@@ -5,44 +5,39 @@ Monorepo con frontend y backend para la app de pádel.
 ## Estructura
 
 ```
-├── frontend/     # App React + Vite
+├── frontend/     # App móvil React Native (Expo)
 └── backend/      # API Express + Supabase
 ```
 
 ## Frontend
 
-App React con Vite, TypeScript, React Router y Tailwind CSS. Despliegue en Fly.io.
+App móvil con React Native y Expo. iOS y Android.
 
 ### Dependencias
 
-- **React 19**
-- **Vite 7**
-- **TypeScript 5**
-- **React Router DOM 7**
-- **Tailwind CSS 4**
-- **@vitejs/plugin-react-swc**
+- **Expo** ~52
+- **React Native** 0.76
+- **React** 18
+- **TypeScript**
 
 ### Requisitos
 
 - Node.js >= 18
+- Expo Go (en el celular) o emulador
 
 ### Comandos
 
 ```bash
 cd frontend
 npm install
-npm run dev      # Desarrollo (http://localhost:5173)
-npm run build    # Build de producción
-npm run preview  # Vista previa del build
+npm start        # Servidor Expo (QR para Expo Go)
+npm run android  # Abrir en emulador Android
+npm run ios      # Abrir en simulador iOS
 ```
 
-### Despliegue (Fly.io)
+### Build para producción
 
-```bash
-cd frontend
-fly launch   # Primera vez
-fly deploy   # Despliegues posteriores
-```
+Usar EAS Build (Expo Application Services) para generar APK/IPA para las tiendas.
 
 ---
 
