@@ -1,7 +1,6 @@
 {
-  "files": [],
-  "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ]
+  "extends": "expo/tsconfig.base.json",
+  "compilerOptions": { "strict": true },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "vite.config.ts", "vite.config.js"]
 }
