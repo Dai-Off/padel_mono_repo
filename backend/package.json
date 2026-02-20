@@ -1,0 +1,32 @@
+{
+  "name": "padel-be",
+  "version": "1.0.0",
+  "description": "Backend para Padel App",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
+  },
+  "keywords": ["node", "express", "typescript", "backend", "supabase"],
+  "license": "ISC",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.56.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^20.8.4",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.2.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

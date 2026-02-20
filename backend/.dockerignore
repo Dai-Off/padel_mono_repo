@@ -1,0 +1,15 @@
+node_modules
+.env
+.env.local
+.env.*.local
+dist
+*.log
+.git
+.gitignore
+fly.toml
+.vscode
+.idea
+.DS_Store
+coverage
+.nyc_output
+*.md
