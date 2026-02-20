@@ -5,44 +5,59 @@ Monorepo con frontend y backend para la app de pádel.
 ## Estructura
 
 ```
-├── frontend/     # App React + Vite
+├── frontend/     # App móvil React Native (Expo)
 └── backend/      # API Express + Supabase
 ```
 
 ## Frontend
 
-App React con Vite, TypeScript, React Router y Tailwind CSS. Despliegue en Fly.io.
+App móvil con React Native y Expo. iOS y Android.
 
 ### Dependencias
 
-- **React 19**
-- **Vite 7**
-- **TypeScript 5**
-- **React Router DOM 7**
-- **Tailwind CSS 4**
-- **@vitejs/plugin-react-swc**
+- **Expo** ~54
+- **React Native** 0.81
+- **React** 19
+- **TypeScript** ~5.9
+- **expo-asset**, **expo-status-bar**, **babel-preset-expo**
 
 ### Requisitos
 
 - Node.js >= 18
+- Expo Go (en el celular) o emulador iOS/Android
 
 ### Comandos
 
 ```bash
 cd frontend
 npm install
-npm run dev      # Desarrollo (http://localhost:5173)
-npm run build    # Build de producción
-npm run preview  # Vista previa del build
+npm start        # Servidor Expo → escanear QR con Expo Go
+npm run android  # Abrir en emulador Android
+npm run ios      # Abrir en simulador iOS
 ```
 
-### Despliegue (Fly.io)
+### Prueba en dispositivo
+
+1. Instalar **Expo Go** (Play Store / App Store)
+2. `npm start` y escanear el QR
+3. Celular y PC en la misma red WiFi
+
+### Build para producción
 
 ```bash
-cd frontend
-fly launch   # Primera vez
-fly deploy   # Despliegues posteriores
+npx eas build --platform android   # APK/AAB
+npx eas build --platform ios       # IPA (requiere Apple Developer)
 ```
+
+Requiere [EAS CLI](https://docs.expo.dev/build/setup/) y cuenta Expo.
+
+### Conectar con backend
+
+Para apuntar a la API, crear `.env` en `frontend/` con:
+```
+EXPO_PUBLIC_API_URL=http://localhost:3000
+```
+En producción, usar la URL del backend en Fly.io.
 
 ---
 
@@ -70,7 +85,7 @@ Copiar `.env.example` a `.env` y completar:
 ```
 PORT=3000
 NODE_ENV=development
-FRONTEND_URL=http://localhost:5173
+FRONTEND_URL=   # Opcional; CORS permite todos por defecto
 
 SUPABASE_URL=
 SUPABASE_ANON_KEY=

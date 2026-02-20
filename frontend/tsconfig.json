@@ -1,7 +1,6 @@
 {
-  "files": [],
-  "references": [
-    { "path": "./tsconfig.app.json" },
-    { "path": "./tsconfig.node.json" }
-  ]
+  "extends": "expo/tsconfig.base.json",
+  "compilerOptions": { "strict": true },
+  "include": ["App.tsx", "index.ts", "app/**/*"],
+  "exclude": ["node_modules"]
 }
