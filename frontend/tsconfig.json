@@ -1,6 +1,6 @@
 {
   "extends": "expo/tsconfig.base.json",
   "compilerOptions": { "strict": true },
-  "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "vite.config.ts", "vite.config.js"]
+  "include": ["App.tsx", "index.ts", "app/**/*"],
+  "exclude": ["node_modules"]
 }

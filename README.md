@@ -15,29 +15,49 @@ App móvil con React Native y Expo. iOS y Android.
 
 ### Dependencias
 
-- **Expo** ~52
-- **React Native** 0.76
-- **React** 18
-- **TypeScript**
+- **Expo** ~54
+- **React Native** 0.81
+- **React** 19
+- **TypeScript** ~5.9
+- **expo-asset**, **expo-status-bar**, **babel-preset-expo**
 
 ### Requisitos
 
 - Node.js >= 18
-- Expo Go (en el celular) o emulador
+- Expo Go (en el celular) o emulador iOS/Android
 
 ### Comandos
 
 ```bash
 cd frontend
 npm install
-npm start        # Servidor Expo (QR para Expo Go)
+npm start        # Servidor Expo → escanear QR con Expo Go
 npm run android  # Abrir en emulador Android
 npm run ios      # Abrir en simulador iOS
 ```
 
+### Prueba en dispositivo
+
+1. Instalar **Expo Go** (Play Store / App Store)
+2. `npm start` y escanear el QR
+3. Celular y PC en la misma red WiFi
+
 ### Build para producción
 
-Usar EAS Build (Expo Application Services) para generar APK/IPA para las tiendas.
+```bash
+npx eas build --platform android   # APK/AAB
+npx eas build --platform ios       # IPA (requiere Apple Developer)
+```
+
+Requiere [EAS CLI](https://docs.expo.dev/build/setup/) y cuenta Expo.
+
+### Conectar con backend
+
+Para apuntar a la API, crear `.env` en `frontend/` con:
+```
+EXPO_PUBLIC_API_URL=http://localhost:3000
+```
+En producción, usar la URL del backend en Fly.io.
 
 ---
 
@@ -65,7 +85,7 @@ Copiar `.env.example` a `.env` y completar:
 ```
 PORT=3000
 NODE_ENV=development
-FRONTEND_URL=http://localhost:5173
+FRONTEND_URL=   # Opcional; CORS permite todos por defecto
 
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
