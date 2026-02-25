@@ -1,35 +1,36 @@
-import { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { AppBackground } from './AppBackground';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SidebarProvider } from '../../contexts/SidebarContext';
+import { useSidebar } from '../../hooks/useSidebar';
+import { AppHeader } from './AppHeader';
+import { HamburgerButton } from './HamburgerButton';
+import { MobileSidebar } from './MobileSidebar';
+import { NavbarActions } from './NavbarActions';
+import { SidebarContent } from './SidebarContent';
 
 type ScreenLayoutProps = {
   children: ReactNode;
-  withBottomNav?: boolean;
-  withHeader?: boolean;
 };
 
-export function ScreenLayout({
-  children,
-  withBottomNav = true,
-  withHeader = true,
-}: ScreenLayoutProps) {
+export function ScreenLayout({ children }: ScreenLayoutProps) {
+  const insets = useSafeAreaInsets();
+  const sidebar = useSidebar(false);
+
   return (
-    <View
-      style={[
-        styles.container,
-        withHeader && styles.withHeader,
-        withBottomNav && styles.withBottomNav,
-      ]}
-    >
-      <LinearGradient
-        colors={['#000', '#18181b', '#000']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFill}
-      />
-      <AppBackground />
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={styles.headerWrapper}>
+        <AppHeader
+          leftSlot={<HamburgerButton onPress={sidebar.toggle} color="#1A1A1A" size={22} />}
+          rightSlot={<NavbarActions />}
+        />
+      </View>
       <View style={styles.content}>{children}</View>
+      <SidebarProvider close={sidebar.close}>
+        <MobileSidebar visible={sidebar.isOpen} onClose={sidebar.close}>
+          <SidebarContent />
+        </MobileSidebar>
+      </SidebarProvider>
     </View>
   );
 }
@@ -37,13 +38,10 @@ export function ScreenLayout({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    overflow: 'hidden',
+    backgroundColor: '#fff',
   },
-  withHeader: {
-    paddingTop: 64,
-  },
-  withBottomNav: {
-    paddingBottom: 80,
+  headerWrapper: {
+    backgroundColor: '#fff',
   },
   content: {
     flex: 1,
