@@ -4,6 +4,13 @@ Base URL: `http://localhost:3000` (o la que uses en `PORT`).
 
 Sin pagos ni precios por ahora: `payment_transactions` y `pricing_rules` quedan para más adelante.
 
+## Auth
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/auth/register` | Registro. Body: email, password, name? (opcional). Mínimo 6 caracteres en password. |
+| POST | `/auth/login` | Login. Body: email, password. Devuelve user y session (access_token, refresh_token). |
+
 ## Health
 
 | Método | Ruta | Descripción |

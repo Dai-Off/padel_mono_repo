@@ -5,11 +5,9 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "assetBundlePatterns": [
-      "**/*"
-    ],
-    "plugins": [
-      "expo-asset"
-    ]
+    "assetBundlePatterns": ["**/*"],
+    "plugins": ["expo-asset"],
+    "ios": { "supportsTablet": true },
+    "android": { "softwareKeyboardLayoutMode": "pan" }
   }
 }
