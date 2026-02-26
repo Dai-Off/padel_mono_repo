@@ -5,11 +5,11 @@ Monorepo con frontend y backend para la app de pádel.
 ## Estructura
 
 ```
-├── frontend/     # App móvil React Native (Expo)
+├── mobile-app/   # App móvil React Native (Expo)
 └── backend/      # API Express + Supabase
 ```
 
-## Frontend
+## Mobile app
 
 App móvil con React Native y Expo. iOS y Android.
 
@@ -29,7 +29,7 @@ App móvil con React Native y Expo. iOS y Android.
 ### Comandos
 
 ```bash
-cd frontend
+cd mobile-app
 npm install
 npm start        # Servidor Expo → escanear QR con Expo Go
 npm run android  # Abrir en emulador Android
@@ -53,7 +53,7 @@ Requiere [EAS CLI](https://docs.expo.dev/build/setup/) y cuenta Expo.
 
 ### Conectar con backend
 
-Para apuntar a la API, crear `.env` en `frontend/` con:
+Para apuntar a la API, crear `.env` en `mobile-app/` con:
 ```
 EXPO_PUBLIC_API_URL=http://localhost:3000
 ```
