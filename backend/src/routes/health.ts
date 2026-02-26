@@ -10,9 +10,19 @@ router.get('/', (_req: Request, res: Response) => {
 router.get('/supabase', async (_req: Request, res: Response) => {
   try {
     const supabase = getSupabaseClient();
-    const { data, error } = await supabase.rpc('now');
+    // Simple ping contra la tabla players para comprobar conexión + esquema
+    const { data, error } = await supabase
+      .from('players')
+      .select('id')
+      .limit(1);
+
     const connected = !error;
-    res.json({ ok: true, connected, serverTime: data ?? null, error: error?.message ?? null });
+    res.json({
+      ok: true,
+      connected,
+      sampleCount: data?.length ?? 0,
+      error: error?.message ?? null,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     res.status(500).json({ ok: false, connected: false, error: message });
