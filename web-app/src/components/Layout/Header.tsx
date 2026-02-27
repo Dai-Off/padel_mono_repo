@@ -4,9 +4,10 @@ import { useTranslation } from 'react-i18next';
 interface HeaderProps {
     clubName: string;
     isOnline?: boolean;
+    onToggleMenu?: () => void;
 }
 
-export const Header = ({ clubName, isOnline = true }: HeaderProps) => {
+export const Header = ({ clubName, isOnline = true, onToggleMenu }: HeaderProps) => {
     const { t, i18n } = useTranslation();
 
     const changeLanguage = (lng: string) => {
@@ -21,6 +22,7 @@ export const Header = ({ clubName, isOnline = true }: HeaderProps) => {
                 <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                         <button
+                            onClick={onToggleMenu}
                             className="w-10 h-10 rounded-xl bg-card border border-border-subtle flex items-center justify-center hover:bg-gray-50 transition-colors">
                             <Menu className="w-5 h-5 text-primary" />
                         </button>
