@@ -1,0 +1,8 @@
+/* Animación para modal de imagen fullscreen */
+@keyframes fadein {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fadein {
+  animation: fadein 0.2s;
+}
