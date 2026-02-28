@@ -12,7 +12,6 @@ import {
     DollarSign,
     MessageSquare,
     AlertCircle,
-    AlertCircle,
     Star,
     Settings
 } from 'lucide-react';

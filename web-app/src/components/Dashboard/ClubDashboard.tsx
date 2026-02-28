@@ -1,72 +1,128 @@
 import { Plus } from 'lucide-react';
 import { Header } from '../Layout/Header';
 import { MainMenu } from '../Layout/MainMenu';
+import { TabSwitcher } from '../Common/TabSwitcher';
+
+// Courts
 import { CourtCard } from '../Courts/CourtCard';
 import { CourtForm } from '../Courts/CourtForm';
-import { useState, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
 import { courtService } from '../../services/court';
 import type { Court } from '../../types/court';
 
+// Clubs
+import { ClubCard } from '../Clubs/ClubCard';
+import { ClubForm } from '../Clubs/ClubForm';
+import { clubService, type Club } from '../../services/club';
+
+// Owners
+import { OwnerCard } from '../Owners/OwnerCard';
+import { OwnerForm } from '../Owners/OwnerForm';
+import { clubOwnerService, type ClubOwner } from '../../services/clubOwner';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+
+type TabId = 'courts' | 'clubs' | 'owners';
+
 export const ClubDashboard = () => {
     const { t } = useTranslation();
-    const [courts, setCourts] = useState<Court[]>([]);
+    const [activeTab, setActiveTab] = useState<TabId>('courts');
     const [loading, setLoading] = useState(true);
-    const [isFormOpen, setIsFormOpen] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-    const [editingCourt, setEditingCourt] = useState<Court | undefined>(undefined);
 
-    const CLUB_ID = 'club-1'; // TODO: Get from auth/context
+    // Data states
+    const [courts, setCourts] = useState<Court[]>([]);
+    const [clubs, setClubs] = useState<Club[]>([]);
+    const [owners, setOwners] = useState<ClubOwner[]>([]);
+
+    // Selection/Form states
+    const [isFormOpen, setIsFormOpen] = useState(false);
+    const [editingItem, setEditingItem] = useState<any>(null);
+
     const CLUB_NAME = "X7 Padel Sabadell Sur";
 
-    useEffect(() => {
-        fetchCourts();
-    }, []);
-
-    const fetchCourts = async () => {
+    const fetchData = useCallback(async () => {
+        setLoading(true);
         try {
-            setLoading(true);
-            const data = await courtService.getAll(CLUB_ID);
-            setCourts(data);
-        } catch (error: any) {
-            console.error('Error fetching courts:', error);
+            if (activeTab === 'courts') {
+                const data = await courtService.getAll();
+                setCourts(data);
+            } else if (activeTab === 'clubs') {
+                const data = await clubService.getAll();
+                setClubs(data);
+            } else if (activeTab === 'owners') {
+                const data = await clubOwnerService.getAll();
+                setOwners(data);
+            }
+        } catch (error) {
+            console.error(`Error fetching ${activeTab}:`, error);
         } finally {
             setLoading(false);
         }
-    };
+    }, [activeTab]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
 
     const handleAddClick = () => {
-        setEditingCourt(undefined);
+        setEditingItem(null);
         setIsFormOpen(true);
     };
 
-    const handleEditClick = (court: Court) => {
-        setEditingCourt(court);
+    const handleEditClick = (item: any) => {
+        setEditingItem(item);
         setIsFormOpen(true);
-    };
-
-    const handleFormSubmit = async (data: Partial<Court>) => {
-        try {
-            if (editingCourt) {
-                const updated = await courtService.update(editingCourt.id, data);
-                setCourts(prev => prev.map(c => c.id === editingCourt.id ? updated : c));
-            } else {
-                const created = await courtService.create({ ...data, club_id: CLUB_ID });
-                setCourts(prev => [...prev, created]);
-            }
-            setIsFormOpen(false);
-        } catch (error: any) {
-            console.error('Error saving court:', error);
-        }
     };
 
     const handleDeleteClick = async (id: string) => {
         if (!confirm(t('confirm_delete'))) return;
         try {
-            await courtService.delete(id);
-            setCourts(prev => prev.filter(c => c.id !== id));
+            if (activeTab === 'courts') {
+                await courtService.delete(id);
+                setCourts(prev => prev.filter(c => c.id !== id));
+            } else if (activeTab === 'clubs') {
+                await clubService.delete(id);
+                setClubs(prev => prev.filter(c => c.id !== id));
+            } else if (activeTab === 'owners') {
+                await clubOwnerService.delete(id);
+                setOwners(prev => prev.filter(o => o.id !== id));
+            }
         } catch (error) {
-            console.error('Error deleting court:', error);
+            console.error('Error deleting item:', error);
+        }
+    };
+
+    const handleFormSubmit = async (data: any) => {
+        try {
+            if (activeTab === 'courts') {
+                if (editingItem) {
+                    const updated = await courtService.update(editingItem.id, data);
+                    setCourts(prev => prev.map(c => c.id === editingItem.id ? updated : c));
+                } else {
+                    const created = await courtService.create(data);
+                    setCourts(prev => [...prev, created]);
+                }
+            } else if (activeTab === 'clubs') {
+                if (editingItem) {
+                    const updated = await clubService.update(editingItem.id, data);
+                    setClubs(prev => prev.map(c => c.id === editingItem.id ? updated : c));
+                } else {
+                    const created = await clubService.create(data);
+                    setClubs(prev => [...prev, created]);
+                }
+            } else if (activeTab === 'owners') {
+                if (editingItem) {
+                    const updated = await clubOwnerService.update(editingItem.id, data);
+                    setOwners(prev => prev.map(o => o.id === editingItem.id ? updated : o));
+                } else {
+                    const created = await clubOwnerService.create(data);
+                    setOwners(prev => [...prev, created]);
+                }
+            }
+            setIsFormOpen(false);
+        } catch (error) {
+            console.error('Error saving item:', error);
         }
     };
 
@@ -79,51 +135,60 @@ export const ClubDashboard = () => {
             />
 
             <main className="px-4 sm:px-5 py-5 pb-20">
-                <div className="max-w-7xl mx-auto space-y-5">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-sm font-bold text-primary">{t('title')}</h2>
+                <div className="max-w-7xl mx-auto space-y-6">
+                    {/* Toolbar */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <TabSwitcher
+                            tabs={[
+                                { id: 'courts', label: t('tabs_courts') },
+                                { id: 'clubs', label: t('tabs_clubs') },
+                                { id: 'owners', label: t('tabs_owners') },
+                            ]}
+                            activeTab={activeTab}
+                            onTabChange={(id) => setActiveTab(id as TabId)}
+                        />
                         <button
                             onClick={handleAddClick}
-                            className="flex items-center gap-1.5 px-4 py-2.5 bg-brand text-brand-foreground rounded-xl text-xs font-bold shadow-sm hover:opacity-90 transition-all active:scale-95"
+                            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 bg-brand text-brand-foreground rounded-2xl text-xs font-bold shadow-lg shadow-brand/20 hover:opacity-90 transition-all active:scale-95"
                         >
-                            <Plus className="w-3.5 h-3.5 stroke-[3px]" />
-                            {t('add_court')}
+                            <Plus className="w-4 h-4 stroke-[3px]" />
+                            {activeTab === 'courts' ? t('add_court') : activeTab === 'clubs' ? t('add_club') : t('add_owner')}
                         </button>
                     </div>
 
+                    {/* Content Grid */}
                     {loading ? (
-                        <div className="flex flex-col items-center justify-center py-20 gap-4">
-                            <div className="w-10 h-10 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
-                            <p className="text-sm font-medium text-muted-foreground">{t('loading')}</p>
+                        <div className="flex flex-col items-center justify-center py-24 gap-4">
+                            <div className="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
+                            <p className="text-sm font-semibold text-muted-foreground animate-pulse">{t('loading')}...</p>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                            {courts.map((court) => (
-                                <CourtCard
-                                    key={court.id}
-                                    court={court}
-                                    onEdit={handleEditClick}
-                                    onDelete={() => handleDeleteClick(court.id)}
-                                />
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                            {activeTab === 'courts' && courts.map(court => (
+                                <CourtCard key={court.id} court={court} onEdit={handleEditClick} onDelete={handleDeleteClick} />
+                            ))}
+                            {activeTab === 'clubs' && clubs.map(club => (
+                                <ClubCard key={club.id} club={club} onEdit={handleEditClick} onDelete={handleDeleteClick} />
+                            ))}
+                            {activeTab === 'owners' && owners.map(owner => (
+                                <OwnerCard key={owner.id} owner={owner} onEdit={handleEditClick} onDelete={handleDeleteClick} />
                             ))}
                         </div>
                     )}
                 </div>
             </main>
 
-            {/* Menú Principal Fullscreen */}
-            <MainMenu
-                isOpen={isMenuOpen}
-                onClose={() => setIsMenuOpen(false)}
-                clubName={CLUB_NAME}
-            />
+            <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName={CLUB_NAME} />
 
-            {isFormOpen && (
-                <CourtForm
-                    court={editingCourt}
-                    onClose={() => setIsFormOpen(false)}
-                    onSubmit={handleFormSubmit}
-                />
+            {/* Forms Layer */}
+            {isFormOpen && activeTab === 'courts' && (
+                <CourtForm court={editingItem} onClose={() => setIsFormOpen(false)} onSubmit={handleFormSubmit} />
+            )}
+            {isFormOpen && activeTab === 'clubs' && (
+                <ClubForm club={editingItem} onClose={() => setIsFormOpen(false)} onSubmit={handleFormSubmit} />
+            )}
+            {isFormOpen && activeTab === 'owners' && (
+                <OwnerForm owner={editingItem} onClose={() => setIsFormOpen(false)} onSubmit={handleFormSubmit} />
             )}
         </div>
     );

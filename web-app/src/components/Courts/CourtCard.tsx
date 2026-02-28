@@ -5,7 +5,7 @@ import type { Court } from '../../types/court';
 interface CourtCardProps {
     court: Court;
     onEdit: (court: Court) => void;
-    onDelete?: () => void;
+    onDelete?: (id: string) => void;
 }
 
 export const CourtCard = ({
@@ -93,7 +93,7 @@ export const CourtCard = ({
                 </button>
                 {onDelete && (
                     <button
-                        onClick={onDelete}
+                        onClick={() => onDelete(court.id)}
                         className="w-10 h-10 border border-border-subtle rounded-xl flex items-center justify-center hover:bg-red-50 transition-colors group"
                     >
                         <Trash2 className="w-4 h-4 text-muted-foreground group-hover:text-error" />

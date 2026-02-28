@@ -29,3 +29,27 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
     return response.json();
 }
+
+export class ApiService {
+    protected async get<T>(path: string): Promise<T> {
+        return apiFetch<T>(path, { method: 'GET' });
+    }
+
+    protected async post<T>(path: string, data: any): Promise<T> {
+        return apiFetch<T>(path, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    protected async put<T>(path: string, data: any): Promise<T> {
+        return apiFetch<T>(path, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    protected async deleteRequest<T>(path: string): Promise<T> {
+        return apiFetch<T>(path, { method: 'DELETE' });
+    }
+}
