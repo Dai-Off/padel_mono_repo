@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@theme {
+  /* Fondo general y de tarjetas */
+  --color-background: #FAFAFA;
+  --color-card: #FFFFFF;
+  
+  /* Paleta de colores principal basada en Figma */
+  --color-primary: #1A1A1A;
+  --color-primary-foreground: #FFFFFF;
+  
+  /* Color de marca (Rojo Padel) */
+  --color-brand: #E31E24;
+  --color-brand-foreground: #FFFFFF;
+  
+  /* Colores de texto y bordes */
+  --color-foreground: #1A1A1A;
+  --color-muted-foreground: #9CA3AF; /* gray-400 */
+  --color-border-subtle: #F3F4F6; /* gray-100 */
+  
+  /* Estados */
+  --color-success: #22C55E; /* green-500 */
+  --color-warning: #F59E0B; /* amber-500 */
+  --color-error: #E31E24;   /* rojo marca */
+}
+
+@layer base {
+  :root {
+    --radius: 0.75rem; /* Unificado para rounded-xl */
+  }
+}
+
+@layer base {
+  html, body {
+    @apply bg-background text-foreground antialiased;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  html::-webkit-scrollbar,
+  body::-webkit-scrollbar {
+    width: 0px;
+    height: 0px;
+  }
+}
+
+/* Animaciones globales */
+@keyframes fadeInUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.6s ease-out both;
+}
