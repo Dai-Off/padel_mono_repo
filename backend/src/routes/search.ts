@@ -111,12 +111,11 @@ router.get('/courts', async (req: Request, res: Response) => {
 
     const baseDate = new Date(searchDate + 'T00:00:00Z').getTime();
 
-    const results: SearchCourtResult[] = courts
-      .map((court) => {
+    const results: SearchCourtResult[] = courts.flatMap((court) => {
         const club = clubMap.get(court.club_id);
         if (!club) {
           console.warn(`[search] Club not found for court ${court.id} (club_id: ${court.club_id})`);
-          return null;
+          return [];
         }
         const rules = rulesByCourt.get(court.id) ?? [];
         const booked = bookedRangesByCourt.get(court.id) ?? [];
@@ -142,7 +141,7 @@ router.get('/courts', async (req: Request, res: Response) => {
 
         const minPriceFormatted = minPriceCents ? `${Math.round(minPriceCents / 100)}€` : '-';
 
-        return {
+        return [{
           id: court.id,
           clubId: club.id,
           clubName: club.name,
@@ -153,14 +152,13 @@ router.get('/courts', async (req: Request, res: Response) => {
           lng: club.lng,
           indoor: court.indoor,
           glassType: court.glass_type,
-          imageUrl: null,
-          distanceKm: null,
+          imageUrl: null as string | null,
+          distanceKm: null as number | null,
           minPriceCents,
           minPriceFormatted,
           timeSlots: [...new Set(timeSlots)].sort(),
-        } satisfies SearchCourtResult;
-      })
-      .filter((r): r is SearchCourtResult => r !== null);
+        } satisfies SearchCourtResult];
+      });
 
     console.log('[search/courts] Courts:', courts.length, 'Clubs:', clubs?.length ?? 0, 'Results:', results.length);
     return res.json({ ok: true, results });
