@@ -3,6 +3,7 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { Skeleton } from '../components/ui/Skeleton';
+import { theme } from '../theme';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeStats, useZoneTrends } from '../hooks/useHomeStats';
 
@@ -483,7 +484,7 @@ export function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40 },
+  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: theme.scrollBottomPadding },
   greeting: {
     paddingBottom: 16,
   },

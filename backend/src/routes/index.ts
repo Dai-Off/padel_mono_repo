@@ -11,6 +11,7 @@ import matchesRouter from './matches';
 import matchPlayersRouter from './matchPlayers';
 import privacyLogsRouter from './privacyLogs';
 import homeRouter from './home';
+import searchRouter from './search';
 
 const router = Router();
 
@@ -30,6 +31,7 @@ router.use('/matches', matchesRouter);
 router.use('/match-players', matchPlayersRouter);
 router.use('/privacy-logs', privacyLogsRouter);
 router.use('/home', homeRouter);
+router.use('/search', searchRouter);
 
 export default router;
 

@@ -33,6 +33,10 @@ export const theme = {
     xxl: scaleFont(28),
   },
   headerHeight: 56,
+  /** Padding uniforme para headers superiores (pt, pb) */
+  headerPadding: { paddingTop: getSpacing(16), paddingBottom: getSpacing(12) },
+  /** Espacio extra bajo el scroll para no tapar la bottom bar */
+  scrollBottomPadding: 72,
   minTouchTarget: 44, // Mínimo recomendado para áreas táctiles (Apple HIG, Android)
   screenWidth: SCREEN_WIDTH,
   screenHeight: SCREEN_HEIGHT,
