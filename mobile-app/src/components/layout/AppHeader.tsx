@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { theme } from '../../theme';
 
 type AppHeaderProps = {
   title?: string;
@@ -31,8 +32,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: theme.spacing.lg,
+    ...theme.headerPadding,
     gap: 16,
   },
   slot: { alignItems: 'center', justifyContent: 'center' },

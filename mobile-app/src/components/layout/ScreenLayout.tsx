@@ -11,20 +11,30 @@ import { SidebarContent } from './SidebarContent';
 
 type ScreenLayoutProps = {
   children: ReactNode;
+  /** Cuando se proporciona, reemplaza el header por defecto (hamburger + acciones) */
+  customHeader?: ReactNode;
+  /** Cuando true, no se muestra header (la pantalla maneja su propio encabezado) */
+  hideHeader?: boolean;
 };
 
-export function ScreenLayout({ children }: ScreenLayoutProps) {
+export function ScreenLayout({ children, customHeader, hideHeader }: ScreenLayoutProps) {
   const insets = useSafeAreaInsets();
   const sidebar = useSidebar(false);
 
+  const header = customHeader ?? (
+    <AppHeader
+      leftSlot={<HamburgerButton onPress={sidebar.toggle} color="#1A1A1A" size={22} />}
+      rightSlot={<NavbarActions />}
+    />
+  );
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <View style={styles.headerWrapper}>
-        <AppHeader
-          leftSlot={<HamburgerButton onPress={sidebar.toggle} color="#1A1A1A" size={22} />}
-          rightSlot={<NavbarActions />}
-        />
-      </View>
+      {!hideHeader && (
+        <View style={styles.headerWrapper}>
+          {header}
+        </View>
+      )}
       <View style={styles.content}>{children}</View>
       <SidebarProvider close={sidebar.close}>
         <MobileSidebar visible={sidebar.isOpen} onClose={sidebar.close}>
