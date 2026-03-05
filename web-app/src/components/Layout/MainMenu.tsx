@@ -62,6 +62,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose }) => {
                 { id: 'torneos', path: '/torneos', icon: Award, label: t('menu_torneos'), color: 'rgb(234, 179, 8)', bgColor: 'rgba(234, 179, 8, 0.06)' },
                 { id: 'incidencias', path: '/incidencias', icon: AlertCircle, label: t('menu_incidencias'), color: 'rgb(239, 68, 68)', bgColor: 'rgba(239, 68, 68, 0.06)' },
                 { id: 'reseñas', path: '/reseñas', icon: Star, label: t('menu_reseñas'), color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
+                { id: 'onboarding', path: '/onboarding', icon: Settings, label: t('onboarding_menu'), color: 'rgb(107, 114, 128)', bgColor: 'rgba(107, 114, 128, 0.06)' },
                 { id: 'configuracion', path: '/configuracion', icon: Settings, label: t('menu_configuracion'), color: 'rgb(107, 114, 128)', bgColor: 'rgba(107, 114, 128, 0.06)' },
             ]
         }
