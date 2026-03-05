@@ -1,7 +1,6 @@
 import React from 'react';
 import { MapPin, Building2, Trash2, Edit, Globe } from 'lucide-react';
 import type { Club } from '../../services/club';
-import { useTranslation } from 'react-i18next';
 
 interface ClubCardProps {
     club: Club;
@@ -10,8 +9,6 @@ interface ClubCardProps {
 }
 
 export const ClubCard: React.FC<ClubCardProps> = ({ club, onEdit, onDelete }) => {
-    const { t } = useTranslation();
-
     return (
         <div className="group bg-white rounded-[24px] p-5 shadow-sm border border-gray-100 hover:shadow-xl hover:shadow-gray-200/50 transition-all duration-300">
             <div className="flex justify-between items-start mb-4">

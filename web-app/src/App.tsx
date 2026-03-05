@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Login } from './components/Auth/Login';
+import { ClubRegistration } from './components/Registration/ClubRegistration';
 import { ClubDashboard } from './components/Dashboard/ClubDashboard';
+import { ManagerOnboarding } from './components/Onboarding/ManagerOnboarding';
 import { authService } from './services/auth';
 import { Toaster } from 'sonner';
 
@@ -20,8 +22,9 @@ function App() {
     <BrowserRouter>
       <Toaster position="top-right" richColors />
       <Routes>
-        {/* Ruta Pública: Login */}
+        {/* Rutas Públicas */}
         <Route path="/login" element={<Login />} />
+        <Route path="/registro" element={<ClubRegistration />} />
 
         {/* Rutas Protegidas */}
         <Route
@@ -29,6 +32,14 @@ function App() {
           element={
             <ProtectedRoute>
               <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/onboarding"
+          element={
+            <ProtectedRoute>
+              <ManagerOnboarding />
             </ProtectedRoute>
           }
         />

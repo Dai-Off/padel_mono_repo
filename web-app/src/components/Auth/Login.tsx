@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, EyeOff, LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
+import { Eye, EyeOff, LogIn, Mail, Lock, AlertCircle, Plus } from 'lucide-react';
 import { authService } from '../../services/auth';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 
@@ -66,7 +66,7 @@ export const Login: React.FC = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
             >
-                <div className="relative overflow-hidden rounded-3xl border border-white/10"
+                <div className="relative overflow-hidden rounded-3xl border-2 border-[#E31E24]/80 shadow-[0_0_24px_rgba(227,30,36,0.15)]"
                     style={{ background: 'linear-gradient(170deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%)' }}>
                     <div className="absolute inset-0 backdrop-blur-xl"></div>
 
@@ -179,7 +179,25 @@ export const Login: React.FC = () => {
                             </motion.button>
                         </form>
 
-                        <button className="w-full mt-4 text-white/30 py-2 rounded-xl hover:text-white/50 transition-colors text-sm">
+                        <div className="flex items-center gap-3 my-6">
+                            <div className="flex-1 h-px bg-white/20" />
+                            <span className="w-8 h-8 rounded-full border border-white/20 flex items-center justify-center text-white/40 text-xs">o</span>
+                            <div className="flex-1 h-px bg-white/20" />
+                        </div>
+
+                        <Link
+                            to="/registro"
+                            className="w-full py-3.5 rounded-2xl border-2 border-[#E31E24] bg-transparent text-white font-bold text-sm flex items-center justify-center gap-2 hover:bg-[#E31E24]/10 transition-colors"
+                        >
+                            <Plus className="w-4 h-4" />
+                            {t('register_my_club')}
+                        </Link>
+
+                        <button
+                            type="button"
+                            onClick={() => navigate(-1)}
+                            className="w-full mt-4 text-white/30 py-2 rounded-xl hover:text-white/50 transition-colors text-sm"
+                        >
                             {t('cancel')}
                         </button>
                     </div>

@@ -11,6 +11,15 @@ Sin pagos ni precios por ahora: `payment_transactions` y `pricing_rules` quedan 
 | POST | `/auth/register` | Registro. Body: email, password, name? (opcional). Mínimo 6 caracteres en password. |
 | POST | `/auth/login` | Login. Body: email, password. Devuelve user y session (access_token, refresh_token). |
 
+## Solicitudes de club (club_applications)
+
+Solicitud de acceso al Manager antes de tener cuenta. Ruta pública (sin auth).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/club-applications/upload` | Subir imagen (logo/foto). Body: `multipart/form-data`, campo `file` (JPEG, PNG, WebP, GIF; máx. 5 MB). Respuesta 200: `{ ok: true, url }`. Errores: 400 (sin archivo o tipo no permitido), 500. Requiere bucket Supabase "Club Images" creado y público. |
+| POST | `/club-applications` | Crear solicitud. Body JSON. **Obligatorios:** responsible_first_name, responsible_last_name, club_name, city, country, phone, email, court_count, sport. **Opcionales:** sports (array), official_name, full_address, description, logo_url, photo_urls (array), courts (array), open_time, close_time (HH:mm), slot_duration_min (60\|90\|120), pricing (array), booking_window, cancellation_policy, tax_id, fiscal_address, stripe_connected (bool), selected_plan (standard\|professional\|champion\|master). Validaciones: email y teléfono formato válido, nombres/ciudad/país mín. 2 caracteres. Respuesta 201: `{ ok: true, id }`. Errores: 400 `{ ok: false, error }`, 500. |
+
 ## Health
 
 | Método | Ruta | Descripción |
