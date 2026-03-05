@@ -12,6 +12,7 @@ import matchPlayersRouter from './matchPlayers';
 import privacyLogsRouter from './privacyLogs';
 import homeRouter from './home';
 import searchRouter from './search';
+import clubApplicationsRouter from './clubApplications';
 
 const router = Router();
 
@@ -32,6 +33,7 @@ router.use('/match-players', matchPlayersRouter);
 router.use('/privacy-logs', privacyLogsRouter);
 router.use('/home', homeRouter);
 router.use('/search', searchRouter);
+router.use('/club-applications', clubApplicationsRouter);
 
 export default router;
 
