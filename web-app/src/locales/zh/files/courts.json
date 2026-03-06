@@ -1,5 +1,6 @@
 {
     "title": "球場管理",
+    "courts_management": "球場管理",
     "add_court": "添加球場",
     "edit_court": "編輯球場",
     "name": "球場名稱",

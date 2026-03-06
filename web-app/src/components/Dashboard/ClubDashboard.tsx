@@ -149,23 +149,39 @@ export const ClubDashboard = () => {
                         />
                         <button
                             onClick={handleAddClick}
-                            className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 bg-brand text-brand-foreground rounded-2xl text-xs font-bold shadow-lg shadow-brand/20 hover:opacity-90 transition-all active:scale-95"
+                            className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${
+                                activeTab === 'courts'
+                                    ? 'bg-[#E31E24] text-white hover:opacity-90'
+                                    : 'bg-brand text-brand-foreground shadow-lg shadow-brand/20 hover:opacity-90'
+                            }`}
                         >
-                            <Plus className="w-4 h-4 stroke-[3px]" />
+                            <Plus className="w-3.5 h-3.5" />
                             {activeTab === 'courts' ? t('add_court') : activeTab === 'clubs' ? t('add_club') : t('add_owner')}
                         </button>
                     </div>
 
+                    {/* Gestión de Pistas: título de sección cuando tab = courts */}
+                    {activeTab === 'courts' && (
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-sm font-bold text-[#1A1A1A]">{t('courts_management')}</h2>
+                        </div>
+                    )}
+
                     {/* Content Grid */}
                     {loading ? (
                         <div className="flex flex-col items-center justify-center py-24 gap-4">
-                            <div className="w-12 h-12 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
-                            <p className="text-sm font-semibold text-muted-foreground animate-pulse">{t('loading')}...</p>
+                            <div className="w-12 h-12 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
+                            <p className="text-sm font-semibold text-gray-500 animate-pulse">{t('loading')}...</p>
                         </div>
                     ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-                            {activeTab === 'courts' && courts.map(court => (
-                                <CourtCard key={court.id} court={court} onEdit={handleEditClick} onDelete={handleDeleteClick} />
+                        <div className={`grid ${activeTab === 'courts' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5'}`}>
+                            {activeTab === 'courts' && courts.map((court) => (
+                                <CourtCard
+                                    key={court.id}
+                                    court={court}
+                                    onEdit={handleEditClick}
+                                    onDelete={handleDeleteClick}
+                                />
                             ))}
                             {activeTab === 'clubs' && clubs.map(club => (
                                 <ClubCard key={club.id} club={club} onEdit={handleEditClick} onDelete={handleDeleteClick} />
