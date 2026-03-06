@@ -8,8 +8,10 @@ Sin pagos ni precios por ahora: `payment_transactions` y `pricing_rules` quedan 
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/auth/register` | Registro. Body: email, password, name? (opcional). Mínimo 6 caracteres en password. |
-| POST | `/auth/login` | Login. Body: email, password. Devuelve user y session (access_token, refresh_token). |
+| POST | `/auth/register` | Registro. Body: `{ "email", "password", "name"? }`. Mínimo 6 caracteres en password. Crea usuario en Auth y opcionalmente en `players`. |
+| POST | `/auth/login` | Login. Body: `{ "email", "password" }`. Respuesta: `{ ok, user, session: { access_token, refresh_token, expires_at } }`. 401 si credenciales incorrectas. |
+
+Para desarrollo: si no puedes entrar tras registrarte, revisa en Supabase → Authentication → Users que el usuario exista y, si usas confirmación de email, confírmalo o desactiva "Confirm email" en Auth settings.
 
 ## Solicitudes de club (club_applications)
 
@@ -59,13 +61,15 @@ Solicitud de acceso al Manager antes de tener cuenta. Ruta pública (sin auth).
 
 ## Pistas (courts)
 
+CRUD de pistas de un club. Todas las rutas bajo `/courts`.
+
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/courts` | Lista. Query: `?club_id=uuid` |
-| GET | `/courts/:id` | Detalle |
-| POST | `/courts` | Crear (club_id, name, indoor?, glass_type?) |
-| PUT | `/courts/:id` | Actualizar (name, indoor, glass_type, status) |
-| DELETE | `/courts/:id` | Borrado físico |
+| GET | `/courts` | Listar. Query: `?club_id=uuid` (opcional, filtra por club). Respuesta: `{ ok: true, courts: [...] }`. Cada pista: id, created_at, club_id, name, indoor, glass_type, status, lighting?, last_maintenance? (si existen columnas; ver migración 003_courts_lighting_maintenance.sql). |
+| GET | `/courts/:id` | Ver una. Respuesta: `{ ok: true, court: { ... } }`. 404 si no existe. |
+| POST | `/courts` | Crear. Body: `{ "club_id", "name", "indoor"? (boolean), "glass_type"? ("normal" \| "panoramic"), "lighting"? (boolean), "last_maintenance"? (ISO date) }`. Respuesta: `{ ok: true, court }`. 400 si faltan club_id o name. |
+| PUT | `/courts/:id` | Editar. Body: `{ "name"?, "indoor"?, "glass_type"?, "status"?, "lighting"?, "last_maintenance"? }`. Respuesta: `{ ok: true, court }`. 400 si body vacío, 404 si no existe. |
+| DELETE | `/courts/:id` | Borrar. Respuesta: `{ ok: true, deleted: id }`. |
 
 ## Reservas (bookings)
 
