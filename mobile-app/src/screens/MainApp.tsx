@@ -12,6 +12,8 @@ import type { PartidoItem } from './PartidosScreen';
 import { PartidoDetailScreen } from './PartidoDetailScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
+import { TusPagosScreen } from './TusPagosScreen';
+import { TransaccionesScreen } from './TransaccionesScreen';
 
 type TabId = 'inicio' | 'reservar' | 'competir' | 'partidos';
 
@@ -20,11 +22,26 @@ export function MainApp() {
   const [activeTab, setActiveTab] = useState<TabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
+  const [showTusPagos, setShowTusPagos] = useState(false);
+  const [showTransacciones, setShowTransacciones] = useState(false);
 
   const showClubDetail = activeTab === 'reservar' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
 
   const renderContent = () => {
+    if (showTransacciones) {
+      return (
+        <TransaccionesScreen onBack={() => setShowTransacciones(false)} />
+      );
+    }
+    if (showTusPagos) {
+      return (
+        <TusPagosScreen
+          onBack={() => setShowTusPagos(false)}
+          onTransaccionesPress={() => setShowTransacciones(true)}
+        />
+      );
+    }
     if (showPartidoDetail && selectedPartido) {
       return (
         <PartidoDetailScreen
@@ -70,7 +87,7 @@ export function MainApp() {
   };
 
   const customHeader =
-    showPartidoDetail ? undefined : activeTab === 'reservar' && !showClubDetail ? (
+    showTusPagos || showTransacciones || showPartidoDetail ? undefined : activeTab === 'reservar' && !showClubDetail ? (
       <BackHeader title="Buscador" onBack={() => setActiveTab('inicio')} />
     ) : activeTab === 'competir' ? (
       <BackHeader title="Competiciones" onBack={() => setActiveTab('inicio')} />
@@ -82,11 +99,12 @@ export function MainApp() {
     <View style={styles.container}>
       <ScreenLayout
         customHeader={customHeader}
-        hideHeader={showClubDetail || showPartidoDetail}
+        hideHeader={showClubDetail || showPartidoDetail || showTusPagos || showTransacciones}
+        onNavigateToTusPagos={() => setShowTusPagos(true)}
       >
         {renderContent()}
       </ScreenLayout>
-      {!showClubDetail && !showPartidoDetail && (
+      {!showClubDetail && !showPartidoDetail && !showTusPagos && !showTransacciones && (
         <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <BottomNavbar activeTab={activeTab} onTabChange={setActiveTab} />
         </View>

@@ -2,12 +2,29 @@
   "expo": {
     "name": "Padel App",
     "slug": "padel-app",
+    "scheme": "padelapp",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "assetBundlePatterns": ["**/*"],
-    "plugins": ["expo-asset"],
-    "ios": { "supportsTablet": true },
-    "android": { "softwareKeyboardLayoutMode": "pan" }
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "plugins": [
+      "expo-asset",
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.wematch.padel",
+          "enableGooglePay": false
+        }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "softwareKeyboardLayoutMode": "pan",
+      "package": "com.anonymous.padelapp"
+    }
   }
 }

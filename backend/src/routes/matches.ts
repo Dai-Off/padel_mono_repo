@@ -153,24 +153,34 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     const totalCents = Number(total_price_cents);
     const shareCents = Math.ceil(totalCents / 4);
 
-    const { error: errBP } = await supabase.from('booking_participants').insert([
-      { booking_id: booking.id, player_id: organizer_player_id, role: 'organizer', share_amount_cents: shareCents },
-    ]);
+    const { data: organizerParticipant, error: errBP } = await supabase
+      .from('booking_participants')
+      .insert([
+        { booking_id: booking.id, player_id: organizer_player_id, role: 'organizer', share_amount_cents: shareCents },
+      ])
+      .select('id')
+      .maybeSingle();
     if (errBP) return res.status(500).json({ ok: false, error: errBP.message });
+    if (!organizerParticipant) return res.status(500).json({ ok: false, error: 'No se pudo crear participante' });
 
     const { error: errMP } = await supabase.from('match_players').insert([
       { match_id: match.id, player_id: organizer_player_id, team: 'A', invite_status: 'accepted', slot_index: 0 },
     ]);
     if (errMP) return res.status(500).json({ ok: false, error: errMP.message });
 
-    return res.status(201).json({ ok: true, match, booking });
+    return res.status(201).json({
+      ok: true,
+      match,
+      booking: { id: booking.id, organizer_participant_id: organizerParticipant.id },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
-/** POST /matches/:id/join - unirse a un partido (Bearer token). Body: { slot_index?: 0|1|2|3 }. */
-router.post('/:id/join', async (req: Request, res: Response) => {
+/** POST /matches/:id/prepare-join - prepara unirse (crea participant pendiente de pago). Body: { slot_index }.
+ *  Devuelve participant_id y booking_id para crear PaymentIntent. El join real se hace tras pago exitoso. */
+router.post('/:id/prepare-join', async (req: Request, res: Response) => {
   const matchId = req.params.id;
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -178,8 +188,8 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     return res.status(401).json({ ok: false, error: 'Token requerido' });
   }
   const slotIndex = req.body?.slot_index;
-  if (slotIndex != null && (typeof slotIndex !== 'number' || slotIndex < 0 || slotIndex > 3)) {
-    return res.status(400).json({ ok: false, error: 'slot_index debe ser 0, 1, 2 o 3' });
+  if (slotIndex == null || typeof slotIndex !== 'number' || slotIndex < 0 || slotIndex > 3) {
+    return res.status(400).json({ ok: false, error: 'slot_index (0-3) es obligatorio' });
   }
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -223,20 +233,51 @@ router.post('/:id/join', async (req: Request, res: Response) => {
 
     const { data: matchPlayers } = await supabase
       .from('match_players')
-      .select('team, created_at, slot_index')
-      .eq('match_id', matchId)
-      .order('created_at', { ascending: true });
-    const current = matchPlayers ?? [];
-    if (current.length >= 4) {
-      return res.status(400).json({ ok: false, error: 'El partido está completo' });
-    }
-
-    const slotTaken = slotIndex != null && current.some((p: { slot_index?: number }) => p.slot_index === slotIndex);
-    if (slotTaken) {
+      .select('slot_index')
+      .eq('match_id', matchId);
+    const taken = (matchPlayers ?? []).map((p: { slot_index?: number }) => p.slot_index).filter((s): s is number => s != null);
+    if (taken.includes(slotIndex)) {
       return res.status(400).json({ ok: false, error: 'Esa plaza ya está ocupada' });
     }
 
-    const team = slotIndex != null ? (slotIndex <= 1 ? 'A' : 'B') : (current.filter((p: { team: string }) => p.team === 'A').length <= current.filter((p: { team: string }) => p.team === 'B').length ? 'A' : 'B');
+    if ((matchPlayers ?? []).length >= 4) {
+      return res.status(400).json({ ok: false, error: 'El partido está completo' });
+    }
+
+    const { data: targetBooking } = await supabase
+      .from('bookings')
+      .select('start_at, end_at')
+      .eq('id', match.booking_id)
+      .maybeSingle();
+    const targetStart = targetBooking?.start_at ? new Date(targetBooking.start_at).getTime() : 0;
+    const targetEnd = targetBooking?.end_at ? new Date(targetBooking.end_at).getTime() : 0;
+    if (targetStart && targetEnd) {
+      const { data: myMatches } = await supabase
+        .from('match_players')
+        .select('match_id')
+        .eq('player_id', playerId);
+      const myMatchIds = (myMatches ?? []).map((m: { match_id: string }) => m.match_id);
+      if (myMatchIds.length > 0) {
+        const { data: matchesWithBookings } = await supabase
+          .from('matches')
+          .select('id, status, bookings(start_at, end_at)')
+          .in('id', myMatchIds)
+          .neq('status', 'cancelled');
+        const overlaps = (matchesWithBookings ?? []).some((m: { status: string; bookings?: { start_at: string; end_at: string } | { start_at: string; end_at: string }[] }) => {
+          const b = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
+          if (!b?.start_at || !b?.end_at) return false;
+          const exStart = new Date(b.start_at).getTime();
+          const exEnd = new Date(b.end_at).getTime();
+          return targetStart < exEnd && targetEnd > exStart;
+        });
+        if (overlaps) {
+          return res.status(400).json({
+            ok: false,
+            error: 'Ya tienes un partido a esa hora. Elige otro horario.',
+          });
+        }
+      }
+    }
 
     const { data: booking } = await supabase
       .from('bookings')
@@ -246,28 +287,43 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     const totalCents = booking?.total_price_cents ?? 0;
     const shareCents = Math.ceil(totalCents / 4);
 
-    const { error: errBP } = await supabase.from('booking_participants').insert([
-      { booking_id: match.booking_id, player_id: playerId, role: 'guest', share_amount_cents: shareCents },
-    ]);
+    const { data: existingParticipant } = await supabase
+      .from('booking_participants')
+      .select('id')
+      .eq('booking_id', match.booking_id)
+      .eq('player_id', playerId)
+      .maybeSingle();
+    if (existingParticipant) {
+      return res.status(409).json({ ok: false, error: 'Ya tienes una plaza reservada en este partido' });
+    }
+
+    const { data: participant, error: errBP } = await supabase
+      .from('booking_participants')
+      .insert([
+        { booking_id: match.booking_id, player_id: playerId, role: 'guest', share_amount_cents: shareCents },
+      ])
+      .select('id')
+      .maybeSingle();
     if (errBP) return res.status(500).json({ ok: false, error: errBP.message });
+    if (!participant) return res.status(500).json({ ok: false, error: 'No se pudo preparar la plaza' });
 
-    const insertPayload: { match_id: string; player_id: string; team: string; invite_status: string; slot_index?: number } = {
-      match_id: matchId,
-      player_id: playerId,
-      team,
-      invite_status: 'accepted',
-    };
-    if (slotIndex != null) insertPayload.slot_index = slotIndex;
-
-    const { error: errMP } = await supabase
-      .from('match_players')
-      .insert([insertPayload]);
-    if (errMP) return res.status(500).json({ ok: false, error: errMP.message });
-
-    return res.status(201).json({ ok: true });
+    return res.status(200).json({
+      ok: true,
+      participant_id: participant.id,
+      booking_id: match.booking_id,
+      share_amount_cents: shareCents,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
+});
+
+/** POST /matches/:id/join - deshabilitado. Usa prepare-join + pago primero. */
+router.post('/:id/join', async (_req: Request, res: Response) => {
+  return res.status(400).json({
+    ok: false,
+    error: 'Para unirte debes pagar primero. Usa prepare-join y el flujo de pago.',
+  });
 });
 
 router.post('/', async (req: Request, res: Response) => {

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Dimensions,
   Image,
   Modal,
@@ -11,10 +12,12 @@ import {
   Text,
   View,
 } from 'react-native';
+import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useStripe } from '@stripe/stripe-react-native';
 import { useAuth } from '../../contexts/AuthContext';
-import { createMatchWithBooking } from '../../api/matches';
+import { createIntentForNewMatch, confirmPaymentFromClient } from '../../api/payments';
 import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
@@ -66,6 +69,7 @@ export function CrearPartidoLocationSheet({
   organizerPlayerId: organizerProp,
 }: CrearPartidoLocationSheetProps) {
   const { session } = useAuth();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>('location');
   const [selected, setSelected] = useState<LocationType>('club_wematch');
@@ -130,29 +134,76 @@ export function CrearPartidoLocationSheet({
 
   const handleCheckout = useCallback(async () => {
     if (!selectedSlot || !selectedClub) return;
-    if (!orgId) return;
+    if (!orgId || !session?.access_token) return;
     setCreating(true);
     setCreateError(null);
     const { start_at, end_at } = buildStartEnd(selectedSlot.dateStr, selectedSlot.time);
     const totalPriceCents = Math.max(selectedSlot.minPriceCents, 100);
-    const result = await createMatchWithBooking({
-      court_id: selectedSlot.courtId,
-      organizer_player_id: orgId,
-      start_at,
-      end_at,
-      total_price_cents: Math.round(totalPriceCents * (DURATION_MIN / 60)),
-      visibility: 'public',
-      competitive,
-      gender,
-    });
-    setCreating(false);
-    if (result) {
-      onPartidoCreado?.();
-      onClose();
-    } else {
-      setCreateError('No se pudo crear el partido. Inténtalo de nuevo.');
+
+    const intentRes = await createIntentForNewMatch(
+      {
+        court_id: selectedSlot.courtId,
+        organizer_player_id: orgId,
+        start_at,
+        end_at,
+        total_price_cents: Math.round(totalPriceCents * (DURATION_MIN / 60)),
+        visibility: 'public',
+        competitive,
+        gender,
+      },
+      session.access_token
+    );
+    if (!intentRes.ok || !intentRes.clientSecret) {
+      setCreating(false);
+      const errMsg = intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.';
+      if (errMsg.includes('esa hora') || errMsg.includes('otro horario')) {
+        Alert.alert('Horario no disponible', 'Ya tienes un partido a esa hora. Elige otro horario.');
+        setStep('clubs');
+      } else {
+        setCreateError(errMsg);
+      }
+      return;
     }
-  }, [selectedSlot, selectedClub, competitive, gender, orgId, onPartidoCreado, onClose]);
+
+    const returnURL = Linking.createURL('stripe-redirect');
+    const { error: initErr } = await initPaymentSheet({
+      paymentIntentClientSecret: intentRes.clientSecret,
+      merchantDisplayName: 'WeMatch Padel',
+      returnURL,
+    });
+    if (initErr) {
+      setCreating(false);
+      setCreateError('Error al configurar el pago. Inténtalo de nuevo.');
+      return;
+    }
+
+    const { error: presentErr } = await presentPaymentSheet();
+    if (presentErr) {
+      setCreating(false);
+      if (__DEV__) {
+        console.warn('[Stripe presentPaymentSheet]', presentErr.code, presentErr.message);
+      }
+      if (presentErr.code === 'Canceled') {
+        setCreateError('Pago cancelado.');
+      } else {
+        setCreateError('Error al procesar el pago. Inténtalo de nuevo.');
+      }
+      return;
+    }
+
+    const confirmRes = await confirmPaymentFromClient(
+      intentRes.paymentIntentId!,
+      session.access_token
+    );
+    setCreating(false);
+    if (!confirmRes.ok) {
+      setCreateError('No se pudo confirmar el partido. Inténtalo de nuevo.');
+      return;
+    }
+
+    onPartidoCreado?.();
+    onClose();
+  }, [selectedSlot, selectedClub, competitive, gender, orgId, session?.access_token, initPaymentSheet, presentPaymentSheet, onPartidoCreado, onClose]);
 
   const handleSiguiente = () => {
     if (selected === 'club_wematch') {
@@ -195,6 +246,8 @@ export function CrearPartidoLocationSheet({
                   setStep('clubs');
                   setSelectedSlot(null);
                   setSelectedClub(null);
+                  setCreateError(null);
+                  loadClubs();
                 }}
                 style={({ pressed }) => [styles.headerBackOnly, pressed && styles.pressed]}
               >
