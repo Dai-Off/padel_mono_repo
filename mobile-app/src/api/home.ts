@@ -57,16 +57,15 @@ export async function fetchHomeStats(token?: string | null): Promise<HomeStats> 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const [courtsFree, playersLooking, matchesCount] = await Promise.all([
+  const [courtsFree, playersLooking] = await Promise.all([
     fetchCount<{ courts?: unknown[] }>(`${API_URL}/courts`, 'courts', headers),
     fetchCount<{ players?: unknown[] }>(`${API_URL}/players`, 'players', headers),
-    fetchCount<{ matches?: unknown[] }>(`${API_URL}/matches`, 'matches', headers),
   ]);
 
   return {
     courtsFree,
     playersLooking,
     classesToday: 0,
-    tournaments: matchesCount,
+    tournaments: 0,
   };
 }

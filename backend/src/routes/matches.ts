@@ -21,7 +21,7 @@ router.get('/', async (req: Request, res: Response) => {
           bookings (
             id, start_at, end_at, total_price_cents, currency, court_id,
             courts (
-              id, club_id,
+              id, club_id, name, indoor, glass_type,
               clubs (id, name, address, city)
             )
           ),
@@ -64,7 +64,7 @@ router.get('/:id', async (req: Request, res: Response) => {
           bookings (
             id, start_at, end_at, total_price_cents, currency, court_id,
             courts (
-              id, club_id,
+              id, club_id, name, indoor, glass_type,
               clubs (id, name, address, city)
             )
           ),

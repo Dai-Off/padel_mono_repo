@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-  Image,
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,11 +11,18 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { SearchCourtResult } from '../api/search';
+import { fetchClubById } from '../api/clubs';
+import { fetchCourtsByClubId, type Court } from '../api/courts';
+import { fetchMatches } from '../api/matches';
+import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import { PartidoCard } from '../components/partido/PartidoCard';
+import type { PartidoItem } from './PartidosScreen';
 import { theme } from '../theme';
 
 type ClubDetailScreenProps = {
   court: SearchCourtResult;
   onClose: () => void;
+  onPartidoPress?: (partido: PartidoItem) => void;
 };
 
 const TABS = ['Home', 'Reservar', 'Partidos abiertos', 'Competiciones'] as const;
@@ -31,6 +38,32 @@ function getCerramientoLabel(indoor: boolean): string {
 
 function getParedesLabel(glassType: string): string {
   return glassType === 'panoramic' ? 'Panorámico' : 'Muro';
+}
+
+/** Formatea weekly_schedule (jsonb) a texto legible. Si está vacío devuelve null. */
+function formatWeeklySchedule(ws: Record<string, unknown> | null | undefined): string | null {
+  if (!ws || typeof ws !== 'object' || Object.keys(ws).length === 0) return null;
+  const DAY_NAMES: Record<string, string> = {
+    '0': 'Dom', '1': 'Lun', '2': 'Mar', '3': 'Mié', '4': 'Jue', '5': 'Vie', '6': 'Sáb',
+    mon: 'Lun', tue: 'Mar', wed: 'Mié', thu: 'Jue', fri: 'Vie', sat: 'Sáb', sun: 'Dom',
+  };
+  const lines: string[] = [];
+  const keys = Object.keys(ws).sort();
+  for (const k of keys) {
+    const v = ws[k];
+    const dayLabel = DAY_NAMES[k] ?? k;
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      const obj = v as Record<string, unknown>;
+      const open = obj.open ?? obj.open_time ?? obj.start;
+      const close = obj.close ?? obj.close_time ?? obj.end;
+      if (open != null && close != null) {
+        lines.push(`${dayLabel}: ${String(open)} - ${String(close)}`);
+      }
+    } else if (typeof v === 'string' && v) {
+      lines.push(`${dayLabel}: ${v}`);
+    }
+  }
+  return lines.length > 0 ? lines.join('\n') : null;
 }
 
 function getNextDays(count: number) {
@@ -49,8 +82,50 @@ function getNextDays(count: number) {
   return out;
 }
 
-export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
+function matchBelongsToClub(match: { bookings?: { courts?: { club_id?: string } | null } | null }, clubId: string): boolean {
+  const clubIdFromMatch = match.bookings?.courts?.club_id;
+  return clubIdFromMatch != null && clubIdFromMatch === clubId;
+}
+
+export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailScreenProps) {
   const [activeTab, setActiveTab] = useState<TabId>('Home');
+  const [clubPartidos, setClubPartidos] = useState<PartidoItem[]>([]);
+  const [partidosLoading, setPartidosLoading] = useState(false);
+  const [clubCourts, setClubCourts] = useState<Court[]>([]);
+  const [scheduleText, setScheduleText] = useState<string | null>(null);
+  const [clubCourtsLoading, setClubCourtsLoading] = useState(true);
+
+  const loadClubData = useCallback(async () => {
+    setClubCourtsLoading(true);
+    const [club, courts] = await Promise.all([
+      fetchClubById(court.clubId),
+      fetchCourtsByClubId(court.clubId),
+    ]);
+    setClubCourts(courts);
+    setScheduleText(club?.weekly_schedule ? formatWeeklySchedule(club.weekly_schedule as Record<string, unknown>) : null);
+    setClubCourtsLoading(false);
+  }, [court.clubId]);
+
+  useEffect(() => {
+    loadClubData();
+  }, [loadClubData]);
+
+  const loadClubPartidos = useCallback(async () => {
+    setPartidosLoading(true);
+    const matches = await fetchMatches({ expand: true });
+    const filtered = matches
+      .filter((m) => matchBelongsToClub(m, court.clubId))
+      .map(mapMatchToPartido)
+      .filter((p): p is PartidoItem => p != null);
+    setClubPartidos(filtered);
+    setPartidosLoading(false);
+  }, [court.clubId]);
+
+  useEffect(() => {
+    if (activeTab === 'Partidos abiertos') {
+      loadClubPartidos();
+    }
+  }, [activeTab, loadClubPartidos]);
   const [selectedDateIndex, setSelectedDateIndex] = useState(1);
   const [showOnlyAvailable, setShowOnlyAvailable] = useState(true);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
@@ -141,7 +216,13 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
                     <Text style={styles.heroStatText}>4.8</Text>
                   </View>
                   <View style={styles.heroStat}>
-                    <Text style={styles.heroStatText}>1 Pista</Text>
+                    <Text style={styles.heroStatText}>
+                      {clubCourtsLoading ? '...' : clubCourts.length === 0
+                        ? 'Sin pistas'
+                        : clubCourts.length === 1
+                          ? '1 Pista'
+                          : `${clubCourts.length} Pistas`}
+                    </Text>
                   </View>
                   {court.distanceKm != null && (
                     <View style={styles.heroStat}>
@@ -235,45 +316,66 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
                 <Text style={styles.reservaTitle}>Reserva una pista</Text>
                 <Text style={styles.reservaSub}>Crea un partido privado e invita a tus amigos</Text>
                 <View style={styles.courtList}>
-                  <Pressable style={({ pressed }) => [styles.courtRow, pressed && styles.pressed]}>
-                    <View style={styles.courtRowLeft}>
-                      <Text style={styles.courtName}>{court.courtName}</Text>
-                      <Text style={styles.courtSub}>
-                        {getCerramientoLabel(court.indoor)} | {getParedesLabel(court.glassType)} | Dobles
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-down" size={20} color="#9ca3af" />
-                  </Pressable>
+                  {clubCourtsLoading ? (
+                    <ActivityIndicator size="small" color="#E31E24" style={{ paddingVertical: 16 }} />
+                  ) : clubCourts.length > 0 ? (
+                    clubCourts.map((c) => (
+                      <Pressable key={c.id} style={({ pressed }) => [styles.courtRow, pressed && styles.pressed]}>
+                        <View style={styles.courtRowLeft}>
+                          <Text style={styles.courtName}>{c.name}</Text>
+                          <Text style={styles.courtSub}>
+                            {getCerramientoLabel(c.indoor)} | {getParedesLabel(c.glass_type)} | Dobles
+                          </Text>
+                        </View>
+                        <Ionicons name="chevron-down" size={20} color="#9ca3af" />
+                      </Pressable>
+                    ))
+                  ) : (
+                    <Pressable style={({ pressed }) => [styles.courtRow, pressed && styles.pressed]}>
+                      <View style={styles.courtRowLeft}>
+                        <Text style={styles.courtName}>{court.courtName}</Text>
+                        <Text style={styles.courtSub}>
+                          {getCerramientoLabel(court.indoor)} | {getParedesLabel(court.glassType)} | Dobles
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-down" size={20} color="#9ca3af" />
+                    </Pressable>
+                  )}
                 </View>
               </View>
             </>
           ) : activeTab === 'Partidos abiertos' ? (
             <>
-              <View style={styles.partidosFiltersWrap}>
-                <View style={styles.partidosFilters}>
-                  <Pressable style={({ pressed }) => [styles.partidosFilterBtn, pressed && styles.pressed]}>
-                    <Text style={styles.partidosFilterText}>Todos los deportes</Text>
-                    <Ionicons name="chevron-down" size={14} color="#fff" />
-                  </Pressable>
-                  <Pressable style={({ pressed }) => [styles.partidosFilterBtn, pressed && styles.pressed]}>
-                    <Text style={styles.partidosFilterText}>Cualquier día</Text>
-                    <Ionicons name="chevron-down" size={14} color="#fff" />
-                  </Pressable>
-                  <Pressable style={({ pressed }) => [styles.partidosFilterBtn, pressed && styles.pressed]}>
-                    <Text style={styles.partidosFilterText}>Mixto</Text>
-                    <Ionicons name="chevron-down" size={14} color="#fff" />
-                  </Pressable>
-                </View>
+              <View style={styles.section}>
+                <Text style={styles.partidosSectionTitle}>Partidos abiertos en {court.clubName}</Text>
+                <Text style={styles.partidosSectionSub}>Únete a un partido en este club</Text>
               </View>
-              <View style={[styles.section, styles.partidosEmptySection]}>
-                <View style={styles.partidosEmptyState}>
-                  <View style={styles.partidosEmptyIcon}>
-                    <Text style={styles.partidosEmptyEmoji}>🎾</Text>
+              {partidosLoading ? (
+                <View style={[styles.section, styles.partidosEmptySection]}>
+                  <ActivityIndicator size="large" color="#E31E24" />
+                  <Text style={[styles.partidosEmptySubtitle, { marginTop: 12 }]}>Cargando partidos...</Text>
+                </View>
+              ) : clubPartidos.length > 0 ? (
+                <View style={[styles.section, styles.partidosListWrap]}>
+                  {clubPartidos.map((item) => (
+                    <PartidoCard
+                      key={item.id}
+                      item={item}
+                      onPress={() => onPartidoPress?.(item)}
+                    />
+                  ))}
+                </View>
+              ) : (
+                <View style={[styles.section, styles.partidosEmptySection]}>
+                  <View style={styles.partidosEmptyState}>
+                    <View style={styles.partidosEmptyIcon}>
+                      <Text style={styles.partidosEmptyEmoji}>🎾</Text>
+                    </View>
+                    <Text style={styles.partidosEmptyTitle}>No hay partidos abiertos</Text>
+                    <Text style={styles.partidosEmptySubtitle}>No hay Partidos Abiertos en este club ahora</Text>
                   </View>
-                  <Text style={styles.partidosEmptyTitle}>No hay pistas disponibles hoy</Text>
-                  <Text style={styles.partidosEmptySubtitle}>Prueba otro día o busca en otro club</Text>
                 </View>
-              </View>
+              )}
               <View style={styles.section}>
                 <View style={styles.partidosAlertHeader}>
                   <Ionicons name="notifications-outline" size={16} color="#f97316" />
@@ -290,14 +392,6 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
                     trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
                     thumbColor="#fff"
                   />
-                </View>
-              </View>
-              <View style={styles.section}>
-                <Text style={styles.partidosReservaTitle}>Reserva una plaza en un partido</Text>
-                <Text style={styles.partidosReservaSub}>No hay Partidos Abiertos disponibles ahora.</Text>
-                <View style={styles.partidosReservaHint}>
-                  <Text style={styles.partidosReservaHintText}>Prueba más tarde</Text>
-                  <Text style={styles.partidosClockEmoji}>⏰</Text>
                 </View>
               </View>
             </>
@@ -341,7 +435,9 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
                 <Text style={styles.tagText}>🎾 Tenis</Text>
               </View>
             </View>
-            <Text style={styles.pistasLabel}>Pista disponible</Text>
+            <Text style={styles.pistasLabel}>
+              {clubCourts.length === 0 ? 'Pista disponible' : clubCourts.length === 1 ? '1 pista' : `${clubCourts.length} pistas`}
+            </Text>
             <View style={styles.amenitiesRow}>
               <View style={styles.amenity}>
                 <Ionicons name="accessibility-outline" size={14} color="#6b7280" />
@@ -387,7 +483,9 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
             <Text style={styles.sectionTitle}>Horarios</Text>
             <View style={[styles.scheduleRow, { borderBottomWidth: 0 }]}>
               <Text style={styles.scheduleDay}>Horarios</Text>
-              <Text style={styles.scheduleHours}>Consulta en el club</Text>
+              <Text style={styles.scheduleHours} numberOfLines={3}>
+                {scheduleText ?? 'Consulta en el club'}
+              </Text>
             </View>
           </View>
 
@@ -1002,6 +1100,21 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#9ca3af',
     marginTop: 2,
+  },
+  partidosSectionTitle: {
+    fontSize: theme.fontSize.lg,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    marginBottom: 4,
+  },
+  partidosSectionSub: {
+    fontSize: theme.fontSize.xs,
+    color: '#9ca3af',
+    marginBottom: theme.spacing.md,
+  },
+  partidosListWrap: {
+    gap: 12,
+    marginBottom: theme.spacing.lg,
   },
   partidosFiltersWrap: {
     marginBottom: theme.spacing.md,

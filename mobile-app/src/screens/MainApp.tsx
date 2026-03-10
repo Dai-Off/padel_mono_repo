@@ -22,17 +22,9 @@ export function MainApp() {
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
 
   const showClubDetail = activeTab === 'reservar' && clubDetailCourt != null;
-  const showPartidoDetail = activeTab === 'partidos' && selectedPartido != null;
+  const showPartidoDetail = selectedPartido != null;
 
   const renderContent = () => {
-    if (showClubDetail && clubDetailCourt) {
-      return (
-        <ClubDetailScreen
-          court={clubDetailCourt}
-          onClose={() => setClubDetailCourt(null)}
-        />
-      );
-    }
     if (showPartidoDetail && selectedPartido) {
       return (
         <PartidoDetailScreen
@@ -41,9 +33,23 @@ export function MainApp() {
         />
       );
     }
+    if (showClubDetail && clubDetailCourt) {
+      return (
+        <ClubDetailScreen
+          court={clubDetailCourt}
+          onClose={() => setClubDetailCourt(null)}
+          onPartidoPress={(p) => setSelectedPartido(p)}
+        />
+      );
+    }
     switch (activeTab) {
       case 'inicio':
-        return <HomeScreen />;
+        return (
+          <HomeScreen
+            onPartidoPress={(p) => setSelectedPartido(p)}
+            onNavigateToTab={(tab) => setActiveTab(tab)}
+          />
+        );
       case 'reservar':
         return (
           <MatchSearchScreen
@@ -80,7 +86,7 @@ export function MainApp() {
       >
         {renderContent()}
       </ScreenLayout>
-      {!showClubDetail && (
+      {!showClubDetail && !showPartidoDetail && (
         <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
           <BottomNavbar activeTab={activeTab} onTabChange={setActiveTab} />
         </View>
