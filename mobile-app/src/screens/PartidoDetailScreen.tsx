@@ -10,8 +10,11 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Linking from 'expo-linking';
+import { useStripe } from '@stripe/stripe-react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchMatchById, joinMatch } from '../api/matches';
+import { fetchMatchById, prepareJoin } from '../api/matches';
+import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
 import { fetchMyPlayerId } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
@@ -31,6 +34,7 @@ function StatusDot({ color }: { color: string }) {
 
 export function PartidoDetailScreen({ partido: initialPartido, onBack }: PartidoDetailScreenProps) {
   const { session } = useAuth();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
   const [joiningSlotIndex, setJoiningSlotIndex] = useState<number | null>(null);
@@ -53,10 +57,48 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
       return;
     }
     setJoiningSlotIndex(slotIndex);
-    const result = await joinMatch(partido.id, token, slotIndex);
+    const prep = await prepareJoin(partido.id, slotIndex, token);
+    if (!('participantId' in prep)) {
+      setJoiningSlotIndex(null);
+      const err = prep.error ?? 'No se pudo preparar.';
+      if (err.includes('esa hora') || err.includes('otro horario')) {
+        Alert.alert('Horario no disponible', 'Ya tienes un partido a esa hora. Elige otro partido.');
+      } else {
+        Alert.alert('Error', err);
+      }
+      return;
+    }
+    const intentRes = await createPaymentIntent(prep.bookingId, prep.participantId, token, slotIndex);
+    if (!intentRes.ok || !intentRes.clientSecret) {
+      setJoiningSlotIndex(null);
+      Alert.alert('Error', 'No se pudo iniciar el pago. Inténtalo de nuevo.');
+      return;
+    }
+    const returnURL = Linking.createURL('stripe-redirect');
+    const { error: initErr } = await initPaymentSheet({
+      paymentIntentClientSecret: intentRes.clientSecret,
+      merchantDisplayName: 'WeMatch Padel',
+      returnURL,
+    });
+    if (initErr) {
+      setJoiningSlotIndex(null);
+      Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+      return;
+    }
+    const { error: presentErr } = await presentPaymentSheet();
+    if (presentErr) {
+      setJoiningSlotIndex(null);
+      if (presentErr.code === 'Canceled') {
+        Alert.alert('Cancelado', 'Pago cancelado.');
+      } else {
+        Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
+      }
+      return;
+    }
+    const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, token);
     setJoiningSlotIndex(null);
-    if (!result.ok) {
-      Alert.alert('Error', result.error ?? 'No se pudo unir al partido.');
+    if (!confirmRes.ok) {
+      Alert.alert('Error', 'No se pudo confirmar. Inténtalo de nuevo.');
       return;
     }
     const match = await fetchMatchById(partido.id, token);
@@ -64,7 +106,7 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
       const updated = mapMatchToPartido(match);
       if (updated) setPartido(updated);
     }
-  }, [partido.id, session?.access_token]);
+  }, [partido.id, session?.access_token, initPaymentSheet, presentPaymentSheet]);
 
   const teamA = partido.players.slice(0, 2);
   const teamB = partido.players.slice(2, 4);

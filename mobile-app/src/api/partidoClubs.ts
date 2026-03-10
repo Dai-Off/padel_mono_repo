@@ -70,8 +70,16 @@ function mergeByClub(todayResults: SearchCourtResult[], tomorrowResults: SearchC
     if (existing) {
       const dateIdx = existing.dates.findIndex((d) => d.dateStr === dateStr);
       if (dateIdx >= 0) {
-        existing.dates[dateIdx].slots = [...existing.dates[dateIdx].slots, ...slots].sort(
-          (a, b) => a.time.localeCompare(b.time)
+        const merged = [...existing.dates[dateIdx].slots, ...slots];
+        const byTime = new Map<string, SlotForCreate>();
+        for (const s of merged) {
+          const prev = byTime.get(s.time);
+          if (!prev || s.minPriceCents < prev.minPriceCents) {
+            byTime.set(s.time, s);
+          }
+        }
+        existing.dates[dateIdx].slots = Array.from(byTime.values()).sort((a, b) =>
+          a.time.localeCompare(b.time)
         );
       } else {
         existing.dates.push({ dateStr, label: dateLabel, slots });

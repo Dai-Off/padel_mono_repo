@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
 import { Animated, Dimensions, Pressable, StyleSheet, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type MobileSidebarProps = {
   visible: boolean;
@@ -10,16 +9,14 @@ type MobileSidebarProps = {
 };
 
 export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps) {
-  const insets = useSafeAreaInsets();
-  const sidebarWidth = Dimensions.get('window').width;
-  const sidebarTop = insets.top ?? 0;
-  const slideAnim = useRef(new Animated.Value(-sidebarWidth)).current;
+  const { width, height } = Dimensions.get('window');
+  const slideAnim = useRef(new Animated.Value(-width)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.spring(slideAnim, {
-        toValue: visible ? 0 : -sidebarWidth,
+        toValue: visible ? 0 : -width,
         useNativeDriver: true,
         damping: 25,
         stiffness: 200,
@@ -30,7 +27,7 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
         useNativeDriver: true,
       }),
     ]).start();
-  }, [visible, slideAnim, backdropAnim, sidebarWidth]);
+  }, [visible, slideAnim, backdropAnim, width]);
 
   const backdropOpacity = backdropAnim.interpolate({
     inputRange: [0, 1],
@@ -56,9 +53,10 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
         style={[
           styles.sidebar,
           {
-            width: sidebarWidth,
-            top: sidebarTop,
-            bottom: 0,
+            width,
+            height,
+            top: 0,
+            left: 0,
             transform: [{ translateX: slideAnim }],
           },
         ]}

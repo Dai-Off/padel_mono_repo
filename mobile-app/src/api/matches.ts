@@ -98,7 +98,7 @@ export type CreateMatchWithBookingParams = {
 type CreateMatchResponse = {
   ok?: boolean;
   match?: Match;
-  booking?: { id: string };
+  booking?: { id: string; organizer_participant_id?: string };
   error?: string;
 };
 
@@ -107,11 +107,44 @@ type JoinMatchResponse = {
   error?: string;
 };
 
+type PrepareJoinResponse = {
+  ok?: boolean;
+  participant_id?: string;
+  booking_id?: string;
+  share_amount_cents?: number;
+  error?: string;
+};
+
 type MatchResponse = {
   ok?: boolean;
   match?: MatchEnriched;
   error?: string;
 };
+
+export async function prepareJoin(
+  matchId: string,
+  slotIndex: number,
+  token: string | null | undefined
+): Promise<{ participantId: string; bookingId: string } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/matches/${matchId}/prepare-join`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ slot_index: slotIndex }),
+    });
+    const json = (await res.json()) as PrepareJoinResponse;
+    if (json.ok && json.participant_id && json.booking_id) {
+      return { participantId: json.participant_id, bookingId: json.booking_id };
+    }
+    return { ok: false, error: json.error ?? 'No se pudo preparar' };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
 
 export async function joinMatch(
   matchId: string,
@@ -155,7 +188,7 @@ export async function fetchMatchById(
 
 export async function createMatchWithBooking(
   params: CreateMatchWithBookingParams
-): Promise<{ match: Match; bookingId: string } | null> {
+): Promise<{ match: Match; bookingId: string; organizerParticipantId?: string } | null> {
   const { token, ...body } = params;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -168,7 +201,11 @@ export async function createMatchWithBooking(
     });
     const json = (await res.json()) as CreateMatchResponse;
     if (json.ok && json.match && json.booking) {
-      return { match: json.match, bookingId: json.booking.id };
+      return {
+        match: json.match,
+        bookingId: json.booking.id,
+        organizerParticipantId: json.booking.organizer_participant_id,
+      };
     }
     return null;
   } catch {

@@ -56,8 +56,9 @@ Requiere [EAS CLI](https://docs.expo.dev/build/setup/) y cuenta Expo.
 Para apuntar a la API, crear `.env` en `mobile-app/` con:
 ```
 EXPO_PUBLIC_API_URL=http://localhost:3000
+EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 ```
-En producción, usar la URL del backend en Fly.io.
+En producción, usar la URL del backend y la clave publishable de Stripe.
 
 ---
 
@@ -90,6 +91,9 @@ FRONTEND_URL=   # Opcional; CORS permite todos por defecto
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...   # Opcional: para webhooks. En local: stripe listen --forward-to localhost:3000/payments/webhook
 ```
 
 ### Comandos
@@ -106,7 +110,10 @@ npm start      # Producción
 
 - `GET /` — Mensaje de bienvenida
 - `GET /health` — Health check básico
-- `GET /health/supabase` — Verifica conexión a Supabase (requiere RPC `now()` en Supabase)
+- `GET /health/supabase` — Verifica conexión a Supabase
+- `POST /payments/create-intent` — Crea PaymentIntent (Booking: Bearer token). Body: `{ booking_id, participant_id }`
+- `POST /payments/confirm-client` — Confirma pago tras éxito en cliente (fallback si webhook no llega)
+- `POST /payments/webhook` — Webhook Stripe (body raw)
 
 ### Despliegue (Fly.io)
 

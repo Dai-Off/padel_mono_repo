@@ -98,7 +98,7 @@ export function SidebarContent() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <SidebarUserHeader />
       <ScrollView
         style={styles.scroll}
@@ -122,7 +122,10 @@ export function SidebarContent() {
             icon="wallet-outline"
             title="Tus pagos"
             subtitle="Métodos de pago y transacciones"
-            onPress={close}
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToTusPagos?.();
+            }}
           />
           <SidebarRowItem
             icon="settings-outline"
