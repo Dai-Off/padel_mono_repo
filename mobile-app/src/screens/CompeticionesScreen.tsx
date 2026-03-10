@@ -35,7 +35,6 @@ function withAlpha(hex: string, alpha: number): string {
 export function CompeticionesScreen() {
   const [activeTab, setActiveTab] = useState<CompeticionTab>('disponibles');
 
-  // TODO: reemplazar por datos de API (ej. useCompetitions)
   const disponiblesItems: CompeticionItem[] = [];
   const inscritasItems: CompeticionItem[] = [];
 

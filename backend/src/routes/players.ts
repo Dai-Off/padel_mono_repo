@@ -3,6 +3,33 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 
 const router = Router();
 
+// GET /players/me -> jugador actual según Bearer token (requiere sesión)
+router.get('/me', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'Token requerido' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      return res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+    }
+    const email = String(user.email).trim().toLowerCase();
+    const { data: player, error: errPlayer } = await supabase
+      .from('players')
+      .select('id, created_at, first_name, last_name, email, phone, elo_rating, status')
+      .eq('email', email)
+      .maybeSingle();
+    if (errPlayer) return res.status(500).json({ ok: false, error: errPlayer.message });
+    if (!player) return res.status(404).json({ ok: false, error: 'No existe jugador con tu email' });
+    return res.json({ ok: true, player });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // GET /players -> lista básica de jugadores
 router.get('/', async (_req: Request, res: Response) => {
   try {

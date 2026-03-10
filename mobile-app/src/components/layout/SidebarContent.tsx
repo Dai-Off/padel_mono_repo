@@ -121,13 +121,13 @@ export function SidebarContent() {
           <SidebarRowItem
             icon="wallet-outline"
             title="Tus pagos"
-            subtitle="Métodos de pago, transacciones, membr..."
+            subtitle="Métodos de pago y transacciones"
             onPress={close}
           />
           <SidebarRowItem
             icon="settings-outline"
             title="Ajustes"
-            subtitle="Configura privacidad, notificaciones, segu..."
+            subtitle="Privacidad y notificaciones"
             onPress={close}
           />
         </SidebarSection>

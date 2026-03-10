@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,6 +9,11 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../contexts/AuthContext';
+import { fetchMatches } from '../api/matches';
+import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import { fetchMyPlayerId } from '../api/players';
+import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
 import { theme } from '../theme';
 
 export type PartidoMode = 'automático' | 'competitivo';
@@ -25,6 +31,8 @@ export type PartidoItem = {
   typeLabel: string;
   levelRange: string;
   players: PartidoPlayer[];
+  /** IDs de jugadores ya en el partido (para ocultar Unirse al organizador/jugadores) */
+  playerIds?: string[];
   venue: string;
   location: string;
   price: string;
@@ -32,63 +40,6 @@ export type PartidoItem = {
   venueImage?: string;
   venueAddress?: string;
 };
-
-// TODO: reemplazar por datos de API (ej. usePartidos)
-const MOCK_PARTIDOS: PartidoItem[] = [
-  {
-    id: '1',
-    dateTime: 'lunes, 09 de febrero · 15:00',
-    mode: 'automático',
-    typeLabel: 'Todos los jugadores',
-    levelRange: '0,25 - 1,25',
-    players: [
-      { name: 'Alvaro', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&h=150&fit=crop', level: '0,5', isFree: false },
-      { name: '', level: '', isFree: true },
-      { name: '', level: '', isFree: true },
-      { name: '', level: '', isFree: true },
-    ],
-    venue: 'Padel Family Indoor',
-    location: '8km · Valdemoro',
-    price: '7,99€',
-    duration: '90min',
-    venueImage: 'https://images.unsplash.com/photo-1622163642998-1ea32b0bbc67?w=400&h=300&fit=crop',
-    venueAddress: 'Avenida de Madrid n°6 polígono industrial',
-  },
-  {
-    id: '2',
-    dateTime: 'lunes, 09 de febrero · 18:30',
-    mode: 'competitivo',
-    typeLabel: 'Mixto',
-    levelRange: '0,41 - 1,41',
-    players: [
-      { name: 'Gema', initial: 'G', level: '0,7', isFree: false },
-      { name: 'Inan Mac', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&h=150&fit=crop', level: '0,9', isFree: false },
-      { name: 'Adrian', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150&h=150&fit=crop', level: '0,7', isFree: false },
-      { name: '', level: '', isFree: true },
-    ],
-    venue: 'Golden Pádel Club',
-    location: '11km · Pinto',
-    price: '11,23€',
-    duration: '90min',
-  },
-  {
-    id: '3',
-    dateTime: 'martes, 10 de febrero · 10:00',
-    mode: 'automático',
-    typeLabel: 'Todos los jugadores',
-    levelRange: '0,29 - 1,29',
-    players: [
-      { name: '', level: '', isFree: true },
-      { name: '', level: '', isFree: true },
-      { name: '', level: '', isFree: true },
-      { name: '', level: '', isFree: true },
-    ],
-    venue: 'Pádel Indoor Plus',
-    location: '5km · Madrid',
-    price: '6,50€',
-    duration: '90min',
-  },
-];
 
 function PlayerSlot({ player }: { player: PartidoPlayer }) {
   if (player.isFree) {
@@ -162,50 +113,53 @@ function PartidoCard({ item, onPress }: { item: PartidoItem; onPress: () => void
 
 type PartidosScreenProps = {
   onPartidoPress?: (partido: PartidoItem) => void;
+  onCrearPartidoPress?: () => void;
 };
 
-export function PartidosScreen({ onPartidoPress }: PartidosScreenProps) {
-  const [sportFilter] = useState('Pádel');
-  const [clubFilter] = useState('10 Clubs');
-  const [dateFilter] = useState('Dom-Lun-Ma');
+export function PartidosScreen({ onPartidoPress, onCrearPartidoPress }: PartidosScreenProps) {
+  const { session } = useAuth();
+  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
+  const [locationSheetVisible, setLocationSheetVisible] = useState(false);
+  const [items, setItems] = useState<PartidoItem[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const items = MOCK_PARTIDOS;
+  useEffect(() => {
+    if (session?.access_token) {
+      fetchMyPlayerId(session.access_token).then((id) => setOrganizerPlayerId(id));
+    } else {
+      setOrganizerPlayerId(null);
+    }
+  }, [session?.access_token]);
+  const loadPartidos = useCallback(async () => {
+    setLoading(true);
+    const matches = await fetchMatches({ expand: true });
+    const partidos = matches.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
+    setItems(partidos);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadPartidos();
+  }, [loadPartidos]);
 
   return (
+    <View style={styles.wrapper}>
     <ScrollView
       style={styles.container}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterScroll}
-        style={styles.filterScrollView}
-      >
-        <Pressable style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}>
-          <Ionicons name="filter" size={16} color="#1A1A1A" />
-        </Pressable>
-        <Pressable style={({ pressed }) => [styles.filterPill, pressed && styles.pressed]}>
-          <Text style={styles.filterPillText}>{sportFilter}</Text>
-          <Ionicons name="chevron-down" size={14} color="#fff" />
-        </Pressable>
-        <Pressable style={({ pressed }) => [styles.filterPill, pressed && styles.pressed]}>
-          <Text style={styles.filterPillText}>{clubFilter}</Text>
-          <Ionicons name="chevron-down" size={14} color="#fff" />
-        </Pressable>
-        <Pressable style={({ pressed }) => [styles.filterPill, pressed && styles.pressed]}>
-          <Text style={styles.filterPillText}>{dateFilter}</Text>
-        </Pressable>
-      </ScrollView>
-
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Para tu nivel</Text>
-        <Text style={styles.sectionSubtitle}>Estos partidos reflejan tu búsqueda y nivel</Text>
+        <Text style={styles.sectionTitle}>Partidos</Text>
+        <Text style={styles.sectionSubtitle}>Partidos abiertos para unirte</Text>
       </View>
 
       <View style={styles.list}>
-        {items.length > 0 ? (
+        {loading ? (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>Cargando partidos...</Text>
+          </View>
+        ) : items.length > 0 ? (
           items.map((item) => (
             <PartidoCard
               key={item.id}
@@ -220,44 +174,42 @@ export function PartidosScreen({ onPartidoPress }: PartidosScreenProps) {
         )}
       </View>
     </ScrollView>
+      <Pressable
+        style={({ pressed }) => [
+          styles.fab,
+          pressed && styles.pressed,
+        ]}
+        onPress={() => {
+          setLocationSheetVisible(true);
+          onCrearPartidoPress?.();
+        }}
+      >
+        <Text style={styles.fabIcon}>+</Text>
+        <Text style={styles.fabLabel}>Comenzar un partido</Text>
+      </Pressable>
+
+      <CrearPartidoLocationSheet
+        visible={locationSheetVisible}
+        organizerPlayerId={organizerPlayerId}
+        onClose={() => {
+          setLocationSheetVisible(false);
+          loadPartidos();
+        }}
+        onSiguiente={() => {
+          setLocationSheetVisible(false);
+          loadPartidos();
+        }}
+        onPartidoCreado={loadPartidos}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: { flex: 1 },
   container: { flex: 1, backgroundColor: '#FAFAFA' },
   content: {
     paddingBottom: theme.scrollBottomPadding,
-  },
-  filterScrollView: { marginBottom: 0 },
-  filterScroll: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: theme.spacing.lg,
-    paddingBottom: theme.spacing.md,
-  },
-  filterBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#1A1A1A',
-    borderRadius: 12,
-  },
-  filterPillText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
   },
   pressed: { opacity: 0.9 },
   section: {
@@ -404,4 +356,38 @@ const styles = StyleSheet.create({
   venueDuration: { fontSize: 10, color: '#9ca3af' },
   emptyState: { paddingVertical: theme.spacing.xxl, alignItems: 'center' },
   emptyText: { fontSize: theme.fontSize.sm, color: '#9ca3af' },
+  fab: {
+    position: 'absolute',
+    bottom: 20,
+    left: '50%',
+    marginLeft: -120,
+    width: 240,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: '#E31E24',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+      },
+      android: { elevation: 8 },
+    }),
+  },
+  fabIcon: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  fabLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
 });
