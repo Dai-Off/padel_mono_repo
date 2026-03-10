@@ -33,6 +33,7 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
     let mounted = true;
     let done = false;
 
+    const MIN_SPLASH_MS = 2800;
     const finish = () => {
       if (mounted && !done) {
         done = true;
@@ -40,7 +41,7 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
       }
     };
 
-    AsyncStorage.getItem(SESSION_KEY)
+    const authCheck = AsyncStorage.getItem(SESSION_KEY)
       .then((stored) => {
         if (!mounted) return;
         if (stored) {
@@ -54,14 +55,14 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
           }
         }
       })
-      .catch(() => {})
-      .finally(finish);
+      .catch(() => {});
 
-    const timeout = setTimeout(finish, 2500);
+    const minSplash = new Promise<void>((r) => setTimeout(r, MIN_SPLASH_MS));
+
+    Promise.all([authCheck, minSplash]).finally(finish);
 
     return () => {
       mounted = false;
-      clearTimeout(timeout);
     };
   }, []);
 

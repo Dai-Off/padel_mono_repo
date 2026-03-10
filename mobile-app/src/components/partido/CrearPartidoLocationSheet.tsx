@@ -19,7 +19,7 @@ import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
 
-export type LocationType = 'club_playtomic' | 'pista_externa';
+export type LocationType = 'club_wematch' | 'pista_externa';
 
 type CrearPartidoLocationSheetProps = {
   visible: boolean;
@@ -68,7 +68,7 @@ export function CrearPartidoLocationSheet({
   const { session } = useAuth();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>('location');
-  const [selected, setSelected] = useState<LocationType>('club_playtomic');
+  const [selected, setSelected] = useState<LocationType>('club_wematch');
   const [clubs, setClubs] = useState<ClubDisplay[]>([]);
   const [clubsLoading, setClubsLoading] = useState(false);
   const [clubsError, setClubsError] = useState<string | null>(null);
@@ -155,7 +155,7 @@ export function CrearPartidoLocationSheet({
   }, [selectedSlot, selectedClub, competitive, gender, orgId, onPartidoCreado, onClose]);
 
   const handleSiguiente = () => {
-    if (selected === 'club_playtomic') {
+    if (selected === 'club_wematch') {
       setStep('clubs');
     } else if (selected === 'pista_externa') {
       setStep('pista_externa');
@@ -489,7 +489,7 @@ export function CrearPartidoLocationSheet({
                   </View>
                 )}
                 <View style={[styles.banner, { marginBottom: 20 }]}>
-                  <Text style={styles.bannerTitle}>Disponibilidad de los clubes Playtomic</Text>
+                  <Text style={styles.bannerTitle}>Disponibilidad de los clubes WeMatch</Text>
                   <Text style={styles.bannerSub}>Reserva tu plaza y lanza un nuevo Partido Abierto!</Text>
                 </View>
                 {clubs.map((club) => (
@@ -554,23 +554,23 @@ export function CrearPartidoLocationSheet({
           <Pressable
             style={({ pressed }) => [
               styles.optionCard,
-              selected === 'club_playtomic' && styles.optionSelected,
+              selected === 'club_wematch' && styles.optionSelected,
               pressed && styles.pressed,
             ]}
             onPress={() => {
-              setSelected('club_playtomic');
+              setSelected('club_wematch');
               setStep('clubs');
             }}
             accessibilityRole="button"
-            accessibilityState={{ selected: selected === 'club_playtomic' }}
+            accessibilityState={{ selected: selected === 'club_wematch' }}
           >
             <View style={styles.optionIconWrap}>
               <Text style={styles.optionEmoji}>🏟️</Text>
             </View>
             <View style={styles.optionBody}>
-              <Text style={styles.optionTitle}>En un club Playtomic</Text>
+              <Text style={styles.optionTitle}>En un club WeMatch</Text>
               <Text style={styles.optionDesc}>
-                Elige en que club Playtomic quieres jugar y publica tu partido para que cualquier jugador pueda apuntarse.
+                Elige en que club WeMatch quieres jugar y publica tu partido para que cualquier jugador pueda apuntarse.
               </Text>
             </View>
           </Pressable>
@@ -591,7 +591,7 @@ export function CrearPartidoLocationSheet({
             <View style={styles.optionBody}>
               <Text style={styles.optionTitle}>Ya se en que pista voy a jugar</Text>
               <Text style={styles.optionDesc}>
-                Juega en un club o instalacion que esta fuera de las opciones que ofrece Playtomic.
+                Juega en un club o instalacion que esta fuera de las opciones que ofrece WeMatch.
               </Text>
             </View>
           </Pressable>
