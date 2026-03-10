@@ -1,8 +1,9 @@
 import { useContext, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
+import { SplashScreen } from './src/components/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { MainApp } from './src/screens/MainApp';
 import { RegisterScreen } from './src/screens/RegisterScreen';
@@ -32,9 +33,7 @@ function AppContent() {
     return (
       <>
         <StatusBar style="light" />
-        <View style={styles.loading}>
-          <ActivityIndicator size="large" color="#fff" />
-        </View>
+        <SplashScreen />
       </>
     );
   }
@@ -70,11 +69,5 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
-  },
-  loading: {
-    flex: 1,
-    backgroundColor: '#000',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

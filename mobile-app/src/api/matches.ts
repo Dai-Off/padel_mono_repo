@@ -23,6 +23,7 @@ type MatchPlayerRef = {
   id: string;
   team: 'A' | 'B';
   created_at: string;
+  slot_index?: number | null;
   players: PlayerRef | null;
 };
 
@@ -111,13 +112,18 @@ type MatchResponse = {
 
 export async function joinMatch(
   matchId: string,
-  token: string | null | undefined
+  token: string | null | undefined,
+  slotIndex?: number
 ): Promise<{ ok: boolean; error?: string }> {
   if (!token) return { ok: false, error: 'Token requerido' };
   try {
     const res = await fetch(`${API_URL}/matches/${matchId}/join`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: slotIndex != null ? JSON.stringify({ slot_index: slotIndex }) : undefined,
     });
     const json = (await res.json()) as JoinMatchResponse;
     if (json.ok) return { ok: true };

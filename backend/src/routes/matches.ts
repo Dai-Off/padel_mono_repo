@@ -26,7 +26,7 @@ router.get('/', async (req: Request, res: Response) => {
             )
           ),
           match_players (
-            id, team, created_at,
+            id, team, created_at, slot_index,
             players (id, first_name, last_name, elo_rating)
           )`
         )
@@ -69,7 +69,7 @@ router.get('/:id', async (req: Request, res: Response) => {
             )
           ),
           match_players (
-            id, team, created_at,
+            id, team, created_at, slot_index,
             players (id, first_name, last_name, elo_rating)
           )`
         )
@@ -159,7 +159,7 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     if (errBP) return res.status(500).json({ ok: false, error: errBP.message });
 
     const { error: errMP } = await supabase.from('match_players').insert([
-      { match_id: match.id, player_id: organizer_player_id, team: 'A', invite_status: 'accepted' },
+      { match_id: match.id, player_id: organizer_player_id, team: 'A', invite_status: 'accepted', slot_index: 0 },
     ]);
     if (errMP) return res.status(500).json({ ok: false, error: errMP.message });
 
@@ -169,13 +169,17 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /matches/:id/join - unirse a un partido (Bearer token). */
+/** POST /matches/:id/join - unirse a un partido (Bearer token). Body: { slot_index?: 0|1|2|3 }. */
 router.post('/:id/join', async (req: Request, res: Response) => {
   const matchId = req.params.id;
   const authHeader = req.headers.authorization;
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
   if (!token) {
     return res.status(401).json({ ok: false, error: 'Token requerido' });
+  }
+  const slotIndex = req.body?.slot_index;
+  if (slotIndex != null && (typeof slotIndex !== 'number' || slotIndex < 0 || slotIndex > 3)) {
+    return res.status(400).json({ ok: false, error: 'slot_index debe ser 0, 1, 2 o 3' });
   }
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -219,7 +223,7 @@ router.post('/:id/join', async (req: Request, res: Response) => {
 
     const { data: matchPlayers } = await supabase
       .from('match_players')
-      .select('team, created_at')
+      .select('team, created_at, slot_index')
       .eq('match_id', matchId)
       .order('created_at', { ascending: true });
     const current = matchPlayers ?? [];
@@ -227,9 +231,12 @@ router.post('/:id/join', async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: 'El partido está completo' });
     }
 
-    const teamACount = current.filter((p) => p.team === 'A').length;
-    const teamBCount = current.filter((p) => p.team === 'B').length;
-    const team = teamACount <= teamBCount ? 'A' : 'B';
+    const slotTaken = slotIndex != null && current.some((p: { slot_index?: number }) => p.slot_index === slotIndex);
+    if (slotTaken) {
+      return res.status(400).json({ ok: false, error: 'Esa plaza ya está ocupada' });
+    }
+
+    const team = slotIndex != null ? (slotIndex <= 1 ? 'A' : 'B') : (current.filter((p: { team: string }) => p.team === 'A').length <= current.filter((p: { team: string }) => p.team === 'B').length ? 'A' : 'B');
 
     const { data: booking } = await supabase
       .from('bookings')
@@ -244,9 +251,17 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     ]);
     if (errBP) return res.status(500).json({ ok: false, error: errBP.message });
 
+    const insertPayload: { match_id: string; player_id: string; team: string; invite_status: string; slot_index?: number } = {
+      match_id: matchId,
+      player_id: playerId,
+      team,
+      invite_status: 'accepted',
+    };
+    if (slotIndex != null) insertPayload.slot_index = slotIndex;
+
     const { error: errMP } = await supabase
       .from('match_players')
-      .insert([{ match_id: matchId, player_id: playerId, team, invite_status: 'accepted' }]);
+      .insert([insertPayload]);
     if (errMP) return res.status(500).json({ ok: false, error: errMP.message });
 
     return res.status(201).json({ ok: true });

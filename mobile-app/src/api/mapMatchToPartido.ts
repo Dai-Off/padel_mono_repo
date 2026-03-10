@@ -40,10 +40,19 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   const durationMin = durationMinutes(b.start_at, b.end_at);
 
   const mps = (m.match_players ?? []).slice();
-  mps.sort((a, b) => {
-    if (a.team !== b.team) return a.team === 'A' ? -1 : 1;
-    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-  });
+  const hasSlotIndex = mps.some((mp) => mp.slot_index != null);
+  if (hasSlotIndex) {
+    mps.sort((a, b) => {
+      const sa = a.slot_index ?? 99;
+      const sb = b.slot_index ?? 99;
+      return sa - sb;
+    });
+  } else {
+    mps.sort((a, b) => {
+      if (a.team !== b.team) return a.team === 'A' ? -1 : 1;
+      return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    });
+  }
 
   const slots: PartidoPlayer[] = [
     { name: '', level: '', isFree: true },
@@ -53,13 +62,16 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   ];
   const playerIds: string[] = [];
   mps.forEach((mp, i) => {
-    if (i >= 4) return;
+    const idx = hasSlotIndex && mp.slot_index != null && mp.slot_index >= 0 && mp.slot_index <= 3
+      ? mp.slot_index
+      : i;
+    if (idx >= 4) return;
     const p = mp.players;
     if (!p) return;
     if (p.id) playerIds.push(p.id);
     const name = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
     const level = (p.elo_rating / 1000).toFixed(2).replace('.', ',');
-    slots[i] = { name, level, isFree: false };
+    slots[idx] = { name, level, isFree: false };
   });
   const players = slots;
 
