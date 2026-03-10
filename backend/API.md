@@ -68,13 +68,15 @@ Crear solicitud y subir imagen son públicos. **Listar, detalle, aprobar y recha
 
 ## Pistas (courts)
 
+CRUD de pistas de un club. Todas las rutas bajo `/courts`.
+
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/courts` | Lista. Query: `?club_id=uuid` |
-| GET | `/courts/:id` | Detalle |
-| POST | `/courts` | Crear (club_id, name, indoor?, glass_type?) |
-| PUT | `/courts/:id` | Actualizar (name, indoor, glass_type, status) |
-| DELETE | `/courts/:id` | Borrado físico |
+| GET | `/courts` | Listar. Query: `?club_id=uuid` (opcional, filtra por club). Respuesta: `{ ok: true, courts: [...] }`. Cada pista: id, created_at, club_id, name, indoor, glass_type, status, lighting?, last_maintenance? (si existen columnas; ver migración 003_courts_lighting_maintenance.sql). |
+| GET | `/courts/:id` | Ver una. Respuesta: `{ ok: true, court: { ... } }`. 404 si no existe. |
+| POST | `/courts` | Crear. Body: `{ "club_id", "name", "indoor"? (boolean), "glass_type"? ("normal" \| "panoramic"), "lighting"? (boolean), "last_maintenance"? (ISO date) }`. Respuesta: `{ ok: true, court }`. 400 si faltan club_id o name. |
+| PUT | `/courts/:id` | Editar. Body: `{ "name"?, "indoor"?, "glass_type"?, "status"?, "lighting"?, "last_maintenance"? }`. Respuesta: `{ ok: true, court }`. 400 si body vacío, 404 si no existe. |
+| DELETE | `/courts/:id` | Borrar. Respuesta: `{ ok: true, deleted: id }`. |
 
 ## Reservas (bookings)
 
@@ -100,9 +102,10 @@ Crear solicitud y subir imagen son públicos. **Listar, detalle, aprobar y recha
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/matches` | Lista. Query: `?booking_id=` |
+| GET | `/matches` | Lista. Query: `?booking_id=`, `?expand=1` (incluye booking, court, club) |
 | GET | `/matches/:id` | Detalle |
-| POST | `/matches` | Crear (booking_id, visibility?, elo_min?, elo_max?, gender?, competitive?) |
+| POST | `/matches/create-with-booking` | Crear booking + match: court_id, organizer_player_id, start_at, end_at, total_price_cents, timezone?, visibility?, elo_min?, elo_max?, gender?, competitive? |
+| POST | `/matches` | Crear (booking_id existente: visibility?, elo_min?, elo_max?, gender?, competitive?) |
 | PUT | `/matches/:id` | Actualizar |
 | DELETE | `/matches/:id` | Cancelar (status=cancelled) |
 

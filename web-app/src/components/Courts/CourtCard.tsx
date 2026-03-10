@@ -1,6 +1,22 @@
+import { motion } from 'framer-motion';
 import { SquarePen, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { Court } from '../../types/court';
+
+function PulseDot({ color }: { color: string }) {
+    return (
+        <span className="relative flex h-2.5 w-2.5">
+            <span
+                className="absolute inline-flex h-full w-full rounded-full opacity-75"
+                style={{ backgroundColor: color }}
+            />
+            <span
+                className="relative inline-flex rounded-full h-2.5 w-2.5 animate-pulse"
+                style={{ backgroundColor: color }}
+            />
+        </span>
+    );
+}
 
 interface CourtCardProps {
     court: Court;
@@ -8,98 +24,115 @@ interface CourtCardProps {
     onDelete?: (id: string) => void;
 }
 
-export const CourtCard = ({
-    court,
-    onEdit,
-    onDelete
-}: CourtCardProps) => {
+function formatMaintenance(value: string | null | undefined): string {
+    if (!value) return '—';
+    try {
+        const d = new Date(value);
+        if (isNaN(d.getTime())) return '—';
+        return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    } catch {
+        return '—';
+    }
+}
+
+export const CourtCard = ({ court, onEdit, onDelete }: CourtCardProps) => {
     const { t } = useTranslation();
 
-    const statusConfig = {
+    const statusConfig: Record<string, { color: string; label: string; dotColor: string }> = {
         operational: {
+            color: 'bg-green-50 border-green-100',
             label: t('operational'),
-            classes: 'bg-green-50 text-green-700 border-green-100',
-            dot: 'bg-green-500'
+            dotColor: '#22C55E',
         },
         maintenance: {
+            color: 'bg-amber-50 border-amber-100',
             label: t('maintenance'),
-            classes: 'bg-amber-50 text-warning border-warning/10',
-            dot: 'bg-warning'
+            dotColor: '#F59E0B',
         },
         closed: {
+            color: 'bg-red-50 border-red-100',
             label: t('closed'),
-            classes: 'bg-red-50 text-error border-error/10',
-            dot: 'bg-error'
-        }
+            dotColor: '#E31E24',
+        },
     };
 
-    const config = statusConfig[court.status] || statusConfig.operational;
+    const cfg = statusConfig[court.status] ?? statusConfig.operational;
+    const glassLabel = court.glass_type === 'panoramic' ? t('glass_panoramic') : t('glass_standard');
 
     return (
-        <article className="bg-card rounded-2xl border border-border-subtle overflow-hidden">
+        <motion.article
+            className="bg-white rounded-2xl border border-gray-100 overflow-hidden"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            whileTap={{ scale: 0.98 }}
+            transition={{ duration: 0.25 }}
+        >
             <div className="p-5">
                 <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-bold text-primary">{court.name}</h3>
-                    <div className={`px-3 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1.5 border ${config.classes}`}>
-                        <span className="relative flex h-2.5 w-2.5">
-                            <span className={`absolute inline-flex h-full w-full rounded-full opacity-75 animate-ping ${config.dot}`}></span>
-                            <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${config.dot}`}></span>
-                        </span>
-                        {config.label}
+                    <h3 className="text-sm font-bold text-[#1A1A1A]">{court.name}</h3>
+                    <div
+                        className={`px-3 py-1.5 rounded-xl text-[10px] font-bold flex items-center gap-1.5 border ${cfg.color}`}
+                    >
+                        <PulseDot color={cfg.dotColor} />
+                        {cfg.label}
                     </div>
                 </div>
-
                 <div className="space-y-2.5">
                     <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-muted-foreground uppercase font-semibold">{t('type')}</span>
-                        <span className="text-xs font-semibold text-primary">Pádel</span>
+                        <span className="text-[10px] text-gray-400">{t('type')}</span>
+                        <span className="text-xs font-semibold text-[#1A1A1A]">Pádel</span>
                     </div>
                     <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-muted-foreground uppercase font-semibold">{t('glass_type')}</span>
-                        <span className="text-xs font-semibold text-primary">
-                            {court.glass_type === 'Cristal Panorámico' ? t('glass_panoramic') :
-                                court.glass_type === 'Cristal Estándar' ? t('glass_standard') :
-                                    court.glass_type === 'Muro' ? t('glass_wall') : court.glass_type}
+                        <span className="text-[10px] text-gray-400">{t('glass_type')}</span>
+                        <span className="text-xs font-semibold text-[#1A1A1A]">{glassLabel}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-gray-400">{t('location')}</span>
+                        <span className="text-xs font-semibold text-[#1A1A1A]">
+                            {court.indoor ? t('indoor') : t('outdoor')}
                         </span>
                     </div>
                     <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-muted-foreground uppercase font-semibold">{t('location')}</span>
-                        <span className="text-xs font-semibold text-primary">{court.indoor ? t('indoor') : t('outdoor')}</span>
+                        <span className="text-[10px] text-gray-400">{t('lighting')}</span>
+                        <span className="text-xs font-semibold text-[#1A1A1A]">
+                            {court.lighting ? t('yes') : t('no')}
+                        </span>
                     </div>
                     <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-muted-foreground uppercase font-semibold">{t('lighting')}</span>
-                        <span className="text-xs font-semibold text-primary">{court.lighting ? t('led_pro') : t('no')}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-muted-foreground uppercase font-semibold">{t('last_maintenance')}</span>
-                        <span className="text-xs font-semibold text-primary">{court.last_maintenance}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-muted-foreground uppercase font-semibold">ID Pista</span>
-                        <span className="text-xs font-semibold text-primary">{court.id.split('-')[0]}</span>
+                        <span className="text-[10px] text-gray-400">{t('last_maintenance')}</span>
+                        <span className="text-xs font-semibold text-[#1A1A1A]">
+                            {formatMaintenance(court.last_maintenance)}
+                        </span>
                     </div>
                 </div>
             </div>
-
             <div className="flex gap-2 px-5 pb-5">
-                <button className="flex-1 px-3 py-2.5 bg-primary text-primary-foreground rounded-xl text-xs font-bold hover:opacity-90 transition-colors shadow-sm">
-                    {t('view_details')}
-                </button>
-                <button
-                    onClick={() => onEdit(court)}
-                    className="w-10 h-10 border border-border-subtle rounded-xl flex items-center justify-center hover:bg-gray-50 transition-colors group"
+                <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.95 }}
+                    className="flex-1 px-3 py-2.5 bg-[#1A1A1A] text-white rounded-xl text-xs font-bold hover:opacity-90 transition-opacity"
                 >
-                    <SquarePen className="w-4 h-4 text-muted-foreground group-hover:text-primary" />
-                </button>
+                    {t('view_details')}
+                </motion.button>
+                <motion.button
+                    type="button"
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => onEdit(court)}
+                    className="w-10 h-10 border border-gray-100 rounded-xl flex items-center justify-center hover:bg-gray-50 transition-colors text-gray-400 hover:text-[#1A1A1A]"
+                >
+                    <SquarePen className="w-4 h-4" />
+                </motion.button>
                 {onDelete && (
-                    <button
+                    <motion.button
+                        type="button"
+                        whileTap={{ scale: 0.95 }}
                         onClick={() => onDelete(court.id)}
-                        className="w-10 h-10 border border-border-subtle rounded-xl flex items-center justify-center hover:bg-red-50 transition-colors group"
+                        className="w-10 h-10 border border-gray-100 rounded-xl flex items-center justify-center hover:bg-red-50 transition-colors text-gray-400 hover:text-red-600"
                     >
-                        <Trash2 className="w-4 h-4 text-muted-foreground group-hover:text-error" />
-                    </button>
+                        <Trash2 className="w-4 h-4" />
+                    </motion.button>
                 )}
             </div>
-        </article>
+        </motion.article>
     );
 };

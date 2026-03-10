@@ -1,4 +1,7 @@
+import { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -7,6 +10,10 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../contexts/AuthContext';
+import { fetchMatchById, joinMatch } from '../api/matches';
+import { fetchMyPlayerId } from '../api/players';
+import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { theme } from '../theme';
 import type { PartidoItem } from './PartidosScreen';
 
@@ -21,7 +28,42 @@ function StatusDot({ color }: { color: string }) {
   );
 }
 
-export function PartidoDetailScreen({ partido, onBack }: PartidoDetailScreenProps) {
+export function PartidoDetailScreen({ partido: initialPartido, onBack }: PartidoDetailScreenProps) {
+  const { session } = useAuth();
+  const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
+  const [partido, setPartido] = useState<PartidoItem>(initialPartido);
+  const [joining, setJoining] = useState(false);
+
+  useEffect(() => {
+    if (session?.access_token) {
+      fetchMyPlayerId(session.access_token).then(setCurrentPlayerId);
+    } else {
+      setCurrentPlayerId(null);
+    }
+  }, [session?.access_token]);
+
+  const isInMatch = currentPlayerId != null && (partido.playerIds ?? []).includes(currentPlayerId);
+
+  const handleJoin = useCallback(async () => {
+    const token = session?.access_token;
+    if (!token) {
+      Alert.alert('Iniciar sesión', 'Necesitas iniciar sesión para unirte al partido.');
+      return;
+    }
+    setJoining(true);
+    const result = await joinMatch(partido.id, token);
+    setJoining(false);
+    if (!result.ok) {
+      Alert.alert('Error', result.error ?? 'No se pudo unir al partido.');
+      return;
+    }
+    const match = await fetchMatchById(partido.id, token);
+    if (match) {
+      const updated = mapMatchToPartido(match);
+      if (updated) setPartido(updated);
+    }
+  }, [partido.id, session?.access_token]);
+
   const teamA = partido.players.slice(0, 2);
   const teamB = partido.players.slice(2, 4);
   const venueImage = partido.venueImage;
@@ -95,14 +137,14 @@ export function PartidoDetailScreen({ partido, onBack }: PartidoDetailScreenProp
           <View style={styles.teamsRow}>
             <View style={styles.teamColumn}>
               {teamA.map((p, i) => (
-                <PlayerSlotDetail key={i} player={p} />
+                <PlayerSlotDetail key={i} player={p} onJoin={p.isFree && !isInMatch ? handleJoin : undefined} joining={joining} />
               ))}
               <Text style={styles.teamLabel}>A</Text>
             </View>
             <Text style={styles.vsLabel}>VS</Text>
             <View style={styles.teamColumn}>
               {teamB.map((p, i) => (
-                <PlayerSlotDetail key={i} player={p} />
+                <PlayerSlotDetail key={i} player={p} onJoin={p.isFree && !isInMatch ? handleJoin : undefined} joining={joining} />
               ))}
               <Text style={styles.teamLabel}>B</Text>
             </View>
@@ -110,10 +152,11 @@ export function PartidoDetailScreen({ partido, onBack }: PartidoDetailScreenProp
         </View>
 
         <Pressable style={({ pressed }) => [styles.venueBtn, pressed && styles.pressed]}>
-          <Image
-            source={{ uri: venueImage || 'https://images.unsplash.com/photo-1622163642998-1ea32b0bbc67?w=400&h=300&fit=crop' }}
-            style={styles.venueImage}
-          />
+          {venueImage ? (
+            <Image source={{ uri: venueImage }} style={styles.venueImage} />
+          ) : (
+            <View style={[styles.venueImage, styles.venueImagePlaceholder]} />
+          )}
           <View style={styles.venueBody}>
             <Text style={styles.venueName}>{partido.venue}</Text>
             <Text style={styles.venueAddress} numberOfLines={1}>{venueAddress}</Text>
@@ -132,14 +175,30 @@ export function PartidoDetailScreen({ partido, onBack }: PartidoDetailScreenProp
   );
 }
 
-function PlayerSlotDetail({ player }: { player: { name: string; avatar?: string; initial?: string; level: string; isFree: boolean } }) {
+function PlayerSlotDetail({
+  player,
+  onJoin,
+  joining,
+}: {
+  player: { name: string; avatar?: string; initial?: string; level: string; isFree: boolean };
+  onJoin?: () => void;
+  joining?: boolean;
+}) {
   if (player.isFree) {
     return (
       <View style={styles.detailPlayerSlot}>
-        <Pressable style={({ pressed }) => [styles.detailAvatarFree, pressed && styles.pressed]}>
-          <Text style={styles.detailAvatarFreePlus}>+</Text>
+        <Pressable
+          style={({ pressed }) => [styles.detailAvatarFree, pressed && styles.pressed]}
+          onPress={onJoin}
+          disabled={joining}
+        >
+          {joining ? (
+            <ActivityIndicator size="small" color="#E31E24" />
+          ) : (
+            <Text style={styles.detailAvatarFreePlus}>+</Text>
+          )}
         </Pressable>
-        <Text style={styles.detailUnirseLabel}>Unirse</Text>
+        <Text style={styles.detailUnirseLabel}>{joining ? 'Uniendo...' : (onJoin ? 'Unirse' : 'Libre')}</Text>
       </View>
     );
   }
@@ -355,6 +414,9 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 12,
+  },
+  venueImagePlaceholder: {
+    backgroundColor: '#e5e7eb',
   },
   venueBody: { flex: 1, marginLeft: 16, minWidth: 0 },
   venueName: {

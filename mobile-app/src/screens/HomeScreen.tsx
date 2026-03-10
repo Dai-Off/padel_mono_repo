@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useState } from 'react';
 import type { ComponentProps } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -6,6 +7,9 @@ import { Skeleton } from '../components/ui/Skeleton';
 import { theme } from '../theme';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeStats, useZoneTrends } from '../hooks/useHomeStats';
+import { fetchMatches } from '../api/matches';
+import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import type { PartidoItem } from './PartidosScreen';
 
 type NearYouItem = {
   id: string;
@@ -119,11 +123,33 @@ function buildZoneTrendRows(trends: {
   ];
 }
 
+function parseTimeFromDateTime(dateTime: string): string {
+  const m = dateTime.match(/\d{1,2}:\d{2}/);
+  return m ? m[0] : '';
+}
+
 export function HomeScreen() {
   const { session } = useAuth();
   const { stats, loading } = useHomeStats();
   const { trends, loading: trendsLoading } = useZoneTrends();
+  const [openMatches, setOpenMatches] = useState<PartidoItem[]>([]);
+  const [matchesLoading, setMatchesLoading] = useState(true);
+
+  const loadMatches = useCallback(async () => {
+    setMatchesLoading(true);
+    const matches = await fetchMatches({ expand: true });
+    const partidos = matches.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
+    setOpenMatches(partidos.slice(0, 6));
+    setMatchesLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadMatches();
+  }, [loadMatches]);
+
   const firstName = getFirstName(session?.user?.user_metadata?.full_name, session?.user?.email);
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Buenos días' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
 
   const nearYouItems = stats ? buildNearYouItems(stats) : [];
   const zoneTrendRows = buildZoneTrendRows(trends);
@@ -135,7 +161,7 @@ export function HomeScreen() {
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.greeting}>
-        <Text style={styles.greetingLabel}>Buenas tardes</Text>
+        <Text style={styles.greetingLabel}>{greeting}</Text>
         <Text style={styles.greetingName}>{firstName} 👋</Text>
       </View>
 
@@ -270,124 +296,65 @@ export function HomeScreen() {
             </View>
             <Text style={styles.openMatchesTitle}>Partidos Abiertos</Text>
           </View>
-          <Pressable style={styles.openMatchesSeeAll} accessibilityRole="button" accessibilityLabel="Ver todo">
-            <Text style={styles.openMatchesSeeAllText}>Ver todo</Text>
-            <Ionicons name="chevron-forward" size={14} color="#E31E24" />
-          </Pressable>
         </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.openMatchesScroll}
-        >
-          <Pressable style={styles.openMatchCard} accessibilityRole="button" accessibilityLabel="15:00 - Padel Family Indoor">
-            <View style={[styles.openMatchTopBar, { backgroundColor: '#E31E24' }]} />
-            <View style={styles.openMatchBody}>
-              <View style={styles.openMatchRow1}>
-                <View style={styles.openMatchTimeRow}>
-                  <Ionicons name="time-outline" size={12} color="#9ca3af" />
-                  <Text style={styles.openMatchTime}>15:00</Text>
-                </View>
-                <View style={[styles.openMatchSportBadge, { backgroundColor: 'rgba(227,30,36,0.082)' }]}>
-                  <Text style={[styles.openMatchSportText, { color: '#E31E24' }]}>Pádel</Text>
-                </View>
+        {matchesLoading ? (
+          <View style={styles.openMatchesSkeleton}>
+            {[1, 2].map((i) => (
+              <View key={i} style={[styles.openMatchCard, { opacity: 0.7 }]}>
+                <Skeleton variant="default" width="100%" height={120} borderRadius={16} />
               </View>
-              <Text style={styles.openMatchVenue} numberOfLines={1}>Padel Family Indoor</Text>
-              <View style={styles.openMatchSlots}>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotFilled]}><Text style={styles.openMatchSlotTextFilled}>J1</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotFilled]}><Text style={styles.openMatchSlotTextFilled}>J2</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotFilled]}><Text style={styles.openMatchSlotTextFilled}>J3</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotEmpty]}><Text style={styles.openMatchSlotTextEmpty}>+</Text></View>
-              </View>
-              <View style={styles.openMatchFooter}>
-                <Text style={styles.openMatchStartsLabel}>Empieza en</Text>
-                <Text style={styles.openMatchStartsValue}>2h 15min</Text>
-              </View>
-            </View>
-          </Pressable>
-          <Pressable style={styles.openMatchCard} accessibilityRole="button" accessibilityLabel="18:30 - Golden Pádel Club">
-            <View style={[styles.openMatchTopBar, { backgroundColor: '#E31E24' }]} />
-            <View style={styles.openMatchBody}>
-              <View style={styles.openMatchRow1}>
-                <View style={styles.openMatchTimeRow}>
-                  <Ionicons name="time-outline" size={12} color="#9ca3af" />
-                  <Text style={styles.openMatchTime}>18:30</Text>
-                </View>
-                <View style={[styles.openMatchSportBadge, { backgroundColor: 'rgba(227,30,36,0.082)' }]}>
-                  <Text style={[styles.openMatchSportText, { color: '#E31E24' }]}>Pádel</Text>
-                </View>
-              </View>
-              <Text style={styles.openMatchVenue} numberOfLines={1}>Golden Pádel Club</Text>
-              <View style={styles.openMatchSlots}>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotFilled]}><Text style={styles.openMatchSlotTextFilled}>J1</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotEmpty]}><Text style={styles.openMatchSlotTextEmpty}>+</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotEmpty]}><Text style={styles.openMatchSlotTextEmpty}>+</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotEmpty]}><Text style={styles.openMatchSlotTextEmpty}>+</Text></View>
-              </View>
-              <View style={styles.openMatchFooter}>
-                <Text style={styles.openMatchStartsLabel}>Empieza en</Text>
-                <Text style={styles.openMatchStartsValue}>5h 45min</Text>
-              </View>
-            </View>
-          </Pressable>
-          <Pressable style={styles.openMatchCard} accessibilityRole="button" accessibilityLabel="19:00 - Centro Tenis Madrid">
-            <View style={[styles.openMatchTopBar, { backgroundColor: '#5b8dee' }]} />
-            <View style={styles.openMatchBody}>
-              <View style={styles.openMatchRow1}>
-                <View style={styles.openMatchTimeRow}>
-                  <Ionicons name="time-outline" size={12} color="#9ca3af" />
-                  <Text style={styles.openMatchTime}>19:00</Text>
-                </View>
-                <View style={[styles.openMatchSportBadge, { backgroundColor: 'rgba(91,141,238,0.082)' }]}>
-                  <Text style={[styles.openMatchSportText, { color: '#5b8dee' }]}>Tenis</Text>
-                </View>
-              </View>
-              <Text style={styles.openMatchVenue} numberOfLines={1}>Centro Tenis Madrid</Text>
-              <View style={styles.openMatchSlots}>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotEmpty]}><Text style={styles.openMatchSlotTextEmpty}>+</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotEmpty]}><Text style={styles.openMatchSlotTextEmpty}>+</Text></View>
-              </View>
-              <View style={styles.openMatchFooter}>
-                <Text style={styles.openMatchStartsLabel}>Empieza en</Text>
-                <Text style={styles.openMatchStartsValue}>6h 15min</Text>
-              </View>
-            </View>
-          </Pressable>
-          <Pressable style={styles.openMatchCard} accessibilityRole="button" accessibilityLabel="20:00 - Pickleball Club Madrid">
-            <View style={[styles.openMatchTopBar, { backgroundColor: '#10b981' }]} />
-            <View style={styles.openMatchBody}>
-              <View style={styles.openMatchRow1}>
-                <View style={styles.openMatchTimeRow}>
-                  <Ionicons name="time-outline" size={12} color="#9ca3af" />
-                  <Text style={styles.openMatchTime}>20:00</Text>
-                </View>
-                <View style={[styles.openMatchSportBadge, { backgroundColor: 'rgba(16,185,129,0.082)' }]}>
-                  <Text style={[styles.openMatchSportText, { color: '#10b981' }]}>Pickleball</Text>
-                </View>
-              </View>
-              <Text style={styles.openMatchVenue} numberOfLines={1}>Pickleball Club Madrid</Text>
-              <View style={styles.openMatchSlots}>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotFilled]}><Text style={styles.openMatchSlotTextFilled}>J1</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotFilled]}><Text style={styles.openMatchSlotTextFilled}>J2</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotEmpty]}><Text style={styles.openMatchSlotTextEmpty}>+</Text></View>
-                <View style={[styles.openMatchSlot, styles.openMatchSlotEmpty]}><Text style={styles.openMatchSlotTextEmpty}>+</Text></View>
-              </View>
-              <View style={styles.openMatchFooter}>
-                <Text style={styles.openMatchStartsLabel}>Empieza en</Text>
-                <Text style={styles.openMatchStartsValue}>7h 15min</Text>
-              </View>
-            </View>
-          </Pressable>
-        </ScrollView>
+            ))}
+          </View>
+        ) : openMatches.length > 0 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.openMatchesScroll}
+          >
+            {openMatches.map((item) => {
+              const time = parseTimeFromDateTime(item.dateTime);
+              return (
+                <Pressable key={item.id} style={styles.openMatchCard} accessibilityRole="button" accessibilityLabel={`${time} - ${item.venue}`}>
+                  <View style={[styles.openMatchTopBar, { backgroundColor: item.mode === 'competitivo' ? '#E31E24' : '#6b7280' }]} />
+                  <View style={styles.openMatchBody}>
+                    <View style={styles.openMatchRow1}>
+                      <View style={styles.openMatchTimeRow}>
+                        <Ionicons name="time-outline" size={12} color="#9ca3af" />
+                        <Text style={styles.openMatchTime}>{time || '—'}</Text>
+                      </View>
+                      <View style={[styles.openMatchSportBadge, { backgroundColor: 'rgba(227,30,36,0.082)' }]}>
+                        <Text style={[styles.openMatchSportText, { color: '#E31E24' }]}>Pádel</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.openMatchVenue} numberOfLines={1}>{item.venue}</Text>
+                    <View style={styles.openMatchSlots}>
+                      {item.players.slice(0, 4).map((p, i) => (
+                        <View key={i} style={[styles.openMatchSlot, p.isFree ? styles.openMatchSlotEmpty : styles.openMatchSlotFilled]}>
+                          <Text style={p.isFree ? styles.openMatchSlotTextEmpty : styles.openMatchSlotTextFilled}>
+                            {p.isFree ? '+' : `J${i + 1}`}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                    <View style={styles.openMatchFooter}>
+                      <Text style={styles.openMatchStartsLabel}>{item.players.filter((x) => !x.isFree).length}/4</Text>
+                      <Text style={styles.openMatchStartsValue}>{item.price}</Text>
+                    </View>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : (
+          <View style={styles.openMatchesEmpty}>
+            <Text style={styles.openMatchesEmptyText}>No hay partidos abiertos</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.nextStepSection}>
         <Pressable style={styles.nextStepCard} accessibilityRole="button" accessibilityLabel="Reserva tu siguiente pista">
-          <Image
-            source={{ uri: 'https://images.unsplash.com/photo-1655882639236-fce3d6e24efd?w=1080' }}
-            style={styles.nextStepImage}
-            resizeMode="cover"
-          />
+          <View style={[styles.nextStepImage, styles.nextStepImagePlaceholder]} />
           <LinearGradient
             colors={['rgba(26,26,26,0.9)', 'rgba(26,26,26,0.6)', 'transparent']}
             start={{ x: 0, y: 0 }}
@@ -400,7 +367,9 @@ export function HomeScreen() {
               <Text style={styles.nextStepLabel}>TU PRÓXIMO PASO</Text>
             </View>
             <Text style={styles.nextStepTitle}>Reserva tu siguiente pista</Text>
-            <Text style={styles.nextStepSubtitle}>3 pistas disponibles a menos de 5km</Text>
+            <Text style={styles.nextStepSubtitle}>
+              {stats?.courtsFree != null ? `${stats.courtsFree} pistas disponibles` : 'Ver disponibilidad'}
+            </Text>
             <View style={styles.nextStepCta} collapsable={false}>
               <Text style={styles.nextStepCtaText}>
                 Ver disponibilidad
@@ -859,6 +828,21 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     borderRadius: 16,
+  },
+  nextStepImagePlaceholder: {
+    backgroundColor: '#e5e7eb',
+  },
+  openMatchesSkeleton: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  openMatchesEmpty: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  openMatchesEmptyText: {
+    fontSize: 14,
+    color: '#9ca3af',
   },
   nextStepGradient: {
     position: 'absolute',
