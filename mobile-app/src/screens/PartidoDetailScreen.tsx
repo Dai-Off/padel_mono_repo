@@ -14,6 +14,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { fetchMatchById, joinMatch } from '../api/matches';
 import { fetchMyPlayerId } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import { theme } from '../theme';
 import type { PartidoItem } from './PartidosScreen';
 
@@ -33,6 +34,7 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
   const [joiningSlotIndex, setJoiningSlotIndex] = useState<number | null>(null);
+  const [clubInfoVisible, setClubInfoVisible] = useState(false);
 
   useEffect(() => {
     if (session?.access_token) {
@@ -164,7 +166,12 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
           </View>
         </View>
 
-        <Pressable style={({ pressed }) => [styles.venueBtn, pressed && styles.pressed]}>
+        <Pressable
+          style={({ pressed }) => [styles.venueBtn, pressed && styles.pressed]}
+          onPress={() => setClubInfoVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Info del club"
+        >
           {venueImage ? (
             <Image source={{ uri: venueImage }} style={styles.venueImage} />
           ) : (
@@ -178,6 +185,12 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
             <Ionicons name="location" size={16} color="#fff" />
           </View>
         </Pressable>
+
+        <ClubInfoSheet
+          visible={clubInfoVisible}
+          onClose={() => setClubInfoVisible(false)}
+          partido={partido}
+        />
 
         <Pressable style={({ pressed }) => [styles.chatBtn, pressed && styles.pressed]}>
           <Ionicons name="chatbubble-outline" size={18} color="#fff" />
