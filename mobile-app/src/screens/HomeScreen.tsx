@@ -361,7 +361,7 @@ export function HomeScreen({ onPartidoPress, onNavigateToTab }: HomeScreenProps)
                       {item.players.slice(0, 4).map((p, i) => (
                         <View key={i} style={[styles.openMatchSlot, p.isFree ? styles.openMatchSlotEmpty : styles.openMatchSlotFilled]}>
                           <Text style={p.isFree ? styles.openMatchSlotTextEmpty : styles.openMatchSlotTextFilled}>
-                            {p.isFree ? '+' : `J${i + 1}`}
+                            {p.isFree ? '+' : (p.initial ?? p.name?.[0] ?? '?')}
                           </Text>
                         </View>
                       ))}

@@ -78,9 +78,14 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     const p = mp.players;
     if (!p) return;
     if (p.id) playerIds.push(p.id);
-    const name = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
+    const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
+    const parts = fullName.split(/\s+/).filter(Boolean);
+    const initial =
+      parts.length >= 2
+        ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+        : fullName[0]?.toUpperCase() ?? '?';
     const level = (p.elo_rating / 1000).toFixed(2).replace('.', ',');
-    slots[idx] = { name, level, isFree: false };
+    slots[idx] = { name: fullName, initial, level, isFree: false };
   });
   const players = slots;
 

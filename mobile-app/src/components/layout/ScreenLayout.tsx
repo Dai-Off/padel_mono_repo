@@ -15,9 +15,11 @@ type ScreenLayoutProps = {
   customHeader?: ReactNode;
   /** Cuando true, no se muestra header (la pantalla maneja su propio encabezado) */
   hideHeader?: boolean;
+  /** Callback cuando el sidebar navega a "Tus pagos" */
+  onNavigateToTusPagos?: () => void;
 };
 
-export function ScreenLayout({ children, customHeader, hideHeader }: ScreenLayoutProps) {
+export function ScreenLayout({ children, customHeader, hideHeader, onNavigateToTusPagos }: ScreenLayoutProps) {
   const insets = useSafeAreaInsets();
   const sidebar = useSidebar(false);
 
@@ -36,7 +38,7 @@ export function ScreenLayout({ children, customHeader, hideHeader }: ScreenLayou
         </View>
       )}
       <View style={styles.content}>{children}</View>
-      <SidebarProvider close={sidebar.close}>
+      <SidebarProvider close={sidebar.close} onNavigateToTusPagos={onNavigateToTusPagos}>
         <MobileSidebar visible={sidebar.isOpen} onClose={sidebar.close}>
           <SidebarContent />
         </MobileSidebar>

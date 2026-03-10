@@ -1,6 +1,9 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+export const STRIPE_PUBLISHABLE_KEY =
+  (process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY as string | undefined) || '';
+
 // Dispositivo físico: usa el host de Metro (tu máquina en la red local)
 // Emulador Android: 10.0.2.2 | Simulador iOS: localhost
 function getApiUrl(): string {
