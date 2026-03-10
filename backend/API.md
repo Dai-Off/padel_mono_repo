@@ -6,21 +6,28 @@ Sin pagos ni precios por ahora: `payment_transactions` y `pricing_rules` quedan 
 
 ## Auth
 
+Usuarios en Supabase Auth. Un usuario puede ser **jugador** (tiene fila en `players` con `auth_user_id`), **dueño de club** (fila en `club_owners` con `auth_user_id`) o ambos.
+
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/auth/register` | Registro. Body: `{ "email", "password", "name"? }`. Mínimo 6 caracteres en password. Crea usuario en Auth y opcionalmente en `players`. |
-| POST | `/auth/login` | Login. Body: `{ "email", "password" }`. Respuesta: `{ ok, user, session: { access_token, refresh_token, expires_at } }`. 401 si credenciales incorrectas. |
-
-Para desarrollo: si no puedes entrar tras registrarte, revisa en Supabase → Authentication → Users que el usuario exista y, si usas confirmación de email, confírmalo o desactiva "Confirm email" en Auth settings.
+| POST | `/auth/register` | Registro como **jugador**. Body: `{ email, password, name? }`. Crea usuario Auth y fila en `players` con `auth_user_id`. Mín. 6 caracteres en password. |
+| POST | `/auth/login` | Login. Body: `{ email, password }`. Devuelve user y session (access_token, refresh_token, expires_at). |
+| GET | `/auth/me` | Usuario actual y roles. Header: `Authorization: Bearer <access_token>`. Respuesta: `{ user, roles: { player_id?, club_owner_id? }, clubs?: [...] }`. |
+| POST | `/auth/register-club-owner` | Completar registro como **dueño** desde invite. Body: `{ application_id, token, password }`. Valida token, crea usuario Auth, `club_owner` (con auth_user_id), `club` y `courts` desde la solicitud; devuelve session. |
 
 ## Solicitudes de club (club_applications)
 
-Solicitud de acceso al Manager antes de tener cuenta. Ruta pública (sin auth).
+Crear solicitud y subir imagen son públicos. **Listar, detalle, aprobar y rechazar requieren admin:** header `Authorization: Bearer <access_token>` y que ese usuario esté en la tabla `admins`. Ver `docs/CREAR_ADMIN.md`.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/club-applications/upload` | Subir imagen (logo/foto). Body: `multipart/form-data`, campo `file` (JPEG, PNG, WebP, GIF; máx. 5 MB). Respuesta 200: `{ ok: true, url }`. Errores: 400 (sin archivo o tipo no permitido), 500. Requiere bucket Supabase "Club Images" creado y público. |
-| POST | `/club-applications` | Crear solicitud. Body JSON. **Obligatorios:** responsible_first_name, responsible_last_name, club_name, city, country, phone, email, court_count, sport. **Opcionales:** sports (array), official_name, full_address, description, logo_url, photo_urls (array), courts (array), open_time, close_time (HH:mm), slot_duration_min (60\|90\|120), pricing (array), booking_window, cancellation_policy, tax_id, fiscal_address, stripe_connected (bool), selected_plan (standard\|professional\|champion\|master). Validaciones: email y teléfono formato válido, nombres/ciudad/país mín. 2 caracteres. Respuesta 201: `{ ok: true, id }`. Errores: 400 `{ ok: false, error }`, 500. |
+| GET | `/club-applications` | Listar (**admin**). Query: `?status=pending|contacted|approved|rejected`. |
+| GET | `/club-applications/:id` | Detalle (**admin**). |
+| GET | `/club-applications/:id/validate-invite` | Validar token del link. Query: `?token=xxx`. Público. |
+| POST | `/club-applications/:id/approve` | Aprobar (**admin**). Crea invite, devuelve `invite_url`. |
+| POST | `/club-applications/:id/reject` | Rechazar (**admin**). Body opcional: `{ reason }`. |
+| POST | `/club-applications/upload` | Subir imagen. Público. Body: `multipart/form-data`, campo `file`. |
+| POST | `/club-applications` | Crear solicitud. Público. Body JSON (obligatorios + opcionales). Respuesta 201: `{ ok: true, id }`. |
 
 ## Health
 
@@ -45,7 +52,7 @@ Solicitud de acceso al Manager antes de tener cuenta. Ruta pública (sin auth).
 |--------|------|-------------|
 | GET | `/club-owners` | Lista |
 | GET | `/club-owners/:id` | Detalle |
-| POST | `/club-owners` | Crear (name, email, stripe_connect_account_id, phone?) |
+| POST | `/club-owners` | Crear (name, email, phone?, stripe_connect_account_id?). stripe_connect_account_id opcional (NULL hasta conectar Stripe). |
 | PUT | `/club-owners/:id` | Actualizar (kyc_status, status, etc.) |
 | DELETE | `/club-owners/:id` | Borrado lógico |
 
@@ -119,5 +126,7 @@ CRUD de pistas de un club. Todas las rutas bajo `/courts`.
 | POST | `/privacy-logs` | Registrar evento GDPR (body: user_id?, action_type, ip, user_agent?). action_type: accept_terms, revoke_marketing, delete_account_request, export_data |
 
 ---
+
+**Migraciones:** Ejecutar en Supabase: `004_roles_and_applications.sql` (auth_user_id, invites); `005_admins.sql` (tabla admins). Para crear el primer admin: ver `docs/CREAR_ADMIN.md`.
 
 **No implementado en este MVP:** `pricing_rules`, `payment_transactions` (pagos con Stripe u otra pasarela después).
