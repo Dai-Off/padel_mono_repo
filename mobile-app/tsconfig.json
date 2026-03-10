@@ -1,6 +1,9 @@
 {
   "extends": "expo/tsconfig.base.json",
-  "compilerOptions": { "strict": true },
-  "include": ["App.tsx", "index.ts", "app/**/*"],
+  "compilerOptions": {
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["App.tsx", "index.ts", "app/**/*", "src/**/*"],
   "exclude": ["node_modules"]
 }

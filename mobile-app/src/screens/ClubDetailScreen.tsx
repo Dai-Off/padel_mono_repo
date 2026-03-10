@@ -24,47 +24,6 @@ type TabId = (typeof TABS)[number];
 const DAYS = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-const TIME_SLOTS = ['20:30', '21:00', '21:30', '22:00', '22:30'];
-
-const MOCK_COURTS = [
-  { id: '2', name: 'Padel 2', sub: 'Exterior | Cristal | Dobles' },
-  { id: '3', name: 'Padel 3', sub: 'Exterior | Cristal | Dobles' },
-  { id: '4', name: 'Padel 4', sub: 'Exterior | Cristal | Dobles' },
-  { id: '5', name: 'Padel 5', sub: 'Exterior | Cristal | Dobles' },
-  { id: '6', name: 'Padel 6', sub: 'Exterior | Cristal | Dobles' },
-];
-
-const TOP_PLAYERS = [
-  { id: '1', initials: 'QM', name: 'Queda...', avatar: null },
-  { id: '2', initials: 'E', name: 'Escuela', avatar: null },
-  { id: '3', initials: 'CD', name: 'Cliente', avatar: null },
-  { id: '4', initials: '', name: 'Ismael', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop' },
-  { id: '5', initials: '', name: 'Olga', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop' },
-  { id: '6', initials: 'ESC', name: 'Escu...', avatar: null },
-];
-
-const RECENT_RESULTS = [
-  {
-    id: '1',
-    date: '03 feb | 18:30 - 20:00',
-    team1: { name: 'Ismael', level: '3.2', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop' },
-    team2: { name: 'Pepe San', level: '3.5', avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&h=100&fit=crop' },
-    team3: { name: 'Alejandro', level: '3.5', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop' },
-    team4: { name: 'Ceci', level: '2.1', avatar: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=100&h=100&fit=crop' },
-    score1: 6, score2: 7, score3: 3, score4: 5,
-    winnerRow1: 2, winnerRow2: 4,
-  },
-  {
-    id: '2',
-    date: '01 feb | 15:00 - 16:30',
-    team1: { name: 'Carlos', level: '4.0', avatar: 'https://images.unsplash.com/photo-1519345182560-3f2917c472ef?w=100&h=100&fit=crop' },
-    team2: { name: 'Ana', level: '3.8', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop' },
-    team3: { name: 'Miguel', level: '3.9', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop' },
-    team4: { name: 'Laura', level: '3.7', avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&h=100&fit=crop' },
-    score1: 6, score2: 4, score3: 6, score4: 2,
-    winnerRow1: 1, winnerRow2: 3,
-  },
-];
 
 function getCerramientoLabel(indoor: boolean): string {
   return indoor ? 'Indoor' : 'Exterior';
@@ -231,20 +190,28 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
               </View>
               <View style={styles.section}>
                 <View style={styles.timeSlotsGrid}>
-                  <View style={styles.timeSlotsRow}>
-                    {TIME_SLOTS.slice(0, 3).map((slot) => (
-                      <Pressable key={slot} style={({ pressed }) => [styles.timeSlotBtn, pressed && styles.pressed]}>
-                        <Text style={styles.timeSlotText}>{slot}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                  <View style={styles.timeSlotsRow}>
-                    {TIME_SLOTS.slice(3).map((slot) => (
-                      <Pressable key={slot} style={({ pressed }) => [styles.timeSlotBtn, pressed && styles.pressed]}>
-                        <Text style={styles.timeSlotText}>{slot}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
+                  {(court.timeSlots ?? []).length > 0 ? (
+                    <>
+                      <View style={styles.timeSlotsRow}>
+                        {court.timeSlots!.slice(0, 3).map((slot) => (
+                          <Pressable key={slot} style={({ pressed }) => [styles.timeSlotBtn, pressed && styles.pressed]}>
+                            <Text style={styles.timeSlotText}>{slot}</Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                      {court.timeSlots!.length > 3 && (
+                        <View style={styles.timeSlotsRow}>
+                          {court.timeSlots!.slice(3).map((slot) => (
+                            <Pressable key={slot} style={({ pressed }) => [styles.timeSlotBtn, pressed && styles.pressed]}>
+                              <Text style={styles.timeSlotText}>{slot}</Text>
+                            </Pressable>
+                          ))}
+                        </View>
+                      )}
+                    </>
+                  ) : (
+                    <Text style={styles.partidosEmptySubtitle}>Sin horarios disponibles</Text>
+                  )}
                 </View>
               </View>
               <View style={styles.section}>
@@ -268,15 +235,15 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
                 <Text style={styles.reservaTitle}>Reserva una pista</Text>
                 <Text style={styles.reservaSub}>Crea un partido privado e invita a tus amigos</Text>
                 <View style={styles.courtList}>
-                  {MOCK_COURTS.map((c) => (
-                    <Pressable key={c.id} style={({ pressed }) => [styles.courtRow, pressed && styles.pressed]}>
-                      <View style={styles.courtRowLeft}>
-                        <Text style={styles.courtName}>{c.name}</Text>
-                        <Text style={styles.courtSub}>{c.sub}</Text>
-                      </View>
-                      <Ionicons name="chevron-down" size={20} color="#9ca3af" />
-                    </Pressable>
-                  ))}
+                  <Pressable style={({ pressed }) => [styles.courtRow, pressed && styles.pressed]}>
+                    <View style={styles.courtRowLeft}>
+                      <Text style={styles.courtName}>{court.courtName}</Text>
+                      <Text style={styles.courtSub}>
+                        {getCerramientoLabel(court.indoor)} | {getParedesLabel(court.glassType)} | Dobles
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-down" size={20} color="#9ca3af" />
+                  </Pressable>
                 </View>
               </View>
             </>
@@ -352,49 +319,15 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
                   </Pressable>
                 </View>
               </View>
-              <Pressable style={({ pressed }) => [styles.compCard, pressed && styles.pressed]}>
-                <View style={styles.compCardBar} />
-                <View style={styles.compCardContent}>
-                  <Text style={styles.compCardDate}>Miércoles, 15 de octubre de 2025</Text>
-                  <View style={styles.compCardMain}>
-                    <View style={styles.compCardIcon}>
-                      <Ionicons name="trophy" size={28} color="#E31E24" />
-                    </View>
-                    <View style={styles.compCardBody}>
-                      <Text style={styles.compCardDateTime}>miércoles, 15 de octubre de 2025 | 02:00</Text>
-                      <Text style={styles.compCardTitle}>RANKING DE PADEL SAN MARTIN DE LA VEGA</Text>
-                      <View style={styles.compCardTags}>
-                        <View style={styles.compTag}><Text style={styles.compTagText}>🎾 Pádel</Text></View>
-                        <View style={styles.compTag}><Text style={styles.compTagText}>🛡️ Liga</Text></View>
-                        <View style={styles.compTag}><Text style={styles.compTagText}>📊 0-7</Text></View>
-                        <View style={styles.compTag}><Text style={styles.compTagText}>🎯 Abierto</Text></View>
-                      </View>
-                      <View style={styles.compCardMeta}>
-                        <Ionicons name="time-outline" size={12} color="#9ca3af" />
-                        <Text style={styles.compCardMetaText}>23 semanas</Text>
-                      </View>
-                      <View style={styles.compCardTeams}>
-                        <View style={styles.compTeamDots}>
-                          {['#E31E24', '#1A1A1A', '#5B8DEE'].map((color, i) => (
-                            <View key={color} style={[styles.compTeamDot, { backgroundColor: color }, i > 0 && { marginLeft: -6 }]} />
-                          ))}
-                        </View>
-                        <Text style={styles.compCardTeamsText}>14/15 equipos</Text>
-                      </View>
-                    </View>
+              <View style={styles.partidosEmptySection}>
+                <View style={styles.partidosEmptyState}>
+                  <View style={styles.partidosEmptyIcon}>
+                    <Text style={styles.partidosEmptyEmoji}>🏆</Text>
                   </View>
-                  <View style={styles.compCardFooter}>
-                    <View style={styles.compCardVenue}>
-                      <Ionicons name="location-outline" size={14} color="#9ca3af" />
-                      <View>
-                        <Text style={styles.compVenueName}>Pádel Y Tenis San Martín De La Vega</Text>
-                        <Text style={styles.compVenueSub}>7km · Madrid</Text>
-                      </View>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#d1d5db" />
-                  </View>
+                  <Text style={styles.partidosEmptyTitle}>No hay competiciones</Text>
+                  <Text style={styles.partidosEmptySubtitle}>Próximamente podrás ver competiciones de este club</Text>
                 </View>
-              </Pressable>
+              </View>
             </>
           ) : (
             <>
@@ -408,7 +341,7 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
                 <Text style={styles.tagText}>🎾 Tenis</Text>
               </View>
             </View>
-            <Text style={styles.pistasLabel}>1 Pista disponible</Text>
+            <Text style={styles.pistasLabel}>Pista disponible</Text>
             <View style={styles.amenitiesRow}>
               <View style={styles.amenity}>
                 <Ionicons name="accessibility-outline" size={14} color="#6b7280" />
@@ -452,110 +385,31 @@ export function ClubDetailScreen({ court, onClose }: ClubDetailScreenProps) {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Horarios</Text>
-            <View style={styles.scheduleRow}>
-              <Text style={styles.scheduleDay}>Lunes</Text>
-              <Text style={styles.scheduleHours}>09:00 - 22:00</Text>
-            </View>
-            <View style={styles.scheduleRow}>
-              <Text style={styles.scheduleDay}>Martes - Viernes</Text>
-              <Text style={styles.scheduleHours}>10:00 - 22:00</Text>
-            </View>
-            <View style={styles.scheduleRow}>
-              <Text style={styles.scheduleDay}>Sábado</Text>
-              <Text style={styles.scheduleHours}>10:00 - 20:00</Text>
-            </View>
-            <View style={styles.scheduleRow}>
-              <Text style={styles.scheduleDay}>Domingo</Text>
-              <Text style={styles.scheduleHours}>09:00 - 14:00</Text>
-            </View>
             <View style={[styles.scheduleRow, { borderBottomWidth: 0 }]}>
-              <Text style={styles.scheduleDay}>* Festivos</Text>
-              <Text style={styles.scheduleHours}>09:00 - 14:00</Text>
+              <Text style={styles.scheduleDay}>Horarios</Text>
+              <Text style={styles.scheduleHours}>Consulta en el club</Text>
             </View>
           </View>
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Promociones</Text>
-            <Pressable style={({ pressed }) => [styles.promoCard, pressed && styles.pressed]}>
-              <View style={styles.promoLeft}>
-                <View style={styles.promoIcon}>
-                  <Text style={styles.promoEmoji}>🏷️</Text>
-                </View>
-                <View style={styles.promoTextWrap}>
-                  <Text style={styles.promoTitle}>Monedero 50€</Text>
-                  <Text style={styles.promoSub}>Ahorra en tus reservas</Text>
-                </View>
-              </View>
-              <Text style={styles.promoCta}>Obtener</Text>
-            </Pressable>
+            <View style={styles.partidosEmptyState}>
+              <Text style={styles.partidosEmptySubtitle}>No hay promociones disponibles</Text>
+            </View>
           </View>
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Top Jugadores</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.topPlayersScroll}>
-              {TOP_PLAYERS.map((p, i) => (
-                <View key={p.id} style={styles.topPlayerItem}>
-                  <View style={styles.topPlayerAvatar}>
-                    {p.avatar ? (
-                      <Image source={{ uri: p.avatar }} style={styles.topPlayerImg} />
-                    ) : (
-                      <Text style={styles.topPlayerInitial}>{p.initials}</Text>
-                    )}
-                    <View style={styles.topPlayerBadge}>
-                      <Text style={styles.topPlayerRank}>{i + 1}</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.topPlayerName} numberOfLines={1}>{p.name}</Text>
-                </View>
-              ))}
-            </ScrollView>
+            <View style={styles.partidosEmptyState}>
+              <Text style={styles.partidosEmptySubtitle}>No hay datos de jugadores</Text>
+            </View>
           </View>
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Resultados recientes</Text>
-            {RECENT_RESULTS.map((m) => (
-              <Pressable key={m.id} style={({ pressed }) => [styles.resultCard, pressed && styles.pressed]}>
-                <Text style={styles.resultDate}>{m.date}</Text>
-                <View style={styles.resultRow}>
-                  <View style={styles.resultTeams}>
-                    <View style={styles.resultTeam}>
-                      <Image source={{ uri: m.team1.avatar }} style={styles.resultAvatar} />
-                      <Text style={styles.resultName}>{m.team1.name}</Text>
-                      <View style={styles.resultLevel}><Text style={styles.resultLevelText}>{m.team1.level}</Text></View>
-                    </View>
-                    <View style={styles.resultTeam}>
-                      <Image source={{ uri: m.team2.avatar }} style={styles.resultAvatar} />
-                      <Text style={styles.resultName}>{m.team2.name}</Text>
-                      <View style={styles.resultLevel}><Text style={styles.resultLevelText}>{m.team2.level}</Text></View>
-                    </View>
-                  </View>
-                  <View style={styles.resultScore}>
-                    <Text style={m.winnerRow1 === 1 ? styles.resultScoreWin : styles.resultScoreLose}>{m.score1}</Text>
-                    <Text style={styles.resultScoreDash}>-</Text>
-                    <Text style={m.winnerRow1 === 2 ? styles.resultScoreWin : styles.resultScoreLose}>{m.score2}</Text>
-                  </View>
-                </View>
-                <View style={[styles.resultRow, { marginBottom: 0 }]}>
-                  <View style={styles.resultTeams}>
-                    <View style={styles.resultTeam}>
-                      <Image source={{ uri: m.team3.avatar }} style={styles.resultAvatar} />
-                      <Text style={styles.resultName}>{m.team3.name}</Text>
-                      <View style={styles.resultLevel}><Text style={styles.resultLevelText}>{m.team3.level}</Text></View>
-                    </View>
-                    <View style={styles.resultTeam}>
-                      <Image source={{ uri: m.team4.avatar }} style={styles.resultAvatar} />
-                      <Text style={styles.resultName}>{m.team4.name}</Text>
-                      <View style={styles.resultLevel}><Text style={styles.resultLevelText}>{m.team4.level}</Text></View>
-                    </View>
-                  </View>
-                  <View style={styles.resultScore}>
-                    <Text style={m.winnerRow2 === 3 ? styles.resultScoreWin : styles.resultScoreLose}>{m.score3}</Text>
-                    <Text style={styles.resultScoreDash}>-</Text>
-                    <Text style={m.winnerRow2 === 4 ? styles.resultScoreWin : styles.resultScoreLose}>{m.score4}</Text>
-                  </View>
-                </View>
-              </Pressable>
-            ))}
+            <View style={styles.partidosEmptyState}>
+              <Text style={styles.partidosEmptySubtitle}>No hay resultados recientes</Text>
+            </View>
           </View>
 
           <View style={styles.section}>

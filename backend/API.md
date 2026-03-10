@@ -95,9 +95,10 @@ CRUD de pistas de un club. Todas las rutas bajo `/courts`.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/matches` | Lista. Query: `?booking_id=` |
+| GET | `/matches` | Lista. Query: `?booking_id=`, `?expand=1` (incluye booking, court, club) |
 | GET | `/matches/:id` | Detalle |
-| POST | `/matches` | Crear (booking_id, visibility?, elo_min?, elo_max?, gender?, competitive?) |
+| POST | `/matches/create-with-booking` | Crear booking + match: court_id, organizer_player_id, start_at, end_at, total_price_cents, timezone?, visibility?, elo_min?, elo_max?, gender?, competitive? |
+| POST | `/matches` | Crear (booking_id existente: visibility?, elo_min?, elo_max?, gender?, competitive?) |
 | PUT | `/matches/:id` | Actualizar |
 | DELETE | `/matches/:id` | Cancelar (status=cancelled) |
 
