@@ -42,17 +42,17 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
   const { name, email, phone, stripe_connect_account_id } = req.body ?? {};
-  if (!name || !email || !stripe_connect_account_id) {
+  if (!name || !email) {
     return res.status(400).json({
       ok: false,
-      error: 'name, email y stripe_connect_account_id son obligatorios',
+      error: 'name y email son obligatorios',
     });
   }
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
       .from('club_owners')
-      .insert([{ name, email, phone: phone ?? null, stripe_connect_account_id }])
+      .insert([{ name, email, phone: phone ?? null, stripe_connect_account_id: stripe_connect_account_id ?? null }])
       .select(SELECT_LIST)
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
