@@ -38,6 +38,9 @@ export type MatchEnriched = Match & {
     courts?: {
       id: string;
       club_id: string;
+      name?: string;
+      indoor?: boolean;
+      glass_type?: string;
       clubs?: { id: string; name: string; address: string; city: string } | null;
     } | null;
   } | null;

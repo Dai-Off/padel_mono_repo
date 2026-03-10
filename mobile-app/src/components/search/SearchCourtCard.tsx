@@ -35,7 +35,7 @@ export function SearchCourtCard({
       onPress={onPress}
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
       accessibilityRole="button"
-      accessibilityLabel={`${court.clubName}, ${court.minPriceFormatted}`}
+      accessibilityLabel={`${court.courtName} - ${court.clubName}, ${court.minPriceFormatted}`}
     >
       <View style={styles.imageWrap}>
         {imageUri ? (
@@ -65,7 +65,8 @@ export function SearchCourtCard({
           <Text style={styles.priceValue}>{court.minPriceFormatted}</Text>
         </View>
         <View style={styles.titleWrap}>
-          <Text style={styles.title}>{court.clubName}</Text>
+          <Text style={styles.title}>{court.courtName}</Text>
+          <Text style={styles.subtitle}>{court.clubName}</Text>
           <View style={styles.locationRow}>
             <Ionicons name="location-outline" size={12} color="rgba(255,255,255,0.7)" />
             <Text style={styles.location} numberOfLines={1}>{locationText}</Text>
@@ -167,8 +168,13 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#fff',
+  },
+  subtitle: {
+    fontSize: theme.fontSize.xs,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 2,
   },
   locationRow: {
     flexDirection: 'row',

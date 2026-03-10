@@ -20,10 +20,13 @@ type NearYouItem = {
   iconBg: string;
 };
 
-function buildNearYouItems(stats: { courtsFree: number; playersLooking: number; classesToday: number; tournaments: number }): NearYouItem[] {
+function buildNearYouItems(
+  stats: { courtsFree: number; playersLooking: number; classesToday: number; tournaments: number },
+  openMatchesCount?: number
+): NearYouItem[] {
   return [
     { id: '1', label: 'Reservar pista', value: String(stats.courtsFree), subtitle: 'pistas libres', icon: 'calendar', iconBg: 'rgba(227, 30, 36, 0.25)' },
-    { id: '2', label: 'Buscar partido', value: String(stats.playersLooking), subtitle: 'jugadores', icon: 'people', iconBg: 'rgba(255, 255, 255, 0.12)' },
+    { id: '2', label: 'Buscar partido', value: String(openMatchesCount ?? stats.playersLooking), subtitle: openMatchesCount != null ? (openMatchesCount === 1 ? 'partido abierto' : 'partidos abiertos') : 'jugadores', icon: 'people', iconBg: 'rgba(255, 255, 255, 0.12)' },
     { id: '3', label: 'Aprender', value: String(stats.classesToday), subtitle: 'clases hoy', icon: 'school', iconBg: 'rgba(91, 141, 238, 0.25)' },
     { id: '4', label: 'Competir', value: String(stats.tournaments), subtitle: 'torneos', icon: 'trophy', iconBg: 'rgba(16, 185, 129, 0.25)' },
   ];
@@ -128,7 +131,14 @@ function parseTimeFromDateTime(dateTime: string): string {
   return m ? m[0] : '';
 }
 
-export function HomeScreen() {
+type TabId = 'reservar' | 'partidos' | 'competir';
+
+type HomeScreenProps = {
+  onPartidoPress?: (partido: PartidoItem) => void;
+  onNavigateToTab?: (tab: TabId) => void;
+};
+
+export function HomeScreen({ onPartidoPress, onNavigateToTab }: HomeScreenProps) {
   const { session } = useAuth();
   const { stats, loading } = useHomeStats();
   const { trends, loading: trendsLoading } = useZoneTrends();
@@ -139,7 +149,7 @@ export function HomeScreen() {
     setMatchesLoading(true);
     const matches = await fetchMatches({ expand: true });
     const partidos = matches.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
-    setOpenMatches(partidos.slice(0, 6));
+    setOpenMatches(partidos);
     setMatchesLoading(false);
   }, []);
 
@@ -151,7 +161,7 @@ export function HomeScreen() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Buenos días' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
 
-  const nearYouItems = stats ? buildNearYouItems(stats) : [];
+  const nearYouItems = stats ? buildNearYouItems(stats, openMatches.length) : [];
   const zoneTrendRows = buildZoneTrendRows(trends);
 
   return (
@@ -194,8 +204,21 @@ export function HomeScreen() {
               </View>
             ) : (
             <View style={styles.nearYouList}>
-              {nearYouItems.map((item) => (
-                <Pressable key={item.id} style={styles.nearYouRow}>
+              {nearYouItems.map((item) => {
+                const tabMap: Record<string, TabId | undefined> = {
+                  '1': 'reservar',
+                  '2': 'partidos',
+                  '4': 'competir',
+                };
+                const targetTab = tabMap[item.id];
+                const canNavigate = targetTab && onNavigateToTab;
+                return (
+                <Pressable
+                  key={item.id}
+                  style={styles.nearYouRow}
+                  onPress={canNavigate ? () => onNavigateToTab(targetTab) : undefined}
+                  disabled={!canNavigate}
+                >
                   <View style={[styles.nearYouIconWrap, { backgroundColor: item.iconBg }]}>
                     <Ionicons name={item.icon} size={16} color="#fff" />
                   </View>
@@ -206,7 +229,8 @@ export function HomeScreen() {
                     <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.3)" />
                   </View>
                 </Pressable>
-              ))}
+              );
+              })}
             </View>
             )}
           </View>
@@ -311,10 +335,16 @@ export function HomeScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.openMatchesScroll}
           >
-            {openMatches.map((item) => {
+            {openMatches.slice(0, 6).map((item) => {
               const time = parseTimeFromDateTime(item.dateTime);
               return (
-                <Pressable key={item.id} style={styles.openMatchCard} accessibilityRole="button" accessibilityLabel={`${time} - ${item.venue}`}>
+                <Pressable
+                  key={item.id}
+                  style={styles.openMatchCard}
+                  onPress={() => onPartidoPress?.(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${time} - ${item.venue}`}
+                >
                   <View style={[styles.openMatchTopBar, { backgroundColor: item.mode === 'competitivo' ? '#E31E24' : '#6b7280' }]} />
                   <View style={styles.openMatchBody}>
                     <View style={styles.openMatchRow1}>
@@ -353,8 +383,17 @@ export function HomeScreen() {
       </View>
 
       <View style={styles.nextStepSection}>
-        <Pressable style={styles.nextStepCard} accessibilityRole="button" accessibilityLabel="Reserva tu siguiente pista">
-          <View style={[styles.nextStepImage, styles.nextStepImagePlaceholder]} />
+        <Pressable
+          style={styles.nextStepCard}
+          onPress={() => onNavigateToTab?.('reservar')}
+          accessibilityRole="button"
+          accessibilityLabel="Reserva tu siguiente pista"
+        >
+          <Image
+            source={{ uri: 'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=800' }}
+            style={styles.nextStepImage}
+            resizeMode="cover"
+          />
           <LinearGradient
             colors={['rgba(26,26,26,0.9)', 'rgba(26,26,26,0.6)', 'transparent']}
             start={{ x: 0, y: 0 }}
@@ -828,8 +867,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     borderRadius: 16,
-  },
-  nextStepImagePlaceholder: {
     backgroundColor: '#e5e7eb',
   },
   openMatchesSkeleton: {

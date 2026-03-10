@@ -27,10 +27,19 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   const b = m.bookings;
   if (!b?.start_at || !b?.end_at || !b?.total_price_cents) return null;
 
-  const club = b.courts?.clubs;
+  const court = b.courts;
+  const club = court?.clubs;
   const venue = club?.name ?? 'Club';
   const city = club?.city ?? '';
   const address = club?.address ?? '';
+  const courtName = court?.name ?? undefined;
+  const indoor = court?.indoor ?? false;
+  const glassType = court?.glass_type ?? 'normal';
+  const courtType = [
+    indoor ? 'Indoor' : 'Exterior',
+    glassType === 'panoramic' ? 'Cristal' : 'Muro',
+    'Dobles',
+  ].join(', ');
   const mode: PartidoMode = m.competitive ? 'competitivo' : 'automático';
   const typeLabel = m.gender === 'mixed' ? 'Mixto' : 'Todos los jugadores';
   const levelRange = m.elo_min != null && m.elo_max != null
@@ -88,5 +97,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     price: formatPrice(b.total_price_cents, b.currency ?? 'EUR'),
     duration: `${durationMin}min`,
     venueAddress: address || undefined,
+    courtName,
+    courtType,
   };
 }
