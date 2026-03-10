@@ -32,7 +32,7 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
   const { session } = useAuth();
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
-  const [joining, setJoining] = useState(false);
+  const [joiningSlotIndex, setJoiningSlotIndex] = useState<number | null>(null);
 
   useEffect(() => {
     if (session?.access_token) {
@@ -44,15 +44,15 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
 
   const isInMatch = currentPlayerId != null && (partido.playerIds ?? []).includes(currentPlayerId);
 
-  const handleJoin = useCallback(async () => {
+  const handleJoin = useCallback(async (slotIndex: number) => {
     const token = session?.access_token;
     if (!token) {
       Alert.alert('Iniciar sesión', 'Necesitas iniciar sesión para unirte al partido.');
       return;
     }
-    setJoining(true);
-    const result = await joinMatch(partido.id, token);
-    setJoining(false);
+    setJoiningSlotIndex(slotIndex);
+    const result = await joinMatch(partido.id, token, slotIndex);
+    setJoiningSlotIndex(null);
     if (!result.ok) {
       Alert.alert('Error', result.error ?? 'No se pudo unir al partido.');
       return;
@@ -137,15 +137,28 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
           <View style={styles.teamsRow}>
             <View style={styles.teamColumn}>
               {teamA.map((p, i) => (
-                <PlayerSlotDetail key={i} player={p} onJoin={p.isFree && !isInMatch ? handleJoin : undefined} joining={joining} />
+                <PlayerSlotDetail
+                  key={i}
+                  player={p}
+                  onJoin={p.isFree && !isInMatch && (joiningSlotIndex == null || joiningSlotIndex === i) ? () => handleJoin(i) : undefined}
+                  joining={joiningSlotIndex === i}
+                />
               ))}
               <Text style={styles.teamLabel}>A</Text>
             </View>
             <Text style={styles.vsLabel}>VS</Text>
             <View style={styles.teamColumn}>
-              {teamB.map((p, i) => (
-                <PlayerSlotDetail key={i} player={p} onJoin={p.isFree && !isInMatch ? handleJoin : undefined} joining={joining} />
-              ))}
+              {teamB.map((p, i) => {
+                const slotIdx = i + 2;
+                return (
+                  <PlayerSlotDetail
+                    key={i}
+                    player={p}
+                    onJoin={p.isFree && !isInMatch && (joiningSlotIndex == null || joiningSlotIndex === slotIdx) ? () => handleJoin(slotIdx) : undefined}
+                    joining={joiningSlotIndex === slotIdx}
+                  />
+                );
+              })}
               <Text style={styles.teamLabel}>B</Text>
             </View>
           </View>
