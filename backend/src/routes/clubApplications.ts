@@ -1,8 +1,11 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { generateInviteToken, hashInviteToken, getInviteExpiresAt } from '../lib/inviteToken';
+import { requireAdmin } from '../middleware/requireAdmin';
 
 const router = Router();
+const APPLICATIONS_SELECT = 'id, created_at, responsible_first_name, responsible_last_name, club_name, city, country, phone, email, court_count, sport, status, approved_at, rejected_at, rejection_reason, club_owner_id, club_id, invitation_sent_at, official_name, full_address, description, tax_id, fiscal_address, courts, open_time, close_time, slot_duration_min, pricing';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -31,6 +34,116 @@ router.post('/upload', upload.single('file'), async (req: Request, res: Response
     if (error) return res.status(500).json({ ok: false, error: error.message });
     const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
     return res.status(200).json({ ok: true, url: publicUrl });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+router.get('/', requireAdmin, async (req: Request, res: Response) => {
+  const status = req.query.status as string | undefined;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    let q = supabase.from('club_applications').select(APPLICATIONS_SELECT).order('created_at', { ascending: false }).limit(100);
+    if (status && ['pending', 'contacted', 'approved', 'rejected'].includes(status)) {
+      q = q.eq('status', status);
+    }
+    const { data, error } = await q;
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, applications: data ?? [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+router.get('/:id/validate-invite', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const token = req.query.token as string;
+  if (!token?.trim()) return res.status(400).json({ ok: false, error: 'Falta el token' });
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const tokenHash = hashInviteToken(token.trim());
+    const { data: invite, error: inviteError } = await supabase
+      .from('club_application_invites')
+      .select('id, application_id, expires_at, used_at')
+      .eq('token_hash', tokenHash)
+      .eq('application_id', id)
+      .maybeSingle();
+    if (inviteError || !invite) return res.status(400).json({ ok: false, error: 'Enlace inválido' });
+    if (invite.used_at) return res.status(400).json({ ok: false, error: 'Este enlace ya fue utilizado' });
+    if (new Date(invite.expires_at) < new Date()) return res.status(400).json({ ok: false, error: 'El enlace ha expirado' });
+    const { data: app, error: appError } = await supabase.from('club_applications').select('id, email, responsible_first_name, responsible_last_name, club_name, status').eq('id', id).maybeSingle();
+    if (appError || !app || app.status !== 'approved') return res.status(400).json({ ok: false, error: 'Solicitud no válida' });
+    return res.json({
+      ok: true,
+      application_id: app.id,
+      email: app.email,
+      responsible_name: [app.responsible_first_name, app.responsible_last_name].filter(Boolean).join(' '),
+      club_name: app.club_name,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+router.get('/:id', requireAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase.from('club_applications').select(APPLICATIONS_SELECT).eq('id', id).maybeSingle();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!data) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
+    return res.json({ ok: true, application: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+router.post('/:id/approve', requireAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: app, error: fetchErr } = await supabase.from('club_applications').select('id, status, email').eq('id', id).maybeSingle();
+    if (fetchErr || !app) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
+    if (app.status !== 'pending' && app.status !== 'contacted') return res.status(400).json({ ok: false, error: 'Solo se puede aprobar una solicitud en estado pending o contacted' });
+    const { token, tokenHash } = generateInviteToken();
+    const expiresAt = getInviteExpiresAt();
+    const { error: inviteErr } = await supabase.from('club_application_invites').insert({
+      application_id: id,
+      token_hash: tokenHash,
+      expires_at: expiresAt.toISOString(),
+    });
+    if (inviteErr) return res.status(500).json({ ok: false, error: inviteErr.message });
+    const { error: updateErr } = await supabase
+      .from('club_applications')
+      .update({ status: 'approved', approved_at: new Date().toISOString(), invitation_sent_at: new Date().toISOString() })
+      .eq('id', id);
+    if (updateErr) return res.status(500).json({ ok: false, error: updateErr.message });
+    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const inviteUrl = `${baseUrl}/registro-club?application_id=${id}&token=${token}`;
+    return res.json({ ok: true, message: 'Solicitud aprobada. Envía el enlace por email al responsable.', invite_url: inviteUrl });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+router.post('/:id/reject', requireAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { reason } = req.body ?? {};
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: app, error: fetchErr } = await supabase.from('club_applications').select('id, status').eq('id', id).maybeSingle();
+    if (fetchErr || !app) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
+    if (app.status !== 'pending' && app.status !== 'contacted') return res.status(400).json({ ok: false, error: 'Solo se puede rechazar una solicitud en estado pending o contacted' });
+    const { error } = await supabase
+      .from('club_applications')
+      .update({
+        status: 'rejected',
+        rejected_at: new Date().toISOString(),
+        rejection_reason: reason != null ? String(reason).trim() : null,
+      })
+      .eq('id', id);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, message: 'Solicitud rechazada' });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
