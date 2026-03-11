@@ -21,6 +21,7 @@ import { clubOwnerService, type ClubOwner } from '../../services/clubOwner';
 
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { authService } from '../../services/auth';
 
 type TabId = 'courts' | 'clubs' | 'owners';
 
@@ -29,6 +30,13 @@ export const ClubDashboard = () => {
     const [activeTab, setActiveTab] = useState<TabId>('courts');
     const [loading, setLoading] = useState(true);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isAdmin, setIsAdmin] = useState(false);
+
+    useEffect(() => {
+        authService.getMe().then((me) => {
+            if (me.ok && me.roles?.admin_id) setIsAdmin(true);
+        }).catch(() => {});
+    }, []);
 
     // Data states
     const [courts, setCourts] = useState<Court[]>([]);
@@ -194,7 +202,7 @@ export const ClubDashboard = () => {
                 </div>
             </main>
 
-            <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName={CLUB_NAME} />
+            <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName={CLUB_NAME} isAdmin={isAdmin} />
 
             {/* Forms Layer */}
             {isFormOpen && activeTab === 'courts' && (
