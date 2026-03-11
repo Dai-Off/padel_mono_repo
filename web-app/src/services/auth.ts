@@ -1,5 +1,5 @@
-import { apiFetch } from './api';
-import type { AuthResponse } from '../types/auth';
+import { apiFetch, apiFetchWithAuth } from './api';
+import type { AuthResponse, MeResponse } from '../types/auth';
 
 export const authService = {
     login: async (email: string, password: string): Promise<AuthResponse> => {
@@ -16,16 +16,26 @@ export const authService = {
         });
     },
 
-    saveSession: (session: any) => {
+    getMe: async (): Promise<MeResponse> => {
+        return apiFetchWithAuth<MeResponse>('/auth/me');
+    },
+
+    saveSession: (session: { access_token: string; refresh_token?: string; expires_at?: number }) => {
         localStorage.setItem('padel_session', JSON.stringify(session));
     },
 
     getSession: () => {
-        const session = localStorage.getItem('padel_session');
-        return session ? JSON.parse(session) : null;
+        try {
+            const raw = localStorage.getItem('padel_session');
+            if (!raw) return null;
+            const session = JSON.parse(raw);
+            return session && typeof session.access_token === 'string' ? session : null;
+        } catch {
+            return null;
+        }
     },
 
     logout: () => {
         localStorage.removeItem('padel_session');
-    }
+    },
 };

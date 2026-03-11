@@ -19,3 +19,11 @@ export interface AuthResponse {
     session: Session | null;
     error?: string;
 }
+
+export interface MeResponse {
+    ok: boolean;
+    user: User;
+    roles: { player_id?: string; club_owner_id?: string; admin_id?: string };
+    clubs?: unknown[];
+    error?: string;
+}

@@ -13,7 +13,8 @@ import {
     MessageSquare,
     AlertCircle,
     Star,
-    Settings
+    Settings,
+    Shield
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -21,22 +22,28 @@ interface MainMenuProps {
     isOpen: boolean;
     onClose: () => void;
     clubName: string;
+    isAdmin?: boolean;
 }
 
-export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose }) => {
+export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) => {
     const { t } = useTranslation();
     const location = useLocation();
     const navigate = useNavigate();
 
+    const principalItems = [
+        { id: 'resumen', path: '/resumen', icon: BarChart3, label: t('menu_resumen'), color: 'rgb(227, 30, 36)', bgColor: 'rgba(227, 30, 36, 0.06)' },
+        { id: 'pistas', path: '/', icon: Grid3x3, label: t('menu_pistas'), color: 'rgb(91, 141, 238)', bgColor: 'rgba(91, 141, 238, 0.1)' },
+        { id: 'reservas', path: '/reservas', icon: Calendar, label: t('menu_reservas'), color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.06)' },
+        { id: 'horarios', path: '/horarios', icon: Clock, label: t('menu_horarios'), color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
+    ];
+    const adminItem = isAdmin
+        ? { id: 'admin', path: '/admin', icon: Shield, label: t('admin_panel'), color: 'rgb(227, 30, 36)', bgColor: 'rgba(227, 30, 36, 0.1)' }
+        : null;
+
     const menuSections = [
         {
             title: t('menu_principal'),
-            items: [
-                { id: 'resumen', path: '/resumen', icon: BarChart3, label: t('menu_resumen'), color: 'rgb(227, 30, 36)', bgColor: 'rgba(227, 30, 36, 0.06)' },
-                { id: 'pistas', path: '/', icon: Grid3x3, label: t('menu_pistas'), color: 'rgb(91, 141, 238)', bgColor: 'rgba(91, 141, 238, 0.1)' },
-                { id: 'reservas', path: '/reservas', icon: Calendar, label: t('menu_reservas'), color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.06)' },
-                { id: 'horarios', path: '/horarios', icon: Clock, label: t('menu_horarios'), color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
-            ]
+            items: adminItem ? [adminItem, ...principalItems] : principalItems,
         },
         {
             title: t('menu_gestion'),

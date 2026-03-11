@@ -169,11 +169,13 @@ router.get('/me', async (req: Request, res: Response) => {
     if (error || !user) {
       return res.status(401).json({ ok: false, error: 'Sesión inválida o token expirado. Haz login de nuevo.', error_detail: error?.message });
     }
-    const roles: { player_id?: string; club_owner_id?: string } = {};
+    const roles: { player_id?: string; club_owner_id?: string; admin_id?: string } = {};
     const { data: player } = await supabase.from('players').select('id').eq('auth_user_id', user.id).maybeSingle();
     if (player) roles.player_id = player.id;
     const { data: owner } = await supabase.from('club_owners').select('id').eq('auth_user_id', user.id).maybeSingle();
     if (owner) roles.club_owner_id = owner.id;
+    const { data: admin } = await supabase.from('admins').select('id').eq('auth_user_id', user.id).maybeSingle();
+    if (admin) roles.admin_id = admin.id;
     let clubs: unknown[] = [];
     if (owner) {
       const { data: clubsData } = await supabase.from('clubs').select('id, name, city').eq('owner_id', owner.id);

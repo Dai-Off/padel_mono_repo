@@ -25,7 +25,16 @@ export const Login: React.FC = () => {
             if (response.ok && response.session) {
                 authService.saveSession(response.session);
                 toast.success(t('login_success'));
-                navigate('/');
+                try {
+                    const me = await authService.getMe();
+                    if (me.ok && me.roles?.admin_id) {
+                        navigate('/admin');
+                    } else {
+                        navigate('/');
+                    }
+                } catch {
+                    navigate('/');
+                }
             } else {
                 setError(t(response.error === 'Email o contraseña incorrectos' ? 'invalid_credentials' : 'login_error'));
                 toast.error(t('invalid_credentials'));
