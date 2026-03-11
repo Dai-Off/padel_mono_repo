@@ -3,17 +3,13 @@ import { Login } from './components/Auth/Login';
 import { ClubRegistration } from './components/Registration/ClubRegistration';
 import { ClubDashboard } from './components/Dashboard/ClubDashboard';
 import { ManagerOnboarding } from './components/Onboarding/ManagerOnboarding';
+import { AdminPanel } from './components/Admin/AdminPanel';
 import { authService } from './services/auth';
 import { Toaster } from 'sonner';
 
-// Componente para proteger rutas
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const session = authService.getSession();
-
-  if (!session) {
-    return <Navigate to="/login" replace />;
-  }
-
+  if (!session) return <Navigate to="/login" replace />;
   return <>{children}</>;
 };
 
@@ -22,11 +18,17 @@ function App() {
     <BrowserRouter>
       <Toaster position="top-right" richColors />
       <Routes>
-        {/* Rutas Públicas */}
         <Route path="/login" element={<Login />} />
         <Route path="/registro" element={<ClubRegistration />} />
 
-        {/* Rutas Protegidas */}
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute>
+              <AdminPanel />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/"
           element={
@@ -44,7 +46,6 @@ function App() {
           }
         />
 
-        {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

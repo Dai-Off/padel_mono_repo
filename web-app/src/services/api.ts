@@ -9,6 +9,17 @@ export class HttpError extends Error {
     }
 }
 
+function getStoredToken(): string | null {
+    try {
+        const raw = localStorage.getItem('padel_session');
+        if (!raw) return null;
+        const session = JSON.parse(raw);
+        return session?.access_token ?? null;
+    } catch {
+        return null;
+    }
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 
@@ -24,10 +35,17 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
-        throw new HttpError(errorData.message || 'API Request failed', response.status);
+        throw new HttpError(errorData.error || errorData.message || 'API Request failed', response.status);
     }
 
     return response.json();
+}
+
+export async function apiFetchWithAuth<T>(path: string, options: RequestInit = {}): Promise<T> {
+    const token = getStoredToken();
+    const headers = new Headers(options.headers || {});
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    return apiFetch<T>(path, { ...options, headers });
 }
 
 export class ApiService {
