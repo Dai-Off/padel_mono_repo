@@ -14,9 +14,10 @@ import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId } from '../api/players';
 import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
 import { PartidoCard } from '../components/partido/PartidoCard';
+import { PartidoCardSkeleton } from '../components/partido/PartidoCardSkeleton';
 import { theme } from '../theme';
 
-export type PartidoMode = 'automático' | 'competitivo';
+export type PartidoMode = 'competitivo' | 'amistoso';
 export type PartidoPlayer = {
   name: string;
   avatar?: string;
@@ -33,6 +34,8 @@ export type PartidoItem = {
   players: PartidoPlayer[];
   /** IDs de jugadores ya en el partido (para ocultar Unirse al organizador/jugadores) */
   playerIds?: string[];
+  /** Si es 'private', otros jugadores no pueden unirse */
+  visibility?: 'public' | 'private';
   venue: string;
   location: string;
   price: string;
@@ -52,23 +55,32 @@ export function PartidosScreen({ onPartidoPress, onCrearPartidoPress }: Partidos
   const { session } = useAuth();
   const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
   const [locationSheetVisible, setLocationSheetVisible] = useState(false);
-  const [items, setItems] = useState<PartidoItem[]>([]);
+  const [openPartidos, setOpenPartidos] = useState<PartidoItem[]>([]);
+  const [myPartidos, setMyPartidos] = useState<PartidoItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    if (session?.access_token) {
-      fetchMyPlayerId(session.access_token).then((id) => setOrganizerPlayerId(id));
-    } else {
-      setOrganizerPlayerId(null);
-    }
-  }, [session?.access_token]);
   const loadPartidos = useCallback(async () => {
     setLoading(true);
-    const matches = await fetchMatches({ expand: true });
-    const partidos = matches.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
-    setItems(partidos);
+    const token = session?.access_token ?? null;
+    const [playerId, matches] = await Promise.all([
+      token ? fetchMyPlayerId(token) : Promise.resolve(null),
+      fetchMatches({ expand: true, token }),
+    ]);
+    setOrganizerPlayerId(playerId);
+    const allPartidos = matches
+      .map(mapMatchToPartido)
+      .filter((p): p is PartidoItem => p != null);
+    setOpenPartidos(allPartidos.filter((p) => p.visibility !== 'private'));
+    setMyPartidos(
+      allPartidos.filter(
+        (p) =>
+          p.visibility === 'private' &&
+          playerId != null &&
+          (p.playerIds ?? []).includes(playerId)
+      )
+    );
     setLoading(false);
-  }, []);
+  }, [session?.access_token]);
 
   useEffect(() => {
     loadPartidos();
@@ -82,17 +94,18 @@ export function PartidosScreen({ onPartidoPress, onCrearPartidoPress }: Partidos
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Partidos</Text>
-        <Text style={styles.sectionSubtitle}>Partidos abiertos para unirte</Text>
+        <Text style={styles.sectionTitle}>Partidos abiertos</Text>
+        <Text style={styles.sectionSubtitle}>Partidos públicos para unirte</Text>
       </View>
-
       <View style={styles.list}>
         {loading ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>Cargando partidos...</Text>
-          </View>
-        ) : items.length > 0 ? (
-          items.map((item) => (
+          <>
+            <PartidoCardSkeleton />
+            <PartidoCardSkeleton />
+            <PartidoCardSkeleton />
+          </>
+        ) : openPartidos.length > 0 ? (
+          openPartidos.map((item) => (
             <PartidoCard
               key={item.id}
               item={item}
@@ -101,7 +114,32 @@ export function PartidosScreen({ onPartidoPress, onCrearPartidoPress }: Partidos
           ))
         ) : (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyText}>No hay partidos disponibles</Text>
+            <Text style={styles.emptyText}>No hay partidos abiertos</Text>
+          </View>
+        )}
+      </View>
+
+      <View style={[styles.section, { marginTop: theme.spacing.xl }]}>
+        <Text style={styles.sectionTitle}>Mis partidos</Text>
+        <Text style={styles.sectionSubtitle}>Tus reservas privadas</Text>
+      </View>
+      <View style={styles.list}>
+        {loading ? (
+          <>
+            <PartidoCardSkeleton />
+            <PartidoCardSkeleton />
+          </>
+        ) : myPartidos.length > 0 ? (
+          myPartidos.map((item) => (
+            <PartidoCard
+              key={item.id}
+              item={item}
+              onPress={() => onPartidoPress?.(item)}
+            />
+          ))
+        ) : (
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyText}>No tienes partidos privados</Text>
           </View>
         )}
       </View>
