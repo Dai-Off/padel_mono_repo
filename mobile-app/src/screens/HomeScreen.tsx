@@ -8,6 +8,7 @@ import { theme } from '../theme';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeStats, useZoneTrends } from '../hooks/useHomeStats';
 import { fetchMatches } from '../api/matches';
+import { fetchMyPlayerId } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import type { PartidoItem } from './PartidosScreen';
 
@@ -142,16 +143,34 @@ export function HomeScreen({ onPartidoPress, onNavigateToTab }: HomeScreenProps)
   const { session } = useAuth();
   const { stats, loading } = useHomeStats();
   const { trends, loading: trendsLoading } = useZoneTrends();
-  const [openMatches, setOpenMatches] = useState<PartidoItem[]>([]);
+  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
+  const [openPartidos, setOpenPartidos] = useState<PartidoItem[]>([]);
+  const [myPartidos, setMyPartidos] = useState<PartidoItem[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(true);
+
+  useEffect(() => {
+    if (session?.access_token) {
+      fetchMyPlayerId(session.access_token).then(setOrganizerPlayerId);
+    } else {
+      setOrganizerPlayerId(null);
+    }
+  }, [session?.access_token]);
 
   const loadMatches = useCallback(async () => {
     setMatchesLoading(true);
     const matches = await fetchMatches({ expand: true });
-    const partidos = matches.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
-    setOpenMatches(partidos);
+    const all = matches.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
+    setOpenPartidos(all.filter((p) => p.visibility !== 'private'));
+    setMyPartidos(
+      all.filter(
+        (p) =>
+          p.visibility === 'private' &&
+          organizerPlayerId != null &&
+          (p.playerIds ?? []).includes(organizerPlayerId)
+      )
+    );
     setMatchesLoading(false);
-  }, []);
+  }, [organizerPlayerId]);
 
   useEffect(() => {
     loadMatches();
@@ -161,7 +180,7 @@ export function HomeScreen({ onPartidoPress, onNavigateToTab }: HomeScreenProps)
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Buenos días' : hour < 20 ? 'Buenas tardes' : 'Buenas noches';
 
-  const nearYouItems = stats ? buildNearYouItems(stats, openMatches.length) : [];
+  const nearYouItems = stats ? buildNearYouItems(stats, openPartidos.length) : [];
   const zoneTrendRows = buildZoneTrendRows(trends);
 
   return (
@@ -329,13 +348,13 @@ export function HomeScreen({ onPartidoPress, onNavigateToTab }: HomeScreenProps)
               </View>
             ))}
           </View>
-        ) : openMatches.length > 0 ? (
+        ) : openPartidos.length > 0 ? (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.openMatchesScroll}
           >
-            {openMatches.slice(0, 6).map((item) => {
+            {openPartidos.slice(0, 6).map((item) => {
               const time = parseTimeFromDateTime(item.dateTime);
               return (
                 <Pressable
@@ -381,6 +400,60 @@ export function HomeScreen({ onPartidoPress, onNavigateToTab }: HomeScreenProps)
           </View>
         )}
       </View>
+
+      {myPartidos.length > 0 && (
+        <View style={[styles.openMatchesSection, { marginTop: theme.spacing.lg }]}>
+          <View style={styles.openMatchesHeader}>
+            <View style={styles.openMatchesTitleRow}>
+              <View style={styles.openMatchesDotWrap}>
+                <View style={[styles.openMatchesDot, { backgroundColor: '#6b7280' }]} />
+              </View>
+              <Text style={styles.openMatchesTitle}>Mis partidos</Text>
+            </View>
+          </View>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.openMatchesScroll}
+          >
+            {myPartidos.slice(0, 6).map((item) => {
+              const time = parseTimeFromDateTime(item.dateTime);
+              return (
+                <Pressable
+                  key={item.id}
+                  style={styles.openMatchCard}
+                  onPress={() => onPartidoPress?.(item)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${time} - ${item.venue}`}
+                >
+                  <View style={[styles.openMatchTopBar, { backgroundColor: '#6b7280' }]} />
+                  <View style={styles.openMatchBody}>
+                    <View style={styles.openMatchRow1}>
+                      <View style={styles.openMatchTimeRow}>
+                        <Ionicons name="time-outline" size={12} color="#9ca3af" />
+                        <Text style={styles.openMatchTime}>{time || '—'}</Text>
+                      </View>
+                      <View style={[styles.openMatchSportBadge, { backgroundColor: 'rgba(107,114,128,0.15)' }]}>
+                        <Text style={[styles.openMatchSportText, { color: '#6b7280' }]}>Privado</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.openMatchVenue} numberOfLines={1}>{item.venue}</Text>
+                    <View style={styles.openMatchReservadoRow}>
+                      <View style={styles.openMatchReservadoIcon}>
+                        <Text style={styles.openMatchReservadoCheck}>✓</Text>
+                      </View>
+                      <Text style={styles.openMatchReservadoLabel}>Tu reserva</Text>
+                    </View>
+                    <View style={styles.openMatchFooter}>
+                      <Text style={styles.openMatchStartsValue}>{item.price}</Text>
+                    </View>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
 
       <View style={styles.nextStepSection}>
         <Pressable
@@ -806,6 +879,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6b7280',
     marginBottom: 12,
+  },
+  openMatchReservadoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  openMatchReservadoIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: 'rgba(227,30,36,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  openMatchReservadoCheck: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#E31E24',
+  },
+  openMatchReservadoLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6b7280',
   },
   openMatchSlots: {
     flexDirection: 'row',

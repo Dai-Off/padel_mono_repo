@@ -31,6 +31,7 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
     start_at,
     end_at,
     total_price_cents,
+    pay_full,
     timezone,
     visibility,
     competitive,
@@ -95,9 +96,32 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       }
     }
 
+    const { data: courtBookings } = await supabase
+      .from('bookings')
+      .select('id, start_at, end_at')
+      .eq('court_id', court_id)
+      .in('status', ['confirmed', 'pending_payment']);
+    const courtOverlaps = (courtBookings ?? []).some((b) => {
+      const exStart = new Date(b.start_at).getTime();
+      const exEnd = new Date(b.end_at).getTime();
+      return newStart < exEnd && newEnd > exStart;
+    });
+    if (courtOverlaps) {
+      res.status(400).json({
+        ok: false,
+        error: 'Esa pista ya está reservada para ese horario. Elige otra hora.',
+      });
+      return;
+    }
+
     const totalCents = Number(total_price_cents);
-    const shareCents = Math.ceil(totalCents / 4);
-    if (shareCents < 50) {
+    const isPayFull = pay_full === true || pay_full === 'true' || pay_full === 1;
+    const amountCents = isPayFull ? totalCents : Math.ceil(totalCents / 4);
+    if (isPayFull && amountCents < 100) {
+      res.status(400).json({ ok: false, error: 'El monto mínimo es 1€' });
+      return;
+    }
+    if (!isPayFull && amountCents < 50) {
       res.status(400).json({ ok: false, error: 'El monto mínimo por jugador es 0.50€' });
       return;
     }
@@ -117,9 +141,10 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
     };
     if (elo_min != null) metadata.elo_min = String(elo_min);
     if (elo_max != null) metadata.elo_max = String(elo_max);
+    if (isPayFull) metadata.pay_full = '1';
 
     const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
-      amount: shareCents,
+      amount: amountCents,
       currency: 'eur',
       automatic_payment_methods: { enabled: true },
       setup_future_usage: 'off_session',
@@ -146,7 +171,7 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       ok: true,
       clientSecret: paymentIntent.client_secret,
       paymentIntentId: paymentIntent.id,
-      amountCents: shareCents,
+      amountCents,
     });
   } catch (err) {
     console.error('[payments/create-intent-for-new-match]', err);
@@ -578,7 +603,30 @@ async function processNewMatchPayment(
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents <= 0) return;
 
-  const shareCents = Math.ceil(total_price_cents / 4);
+  const newStart = new Date(start_at).getTime();
+  const newEnd = new Date(end_at).getTime();
+  const { data: courtBookings } = await supabase
+    .from('bookings')
+    .select('id, start_at, end_at')
+    .eq('court_id', court_id)
+    .in('status', ['confirmed', 'pending_payment']);
+  const courtOverlaps = (courtBookings ?? []).some((b) => {
+    const exStart = new Date(b.start_at).getTime();
+    const exEnd = new Date(b.end_at).getTime();
+    return newStart < exEnd && newEnd > exStart;
+  });
+  if (courtOverlaps) {
+    console.error('[payments/webhook] Slot already booked, skipping booking creation. Payment may need refund.', {
+      court_id,
+      start_at,
+      end_at,
+      paymentIntentId: pi.id,
+    });
+    return;
+  }
+
+  const isPayFull = meta.pay_full === '1';
+  const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
 
   const { data: booking, error: errBooking } = await supabase
     .from('bookings')
@@ -732,7 +780,28 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
 
-      const shareCents = Math.ceil(total_price_cents / 4);
+      const newStart = new Date(start_at).getTime();
+      const newEnd = new Date(end_at).getTime();
+      const { data: courtBookings } = await supabase
+        .from('bookings')
+        .select('id, start_at, end_at')
+        .eq('court_id', court_id)
+        .in('status', ['confirmed', 'pending_payment']);
+      const courtOverlaps = (courtBookings ?? []).some((b) => {
+        const exStart = new Date(b.start_at).getTime();
+        const exEnd = new Date(b.end_at).getTime();
+        return newStart < exEnd && newEnd > exStart;
+      });
+      if (courtOverlaps) {
+        res.status(400).json({
+          ok: false,
+          error: 'Esa pista ya está reservada para ese horario. Contacta con soporte para el reembolso.',
+        });
+        return;
+      }
+
+      const isPayFull = meta.pay_full === '1';
+      const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
 
       const { data: booking, error: errBooking } = await supabase
         .from('bookings')
