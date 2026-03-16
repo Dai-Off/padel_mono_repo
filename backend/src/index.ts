@@ -7,8 +7,9 @@ dotenv.config();
 const port: number = Number(process.env.PORT) || 3000;
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(err.stack);
-  res.status(500).json({ error: '¡Algo salió mal en el servidor!' });
+  console.error(err?.stack ?? err);
+  const message = err?.message || '¡Algo salió mal en el servidor!';
+  res.status(500).json({ ok: false, error: message });
 });
 
 app.listen(port, () => {

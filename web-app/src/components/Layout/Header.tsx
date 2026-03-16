@@ -1,5 +1,7 @@
-import { Menu, ArrowLeft } from 'lucide-react';
+import { Menu, LogOut } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+import { authService } from '../../services/auth';
 
 interface HeaderProps {
     clubName: string;
@@ -9,6 +11,12 @@ interface HeaderProps {
 
 export const Header = ({ clubName, isOnline = true, onToggleMenu }: HeaderProps) => {
     const { t, i18n } = useTranslation();
+    const navigate = useNavigate();
+
+    const handleLogout = () => {
+        authService.logout();
+        navigate('/login');
+    };
 
     const changeLanguage = (lng: string) => {
         i18n.changeLanguage(lng);
@@ -62,9 +70,13 @@ export const Header = ({ clubName, isOnline = true, onToggleMenu }: HeaderProps)
                         </div>
 
                         <button
-                            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-all">
-                            <ArrowLeft className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline">{t('close')}</span>
+                            type="button"
+                            onClick={handleLogout}
+                            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-all"
+                            title={t('logout')}
+                        >
+                            <LogOut className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">{t('logout')}</span>
                         </button>
                     </div>
                 </div>
