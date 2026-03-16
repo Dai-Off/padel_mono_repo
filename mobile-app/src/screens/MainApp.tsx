@@ -10,6 +10,7 @@ import { CompeticionesScreen } from './CompeticionesScreen';
 import { HomeScreen } from './HomeScreen';
 import type { PartidoItem } from './PartidosScreen';
 import { PartidoDetailScreen } from './PartidoDetailScreen';
+import { PartidoPrivadoDetailScreen } from './PartidoPrivadoDetailScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
@@ -43,6 +44,14 @@ export function MainApp() {
       );
     }
     if (showPartidoDetail && selectedPartido) {
+      if (selectedPartido.visibility === 'private') {
+        return (
+          <PartidoPrivadoDetailScreen
+            partido={selectedPartido}
+            onBack={() => setSelectedPartido(null)}
+          />
+        );
+      }
       return (
         <PartidoDetailScreen
           partido={selectedPartido}

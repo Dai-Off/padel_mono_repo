@@ -68,6 +68,8 @@ export type CreateIntentForNewMatchParams = {
   start_at: string;
   end_at: string;
   total_price_cents: number;
+  /** Si true, el usuario paga el total (reserva). Si false, paga 1/4 (crear partido entre 4). */
+  pay_full?: boolean;
   timezone?: string;
   visibility?: 'public' | 'private';
   competitive?: boolean;
