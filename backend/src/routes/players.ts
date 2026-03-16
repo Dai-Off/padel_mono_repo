@@ -30,12 +30,13 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 });
 
-// GET /players -> lista básica de jugadores
-router.get('/', async (_req: Request, res: Response) => {
+// GET /players -> lista de jugadores (soporta search con ?q=...)
+router.get('/', async (req: Request, res: Response) => {
+  const query = req.query.q as string | undefined;
   try {
     const supabase = getSupabaseServiceRoleClient();
 
-    const { data, error } = await supabase
+    let q = supabase
       .from('players')
       .select(
         `
@@ -51,6 +52,12 @@ router.get('/', async (_req: Request, res: Response) => {
       )
       .order('created_at', { ascending: false })
       .limit(50);
+
+    if (query) {
+      q = q.or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,email.ilike.%${query}%`);
+    }
+
+    const { data, error } = await q;
 
     if (error) {
       return res.status(500).json({ ok: false, error: error.message });

@@ -1,0 +1,43 @@
+/* ========================================
+   Grilla Feature – Custom CSS
+   Extracted from the standalone project's index.css.
+   Only grilla-specific utility classes are included here.
+   ======================================== */
+
+/* Hide scrollbar for Chrome, Safari and Opera */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Hide scrollbar for IE, Edge and Firefox */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  /* IE and Edge */
+  scrollbar-width: none;
+  /* Firefox */
+}
+
+/* Prevent scroll container from stealing touch events during active drag on mobile */
+.dragging-active {
+  touch-action: none !important;
+  -webkit-overflow-scrolling: auto !important;
+}
+
+/* Ensure draggable elements always block native touch gestures */
+[data-dnd-draggable] {
+  touch-action: none;
+}
+
+/* Safari iOS: use -webkit-fill-available as fallback for dvh */
+@supports (-webkit-touch-callout: none) {
+  .h-\[100dvh\] {
+    height: -webkit-fill-available;
+  }
+}
+
+/* Smooth momentum scrolling on iOS Safari */
+.mobile-full-view-scroll {
+  -webkit-overflow-scrolling: touch;
+  overflow-x: auto;
+  overflow-y: hidden;
+}

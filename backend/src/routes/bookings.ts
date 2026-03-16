@@ -4,22 +4,31 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 const router = Router();
 
 const SELECT_LIST =
-  'id, created_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, status';
+  'id, created_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, status, notes, reservation_type, players!bookings_organizer_player_id_fkey(first_name, last_name)';
 const SELECT_ONE =
-  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, pricing_rule_ids, status, cancelled_at, cancelled_by, cancellation_reason';
+  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, pricing_rule_ids, status, cancelled_at, cancelled_by, cancellation_reason, notes, reservation_type, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, email))';
 
 router.get('/', async (req: Request, res: Response) => {
   const court_id = req.query.court_id as string | undefined;
   const organizer_player_id = req.query.organizer_player_id as string | undefined;
+  const date = req.query.date as string | undefined; // YYYY-MM-DD
   try {
     const supabase = getSupabaseServiceRoleClient();
     let q = supabase
       .from('bookings')
       .select(SELECT_LIST)
-      .order('start_at', { ascending: false })
-      .limit(50);
+      .order('start_at', { ascending: true })
+      .limit(200);
     if (court_id) q = q.eq('court_id', court_id);
     if (organizer_player_id) q = q.eq('organizer_player_id', organizer_player_id);
+    if (date) {
+      // Filter bookings whose start falls within the given calendar day (UTC-based)
+      const nextDay = new Date(date);
+      nextDay.setDate(nextDay.getDate() + 1);
+      const nextDayStr = nextDay.toISOString().split('T')[0];
+      q = q.gte('start_at', `${date}T00:00:00`).lt('start_at', `${nextDayStr}T00:00:00`);
+    }
+    q = q.neq('status', 'cancelled');
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, bookings: data ?? [] });
@@ -55,16 +64,24 @@ router.post('/', async (req: Request, res: Response) => {
     total_price_cents,
     currency,
     pricing_rule_ids,
+    status,
+    notes,
+    reservation_type,
+    participants, // Array of { player_id }
   } = req.body ?? {};
+
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents == null) {
     return res.status(400).json({
       ok: false,
       error: 'court_id, organizer_player_id, start_at, end_at, total_price_cents son obligatorios',
     });
   }
+
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data, error } = await supabase
+
+    // 1. Insert Booking
+    const { data: booking, error: bookingError } = await supabase
       .from('bookings')
       .insert([
         {
@@ -75,13 +92,53 @@ router.post('/', async (req: Request, res: Response) => {
           timezone: timezone ?? 'Europe/Madrid',
           total_price_cents: Number(total_price_cents),
           currency: currency ?? 'EUR',
+          status: status ?? 'pending_payment',
+          notes: notes ?? null,
+          reservation_type: reservation_type ?? 'normal',
           pricing_rule_ids: Array.isArray(pricing_rule_ids) ? pricing_rule_ids : null,
         },
       ])
       .select(SELECT_ONE)
-      .maybeSingle();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.status(201).json({ ok: true, booking: data });
+      .single();
+
+    if (bookingError) return res.status(500).json({ ok: false, error: bookingError.message });
+
+    // 2. Insert Participants
+    const participantRows = [
+      {
+        booking_id: booking.id,
+        player_id: organizer_player_id,
+        role: 'organizer',
+        share_amount_cents: 0,
+        payment_status: status === 'confirmed' ? 'paid' : 'pending',
+      },
+    ];
+
+    if (Array.isArray(participants)) {
+      participants.forEach((p: any) => {
+        if (p.player_id && p.player_id !== organizer_player_id) {
+          participantRows.push({
+            booking_id: booking.id,
+            player_id: p.player_id,
+            role: 'guest',
+            share_amount_cents: 0,
+            payment_status: status === 'confirmed' ? 'paid' : 'pending',
+          });
+        }
+      });
+    }
+
+    const { error: participantsError } = await supabase
+      .from('booking_participants')
+      .insert(participantRows);
+
+    if (participantsError) {
+      console.error('Error creating participants:', participantsError.message);
+      // We don't roll back the booking for now as it's already created, 
+      // but in a more robust system we would use a transaction or clean up.
+    }
+
+    return res.status(201).json({ ok: true, booking });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -89,7 +146,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { status, cancelled_by, cancellation_reason } = req.body ?? {};
+  const { status, cancelled_by, cancellation_reason, notes, participants, court_id, start_at, end_at } = req.body ?? {};
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (status !== undefined) update.status = status;
   if (cancelled_by !== undefined) update.cancelled_by = cancelled_by;
@@ -97,11 +154,18 @@ router.put('/:id', async (req: Request, res: Response) => {
   if (status === 'cancelled') {
     update.cancelled_at = new Date().toISOString();
   }
-  if (Object.keys(update).length === 1) {
+  if (notes !== undefined) update.notes = notes;
+  if (court_id !== undefined) update.court_id = court_id;
+  if (start_at !== undefined) update.start_at = start_at;
+  if (end_at !== undefined) update.end_at = end_at;
+
+  if (Object.keys(update).length === 1 && !Array.isArray(participants)) {
     return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
   }
+
   try {
     const supabase = getSupabaseServiceRoleClient();
+
     const { data, error } = await supabase
       .from('bookings')
       .update(update)
@@ -110,6 +174,37 @@ router.put('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Booking not found' });
+
+    // Update guest participants if provided
+    if (Array.isArray(participants)) {
+      const organizerPlayerId = (data as any).organizer_player_id;
+
+      // Delete existing guest participants
+      await supabase
+        .from('booking_participants')
+        .delete()
+        .eq('booking_id', id)
+        .eq('role', 'guest');
+
+      // Insert new guests (skip if same as organizer)
+      const guestRows = participants
+        .filter((p: any) => p.player_id && p.player_id !== organizerPlayerId)
+        .map((p: any) => ({
+          booking_id: id,
+          player_id: p.player_id,
+          role: 'guest',
+          payment_status: 'pending',
+          share_amount_cents: 0,
+        }));
+
+      if (guestRows.length > 0) {
+        const { error: pErr } = await supabase
+          .from('booking_participants')
+          .insert(guestRows);
+        if (pErr) console.error('Error updating participants:', pErr.message);
+      }
+    }
+
     return res.json({ ok: true, booking: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
