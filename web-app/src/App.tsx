@@ -7,6 +7,7 @@ import { RegistroClubInvite } from './components/Registration/RegistroClubInvite
 import { ClubDashboard } from './components/Dashboard/ClubDashboard';
 import { ManagerOnboarding } from './components/Onboarding/ManagerOnboarding';
 import { AdminPanel } from './components/Admin/AdminPanel';
+import { GrillaView } from './features/grilla';
 import { authService } from './services/auth';
 import { Toaster } from 'sonner';
 
@@ -56,6 +57,14 @@ function App() {
           element={
             <ProtectedRoute>
               <ManagerOnboarding />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/grilla"
+          element={
+            <ProtectedRoute>
+              <GrillaView />
             </ProtectedRoute>
           }
         />
