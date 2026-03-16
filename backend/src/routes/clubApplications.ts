@@ -1,8 +1,9 @@
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { generateInviteToken, hashInviteToken, getInviteExpiresAt } from '../lib/inviteToken';
 import { requireAdmin } from '../middleware/requireAdmin';
+import { sendInviteEmail } from '../lib/mailer';
 
 const router = Router();
 const APPLICATIONS_SELECT = 'id, created_at, responsible_first_name, responsible_last_name, club_name, city, country, phone, email, court_count, sport, status, approved_at, rejected_at, rejection_reason, club_owner_id, club_id, invitation_sent_at, official_name, full_address, description, tax_id, fiscal_address, courts, open_time, close_time, slot_duration_min, pricing';
@@ -11,31 +12,56 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
     if (allowed.includes(file.mimetype)) cb(null, true);
     else cb(new Error('Solo se permiten imágenes (JPEG, PNG, WebP, GIF)'));
   },
 });
 
-const BUCKET = 'Club Images';
+const BUCKET = 'club-images';
 
-router.post('/upload', upload.single('file'), async (req: Request, res: Response) => {
+router.post('/upload', (req: Request, res: Response, next: express.NextFunction) => {
+  upload.single('file')(req, res, (err: unknown) => {
+    if (err) {
+      const msg = err instanceof Error ? err.message : 'Error al subir';
+      const isLimit = err && typeof err === 'object' && 'code' in err && err.code === 'LIMIT_FILE_SIZE';
+      return res.status(400).json({ ok: false, error: isLimit ? 'El archivo supera el límite de 5 MB' : msg });
+    }
+    next();
+  });
+}, async (req: Request, res: Response, next: express.NextFunction) => {
   if (!req.file) {
-    return res.status(400).json({ ok: false, error: 'No se envió ningún archivo' });
+    return res.status(400).json({ ok: false, error: 'No se envió ningún archivo. Usa el campo "file" en form-data.' });
+  }
+  const buffer = req.file.buffer ?? (req.file as unknown as { buffer?: Buffer }).buffer;
+  if (!buffer || !Buffer.isBuffer(buffer)) {
+    return res.status(500).json({ ok: false, error: 'No se pudo leer el archivo (buffer inválido).' });
   }
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const ext = req.file.originalname.split('.').pop() || 'jpg';
+    const ext = req.file.originalname.split('.').pop()?.toLowerCase() || 'jpg';
     const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error } = await supabase.storage.from(BUCKET).upload(path, req.file.buffer, {
+    const { error } = await supabase.storage.from(BUCKET).upload(path, buffer, {
       contentType: req.file.mimetype,
       upsert: false,
     });
-    if (error) return res.status(500).json({ ok: false, error: error.message });
-    const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
-    return res.status(200).json({ ok: true, url: publicUrl });
+    if (error) {
+      console.error('Supabase storage upload error:', error.message);
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+    const expiresIn = 60 * 60 * 24 * 7; // 7 días (evita 400 de la URL pública)
+    const { data: signedData, error: signedError } = await supabase.storage.from(BUCKET).createSignedUrl(path, expiresIn);
+    if (signedError) {
+      console.error('createSignedUrl error:', signedError.message);
+      return res.status(500).json({ ok: false, error: signedError.message });
+    }
+    const url = (signedData as { signedUrl?: string; signedURL?: string })?.signedUrl ?? (signedData as { signedURL?: string })?.signedURL;
+    if (!url) return res.status(500).json({ ok: false, error: 'No se pudo generar la URL de la imagen' });
+    return res.status(200).json({ ok: true, url });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: (err as Error).message });
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('Upload error:', msg);
+    return res.status(500).json({ ok: false, error: msg });
   }
 });
 
@@ -57,11 +83,11 @@ router.get('/', requireAdmin, async (req: Request, res: Response) => {
 
 router.get('/:id/validate-invite', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const token = req.query.token as string;
-  if (!token?.trim()) return res.status(400).json({ ok: false, error: 'Falta el token' });
+  const token = (req.query.token as string)?.trim();
+  if (!token) return res.status(400).json({ ok: false, error: 'Falta el token' });
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const tokenHash = hashInviteToken(token.trim());
+    const tokenHash = hashInviteToken(token);
     const { data: invite, error: inviteError } = await supabase
       .from('club_application_invites')
       .select('id, application_id, expires_at, used_at')
@@ -69,10 +95,19 @@ router.get('/:id/validate-invite', async (req: Request, res: Response) => {
       .eq('application_id', id)
       .maybeSingle();
     if (inviteError || !invite) return res.status(400).json({ ok: false, error: 'Enlace inválido' });
-    if (invite.used_at) return res.status(400).json({ ok: false, error: 'Este enlace ya fue utilizado' });
     if (new Date(invite.expires_at) < new Date()) return res.status(400).json({ ok: false, error: 'El enlace ha expirado' });
-    const { data: app, error: appError } = await supabase.from('club_applications').select('id, email, responsible_first_name, responsible_last_name, club_name, status').eq('id', id).maybeSingle();
+    const { data: app, error: appError } = await supabase.from('club_applications').select('id, email, responsible_first_name, responsible_last_name, club_name, status, club_owner_id').eq('id', id).maybeSingle();
     if (appError || !app || app.status !== 'approved') return res.status(400).json({ ok: false, error: 'Solicitud no válida' });
+    if (invite.used_at) {
+      return res.json({
+        ok: true,
+        already_completed: true,
+        application_id: app.id,
+        email: app.email,
+        responsible_name: [app.responsible_first_name, app.responsible_last_name].filter(Boolean).join(' '),
+        club_name: app.club_name,
+      });
+    }
     return res.json({
       ok: true,
       application_id: app.id,
@@ -102,9 +137,10 @@ router.post('/:id/approve', requireAdmin, async (req: Request, res: Response) =>
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data: app, error: fetchErr } = await supabase.from('club_applications').select('id, status, email').eq('id', id).maybeSingle();
+    const { data: app, error: fetchErr } = await supabase.from('club_applications').select('id, status, email, club_name').eq('id', id).maybeSingle();
     if (fetchErr || !app) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
     if (app.status !== 'pending' && app.status !== 'contacted') return res.status(400).json({ ok: false, error: 'Solo se puede aprobar una solicitud en estado pending o contacted' });
+    await supabase.from('club_application_invites').delete().eq('application_id', id);
     const { token, tokenHash } = generateInviteToken();
     const expiresAt = getInviteExpiresAt();
     const { error: inviteErr } = await supabase.from('club_application_invites').insert({
@@ -120,7 +156,17 @@ router.post('/:id/approve', requireAdmin, async (req: Request, res: Response) =>
     if (updateErr) return res.status(500).json({ ok: false, error: updateErr.message });
     const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     const inviteUrl = `${baseUrl}/registro-club?application_id=${id}&token=${token}`;
-    return res.json({ ok: true, message: 'Solicitud aprobada. Envía el enlace por email al responsable.', invite_url: inviteUrl });
+    const clubName = (app as { club_name?: string }).club_name ?? 'Tu club';
+    const emailResult = await sendInviteEmail(app.email, inviteUrl, clubName);
+    return res.json({
+      ok: true,
+      message: emailResult.sent
+        ? 'Solicitud aprobada. Se ha enviado el enlace por email al responsable.'
+        : 'Solicitud aprobada. Envía el enlace por email al responsable (no se pudo enviar el correo automático).',
+      invite_url: inviteUrl,
+      email_sent: emailResult.sent,
+      email_error: emailResult.error,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

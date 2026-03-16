@@ -20,6 +20,14 @@ export const playerService = {
         return response.player;
     },
 
+    createManual: async (data: { first_name: string; last_name: string; phone: string; email?: string | null }): Promise<Player> => {
+        const response = await apiFetch<ApiResponse<{ player: Player }>>('/players/manual', {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+        return response.player;
+    },
+
     update: async (id: string, data: Partial<Player>): Promise<Player> => {
         const response = await apiFetch<ApiResponse<{ player: Player }>>(`/players/${id}`, {
             method: 'PUT',

@@ -30,6 +30,75 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 });
 
+// POST /players/manual -> alta manual en el club (nombre, apellidos, teléfono obligatorios; email opcional)
+router.post('/manual', async (req: Request, res: Response) => {
+  const { first_name, last_name, phone, email } = req.body ?? {};
+
+  const firstName = typeof first_name === 'string' ? first_name.trim() : '';
+  const lastName = typeof last_name === 'string' ? last_name.trim() : '';
+  const phoneStr = typeof phone === 'string' ? phone.trim() : '';
+
+  if (!firstName || !lastName || !phoneStr) {
+    return res.status(400).json({
+      ok: false,
+      error: 'first_name, last_name y phone son obligatorios',
+    });
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+
+    const { data: existingByPhone } = await supabase
+      .from('players')
+      .select('id')
+      .eq('phone', phoneStr)
+      .neq('status', 'deleted')
+      .maybeSingle();
+    if (existingByPhone) {
+      return res.status(409).json({ ok: false, error: 'Ya existe un usuario con este teléfono' });
+    }
+
+    const emailStr = typeof email === 'string' ? email.trim().toLowerCase() : null;
+    if (emailStr) {
+      const { data: existingByEmail } = await supabase
+        .from('players')
+        .select('id')
+        .eq('email', emailStr)
+        .neq('status', 'deleted')
+        .maybeSingle();
+      if (existingByEmail) {
+        return res.status(409).json({ ok: false, error: 'Ya existe un usuario con este correo' });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('players')
+      .insert([
+        {
+          first_name: firstName,
+          last_name: lastName,
+          phone: phoneStr,
+          email: emailStr,
+          auth_user_id: null,
+        },
+      ])
+      .select('id, created_at, first_name, last_name, email, phone, elo_rating, status')
+      .maybeSingle();
+
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(409).json({ ok: false, error: 'Ya existe un usuario con este teléfono o correo' });
+      }
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+
+    return res.status(201).json({ ok: true, player: data });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ ok: false, error: message });
+  }
+});
+
 // GET /players -> lista básica de jugadores
 router.get('/', async (_req: Request, res: Response) => {
   try {
@@ -46,7 +115,8 @@ router.get('/', async (_req: Request, res: Response) => {
         email,
         phone,
         elo_rating,
-        status
+        status,
+        auth_user_id
       `
       )
       .order('created_at', { ascending: false })
