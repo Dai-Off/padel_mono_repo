@@ -65,7 +65,7 @@ export const ClubDashboard = () => {
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<any>(null);
 
-    const CLUB_NAME = "X7 Padel Sabadell Sur";
+    const CLUB_NAME = "Club Padel Grilla";
 
     const fetchData = useCallback(async () => {
         setLoading(true);
