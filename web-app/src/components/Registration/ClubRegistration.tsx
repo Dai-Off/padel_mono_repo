@@ -115,6 +115,7 @@ function DarkSelect({
 function ImageUploadSlot({ label, url, onUpload }: { label: string; url: string | null | undefined; onUpload: (file: File) => Promise<void> }) {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [imgError, setImgError] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -128,6 +129,7 @@ function ImageUploadSlot({ label, url, onUpload }: { label: string; url: string 
             return;
         }
         setError(null);
+        setImgError(false);
         setLoading(true);
         try {
             await onUpload(file);
@@ -138,11 +140,18 @@ function ImageUploadSlot({ label, url, onUpload }: { label: string; url: string 
             e.target.value = '';
         }
     };
+    const showImage = url && !imgError;
     return (
         <label className="aspect-square min-h-[72px] sm:min-h-0 rounded-lg bg-white/[0.04] flex flex-col items-center justify-center gap-1 text-white/12 hover:bg-white/[0.07] hover:text-white/25 active:bg-white/[0.06] transition-all touch-manipulation cursor-pointer overflow-hidden relative">
             <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="sr-only" ref={inputRef} onChange={handleChange} disabled={loading} />
-            {url ? (
-                <img src={url} alt="" className="absolute inset-0 w-full h-full object-cover" />
+            {showImage ? (
+                <img
+                    src={url}
+                    alt=""
+                    className="absolute inset-0 w-full h-full object-cover"
+                    onLoad={() => setImgError(false)}
+                    onError={() => setImgError(true)}
+                />
             ) : loading ? (
                 <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin text-white/40" />
             ) : (

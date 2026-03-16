@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hashInviteToken } from '../lib/inviteToken';
+import { sendPasswordResetEmail } from '../lib/mailer';
 
 const router = Router();
 
@@ -48,28 +49,47 @@ router.post('/register', async (req: Request, res: Response) => {
       return res.status(409).json({ ok: false, error: 'El email ya está registrado' });
     }
 
-    // Crear registro en players vinculado al usuario de auth
     const fullName = (name ? String(name).trim() : '') || '';
     const nameParts = fullName ? fullName.split(/\s+/) : [];
     const firstName = nameParts[0] || 'Usuario';
     const lastName = nameParts.slice(1).join(' ') || '';
-
     const authUserId = data.user?.id ?? null;
-    const { error: playerError } = await supabase
-      .from('players')
-      .insert([
-        {
-          first_name: firstName,
-          last_name: lastName,
-          email: emailStr,
-          status: 'active',
-          auth_user_id: authUserId,
-        },
-      ]);
 
-    if (playerError) {
-      // Si falla por email duplicado, el usuario ya existe - no bloqueamos el registro de auth
-      if (playerError.code !== '23505') {
+    const { data: existingPlayer } = await supabase
+      .from('players')
+      .select('id, auth_user_id')
+      .eq('email', emailStr)
+      .neq('status', 'deleted')
+      .maybeSingle();
+
+    if (existingPlayer) {
+      if (existingPlayer.auth_user_id) {
+        return res.status(409).json({ ok: false, error: 'El email ya está registrado' });
+      }
+      const { error: updateErr } = await supabase
+        .from('players')
+        .update({
+          auth_user_id: authUserId,
+          email: emailStr,
+          first_name: firstName || undefined,
+          last_name: lastName || undefined,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingPlayer.id);
+      if (updateErr) console.error('Error vinculando player en registro:', updateErr.message);
+    } else {
+      const { error: playerError } = await supabase
+        .from('players')
+        .insert([
+          {
+            first_name: firstName,
+            last_name: lastName,
+            email: emailStr,
+            status: 'active',
+            auth_user_id: authUserId,
+          },
+        ]);
+      if (playerError && playerError.code !== '23505') {
         console.error('Error creando player en registro:', playerError.message);
       }
     }
@@ -152,6 +172,48 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
+// POST /auth/forgot-password — envía enlace para restablecer contraseña por email
+const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
+
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  const { email } = req.body ?? {};
+  const emailStr = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (!emailStr) {
+    return res.status(400).json({ ok: false, error: 'Email es obligatorio' });
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const redirectTo = `${FRONTEND_URL}/reset-password`;
+    const { data, error } = await supabase.auth.admin.generateLink({
+      type: 'recovery',
+      email: emailStr,
+      options: { redirectTo },
+    });
+
+    if (error) {
+      return res.status(400).json({ ok: false, error: error.message });
+    }
+
+    const actionLink =
+      (data as { properties?: { action_link?: string }; action_link?: string })?.properties?.action_link ??
+      (data as { action_link?: string })?.action_link;
+    if (!actionLink) {
+      return res.status(500).json({ ok: false, error: 'No se pudo generar el enlace' });
+    }
+
+    const { sent, error: mailError } = await sendPasswordResetEmail(emailStr, actionLink);
+    if (!sent && mailError) {
+      return res.status(500).json({ ok: false, error: mailError });
+    }
+
+    return res.json({ ok: true, message: 'Si el correo existe, recibirás un enlace para restablecer la contraseña' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ ok: false, error: message });
+  }
+});
+
 // GET /auth/me — usuario actual y roles (player_id, club_owner_id, clubs). Requiere Authorization: Bearer <access_token>.
 router.get('/me', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization ?? req.headers['Authorization'];
@@ -216,6 +278,13 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
 
     const { data: app, error: appErr } = await supabase.from('club_applications').select('*').eq('id', application_id).eq('status', 'approved').maybeSingle();
     if (appErr || !app) return res.status(400).json({ ok: false, error: 'Solicitud no válida' });
+    if (app.club_owner_id) {
+      return res.status(200).json({
+        ok: true,
+        already_registered: true,
+        message: 'Ya completaste el registro. Inicia sesión con tu email y contraseña.',
+      });
+    }
 
     const emailStr = String(app.email).trim().toLowerCase();
     const { data: authData, error: signUpErr } = await supabase.auth.signUp({

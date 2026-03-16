@@ -19,15 +19,33 @@ import { OwnerCard } from '../Owners/OwnerCard';
 import { OwnerForm } from '../Owners/OwnerForm';
 import { clubOwnerService, type ClubOwner } from '../../services/clubOwner';
 
+// Players
+import { ClubPlayersTab } from '../Players/ClubPlayers';
+
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { authService } from '../../services/auth';
 
-type TabId = 'courts' | 'clubs' | 'owners';
+type TabId = 'courts' | 'clubs' | 'owners' | 'players';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
-    const [activeTab, setActiveTab] = useState<TabId>('courts');
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [activeTab, setActiveTabState] = useState<TabId>(() =>
+        location.pathname === '/jugadores' ? 'players' : 'courts'
+    );
+
+    useEffect(() => {
+        if (location.pathname === '/jugadores') setActiveTabState('players');
+    }, [location.pathname]);
+
+    const setActiveTab = (id: TabId) => {
+        setActiveTabState(id);
+        if (id === 'players') navigate('/jugadores');
+        else navigate('/');
+    };
     const [loading, setLoading] = useState(true);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isAdmin, setIsAdmin] = useState(false);
@@ -144,60 +162,65 @@ export const ClubDashboard = () => {
 
             <main className="px-4 sm:px-5 py-5 pb-20">
                 <div className="max-w-7xl mx-auto space-y-6">
-                    {/* Toolbar */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <TabSwitcher
                             tabs={[
                                 { id: 'courts', label: t('tabs_courts') },
                                 { id: 'clubs', label: t('tabs_clubs') },
                                 { id: 'owners', label: t('tabs_owners') },
+                                { id: 'players', label: t('tabs_players') },
                             ]}
                             activeTab={activeTab}
                             onTabChange={(id) => setActiveTab(id as TabId)}
                         />
-                        <button
-                            onClick={handleAddClick}
-                            className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${
-                                activeTab === 'courts'
-                                    ? 'bg-[#E31E24] text-white hover:opacity-90'
-                                    : 'bg-brand text-brand-foreground shadow-lg shadow-brand/20 hover:opacity-90'
-                            }`}
-                        >
-                            <Plus className="w-3.5 h-3.5" />
-                            {activeTab === 'courts' ? t('add_court') : activeTab === 'clubs' ? t('add_club') : t('add_owner')}
-                        </button>
+                        {activeTab !== 'players' && (
+                            <button
+                                onClick={handleAddClick}
+                                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${
+                                    activeTab === 'courts'
+                                        ? 'bg-[#E31E24] text-white hover:opacity-90'
+                                        : 'bg-brand text-brand-foreground shadow-lg shadow-brand/20 hover:opacity-90'
+                                }`}
+                            >
+                                <Plus className="w-3.5 h-3.5" />
+                                {activeTab === 'courts' ? t('add_court') : activeTab === 'clubs' ? t('add_club') : t('add_owner')}
+                            </button>
+                        )}
                     </div>
 
-                    {/* Gestión de Pistas: título de sección cuando tab = courts */}
-                    {activeTab === 'courts' && (
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-sm font-bold text-[#1A1A1A]">{t('courts_management')}</h2>
-                        </div>
-                    )}
-
-                    {/* Content Grid */}
-                    {loading ? (
-                        <div className="flex flex-col items-center justify-center py-24 gap-4">
-                            <div className="w-12 h-12 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
-                            <p className="text-sm font-semibold text-gray-500 animate-pulse">{t('loading')}...</p>
-                        </div>
+                    {activeTab === 'players' ? (
+                        <ClubPlayersTab />
                     ) : (
-                        <div className={`grid ${activeTab === 'courts' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5'}`}>
-                            {activeTab === 'courts' && courts.map((court) => (
-                                <CourtCard
-                                    key={court.id}
-                                    court={court}
-                                    onEdit={handleEditClick}
-                                    onDelete={handleDeleteClick}
-                                />
-                            ))}
-                            {activeTab === 'clubs' && clubs.map(club => (
-                                <ClubCard key={club.id} club={club} onEdit={handleEditClick} onDelete={handleDeleteClick} />
-                            ))}
-                            {activeTab === 'owners' && owners.map(owner => (
-                                <OwnerCard key={owner.id} owner={owner} onEdit={handleEditClick} onDelete={handleDeleteClick} />
-                            ))}
-                        </div>
+                        <>
+                            {activeTab === 'courts' && (
+                                <div className="flex items-center justify-between">
+                                    <h2 className="text-sm font-bold text-[#1A1A1A]">{t('courts_management')}</h2>
+                                </div>
+                            )}
+                            {loading ? (
+                                <div className="flex flex-col items-center justify-center py-24 gap-4">
+                                    <div className="w-12 h-12 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
+                                    <p className="text-sm font-semibold text-gray-500 animate-pulse">{t('loading')}...</p>
+                                </div>
+                            ) : (
+                                <div className={`grid ${activeTab === 'courts' ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5'}`}>
+                                    {activeTab === 'courts' && courts.map((court) => (
+                                        <CourtCard
+                                            key={court.id}
+                                            court={court}
+                                            onEdit={handleEditClick}
+                                            onDelete={handleDeleteClick}
+                                        />
+                                    ))}
+                                    {activeTab === 'clubs' && clubs.map(club => (
+                                        <ClubCard key={club.id} club={club} onEdit={handleEditClick} onDelete={handleDeleteClick} />
+                                    ))}
+                                    {activeTab === 'owners' && owners.map(owner => (
+                                        <OwnerCard key={owner.id} owner={owner} onEdit={handleEditClick} onDelete={handleDeleteClick} />
+                                    ))}
+                                </div>
+                            )}
+                        </>
                     )}
                 </div>
             </main>
