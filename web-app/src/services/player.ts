@@ -2,8 +2,9 @@ import { apiFetch } from './api';
 import type { Player, ApiResponse } from '../types/api';
 
 export const playerService = {
-    getAll: async (): Promise<Player[]> => {
-        const response = await apiFetch<ApiResponse<{ players: Player[] }>>('/players');
+    getAll: async (query?: string): Promise<Player[]> => {
+        const path = query ? `/players?q=${encodeURIComponent(query)}` : '/players';
+        const response = await apiFetch<ApiResponse<{ players: Player[] }>>(path);
         return response.players || [];
     },
 
