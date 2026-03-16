@@ -38,6 +38,7 @@ export async function fetchSearchCourts(
   try {
     const res = await fetch(url.toString(), {
       headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
     });
     const json = (await res.json()) as { ok?: boolean; results?: SearchCourtResult[]; error?: string };
     if (!res.ok) {

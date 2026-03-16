@@ -68,13 +68,14 @@ router.get('/courts', async (req: Request, res: Response) => {
       .in('court_id', courtIds)
       .eq('active', true);
 
+    const searchDate = dateFrom ?? new Date().toISOString().slice(0, 10);
+
     let bookingsQuery = supabase
       .from('bookings')
-      .select('id, court_id, start_at, end_at, total_price_cents')
+      .select('id, court_id, start_at, end_at, total_price_cents, status')
       .in('court_id', courtIds)
-      .in('status', ['confirmed', 'pending_payment']);
+      .neq('status', 'cancelled');
 
-    const searchDate = dateFrom ?? new Date().toISOString().slice(0, 10);
     const day = new Date(searchDate + 'T12:00:00Z').getUTCDay();
     const dow = day === 0 ? 7 : day;
 
@@ -88,6 +89,11 @@ router.get('/courts', async (req: Request, res: Response) => {
     const { data: bookings, error: bookingsError } = await bookingsQuery;
     if (bookingsError) return res.status(500).json({ ok: false, error: bookingsError.message });
 
+    console.log('[search/courts] Bookings found:', bookings?.length ?? 0, 'for date', searchDate, 'courts', courtIds.length);
+    if (bookings?.length) {
+      console.log('[search/courts] Sample:', bookings.slice(0, 3).map((b) => ({ court_id: b.court_id, start_at: b.start_at, status: b.status })));
+    }
+
     const bookedRangesByCourt = new Map<string, { start: number; end: number }[]>();
     for (const b of bookings ?? []) {
       const start = new Date(b.start_at).getTime();
@@ -98,8 +104,11 @@ router.get('/courts', async (req: Request, res: Response) => {
     }
 
     const rulesByCourt = new Map<string, { startMin: number; endMin: number; amountCents: number }[]>();
+    const dowNum = Number(dow);
     for (const r of pricingRules ?? []) {
-      if (!r.days_of_week?.includes(dow)) continue;
+      const dows = Array.isArray(r.days_of_week) ? r.days_of_week : [];
+      const matchesDay = dows.some((d: unknown) => Number(d) === dowNum);
+      if (!matchesDay) continue;
       const list = rulesByCourt.get(r.court_id) ?? [];
       list.push({
         startMin: r.start_minutes,
@@ -161,6 +170,7 @@ router.get('/courts', async (req: Request, res: Response) => {
       });
 
     console.log('[search/courts] Courts:', courts.length, 'Clubs:', clubs?.length ?? 0, 'Results:', results.length);
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     return res.json({ ok: true, results });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
