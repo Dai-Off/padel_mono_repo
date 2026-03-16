@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import * as Linking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,15 +11,26 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useStripe } from '@stripe/stripe-react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { SearchCourtResult } from '../api/search';
+import { fetchSearchCourts } from '../api/search';
 import { fetchClubById } from '../api/clubs';
 import { fetchCourtsByClubId, type Court } from '../api/courts';
 import { fetchMatches } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import { createIntentForNewMatch, confirmPaymentFromClient } from '../api/payments';
+import { fetchMyPlayerId } from '../api/players';
+import { useAuth } from '../contexts/AuthContext';
 import { PartidoCard } from '../components/partido/PartidoCard';
+import {
+  BookingConfirmationModal,
+  type BookingConfirmationData,
+} from '../components/partido/BookingConfirmationModal';
 import type { PartidoItem } from './PartidosScreen';
 import { theme } from '../theme';
+
+const DURATION_MIN = 60;
 
 type ClubDetailScreenProps = {
   court: SearchCourtResult;
@@ -31,13 +44,21 @@ type TabId = (typeof TABS)[number];
 const DAYS = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
+/** Fecha en YYYY-MM-DD según hora local (evita desfase por toISOString en UTC). */
+function toDateStringLocal(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 
 function getCerramientoLabel(indoor: boolean): string {
   return indoor ? 'Indoor' : 'Exterior';
 }
 
 function getParedesLabel(glassType: string): string {
-  return glassType === 'panoramic' ? 'Panorámico' : 'Muro';
+  return glassType === 'panoramic' ? 'Cristal' : 'Muro';
 }
 
 /** Formatea weekly_schedule (jsonb) a texto legible. Si está vacío devuelve null. */
@@ -87,9 +108,25 @@ function matchBelongsToClub(match: { bookings?: { courts?: { club_id?: string } 
   return clubIdFromMatch != null && clubIdFromMatch === clubId;
 }
 
+function formatDateTimeForConfirmation(date: Date, time: string): string {
+  const dayNames = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
+  const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const d = new Date(date);
+  d.setHours(parseInt(time.slice(0, 2), 10), parseInt(time.slice(3, 5) || '0', 10), 0, 0);
+  const dayName = dayNames[d.getDay()] ?? 'Día';
+  const dayNum = d.getDate();
+  const month = months[d.getMonth()] ?? '';
+  return `${dayName}, ${dayNum} ${month} · ${time}`;
+}
+
 export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailScreenProps) {
+  const { session } = useAuth();
+  const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [activeTab, setActiveTab] = useState<TabId>('Home');
   const [clubPartidos, setClubPartidos] = useState<PartidoItem[]>([]);
+  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
+  const [confirmationModalVisible, setConfirmationModalVisible] = useState(false);
+  const [confirmationModalData, setConfirmationModalData] = useState<BookingConfirmationData | null>(null);
   const [partidosLoading, setPartidosLoading] = useState(false);
   const [clubCourts, setClubCourts] = useState<Court[]>([]);
   const [scheduleText, setScheduleText] = useState<string | null>(null);
@@ -116,7 +153,8 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
     const filtered = matches
       .filter((m) => matchBelongsToClub(m, court.clubId))
       .map(mapMatchToPartido)
-      .filter((p): p is PartidoItem => p != null);
+      .filter((p): p is PartidoItem => p != null)
+      .filter((p) => p.visibility !== 'private');
     setClubPartidos(filtered);
     setPartidosLoading(false);
   }, [court.clubId]);
@@ -130,7 +168,167 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
   const [showOnlyAvailable, setShowOnlyAvailable] = useState(true);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [partidosAlertsEnabled, setPartidosAlertsEnabled] = useState(false);
+  const [timeSlotsForDate, setTimeSlotsForDate] = useState<string[]>([]);
+  const [timeSlotsLoading, setTimeSlotsLoading] = useState(false);
+  const [courtPrices, setCourtPrices] = useState<Record<string, { minPriceCents: number; minPriceFormatted: string }>>({});
+  const [expandedCourtId, setExpandedCourtId] = useState<string | null>(null);
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
+  const [reserving, setReserving] = useState(false);
   const dateOptions = getNextDays(7);
+
+  const selectedDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + selectedDateIndex);
+    return d;
+  }, [selectedDateIndex]);
+
+  const loadTimeSlotsForDate = useCallback(
+    async (date: Date) => {
+      setTimeSlotsLoading(true);
+      try {
+        const dateStr = toDateStringLocal(date);
+        const results = await fetchSearchCourts({
+          dateFrom: dateStr,
+          dateTo: dateStr,
+        });
+        const clubResults = results.filter((r) => r.clubId === court.clubId);
+        const allSlots: string[] = [];
+        const prices: Record<string, { minPriceCents: number; minPriceFormatted: string }> = {};
+        for (const r of clubResults) {
+          allSlots.push(...(r.timeSlots ?? []));
+          if (r.minPriceCents > 0) {
+            prices[r.id] = {
+              minPriceCents: r.minPriceCents,
+              minPriceFormatted: r.minPriceFormatted ?? `${Math.round(r.minPriceCents / 100)}€`,
+            };
+          }
+        }
+        setTimeSlotsForDate([...new Set(allSlots)].sort());
+        setCourtPrices(prices);
+      } catch {
+        setTimeSlotsForDate([]);
+        setCourtPrices({});
+      } finally {
+        setTimeSlotsLoading(false);
+      }
+    },
+    [court.clubId]
+  );
+
+  useEffect(() => {
+    if (activeTab === 'Reservar') {
+      loadTimeSlotsForDate(selectedDate);
+    }
+  }, [activeTab, selectedDate, loadTimeSlotsForDate]);
+
+  useEffect(() => {
+    if (session?.access_token) {
+      fetchMyPlayerId(session.access_token).then(setOrganizerPlayerId);
+    } else {
+      setOrganizerPlayerId(null);
+    }
+  }, [session?.access_token]);
+
+  const handleReservar = useCallback(
+    async (c: Court, priceInfo: { minPriceCents: number; minPriceFormatted: string } | undefined) => {
+      if (!selectedTimeSlot) {
+        Alert.alert('Elige un horario', 'Selecciona primero una hora en la lista de arriba.');
+        return;
+      }
+      if (!organizerPlayerId || !session?.access_token) {
+        Alert.alert('Inicia sesión', 'Debes iniciar sesión para reservar.');
+        return;
+      }
+      if (!priceInfo || priceInfo.minPriceCents <= 0) {
+        Alert.alert('No disponible', 'No hay precio disponible para esta pista en la fecha seleccionada.');
+        return;
+      }
+
+      setReserving(true);
+      const dateStr = toDateStringLocal(selectedDate);
+      const start_at = `${dateStr}T${selectedTimeSlot}:00.000Z`;
+      const startDate = new Date(start_at);
+      const endDate = new Date(startDate.getTime() + DURATION_MIN * 60 * 1000);
+      const end_at = endDate.toISOString();
+      const totalPriceCents = Math.max(priceInfo.minPriceCents, 100);
+
+      const intentRes = await createIntentForNewMatch(
+        {
+          court_id: c.id,
+          organizer_player_id: organizerPlayerId,
+          start_at,
+          end_at,
+          total_price_cents: totalPriceCents,
+          pay_full: true,
+          visibility: 'private',
+          competitive: false,
+          gender: 'any',
+        },
+        session.access_token
+      );
+
+      if (!intentRes.ok || !intentRes.clientSecret) {
+        setReserving(false);
+        const errMsg = intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.';
+        if (errMsg.includes('esa hora') || errMsg.includes('otro horario')) {
+          Alert.alert('Horario no disponible', 'Ya tienes un partido a esa hora. Elige otro horario.');
+        } else {
+          Alert.alert('Error', errMsg);
+        }
+        return;
+      }
+
+      const returnURL = Linking.createURL('stripe-redirect');
+      const { error: initErr } = await initPaymentSheet({
+        paymentIntentClientSecret: intentRes.clientSecret,
+        merchantDisplayName: 'WeMatch Padel',
+        returnURL,
+      });
+
+      if (initErr) {
+        setReserving(false);
+        Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+        return;
+      }
+
+      const { error: presentErr } = await presentPaymentSheet();
+      if (presentErr) {
+        setReserving(false);
+        if (presentErr.code === 'Canceled') {
+          // Usuario canceló, no mostrar error
+        } else {
+          Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
+        }
+        return;
+      }
+
+      const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, session.access_token);
+      setReserving(false);
+
+      if (!confirmRes.ok) {
+        Alert.alert('Error', 'No se pudo confirmar la reserva. Inténtalo de nuevo.');
+        return;
+      }
+
+      setConfirmationModalData({
+        courtName: c.name,
+        clubName: court.clubName,
+        dateTimeFormatted: formatDateTimeForConfirmation(selectedDate, selectedTimeSlot),
+        duration: `${DURATION_MIN} min`,
+        priceFormatted: priceInfo.minPriceFormatted,
+      });
+      setConfirmationModalVisible(true);
+    },
+    [
+      selectedTimeSlot,
+      selectedDate,
+      organizerPlayerId,
+      session?.access_token,
+      court.clubName,
+      initPaymentSheet,
+      presentPaymentSheet,
+    ]
+  );
 
   return (
     <View style={styles.container}>
@@ -270,30 +468,34 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                 </View>
               </View>
               <View style={styles.section}>
-                <View style={styles.timeSlotsGrid}>
-                  {(court.timeSlots ?? []).length > 0 ? (
-                    <>
-                      <View style={styles.timeSlotsRow}>
-                        {court.timeSlots!.slice(0, 3).map((slot) => (
-                          <Pressable key={slot} style={({ pressed }) => [styles.timeSlotBtn, pressed && styles.pressed]}>
-                            <Text style={styles.timeSlotText}>{slot}</Text>
-                          </Pressable>
-                        ))}
-                      </View>
-                      {court.timeSlots!.length > 3 && (
-                        <View style={styles.timeSlotsRow}>
-                          {court.timeSlots!.slice(3).map((slot) => (
-                            <Pressable key={slot} style={({ pressed }) => [styles.timeSlotBtn, pressed && styles.pressed]}>
-                              <Text style={styles.timeSlotText}>{slot}</Text>
-                            </Pressable>
-                          ))}
-                        </View>
-                      )}
-                    </>
-                  ) : (
-                    <Text style={styles.partidosEmptySubtitle}>Sin horarios disponibles</Text>
-                  )}
-                </View>
+                {timeSlotsLoading ? (
+                  <ActivityIndicator size="small" color="#E31E24" style={{ paddingVertical: 16 }} />
+                ) : timeSlotsForDate.length > 0 ? (
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.timeSlotsCarousel}
+                  >
+                    {timeSlotsForDate.map((slot) => {
+                      const isSelected = selectedTimeSlot === slot;
+                      return (
+                        <Pressable
+                          key={slot}
+                          onPress={() => setSelectedTimeSlot(slot)}
+                          style={({ pressed }) => [
+                            styles.timeSlotBtn,
+                            isSelected && styles.timeSlotBtnSelected,
+                            pressed && styles.pressed,
+                          ]}
+                        >
+                          <Text style={[styles.timeSlotText, isSelected && styles.timeSlotTextSelected]}>{slot}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                ) : (
+                  <Text style={styles.partidosEmptySubtitle}>Sin horarios disponibles</Text>
+                )}
               </View>
               <View style={styles.section}>
                 <View style={styles.alertHeader}>
@@ -319,27 +521,63 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                   {clubCourtsLoading ? (
                     <ActivityIndicator size="small" color="#E31E24" style={{ paddingVertical: 16 }} />
                   ) : clubCourts.length > 0 ? (
-                    clubCourts.map((c) => (
-                      <Pressable key={c.id} style={({ pressed }) => [styles.courtRow, pressed && styles.pressed]}>
-                        <View style={styles.courtRowLeft}>
-                          <Text style={styles.courtName}>{c.name}</Text>
-                          <Text style={styles.courtSub}>
-                            {getCerramientoLabel(c.indoor)} | {getParedesLabel(c.glass_type)} | Dobles
-                          </Text>
+                    clubCourts.map((c) => {
+                      const isExpanded = expandedCourtId === c.id;
+                      const priceInfo = courtPrices[c.id];
+                      return (
+                        <View key={c.id} style={styles.courtCard}>
+                          <Pressable
+                            style={({ pressed }) => [styles.courtCardHeader, pressed && styles.pressed]}
+                            onPress={() => setExpandedCourtId(isExpanded ? null : c.id)}
+                          >
+                            <View style={styles.courtRowLeft}>
+                              <Text style={styles.courtCardName}>{c.name}</Text>
+                              <Text style={styles.courtCardSub}>
+                                {getCerramientoLabel(c.indoor)} | {getParedesLabel(c.glass_type)} | Dobles
+                              </Text>
+                            </View>
+                            <Ionicons
+                              name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                              size={20}
+                              color="#9ca3af"
+                            />
+                          </Pressable>
+                          {isExpanded && (
+                            <View style={styles.courtCardActions}>
+                                <Pressable style={({ pressed }) => [styles.courtPriceBtn, pressed && styles.pressed]}>
+                                  <Text style={styles.courtPriceAmount}>
+                                    {priceInfo?.minPriceFormatted ?? '-'}
+                                  </Text>
+                                  <Text style={styles.courtPriceDuration}>60 min</Text>
+                                </Pressable>
+                                <Pressable
+                                style={({ pressed }) => [
+                                  styles.courtReservarBtn,
+                                  (!selectedTimeSlot || reserving) && styles.courtReservarBtnDisabled,
+                                  pressed && !reserving && selectedTimeSlot && styles.pressed,
+                                ]}
+                                onPress={() =>
+                                  selectedTimeSlot
+                                    ? handleReservar(c, priceInfo ?? undefined)
+                                    : undefined
+                                }
+                                disabled={reserving || !selectedTimeSlot}
+                              >
+                                {reserving ? (
+                                  <ActivityIndicator size="small" color="#1A1A1A" />
+                                ) : !selectedTimeSlot ? (
+                                  <Text style={styles.courtReservarTextDisabled}>Elige hora</Text>
+                                ) : (
+                                  <Text style={styles.courtReservarText}>Reservar</Text>
+                                )}
+                              </Pressable>
+                            </View>
+                          )}
                         </View>
-                        <Ionicons name="chevron-down" size={20} color="#9ca3af" />
-                      </Pressable>
-                    ))
+                      );
+                    })
                   ) : (
-                    <Pressable style={({ pressed }) => [styles.courtRow, pressed && styles.pressed]}>
-                      <View style={styles.courtRowLeft}>
-                        <Text style={styles.courtName}>{court.courtName}</Text>
-                        <Text style={styles.courtSub}>
-                          {getCerramientoLabel(court.indoor)} | {getParedesLabel(court.glassType)} | Dobles
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-down" size={20} color="#9ca3af" />
-                    </Pressable>
+                    <Text style={styles.partidosEmptySubtitle}>Sin pistas en este club</Text>
                   )}
                 </View>
               </View>
@@ -522,6 +760,12 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
             </>
           )}
         </ScrollView>
+
+        <BookingConfirmationModal
+          visible={confirmationModalVisible}
+          data={confirmationModalData}
+          onClose={() => setConfirmationModalVisible(false)}
+        />
       </View>
   );
 }
@@ -1021,15 +1265,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#6b7280',
   },
-  timeSlotsGrid: {
-    gap: theme.spacing.xs,
-  },
-  timeSlotsRow: {
+  timeSlotsCarousel: {
     flexDirection: 'row',
     gap: theme.spacing.xs,
+    paddingRight: theme.spacing.lg,
   },
   timeSlotBtn: {
-    flex: 1,
+    width: 72,
     paddingVertical: 12,
     paddingHorizontal: theme.spacing.md,
     borderRadius: 12,
@@ -1037,6 +1279,13 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  timeSlotBtnSelected: {
+    backgroundColor: '#E31E24',
+    borderColor: '#E31E24',
+  },
+  timeSlotTextSelected: {
+    color: '#fff',
   },
   timeSlotText: {
     fontSize: theme.fontSize.xs,
@@ -1076,7 +1325,79 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
   },
   courtList: {
+    gap: theme.spacing.md,
+  },
+  courtCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
+  },
+  courtCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: theme.spacing.md,
+  },
+  courtCardName: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  courtCardSub: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 2,
+  },
+  courtCardActions: {
+    flexDirection: 'row',
     gap: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.md,
+    paddingBottom: theme.spacing.md,
+  },
+  courtPriceBtn: {
+    flex: 1,
+    backgroundColor: '#E31E24',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: theme.spacing.sm,
+    alignItems: 'center',
+  },
+  courtPriceAmount: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  courtPriceDuration: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: 1,
+  },
+  courtReservarBtn: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingVertical: 8,
+    paddingHorizontal: theme.spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  courtReservarText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  courtReservarTextDisabled: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: '600',
+    color: '#9ca3af',
+  },
+  courtReservarBtnDisabled: {
+    backgroundColor: '#f9fafb',
+    opacity: 0.9,
   },
   courtRow: {
     flexDirection: 'row',

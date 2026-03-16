@@ -3,10 +3,11 @@ export interface Player {
     created_at: string;
     first_name: string;
     last_name: string;
-    email: string;
+    email: string | null;
     phone: string | null;
     elo_rating: number;
-    status: 'active' | 'deleted';
+    status: 'active' | 'blocked' | 'deleted';
+    auth_user_id?: string | null;
 }
 
 export interface ClubOwner {

@@ -129,9 +129,14 @@ export const Login: React.FC = () => {
 
                             {/* Password Field */}
                             <div>
-                                <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-2">
-                                    {t('password_label')}
-                                </label>
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider">
+                                        {t('password_label')}
+                                    </label>
+                                    <Link to="/forgot-password" className="text-[10px] text-[#E31E24]/90 hover:text-[#E31E24] uppercase tracking-wider">
+                                        {t('forgot_password_link')}
+                                    </Link>
+                                </div>
                                 <div className="relative">
                                     <input
                                         type={showPassword ? "text" : "password"}
