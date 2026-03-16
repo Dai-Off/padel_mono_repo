@@ -65,3 +65,36 @@ export async function submitClubApplication(
         body: JSON.stringify(data),
     });
 }
+
+export interface ValidateInviteResponse {
+    ok: boolean;
+    already_completed?: boolean;
+    application_id?: string;
+    email?: string;
+    responsible_name?: string;
+    club_name?: string;
+    error?: string;
+}
+
+export async function validateInvite(applicationId: string, token: string): Promise<ValidateInviteResponse> {
+    const url = `${base('/club-applications/' + applicationId + '/validate-invite')}?token=${encodeURIComponent(token)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Enlace inválido');
+    return data;
+}
+
+export interface RegisterClubOwnerResponse {
+    ok: boolean;
+    already_registered?: boolean;
+    message?: string;
+    session?: { access_token: string; refresh_token?: string; expires_at?: number };
+    error?: string;
+}
+
+export async function registerClubOwner(applicationId: string, token: string, password: string): Promise<RegisterClubOwnerResponse> {
+    return apiFetch<RegisterClubOwnerResponse>('/auth/register-club-owner', {
+        method: 'POST',
+        body: JSON.stringify({ application_id: applicationId, token, password }),
+    });
+}

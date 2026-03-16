@@ -40,7 +40,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     glassType === 'panoramic' ? 'Cristal' : 'Muro',
     'Dobles',
   ].join(', ');
-  const mode: PartidoMode = m.competitive ? 'competitivo' : 'automático';
+  const mode: PartidoMode = m.competitive ? 'competitivo' : 'amistoso';
   const typeLabel = m.gender === 'mixed' ? 'Mixto' : 'Todos los jugadores';
   const levelRange = m.elo_min != null && m.elo_max != null
     ? `${(m.elo_min / 1000).toFixed(2)} - ${(m.elo_max / 1000).toFixed(2)}`
@@ -92,6 +92,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   return {
     id: m.id,
     playerIds,
+    visibility: m.visibility === 'private' ? 'private' : 'public',
     dateTime: formatDateTime(b.start_at, b.end_at),
     mode,
     typeLabel,

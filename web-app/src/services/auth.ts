@@ -16,6 +16,13 @@ export const authService = {
         });
     },
 
+    forgotPassword: async (email: string): Promise<{ ok: boolean; error?: string; message?: string }> => {
+        return apiFetch<{ ok: boolean; error?: string; message?: string }>('/auth/forgot-password', {
+            method: 'POST',
+            body: JSON.stringify({ email }),
+        });
+    },
+
     getMe: async (): Promise<MeResponse> => {
         return apiFetchWithAuth<MeResponse>('/auth/me');
     },
