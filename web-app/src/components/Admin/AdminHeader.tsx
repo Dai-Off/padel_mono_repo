@@ -1,10 +1,16 @@
-import { ArrowLeft } from 'lucide-react';
+import { LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { authService } from '../../services/auth';
 
 export const AdminHeader = () => {
     const { t } = useTranslation();
     const navigate = useNavigate();
+
+    const handleLogout = () => {
+        authService.logout();
+        navigate('/login');
+    };
 
     return (
         <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-md border-b border-border-subtle">
@@ -17,11 +23,13 @@ export const AdminHeader = () => {
                         <h1 className="text-sm font-bold text-primary">{t('admin_panel')}</h1>
                     </div>
                     <button
-                        onClick={() => navigate('/')}
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-all"
+                        type="button"
+                        onClick={handleLogout}
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-all"
+                        title={t('logout')}
                     >
-                        <ArrowLeft className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">{t('admin_go_dashboard')}</span>
+                        <LogOut className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">{t('logout')}</span>
                     </button>
                 </div>
             </div>

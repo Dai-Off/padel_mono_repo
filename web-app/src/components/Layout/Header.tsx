@@ -7,9 +7,10 @@ interface HeaderProps {
     clubName: string;
     isOnline?: boolean;
     onToggleMenu?: () => void;
+    clubLogoUrl?: string | null;
 }
 
-export const Header = ({ clubName, isOnline = true, onToggleMenu }: HeaderProps) => {
+export const Header = ({ clubName, isOnline = true, onToggleMenu, clubLogoUrl }: HeaderProps) => {
     const { t, i18n } = useTranslation();
     const navigate = useNavigate();
 
@@ -35,8 +36,18 @@ export const Header = ({ clubName, isOnline = true, onToggleMenu }: HeaderProps)
                             <Menu className="w-5 h-5 text-primary" />
                         </button>
 
-                        <div className="w-9 h-9 rounded-xl overflow-hidden bg-white border border-border-subtle p-1 flex-shrink-0">
-                            <img src="/logo.png" alt="Logo" className="w-full h-full object-contain" />
+                        <div className="w-9 h-9 rounded-xl overflow-hidden bg-white border border-border-subtle p-1 flex-shrink-0 flex items-center justify-center">
+                            {clubLogoUrl ? (
+                                <img
+                                    src={clubLogoUrl}
+                                    alt={clubName || 'Club logo'}
+                                    className="w-full h-full object-contain"
+                                />
+                            ) : (
+                                <span className="text-[10px] font-bold text-primary truncate">
+                                    {(clubName || '').trim() ? (clubName || '').trim().slice(0, 2).toUpperCase() : 'CL'}
+                                </span>
+                            )}
                         </div>
                         <div className="min-w-0">
                             <h1 className="text-sm font-bold text-primary truncate">{clubName}</h1>
