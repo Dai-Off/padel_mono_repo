@@ -5,7 +5,6 @@ import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 
 const router = Router();
 router.use(attachAuthContext);
-router.use(requireClubOwnerOrAdmin);
 
 const FIELDS = 'id, created_at, club_id, name, indoor, glass_type, status, lighting, last_maintenance';
 
@@ -14,6 +13,7 @@ function canAccessCourtClub(req: Request, clubId: string): boolean {
   return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
 }
 
+/** GET /courts — listar pistas. Público (app móvil, reservas). Si hay token y es admin/dueño, se filtra por sus clubs; si no, se devuelven todas (o por club_id si se pasa). */
 router.get('/', async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   try {
@@ -22,14 +22,14 @@ router.get('/', async (req: Request, res: Response) => {
       .from('courts')
       .select(FIELDS)
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(100);
     if (req.authContext?.adminId) {
       if (club_id) q = q.eq('club_id', club_id);
+    } else if (req.authContext?.clubOwnerId && req.authContext?.allowedClubIds?.length) {
+      q = q.in('club_id', req.authContext.allowedClubIds);
+      if (club_id && !req.authContext.allowedClubIds.includes(club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+      if (club_id) q = q.eq('club_id', club_id);
     } else {
-      const allowed = req.authContext?.allowedClubIds ?? [];
-      if (allowed.length === 0) return res.json({ ok: true, courts: [] });
-      if (club_id && !allowed.includes(club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
-      q = q.in('club_id', allowed);
       if (club_id) q = q.eq('club_id', club_id);
     }
     const { data, error } = await q;
@@ -40,6 +40,7 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /courts/:id — detalle de una pista. Público (app móvil, reservas). */
 router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
@@ -51,14 +52,13 @@ router.get('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Pista no encontrada' });
-    if (!canAccessCourtClub(req, (data as { club_id: string }).club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a esta pista' });
     return res.json({ ok: true, court: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { club_id, name, indoor, glass_type, lighting, last_maintenance } = req.body ?? {};
   if (!club_id || !name || !String(name).trim()) {
     return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
@@ -86,7 +86,7 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -122,7 +122,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
