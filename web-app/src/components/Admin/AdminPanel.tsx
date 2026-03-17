@@ -9,6 +9,7 @@ import { adminApplicationsService, type ClubApplication, type ApplicationStatus 
 import { authService } from '../../services/auth';
 import { HttpError } from '../../services/api';
 import { TabSwitcher } from '../Common/TabSwitcher';
+import { PageSkeleton } from '../Layout/PageSkeleton';
 
 const STATUS_TAB_ALL = 'all';
 
@@ -67,6 +68,10 @@ export const AdminPanel = () => {
         await adminApplicationsService.reject(id, reason);
         toast.success(t('admin_status_rejected'));
     };
+
+    if (loading && applications.length === 0) {
+        return <PageSkeleton />;
+    }
 
     return (
         <div className="min-h-screen bg-background text-foreground font-sans">
