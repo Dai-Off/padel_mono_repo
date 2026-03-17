@@ -8,9 +8,9 @@ router.use(attachAuthContext);
 router.use(requireClubOwnerOrAdmin);
 
 const SELECT_LIST =
-  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency';
+  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, logo_url';
 const SELECT_ONE =
-  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions';
+  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions, logo_url';
 
 function canAccessClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
@@ -72,6 +72,7 @@ router.post('/', async (req: Request, res: Response) => {
     base_currency,
     weekly_schedule,
     schedule_exceptions,
+    logo_url,
   } = req.body ?? {};
   if (!owner_id || !fiscal_tax_id || !fiscal_legal_name || !name || !address || !city || !postal_code) {
     return res.status(400).json({
@@ -101,6 +102,7 @@ router.post('/', async (req: Request, res: Response) => {
           base_currency: base_currency ?? 'EUR',
           weekly_schedule: weekly_schedule ?? {},
           schedule_exceptions: schedule_exceptions ?? [],
+          logo_url: logo_url ?? null,
         },
       ])
       .select(SELECT_ONE)
@@ -120,7 +122,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   const allowed = [
     'fiscal_tax_id', 'fiscal_legal_name', 'name', 'description',
     'address', 'city', 'postal_code', 'lat', 'lng', 'base_currency',
-    'weekly_schedule', 'schedule_exceptions',
+    'weekly_schedule', 'schedule_exceptions', 'logo_url',
   ];
   for (const key of allowed) {
     if (body[key] !== undefined) update[key] = body[key];

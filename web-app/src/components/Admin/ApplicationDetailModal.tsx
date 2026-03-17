@@ -40,7 +40,6 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
     const canAct = status === 'pending' || status === 'contacted';
 
     const handleApprove = async () => {
-        if (!confirm(t('admin_confirm_approve'))) return;
         setLoading('approve');
         try {
             const { invite_url } = await onApprove(application.id);

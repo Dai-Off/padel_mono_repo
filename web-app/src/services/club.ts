@@ -15,6 +15,7 @@ export interface Club {
     base_currency: string;
     weekly_schedule: any;
     schedule_exceptions: any;
+    logo_url?: string | null;
     created_at: string;
     updated_at: string;
 }
