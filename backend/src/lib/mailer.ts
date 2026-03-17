@@ -1,5 +1,3 @@
-import { getSupabaseServiceRoleClient } from './supabase';
-
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -8,24 +6,57 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+const EDGE_INVOKE_SECRET = (process.env.EDGE_INVOKE_SECRET || '').trim();
+
+/**
+ * Invoca la Edge Function por HTTP (sin JWT: la función debe tener verify_jwt = false).
+ * Opcional: EDGE_INVOKE_SECRET en backend y en la función para autorizar solo este servidor.
+ */
 async function invokeEdgeFunction(name: string, body: Record<string, unknown>): Promise<{ sent: boolean; error?: string }> {
+  if (!SUPABASE_URL) {
+    return { sent: false, error: 'Falta SUPABASE_URL' };
+  }
+  const url = `${SUPABASE_URL}/functions/v1/${name}`;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (EDGE_INVOKE_SECRET) headers['x-edge-invoke-secret'] = EDGE_INVOKE_SECRET;
+
   try {
-    const supabase = getSupabaseServiceRoleClient();
-    const { data, error } = await supabase.functions.invoke(name, { body });
-    if (error) {
-      console.error(`Edge Function ${name} error:`, error.message ?? error);
-      return { sent: false, error: typeof error === 'string' ? error : (error as Error).message ?? 'Error al invocar Edge Function' };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    const raw = await res.text();
+    let data: Record<string, unknown> | null = null;
+    try {
+      if (raw) data = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      if (!res.ok) return { sent: false, error: raw || `HTTP ${res.status}` };
     }
-    const ok = data && typeof data === 'object' && (data as { ok?: boolean }).ok === true;
-    const errMsg = data && typeof data === 'object' ? (data as { error?: string }).error : undefined;
-    if (!ok && errMsg) {
-      console.error(`Edge Function ${name} response error:`, errMsg);
+    const errMsg = data && typeof data.error === 'string' ? data.error : data && typeof (data as { error?: { message?: string } }).error?.message === 'string' ? (data as { error: { message: string } }).error.message : null;
+    if (data && data.ok === false && typeof data.error === 'string') {
+      console.error('Edge Function', name, 'error:', data.error);
+      return { sent: false, error: data.error };
+    }
+    if (errMsg) {
+      console.error('Edge Function', name, 'error:', errMsg);
       return { sent: false, error: errMsg };
+    }
+    if (!res.ok) {
+      const msg =
+        (data && typeof data.error === 'string' ? data.error : null) ||
+        (data && typeof (data as { message?: string }).message === 'string' ? (data as { message: string }).message : null) ||
+        raw ||
+        `HTTP ${res.status}`;
+      return { sent: false, error: msg };
     }
     return { sent: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`invokeEdgeFunction ${name} error:`, msg);
+    console.error('Edge Function', name, 'invoke error:', msg);
     return { sent: false, error: msg };
   }
 }

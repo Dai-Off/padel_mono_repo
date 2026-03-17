@@ -38,7 +38,7 @@ import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
 import dropSoundAsset from '../../assets/sounds/sfx2.mp3';
 
-import { apiFetch } from '../../services/api';
+import { apiFetchWithAuth } from '../../services/api';
 
 import './grilla.css';
 
@@ -65,16 +65,17 @@ const useClubData = (dateOrStr: Date | string) => {
     const fetchCourts = useCallback(async (): Promise<Court[]> => {
         if (courtsRef.current.length > 0) return courtsRef.current;
 
-        let courtsRes = await apiFetch<any>(`/courts?club_id=${clubId}`);
+        let courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${clubId}`);
         let courtsData: Court[] = (courtsRes.courts || []).map((c: any) => ({
             id: c.id, name: c.name, locationId: 'sede-central'
         }));
 
         if (courtsData.length === 0) {
-            const allClubsRes = await apiFetch<any>('/clubs');
-            if (allClubsRes.ok && allClubsRes.result?.length > 0) {
-                const firstClub = allClubsRes.result[0];
-                courtsRes = await apiFetch<any>(`/courts?club_id=${firstClub.id}`);
+            const allClubsRes = await apiFetchWithAuth<any>('/clubs');
+            const clubsList = allClubsRes?.clubs ?? [];
+            if (allClubsRes?.ok && clubsList.length > 0) {
+                const firstClub = clubsList[0];
+                courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${firstClub.id}`);
                 courtsData = (courtsRes.courts || []).map((c: any) => ({
                     id: c.id, name: c.name, locationId: 'sede-central'
                 }));
@@ -103,7 +104,7 @@ const useClubData = (dateOrStr: Date | string) => {
             return mapBookings(cached.data, courtsData);
         }
 
-        const bRes = await apiFetch<any>(`/bookings?date=${date}`);
+        const bRes = await apiFetchWithAuth<any>(`/bookings?date=${date}`);
         const raw = bRes.bookings || [];
         bookingsCache[date] = { data: raw, ts: Date.now() };
         return mapBookings(raw, courtsData);
@@ -145,7 +146,7 @@ const useClubData = (dateOrStr: Date | string) => {
                 const ds = toDateStr(d);
                 if (!bookingsCache[ds] || Date.now() - bookingsCache[ds].ts >= CACHE_TTL) {
                     try {
-                        const bRes = await apiFetch<any>(`/bookings?date=${ds}`);
+                        const bRes = await apiFetchWithAuth<any>(`/bookings?date=${ds}`);
                         bookingsCache[ds] = { data: bRes.bookings || [], ts: Date.now() };
                     } catch { /* silent prefetch */ }
                 }
@@ -369,7 +370,7 @@ function GrillaViewInner() {
       setSelectedModalReservationId(res.id);
       if (!res.id.startsWith('new-')) {
           try {
-              const data = await apiFetch<any>(`/bookings/${res.id}`);
+              const data = await apiFetchWithAuth<any>(`/bookings/${res.id}`);
               if (data.ok) {
                   // Enrich with courtName from reservation state (court_id alone is not human-readable)
                   const court = courts.find(c => c.id === (data.booking.court_id ?? res.courtId));
@@ -388,7 +389,7 @@ function GrillaViewInner() {
 
   const handleUpdateBooking = async (bookingId: string, bookingData: any) => {
       try {
-          const res = await apiFetch<any>(`/bookings/${bookingId}`, {
+          const res = await apiFetchWithAuth<any>(`/bookings/${bookingId}`, {
               method: 'PUT',
               body: JSON.stringify(bookingData),
           });
@@ -409,7 +410,7 @@ function GrillaViewInner() {
       setSelectedModalReservationId(null);
       setEditingBookingData(null);
       try {
-          const res = await apiFetch<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
+          const res = await apiFetchWithAuth<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
           if (!res.ok) {
               // Revert on failure
               refresh();
@@ -435,7 +436,7 @@ function GrillaViewInner() {
               timezone: 'Europe/Madrid' // Or dynamic
           };
 
-          const res = await apiFetch<any>('/bookings', {
+          const res = await apiFetchWithAuth<any>('/bookings', {
               method: 'POST',
               body: JSON.stringify(payload)
           });
@@ -665,7 +666,7 @@ function GrillaViewInner() {
     const startAt = new Date(`${baseDate}T${startTime}`).toISOString();
     const endAt = new Date(new Date(startAt).getTime() + durationMinutes * 60000).toISOString();
 
-    apiFetch<any>(`/bookings/${reservationId}`, {
+    apiFetchWithAuth<any>(`/bookings/${reservationId}`, {
       method: 'PUT',
       body: JSON.stringify({
         court_id: courtId,
