@@ -53,6 +53,14 @@ function App() {
           }
         />
         <Route
+          path="/configuracion"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/onboarding"
           element={
             <ProtectedRoute>

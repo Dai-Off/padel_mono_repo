@@ -1,10 +1,19 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { attachAuthContext } from '../middleware/attachAuthContext';
+import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 
 const router = Router();
+router.use(attachAuthContext);
 
 const FIELDS = 'id, created_at, club_id, name, indoor, glass_type, status, lighting, last_maintenance';
 
+function canAccessCourtClub(req: Request, clubId: string): boolean {
+  if (req.authContext?.adminId) return true;
+  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
+}
+
+/** GET /courts — listar pistas. Público (app móvil, reservas). Si hay token y es admin/dueño, se filtra por sus clubs; si no, se devuelven todas (o por club_id si se pasa). */
 router.get('/', async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   try {
@@ -13,8 +22,16 @@ router.get('/', async (req: Request, res: Response) => {
       .from('courts')
       .select(FIELDS)
       .order('created_at', { ascending: false })
-      .limit(50);
-    if (club_id) q = q.eq('club_id', club_id);
+      .limit(100);
+    if (req.authContext?.adminId) {
+      if (club_id) q = q.eq('club_id', club_id);
+    } else if (req.authContext?.clubOwnerId && req.authContext?.allowedClubIds?.length) {
+      q = q.in('club_id', req.authContext.allowedClubIds);
+      if (club_id && !req.authContext.allowedClubIds.includes(club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+      if (club_id) q = q.eq('club_id', club_id);
+    } else {
+      if (club_id) q = q.eq('club_id', club_id);
+    }
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, courts: data ?? [] });
@@ -23,6 +40,7 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /courts/:id — detalle de una pista. Público (app móvil, reservas). */
 router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
@@ -40,11 +58,12 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { club_id, name, indoor, glass_type, lighting, last_maintenance } = req.body ?? {};
   if (!club_id || !name || !String(name).trim()) {
     return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
   }
+  if (!canAccessCourtClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   try {
     const supabase = getSupabaseServiceRoleClient();
     const row: Record<string, unknown> = {
@@ -67,8 +86,15 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: existing } = await supabase.from('courts').select('club_id').eq('id', id).maybeSingle();
+    if (!existing || !canAccessCourtClub(req, (existing as { club_id: string }).club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a esta pista' });
+  } catch {
+    return res.status(500).json({ ok: false, error: 'Error al verificar pista' });
+  }
   const { name, indoor, glass_type, status, lighting, last_maintenance } = req.body ?? {};
   const update: Record<string, unknown> = {};
   if (name !== undefined) update.name = String(name).trim();
@@ -96,10 +122,12 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const { data: existing } = await supabase.from('courts').select('club_id').eq('id', id).maybeSingle();
+    if (!existing || !canAccessCourtClub(req, (existing as { club_id: string }).club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a esta pista' });
     const { error } = await supabase.from('courts').delete().eq('id', id);
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, deleted: id });

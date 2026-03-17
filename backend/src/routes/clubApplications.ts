@@ -4,6 +4,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { generateInviteToken, hashInviteToken, getInviteExpiresAt } from '../lib/inviteToken';
 import { requireAdmin } from '../middleware/requireAdmin';
 import { sendInviteEmail } from '../lib/mailer';
+import { getFrontendUrl } from '../lib/env';
 
 const router = Router();
 const APPLICATIONS_SELECT = 'id, created_at, responsible_first_name, responsible_last_name, club_name, city, country, phone, email, court_count, sport, status, approved_at, rejected_at, rejection_reason, club_owner_id, club_id, invitation_sent_at, official_name, full_address, description, tax_id, fiscal_address, courts, open_time, close_time, slot_duration_min, pricing';
@@ -154,8 +155,7 @@ router.post('/:id/approve', requireAdmin, async (req: Request, res: Response) =>
       .update({ status: 'approved', approved_at: new Date().toISOString(), invitation_sent_at: new Date().toISOString() })
       .eq('id', id);
     if (updateErr) return res.status(500).json({ ok: false, error: updateErr.message });
-    const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const inviteUrl = `${baseUrl}/registro-club?application_id=${id}&token=${token}`;
+    const inviteUrl = `${getFrontendUrl()}/registro-club?application_id=${id}&token=${token}`;
     const clubName = (app as { club_name?: string }).club_name ?? 'Tu club';
     const emailResult = await sendInviteEmail(app.email, inviteUrl, clubName);
     return res.json({

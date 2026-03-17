@@ -48,7 +48,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
         {
             title: t('menu_gestion'),
             items: [
-                { id: 'checkin', path: '/check-in', icon: UserPlus, label: t('menu_checkin'), color: 'rgb(139, 92, 246)', bgColor: 'rgba(139, 92, 246, 0.06)' },
+                { id: 'checkIn', path: '/checkIn', icon: UserPlus, label: t('menu_checkin'), color: 'rgb(139, 92, 246)', bgColor: 'rgba(139, 92, 246, 0.06)' },
                 { id: 'personal', path: '/personal', icon: Users, label: t('menu_personal'), color: 'rgb(236, 72, 153)', bgColor: 'rgba(236, 72, 153, 0.06)' },
                 { id: 'jugadores', path: '/jugadores', icon: Users, label: t('menu_jugadores'), color: 'rgb(20, 184, 166)', bgColor: 'rgba(20, 184, 166, 0.06)' },
                 { id: 'escuela', path: '/escuela', icon: Award, label: t('menu_escuela'), color: 'rgb(249, 115, 22)', bgColor: 'rgba(249, 115, 22, 0.06)' },
@@ -59,7 +59,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
             title: t('menu_finanzas'),
             items: [
                 { id: 'pagos', path: '/pagos', icon: DollarSign, label: t('menu_pagos'), color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.06)' },
-                { id: 'cierre-caja', path: '/cierre-caja', icon: DollarSign, label: t('menu_cierre_caja'), color: 'rgb(5, 150, 105)', bgColor: 'rgba(5, 150, 105, 0.06)' },
+                { id: 'cierreCaja', path: '/cierreCaja', icon: DollarSign, label: t('menu_cierre_caja'), color: 'rgb(5, 150, 105)', bgColor: 'rgba(5, 150, 105, 0.06)' },
             ]
         },
         {
@@ -68,7 +68,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
                 { id: 'crm', path: '/crm', icon: MessageSquare, label: t('menu_crm'), color: 'rgb(59, 130, 246)', bgColor: 'rgba(59, 130, 246, 0.06)' },
                 { id: 'torneos', path: '/torneos', icon: Award, label: t('menu_torneos'), color: 'rgb(234, 179, 8)', bgColor: 'rgba(234, 179, 8, 0.06)' },
                 { id: 'incidencias', path: '/incidencias', icon: AlertCircle, label: t('menu_incidencias'), color: 'rgb(239, 68, 68)', bgColor: 'rgba(239, 68, 68, 0.06)' },
-                { id: 'reseñas', path: '/reseñas', icon: Star, label: t('menu_reseñas'), color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
+                { id: 'resenas', path: '/resenas', icon: Star, label: t('menu_reseñas'), color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
                 { id: 'onboarding', path: '/onboarding', icon: Settings, label: t('onboarding_menu'), color: 'rgb(107, 114, 128)', bgColor: 'rgba(107, 114, 128, 0.06)' },
                 { id: 'configuracion', path: '/configuracion', icon: Settings, label: t('menu_configuracion'), color: 'rgb(107, 114, 128)', bgColor: 'rgba(107, 114, 128, 0.06)' },
             ]

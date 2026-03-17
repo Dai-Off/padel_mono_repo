@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hashInviteToken } from '../lib/inviteToken';
 import { sendPasswordResetEmail } from '../lib/mailer';
+import { getFrontendUrl } from '../lib/env';
 
 const router = Router();
 
@@ -173,8 +174,6 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // POST /auth/forgot-password — envía enlace para restablecer contraseña por email
-const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
-
 router.post('/forgot-password', async (req: Request, res: Response) => {
   const { email } = req.body ?? {};
   const emailStr = typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -184,7 +183,7 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const redirectTo = `${FRONTEND_URL}/reset-password`;
+    const redirectTo = `${getFrontendUrl()}/reset-password`;
     const { data, error } = await supabase.auth.admin.generateLink({
       type: 'recovery',
       email: emailStr,
@@ -273,12 +272,11 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
       .eq('token_hash', tokenHash)
       .maybeSingle();
     if (inviteErr || !invite) return res.status(400).json({ ok: false, error: 'Enlace inválido' });
-    if (invite.used_at) return res.status(400).json({ ok: false, error: 'Este enlace ya fue utilizado' });
     if (new Date(invite.expires_at) < new Date()) return res.status(400).json({ ok: false, error: 'El enlace ha expirado' });
 
     const { data: app, error: appErr } = await supabase.from('club_applications').select('*').eq('id', application_id).eq('status', 'approved').maybeSingle();
     if (appErr || !app) return res.status(400).json({ ok: false, error: 'Solicitud no válida' });
-    if (app.club_owner_id) {
+    if (app.club_owner_id || invite.used_at) {
       return res.status(200).json({
         ok: true,
         already_registered: true,
