@@ -48,6 +48,7 @@ export function ClubSettingsTab() {
         city: '',
         postal_code: '',
         description: '',
+        logo_url: '',
     });
 
     const selectedClub = selectedClubId ? clubs.find((c) => c.id === selectedClubId) ?? null : null;
@@ -60,6 +61,7 @@ export function ClubSettingsTab() {
             city: club.city ?? '',
             postal_code: club.postal_code ?? '',
             description: club.description ?? '',
+            logo_url: club.logo_url ?? '',
         });
     }, []);
 
@@ -229,6 +231,12 @@ export function ClubSettingsTab() {
                                 className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/30 text-sm text-[#1A1A1A] resize-none"
                             />
                         </div>
+                        <InputField
+                            label="Logo URL"
+                            value={form.logo_url}
+                            onChange={(v) => setForm((f) => ({ ...f, logo_url: v }))}
+                            placeholder="https://..."
+                        />
                     </div>
                 </div>
 

@@ -39,6 +39,7 @@ import type { ZoomLevel } from './context/ZoomContext';
 import dropSoundAsset from '../../assets/sounds/sfx2.mp3';
 
 import { apiFetchWithAuth } from '../../services/api';
+import { PageSkeleton } from '../../components/Layout/PageSkeleton';
 
 import './grilla.css';
 
@@ -57,29 +58,36 @@ const useClubData = (dateOrStr: Date | string) => {
     const [reservations, setReservations] = useState<Reservation[]>([]);
     const [loading, setLoading] = useState(true);
     const courtsRef = useRef<Court[]>([]);
+    const [clubName, setClubName] = useState<string>('');
 
-    const clubId = '70a3ffb1-3bd7-4791-9153-b65d704f703c';
+    const [clubId, setClubId] = useState<string | null>(null);
     const dateStr = toDateStr(dateOrStr);
 
     // Fetch courts once (they rarely change)
     const fetchCourts = useCallback(async (): Promise<Court[]> => {
         if (courtsRef.current.length > 0) return courtsRef.current;
 
-        let courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${clubId}`);
-        let courtsData: Court[] = (courtsRes.courts || []).map((c: any) => ({
-            id: c.id, name: c.name, locationId: 'sede-central'
-        }));
+        let effectiveClubId = clubId;
 
-        if (courtsData.length === 0) {
+        // If we don't know the club yet, fetch clubs and pick the first one linked to the user
+        if (!effectiveClubId) {
             const allClubsRes = await apiFetchWithAuth<any>('/clubs');
             const clubsList = allClubsRes?.clubs ?? [];
             if (allClubsRes?.ok && clubsList.length > 0) {
                 const firstClub = clubsList[0];
-                courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${firstClub.id}`);
-                courtsData = (courtsRes.courts || []).map((c: any) => ({
-                    id: c.id, name: c.name, locationId: 'sede-central'
-                }));
+                effectiveClubId = firstClub.id;
+                setClubId(firstClub.id);
+                setClubName(firstClub.name ?? '');
             }
+        }
+
+        let courtsData: Court[] = [];
+
+        if (effectiveClubId) {
+            const courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${effectiveClubId}`);
+            courtsData = (courtsRes.courts || []).map((c: any) => ({
+                id: c.id, name: c.name, locationId: 'sede-central'
+            }));
         }
 
         if (courtsData.length === 0) {
@@ -157,7 +165,7 @@ const useClubData = (dateOrStr: Date | string) => {
         return () => clearTimeout(timer);
     }, [dateStr, dateOrStr]);
 
-    return { courts, reservations, loading, refresh };
+    return { courts, reservations, loading, refresh, clubName };
 };
 
 // Pure mapping function — no network calls
@@ -269,7 +277,7 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
-  const { courts, reservations: serverReservations, refresh } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, refresh, clubName, loading } = useClubData(selectedDate);
 
   // Filter courts and reservations by the active location tab
   const activeCourts = useMemo(() => {
@@ -864,6 +872,10 @@ function GrillaViewInner() {
     }
   };
 
+  if (loading && courts.length === 0) {
+    return <PageSkeleton />;
+  }
+
   return (
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
       <div className="h-[100dvh] flex flex-col bg-gray-100 font-sans overflow-x-hidden overflow-y-auto landscape:overflow-y-auto">
@@ -880,7 +892,9 @@ function GrillaViewInner() {
                 </div>
               </div>
               <div className="flex flex-col">
-                <h1 className="text-[13px] md:text-sm font-bold text-gray-900 leading-tight">{t('header.clubName')}</h1>
+                <h1 className="text-[13px] md:text-sm font-bold text-gray-900 leading-tight">
+                  {clubName || t('header.clubName')}
+                </h1>
               </div>
             </div>
             <div className="flex items-center gap-2">

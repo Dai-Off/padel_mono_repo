@@ -8,6 +8,7 @@ function escapeHtml(s: string): string {
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
 const EDGE_INVOKE_SECRET = (process.env.EDGE_INVOKE_SECRET || '').trim();
+const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
 /**
  * Invoca la Edge Function por HTTP (sin JWT: la función debe tener verify_jwt = false).
@@ -22,6 +23,7 @@ async function invokeEdgeFunction(name: string, body: Record<string, unknown>): 
     'Content-Type': 'application/json',
   };
   if (EDGE_INVOKE_SECRET) headers['x-edge-invoke-secret'] = EDGE_INVOKE_SECRET;
+  if (SUPABASE_SERVICE_ROLE_KEY) headers['Authorization'] = `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`;
 
   try {
     const res = await fetch(url, {
