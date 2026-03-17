@@ -75,3 +75,27 @@ export class ApiService {
         return apiFetch<T>(path, { method: 'DELETE' });
     }
 }
+
+export class ApiServiceWithAuth extends ApiService {
+    protected override async get<T>(path: string): Promise<T> {
+        return apiFetchWithAuth<T>(path, { method: 'GET' });
+    }
+
+    protected override async post<T>(path: string, data: any): Promise<T> {
+        return apiFetchWithAuth<T>(path, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    protected override async put<T>(path: string, data: any): Promise<T> {
+        return apiFetchWithAuth<T>(path, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    protected override async deleteRequest<T>(path: string): Promise<T> {
+        return apiFetchWithAuth<T>(path, { method: 'DELETE' });
+    }
+}

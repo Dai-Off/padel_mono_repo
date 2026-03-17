@@ -1,4 +1,4 @@
-import { ApiService } from './api';
+import { ApiServiceWithAuth } from './api';
 
 export interface Club {
     id: string;
@@ -19,7 +19,7 @@ export interface Club {
     updated_at: string;
 }
 
-class ClubService extends ApiService {
+class ClubService extends ApiServiceWithAuth {
     async getAll(ownerId?: string): Promise<Club[]> {
         const url = ownerId ? `/clubs?owner_id=${ownerId}` : '/clubs';
         const response = await this.get<{ clubs: Club[] }>(url);
