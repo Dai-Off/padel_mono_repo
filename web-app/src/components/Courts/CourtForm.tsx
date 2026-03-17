@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import type { Court } from '../../types/court';
+import type { MeResponse } from '../../types/auth';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clubService, type Club } from '../../services/club';
@@ -34,9 +35,18 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
     useEffect(() => {
         setClubsReady(false);
         (async () => {
-            const me = await authService.getMe().catch(() => ({ ok: false }));
-            const admin = me.ok && !!me.roles?.admin_id;
-            const ownerId = me.ok && me.roles?.club_owner_id ? me.roles.club_owner_id : undefined;
+            const me = await authService.getMe().catch(() => ({ ok: false as const }));
+            const isMeResponse = (value: unknown): value is MeResponse =>
+                typeof value === 'object' && value !== null && 'roles' in value;
+
+            let admin = false;
+            let ownerId: string | undefined;
+
+            if (isMeResponse(me) && me.ok) {
+                admin = !!me.roles.admin_id;
+                ownerId = me.roles.club_owner_id ?? undefined;
+            }
+
             setIsAdmin(admin);
             const list = ownerId ? await clubService.getAll(ownerId) : await clubService.getAll();
             setClubs(list ?? []);
