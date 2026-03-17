@@ -1,12 +1,21 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { attachAuthContext } from '../middleware/attachAuthContext';
+import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 
 const router = Router();
+router.use(attachAuthContext);
+router.use(requireClubOwnerOrAdmin);
 
 const SELECT_LIST =
   'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency';
 const SELECT_ONE =
   'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions';
+
+function canAccessClub(req: Request, clubId: string): boolean {
+  if (req.authContext?.adminId) return true;
+  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
+}
 
 router.get('/', async (req: Request, res: Response) => {
   const owner_id = req.query.owner_id as string | undefined;
@@ -17,7 +26,11 @@ router.get('/', async (req: Request, res: Response) => {
       .select(SELECT_LIST)
       .order('created_at', { ascending: false })
       .limit(50);
-    if (owner_id) q = q.eq('owner_id', owner_id);
+    if (req.authContext?.adminId) {
+      if (owner_id) q = q.eq('owner_id', owner_id);
+    } else {
+      q = q.in('id', req.authContext?.allowedClubIds ?? []);
+    }
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, clubs: data ?? [] });
@@ -37,6 +50,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Club not found' });
+    if (!canAccessClub(req, id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     return res.json({ ok: true, club: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -64,6 +78,9 @@ router.post('/', async (req: Request, res: Response) => {
       ok: false,
       error: 'owner_id, fiscal_tax_id, fiscal_legal_name, name, address, city, postal_code son obligatorios',
     });
+  }
+  if (!req.authContext?.adminId && req.authContext?.clubOwnerId !== owner_id) {
+    return res.status(403).json({ ok: false, error: 'Solo puedes crear clubs con tu owner_id' });
   }
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -97,6 +114,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
+  if (!canAccessClub(req, id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   const body = req.body ?? {};
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   const allowed = [
@@ -128,6 +146,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 
 router.delete('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
+  if (!canAccessClub(req, id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { error } = await supabase.from('clubs').delete().eq('id', id);

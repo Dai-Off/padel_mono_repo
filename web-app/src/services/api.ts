@@ -1,5 +1,9 @@
 // padel_fe/src/services/api.ts
-const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE || 'http://localhost:3000').replace(/\/$/, '');
+
+export function getApiBase(): string {
+  return API_BASE_URL;
+}
 
 export class HttpError extends Error {
     status: number;
