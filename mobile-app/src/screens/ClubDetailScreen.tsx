@@ -165,10 +165,10 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
     }
   }, [activeTab, loadClubPartidos]);
   const [selectedDateIndex, setSelectedDateIndex] = useState(1);
-  const [showOnlyAvailable, setShowOnlyAvailable] = useState(true);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [partidosAlertsEnabled, setPartidosAlertsEnabled] = useState(false);
   const [timeSlotsForDate, setTimeSlotsForDate] = useState<string[]>([]);
+  const [slotsByCourt, setSlotsByCourt] = useState<Record<string, string[]>>({});
   const [timeSlotsLoading, setTimeSlotsLoading] = useState(false);
   const [courtPrices, setCourtPrices] = useState<Record<string, { minPriceCents: number; minPriceFormatted: string }>>({});
   const [expandedCourtId, setExpandedCourtId] = useState<string | null>(null);
@@ -187,6 +187,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
       setTimeSlotsLoading(true);
       try {
         const dateStr = toDateStringLocal(date);
+        const slotsPerCourt: Record<string, string[]> = {};
         const results = await fetchSearchCourts({
           dateFrom: dateStr,
           dateTo: dateStr,
@@ -195,7 +196,9 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
         const allSlots: string[] = [];
         const prices: Record<string, { minPriceCents: number; minPriceFormatted: string }> = {};
         for (const r of clubResults) {
-          allSlots.push(...(r.timeSlots ?? []));
+          const courtSlots = r.timeSlots ?? [];
+          allSlots.push(...courtSlots);
+          slotsPerCourt[r.id] = courtSlots;
           if (r.minPriceCents > 0) {
             prices[r.id] = {
               minPriceCents: r.minPriceCents,
@@ -205,9 +208,11 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
         }
         setTimeSlotsForDate([...new Set(allSlots)].sort());
         setCourtPrices(prices);
+        setSlotsByCourt(slotsPerCourt);
       } catch {
         setTimeSlotsForDate([]);
         setCourtPrices({});
+        setSlotsByCourt({});
       } finally {
         setTimeSlotsLoading(false);
       }
@@ -217,6 +222,9 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
 
   useEffect(() => {
     if (activeTab === 'Reservar') {
+      // Al cambiar de día, limpiamos horario seleccionado y pista expandida
+      setSelectedTimeSlot(null);
+      setExpandedCourtId(null);
       loadTimeSlotsForDate(selectedDate);
     }
   }, [activeTab, selectedDate, loadTimeSlotsForDate]);
@@ -246,8 +254,9 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
 
       setReserving(true);
       const dateStr = toDateStringLocal(selectedDate);
-      const start_at = `${dateStr}T${selectedTimeSlot}:00.000Z`;
-      const startDate = new Date(start_at);
+      // Parse as local time (no Z suffix) so JS converts correctly to UTC when sending to backend
+      const startDate = new Date(`${dateStr}T${selectedTimeSlot}:00`);
+      const start_at = startDate.toISOString();
       const endDate = new Date(startDate.getTime() + DURATION_MIN * 60 * 1000);
       const end_at = endDate.toISOString();
       const totalPriceCents = Math.max(priceInfo.minPriceCents, 100);
@@ -302,13 +311,20 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
         return;
       }
 
-      const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, session.access_token);
+      const confirmRes = await confirmPaymentFromClient(
+        intentRes.paymentIntentId!,
+        session.access_token
+      );
       setReserving(false);
 
       if (!confirmRes.ok) {
         Alert.alert('Error', 'No se pudo confirmar la reserva. Inténtalo de nuevo.');
         return;
       }
+
+      // Refrescar disponibilidad para que la pista desaparezca automáticamente
+      await loadTimeSlotsForDate(selectedDate);
+      setExpandedCourtId(null);
 
       setConfirmationModalData({
         courtName: c.name,
@@ -327,6 +343,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
       court.clubName,
       initPaymentSheet,
       presentPaymentSheet,
+      loadTimeSlotsForDate,
     ]
   );
 
@@ -457,17 +474,6 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                 </ScrollView>
               </View>
               <View style={styles.section}>
-                <View style={styles.toggleRow}>
-                  <Text style={styles.toggleLabel}>Mostrar solo disponibles</Text>
-                  <Switch
-                    value={showOnlyAvailable}
-                    onValueChange={setShowOnlyAvailable}
-                    trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
-                    thumbColor="#fff"
-                  />
-                </View>
-              </View>
-              <View style={styles.section}>
                 {timeSlotsLoading ? (
                   <ActivityIndicator size="small" color="#E31E24" style={{ paddingVertical: 16 }} />
                 ) : timeSlotsForDate.length > 0 ? (
@@ -518,10 +524,27 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                 <Text style={styles.reservaTitle}>Reserva una pista</Text>
                 <Text style={styles.reservaSub}>Crea un partido privado e invita a tus amigos</Text>
                 <View style={styles.courtList}>
-                  {clubCourtsLoading ? (
+                  {!selectedTimeSlot ? (
+                  <Text style={styles.partidosEmptySubtitle}>
+                    Selecciona primero un horario para ver qué pistas están libres.
+                  </Text>
+                  ) : clubCourtsLoading ? (
                     <ActivityIndicator size="small" color="#E31E24" style={{ paddingVertical: 16 }} />
                   ) : clubCourts.length > 0 ? (
-                    clubCourts.map((c) => {
+                  (() => {
+                    const courtsToShow = selectedTimeSlot
+                      ? clubCourts.filter((c) => (slotsByCourt[c.id] ?? []).includes(selectedTimeSlot))
+                      : clubCourts;
+
+                    if (courtsToShow.length === 0 && selectedTimeSlot) {
+                      return (
+                        <Text style={styles.partidosEmptySubtitle}>
+                          No hay pistas disponibles para este horario.
+                        </Text>
+                      );
+                    }
+
+                    return courtsToShow.map((c) => {
                       const isExpanded = expandedCourtId === c.id;
                       const priceInfo = courtPrices[c.id];
                       return (
@@ -575,7 +598,8 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                           )}
                         </View>
                       );
-                    })
+                    });
+                  })()
                   ) : (
                     <Text style={styles.partidosEmptySubtitle}>Sin pistas en este club</Text>
                   )}
