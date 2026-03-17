@@ -118,7 +118,9 @@ router.get('/courts', async (req: Request, res: Response) => {
       rulesByCourt.set(r.court_id, list);
     }
 
-    const baseDate = new Date(searchDate + 'T00:00:00Z').getTime();
+    // Use local midnight so time-slot labels ("10:00") represent local clock time,
+    // consistent with how the mobile app and web grid display hours.
+    const baseDate = new Date(searchDate + 'T00:00:00').getTime();
 
     const results: SearchCourtResult[] = courts.flatMap((court) => {
         const club = clubMap.get(court.club_id);
