@@ -5,7 +5,6 @@ import { Lock, Mail, Building2, User, Eye, EyeOff, Loader2, CheckCircle2 } from 
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { validateInvite, registerClubOwner } from '../../services/clubApplication';
-import { authService } from '../../services/auth';
 
 export const RegistroClubInvite = () => {
     const { t } = useTranslation();
