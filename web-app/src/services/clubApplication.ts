@@ -1,4 +1,4 @@
-import { apiFetch } from './api';
+import { apiFetch, getApiBase } from './api';
 
 export interface ClubApplicationPayload {
     responsible_first_name: string;
@@ -42,8 +42,7 @@ export interface UploadResponse {
     error?: string;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
-const base = (path: string) => `${API_BASE.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+const base = (path: string) => `${getApiBase()}${path.startsWith('/') ? path : `/${path}`}`;
 
 export async function uploadClubApplicationImage(file: File): Promise<UploadResponse> {
     const form = new FormData();

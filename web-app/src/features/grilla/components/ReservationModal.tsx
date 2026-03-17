@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
-import { apiFetch } from '../../../services/api';
+import { apiFetchWithAuth } from '../../../services/api';
 import type { Player } from '../../../types/api';
 
 interface ReservationModalProps {
@@ -312,7 +312,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             const newEnd = new Date(newStart.getTime() + duration * 60000);
             try {
                 const courtId = editingBookingData.court_id;
-                const bRes = await apiFetch<any>(`/bookings?court_id=${courtId}&date=${dateBase}`);
+                const bRes = await apiFetchWithAuth<any>(`/bookings?court_id=${courtId}&date=${dateBase}`);
                 const conflicts = (bRes.bookings || []).filter((b: any) => {
                     if (b.id === editingBookingData.id) return false;
                     const bStart = new Date(b.start_at);

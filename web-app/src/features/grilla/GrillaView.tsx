@@ -38,7 +38,8 @@ import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
 import dropSoundAsset from '../../assets/sounds/sfx2.mp3';
 
-import { apiFetch } from '../../services/api';
+import { apiFetchWithAuth } from '../../services/api';
+import { PageSkeleton } from '../../components/Layout/PageSkeleton';
 
 import './grilla.css';
 
@@ -57,28 +58,36 @@ const useClubData = (dateOrStr: Date | string) => {
     const [reservations, setReservations] = useState<Reservation[]>([]);
     const [loading, setLoading] = useState(true);
     const courtsRef = useRef<Court[]>([]);
+    const [clubName, setClubName] = useState<string>('');
 
-    const clubId = '70a3ffb1-3bd7-4791-9153-b65d704f703c';
+    const [clubId, setClubId] = useState<string | null>(null);
     const dateStr = toDateStr(dateOrStr);
 
     // Fetch courts once (they rarely change)
     const fetchCourts = useCallback(async (): Promise<Court[]> => {
         if (courtsRef.current.length > 0) return courtsRef.current;
 
-        let courtsRes = await apiFetch<any>(`/courts?club_id=${clubId}`);
-        let courtsData: Court[] = (courtsRes.courts || []).map((c: any) => ({
-            id: c.id, name: c.name, locationId: 'sede-central'
-        }));
+        let effectiveClubId = clubId;
 
-        if (courtsData.length === 0) {
-            const allClubsRes = await apiFetch<any>('/clubs');
-            if (allClubsRes.ok && allClubsRes.result?.length > 0) {
-                const firstClub = allClubsRes.result[0];
-                courtsRes = await apiFetch<any>(`/courts?club_id=${firstClub.id}`);
-                courtsData = (courtsRes.courts || []).map((c: any) => ({
-                    id: c.id, name: c.name, locationId: 'sede-central'
-                }));
+        // If we don't know the club yet, fetch clubs and pick the first one linked to the user
+        if (!effectiveClubId) {
+            const allClubsRes = await apiFetchWithAuth<any>('/clubs');
+            const clubsList = allClubsRes?.clubs ?? [];
+            if (allClubsRes?.ok && clubsList.length > 0) {
+                const firstClub = clubsList[0];
+                effectiveClubId = firstClub.id;
+                setClubId(firstClub.id);
+                setClubName(firstClub.name ?? '');
             }
+        }
+
+        let courtsData: Court[] = [];
+
+        if (effectiveClubId) {
+            const courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${effectiveClubId}`);
+            courtsData = (courtsRes.courts || []).map((c: any) => ({
+                id: c.id, name: c.name, locationId: 'sede-central'
+            }));
         }
 
         if (courtsData.length === 0) {
@@ -103,7 +112,7 @@ const useClubData = (dateOrStr: Date | string) => {
             return mapBookings(cached.data, courtsData);
         }
 
-        const bRes = await apiFetch<any>(`/bookings?date=${date}`);
+        const bRes = await apiFetchWithAuth<any>(`/bookings?date=${date}`);
         const raw = bRes.bookings || [];
         bookingsCache[date] = { data: raw, ts: Date.now() };
         return mapBookings(raw, courtsData);
@@ -145,7 +154,7 @@ const useClubData = (dateOrStr: Date | string) => {
                 const ds = toDateStr(d);
                 if (!bookingsCache[ds] || Date.now() - bookingsCache[ds].ts >= CACHE_TTL) {
                     try {
-                        const bRes = await apiFetch<any>(`/bookings?date=${ds}`);
+                        const bRes = await apiFetchWithAuth<any>(`/bookings?date=${ds}`);
                         bookingsCache[ds] = { data: bRes.bookings || [], ts: Date.now() };
                     } catch { /* silent prefetch */ }
                 }
@@ -156,7 +165,7 @@ const useClubData = (dateOrStr: Date | string) => {
         return () => clearTimeout(timer);
     }, [dateStr, dateOrStr]);
 
-    return { courts, reservations, loading, refresh };
+    return { courts, reservations, loading, refresh, clubName };
 };
 
 // Pure mapping function — no network calls
@@ -268,7 +277,7 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
-  const { courts, reservations: serverReservations, refresh } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, refresh, clubName, loading } = useClubData(selectedDate);
 
   // Filter courts and reservations by the active location tab
   const activeCourts = useMemo(() => {
@@ -369,7 +378,7 @@ function GrillaViewInner() {
       setSelectedModalReservationId(res.id);
       if (!res.id.startsWith('new-')) {
           try {
-              const data = await apiFetch<any>(`/bookings/${res.id}`);
+              const data = await apiFetchWithAuth<any>(`/bookings/${res.id}`);
               if (data.ok) {
                   // Enrich with courtName from reservation state (court_id alone is not human-readable)
                   const court = courts.find(c => c.id === (data.booking.court_id ?? res.courtId));
@@ -388,7 +397,7 @@ function GrillaViewInner() {
 
   const handleUpdateBooking = async (bookingId: string, bookingData: any) => {
       try {
-          const res = await apiFetch<any>(`/bookings/${bookingId}`, {
+          const res = await apiFetchWithAuth<any>(`/bookings/${bookingId}`, {
               method: 'PUT',
               body: JSON.stringify(bookingData),
           });
@@ -409,7 +418,7 @@ function GrillaViewInner() {
       setSelectedModalReservationId(null);
       setEditingBookingData(null);
       try {
-          const res = await apiFetch<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
+          const res = await apiFetchWithAuth<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
           if (!res.ok) {
               // Revert on failure
               refresh();
@@ -435,7 +444,7 @@ function GrillaViewInner() {
               timezone: 'Europe/Madrid' // Or dynamic
           };
 
-          const res = await apiFetch<any>('/bookings', {
+          const res = await apiFetchWithAuth<any>('/bookings', {
               method: 'POST',
               body: JSON.stringify(payload)
           });
@@ -665,7 +674,7 @@ function GrillaViewInner() {
     const startAt = new Date(`${baseDate}T${startTime}`).toISOString();
     const endAt = new Date(new Date(startAt).getTime() + durationMinutes * 60000).toISOString();
 
-    apiFetch<any>(`/bookings/${reservationId}`, {
+    apiFetchWithAuth<any>(`/bookings/${reservationId}`, {
       method: 'PUT',
       body: JSON.stringify({
         court_id: courtId,
@@ -863,6 +872,10 @@ function GrillaViewInner() {
     }
   };
 
+  if (loading && courts.length === 0) {
+    return <PageSkeleton />;
+  }
+
   return (
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
       <div className="h-[100dvh] flex flex-col bg-gray-100 font-sans overflow-x-hidden overflow-y-auto landscape:overflow-y-auto">
@@ -879,7 +892,9 @@ function GrillaViewInner() {
                 </div>
               </div>
               <div className="flex flex-col">
-                <h1 className="text-[13px] md:text-sm font-bold text-gray-900 leading-tight">{t('header.clubName')}</h1>
+                <h1 className="text-[13px] md:text-sm font-bold text-gray-900 leading-tight">
+                  {clubName || t('header.clubName')}
+                </h1>
               </div>
             </div>
             <div className="flex items-center gap-2">
