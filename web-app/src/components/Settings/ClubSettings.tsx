@@ -132,7 +132,7 @@ export function ClubSettingsTab() {
         }
     };
 
-    const showPanel = clubs.length > 1 || (isAdmin && clubs.length >= 1);
+    const showPanel = isAdmin && clubs.length >= 1;
 
     if (status === 'loading') {
         return (
