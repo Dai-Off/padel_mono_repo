@@ -35,4 +35,12 @@ export const courtService = {
             method: 'DELETE',
         });
     },
+
+    reorder: async (clubId: string, courtIds: string[]): Promise<Court[]> => {
+        const res = await apiFetchWithAuth<ApiResponse<{ courts: Court[] }>>('/courts/reorder', {
+            method: 'PUT',
+            body: JSON.stringify({ club_id: clubId, court_ids: courtIds }),
+        });
+        return res.courts ?? [];
+    },
 };
