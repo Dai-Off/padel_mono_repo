@@ -2,12 +2,13 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hashInviteToken } from '../lib/inviteToken';
 import { sendPasswordResetEmail } from '../lib/mailer';
+import { getFrontendUrl } from '../lib/env';
 
 const router = Router();
 
 // POST /auth/register
 router.post('/register', async (req: Request, res: Response) => {
-  const { email, password, name } = req.body ?? {};
+  const { email, password, name, source, is_mobile } = req.body ?? {};
 
   if (!email || !password) {
     return res.status(400).json({
@@ -28,21 +29,32 @@ router.post('/register', async (req: Request, res: Response) => {
 
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const baseUrl = getFrontendUrl();
+    const isMobileSource = source === 'mobile' || is_mobile === true;
+    const redirectTo = isMobileSource ? `${baseUrl}/email-confirmed` : `${baseUrl}/login`;
 
     const { data, error } = await supabase.auth.signUp({
       email: emailStr,
       password: passwordStr,
       options: {
         data: name ? { full_name: String(name).trim() } : undefined,
+        emailRedirectTo: redirectTo,
       },
     });
 
     if (error) {
-      const msg = error.message;
+      const msg = error.message.toLowerCase();
       if (msg.includes('already registered') || msg.includes('already exists')) {
         return res.status(409).json({ ok: false, error: 'El email ya está registrado' });
       }
-      return res.status(400).json({ ok: false, error: msg });
+      if (msg.includes('rate limit')) {
+        return res.status(429).json({
+          ok: false,
+          error: 'Has solicitado demasiados correos en poco tiempo. Espera unos minutos e inténtalo de nuevo.',
+          error_code: 'EMAIL_RATE_LIMIT',
+        });
+      }
+      return res.status(400).json({ ok: false, error: error.message });
     }
 
     if (!data.session && data.user?.identities?.length === 0) {
@@ -173,8 +185,6 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // POST /auth/forgot-password — envía enlace para restablecer contraseña por email
-const FRONTEND_URL = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/$/, '');
-
 router.post('/forgot-password', async (req: Request, res: Response) => {
   const { email } = req.body ?? {};
   const emailStr = typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -184,7 +194,7 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const redirectTo = `${FRONTEND_URL}/reset-password`;
+    const redirectTo = `${getFrontendUrl()}/reset-password`;
     const { data, error } = await supabase.auth.admin.generateLink({
       type: 'recovery',
       email: emailStr,
@@ -192,6 +202,14 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
     });
 
     if (error) {
+      const msg = error.message.toLowerCase();
+      if (msg.includes('rate limit')) {
+        return res.status(429).json({
+          ok: false,
+          error: 'Has solicitado demasiados correos en poco tiempo. Espera unos minutos e inténtalo de nuevo.',
+          error_code: 'EMAIL_RATE_LIMIT',
+        });
+      }
       return res.status(400).json({ ok: false, error: error.message });
     }
 
@@ -240,7 +258,10 @@ router.get('/me', async (req: Request, res: Response) => {
     if (admin) roles.admin_id = admin.id;
     let clubs: unknown[] = [];
     if (owner) {
-      const { data: clubsData } = await supabase.from('clubs').select('id, name, city').eq('owner_id', owner.id);
+      const { data: clubsData } = await supabase
+        .from('clubs')
+        .select('id, name, city, logo_url')
+        .eq('owner_id', owner.id);
       clubs = clubsData ?? [];
     }
     return res.json({
@@ -273,12 +294,11 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
       .eq('token_hash', tokenHash)
       .maybeSingle();
     if (inviteErr || !invite) return res.status(400).json({ ok: false, error: 'Enlace inválido' });
-    if (invite.used_at) return res.status(400).json({ ok: false, error: 'Este enlace ya fue utilizado' });
     if (new Date(invite.expires_at) < new Date()) return res.status(400).json({ ok: false, error: 'El enlace ha expirado' });
 
     const { data: app, error: appErr } = await supabase.from('club_applications').select('*').eq('id', application_id).eq('status', 'approved').maybeSingle();
     if (appErr || !app) return res.status(400).json({ ok: false, error: 'Solicitud no válida' });
-    if (app.club_owner_id) {
+    if (app.club_owner_id || invite.used_at) {
       return res.status(200).json({
         ok: true,
         already_registered: true,
@@ -287,14 +307,26 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
     }
 
     const emailStr = String(app.email).trim().toLowerCase();
+    const redirectTo = `${getFrontendUrl()}/login`;
     const { data: authData, error: signUpErr } = await supabase.auth.signUp({
       email: emailStr,
       password: passwordStr,
-      options: { data: { full_name: `${app.responsible_first_name} ${app.responsible_last_name}`.trim() } },
+      options: {
+        data: { full_name: `${app.responsible_first_name} ${app.responsible_last_name}`.trim() },
+        emailRedirectTo: redirectTo,
+      },
     });
     if (signUpErr) {
-      if (signUpErr.message.includes('already registered') || signUpErr.message.includes('already exists')) {
+      const msg = signUpErr.message.toLowerCase();
+      if (msg.includes('already registered') || msg.includes('already exists')) {
         return res.status(409).json({ ok: false, error: 'Este email ya tiene una cuenta. Usa Iniciar sesión.' });
+      }
+      if (msg.includes('rate limit')) {
+        return res.status(429).json({
+          ok: false,
+          error: 'Has solicitado demasiados correos en poco tiempo. Espera unos minutos e inténtalo de nuevo.',
+          error_code: 'EMAIL_RATE_LIMIT',
+        });
       }
       return res.status(400).json({ ok: false, error: signUpErr.message });
     }
@@ -331,6 +363,7 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
         address,
         city: app.city?.trim(),
         postal_code: postalCode,
+        logo_url: app.logo_url?.trim() || null,
       })
       .select('id')
       .single();
@@ -359,19 +392,12 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
     await supabase.from('club_application_invites').update({ used_at: new Date().toISOString() }).eq('id', invite.id);
     await supabase.from('club_applications').update({ club_owner_id: ownerId, club_id: clubId }).eq('id', application_id);
 
-    const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({ email: emailStr, password: passwordStr });
-    const session = signInErr ? null : signInData.session ? {
-      access_token: signInData.session.access_token,
-      refresh_token: signInData.session.refresh_token,
-      expires_at: signInData.session.expires_at,
-    } : null;
-
     return res.status(201).json({
       ok: true,
       user: { id: authData.user?.id, email: authData.user?.email },
       roles: { club_owner_id: ownerId },
       club_id: clubId,
-      session,
+      email_confirmation_required: !authData.user?.email_confirmed_at,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

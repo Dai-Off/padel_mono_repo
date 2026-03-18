@@ -5,7 +5,6 @@ import { Lock, Mail, Building2, User, Eye, EyeOff, Loader2, CheckCircle2 } from 
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { validateInvite, registerClubOwner } from '../../services/clubApplication';
-import { authService } from '../../services/auth';
 
 export const RegistroClubInvite = () => {
     const { t } = useTranslation();
@@ -14,7 +13,7 @@ export const RegistroClubInvite = () => {
     const applicationId = searchParams.get('application_id') ?? '';
     const token = searchParams.get('token') ?? '';
 
-    const [status, setStatus] = useState<'loading' | 'valid' | 'invalid' | 'already_completed'>('loading');
+    const [status, setStatus] = useState<'loading' | 'valid' | 'invalid' | 'already_completed' | 'completed_waiting_email'>('loading');
     const [email, setEmail] = useState('');
     const [clubName, setClubName] = useState('');
     const [responsibleName, setResponsibleName] = useState('');
@@ -62,13 +61,12 @@ export const RegistroClubInvite = () => {
         setIsSubmitting(true);
         try {
             const res = await registerClubOwner(applicationId, token, password);
-            if (res.ok && res.session) {
-                authService.saveSession(res.session);
-                toast.success(t('invite_success'));
-                navigate('/', { replace: true });
-            } else if (res.ok && res.already_registered) {
+            if (res.ok && res.already_registered) {
                 toast.info(res.message ?? t('invite_already_completed'));
                 navigate('/login', { replace: true });
+            } else if (res.ok) {
+                toast.success(t('invite_success'));
+                setStatus('completed_waiting_email');
             } else {
                 setError(res.error ?? t('error_occurred'));
             }
@@ -129,6 +127,21 @@ export const RegistroClubInvite = () => {
                     >
                         {t('login')}
                     </button>
+                </motion.div>
+            </div>
+        );
+    }
+
+    if (status === 'completed_waiting_email') {
+        return (
+            <div className="fixed inset-0 bg-[#0D0D0D] z-50 flex items-center justify-center p-5">
+                <motion.div
+                    className="relative w-full max-w-md rounded-3xl border-2 border-green-500/50 bg-white/5 p-8 text-center"
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                >
+                    <p className="text-green-400 font-semibold mb-4">{t('invite_check_email_title')}</p>
+                    <p className="text-white/50 text-sm mb-6">{t('invite_check_email_body')}</p>
                 </motion.div>
             </div>
         );

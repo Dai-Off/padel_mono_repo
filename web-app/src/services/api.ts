@@ -1,5 +1,9 @@
 // padel_fe/src/services/api.ts
-const API_BASE_URL = import.meta.env.VITE_API_BASE || 'http://localhost:3000';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE || 'http://localhost:3000').replace(/\/$/, '');
+
+export function getApiBase(): string {
+  return API_BASE_URL;
+}
 
 export class HttpError extends Error {
     status: number;
@@ -69,5 +73,29 @@ export class ApiService {
 
     protected async deleteRequest<T>(path: string): Promise<T> {
         return apiFetch<T>(path, { method: 'DELETE' });
+    }
+}
+
+export class ApiServiceWithAuth extends ApiService {
+    protected override async get<T>(path: string): Promise<T> {
+        return apiFetchWithAuth<T>(path, { method: 'GET' });
+    }
+
+    protected override async post<T>(path: string, data: any): Promise<T> {
+        return apiFetchWithAuth<T>(path, {
+            method: 'POST',
+            body: JSON.stringify(data),
+        });
+    }
+
+    protected override async put<T>(path: string, data: any): Promise<T> {
+        return apiFetchWithAuth<T>(path, {
+            method: 'PUT',
+            body: JSON.stringify(data),
+        });
+    }
+
+    protected override async deleteRequest<T>(path: string): Promise<T> {
+        return apiFetchWithAuth<T>(path, { method: 'DELETE' });
     }
 }
