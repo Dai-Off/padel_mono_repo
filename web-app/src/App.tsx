@@ -71,6 +71,14 @@ function App() {
           }
         />
         <Route
+          path="/inventario"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/onboarding"
           element={
             <ProtectedRoute>
