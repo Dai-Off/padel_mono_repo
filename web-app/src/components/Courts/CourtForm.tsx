@@ -1,9 +1,11 @@
 import { X } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import type { Court } from '../../types/court';
+import type { MeResponse } from '../../types/auth';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clubService, type Club } from '../../services/club';
+import { authService } from '../../services/auth';
 
 interface CourtFormProps {
     court?: Court;
@@ -15,8 +17,10 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
     const { t } = useTranslation();
     const isEdit = !!court;
     const [clubs, setClubs] = useState<Club[]>([]);
+    const [isAdmin, setIsAdmin] = useState(false);
+    const [clubsReady, setClubsReady] = useState(false);
 
-    const { register, handleSubmit, reset, formState: { errors } } = useForm<Partial<Court>>({
+    const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Partial<Court>>({
         defaultValues: court || {
             name: '',
             club_id: '',
@@ -29,8 +33,27 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
     });
 
     useEffect(() => {
-        clubService.getAll().then(setClubs).catch(console.error);
-    }, []);
+        setClubsReady(false);
+        (async () => {
+            const me = await authService.getMe().catch(() => ({ ok: false as const }));
+            const isMeResponse = (value: unknown): value is MeResponse =>
+                typeof value === 'object' && value !== null && 'roles' in value;
+
+            let admin = false;
+            let ownerId: string | undefined;
+
+            if (isMeResponse(me) && me.ok) {
+                admin = !!me.roles.admin_id;
+                ownerId = me.roles.club_owner_id ?? undefined;
+            }
+
+            setIsAdmin(admin);
+            const list = ownerId ? await clubService.getAll(ownerId) : await clubService.getAll();
+            setClubs(list ?? []);
+            if (!court && list?.length === 1) setValue('club_id', list[0].id);
+            setClubsReady(true);
+        })();
+    }, [court, setValue]);
 
     useEffect(() => {
         if (court) {
@@ -56,21 +79,24 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
 
                 {/* Body */}
                 <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider px-1">
-                            {t('club_select')}
-                        </label>
-                        <select
-                            {...register('club_id', { required: t('required') })}
-                            className="w-full px-4 py-3.5 rounded-2xl border border-border-subtle focus:outline-none focus:ring-4 focus:ring-brand/5 focus:border-brand bg-[#FAFAFA] text-sm font-semibold transition-all appearance-none cursor-pointer"
-                        >
-                            <option value="">{t('select_option')}</option>
-                            {clubs.map(club => (
-                                <option key={club.id} value={club.id}>{club.name}</option>
-                            ))}
-                        </select>
-                        {errors.club_id && <span className="text-[10px] text-error font-bold px-1">{errors.club_id.message}</span>}
-                    </div>
+                    {clubsReady && !isAdmin && clubs.length === 1 && <input type="hidden" {...register('club_id')} />}
+                    {clubsReady && (isAdmin || clubs.length !== 1) && (
+                        <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider px-1">
+                                {t('club_select')}
+                            </label>
+                            <select
+                                {...register('club_id', { required: t('required') })}
+                                className="w-full px-4 py-3.5 rounded-2xl border border-border-subtle focus:outline-none focus:ring-4 focus:ring-brand/5 focus:border-brand bg-[#FAFAFA] text-sm font-semibold transition-all appearance-none cursor-pointer"
+                            >
+                                <option value="">{t('select_option')}</option>
+                                {clubs.map((club) => (
+                                    <option key={club.id} value={club.id}>{club.name}</option>
+                                ))}
+                            </select>
+                            {errors.club_id && <span className="text-[10px] text-error font-bold px-1">{errors.club_id.message}</span>}
+                        </div>
+                    )}
 
                     <div className="space-y-1.5">
                         <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider px-1">

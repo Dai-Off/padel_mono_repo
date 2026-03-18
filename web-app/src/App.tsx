@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Login } from './components/Auth/Login';
 import { ForgotPassword } from './components/Auth/ForgotPassword';
 import { ResetPassword } from './components/Auth/ResetPassword';
+import { EmailConfirmed } from './components/Auth/EmailConfirmed';
 import { ClubRegistration } from './components/Registration/ClubRegistration';
 import { RegistroClubInvite } from './components/Registration/RegistroClubInvite';
 import { ClubDashboard } from './components/Dashboard/ClubDashboard';
@@ -23,6 +24,7 @@ function App() {
       <Toaster position="top-right" richColors />
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/email-confirmed" element={<EmailConfirmed />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/registro" element={<ClubRegistration />} />
@@ -46,6 +48,14 @@ function App() {
         />
         <Route
           path="/jugadores"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/configuracion"
           element={
             <ProtectedRoute>
               <ClubDashboard />
