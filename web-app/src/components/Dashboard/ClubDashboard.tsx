@@ -1,9 +1,29 @@
 import { Plus } from 'lucide-react';
+import {
+    DndContext,
+    closestCenter,
+    PointerSensor,
+    KeyboardSensor,
+    DragOverlay,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+    type DragStartEvent,
+} from '@dnd-kit/core';
+import {
+    SortableContext,
+    rectSortingStrategy,
+    arrayMove,
+    sortableKeyboardCoordinates,
+} from '@dnd-kit/sortable';
+import { toast } from 'sonner';
 import { Header } from '../Layout/Header';
 import { MainMenu } from '../Layout/MainMenu';
 
 // Courts
 import { CourtCard } from '../Courts/CourtCard';
+import { CourtDetailModal } from '../Courts/CourtDetailModal';
+import { SortableCourtCard } from '../Courts/SortableCourtCard';
 import { CourtForm } from '../Courts/CourtForm';
 import { courtService } from '../../services/court';
 import type { Court } from '../../types/court';
@@ -14,18 +34,20 @@ import { ClubPlayersTab } from '../Players/ClubPlayers';
 import { ClubSettingsTab } from '../Settings/ClubSettings';
 
 import { useState, useEffect, useCallback } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { authService } from '../../services/auth';
 import { clubService, type Club } from '../../services/club';
 import { PageSkeleton } from '../Layout/PageSkeleton';
+import { ClubStaffTab } from '../Staff/ClubStaffTab';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
     const location = useLocation();
-    const navigate = useNavigate();
     const isPlayersPage = location.pathname === '/jugadores';
     const isConfigPage = location.pathname === '/configuracion';
+    const isPersonalPage = location.pathname === '/personal';
 
     const [loading, setLoading] = useState(true);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -70,24 +92,34 @@ export const ClubDashboard = () => {
     }, []);
 
     const [courts, setCourts] = useState<Court[]>([]);
+    const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    );
 
     // Selection/Form states
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingItem, setEditingItem] = useState<any>(null);
     const [courtToDelete, setCourtToDelete] = useState<Court | null>(null);
+    const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage) return;
+        if (isPlayersPage || isConfigPage || isPersonalPage) {
+            setLoading(false);
+            return;
+        }
         setLoading(true);
         try {
-            const data = await courtService.getAll();
+            const data = await courtService.getAll(club?.id);
             setCourts(data);
         } catch (error) {
             console.error('Error fetching courts:', error);
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -115,11 +147,34 @@ export const ClubDashboard = () => {
                 setCourts(prev => prev.map(c => c.id === editingItem.id ? updated : c));
             } else {
                 const created = await courtService.create(data);
-                setCourts(prev => [...prev, created]);
+                setCourts(prev => [...prev, created].sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0)));
             }
             setIsFormOpen(false);
         } catch (error) {
             console.error('Error saving item:', error);
+        }
+    };
+
+    const handleCourtsDragStart = (e: DragStartEvent) => {
+        setActiveDragId(String(e.active.id));
+    };
+
+    const handleCourtsDragEnd = async (e: DragEndEvent) => {
+        setActiveDragId(null);
+        const { active, over } = e;
+        if (!over || active.id === over.id || !club?.id) return;
+        const oldIndex = courts.findIndex((c) => c.id === active.id);
+        const newIndex = courts.findIndex((c) => c.id === over.id);
+        if (oldIndex < 0 || newIndex < 0) return;
+        const reordered = arrayMove(courts, oldIndex, newIndex);
+        setCourts(reordered);
+        try {
+            const saved = await courtService.reorder(club.id, reordered.map((c) => c.id));
+            setCourts(saved);
+            window.dispatchEvent(new CustomEvent('padel:courts-reordered'));
+        } catch {
+            toast.error(t('fetch_error'));
+            fetchData();
         }
     };
 
@@ -142,6 +197,8 @@ export const ClubDashboard = () => {
                         <ClubPlayersTab />
                     ) : isConfigPage ? (
                         <ClubSettingsTab />
+                    ) : isPersonalPage ? (
+                        <ClubStaffTab clubId={club?.id ?? null} />
                     ) : (
                         <>
                             <div className="flex items-center justify-between gap-3">
@@ -153,13 +210,11 @@ export const ClubDashboard = () => {
                                     >
                                         {t('courts_management')}
                                     </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => navigate('/grilla')}
-                                        className="px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-xs font-semibold text-[#1A1A1A] hover:bg-gray-50 active:scale-95"
-                                    >
-                                        Ver grilla
-                                    </button>
+                                    {courts.length > 1 && (
+                                        <span className="text-[10px] text-gray-400 max-w-[200px] leading-tight hidden sm:inline">
+                                            {t('drag_order_hint')}
+                                        </span>
+                                    )}
                                 </div>
                                 <button
                                     onClick={handleAddClick}
@@ -174,17 +229,40 @@ export const ClubDashboard = () => {
                                     <div className="w-12 h-12 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
                                     <p className="text-sm font-semibold text-gray-500 animate-pulse">{t('loading')}...</p>
                                 </div>
+                            ) : courts.length === 0 ? (
+                                <p className="text-sm text-gray-500 text-center py-12">{t('no_courts')}</p>
                             ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                    {courts.map((court) => (
-                                        <CourtCard
-                                            key={court.id}
-                                            court={court}
-                                            onEdit={handleEditClick}
-                                            onDelete={handleDeleteClick}
-                                        />
-                                    ))}
-                                </div>
+                                <DndContext
+                                    sensors={sensors}
+                                    collisionDetection={closestCenter}
+                                    onDragStart={handleCourtsDragStart}
+                                    onDragEnd={handleCourtsDragEnd}
+                                >
+                                    <SortableContext items={courts.map((c) => c.id)} strategy={rectSortingStrategy}>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                            {courts.map((court) => (
+                                                <SortableCourtCard
+                                                    key={court.id}
+                                                    court={court}
+                                                    onEdit={handleEditClick}
+                                                    onDelete={handleDeleteClick}
+                                                    onViewDetails={setCourtDetail}
+                                                />
+                                            ))}
+                                        </div>
+                                    </SortableContext>
+                                    <DragOverlay dropAnimation={null}>
+                                        {activeDragId ? (
+                                            <div className="cursor-grabbing opacity-95 shadow-2xl rounded-2xl overflow-hidden max-w-sm">
+                                                <CourtCard
+                                                    court={courts.find((c) => c.id === activeDragId)!}
+                                                    onEdit={() => {}}
+                                                    onViewDetails={() => {}}
+                                                />
+                                            </div>
+                                        ) : null}
+                                    </DragOverlay>
+                                </DndContext>
                             )}
                         </>
                     )}
@@ -201,6 +279,17 @@ export const ClubDashboard = () => {
             {isFormOpen && (
                 <CourtForm court={editingItem} onClose={() => setIsFormOpen(false)} onSubmit={handleFormSubmit} />
             )}
+
+            <AnimatePresence>
+                {courtDetail && (
+                    <CourtDetailModal
+                        key={courtDetail.id}
+                        court={courtDetail}
+                        onClose={() => setCourtDetail(null)}
+                        onEdit={handleEditClick}
+                    />
+                )}
+            </AnimatePresence>
 
             {courtToDelete && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
