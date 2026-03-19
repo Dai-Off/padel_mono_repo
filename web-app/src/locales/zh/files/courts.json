@@ -1,6 +1,8 @@
 {
     "title": "球場管理",
     "courts_management": "球場管理",
+    "no_courts": "尚無球場，請使用上方按鈕新增。",
+    "drag_order_hint": "拖曳 ⋮⋮ 圖示可排序（會儲存，日程表同步）。",
     "add_court": "添加球場",
     "edit_court": "編輯球場",
     "name": "球場名稱",
@@ -20,6 +22,8 @@
     "cancel": "取消",
     "save": "保存更改",
     "view_details": "查看詳情",
+    "court_detail_title": "球場詳情",
+    "court_display_order": "列表順序",
     "glass_panoramic": "全景玻璃",
     "glass_standard": "標準玻璃",
     "glass_wall": "圍牆",

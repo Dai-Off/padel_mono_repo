@@ -47,9 +47,25 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
 export async function apiFetchWithAuth<T>(path: string, options: RequestInit = {}): Promise<T> {
     const token = getStoredToken();
+    const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
     const headers = new Headers(options.headers || {});
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    return apiFetch<T>(path, { ...options, headers });
+    const response = await fetch(url, { ...options, headers });
+    if (!response.ok) {
+        if (response.status === 401 && token) {
+            try {
+                localStorage.removeItem('padel_session');
+            } catch {
+                /* ignore */
+            }
+            sessionStorage.setItem('padel_session_expired', '1');
+            window.location.assign('/login');
+        }
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        throw new HttpError(errorData.error || errorData.message || 'API Request failed', response.status);
+    }
+    return response.json();
 }
 
 export class ApiService {

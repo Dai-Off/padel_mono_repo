@@ -40,6 +40,9 @@ import dropSoundAsset from '../../assets/sounds/sfx2.mp3';
 
 import { apiFetchWithAuth } from '../../services/api';
 import { PageSkeleton } from '../../components/Layout/PageSkeleton';
+import { MainMenu } from '../../components/Layout/MainMenu';
+import { authService } from '../../services/auth';
+import { useNavigate } from 'react-router-dom';
 
 import './grilla.css';
 
@@ -61,48 +64,61 @@ const useClubData = (dateOrStr: Date | string) => {
     const [clubName, setClubName] = useState<string>('');
 
     const [clubId, setClubId] = useState<string | null>(null);
+    const [courtsEpoch, setCourtsEpoch] = useState(0);
     const dateStr = toDateStr(dateOrStr);
 
-    // Fetch courts once (they rarely change)
-    const fetchCourts = useCallback(async (): Promise<Court[]> => {
-        if (courtsRef.current.length > 0) return courtsRef.current;
+    useEffect(() => {
+        const onReorder = () => {
+            courtsRef.current = [];
+            setCourtsEpoch((n) => n + 1);
+        };
+        window.addEventListener('padel:courts-reordered', onReorder);
+        return () => window.removeEventListener('padel:courts-reordered', onReorder);
+    }, []);
 
+    const fetchCourts = useCallback(async (): Promise<Court[]> => {
         let effectiveClubId = clubId;
 
-        // If we don't know the club yet, fetch clubs and pick the first one linked to the user
         if (!effectiveClubId) {
-            const allClubsRes = await apiFetchWithAuth<any>('/clubs');
-            const clubsList = allClubsRes?.clubs ?? [];
-            if (allClubsRes?.ok && clubsList.length > 0) {
-                const firstClub = clubsList[0];
-                effectiveClubId = firstClub.id;
-                setClubId(firstClub.id);
-                setClubName(firstClub.name ?? '');
+            const meRes = await apiFetchWithAuth<any>('/auth/me');
+            const fromMe = Array.isArray(meRes?.clubs) && meRes.clubs[0]?.id ? meRes.clubs[0] : null;
+            if (fromMe) {
+                effectiveClubId = fromMe.id;
+                setClubId(fromMe.id);
+                setClubName(fromMe.name ?? '');
+            } else {
+                const allClubsRes = await apiFetchWithAuth<any>('/clubs');
+                const clubsList = allClubsRes?.clubs ?? [];
+                if (allClubsRes?.ok && clubsList.length > 0) {
+                    const firstClub = clubsList[0];
+                    effectiveClubId = firstClub.id;
+                    setClubId(firstClub.id);
+                    setClubName(firstClub.name ?? '');
+                }
             }
         }
 
         let courtsData: Court[] = [];
-
         if (effectiveClubId) {
             const courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${effectiveClubId}`);
-            courtsData = (courtsRes.courts || []).map((c: any) => ({
-                id: c.id, name: c.name, locationId: 'sede-central'
+            const raw = courtsRes.courts || [];
+            const sorted = [...raw].sort((a: { display_order?: number; created_at?: string }, b: { display_order?: number; created_at?: string }) => {
+                const da = a.display_order ?? 0;
+                const db = b.display_order ?? 0;
+                if (da !== db) return da - db;
+                return String(a.created_at ?? '').localeCompare(String(b.created_at ?? ''));
+            });
+            courtsData = sorted.map((c: { id: string; name: string }) => ({
+                id: c.id,
+                name: c.name,
+                locationId: 'sede-central',
             }));
-        }
-
-        if (courtsData.length === 0) {
-            courtsData = [
-                { id: 'c-pista-1', name: 'PISTA 1', locationId: 'sede-central' },
-                { id: 'c-pista-2', name: 'PISTA 2', locationId: 'sede-central' },
-                { id: 'c-pista-3', name: 'PISTA 3', locationId: 'sede-central' },
-                { id: 'c-pista-4', name: 'PISTA 4', locationId: 'sede-central' },
-            ];
         }
 
         courtsRef.current = courtsData;
         setCourts(courtsData);
         return courtsData;
-    }, [clubId]);
+    }, [clubId, courtsEpoch]);
 
     // Fetch bookings for a single date — single request, with cache
     const fetchBookingsForDate = useCallback(async (date: string, courtsData: Court[]): Promise<Reservation[]> => {
@@ -262,7 +278,10 @@ const ZoomScrollbars = () => {
 
 function GrillaViewInner() {
   const { t, locale, setLocale } = useTranslation();
+  const navigate = useNavigate();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const today = new Date(); // Always current date — recomputed each render so chips are never stale
   const [selectedDate, setSelectedDate] = useState<Date>(today);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -278,6 +297,16 @@ function GrillaViewInner() {
     return '';
   }, [today, selectedDate]);
   const { courts, reservations: serverReservations, refresh, clubName, loading } = useClubData(selectedDate);
+
+  useEffect(() => {
+    let cancelled = false;
+    authService.getMe().then((me) => {
+      if (!cancelled && me.ok) setIsAdmin(!!me.roles?.admin_id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Filter courts and reservations by the active location tab
   const activeCourts = useMemo(() => {
@@ -883,7 +912,11 @@ function GrillaViewInner() {
         {!isMobileDevice && (
           <header className="bg-[#f8f8f8] px-4 md:px-6 py-1.5 md:py-2 z-50 flex-shrink-0 flex justify-between items-center border-b border-gray-100 gap-3">
             <div className="flex items-center gap-3 md:gap-4">
-              <button className="w-9 h-9 md:w-10 md:h-10 bg-white border border-gray-200 rounded-lg flex items-center justify-center text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 flex-shrink-0 transition-colors">
+              <button
+                type="button"
+                onClick={() => setMenuOpen(true)}
+                className="w-9 h-9 md:w-10 md:h-10 bg-white border border-gray-200 rounded-lg flex items-center justify-center text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 flex-shrink-0 transition-colors"
+              >
                 <Menu className="w-5 h-5 md:w-5 md:h-5 text-gray-600" />
               </button>
               <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.05)] relative p-[2px]">
@@ -925,7 +958,11 @@ function GrillaViewInner() {
                   </div>
                 )}
               </div>
-              <button className="bg-[#1f1f1f] hover:bg-black text-white px-4 py-2 md:px-5 md:py-2.5 rounded-full font-medium text-xs md:text-sm flex items-center gap-2 transition-colors flex-shrink-0 shadow-sm">
+              <button
+                type="button"
+                onClick={() => navigate('/')}
+                className="bg-[#1f1f1f] hover:bg-black text-white px-4 py-2 md:px-5 md:py-2.5 rounded-full font-medium text-xs md:text-sm flex items-center gap-2 transition-colors flex-shrink-0 shadow-sm"
+              >
                 <ArrowLeft className="w-4 h-4 md:w-4.5 md:h-4.5" />
                 <span className="hidden sm:inline">{t('header.close')}</span>
               </button>
@@ -999,15 +1036,31 @@ function GrillaViewInner() {
                 {(
                   <div className="bg-[#f8f8f8] border-b border-gray-200 px-4 md:px-8 py-2 mb-3">
                     {/* Heading row with mobile hamburger */}
-                    <div className="flex items-center gap-2 mb-1.5">
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <div className="flex items-center gap-2 min-w-0">
                       {isMobileDevice && (
-                        <button className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 flex-shrink-0 transition-colors">
+                        <button
+                          type="button"
+                          onClick={() => setMenuOpen(true)}
+                          className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 flex-shrink-0 transition-colors"
+                        >
                           <Menu className="w-4 h-4 text-gray-600" />
                         </button>
                       )}
-                      <h2 className="text-xs md:text-sm font-semibold text-[#003366] capitalize">
+                      <h2 className="text-xs md:text-sm font-semibold text-[#003366] capitalize truncate">
                       {`${t('toolbar.reservationsOf')} ${selectedDate.toLocaleDateString(locale === 'zh-HK' ? 'zh-HK' : 'es', { weekday: 'long' })}, ${selectedDate.toLocaleDateString(locale === 'zh-HK' ? 'zh-HK' : 'es', { day: 'numeric', month: 'long', year: 'numeric' })}`}
                     </h2>
+                      </div>
+                      {isMobileDevice && (
+                        <button
+                          type="button"
+                          onClick={() => navigate('/')}
+                          className="flex items-center gap-1 flex-shrink-0 px-2 py-1 rounded-lg bg-[#1f1f1f] text-white text-[10px] font-semibold"
+                        >
+                          <ArrowLeft className="w-3 h-3" />
+                          {t('header.close')}
+                        </button>
+                      )}
                     </div>
                     {/* Controls row */}
                     <div className="flex flex-wrap items-center gap-1 md:gap-2">
@@ -1289,6 +1342,12 @@ function GrillaViewInner() {
       <HoverTooltip
         reservation={hoveredTooltip?.res || null}
         anchorElement={hoveredTooltip?.el || null}
+      />
+      <MainMenu
+        isOpen={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        clubName={clubName || ''}
+        isAdmin={isAdmin}
       />
       </div>
     </ZoomContext.Provider>

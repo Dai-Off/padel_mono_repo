@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, LogIn, Mail, Lock, AlertCircle, Plus } from 'lucide-react';
 import { authService } from '../../services/auth';
@@ -14,6 +14,13 @@ export const Login: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const navigate = useNavigate();
+
+    useEffect(() => {
+        if (sessionStorage.getItem('padel_session_expired')) {
+            sessionStorage.removeItem('padel_session_expired');
+            toast.error(t('session_expired'));
+        }
+    }, [t]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
