@@ -52,6 +52,7 @@ export const inventoryService = {
         movement_type: InventoryMovementType;
         quantity: number;
         reason?: string | null;
+        movement_at?: string | null;
     }): Promise<InventoryMovement> => {
         const res = await apiFetchWithAuth<ApiOk<{ movement: InventoryMovement }>>('/inventario/movements', {
             method: 'POST',

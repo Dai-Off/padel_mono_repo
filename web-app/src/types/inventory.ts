@@ -23,6 +23,7 @@ export interface InventoryMovement {
     movement_type: InventoryMovementType;
     quantity: number;
     reason?: string | null;
+    movement_at?: string;
     created_at?: string;
 }
 
