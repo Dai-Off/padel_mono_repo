@@ -3,6 +3,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hashInviteToken } from '../lib/inviteToken';
 import { sendPasswordResetEmail } from '../lib/mailer';
 import { getFrontendUrl } from '../lib/env';
+import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 
 const router = Router();
 
@@ -381,11 +382,28 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
           glass_type: co.type === 'panoramic' ? 'panoramic' : 'normal',
         };
       });
-      await supabase.from('courts').insert(rows);
+      const { data: insertedCourts, error: courtsErr } = await supabase
+        .from('courts')
+        .insert(rows)
+        .select('id');
+      if (courtsErr) return res.status(500).json({ ok: false, error: courtsErr.message });
+
+      // Seed default pricing rules so availability returns time slots immediately.
+      for (const c of insertedCourts ?? []) {
+        const r = await ensureDefaultPricingRuleForCourt(supabase as any, (c as { id: string }).id);
+        if (r.error) console.error('[register-club-owner] pricing rule seed failed:', r.error);
+      }
     } else {
       const n = Math.max(1, parseInt(String(app.court_count), 10) || 1);
       for (let i = 0; i < n; i++) {
-        await supabase.from('courts').insert({ club_id: clubId, name: `Pista ${i + 1}` });
+        const { data: insertedCourt, error: courtErr } = await supabase
+          .from('courts')
+          .insert({ club_id: clubId, name: `Pista ${i + 1}` })
+          .select('id')
+          .single();
+        if (courtErr) return res.status(500).json({ ok: false, error: courtErr.message });
+        const r = await ensureDefaultPricingRuleForCourt(supabase as any, insertedCourt.id);
+        if (r.error) console.error('[register-club-owner] pricing rule seed failed:', r.error);
       }
     }
 
