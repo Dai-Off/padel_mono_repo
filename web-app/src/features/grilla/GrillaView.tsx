@@ -609,9 +609,9 @@ function GrillaViewInner() {
 
     let newStatus = reservation.status;
     if (newCourtId === 'pista-virtual' && reservation.courtId !== 'pista-virtual') {
-      newStatus = 'Tiempo pasado'; // Or some other temporary logic 
+      newStatus = 'past';
     } else if (newCourtId !== 'pista-virtual' && reservation.courtId === 'pista-virtual') {
-      newStatus = 'Pagado';
+      newStatus = 'confirmed';
     }
 
     const newStartMin = parseTimeStr(newStartTime);
@@ -1152,7 +1152,7 @@ function GrillaViewInner() {
                                 setReservations(prev => [...prev, {
                                   id: newId, courtId, courtName,
                                   startTime: timeStr, durationMinutes: 90,
-                                  playerName: '', status: 'Reservado',
+                                  playerName: '', status: 'available', booking_type: 'standard',
                                 }]);
                                 setSelectedModalReservationId(newId);
                               }}
@@ -1210,7 +1210,7 @@ function GrillaViewInner() {
                             setReservations(prev => [...prev, {
                               id: newId, courtId, courtName,
                               startTime: timeStr, durationMinutes: 90,
-                              playerName: '', status: 'Reservado',
+                              playerName: '', status: 'available', booking_type: 'standard',
                             }]);
                             setSelectedModalReservationId(newId);
                           }}
