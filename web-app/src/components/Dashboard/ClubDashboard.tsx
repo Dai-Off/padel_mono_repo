@@ -39,7 +39,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
 import { authService } from '../../services/auth';
 import { clubService, type Club } from '../../services/club';
-import { PageSkeleton } from '../Layout/PageSkeleton';
+import { PageSpinner } from '../Layout/PageSpinner';
 import { ClubStaffTab } from '../Staff/ClubStaffTab';
 
 export const ClubDashboard = () => {
@@ -179,7 +179,7 @@ export const ClubDashboard = () => {
     };
 
     if (!club && loading) {
-        return <PageSkeleton />;
+        return <PageSpinner />;
     }
 
     return (
@@ -196,7 +196,7 @@ export const ClubDashboard = () => {
                     {isPlayersPage ? (
                         <ClubPlayersTab />
                     ) : isConfigPage ? (
-                        <ClubSettingsTab />
+                        <ClubSettingsTab initialClub={club} />
                     ) : isPersonalPage ? (
                         <ClubStaffTab clubId={club?.id ?? null} />
                     ) : (
@@ -225,10 +225,7 @@ export const ClubDashboard = () => {
                                 </button>
                             </div>
                             {loading ? (
-                                <div className="flex flex-col items-center justify-center py-24 gap-4">
-                                    <div className="w-12 h-12 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
-                                    <p className="text-sm font-semibold text-gray-500 animate-pulse">{t('loading')}...</p>
-                                </div>
+                                <PageSpinner />
                             ) : courts.length === 0 ? (
                                 <p className="text-sm text-gray-500 text-center py-12">{t('no_courts')}</p>
                             ) : (

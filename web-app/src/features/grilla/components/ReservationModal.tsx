@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import type { Reservation } from '../types';
 import {
     X,
@@ -10,9 +10,11 @@ import {
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
 import { apiFetchWithAuth } from '../../../services/api';
+import { reservationTypePricesService } from '../../../services/reservationTypePrices';
 import type { Player } from '../../../types/api';
 
 interface ReservationModalProps {
+    clubId?: string | null;
     isOpen: boolean;
     onClose: () => void;
     reservation: Reservation | null;
@@ -20,6 +22,7 @@ interface ReservationModalProps {
     editingBookingData?: any | null;
     onUpdate?: (bookingId: string, data: any) => Promise<void>;
     onDelete?: (bookingId: string, sendEmail: boolean) => Promise<void>;
+    onMarkPaid?: (bookingId: string) => Promise<void>;
 }
 
 // Helper: Player Search Component
@@ -229,7 +232,7 @@ const PlayerSearch: React.FC<{
 };
 
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
     const isEditMode = !!editingBookingData;
@@ -250,6 +253,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [sendDeleteEmail, setSendDeleteEmail] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [overlapError, setOverlapError] = useState<string | null>(null);
+    const [pricesByType, setPricesByType] = useState<Record<string, { price_per_hour_cents: number }>>({});
+    const [isMarkingPaid, setIsMarkingPaid] = useState(false);
 
     // Track original values to detect changes in edit mode
     const originalRef = useRef<{
@@ -368,6 +373,22 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         return () => { document.body.style.overflow = 'unset'; };
     }, [isOpen, reservation?.id, editingBookingData?.id]);
 
+    // Fetch prices when opening in create mode and clubId is available
+    useEffect(() => {
+        if (!isOpen || !clubId || !!editingBookingData) return;
+        reservationTypePricesService.get(clubId).then(setPricesByType).catch(() => setPricesByType({}));
+    }, [isOpen, clubId, editingBookingData?.id]);
+
+    const totalPriceCents = useMemo(() => {
+        if (editingBookingData?.total_price_cents != null) return editingBookingData.total_price_cents;
+        const pricePerHour = pricesByType[resType]?.price_per_hour_cents ?? 0;
+        return Math.round((duration / 60) * pricePerHour);
+    }, [editingBookingData?.total_price_cents, pricesByType, resType, duration]);
+
+    const formattedPrice = totalPriceCents != null && totalPriceCents >= 0
+        ? (totalPriceCents / 100).toFixed(2).replace('.', ',') + ' €'
+        : null;
+
     if (!isOpen || !reservation) return null;
 
     const handleSave = async (status: 'confirmed' | 'pending_payment') => {
@@ -420,14 +441,14 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                         .filter(p => p !== null)
                         .map(p => ({ player_id: p!.id })),
                 });
-            } else if (onSave) {
+                } else if (onSave) {
                 // Create new booking
                 const data = {
                     court_id: reservation.courtId,
                     organizer_player_id: organizer.id,
                     start_at: `${startHour}:${startMinute}`,
                     duration_minutes: duration,
-                    total_price_cents: 0,
+                    total_price_cents: totalPriceCents,
                     status,
                     notes,
                     booking_type: resType || 'standard',
@@ -445,6 +466,20 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             alert('Error al guardar la reserva');
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handleMarkPaid = async () => {
+        if (!onMarkPaid || !editingBookingData) return;
+        setIsMarkingPaid(true);
+        try {
+            await onMarkPaid(editingBookingData.id);
+            onClose();
+        } catch (err) {
+            console.error('Error marking paid:', err);
+            alert('Error al marcar como pagado');
+        } finally {
+            setIsMarkingPaid(false);
         }
     };
 
@@ -505,6 +540,15 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                         )}
                         <div className="flex gap-2 flex-wrap">
                             {/* Actualizar — only shown in edit mode when there are changes */}
+                            {isEditMode && editingBookingData?.status === 'pending_payment' && onMarkPaid && (
+                                <button
+                                    onClick={handleMarkPaid}
+                                    disabled={isMarkingPaid}
+                                    className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
+                                >
+                                    {isMarkingPaid ? 'Procesando...' : 'Marcar como pagado'}
+                                </button>
+                            )}
                             {isEditMode && hasChanges && (
                                 <button
                                     onClick={() => handleSave(editingBookingData?.status === 'confirmed' ? 'confirmed' : 'pending_payment')}
@@ -690,6 +734,15 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     <option value="blocked">Bloqueo administrativo</option>
                                 </select>
                             </div>
+
+                            {/* Precio calculado (solo en modo creación) */}
+                            {!isEditMode && formattedPrice != null && (
+                                <div className="flex items-center gap-2">
+                                    <span className="text-sm font-bold text-gray-700 w-32 shrink-0">Precio:</span>
+                                    <span className="text-sm font-bold text-[#006A6A]">{formattedPrice}</span>
+                                    <span className="text-xs text-gray-500">({duration} min)</span>
+                                </div>
+                            )}
                         </div>
                     </div>
 

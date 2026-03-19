@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Users, TrendingUp, Search, Eye, Mail, Phone, Zap, Plus, Loader2,
 } from 'lucide-react';
+import { PageSpinner } from '../Layout/PageSpinner';
 import { useTranslation } from 'react-i18next';
 import { playerService } from '../../services/player';
 import type { Player } from '../../types/api';
@@ -178,10 +179,7 @@ export function ClubPlayersTab() {
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center py-12 gap-2">
-          <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-          <span className="text-xs text-gray-500">{t('loading')}</span>
-        </div>
+        <PageSpinner />
       ) : (
         <div className="space-y-2">
           {filteredPlayers.length === 0 ? (
