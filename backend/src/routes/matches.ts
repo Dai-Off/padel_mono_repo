@@ -127,6 +127,7 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
           timezone: timezone ?? 'Europe/Madrid',
           total_price_cents: Number(total_price_cents),
           currency: 'EUR',
+          status: 'pending_payment',
           source_channel: ['mobile', 'web', 'manual', 'system'].includes(source_channel)
             ? source_channel
             : 'web',
