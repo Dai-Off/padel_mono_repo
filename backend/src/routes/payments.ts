@@ -38,6 +38,7 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
     gender,
     elo_min,
     elo_max,
+    source_channel,
   } = req.body ?? {};
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents == null) {
@@ -138,6 +139,9 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       visibility: visibility === 'public' ? 'public' : 'private',
       competitive: competitive !== false ? '1' : '0',
       gender: gender ?? 'any',
+      source_channel: ['mobile', 'web', 'manual', 'system'].includes(source_channel)
+        ? source_channel
+        : 'mobile',
     };
     if (elo_min != null) metadata.elo_min = String(elo_min);
     if (elo_max != null) metadata.elo_max = String(elo_max);
@@ -600,6 +604,9 @@ async function processNewMatchPayment(
   const gender = meta.gender ?? 'any';
   const elo_min = meta.elo_min ? parseInt(meta.elo_min, 10) : null;
   const elo_max = meta.elo_max ? parseInt(meta.elo_max, 10) : null;
+  const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
+    ? meta.source_channel
+    : 'mobile';
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents <= 0) return;
 
@@ -639,6 +646,7 @@ async function processNewMatchPayment(
       total_price_cents,
       currency: 'EUR',
       status: 'confirmed',
+      source_channel,
     }])
     .select('id')
     .maybeSingle();
@@ -769,6 +777,9 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       const gender = meta.gender ?? 'any';
       const elo_min = meta.elo_min ? parseInt(meta.elo_min, 10) : null;
       const elo_max = meta.elo_max ? parseInt(meta.elo_max, 10) : null;
+      const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
+        ? meta.source_channel
+        : 'mobile';
 
       if (!court_id || !start_at || !end_at || total_price_cents <= 0) {
         res.status(400).json({ ok: false, error: 'Metadata de pago incompleta' });
@@ -814,6 +825,7 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
           total_price_cents,
           currency: 'EUR',
           status: 'confirmed',
+          source_channel,
         }])
         .select('id')
         .maybeSingle();

@@ -4,9 +4,9 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 const router = Router();
 
 const SELECT_LIST =
-  'id, created_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, status, reservation_type, notes, players!bookings_organizer_player_id_fkey(first_name, last_name)';
+  'id, created_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, players!bookings_organizer_player_id_fkey(first_name, last_name)';
 const SELECT_ONE =
-  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, cancelled_at, cancelled_by, cancellation_reason, notes, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, email))';
+  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, email))';
 
 router.get('/', async (req: Request, res: Response) => {
   const court_id = req.query.court_id as string | undefined;
@@ -97,6 +97,9 @@ router.post('/', async (req: Request, res: Response) => {
           notes: notes ?? null,
           reservation_type: booking_type ?? 'standard',
           pricing_rule_ids: Array.isArray(pricing_rule_ids) ? pricing_rule_ids : null,
+          source_channel: ['mobile', 'web', 'manual', 'system'].includes(source_channel)
+            ? source_channel
+            : 'web',
         },
       ])
       .select(SELECT_ONE)
