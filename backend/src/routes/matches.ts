@@ -106,6 +106,7 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     elo_max,
     gender,
     competitive,
+    source_channel,
   } = req.body ?? {};
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents == null) {
     return res.status(400).json({
@@ -126,6 +127,10 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
           timezone: timezone ?? 'Europe/Madrid',
           total_price_cents: Number(total_price_cents),
           currency: 'EUR',
+          status: 'pending_payment',
+          source_channel: ['mobile', 'web', 'manual', 'system'].includes(source_channel)
+            ? source_channel
+            : 'web',
         },
       ])
       .select('id')
