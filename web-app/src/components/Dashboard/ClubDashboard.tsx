@@ -41,6 +41,7 @@ import { authService } from '../../services/auth';
 import { clubService, type Club } from '../../services/club';
 import { PageSkeleton } from '../Layout/PageSkeleton';
 import { ClubStaffTab } from '../Staff/ClubStaffTab';
+import { InventoryControl } from '../Inventory/InventoryControl';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
@@ -48,6 +49,7 @@ export const ClubDashboard = () => {
     const isPlayersPage = location.pathname === '/jugadores';
     const isConfigPage = location.pathname === '/configuracion';
     const isPersonalPage = location.pathname === '/personal';
+    const isInventoryPage = location.pathname === '/inventario';
 
     const [loading, setLoading] = useState(true);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -106,7 +108,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage) {
             setLoading(false);
             return;
         }
@@ -199,6 +201,8 @@ export const ClubDashboard = () => {
                         <ClubSettingsTab />
                     ) : isPersonalPage ? (
                         <ClubStaffTab clubId={club?.id ?? null} />
+                    ) : isInventoryPage ? (
+                        <InventoryControl clubId={club?.id ?? null} />
                     ) : (
                         <>
                             <div className="flex items-center justify-between gap-3">
@@ -276,12 +280,12 @@ export const ClubDashboard = () => {
                 isAdmin={isAdmin}
             />
 
-            {isFormOpen && (
+            {!isInventoryPage && isFormOpen && (
                 <CourtForm court={editingItem} onClose={() => setIsFormOpen(false)} onSubmit={handleFormSubmit} />
             )}
 
             <AnimatePresence>
-                {courtDetail && (
+                {!isInventoryPage && courtDetail && (
                     <CourtDetailModal
                         key={courtDetail.id}
                         court={courtDetail}
@@ -291,7 +295,7 @@ export const ClubDashboard = () => {
                 )}
             </AnimatePresence>
 
-            {courtToDelete && (
+            {!isInventoryPage && courtToDelete && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
                     <div className="w-full max-w-sm rounded-2xl bg-white border border-gray-200 p-5 shadow-xl">
                         <p className="text-sm font-semibold text-[#1A1A1A] mb-2">
