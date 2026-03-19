@@ -16,6 +16,7 @@ import clubApplicationsRouter from './clubApplications';
 import paymentsRouter from './paymentsRouter';
 import pricingRulesRouter from './pricingRules';
 import clubStaffRouter from './clubStaff';
+import inventoryRouter from './inventory';
 
 const router = Router();
 
@@ -40,6 +41,7 @@ router.use('/club-applications', clubApplicationsRouter);
 router.use('/payments', paymentsRouter);
 router.use('/pricing-rules', pricingRulesRouter);
 router.use('/club-staff', clubStaffRouter);
+router.use('/inventario', inventoryRouter);
 
 export default router;
 
