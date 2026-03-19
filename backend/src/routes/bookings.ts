@@ -4,9 +4,9 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 const router = Router();
 
 const SELECT_LIST =
-  'id, created_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, status, notes, reservation_type, players!bookings_organizer_player_id_fkey(first_name, last_name)';
+  'id, created_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, players!bookings_organizer_player_id_fkey(first_name, last_name)';
 const SELECT_ONE =
-  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, pricing_rule_ids, status, cancelled_at, cancelled_by, cancellation_reason, notes, reservation_type, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, email))';
+  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, email))';
 
 router.get('/', async (req: Request, res: Response) => {
   const court_id = req.query.court_id as string | undefined;
@@ -66,7 +66,8 @@ router.post('/', async (req: Request, res: Response) => {
     pricing_rule_ids,
     status,
     notes,
-    reservation_type,
+    booking_type,
+    source_channel,
     participants, // Array of { player_id }
   } = req.body ?? {};
 
@@ -94,8 +95,11 @@ router.post('/', async (req: Request, res: Response) => {
           currency: currency ?? 'EUR',
           status: status ?? 'pending_payment',
           notes: notes ?? null,
-          reservation_type: reservation_type ?? 'normal',
+          reservation_type: booking_type ?? 'standard',
           pricing_rule_ids: Array.isArray(pricing_rule_ids) ? pricing_rule_ids : null,
+          source_channel: ['mobile', 'web', 'manual', 'system'].includes(source_channel)
+            ? source_channel
+            : 'web',
         },
       ])
       .select(SELECT_ONE)
@@ -146,7 +150,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { status, cancelled_by, cancellation_reason, notes, participants, court_id, start_at, end_at } = req.body ?? {};
+  const { status, cancelled_by, cancellation_reason, notes, booking_type, participants, court_id, start_at, end_at } = req.body ?? {};
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (status !== undefined) update.status = status;
   if (cancelled_by !== undefined) update.cancelled_by = cancelled_by;
@@ -155,6 +159,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     update.cancelled_at = new Date().toISOString();
   }
   if (notes !== undefined) update.notes = notes;
+  if (booking_type !== undefined) update.reservation_type = booking_type;
   if (court_id !== undefined) update.court_id = court_id;
   if (start_at !== undefined) update.start_at = start_at;
   if (end_at !== undefined) update.end_at = end_at;
