@@ -10,23 +10,43 @@ const SELECT_ONE =
 
 router.get('/', async (req: Request, res: Response) => {
   const court_id = req.query.court_id as string | undefined;
+  const club_id = req.query.club_id as string | undefined;
   const organizer_player_id = req.query.organizer_player_id as string | undefined;
   const date = req.query.date as string | undefined; // YYYY-MM-DD
   try {
     const supabase = getSupabaseServiceRoleClient();
+
+    // When club_id is provided, resolve it to the set of court IDs for that club
+    let courtIdsForClub: string[] | null = null;
+    if (club_id) {
+      const { data: clubCourts, error: courtsErr } = await supabase
+        .from('courts')
+        .select('id')
+        .eq('club_id', club_id);
+      if (courtsErr) return res.status(500).json({ ok: false, error: courtsErr.message });
+      courtIdsForClub = (clubCourts ?? []).map((c: { id: string }) => c.id);
+      if (courtIdsForClub.length === 0) {
+        // Club exists but has no courts — return empty immediately
+        return res.json({ ok: true, bookings: [] });
+      }
+    }
+
     let q = supabase
       .from('bookings')
       .select(SELECT_LIST)
       .order('start_at', { ascending: true })
       .limit(200);
-    if (court_id) q = q.eq('court_id', court_id);
+
+    if (courtIdsForClub) q = q.in('court_id', courtIdsForClub);
+    else if (court_id) q = q.eq('court_id', court_id);
+
     if (organizer_player_id) q = q.eq('organizer_player_id', organizer_player_id);
     if (date) {
-      // Filter bookings whose start falls within the given calendar day (UTC-based)
-      const nextDay = new Date(date);
-      nextDay.setDate(nextDay.getDate() + 1);
+      // Filter bookings whose start falls within the given calendar day (UTC)
+      const nextDay = new Date(date + 'T00:00:00Z');
+      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
       const nextDayStr = nextDay.toISOString().split('T')[0];
-      q = q.gte('start_at', `${date}T00:00:00`).lt('start_at', `${nextDayStr}T00:00:00`);
+      q = q.gte('start_at', `${date}T00:00:00Z`).lt('start_at', `${nextDayStr}T00:00:00Z`);
     }
     q = q.neq('status', 'cancelled');
     const { data, error } = await q;

@@ -76,8 +76,12 @@ router.get('/courts', async (req: Request, res: Response) => {
       .in('court_id', courtIds)
       .neq('status', 'cancelled');
 
-    const day = new Date(searchDate + 'T12:00:00Z').getUTCDay();
-    const dow = day === 0 ? 7 : day;
+    // Day-of-week reference:
+    // - JS getUTCDay(): 0..6 (Sun=0)
+    // - Many DB schemas store ISO: 1..7 (Mon=1..Sun=7)
+    // We support both to avoid "no slots" when data uses the other convention.
+    const jsDow = new Date(searchDate + 'T12:00:00Z').getUTCDay(); // 0..6
+    const isoDow = jsDow === 0 ? 7 : jsDow; // 1..7
 
     if (dateFrom) {
       bookingsQuery = bookingsQuery.gte('start_at', `${dateFrom}T00:00:00Z`);
@@ -104,10 +108,12 @@ router.get('/courts', async (req: Request, res: Response) => {
     }
 
     const rulesByCourt = new Map<string, { startMin: number; endMin: number; amountCents: number }[]>();
-    const dowNum = Number(dow);
     for (const r of pricingRules ?? []) {
       const dows = Array.isArray(r.days_of_week) ? r.days_of_week : [];
-      const matchesDay = dows.some((d: unknown) => Number(d) === dowNum);
+      const matchesDay = dows.some((d: unknown) => {
+        const n = Number(d);
+        return n === isoDow || n === jsDow;
+      });
       if (!matchesDay) continue;
       const list = rulesByCourt.get(r.court_id) ?? [];
       list.push({
@@ -118,7 +124,9 @@ router.get('/courts', async (req: Request, res: Response) => {
       rulesByCourt.set(r.court_id, list);
     }
 
-    const baseDate = new Date(searchDate + 'T00:00:00Z').getTime();
+    // Use local midnight so time-slot labels ("10:00") represent local clock time,
+    // consistent with how the mobile app and web grid display hours.
+    const baseDate = new Date(searchDate + 'T00:00:00').getTime();
 
     const results: SearchCourtResult[] = courts.flatMap((court) => {
         const club = clubMap.get(court.club_id);
