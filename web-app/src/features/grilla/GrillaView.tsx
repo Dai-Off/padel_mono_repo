@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 
 import { Calendar, Printer, Menu, ArrowLeft, X, Globe } from 'lucide-react';
+import { MainMenu } from '../../components/Layout/MainMenu';
 import clsx from 'clsx';
 import { useTranslation } from './i18n/I18nContext';
 import type { Locale } from './i18n/translations';
@@ -38,8 +39,7 @@ import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
 import dropSoundAsset from '../../assets/sounds/sfx2.mp3';
 
-import { apiFetchWithAuth } from '../../services/api';
-import { PageSkeleton } from '../../components/Layout/PageSkeleton';
+import { apiFetch, apiFetchWithAuth } from '../../services/api';
 
 import './grilla.css';
 
@@ -59,7 +59,6 @@ const useClubData = (dateOrStr: Date | string) => {
     const [loading, setLoading] = useState(true);
     const [clubId, setClubId] = useState<string | null>(null);
     const courtsRef = useRef<Court[]>([]);
-    const [clubName, setClubName] = useState<string>('');
     const dateStr = toDateStr(dateOrStr);
 
     // Resolve club_id from the logged-in club owner's profile
@@ -76,27 +75,21 @@ const useClubData = (dateOrStr: Date | string) => {
 
     // Fetch courts once per club (they rarely change)
     const fetchCourts = useCallback(async (): Promise<Court[]> => {
-        let effectiveClubId = clubId;
+        if (!clubId) return [];
+        let courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${clubId}`);
+        let courtsData: Court[] = (courtsRes.courts || []).map((c: any) => ({
+            id: c.id, name: c.name, locationId: 'sede-central'
+        }));
 
-        // If we don't know the club yet, fetch clubs and pick the first one linked to the user
-        if (!effectiveClubId) {
-            const allClubsRes = await apiFetchWithAuth<any>('/clubs');
-            const clubsList = allClubsRes?.clubs ?? [];
-            if (allClubsRes?.ok && clubsList.length > 0) {
-                const firstClub = clubsList[0];
-                effectiveClubId = firstClub.id;
-                setClubId(firstClub.id);
-                setClubName(firstClub.name ?? '');
+        if (courtsData.length === 0) {
+            const allClubsRes = await apiFetch<any>('/clubs');
+            if (allClubsRes.ok && allClubsRes.result?.length > 0) {
+                const firstClub = allClubsRes.result[0];
+                courtsRes = await apiFetch<any>(`/courts?club_id=${firstClub.id}`);
+                courtsData = (courtsRes.courts || []).map((c: any) => ({
+                    id: c.id, name: c.name, locationId: 'sede-central'
+                }));
             }
-        }
-
-        let courtsData: Court[] = [];
-
-        if (effectiveClubId) {
-            const courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${effectiveClubId}`);
-            courtsData = (courtsRes.courts || []).map((c: any) => ({
-                id: c.id, name: c.name, locationId: 'sede-central'
-            }));
         }
 
         if (courtsData.length === 0) {
@@ -175,7 +168,7 @@ const useClubData = (dateOrStr: Date | string) => {
         return () => clearTimeout(timer);
     }, [dateStr, dateOrStr, clubId]);
 
-    return { courts, reservations, loading, refresh, clubName };
+    return { courts, reservations, loading, refresh };
 };
 
 // Pure mapping function — no network calls
@@ -194,7 +187,10 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
             startTime: start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
             durationMinutes: (new Date(b.end_at).getTime() - start.getTime()) / 60000,
             playerName,
-            status: b.status === 'confirmed' ? 'Pagado' : 'Reservado',
+            status: b.status ?? 'pending_payment',
+            booking_type: b.reservation_type ?? b.booking_type ?? 'standard',
+            source_channel: b.source_channel ?? 'manual',
+            notes: b.notes ?? undefined,
             locationId: 'sede-central'
         };
     });
@@ -273,6 +269,7 @@ const ZoomScrollbars = () => {
 function GrillaViewInner() {
   const { t, locale, setLocale } = useTranslation();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const today = new Date(); // Always current date — recomputed each render so chips are never stale
   const [selectedDate, setSelectedDate] = useState<Date>(today);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -287,7 +284,7 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
-  const { courts, reservations: serverReservations, refresh, clubName, loading } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, refresh } = useClubData(selectedDate);
 
   // Filter courts and reservations by the active location tab
   const activeCourts = useMemo(() => {
@@ -388,7 +385,7 @@ function GrillaViewInner() {
       setSelectedModalReservationId(res.id);
       if (!res.id.startsWith('new-')) {
           try {
-              const data = await apiFetchWithAuth<any>(`/bookings/${res.id}`);
+              const data = await apiFetch<any>(`/bookings/${res.id}`);
               if (data.ok) {
                   // Enrich with courtName from reservation state (court_id alone is not human-readable)
                   const court = courts.find(c => c.id === (data.booking.court_id ?? res.courtId));
@@ -407,7 +404,7 @@ function GrillaViewInner() {
 
   const handleUpdateBooking = async (bookingId: string, bookingData: any) => {
       try {
-          const res = await apiFetchWithAuth<any>(`/bookings/${bookingId}`, {
+          const res = await apiFetch<any>(`/bookings/${bookingId}`, {
               method: 'PUT',
               body: JSON.stringify(bookingData),
           });
@@ -428,7 +425,7 @@ function GrillaViewInner() {
       setSelectedModalReservationId(null);
       setEditingBookingData(null);
       try {
-          const res = await apiFetchWithAuth<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
+          const res = await apiFetch<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
           if (!res.ok) {
               // Revert on failure
               refresh();
@@ -454,7 +451,7 @@ function GrillaViewInner() {
               timezone: 'Europe/Madrid' // Or dynamic
           };
 
-          const res = await apiFetchWithAuth<any>('/bookings', {
+          const res = await apiFetch<any>('/bookings', {
               method: 'POST',
               body: JSON.stringify(payload)
           });
@@ -623,9 +620,9 @@ function GrillaViewInner() {
 
     let newStatus = reservation.status;
     if (newCourtId === 'pista-virtual' && reservation.courtId !== 'pista-virtual') {
-      newStatus = 'Tiempo pasado'; // Or some other temporary logic 
+      newStatus = 'past';
     } else if (newCourtId !== 'pista-virtual' && reservation.courtId === 'pista-virtual') {
-      newStatus = 'Pagado';
+      newStatus = 'confirmed';
     }
 
     const newStartMin = parseTimeStr(newStartTime);
@@ -684,7 +681,7 @@ function GrillaViewInner() {
     const startAt = new Date(`${baseDate}T${startTime}`).toISOString();
     const endAt = new Date(new Date(startAt).getTime() + durationMinutes * 60000).toISOString();
 
-    apiFetchWithAuth<any>(`/bookings/${reservationId}`, {
+    apiFetch<any>(`/bookings/${reservationId}`, {
       method: 'PUT',
       body: JSON.stringify({
         court_id: courtId,
@@ -882,29 +879,23 @@ function GrillaViewInner() {
     }
   };
 
-  if (loading && courts.length === 0) {
-    return <PageSkeleton />;
-  }
-
   return (
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
       <div className="h-[100dvh] flex flex-col bg-gray-100 font-sans overflow-x-hidden overflow-y-auto landscape:overflow-y-auto">
         {/* ── Top Header ── */}
         {!isMobileDevice && (
-          <header className="bg-[#f8f8f8] px-4 md:px-6 py-1.5 md:py-2 z-50 flex-shrink-0 flex justify-between items-center border-b border-gray-100 gap-3">
+          <header className="bg-[#00726b] px-4 md:px-6 py-1.5 md:py-2 z-50 flex-shrink-0 flex justify-between items-center border-b border-[#005a4f] gap-3">
             <div className="flex items-center gap-3 md:gap-4">
-              <button className="w-9 h-9 md:w-10 md:h-10 bg-white border border-gray-200 rounded-lg flex items-center justify-center text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 flex-shrink-0 transition-colors">
-                <Menu className="w-5 h-5 md:w-5 md:h-5 text-gray-600" />
+              <button onClick={() => setIsMenuOpen(true)} className="w-9 h-9 md:w-10 md:h-10 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors">
+                <Menu className="w-5 h-5 md:w-5 md:h-5 text-white" />
               </button>
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-gray-200 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.05)] relative p-[2px]">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">
                 <div className="w-full h-full rounded-full border border-gray-900 bg-white flex items-center justify-center">
                   <span className="font-extrabold text-[10px] sm:text-xs text-black italic tracking-tighter">X7</span>
                 </div>
               </div>
               <div className="flex flex-col">
-                <h1 className="text-[13px] md:text-sm font-bold text-gray-900 leading-tight">
-                  {clubName || t('header.clubName')}
-                </h1>
+                <h1 className="text-[13px] md:text-sm font-bold text-white leading-tight">{t('header.clubName')}</h1>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -912,10 +903,10 @@ function GrillaViewInner() {
               <div className="relative">
                 <button
                   onClick={() => setLangMenuOpen(prev => !prev)}
-                  className="w-9 h-9 md:w-10 md:h-10 bg-white border border-gray-200 rounded-lg flex items-center justify-center text-gray-700 shadow-[0_1px_2px_rgba(0,0,0,0.05)] hover:bg-gray-50 flex-shrink-0 transition-colors"
+                  className="w-9 h-9 md:w-10 md:h-10 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors"
                   title={t('header.languageLabel')}
                 >
-                  <Globe className="w-4 h-4 md:w-5 md:h-5 text-gray-600" />
+                  <Globe className="w-4 h-4 md:w-5 md:h-5 text-white" />
                 </button>
                 {langMenuOpen && (
                   <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[60] overflow-hidden min-w-[160px] animate-in fade-in slide-in-from-top-2 duration-150">
@@ -1172,7 +1163,7 @@ function GrillaViewInner() {
                                 setReservations(prev => [...prev, {
                                   id: newId, courtId, courtName,
                                   startTime: timeStr, durationMinutes: 90,
-                                  playerName: '', status: 'Reservado',
+                                  playerName: '', status: 'available', booking_type: 'standard',
                                 }]);
                                 setSelectedModalReservationId(newId);
                               }}
@@ -1230,7 +1221,7 @@ function GrillaViewInner() {
                             setReservations(prev => [...prev, {
                               id: newId, courtId, courtName,
                               startTime: timeStr, durationMinutes: 90,
-                              playerName: '', status: 'Reservado',
+                              playerName: '', status: 'available', booking_type: 'standard',
                             }]);
                             setSelectedModalReservationId(newId);
                           }}
@@ -1301,6 +1292,7 @@ function GrillaViewInner() {
         anchorElement={hoveredTooltip?.el || null}
       />
       </div>
+      <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" />
     </ZoomContext.Provider>
   );
 }

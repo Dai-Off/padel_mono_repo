@@ -22,6 +22,8 @@ interface CourtCardProps {
     court: Court;
     onEdit: (court: Court) => void;
     onDelete?: (id: string) => void;
+    onViewDetails?: (court: Court) => void;
+    className?: string;
 }
 
 function formatMaintenance(value: string | null | undefined): string {
@@ -35,7 +37,7 @@ function formatMaintenance(value: string | null | undefined): string {
     }
 }
 
-export const CourtCard = ({ court, onEdit, onDelete }: CourtCardProps) => {
+export const CourtCard = ({ court, onEdit, onDelete, onViewDetails, className }: CourtCardProps) => {
     const { t } = useTranslation();
 
     const statusConfig: Record<string, { color: string; label: string; dotColor: string }> = {
@@ -61,7 +63,7 @@ export const CourtCard = ({ court, onEdit, onDelete }: CourtCardProps) => {
 
     return (
         <motion.article
-            className="bg-white rounded-2xl border border-gray-100 overflow-hidden"
+            className={`bg-white rounded-2xl border border-gray-100 overflow-hidden ${className ?? ''}`}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             whileTap={{ scale: 0.98 }}
@@ -110,6 +112,7 @@ export const CourtCard = ({ court, onEdit, onDelete }: CourtCardProps) => {
                 <motion.button
                     type="button"
                     whileTap={{ scale: 0.95 }}
+                    onClick={() => onViewDetails?.(court)}
                     className="flex-1 px-3 py-2.5 bg-[#1A1A1A] text-white rounded-xl text-xs font-bold hover:opacity-90 transition-opacity"
                 >
                     {t('view_details')}

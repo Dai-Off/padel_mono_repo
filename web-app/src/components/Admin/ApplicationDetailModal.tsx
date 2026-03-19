@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Check, XCircle, Copy, Building2, User, MapPin, Mail, Phone, Clock } from 'lucide-react';
+import { X, Check, XCircle, Copy, Building2, User, MapPin, Mail, Phone, Clock, MailPlus } from 'lucide-react';
+import { adminApplicationsService } from '../../services/adminApplications';
 import type { ClubApplication, ApplicationStatus } from '../../services/adminApplications';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -28,7 +29,7 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
     onDone,
 }) => {
     const { t } = useTranslation();
-    const [loading, setLoading] = useState<'approve' | 'reject' | null>(null);
+    const [loading, setLoading] = useState<'approve' | 'reject' | 'resend' | null>(null);
     const [inviteUrl, setInviteUrl] = useState<string | null>(null);
     const [rejectMode, setRejectMode] = useState(false);
     const [rejectReason, setRejectReason] = useState('');
@@ -72,6 +73,19 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
             navigator.clipboard.writeText(inviteUrl);
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
+        }
+    };
+
+    const handleResendInvite = async () => {
+        setLoading('resend');
+        try {
+            const { invite_url, message } = await adminApplicationsService.resendInvite(application.id);
+            setInviteUrl(invite_url);
+            toast.success(message || t('admin_resend_invite_done'));
+        } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Error');
+        } finally {
+            setLoading(null);
         }
     };
 
@@ -178,13 +192,41 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
                             <div className="p-4 rounded-2xl bg-green-50 border border-green-100">
                                 <p className="text-xs font-bold text-green-800 mb-2">{t('admin_invite_url')}</p>
                                 <p className="text-xs text-green-700 break-all mb-3">{inviteUrl}</p>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={copyInviteUrl}
+                                        className="flex items-center gap-2 px-3 py-2 rounded-xl bg-green-600 text-white text-xs font-semibold hover:bg-green-700"
+                                    >
+                                        <Copy className="w-4 h-4" />
+                                        {copied ? t('admin_copied') : t('admin_copy_link')}
+                                    </button>
+                                    {status === 'approved' && !application.club_owner_id && (
+                                        <button
+                                            type="button"
+                                            onClick={handleResendInvite}
+                                            disabled={loading === 'resend'}
+                                            className="flex items-center gap-2 px-3 py-2 rounded-xl border border-green-600 text-green-700 text-xs font-semibold hover:bg-green-100 disabled:opacity-50"
+                                        >
+                                            <MailPlus className="w-4 h-4" />
+                                            {loading === 'resend' ? '…' : t('admin_resend_invite')}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {status === 'approved' && !application.club_owner_id && !inviteUrl && (
+                            <div className="p-4 rounded-2xl border border-amber-100 bg-amber-50/80">
+                                <p className="text-xs text-amber-900 mb-3">{t('admin_resend_invite_hint')}</p>
                                 <button
                                     type="button"
-                                    onClick={copyInviteUrl}
-                                    className="flex items-center gap-2 px-3 py-2 rounded-xl bg-green-600 text-white text-xs font-semibold hover:bg-green-700"
+                                    onClick={handleResendInvite}
+                                    disabled={loading === 'resend'}
+                                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 disabled:opacity-50"
                                 >
-                                    <Copy className="w-4 h-4" />
-                                    {copied ? t('admin_copied') : t('admin_copy_link')}
+                                    <MailPlus className="w-4 h-4" />
+                                    {loading === 'resend' ? '…' : t('admin_resend_invite')}
                                 </button>
                             </div>
                         )}

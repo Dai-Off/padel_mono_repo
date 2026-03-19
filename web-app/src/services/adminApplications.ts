@@ -87,4 +87,12 @@ export const adminApplicationsService = {
         });
         if (!res.ok) throw new Error((res as { error?: string }).error || 'Error al rechazar');
     },
+
+    resendInvite: async (id: string): Promise<{ invite_url: string; message?: string }> => {
+        const res = await apiFetchWithAuth<ApproveResponse>(`/club-applications/${id}/resend-invite`, {
+            method: 'POST',
+        });
+        if (!res.ok) throw new Error((res as { error?: string }).error || 'Error al reenviar');
+        return { invite_url: res.invite_url || '', message: res.message };
+    },
 };
