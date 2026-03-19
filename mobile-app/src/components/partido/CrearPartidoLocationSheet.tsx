@@ -147,7 +147,7 @@ export function CrearPartidoLocationSheet({
         start_at,
         end_at,
         total_price_cents: Math.round(totalPriceCents * (DURATION_MIN / 60)),
-        visibility: 'public',
+        visibility: partidoPrivado ? 'private' : 'public',
         competitive,
         gender,
       },
@@ -203,7 +203,7 @@ export function CrearPartidoLocationSheet({
 
     onPartidoCreado?.();
     onClose();
-  }, [selectedSlot, selectedClub, competitive, gender, orgId, session?.access_token, initPaymentSheet, presentPaymentSheet, onPartidoCreado, onClose]);
+  }, [selectedSlot, selectedClub, competitive, gender, orgId, session?.access_token, initPaymentSheet, presentPaymentSheet, onPartidoCreado, onClose, partidoPrivado]);
 
   const handleSiguiente = () => {
     if (selected === 'club_wematch') {
@@ -455,6 +455,25 @@ export function CrearPartidoLocationSheet({
                       </View>
                     </Pressable>
                   ))}
+                </View>
+
+                <View style={styles.configSection}>
+                  <Text style={styles.configSectionTitle}>Privacidad</Text>
+                  <View style={styles.privacyRow}>
+                    <View style={styles.privacyLeft}>
+                      <Ionicons name="lock-closed-outline" size={18} color="#6b7280" />
+                      <View style={styles.privacyTextWrap}>
+                        <Text style={styles.privacyLabel}>Partido privado</Text>
+                        <Text style={styles.privacySub}>No aparecerá en “Partidos abiertos”</Text>
+                      </View>
+                    </View>
+                    <Switch
+                      value={partidoPrivado}
+                      onValueChange={setPartidoPrivado}
+                      trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
+                      thumbColor="#fff"
+                    />
+                  </View>
                 </View>
 
                 <View style={styles.configClubCard}>
@@ -1197,6 +1216,38 @@ const styles = StyleSheet.create({
     color: '#1A1A1A',
   },
   configGenderSub: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 2,
+  },
+  privacyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#f3f4f6',
+    backgroundColor: '#fff',
+  },
+  privacyLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  privacyTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  privacyLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  privacySub: {
     fontSize: 12,
     color: '#9ca3af',
     marginTop: 2,

@@ -39,7 +39,7 @@ import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
 import dropSoundAsset from '../../assets/sounds/sfx2.mp3';
 
-import { apiFetch } from '../../services/api';
+import { apiFetch, apiFetchWithAuth } from '../../services/api';
 
 import './grilla.css';
 
@@ -57,16 +57,26 @@ const useClubData = (dateOrStr: Date | string) => {
     const [courts, setCourts] = useState<Court[]>([]);
     const [reservations, setReservations] = useState<Reservation[]>([]);
     const [loading, setLoading] = useState(true);
+    const [clubId, setClubId] = useState<string | null>(null);
     const courtsRef = useRef<Court[]>([]);
-
-    const clubId = '70a3ffb1-3bd7-4791-9153-b65d704f703c';
     const dateStr = toDateStr(dateOrStr);
 
-    // Fetch courts once (they rarely change)
-    const fetchCourts = useCallback(async (): Promise<Court[]> => {
-        if (courtsRef.current.length > 0) return courtsRef.current;
+    // Resolve club_id from the logged-in club owner's profile
+    useEffect(() => {
+        apiFetchWithAuth<{ ok: boolean; clubs?: { id: string }[] }>('/auth/me')
+            .then(res => {
+                const id = res.clubs?.[0]?.id ?? null;
+                // Reset courts cache so it re-fetches for the correct club
+                courtsRef.current = [];
+                setClubId(id);
+            })
+            .catch(() => setClubId(null));
+    }, []);
 
-        let courtsRes = await apiFetch<any>(`/courts?club_id=${clubId}`);
+    // Fetch courts once per club (they rarely change)
+    const fetchCourts = useCallback(async (): Promise<Court[]> => {
+        if (!clubId) return [];
+        let courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${clubId}`);
         let courtsData: Court[] = (courtsRes.courts || []).map((c: any) => ({
             id: c.id, name: c.name, locationId: 'sede-central'
         }));
@@ -90,27 +100,27 @@ const useClubData = (dateOrStr: Date | string) => {
                 { id: 'c-pista-4', name: 'PISTA 4', locationId: 'sede-central' },
             ];
         }
-
         courtsRef.current = courtsData;
         setCourts(courtsData);
         return courtsData;
     }, [clubId]);
 
-    // Fetch bookings for a single date — single request, with cache
+    // Fetch bookings for a single date — filtered by club to avoid cross-club pollution
     const fetchBookingsForDate = useCallback(async (date: string, courtsData: Court[]): Promise<Reservation[]> => {
         const cached = bookingsCache[date];
         if (cached && Date.now() - cached.ts < CACHE_TTL) {
-            // Map from cache
             return mapBookings(cached.data, courtsData);
         }
 
-        const bRes = await apiFetch<any>(`/bookings?date=${date}`);
+        const query = clubId ? `/bookings?date=${date}&club_id=${clubId}` : `/bookings?date=${date}`;
+        const bRes = await apiFetchWithAuth<any>(query);
         const raw = bRes.bookings || [];
         bookingsCache[date] = { data: raw, ts: Date.now() };
         return mapBookings(raw, courtsData);
-    }, []);
+    }, [clubId]);
 
     const fetchData = useCallback(async () => {
+        if (!clubId) return; // wait until club is resolved from auth
         setLoading(true);
         try {
             const courtsData = await fetchCourts();
@@ -121,7 +131,7 @@ const useClubData = (dateOrStr: Date | string) => {
         } finally {
             setLoading(false);
         }
-    }, [dateStr, fetchCourts, fetchBookingsForDate]);
+    }, [clubId, dateStr, fetchCourts, fetchBookingsForDate]);
 
     // Force-refresh: invalidate cache for current date and re-fetch
     const refresh = useCallback(async () => {
@@ -146,7 +156,8 @@ const useClubData = (dateOrStr: Date | string) => {
                 const ds = toDateStr(d);
                 if (!bookingsCache[ds] || Date.now() - bookingsCache[ds].ts >= CACHE_TTL) {
                     try {
-                        const bRes = await apiFetch<any>(`/bookings?date=${ds}`);
+                        const query = clubId ? `/bookings?date=${ds}&club_id=${clubId}` : `/bookings?date=${ds}`;
+                        const bRes = await apiFetchWithAuth<any>(query);
                         bookingsCache[ds] = { data: bRes.bookings || [], ts: Date.now() };
                     } catch { /* silent prefetch */ }
                 }
@@ -155,7 +166,7 @@ const useClubData = (dateOrStr: Date | string) => {
         // Prefetch after a short delay so it doesn't block the current date load
         const timer = setTimeout(prefetch, 300);
         return () => clearTimeout(timer);
-    }, [dateStr, dateOrStr]);
+    }, [dateStr, dateOrStr, clubId]);
 
     return { courts, reservations, loading, refresh };
 };
