@@ -50,7 +50,7 @@ export type BookingType =
     | 'tournament'         // Pistas bloqueadas para torneo externo
     | 'blocked';           // Bloqueo administrativo de pista
 
-export type BookingSourceChannel = 'app' | 'manual' | 'system';
+export type BookingSourceChannel = 'mobile' | 'web' | 'manual' | 'system';
 
 export type BookingStatus =
     | 'pending_payment'  // Pendiente de cobro

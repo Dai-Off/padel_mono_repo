@@ -182,6 +182,26 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                 />
             )}
 
+            {/* Mobile channel badge (WM) — top left yellow circle */}
+            {reservation.source_channel === 'mobile' && (
+                <div
+                    className="absolute top-0 left-0 z-20 rounded-full bg-yellow-400 flex items-center justify-center"
+                    style={{
+                        width: isCompact ? 9 : isSmallZoom ? 25 : 14,
+                        height: isCompact ? 9 : isSmallZoom ? 25 : 14,
+                    }}
+                >
+                    {!isCompact && (
+                        <span
+                            className="font-black text-gray-900 leading-none select-none"
+                            style={{ fontSize: isSmallZoom ? 9 : 5 }}
+                        >
+                            WM
+                        </span>
+                    )}
+                </div>
+            )}
+
             {/* Payment icons: white circle (count) + red circle (paid) */}
             {reservation.isPaidIcon && reservation.paymentNumber !== undefined && (
                 <div className="absolute bottom-0.5 right-0.5 flex items-center gap-0.5 z-20">

@@ -45,7 +45,7 @@ export interface Reservation {
     playerName: string;
     status: ReservationStatus;
     booking_type: ReservationType;
-    source_channel?: 'app' | 'manual' | 'system';
+    source_channel?: 'mobile' | 'web' | 'manual' | 'system';
     playerEmail?: string;
     totalPrice?: number;
     isPaidIcon?: boolean;
