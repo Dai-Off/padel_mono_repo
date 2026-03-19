@@ -3,7 +3,7 @@ import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
-import type { Reservation, ReservationStatus } from '../types';
+import type { Reservation, ReservationType } from '../types';
 import { PIXELS_PER_MINUTE, START_HOUR } from '../utils/timeGrid';
 import { useTranslation } from '../i18n/I18nContext';
 import { useZoom } from '../context/ZoomContext';
@@ -18,29 +18,21 @@ interface Props {
     onHoverEnd?: () => void;
 }
 
-const statusColors: Record<ReservationStatus, string> = {
-    // Normal Players -> Blue
-    'Reservado': 'bg-[#005bc5] text-white border-[#004fa8]',
-    'Pagado': 'bg-[#005bc5] text-white border-[#004fa8]',
-    'Torneo Reservado': 'bg-[#005bc5] text-white border-[#004fa8]',
-    'Torneo Pagado': 'bg-[#005bc5] text-white border-[#004fa8]',
-    'RESERVA FIJA 2025 - 40€ Pagado': 'bg-[#005bc5] text-white border-[#004fa8]',
-    'Reserva Internet Pago parcial': 'bg-[#005bc5] text-white border-[#004fa8]',
-    'Reserva Internet Pagado': 'bg-[#005bc5] text-white border-[#004fa8]',
-    'S7 RESERVAS Reservado': 'bg-[#005bc5] text-white border-[#004fa8]',
-    
-    // School -> Pink
-    'DIAGONAL TARIFA PLANA Reservado': 'bg-[#fbcfe8] text-[#831843] border-[#f472b6]',
-    'DIAGONAL ESCUELA DE 17:00 A 23:00 Reservado': 'bg-[#fbcfe8] text-[#831843] border-[#f472b6]',
-    'DIAGONAL ACADEMY 9:00 A 17:00 Reservado': 'bg-[#fbcfe8] text-[#831843] border-[#f472b6]',
-    'RESERVA VALLE CHINO Reservado': 'bg-[#fbcfe8] text-[#831843] border-[#f472b6]',
-    'RESERVA PUNTA CHINO Reservado': 'bg-[#fbcfe8] text-[#831843] border-[#f472b6]',
-    'D.ADICIONAL MAÑANAS (A-D) Reservado': 'bg-[#fbcfe8] text-[#831843] border-[#f472b6]',
-    
-    // Free / Passed
-    'Disponible': 'bg-[#9cd670] text-[#5a7a3a] border-[#8bc55e]',
-    'Tiempo pasado': 'bg-[#e5e7eb] text-gray-500 border-gray-300',
+// Color is driven by booking_type (the "what"), not by payment status
+const bookingTypeColors: Record<ReservationType, string> = {
+    'standard':          'bg-[#005bc5] text-white border-[#004fa8]',           // Azul — pista privada
+    'open_match':        'bg-[#7c3aed] text-white border-[#6d28d9]',           // Violeta — partido abierto
+    'pozo':              'bg-[#ea580c] text-white border-[#c2410c]',           // Naranja — americanas/melee
+    'fixed_recurring':   'bg-[#166534] text-white border-[#14532d]',           // Verde oscuro — turno fijo
+    'school_group':      'bg-[#fbcfe8] text-[#831843] border-[#f472b6]',      // Rosa — escuela grupo
+    'school_individual': 'bg-[#fce7f3] text-[#9d174d] border-[#f9a8d4]',     // Rosa claro — clase particular
+    'flat_rate':         'bg-[#be185d] text-white border-[#9d174d]',           // Fucsia — tarifa plana DPA
+    'tournament':        'bg-[#b45309] text-white border-[#92400e]',           // Ámbar — torneo
+    'blocked':           'bg-[#4b5563] text-white border-[#374151]',           // Gris — bloqueo admin
 };
+
+// Pending payment: dashed border to indicate "not yet paid"
+const pendingPaymentStyle = 'border-dashed opacity-80';
 
 export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justDropped, onClick, compactPxPerMinute, onHoverStart, onHoverEnd }) => {
     const { tData } = useTranslation();
@@ -87,7 +79,7 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                 className={clsx(
                     'absolute inset-x-0 border flex flex-col overflow-hidden text-xs transition-none opacity-50 grayscale',
                     isCompact ? 'p-0 px-0.5' : 'p-1.5',
-                    statusColors[reservation.status]
+                    bookingTypeColors[reservation.booking_type] ?? bookingTypeColors['standard']
                 )}
                 style={{ ...style, transform: undefined, zIndex: 0 }}
             >
@@ -134,7 +126,8 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                 'absolute inset-x-0 border flex flex-col overflow-hidden cursor-pointer hover:brightness-95 transition-[filter]',
                 isShortBooking && 'justify-center items-center',
                 isCompact ? 'p-0 px-0.5 text-[8px]' : isShortBooking ? 'p-0 px-0.5' : isSmallZoom ? 'p-1.5 text-[18px]' : 'p-1.5 text-xs',
-                statusColors[reservation.status],
+                bookingTypeColors[reservation.booking_type] ?? bookingTypeColors['standard'],
+                reservation.status === 'pending_payment' && pendingPaymentStyle,
                 isOverlay && 'shadow-lg scale-[1.02] ring-2 ring-blue-400 opacity-95 cursor-grabbing !transition-none',
                 justDropped && 'relative z-20'
             )}
