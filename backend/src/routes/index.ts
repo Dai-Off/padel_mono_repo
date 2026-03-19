@@ -14,6 +14,7 @@ import homeRouter from './home';
 import searchRouter from './search';
 import clubApplicationsRouter from './clubApplications';
 import paymentsRouter from './paymentsRouter';
+import clubStaffRouter from './clubStaff';
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.use('/home', homeRouter);
 router.use('/search', searchRouter);
 router.use('/club-applications', clubApplicationsRouter);
 router.use('/payments', paymentsRouter);
+router.use('/club-staff', clubStaffRouter);
 
 export default router;
 

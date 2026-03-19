@@ -1,6 +1,8 @@
 {
     "title": "Court Management",
     "courts_management": "Court Management",
+    "no_courts": "No courts yet. Add one with the button above.",
+    "drag_order_hint": "Drag using the ⋮⋮ handle to reorder (saved; grid uses the same order).",
     "add_court": "Add Court",
     "edit_court": "Edit Court",
     "name": "Court Name",
@@ -20,6 +22,8 @@
     "cancel": "Cancel",
     "save": "Save Changes",
     "view_details": "View Details",
+    "court_detail_title": "Court details",
+    "court_display_order": "List order",
     "glass_panoramic": "Panoramic",
     "glass_standard": "Standard",
     "glass_wall": "Wall",
