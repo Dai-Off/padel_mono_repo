@@ -37,10 +37,10 @@ export const Login: React.FC = () => {
                     if (me.ok && me.roles?.admin_id) {
                         navigate('/admin');
                     } else {
-                        navigate('/');
+                        navigate('/grilla?menu=resumen');
                     }
                 } catch {
-                    navigate('/');
+                    navigate('/grilla?menu=resumen');
                 }
             } else {
                 setError(t(response.error === 'Email o contraseña incorrectos' ? 'invalid_credentials' : 'login_error'));

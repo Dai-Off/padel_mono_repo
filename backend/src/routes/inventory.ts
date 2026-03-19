@@ -9,7 +9,7 @@ router.use(attachAuthContext);
 
 const ITEM_FIELDS =
   'id, club_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, created_at, updated_at';
-const MOVEMENT_FIELDS = 'id, club_id, item_id, movement_type, quantity, reason, created_at';
+const MOVEMENT_FIELDS = 'id, club_id, item_id, movement_type, quantity, reason, movement_at, created_at';
 
 function canAccessClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
@@ -237,7 +237,7 @@ router.get('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Resp
     const supabase = getSupabaseServiceRoleClient();
     let q = supabase.from('inventory_movements').select(MOVEMENT_FIELDS).eq('club_id', club_id);
     if (item_id?.trim()) q = q.eq('item_id', item_id.trim());
-    q = q.order('created_at', { ascending: false }).limit(100);
+    q = q.order('movement_at', { ascending: false }).order('created_at', { ascending: false }).limit(100);
 
     const { data, error } = await q;
     if (error) {
@@ -256,7 +256,7 @@ router.get('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Resp
  * Crea un movimiento de stock (entrada/salida).
  */
 router.post('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
-  const { club_id, item_id, movement_type, quantity, reason } = req.body ?? {};
+  const { club_id, item_id, movement_type, quantity, reason, movement_at } = req.body ?? {};
 
   const clubIdStr = String(club_id ?? '').trim();
   const itemIdStr = String(item_id ?? '').trim();
@@ -267,6 +267,15 @@ router.post('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Res
   if (typeStr !== 'in' && typeStr !== 'out') return res.status(400).json({ ok: false, error: 'movement_type debe ser in u out' });
   if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ ok: false, error: 'quantity debe ser un número > 0' });
   if (!canAccessClub(req, clubIdStr)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+
+  let movementAtIso: string | null = null;
+  if (movement_at != null && String(movement_at).trim()) {
+    const d = new Date(String(movement_at));
+    if (Number.isNaN(d.getTime())) {
+      return res.status(400).json({ ok: false, error: 'movement_at inválido (usa fecha/hora ISO o YYYY-MM-DD)' });
+    }
+    movementAtIso = d.toISOString();
+  }
 
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -319,6 +328,7 @@ router.post('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Res
       quantity: Math.trunc(qty),
       reason: reason != null && String(reason).trim() ? String(reason).trim() : null,
     };
+    row.movement_at = movementAtIso ?? new Date().toISOString();
 
     const { data, error } = await supabase.from('inventory_movements').insert(row).select(MOVEMENT_FIELDS).single();
     if (error) {

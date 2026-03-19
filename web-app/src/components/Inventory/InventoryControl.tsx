@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Edit, Minus, Package, Plus, Trash2, Upload } from 'lucide-react';
+import { ChevronDown, ChevronUp, Edit, Minus, Package, Plus, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
-import type { InventoryItem, InventoryMovementType } from '../../types/inventory';
+import type { InventoryItem, InventoryMovement, InventoryMovementType } from '../../types/inventory';
 import { inventoryService } from '../../services/inventory';
 
 function clampInt(n: number): number {
@@ -40,8 +40,19 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
         movementType: InventoryMovementType;
         quantity: number;
         reason: string;
+        movementDate: string;
         maxQuantity?: number;
     }>(null);
+
+    const [searchText, setSearchText] = useState('');
+    const [filterDateFrom, setFilterDateFrom] = useState('');
+    const [filterDateTo, setFilterDateTo] = useState('');
+    const [stockFilter, setStockFilter] = useState<'all' | 'inStock' | 'outOfStock'>('all');
+    const [sortBy, setSortBy] = useState<'name' | 'stock' | 'value'>('name');
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+    const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+    const [historyByItem, setHistoryByItem] = useState<Record<string, InventoryMovement[]>>({});
+    const [historyLoadingItemId, setHistoryLoadingItemId] = useState<string | null>(null);
 
     function formatMoneyFromCents(cents: number, currency: string): string {
         const value = (Number.isFinite(cents) ? cents : 0) / 100;
@@ -65,6 +76,20 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
 
     function getCurrentQty(item: InventoryItem): number {
         return typeof item.current_quantity === 'number' ? item.current_quantity : 0;
+    }
+
+    function movementDateLabel(movement: InventoryMovement): string {
+        const src = movement.movement_at ?? movement.created_at;
+        if (!src) return '-';
+        const d = new Date(src);
+        if (Number.isNaN(d.getTime())) return '-';
+        return d.toLocaleString('es-ES', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
     }
 
     const load = useCallback(async () => {
@@ -107,6 +132,59 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
         const currency = items[0]?.currency || 'EUR';
         return { totalProducts, stockOk, stockLow, totalValueCents, currency };
     }, [items]);
+
+    const filteredItems = useMemo(() => {
+        const normalizedSearch = searchText.trim().toLowerCase();
+        let next = [...items];
+
+        if (normalizedSearch) {
+            next = next.filter((item) => item.name.toLowerCase().includes(normalizedSearch));
+        }
+
+        if (filterDateFrom) {
+            const from = new Date(`${filterDateFrom}T00:00:00`).getTime();
+            next = next.filter((item) => {
+                if (!item.created_at) return false;
+                const t = new Date(item.created_at).getTime();
+                return Number.isFinite(t) && t >= from;
+            });
+        }
+
+        if (filterDateTo) {
+            const to = new Date(`${filterDateTo}T23:59:59`).getTime();
+            next = next.filter((item) => {
+                if (!item.created_at) return false;
+                const t = new Date(item.created_at).getTime();
+                return Number.isFinite(t) && t <= to;
+            });
+        }
+
+        if (stockFilter === 'inStock') {
+            next = next.filter((item) => getCurrentQty(item) > 0);
+        } else if (stockFilter === 'outOfStock') {
+            next = next.filter((item) => getCurrentQty(item) <= 0);
+        }
+
+        next.sort((a, b) => {
+            let av = 0;
+            let bv = 0;
+            if (sortBy === 'name') {
+                const cmp = a.name.localeCompare(b.name, 'es', { sensitivity: 'base' });
+                return sortDir === 'asc' ? cmp : -cmp;
+            }
+            if (sortBy === 'stock') {
+                av = getCurrentQty(a);
+                bv = getCurrentQty(b);
+            } else if (sortBy === 'value') {
+                av = getCurrentQty(a) * (a.unit_price_cents ?? 0);
+                bv = getCurrentQty(b) * (b.unit_price_cents ?? 0);
+            }
+            const diff = av - bv;
+            return sortDir === 'asc' ? diff : -diff;
+        });
+
+        return next;
+    }, [items, searchText, filterDateFrom, filterDateTo, stockFilter, sortBy, sortDir]);
 
     const openCreate = () => {
         setItemForm({
@@ -233,6 +311,7 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
             movementType,
             quantity: 1,
             reason: '',
+            movementDate: new Date().toISOString().slice(0, 10),
             maxQuantity,
         });
     };
@@ -256,12 +335,40 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
                 movement_type: movementModal.movementType,
                 quantity,
                 reason: movementModal.reason.trim() || null,
+                movement_at: movementModal.movementDate ? `${movementModal.movementDate}T12:00:00` : null,
             });
             toast.success('Movimiento guardado');
             setMovementModal(null);
             await load();
+            if (expandedItemId && expandedItemId === movementModal.item.id) {
+                setHistoryByItem((prev) => ({ ...prev, [expandedItemId]: [] }));
+            }
         } catch (e) {
             toast.error((e as Error).message || 'Error al guardar movimiento');
+        }
+    };
+
+    const toggleHistory = async (item: InventoryItem) => {
+        const nextId = expandedItemId === item.id ? null : item.id;
+        setExpandedItemId(nextId);
+        if (!nextId) return;
+        if (historyByItem[nextId]?.length) return;
+        if (!clubId) return;
+
+        setHistoryLoadingItemId(nextId);
+        try {
+            const movements = await inventoryService.listMovements({ club_id: clubId, item_id: nextId });
+            const sorted = [...movements].sort((a, b) => {
+                const at = new Date(a.movement_at ?? a.created_at ?? '').getTime();
+                const bt = new Date(b.movement_at ?? b.created_at ?? '').getTime();
+                return bt - at;
+            });
+            setHistoryByItem((prev) => ({ ...prev, [nextId]: sorted }));
+        } catch (e) {
+            toast.error((e as Error).message || 'Error al cargar historial');
+            setHistoryByItem((prev) => ({ ...prev, [nextId]: [] }));
+        } finally {
+            setHistoryLoadingItemId(null);
         }
     };
 
@@ -308,15 +415,81 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
                     </div>
                 </div>
 
+                <div className="bg-white rounded-2xl border border-gray-100 p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+                        <div className="lg:col-span-2">
+                            <label className="text-[10px] font-semibold text-gray-500">Buscar por nombre</label>
+                            <input
+                                className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                placeholder="Ej: Pelotas"
+                                value={searchText}
+                                onChange={(e) => setSearchText(e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-semibold text-gray-500">Fecha desde</label>
+                            <input
+                                type="date"
+                                className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                value={filterDateFrom}
+                                onChange={(e) => setFilterDateFrom(e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-semibold text-gray-500">Fecha hasta</label>
+                            <input
+                                type="date"
+                                className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                value={filterDateTo}
+                                onChange={(e) => setFilterDateTo(e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-semibold text-gray-500">Estado stock</label>
+                            <select
+                                className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                value={stockFilter}
+                                onChange={(e) => setStockFilter(e.target.value as 'all' | 'inStock' | 'outOfStock')}
+                            >
+                                <option value="all">Todos</option>
+                                <option value="inStock">Con stock</option>
+                                <option value="outOfStock">Sin stock</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-[10px] font-semibold text-gray-500">Orden</label>
+                            <div className="mt-0.5 flex gap-2">
+                                <select
+                                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                    value={sortBy}
+                                    onChange={(e) => setSortBy(e.target.value as 'name' | 'stock' | 'value')}
+                                >
+                                    <option value="name">Nombre</option>
+                                    <option value="stock">Stock</option>
+                                    <option value="value">Valor</option>
+                                </select>
+                                <select
+                                    className="w-[100px] rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                    value={sortDir}
+                                    onChange={(e) => setSortDir(e.target.value as 'asc' | 'desc')}
+                                >
+                                    <option value="asc">Asc</option>
+                                    <option value="desc">Desc</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
             {loading ? (
                 <div className="flex justify-center py-16">
                     <div className="w-10 h-10 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
                 </div>
-            ) : items.length === 0 ? (
+            ) : filteredItems.length === 0 ? (
                 <p className="text-sm text-gray-500 text-center py-8">Aún no hay productos registrados.</p>
             ) : (
                 <div className="space-y-3">
-                    {items.map((item) => {
+                    {filteredItems.map((item) => {
                         const qty = getCurrentQty(item);
                         const threshold = getLowStockThreshold(item);
                         const isLow = threshold > 0 && qty <= threshold;
@@ -400,6 +573,18 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
                                     <div className="flex items-center gap-1.5 flex-shrink-0">
                                         <button
                                             type="button"
+                                            onClick={() => toggleHistory(item)}
+                                            className="px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 flex items-center gap-1"
+                                        >
+                                            Historial
+                                            {expandedItemId === item.id ? (
+                                                <ChevronUp className="w-3.5 h-3.5" />
+                                            ) : (
+                                                <ChevronDown className="w-3.5 h-3.5" />
+                                            )}
+                                        </button>
+                                        <button
+                                            type="button"
                                             onClick={() => openEdit(item)}
                                             className="w-8 h-8 rounded-lg border border-gray-100 flex items-center justify-center hover:bg-gray-50"
                                             aria-label="Editar"
@@ -416,6 +601,52 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
                                         </button>
                                     </div>
                                 </div>
+
+                                {expandedItemId === item.id && (
+                                    <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                                        <p className="text-[10px] font-semibold text-gray-500 mb-2">Historial de movimientos</p>
+                                        {historyLoadingItemId === item.id ? (
+                                            <p className="text-[10px] text-gray-400">Cargando historial...</p>
+                                        ) : (historyByItem[item.id] ?? []).length === 0 ? (
+                                            <p className="text-[10px] text-gray-400">Sin movimientos registrados.</p>
+                                        ) : (
+                                            <div className="space-y-2">
+                                                {(historyByItem[item.id] ?? [])
+                                                    .filter((mv) => {
+                                                        const src = mv.movement_at ?? mv.created_at;
+                                                        if (!src) return true;
+                                                        const t = new Date(src).getTime();
+                                                        if (!Number.isFinite(t)) return true;
+                                                        if (filterDateFrom) {
+                                                            const from = new Date(`${filterDateFrom}T00:00:00`).getTime();
+                                                            if (t < from) return false;
+                                                        }
+                                                        if (filterDateTo) {
+                                                            const to = new Date(`${filterDateTo}T23:59:59`).getTime();
+                                                            if (t > to) return false;
+                                                        }
+                                                        return true;
+                                                    })
+                                                    .map((mv) => {
+                                                    const isIn = mv.movement_type === 'in';
+                                                    return (
+                                                        <div key={mv.id} className="bg-white rounded-lg border border-gray-100 p-2">
+                                                            <div className="flex items-center justify-between gap-2">
+                                                                <span className={`text-[10px] font-bold ${isIn ? 'text-green-600' : 'text-red-600'}`}>
+                                                                    {isIn ? 'Entrada' : 'Salida'} {isIn ? '+' : '-'}{mv.quantity}
+                                                                </span>
+                                                                <span className="text-[10px] text-gray-500">{movementDateLabel(mv)}</span>
+                                                            </div>
+                                                            {mv.reason ? (
+                                                                <p className="text-[10px] text-gray-500 mt-1">{mv.reason}</p>
+                                                            ) : null}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         );
                     })}
@@ -632,6 +863,15 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
                                     value={movementModal.reason}
                                     onChange={(e) => setMovementModal((m) => (m ? { ...m, reason: e.target.value } : m))}
                                     placeholder="Ej: compra / merma"
+                                />
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-semibold text-gray-500">Fecha del movimiento</label>
+                                <input
+                                    type="date"
+                                    className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                    value={movementModal.movementDate}
+                                    onChange={(e) => setMovementModal((m) => (m ? { ...m, movementDate: e.target.value } : m))}
                                 />
                             </div>
                         </div>
