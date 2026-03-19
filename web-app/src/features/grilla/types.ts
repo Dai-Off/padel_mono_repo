@@ -1,20 +1,26 @@
+// Lifecycle / payment status (maps to bookings.status in DB)
 export type ReservationStatus =
-    | 'Reservado'
-    | 'Pagado'
-    | 'Torneo Reservado'
-    | 'Torneo Pagado'
-    | 'RESERVA FIJA 2025 - 40€ Pagado'
-    | 'Reserva Internet Pago parcial'
-    | 'Reserva Internet Pagado'
-    | 'S7 RESERVAS Reservado'
-    | 'DIAGONAL TARIFA PLANA Reservado'
-    | 'DIAGONAL ESCUELA DE 17:00 A 23:00 Reservado'
-    | 'DIAGONAL ACADEMY 9:00 A 17:00 Reservado'
-    | 'RESERVA VALLE CHINO Reservado'
-    | 'RESERVA PUNTA CHINO Reservado'
-    | 'D.ADICIONAL MAÑANAS (A-D) Reservado'
-    | 'Disponible'
-    | 'Tiempo pasado';
+    | 'pending_payment'   // Pendiente de cobro
+    | 'partial_payment'   // Pago parcial (split en proceso)
+    | 'confirmed'         // Confirmada y pagada
+    | 'flat_rate'         // Tarifa plana (coste 0 en planilla)
+    | 'no_show'           // No se presentó sin avisar con 48h
+    | 'completed'         // Jugada y finalizada
+    | 'cancelled'         // Cancelada
+    | 'available'         // Slot libre (no es un estado de DB, solo UI)
+    | 'past';             // Tiempo pasado (solo UI)
+
+// Type of reservation (maps to bookings.booking_type in DB)
+export type ReservationType =
+    | 'standard'
+    | 'open_match'
+    | 'pozo'
+    | 'fixed_recurring'
+    | 'school_group'
+    | 'school_individual'
+    | 'flat_rate'
+    | 'tournament'
+    | 'blocked';
 
 export interface PlayerDetails {
     name: string;
@@ -31,18 +37,27 @@ export interface Court {
 
 export interface Reservation {
     id: string;
-    locationId?: string; // Link reservation to a specific location tab
+    locationId?: string;
     courtId: string;
-    courtName?: string; // Human-readable court name (e.g., "PISTA 3 CENTRAL")
-    startTime: string; // e.g., "18:00"
-    durationMinutes: number; // e.g., 90
+    courtName?: string;
+    startTime: string;        // e.g. "18:00"
+    durationMinutes: number;  // e.g. 90
     playerName: string;
-    matchType?: string; // e.g., "Playtomic", "ESCUELA ASIATICA", "S7 TORNEOS"
+    /** Display label for the reservation (e.g. i18n of booking_type or custom) */
+    matchType?: string;
     status: ReservationStatus;
+    booking_type: ReservationType;
+    source_channel?: 'mobile' | 'web' | 'manual' | 'system';
     playerEmail?: string;
     totalPrice?: number;
     isPaidIcon?: boolean;
     paymentNumber?: number;
     hasYellowAlert?: boolean;
     detailedPlayers?: PlayerDetails[];
+    // Extended fields populated when relevant
+    instructorName?: string;         // school bookings
+    flatRateAgreementId?: string;    // flat_rate bookings
+    pozoEventId?: string;            // pozo bookings
+    parentBookingId?: string;        // fixed_recurring instances
+    notes?: string;
 }

@@ -172,6 +172,58 @@ router.post('/:id/approve', requireAdmin, async (req: Request, res: Response) =>
   }
 });
 
+/**
+ * POST /club-applications/:id/resend-invite — regenerar token y reenviar email (solo approved, sin registro completado).
+ */
+router.post('/:id/resend-invite', requireAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: app, error: fetchErr } = await supabase
+      .from('club_applications')
+      .select('id, status, email, club_name, club_owner_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (fetchErr || !app) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
+    if (app.status !== 'approved') {
+      return res.status(400).json({ ok: false, error: 'Solo solicitudes aprobadas pueden regenerar la invitación' });
+    }
+    if (app.club_owner_id) {
+      return res.status(400).json({
+        ok: false,
+        error: 'El club ya completó el registro. La invitación ya no aplica.',
+      });
+    }
+    await supabase.from('club_application_invites').delete().eq('application_id', id);
+    const { token, tokenHash } = generateInviteToken();
+    const expiresAt = getInviteExpiresAt();
+    const { error: inviteErr } = await supabase.from('club_application_invites').insert({
+      application_id: id,
+      token_hash: tokenHash,
+      expires_at: expiresAt.toISOString(),
+    });
+    if (inviteErr) return res.status(500).json({ ok: false, error: inviteErr.message });
+    await supabase
+      .from('club_applications')
+      .update({ invitation_sent_at: new Date().toISOString() })
+      .eq('id', id);
+    const inviteUrl = `${getFrontendUrl()}/registro-club?application_id=${id}&token=${token}`;
+    const clubName = (app as { club_name?: string }).club_name ?? 'Tu club';
+    const emailResult = await sendInviteEmail((app as { email: string }).email, inviteUrl, clubName);
+    return res.json({
+      ok: true,
+      message: emailResult.sent
+        ? 'Invitación regenerada y enviada por email.'
+        : 'Invitación regenerada. Reenvía el enlace manualmente si el correo automático falló.',
+      invite_url: inviteUrl,
+      email_sent: emailResult.sent,
+      email_error: emailResult.error,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 router.post('/:id/reject', requireAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { reason } = req.body ?? {};

@@ -1,0 +1,183 @@
+openapi: 3.0.3
+info:
+  title: Padel API — Club staff
+  version: 1.0.0
+  description: CRUD de personal por club. Solo admin global o dueño del club (mismos clubs que en token).
+servers:
+  - url: /
+tags:
+  - name: Club staff
+    description: Gestión de personal asociado a un club concreto
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ClubStaffMember:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        club_id: { type: string, format: uuid }
+        name: { type: string }
+        role: { type: string }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        schedule: { type: string, nullable: true }
+        schedule_blocks:
+          type: array
+          nullable: true
+          description: Horario por bloques (días + hora desde/hasta). Permite múltiples bloques.
+          items:
+            type: object
+            required: [days, from, to]
+            properties:
+              days:
+                type: array
+                items: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] }
+              from: { type: string, example: "09:00" }
+              to: { type: string, example: "12:00" }
+        status: { enum: [active, inactive] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+security:
+  - bearerAuth: []
+paths:
+  /club-staff:
+    get:
+      tags: [Club staff]
+      summary: Listar personal del club
+      description: Filtra estrictamente por club_id. El usuario debe ser dueño de ese club o admin.
+      parameters:
+        - name: club_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { const: true }
+                  staff:
+                    type: array
+                    items: { $ref: '#/components/schemas/ClubStaffMember' }
+              example:
+                ok: true
+                staff:
+                  - id: "a1b2c3d4-0000-0000-0000-000000000001"
+                    club_id: "club-uuid"
+                    name: "Ana García"
+                    role: "Recepción"
+                    email: ana@club.com
+                    phone: "+34 600 111 222"
+                    schedule: "L-V 9-17"
+                    schedule_blocks:
+                      - { days: [mon, tue, wed, thu, fri], from: "09:00", to: "12:00" }
+                      - { days: [mon, tue, wed, thu, fri], from: "17:00", to: "19:00" }
+                    status: active
+        '400':
+          description: Falta club_id
+          content:
+            application/json:
+              example: { ok: false, error: "club_id es obligatorio" }
+        '401':
+          description: Token requerido
+        '403':
+          description: Sin acceso al club
+        '503':
+          description: Migración no aplicada
+    post:
+      tags: [Club staff]
+      summary: Crear miembro
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [club_id, name]
+              properties:
+                club_id: { type: string, format: uuid }
+                name: { type: string }
+                role: { type: string }
+                email: { type: string }
+                phone: { type: string }
+                schedule:
+                  type: string
+                  description: Texto libre (legado). Preferir schedule_blocks.
+                schedule_blocks:
+                  type: array
+                  description: Horario por bloques (días + hora desde/hasta). Permite múltiples bloques.
+                  items:
+                    type: object
+                    required: [days, from, to]
+                    properties:
+                      days:
+                        type: array
+                        items: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] }
+                      from: { type: string, example: "09:00" }
+                      to: { type: string, example: "12:00" }
+                status: { enum: [active, inactive] }
+            example:
+              club_id: "club-uuid"
+              name: "Carlos Ruiz"
+              role: "Entrenador"
+              email: carlos@club.com
+              phone: "+34 611 222 333"
+              schedule_blocks:
+                - { days: [sat, sun], from: "10:00", to: "14:00" }
+              status: active
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              example:
+                ok: true
+                member:
+                  id: "new-uuid"
+                  club_id: "club-uuid"
+                  name: "Carlos Ruiz"
+                  role: "Entrenador"
+                  status: active
+        '400': { description: Validación }
+        '403': { description: Sin acceso al club }
+  /club-staff/{id}:
+    put:
+      tags: [Club staff]
+      summary: Actualizar miembro
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            example: { name: "Carlos R.", status: inactive }
+      responses:
+        '200': { description: OK }
+        '400': { description: Sin campos }
+        '403': { description: Registro de otro club }
+        '404': { description: No encontrado }
+    delete:
+      tags: [Club staff]
+      summary: Eliminar miembro
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example: { ok: true }
+        '403': { description: Sin acceso }
+        '404': { description: No encontrado }

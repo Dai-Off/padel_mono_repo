@@ -461,7 +461,7 @@ function ManagerPhase({
                                     <p className="text-[10px] text-white/15">Sin pistas. Añade una.</p>
                                 </div>
                             )}
-                            <div className="space-y-2 min-h-[100px] max-h-[35vh] sm:max-h-[40vh] overflow-y-auto overflow-x-hidden scrollbar-hide">
+                            <div className="space-y-2">
                                 {data.courts.map(court => (
                                     <div key={court.id} className="p-3 rounded-lg bg-white/[0.04] space-y-2">
                                         <div className="flex items-center justify-between">

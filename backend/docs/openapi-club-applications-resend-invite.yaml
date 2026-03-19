@@ -1,0 +1,41 @@
+openapi: 3.0.3
+info:
+  title: POST /club-applications/{id}/resend-invite
+  version: 1.0.0
+tags:
+  - name: Club applications
+paths:
+  /club-applications/{id}/resend-invite:
+    post:
+      tags: [Club applications]
+      summary: Regenerar invitación y reenviar email
+      description: |
+        Elimina invitaciones previas, crea token nuevo con nueva caducidad, actualiza `invitation_sent_at`
+        y envía el correo al responsable. Solo si la solicitud está **approved** y **no** tiene `club_owner_id`
+        (registro aún no completado).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Nuevo enlace generado
+          content:
+            application/json:
+              example:
+                ok: true
+                invite_url: "https://app/registro-club?application_id=...&token=..."
+                message: "Invitación regenerada y enviada por email."
+                email_sent: true
+        "400":
+          description: No approved, o registro ya completado
+        "401": { description: No admin }
+        "404": { description: Solicitud no encontrada }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer

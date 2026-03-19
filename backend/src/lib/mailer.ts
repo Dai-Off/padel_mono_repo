@@ -78,3 +78,22 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string): Prom
 export async function sendInviteEmail(to: string, inviteUrl: string, clubName: string): Promise<{ sent: boolean; error?: string }> {
   return invokeEdgeFunction('send-invitation-email', { to, inviteUrl, clubName });
 }
+
+export async function sendStaffAccountEmail(
+  to: string,
+  staffName: string,
+  clubName: string,
+  plainPassword: string,
+  loginUrl: string
+): Promise<{ sent: boolean; error?: string }> {
+  const subject = `Acceso al panel — ${clubName}`;
+  const html = `
+    <p>Hola ${escapeHtml(staffName)},</p>
+    <p>Te han dado de alta en el personal de <strong>${escapeHtml(clubName)}</strong>.</p>
+    <p>Puedes entrar aquí: <a href="${escapeHtml(loginUrl)}" style="color:#E31E24;font-weight:bold;">Iniciar sesión</a></p>
+    <p><strong>Email:</strong> ${escapeHtml(to)}<br/>
+    <strong>Contraseña temporal:</strong> ${escapeHtml(plainPassword)}</p>
+    <p>Te recomendamos cambiar la contraseña cuando entres (si la opción está disponible).</p>
+  `;
+  return invokeEdgeFunction('send-email', { to, subject, html });
+}

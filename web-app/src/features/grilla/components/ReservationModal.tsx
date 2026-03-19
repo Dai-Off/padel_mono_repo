@@ -5,6 +5,7 @@ import {
     Search,
     Trash2,
     AlertTriangle,
+    UserPlus,
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
@@ -34,6 +35,12 @@ const PlayerSearch: React.FC<{
     const [isSearching, setIsSearching] = useState(false);
     const [showResults, setShowResults] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
+
+    // Alta de jugador state
+    const [altaOpen, setAltaOpen] = useState(false);
+    const [altaSubmitting, setAltaSubmitting] = useState(false);
+    const [altaError, setAltaError] = useState('');
+    const [altaForm, setAltaForm] = useState({ first_name: '', last_name: '', phone: '', email: '' });
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -67,6 +74,28 @@ const PlayerSearch: React.FC<{
         return () => clearTimeout(timeoutId);
     }, [query]);
 
+    const handleAltaSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const { first_name, last_name, phone, email } = altaForm;
+        if (!first_name.trim() || !last_name.trim() || !phone.trim() || !email.trim()) {
+            setAltaError('Todos los campos son obligatorios.');
+            return;
+        }
+        setAltaSubmitting(true);
+        setAltaError('');
+        try {
+            const newPlayer = await playerService.createManual({ first_name: first_name.trim(), last_name: last_name.trim(), phone: phone.trim(), email: email.trim() });
+            onSelect(newPlayer);
+            setAltaOpen(false);
+            setAltaForm({ first_name: '', last_name: '', phone: '', email: '' });
+        } catch (err: unknown) {
+            const msg = err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : 'Error al dar de alta el jugador.';
+            setAltaError(msg);
+        } finally {
+            setAltaSubmitting(false);
+        }
+    };
+
     return (
         <div className="flex flex-col gap-1.5" ref={containerRef}>
             <label className="text-sm font-bold text-gray-700 flex items-center gap-1">
@@ -93,32 +122,42 @@ const PlayerSearch: React.FC<{
                     </div>
                 ) : (
                     <>
-                        <div className="relative">
-                            <input
-                                type="text"
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                placeholder={placeholder}
-                                className="w-full p-2.5 pr-10 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#006A6A] focus:border-transparent outline-none transition-all"
-                                onFocus={() => query.trim() && setShowResults(true)}
-                            />
+                        <div className="flex gap-1.5">
+                            <div className="relative flex-1">
+                                <input
+                                    type="text"
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    placeholder={placeholder}
+                                    className="w-full p-2.5 pr-10 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#006A6A] focus:border-transparent outline-none transition-all"
+                                    onFocus={() => query.trim() && setShowResults(true)}
+                                />
+                                <button
+                                    type="button"
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer"
+                                    onClick={async () => {
+                                        setIsSearching(true);
+                                        try {
+                                            const players = await playerService.getAll(query.trim() || undefined);
+                                            setResults(players);
+                                            setShowResults(true);
+                                        } catch (err) {
+                                            console.error('Error fetching players:', err);
+                                        } finally {
+                                            setIsSearching(false);
+                                        }
+                                    }}
+                                >
+                                    <Search size={18} className="text-[#006A6A] hover:text-[#005151]" />
+                                </button>
+                            </div>
                             <button
                                 type="button"
-                                className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer"
-                                onClick={async () => {
-                                    setIsSearching(true);
-                                    try {
-                                        const players = await playerService.getAll(query.trim() || undefined);
-                                        setResults(players);
-                                        setShowResults(true);
-                                    } catch (err) {
-                                        console.error('Error fetching players:', err);
-                                    } finally {
-                                        setIsSearching(false);
-                                    }
-                                }}
+                                title="Dar de alta jugador"
+                                onClick={() => { setAltaOpen(true); setAltaError(''); }}
+                                className="flex items-center justify-center w-10 h-10 rounded-md bg-[#00726b] hover:bg-[#005a4f] text-white transition-colors shrink-0"
                             >
-                                <Search size={18} className="text-[#006A6A] hover:text-[#005151]" />
+                                <UserPlus size={16} />
                             </button>
                         </div>
                         {showResults && results.length > 0 && (
@@ -151,6 +190,40 @@ const PlayerSearch: React.FC<{
                     </>
                 )}
             </div>
+
+            {/* Modal Alta de Jugador */}
+            {altaOpen && (
+                <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setAltaOpen(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-base font-bold text-gray-900">Alta manual en el club</h3>
+                            <button onClick={() => setAltaOpen(false)} className="p-1 hover:bg-gray-100 rounded-full text-gray-500">
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <form onSubmit={handleAltaSubmit} className="flex flex-col gap-3">
+                            {(['first_name', 'last_name', 'phone', 'email'] as const).map((field) => (
+                                <input
+                                    key={field}
+                                    type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'}
+                                    placeholder={{ first_name: 'Nombre', last_name: 'Apellidos', phone: 'Teléfono', email: 'Email' }[field]}
+                                    value={altaForm[field]}
+                                    onChange={(e) => setAltaForm(prev => ({ ...prev, [field]: e.target.value }))}
+                                    className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#00726b] focus:border-transparent outline-none"
+                                />
+                            ))}
+                            {altaError && <p className="text-xs text-red-500">{altaError}</p>}
+                            <button
+                                type="submit"
+                                disabled={altaSubmitting}
+                                className="mt-1 w-full py-2.5 rounded-lg bg-[#00726b] hover:bg-[#005a4f] text-white text-sm font-bold transition-colors disabled:opacity-60"
+                            >
+                                {altaSubmitting ? 'Dando de alta...' : 'Dar de alta'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
@@ -165,7 +238,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [organizer, setOrganizer] = useState<Player | null>(null);
     const [additionalPlayers, setAdditionalPlayers] = useState<(Player | null)[]>([null, null, null]);
     const [duration, setDuration] = useState(90);
-    const [resType, setResType] = useState('');
+    const [resType, setResType] = useState<string>('standard');
     const [notes, setNotes] = useState('');
     const [confirmEmail, setConfirmEmail] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -282,7 +355,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             setOrganizer(null);
             setAdditionalPlayers([null, null, null]);
             setDuration(reservation?.durationMinutes || 90);
-            setResType('');
+            setResType('standard');
             setNotes('');
             setConfirmEmail(false);
             if (reservation?.startTime) {
@@ -357,7 +430,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     total_price_cents: 0,
                     status,
                     notes,
-                    reservation_type: resType.toLowerCase() || 'normal',
+                    booking_type: resType || 'standard',
+                    source_channel: 'manual',
                     participants: additionalPlayers
                         .filter(p => p !== null)
                         .map(p => ({ player_id: p!.id })),
@@ -600,13 +674,21 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             {/* Tipo de reserva */}
                             <div className="flex items-center gap-2">
                                 <label className="text-sm font-bold text-gray-700 w-32 shrink-0">Tipo de reserva:</label>
-                                <input
-                                    type="text"
+                                <select
                                     className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
                                     value={resType}
                                     onChange={(e) => setResType(e.target.value)}
-                                    placeholder="Normal, Clase, Torneo..."
-                                />
+                                >
+                                    <option value="standard">Pista privada</option>
+                                    <option value="open_match">Partido abierto</option>
+                                    <option value="pozo">Pozo / Americanas</option>
+                                    <option value="fixed_recurring">Turno fijo</option>
+                                    <option value="school_group">Escuela — clase grupal</option>
+                                    <option value="school_individual">Escuela — clase particular</option>
+                                    <option value="flat_rate">Tarifa plana</option>
+                                    <option value="tournament">Torneo</option>
+                                    <option value="blocked">Bloqueo administrativo</option>
+                                </select>
                             </div>
                         </div>
                     </div>
