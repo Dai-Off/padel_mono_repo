@@ -43,6 +43,8 @@ export interface Reservation {
     startTime: string;        // e.g. "18:00"
     durationMinutes: number;  // e.g. 90
     playerName: string;
+    /** Display label for the reservation (e.g. i18n of booking_type or custom) */
+    matchType?: string;
     status: ReservationStatus;
     booking_type: ReservationType;
     source_channel?: 'mobile' | 'web' | 'manual' | 'system';
