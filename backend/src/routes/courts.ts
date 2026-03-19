@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -80,7 +81,14 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
       .select(FIELDS)
       .single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.status(201).json({ ok: true, court: data });
+
+    // Ensure pricing_rules is not empty for this court, otherwise search availability returns no slots.
+    const pr = await ensureDefaultPricingRuleForCourt(supabase as any, data.id);
+    if (pr.error) {
+      // Don't fail court creation: return warning so UI can notify and/or user can re-seed later.
+      return res.status(201).json({ ok: true, court: data, pricing_rule_seeded: false, pricing_rule_warning: pr.error });
+    }
+    return res.status(201).json({ ok: true, court: data, pricing_rule_seeded: pr.created });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
