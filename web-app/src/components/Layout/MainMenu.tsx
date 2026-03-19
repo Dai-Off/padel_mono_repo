@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
     BarChart3,
     Grid3x3,
@@ -29,11 +29,13 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
     const { t } = useTranslation();
     const location = useLocation();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const grillaMenu = searchParams.get('menu');
 
     const principalItems = [
-        { id: 'resumen', path: '/resumen', icon: BarChart3, label: t('menu_resumen'), color: 'rgb(227, 30, 36)', bgColor: 'rgba(227, 30, 36, 0.06)' },
+        { id: 'resumen', path: '/grilla', icon: BarChart3, label: t('menu_resumen'), color: 'rgb(227, 30, 36)', bgColor: 'rgba(227, 30, 36, 0.06)' },
         { id: 'pistas', path: '/', icon: Grid3x3, label: t('menu_pistas'), color: 'rgb(91, 141, 238)', bgColor: 'rgba(91, 141, 238, 0.1)' },
-        { id: 'reservas', path: '/reservas', icon: Calendar, label: t('menu_reservas'), color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.06)' },
+        { id: 'reservas', path: '/grilla', icon: Calendar, label: t('menu_reservas'), color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.06)' },
         { id: 'horarios', path: '/horarios', icon: Clock, label: t('menu_horarios'), color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
     ];
     const adminItem = isAdmin
@@ -75,8 +77,12 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
         }
     ];
 
-    const handleItemClick = (path: string) => {
-        navigate(path);
+    const handleItemClick = (item: { path: string; id: string }) => {
+        if (item.path === '/grilla' && (item.id === 'resumen' || item.id === 'reservas')) {
+            navigate(`/grilla?menu=${item.id}`);
+        } else {
+            navigate(item.path);
+        }
         onClose();
     };
 
@@ -115,11 +121,16 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
                                     </p>
                                     <div className="space-y-1">
                                         {section.items.map((item, itemIdx) => {
-                                            const isActive = location.pathname === item.path;
+                                            const isGrillaEntry =
+                                                item.path === '/grilla' &&
+                                                (item.id === 'resumen' || item.id === 'reservas');
+                                            const isActive = isGrillaEntry
+                                                ? location.pathname === '/grilla' && grillaMenu === item.id
+                                                : location.pathname === item.path;
                                             return (
                                                 <motion.button
                                                     key={itemIdx}
-                                                    onClick={() => handleItemClick(item.path)}
+                                                    onClick={() => handleItemClick(item)}
                                                     whileTap={{ scale: 0.98 }}
                                                     className={`w-full flex items-center gap-3 px-3 py-3 rounded-2xl transition-all ${isActive
                                                         ? 'bg-[#1A1A1A] text-white shadow-xl shadow-black/10'

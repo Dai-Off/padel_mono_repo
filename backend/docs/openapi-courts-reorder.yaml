@@ -1,0 +1,62 @@
+openapi: 3.0.3
+info:
+  title: PUT /courts/reorder
+  version: 1.0.0
+tags:
+  - name: Courts
+paths:
+  /courts/reorder:
+    put:
+      tags: [Courts]
+      summary: Persistir orden de pistas de un club
+      description: |
+        Actualiza `display_order` (0..n-1) para cada pista. `court_ids` debe ser una permutación
+        exacta de los ids de pistas de ese club. El listado GET /courts devuelve pistas en este orden.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [club_id, court_ids]
+              properties:
+                club_id:
+                  type: string
+                  format: uuid
+                court_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Orden deseado, primero a último en la grilla/lista
+            example:
+              club_id: "550e8400-e29b-41d4-a716-446655440000"
+              court_ids:
+                - "uuid-pista-3"
+                - "uuid-pista-1"
+                - "uuid-pista-2"
+      responses:
+        "200":
+          description: Orden guardado; devuelve pistas del club ordenadas
+          content:
+            application/json:
+              example:
+                ok: true
+                courts:
+                  - id: "uuid-pista-3"
+                    name: "Pista 3"
+                    display_order: 0
+                    club_id: "550e8400-e29b-41d4-a716-446655440000"
+        "400":
+          description: club_id faltante, court_ids inválido o no coincide con las pistas del club
+        "401":
+          description: Sin token
+        "403":
+          description: Sin acceso al club
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer

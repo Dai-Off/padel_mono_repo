@@ -1,6 +1,8 @@
 {
     "title": "Gestión de Pistas",
     "courts_management": "Gestión de Pistas",
+    "no_courts": "No hay pistas. Añade la primera con el botón superior.",
+    "drag_order_hint": "Arrastra desde el icono ⋮⋮ para ordenar (se guarda y se usa en la grilla).",
     "add_court": "Añadir Pista",
     "edit_court": "Editar Pista",
     "name": "Nombre de la Pista",
@@ -20,6 +22,8 @@
     "cancel": "Cancelar",
     "save": "Guardar Cambios",
     "view_details": "Ver Detalles",
+    "court_detail_title": "Detalle de la pista",
+    "court_display_order": "Orden en lista",
     "glass_panoramic": "Panorámico",
     "glass_standard": "Estándar",
     "glass_wall": "Muro",
