@@ -1,4 +1,6 @@
 // padel_fe/src/services/api.ts
+import { getSupabaseClient } from '../lib/supabase';
+
 const API_BASE_URL = (import.meta.env.VITE_API_BASE || 'http://localhost:3000').replace(/\/$/, '');
 
 export function getApiBase(): string {
@@ -14,14 +16,52 @@ export class HttpError extends Error {
 }
 
 function getStoredToken(): string | null {
+    const session = getStoredSession();
+    return session?.access_token ?? null;
+}
+
+type StoredSession = {
+    access_token: string;
+    refresh_token?: string;
+    expires_at?: number;
+};
+
+function getStoredSession(): StoredSession | null {
     try {
         const raw = localStorage.getItem('padel_session');
         if (!raw) return null;
         const session = JSON.parse(raw);
-        return session?.access_token ?? null;
+        if (!session || typeof session.access_token !== 'string') return null;
+        return session as StoredSession;
     } catch {
         return null;
     }
+}
+
+function saveStoredSession(session: StoredSession): void {
+    localStorage.setItem('padel_session', JSON.stringify(session));
+}
+
+function isTokenExpiringSoon(expiresAt?: number): boolean {
+    if (!expiresAt) return false;
+    const nowSec = Math.floor(Date.now() / 1000);
+    return expiresAt - nowSec <= 60;
+}
+
+async function refreshSessionTokenIfPossible(): Promise<StoredSession | null> {
+    const current = getStoredSession();
+    if (!current?.refresh_token) return null;
+    const supabase = getSupabaseClient();
+    if (!supabase) return null;
+    const { data, error } = await supabase.auth.refreshSession({ refresh_token: current.refresh_token });
+    if (error || !data.session?.access_token) return null;
+    const next: StoredSession = {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token ?? current.refresh_token,
+        expires_at: data.session.expires_at,
+    };
+    saveStoredSession(next);
+    return next;
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -46,19 +86,31 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 }
 
 export async function apiFetchWithAuth<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const token = getStoredToken();
+    let session = getStoredSession();
+    if (session && isTokenExpiringSoon(session.expires_at)) {
+        session = (await refreshSessionTokenIfPossible()) ?? session;
+    }
+    const token = session?.access_token ?? null;
     const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
     const headers = new Headers(options.headers || {});
     if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    const response = await fetch(url, { ...options, headers });
+    let response = await fetch(url, { ...options, headers });
+
+    // If access token expired/invalid, try one refresh + retry before forcing logout.
+    if (response.status === 401 && session?.refresh_token) {
+        const refreshed = await refreshSessionTokenIfPossible();
+        if (refreshed?.access_token) {
+            const retryHeaders = new Headers(options.headers || {});
+            if (!retryHeaders.has('Content-Type')) retryHeaders.set('Content-Type', 'application/json');
+            retryHeaders.set('Authorization', `Bearer ${refreshed.access_token}`);
+            response = await fetch(url, { ...options, headers: retryHeaders });
+        }
+    }
+
     if (!response.ok) {
-        if (response.status === 401 && token) {
-            try {
-                localStorage.removeItem('padel_session');
-            } catch {
-                /* ignore */
-            }
+        if (response.status === 401 && getStoredToken()) {
+            try { localStorage.removeItem('padel_session'); } catch { /* ignore */ }
             sessionStorage.setItem('padel_session_expired', '1');
             window.location.assign('/login');
         }

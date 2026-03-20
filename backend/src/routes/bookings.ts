@@ -8,6 +8,87 @@ const SELECT_LIST =
 const SELECT_ONE =
   'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, email))';
 
+function dateToWeekday(d: Date): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
+  const idx = d.getUTCDay();
+  if (idx === 0) return 'sun';
+  return (['mon', 'tue', 'wed', 'thu', 'fri', 'sat'][idx - 1] as 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat');
+}
+
+async function hasCourtConflict(params: {
+  courtId: string;
+  startAt: string;
+  endAt: string;
+  excludeBookingId?: string;
+}): Promise<{ conflict: boolean; reason?: string }> {
+  const supabase = getSupabaseServiceRoleClient();
+  const startMs = new Date(params.startAt).getTime();
+  const endMs = new Date(params.endAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) {
+    return { conflict: true, reason: 'Rango horario inválido' };
+  }
+
+  // 1) Conflicto contra bookings existentes
+  let q = supabase
+    .from('bookings')
+    .select('id, start_at, end_at, status')
+    .eq('court_id', params.courtId)
+    .neq('status', 'cancelled');
+  if (params.excludeBookingId) q = q.neq('id', params.excludeBookingId);
+  const { data: existingBookings, error: bErr } = await q;
+  if (bErr) return { conflict: true, reason: bErr.message };
+  const bookingOverlap = (existingBookings ?? []).some((b: any) => {
+    const s = new Date(b.start_at).getTime();
+    const e = new Date(b.end_at).getTime();
+    return startMs < e && endMs > s;
+  });
+  if (bookingOverlap) {
+    return { conflict: true, reason: 'La pista ya tiene una reserva en ese horario' };
+  }
+
+  // 2) Conflicto contra cursos de escuela activos
+  const { data: court, error: cErr } = await supabase
+    .from('courts')
+    .select('club_id')
+    .eq('id', params.courtId)
+    .maybeSingle();
+  if (cErr) return { conflict: true, reason: cErr.message };
+  const clubId = (court as { club_id?: string } | null)?.club_id;
+  if (!clubId) return { conflict: false };
+
+  const dateStr = params.startAt.slice(0, 10);
+  const weekday = dateToWeekday(new Date(`${dateStr}T00:00:00Z`));
+  const { data: courses, error: scErr } = await supabase
+    .from('club_school_courses')
+    .select('id, starts_on, ends_on, is_active')
+    .eq('club_id', clubId)
+    .eq('court_id', params.courtId)
+    .eq('is_active', true);
+  if (scErr) return { conflict: true, reason: scErr.message };
+  const validCourseIds = (courses ?? [])
+    .filter((c: any) => (!c.starts_on || dateStr >= c.starts_on) && (!c.ends_on || dateStr <= c.ends_on))
+    .map((c: any) => c.id);
+  if (!validCourseIds.length) return { conflict: false };
+
+  const { data: days, error: dayErr } = await supabase
+    .from('club_school_course_days')
+    .select('course_id, weekday, start_time, end_time')
+    .in('course_id', validCourseIds)
+    .eq('weekday', weekday);
+  if (dayErr) return { conflict: true, reason: dayErr.message };
+
+  const reqStartMin = Number(params.startAt.slice(11, 13)) * 60 + Number(params.startAt.slice(14, 16));
+  const reqEndMin = Number(params.endAt.slice(11, 13)) * 60 + Number(params.endAt.slice(14, 16));
+  const courseOverlap = (days ?? []).some((d: any) => {
+    const s = Number(String(d.start_time).slice(0, 2)) * 60 + Number(String(d.start_time).slice(3, 5));
+    const e = Number(String(d.end_time).slice(0, 2)) * 60 + Number(String(d.end_time).slice(3, 5));
+    return reqStartMin < e && reqEndMin > s;
+  });
+  if (courseOverlap) {
+    return { conflict: true, reason: 'La pista está ocupada por un curso de escuela en ese horario' };
+  }
+  return { conflict: false };
+}
+
 router.get('/', async (req: Request, res: Response) => {
   const court_id = req.query.court_id as string | undefined;
   const club_id = req.query.club_id as string | undefined;
@@ -99,6 +180,15 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
+    const conflict = await hasCourtConflict({
+      courtId: String(court_id),
+      startAt: String(start_at),
+      endAt: String(end_at),
+    });
+    if (conflict.conflict) {
+      return res.status(409).json({ ok: false, error: conflict.reason ?? 'Conflicto de horario' });
+    }
+
     const supabase = getSupabaseServiceRoleClient();
 
     // 1. Insert Booking
@@ -190,6 +280,28 @@ router.put('/:id', async (req: Request, res: Response) => {
 
   try {
     const supabase = getSupabaseServiceRoleClient();
+
+    if (court_id !== undefined || start_at !== undefined || end_at !== undefined) {
+      const { data: existingBooking, error: exErr } = await supabase
+        .from('bookings')
+        .select('court_id, start_at, end_at')
+        .eq('id', id)
+        .maybeSingle();
+      if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
+      if (!existingBooking) return res.status(404).json({ ok: false, error: 'Booking not found' });
+      const nextCourt = String(court_id ?? (existingBooking as any).court_id);
+      const nextStart = String(start_at ?? (existingBooking as any).start_at);
+      const nextEnd = String(end_at ?? (existingBooking as any).end_at);
+      const conflict = await hasCourtConflict({
+        courtId: nextCourt,
+        startAt: nextStart,
+        endAt: nextEnd,
+        excludeBookingId: id,
+      });
+      if (conflict.conflict) {
+        return res.status(409).json({ ok: false, error: conflict.reason ?? 'Conflicto de horario' });
+      }
+    }
 
     const { data, error } = await supabase
       .from('bookings')

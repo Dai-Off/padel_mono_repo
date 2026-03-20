@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { Calendar, Printer, Menu, ArrowLeft, X, Globe } from 'lucide-react';
 import { MainMenu } from '../../components/Layout/MainMenu';
@@ -30,6 +31,7 @@ import { GridBackground } from './components/GridBackground';
 import { CourtColumn } from './components/CourtColumn';
 import { ReservationCard } from './components/ReservationCard';
 import { ReservationModal } from './components/ReservationModal';
+import { SchoolCourseModal } from './components/SchoolCourseModal';
 
 import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
@@ -40,6 +42,8 @@ import type { ZoomLevel } from './context/ZoomContext';
 import dropSoundAsset from '../../assets/sounds/sfx2.mp3';
 
 import { apiFetch, apiFetchWithAuth } from '../../services/api';
+import { schoolCoursesService } from '../../services/schoolCourses';
+import { authService } from '../../services/auth';
 
 import './grilla.css';
 
@@ -63,8 +67,8 @@ const useClubData = (dateOrStr: Date | string) => {
 
     // Resolve club_id from the logged-in club owner's profile
     useEffect(() => {
-        apiFetchWithAuth<{ ok: boolean; clubs?: { id: string }[] }>('/auth/me')
-            .then(res => {
+        authService.getMe()
+            .then((res) => {
                 const id = res.clubs?.[0]?.id ?? null;
                 // Reset courts cache so it re-fetches for the correct club
                 courtsRef.current = [];
@@ -113,10 +117,25 @@ const useClubData = (dateOrStr: Date | string) => {
         }
 
         const query = clubId ? `/bookings?date=${date}&club_id=${clubId}` : `/bookings?date=${date}`;
-        const bRes = await apiFetchWithAuth<any>(query);
+        const [bRes, schoolSlots] = await Promise.all([
+          apiFetchWithAuth<any>(query),
+          clubId ? schoolCoursesService.slots(clubId, date) : Promise.resolve([]),
+        ]);
         const raw = bRes.bookings || [];
-        bookingsCache[date] = { data: raw, ts: Date.now() };
-        return mapBookings(raw, courtsData);
+        const schoolAsBookings = schoolSlots.map((slot) => ({
+          id: `school-slot-${slot.id}`,
+          court_id: slot.court_id,
+          start_at: `${date}T${slot.start_time}:00Z`,
+          end_at: `${date}T${slot.end_time}:00Z`,
+          status: 'confirmed',
+          reservation_type: 'school_course',
+          source_channel: 'system',
+          notes: `${slot.course_name}${slot.staff_name ? ` - ${slot.staff_name}` : ''}`,
+          players: { first_name: 'Curso', last_name: slot.course_name },
+        }));
+        const merged = [...raw, ...schoolAsBookings];
+        bookingsCache[date] = { data: merged, ts: Date.now() };
+        return mapBookings(merged, courtsData);
     }, [clubId]);
 
     const fetchData = useCallback(async () => {
@@ -157,8 +176,22 @@ const useClubData = (dateOrStr: Date | string) => {
                 if (!bookingsCache[ds] || Date.now() - bookingsCache[ds].ts >= CACHE_TTL) {
                     try {
                         const query = clubId ? `/bookings?date=${ds}&club_id=${clubId}` : `/bookings?date=${ds}`;
-                        const bRes = await apiFetchWithAuth<any>(query);
-                        bookingsCache[ds] = { data: bRes.bookings || [], ts: Date.now() };
+                        const [bRes, schoolSlots] = await Promise.all([
+                          apiFetchWithAuth<any>(query),
+                          clubId ? schoolCoursesService.slots(clubId, ds) : Promise.resolve([]),
+                        ]);
+                        const schoolAsBookings = schoolSlots.map((slot) => ({
+                          id: `school-slot-${slot.id}`,
+                          court_id: slot.court_id,
+                          start_at: `${ds}T${slot.start_time}:00Z`,
+                          end_at: `${ds}T${slot.end_time}:00Z`,
+                          status: 'confirmed',
+                          reservation_type: 'school_course',
+                          source_channel: 'system',
+                          notes: `${slot.course_name}${slot.staff_name ? ` - ${slot.staff_name}` : ''}`,
+                          players: { first_name: 'Curso', last_name: slot.course_name },
+                        }));
+                        bookingsCache[ds] = { data: [...(bRes.bookings || []), ...schoolAsBookings], ts: Date.now() };
                     } catch { /* silent prefetch */ }
                 }
             }
@@ -267,6 +300,7 @@ const ZoomScrollbars = () => {
 };
 
 function GrillaViewInner() {
+  const navigate = useNavigate();
   const { t, locale, setLocale } = useTranslation();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -316,6 +350,7 @@ function GrillaViewInner() {
   const [recentlyDroppedId, setRecentlyDroppedId] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('L');
   const [selectedModalReservationId, setSelectedModalReservationId] = useState<string | null>(null);
+  const [selectedSchoolCourseId, setSelectedSchoolCourseId] = useState<string | null>(null);
   const [editingBookingData, setEditingBookingData] = useState<any | null>(null);
   const [hoveredTooltip, setHoveredTooltip] = useState<{ res: Reservation, el: HTMLElement } | null>(null);
   const [focusedCourtId, setFocusedCourtId] = useState<string | null>(null);
@@ -382,6 +417,16 @@ function GrillaViewInner() {
   }, [selectedDate]);
 
   const handleReservationClick = async (res: Reservation) => {
+      if (res.booking_type === 'school_course' || res.id.startsWith('school-slot-')) {
+          const raw = res.id.startsWith('school-slot-') ? res.id.replace('school-slot-', '') : '';
+          const courseId = raw.split(':')[0];
+          setSelectedModalReservationId(null);
+          setEditingBookingData(null);
+          setSelectedSchoolCourseId(courseId);
+          return;
+      }
+
+      setSelectedSchoolCourseId(null);
       setSelectedModalReservationId(res.id);
       if (!res.id.startsWith('new-')) {
           try {
@@ -608,6 +653,7 @@ function GrillaViewInner() {
 
     const reservation = reservations.find(r => r.id === active.id);
     if (!reservation) return;
+    if (reservation.id.startsWith('school-slot-')) return;
 
     const newCourtId = over.id as string;
 
@@ -879,6 +925,11 @@ function GrillaViewInner() {
     }
   };
 
+  const handleLogout = () => {
+    authService.logout();
+    navigate('/login', { replace: true });
+  };
+
   return (
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
       <div className="h-[100dvh] flex flex-col bg-gray-100 font-sans overflow-x-hidden overflow-y-auto landscape:overflow-y-auto">
@@ -926,7 +977,10 @@ function GrillaViewInner() {
                   </div>
                 )}
               </div>
-              <button className="bg-[#1f1f1f] hover:bg-black text-white px-4 py-2 md:px-5 md:py-2.5 rounded-full font-medium text-xs md:text-sm flex items-center gap-2 transition-colors flex-shrink-0 shadow-sm">
+              <button
+                onClick={handleLogout}
+                className="bg-[#1f1f1f] hover:bg-black text-white px-4 py-2 md:px-5 md:py-2.5 rounded-full font-medium text-xs md:text-sm flex items-center gap-2 transition-colors flex-shrink-0 shadow-sm"
+              >
                 <ArrowLeft className="w-4 h-4 md:w-4.5 md:h-4.5" />
                 <span className="hidden sm:inline">{t('header.close')}</span>
               </button>
@@ -1277,6 +1331,12 @@ function GrillaViewInner() {
           editingBookingData={editingBookingData}
           onUpdate={handleUpdateBooking}
           onDelete={handleDeleteBooking}
+        />
+
+        <SchoolCourseModal
+          isOpen={selectedSchoolCourseId !== null}
+          courseId={selectedSchoolCourseId}
+          onClose={() => setSelectedSchoolCourseId(null)}
         />
 
         <BadPracticeModal
