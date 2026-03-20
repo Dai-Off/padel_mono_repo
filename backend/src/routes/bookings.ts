@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { recordPayment } from '../lib/payment';
 
 const router = Router();
 
@@ -57,6 +58,27 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+router.post('/:id/mark-paid', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const payResult = await recordPayment(id);
+    if (!payResult.ok) {
+      return res.status(400).json({ ok: false, error: payResult.error ?? 'Error al registrar pago' });
+    }
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(SELECT_ONE)
+      .eq('id', id)
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!data) return res.status(404).json({ ok: false, error: 'Booking not found' });
+    return res.json({ ok: true, booking: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
@@ -101,7 +123,9 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
 
-    // 1. Insert Booking
+    const wantConfirmed = status === 'confirmed';
+
+    // 1. Insert Booking (siempre como pending; el middleware de pago lo confirma si aplica)
     const { data: booking, error: bookingError } = await supabase
       .from('bookings')
       .insert([
@@ -113,7 +137,7 @@ router.post('/', async (req: Request, res: Response) => {
           timezone: timezone ?? 'Europe/Madrid',
           total_price_cents: Number(total_price_cents),
           currency: currency ?? 'EUR',
-          status: status ?? 'pending_payment',
+          status: 'pending_payment',
           notes: notes ?? null,
           reservation_type: booking_type ?? 'standard',
           pricing_rule_ids: Array.isArray(pricing_rule_ids) ? pricing_rule_ids : null,
@@ -134,7 +158,7 @@ router.post('/', async (req: Request, res: Response) => {
         player_id: organizer_player_id,
         role: 'organizer',
         share_amount_cents: 0,
-        payment_status: status === 'confirmed' ? 'paid' : 'pending',
+        payment_status: 'pending',
       },
     ];
 
@@ -146,7 +170,7 @@ router.post('/', async (req: Request, res: Response) => {
             player_id: p.player_id,
             role: 'guest',
             share_amount_cents: 0,
-            payment_status: status === 'confirmed' ? 'paid' : 'pending',
+            payment_status: 'pending',
           });
         }
       });
@@ -158,8 +182,20 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (participantsError) {
       console.error('Error creating participants:', participantsError.message);
-      // We don't roll back the booking for now as it's already created, 
-      // but in a more robust system we would use a transaction or clean up.
+    }
+
+    // 3. Si el admin indicó "Pagar" → middleware de pago simula el cobro
+    if (wantConfirmed) {
+      const payResult = await recordPayment(booking.id);
+      if (!payResult.ok) {
+        return res.status(500).json({ ok: false, error: payResult.error ?? 'Error al registrar pago' });
+      }
+      const { data: updated } = await supabase
+        .from('bookings')
+        .select(SELECT_ONE)
+        .eq('id', booking.id)
+        .single();
+      return res.status(201).json({ ok: true, booking: updated ?? booking });
     }
 
     return res.status(201).json({ ok: true, booking });
@@ -172,7 +208,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status, cancelled_by, cancellation_reason, notes, booking_type, participants, court_id, start_at, end_at } = req.body ?? {};
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (status !== undefined) update.status = status;
+  if (status !== undefined && status !== 'confirmed') update.status = status;
   if (cancelled_by !== undefined) update.cancelled_by = cancelled_by;
   if (cancellation_reason !== undefined) update.cancellation_reason = cancellation_reason;
   if (status === 'cancelled') {
@@ -184,7 +220,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   if (start_at !== undefined) update.start_at = start_at;
   if (end_at !== undefined) update.end_at = end_at;
 
-  if (Object.keys(update).length === 1 && !Array.isArray(participants)) {
+  if (Object.keys(update).length === 1 && !Array.isArray(participants) && status !== 'confirmed') {
     return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
   }
 
@@ -199,6 +235,20 @@ router.put('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Booking not found' });
+
+    // Si se marca como pagada → middleware de pago
+    if (status === 'confirmed') {
+      const payResult = await recordPayment(id);
+      if (!payResult.ok) {
+        return res.status(500).json({ ok: false, error: payResult.error ?? 'Error al registrar pago' });
+      }
+      const { data: refreshed } = await supabase
+        .from('bookings')
+        .select(SELECT_ONE)
+        .eq('id', id)
+        .single();
+      if (refreshed) Object.assign(data, refreshed);
+    }
 
     // Update guest participants if provided
     if (Array.isArray(participants)) {

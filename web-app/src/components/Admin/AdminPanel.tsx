@@ -9,7 +9,7 @@ import { adminApplicationsService, type ClubApplication, type ApplicationStatus 
 import { authService } from '../../services/auth';
 import { HttpError } from '../../services/api';
 import { TabSwitcher } from '../Common/TabSwitcher';
-import { PageSkeleton } from '../Layout/PageSkeleton';
+import { PageSpinner } from '../Layout/PageSpinner';
 
 const STATUS_TAB_ALL = 'all';
 
@@ -70,7 +70,7 @@ export const AdminPanel = () => {
     };
 
     if (loading && applications.length === 0) {
-        return <PageSkeleton />;
+        return <PageSpinner />;
     }
 
     return (
@@ -95,10 +95,7 @@ export const AdminPanel = () => {
                     </div>
 
                     {loading ? (
-                        <div className="flex flex-col items-center justify-center py-24 gap-4">
-                            <div className="w-12 h-12 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
-                            <p className="text-sm font-semibold text-gray-500 animate-pulse">{t('admin_loading')}</p>
-                        </div>
+                        <PageSpinner />
                     ) : applications.length === 0 ? (
                         <div className="py-16 text-center">
                             <p className="text-sm text-gray-500">{t('admin_no_applications')}</p>
