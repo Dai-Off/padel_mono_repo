@@ -1,0 +1,339 @@
+openapi: 3.0.3
+info:
+  title: Inventory control
+  version: 1.0.0
+tags:
+  - name: Inventory
+    description: Control y auditoría de inventario del club
+paths:
+  /inventario/items:
+    get:
+      tags: [Inventory]
+      summary: Listar productos y stock actual
+      description: |
+        Devuelve la lista de productos del club indicado por `club_id` y calcula `current_quantity`
+        sumando todas las entradas/salidas registradas en `inventory_movements`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: club_id
+          required: true
+          schema: { type: string, format: uuid }
+          description: ID del club
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              examples:
+                ok:
+                  value:
+                    ok: true
+                    items:
+                      - id: "item-uuid"
+                        club_id: "club-uuid"
+                        name: "Pelotas de pádel"
+                        sku: "BALL-TP-1"
+                        unit: "ud"
+                        status: "active"
+                        unit_price_cents: 2500
+                        currency: "EUR"
+                        low_stock_threshold: 5
+                        image_url: null
+                        current_quantity: 42
+        "400":
+          description: Falta club_id
+          content:
+            application/json:
+              example: { ok: false, error: "club_id es obligatorio" }
+        "401":
+          description: Sin token
+        "403":
+          description: Sin acceso al club
+        "503":
+          description: Migración no aplicada (tablas inventario inexistentes)
+          content:
+            application/json:
+              example: { ok: false, error: "Tablas inventory_items/inventory_movements no existen. Aplica las migraciones en Supabase." }
+    post:
+      tags: [Inventory]
+      summary: Crear producto
+      description: Crea un nuevo producto asociado al club.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [club_id, name]
+              properties:
+                club_id: { type: string, format: uuid }
+                name: { type: string }
+                sku: { type: string, nullable: true }
+                unit: { type: string, nullable: true }
+                status: { type: string, enum: [active, inactive], default: active }
+                unit_price_cents: { type: integer, minimum: 0, description: "Precio unitario en céntimos" }
+                currency: { type: string, example: "EUR" }
+                low_stock_threshold: { type: integer, minimum: 0, description: "Si current_quantity <= low_stock_threshold => Stock Bajo" }
+                image_url: { type: string, nullable: true, description: "URL de la imagen del producto (opcional)" }
+            example:
+              club_id: "club-uuid"
+              name: "Pelotas de pádel"
+              sku: "BALL-TP-1"
+              unit: "ud"
+              status: "active"
+              unit_price_cents: 2500
+              currency: "EUR"
+              low_stock_threshold: 5
+              image_url: null
+      responses:
+        "201":
+          description: Creado
+          content:
+            application/json:
+              example:
+                ok: true
+                item:
+                  id: "item-uuid"
+                  club_id: "club-uuid"
+                  name: "Pelotas de pádel"
+                  sku: "BALL-TP-1"
+                  unit: "ud"
+                  status: "active"
+                  unit_price_cents: 2500
+                  currency: "EUR"
+                  low_stock_threshold: 5
+                  image_url: null
+        "400":
+          description: Validación (incluye stock insuficiente en salidas `out`)
+        "401":
+          description: Sin token
+        "403":
+          description: Sin acceso al club
+        "503":
+          description: Tabla inventario no existente
+          content:
+            application/json:
+              example: { ok: false, error: "Tabla inventory_items no existe. Aplica la migración en Supabase." }
+
+  /inventario/items/{id}:
+    put:
+      tags: [Inventory]
+      summary: Actualizar producto
+      description: Actualiza campos del producto. Solo se permite si el usuario tiene acceso al club.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+          description: ID del producto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                sku: { type: string, nullable: true }
+                unit: { type: string, nullable: true }
+                status: { type: string, enum: [active, inactive] }
+                unit_price_cents: { type: integer, minimum: 0, description: "Precio unitario en céntimos" }
+                currency: { type: string, example: "EUR" }
+                low_stock_threshold: { type: integer, minimum: 0, description: "Umbral para considerar Stock Bajo" }
+                image_url: { type: string, nullable: true, description: "URL de la imagen del producto (opcional)" }
+            example:
+              name: "Pelotas de pádel (nuevas)"
+              sku: "BALL-TP-2"
+              status: "active"
+              unit_price_cents: 2700
+              currency: "EUR"
+              low_stock_threshold: 5
+              image_url: null
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              example: { ok: true, item: { id: "item-uuid", club_id: "club-uuid", name: "Pelotas...", status: "active" } }
+        "400":
+          description: Sin campos para actualizar
+        "401":
+          description: Sin token
+        "403":
+          description: Sin acceso al club
+        "404":
+          description: Producto no encontrado
+        "503":
+          description: Tabla inventory_items no existente
+    delete:
+      tags: [Inventory]
+      summary: Eliminar producto
+      description: Elimina el producto del inventario.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+          description: ID del producto
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              example: { ok: true, deleted: "item-uuid" }
+        "401":
+          description: Sin token
+        "403":
+          description: Sin acceso al club
+        "404":
+          description: Producto no encontrado
+
+  /inventario/items/{id}/image:
+    post:
+      tags: [Inventory]
+      summary: Subir imagen para un producto
+      description: |
+        Sube una imagen y actualiza `image_url` del producto. Se requiere que el producto pertenezca al club del usuario (admin o dueño con acceso).
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+          description: ID del producto
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Archivo de imagen (JPEG/PNG/WebP/GIF)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              example: { ok: true, url: "https://..." }
+        "400":
+          description: Falta archivo o formato inválido
+        "401":
+          description: Sin token
+        "403":
+          description: Sin acceso al club
+        "404":
+          description: Producto no encontrado
+        "500":
+          description: Error al procesar la imagen
+
+  /inventario/movements:
+    get:
+      tags: [Inventory]
+      summary: Listar movimientos
+      description: Lista movimientos de inventario (auditoría). Se pueden filtrar por `item_id`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: club_id
+          required: true
+          schema: { type: string, format: uuid }
+          description: ID del club
+        - in: query
+          name: item_id
+          required: false
+          schema: { type: string, format: uuid }
+          description: Filtrar por producto
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              example:
+                ok: true
+                movements:
+                  - id: "mov-uuid"
+                    club_id: "club-uuid"
+                    item_id: "item-uuid"
+                    movement_type: "in"
+                    quantity: 10
+                    reason: "Compra"
+                    created_at: "2026-03-18T12:00:00.000Z"
+        "400":
+          description: Falta club_id
+        "401":
+          description: Sin token
+        "403":
+          description: Sin acceso al club
+        "503":
+          description: Tabla inventory_movements no existente
+    post:
+      tags: [Inventory]
+      summary: Crear movimiento de stock
+      description: Registra una entrada (`in`) o una salida (`out`) de stock para un producto.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [club_id, item_id, movement_type, quantity]
+              properties:
+                club_id: { type: string, format: uuid }
+                item_id: { type: string, format: uuid }
+                movement_type: { type: string, enum: [in, out] }
+                quantity: { type: integer, minimum: 1 }
+                reason: { type: string, nullable: true }
+            example:
+              club_id: "club-uuid"
+              item_id: "item-uuid"
+              movement_type: "out"
+              quantity: 3
+              reason: "Merma"
+      responses:
+        "201":
+          description: Creado
+          content:
+            application/json:
+              example:
+                ok: true
+                movement:
+                  id: "mov-uuid"
+                  club_id: "club-uuid"
+                  item_id: "item-uuid"
+                  movement_type: "out"
+                  quantity: 3
+                  reason: "Merma"
+                  created_at: "2026-03-18T12:00:00.000Z"
+        "400":
+          description: Validación
+        "401":
+          description: Sin token
+        "403":
+          description: Sin acceso al club
+        "404":
+          description: Producto no encontrado
+        "503":
+          description: Tabla inventory_movements no existente
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+
