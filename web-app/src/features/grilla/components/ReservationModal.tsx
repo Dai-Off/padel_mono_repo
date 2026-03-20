@@ -376,7 +376,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     // Fetch prices when opening in create mode and clubId is available
     useEffect(() => {
         if (!isOpen || !clubId || !!editingBookingData) return;
-        reservationTypePricesService.get(clubId).then(setPricesByType).catch(() => setPricesByType({}));
+        reservationTypePricesService.getByClub(clubId).then(setPricesByType).catch(() => setPricesByType({}));
     }, [isOpen, clubId, editingBookingData?.id]);
 
     const totalPriceCents = useMemo(() => {

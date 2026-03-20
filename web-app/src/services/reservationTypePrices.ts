@@ -20,7 +20,7 @@ export type PricesByType = Record<
 >;
 
 class ReservationTypePricesService extends ApiServiceWithAuth {
-  async get(clubId: string): Promise<PricesByType> {
+  async getByClub(clubId: string): Promise<PricesByType> {
     const res = await super.get<{ ok: boolean; prices: PricesByType }>(
       `/reservation-type-prices?club_id=${encodeURIComponent(clubId)}`
     );

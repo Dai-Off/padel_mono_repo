@@ -44,7 +44,7 @@ export function ReservationTypePricesCard({ clubId }: ReservationTypePricesCardP
     setLoading(true);
     setError(null);
     reservationTypePricesService
-      .get(clubId)
+      .getByClub(clubId)
       .then((data) => {
         if (cancelled) return;
         const next: Record<string, number> = {};
