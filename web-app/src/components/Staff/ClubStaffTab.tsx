@@ -258,7 +258,7 @@ function PasswordField({
     );
 }
 
-export function ClubStaffTab({ clubId }: { clubId: string | null }) {
+export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string | null; clubResolved?: boolean }) {
     const [list, setList] = useState<ClubStaffMember[]>([]);
     const [loading, setLoading] = useState(false);
     const [modal, setModal] = useState<{ mode: 'create' | 'edit'; member?: ClubStaffMember } | null>(null);
@@ -403,6 +403,14 @@ export function ClubStaffTab({ clubId }: { clubId: string | null }) {
             setDeleteId(null);
         }
     };
+
+    if (!clubResolved) {
+        return (
+            <div className="flex justify-center py-16">
+                <div className="w-10 h-10 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
+            </div>
+        );
+    }
 
     if (!clubId) {
         return (
