@@ -169,6 +169,11 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                 <span className="uppercase font-bold leading-tight break-words whitespace-normal text-[5.5px]">
                     {displayLabel}
                 </span>
+                {!isCompact && reservation.totalPrice != null && reservation.totalPrice > 0 && (
+                    <span className="text-[5px] opacity-90 mt-0.5">
+                        {(reservation.totalPrice).toFixed(2).replace('.', ',')} €
+                    </span>
+                )}
             </div>
 
             {/* Yellow alert circle — top left */}
