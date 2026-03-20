@@ -201,7 +201,7 @@ const useClubData = (dateOrStr: Date | string) => {
         return () => clearTimeout(timer);
     }, [dateStr, dateOrStr, clubId]);
 
-    return { courts, reservations, loading, refresh };
+    return { courts, reservations, loading, refresh, clubId };
 };
 
 // Pure mapping function — no network calls
@@ -224,7 +224,8 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
             booking_type: b.reservation_type ?? b.booking_type ?? 'standard',
             source_channel: b.source_channel ?? 'manual',
             notes: b.notes ?? undefined,
-            locationId: 'sede-central'
+            locationId: 'sede-central',
+            totalPrice: b.total_price_cents != null ? b.total_price_cents / 100 : undefined,
         };
     });
 }
@@ -318,7 +319,7 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
-  const { courts, reservations: serverReservations, refresh } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, refresh, clubId } = useClubData(selectedDate);
 
   // Filter courts and reservations by the active location tab
   const activeCourts = useMemo(() => {
@@ -462,6 +463,22 @@ function GrillaViewInner() {
           console.error('Error updating booking:', err);
           throw err;
       }
+  };
+
+  const handleMarkPaid = async (bookingId: string) => {
+    try {
+      const res = await apiFetchWithAuth<any>(`/bookings/${bookingId}/mark-paid`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        refresh();
+      } else {
+        throw new Error(res.error || 'Error al marcar como pagado');
+      }
+    } catch (err) {
+      console.error('Error marking paid:', err);
+      throw err;
+    }
   };
 
   const handleDeleteBooking = async (bookingId: string, _sendEmail: boolean) => {
@@ -1317,6 +1334,7 @@ function GrillaViewInner() {
         </main>
 
         <ReservationModal
+          clubId={clubId}
           isOpen={selectedModalReservationId !== null}
           onClose={() => {
             // If the reservation was never saved (temp id), remove it from state
@@ -1331,6 +1349,7 @@ function GrillaViewInner() {
           editingBookingData={editingBookingData}
           onUpdate={handleUpdateBooking}
           onDelete={handleDeleteBooking}
+          onMarkPaid={handleMarkPaid}
         />
 
         <SchoolCourseModal

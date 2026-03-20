@@ -9,6 +9,7 @@ import { ClubDashboard } from './components/Dashboard/ClubDashboard';
 import { ManagerOnboarding } from './components/Onboarding/ManagerOnboarding';
 import { AdminPanel } from './components/Admin/AdminPanel';
 import { GrillaView } from './features/grilla';
+import { PreciosView } from './components/Precios/PreciosView';
 import { authService } from './services/auth';
 import { Toaster } from 'sonner';
 
@@ -99,6 +100,14 @@ function App() {
           element={
             <ProtectedRoute>
               <GrillaView />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/precios"
+          element={
+            <ProtectedRoute>
+              <PreciosView />
             </ProtectedRoute>
           }
         />
