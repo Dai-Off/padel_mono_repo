@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { authService } from '../../services/auth';
 import { clubService, type Club } from '../../services/club';
+import { PageSpinner } from '../Layout/PageSpinner';
 
 function InputField({
     label,
@@ -35,7 +36,11 @@ function InputField({
 
 type Status = 'loading' | 'no_club' | 'ready';
 
-export function ClubSettingsTab() {
+interface ClubSettingsTabProps {
+    initialClub?: Club | null;
+}
+
+export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
     const { t, i18n } = useTranslation();
     const [status, setStatus] = useState<Status>('loading');
     const [saving, setSaving] = useState(false);
@@ -67,8 +72,15 @@ export function ClubSettingsTab() {
 
     useEffect(() => {
         let cancelled = false;
-        (async () => {
+        if (initialClub) {
+            setSelectedClubId(initialClub.id);
+            loadClubIntoForm(initialClub);
+            setClubs([initialClub]);
+            setStatus('ready');
+        } else {
             setStatus('loading');
+        }
+        (async () => {
             try {
                 const me = await authService.getMe();
                 if (cancelled) return;
@@ -84,8 +96,9 @@ export function ClubSettingsTab() {
                 if (cancelled) return;
 
                 setIsAdmin(admin);
-                setClubs(Array.isArray(list) ? list : []);
-                const first = Array.isArray(list) && list.length > 0 ? list[0] : null;
+                const clubsList = Array.isArray(list) && list.length > 0 ? list : (initialClub ? [initialClub] : []);
+                setClubs(clubsList);
+                const first = clubsList[0] ?? initialClub ?? null;
                 if (first) {
                     setSelectedClubId(first.id);
                     loadClubIntoForm(first);
@@ -95,13 +108,13 @@ export function ClubSettingsTab() {
                 }
             } catch {
                 if (!cancelled) {
-                    toast.error(t('fetch_error'));
-                    setStatus('no_club');
+                    toast.error('Error al cargar los datos');
+                    setStatus(initialClub ? 'ready' : 'no_club');
                 }
             }
         })();
         return () => { cancelled = true; };
-    }, [t, loadClubIntoForm]);
+    }, [loadClubIntoForm]);
 
     useEffect(() => {
         if (!selectedClubId || !selectedClub) return;
@@ -137,12 +150,7 @@ export function ClubSettingsTab() {
     const showPanel = isAdmin && clubs.length >= 1;
 
     if (status === 'loading') {
-        return (
-            <div className="flex flex-col items-center justify-center py-24 gap-4">
-                <Loader2 className="w-10 h-10 text-[#E31E24] animate-spin" />
-                <p className="text-sm text-gray-500">{t('loading')}</p>
-            </div>
-        );
+        return <PageSpinner />;
     }
 
     if (status === 'no_club') {

@@ -13,6 +13,7 @@ import {
     EyeOff,
 } from 'lucide-react';
 import { clubStaffService } from '../../services/clubStaff';
+import { PageSpinner } from '../Layout/PageSpinner';
 import type { ClubStaffMember, ScheduleBlock, Weekday } from '../../types/clubStaff';
 import { toast } from 'sonner';
 
@@ -463,9 +464,7 @@ export function ClubStaffTab({ clubId }: { clubId: string | null }) {
             </div>
 
             {loading ? (
-                <div className="flex justify-center py-16">
-                    <div className="w-10 h-10 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
-                </div>
+                <PageSpinner />
             ) : (
                 <div className="space-y-3">
                     {list.length === 0 ? (
