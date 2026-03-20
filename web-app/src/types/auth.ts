@@ -24,6 +24,8 @@ export interface MeResponse {
     ok: boolean;
     user: User;
     roles: { player_id?: string; club_owner_id?: string; admin_id?: string };
-    clubs?: unknown[];
+    clubs?: Array<
+        { id: string } & Record<string, any>
+    >;
     error?: string;
 }
