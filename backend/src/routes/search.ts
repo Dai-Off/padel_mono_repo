@@ -98,6 +98,10 @@ router.get('/courts', async (req: Request, res: Response) => {
       console.log('[search/courts] Sample:', bookings.slice(0, 3).map((b) => ({ court_id: b.court_id, start_at: b.start_at, status: b.status })));
     }
 
+    // Use local midnight so time-slot labels ("10:00") represent local clock time,
+    // consistent with how the mobile app and web grid display hours.
+    const baseDate = new Date(searchDate + 'T00:00:00').getTime();
+
     const bookedRangesByCourt = new Map<string, { start: number; end: number }[]>();
     for (const b of bookings ?? []) {
       const start = new Date(b.start_at).getTime();
@@ -105,6 +109,37 @@ router.get('/courts', async (req: Request, res: Response) => {
       const list = bookedRangesByCourt.get(b.court_id) ?? [];
       list.push({ start, end });
       bookedRangesByCourt.set(b.court_id, list);
+    }
+
+    // Also block slots occupied by active school courses for the searched day
+    const weekdayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+    const weekday = weekdayMap[new Date(searchDate + 'T00:00:00Z').getUTCDay()];
+    const { data: schoolCourses } = await supabase
+      .from('club_school_courses')
+      .select('id, court_id, starts_on, ends_on, is_active')
+      .in('court_id', courtIds)
+      .eq('is_active', true);
+    const validCourseIds = (schoolCourses ?? [])
+      .filter((c: any) => (!c.starts_on || searchDate >= c.starts_on) && (!c.ends_on || searchDate <= c.ends_on))
+      .map((c: any) => c.id);
+    if (validCourseIds.length) {
+      const { data: schoolDays } = await supabase
+        .from('club_school_course_days')
+        .select('course_id, weekday, start_time, end_time')
+        .in('course_id', validCourseIds)
+        .eq('weekday', weekday);
+      const byCourse = new Map((schoolCourses ?? []).map((c: any) => [c.id, c]));
+      for (const d of schoolDays ?? []) {
+        const course = byCourse.get(d.course_id);
+        if (!course) continue;
+        const startMin = Number(String(d.start_time).slice(0, 2)) * 60 + Number(String(d.start_time).slice(3, 5));
+        const endMin = Number(String(d.end_time).slice(0, 2)) * 60 + Number(String(d.end_time).slice(3, 5));
+        const start = baseDate + startMin * 60 * 1000;
+        const end = baseDate + endMin * 60 * 1000;
+        const list = bookedRangesByCourt.get(course.court_id) ?? [];
+        list.push({ start, end });
+        bookedRangesByCourt.set(course.court_id, list);
+      }
     }
 
     const rulesByCourt = new Map<string, { startMin: number; endMin: number; amountCents: number }[]>();
@@ -123,10 +158,6 @@ router.get('/courts', async (req: Request, res: Response) => {
       });
       rulesByCourt.set(r.court_id, list);
     }
-
-    // Use local midnight so time-slot labels ("10:00") represent local clock time,
-    // consistent with how the mobile app and web grid display hours.
-    const baseDate = new Date(searchDate + 'T00:00:00').getTime();
 
     const results: SearchCourtResult[] = courts.flatMap((court) => {
         const club = clubMap.get(court.club_id);
