@@ -80,6 +80,14 @@ function App() {
           }
         />
         <Route
+          path="/escuela"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/onboarding"
           element={
             <ProtectedRoute>

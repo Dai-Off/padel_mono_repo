@@ -33,7 +33,7 @@ import { ClubPlayersTab } from '../Players/ClubPlayers';
 // Settings (Editar club / Configuración)
 import { ClubSettingsTab } from '../Settings/ClubSettings';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router-dom';
@@ -42,6 +42,7 @@ import { clubService, type Club } from '../../services/club';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { ClubStaffTab } from '../Staff/ClubStaffTab';
 import { InventoryControl } from '../Inventory/InventoryControl';
+import { ClubSchoolTab } from '../School/ClubSchoolTab';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
@@ -50,8 +51,10 @@ export const ClubDashboard = () => {
     const isConfigPage = location.pathname === '/configuracion';
     const isPersonalPage = location.pathname === '/personal';
     const isInventoryPage = location.pathname === '/inventario';
+    const isSchoolPage = location.pathname === '/escuela';
 
     const [loading, setLoading] = useState(true);
+    const [clubResolved, setClubResolved] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isAdmin, setIsAdmin] = useState(false);
     const [club, setClub] = useState<Club | null>(null);
@@ -69,6 +72,7 @@ export const ClubDashboard = () => {
                 const clubsFromMe = Array.isArray(me.clubs) ? (me.clubs as Club[]) : [];
                 if (clubsFromMe.length > 0) {
                     if (!cancelled) setClub(clubsFromMe[0]);
+                    if (!cancelled) setClubResolved(true);
                     return;
                 }
 
@@ -88,6 +92,8 @@ export const ClubDashboard = () => {
                     setIsAdmin(false);
                     setClub(null);
                 }
+            } finally {
+                if (!cancelled) setClubResolved(true);
             }
         })();
         return () => { cancelled = true; };
@@ -95,6 +101,7 @@ export const ClubDashboard = () => {
 
     const [courts, setCourts] = useState<Court[]>([]);
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
+    const reorderRequestSeqRef = useRef(0);
 
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -108,7 +115,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage) {
             setLoading(false);
             return;
         }
@@ -121,7 +128,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -168,15 +175,28 @@ export const ClubDashboard = () => {
         const oldIndex = courts.findIndex((c) => c.id === active.id);
         const newIndex = courts.findIndex((c) => c.id === over.id);
         if (oldIndex < 0 || newIndex < 0) return;
-        const reordered = arrayMove(courts, oldIndex, newIndex);
+        const previous = [...courts];
+        const reordered = arrayMove(previous, oldIndex, newIndex);
         setCourts(reordered);
+        const reqSeq = ++reorderRequestSeqRef.current;
         try {
             const saved = await courtService.reorder(club.id, reordered.map((c) => c.id));
-            setCourts(saved);
+            if (reqSeq !== reorderRequestSeqRef.current) return; // stale response from older reorder
+            // Keep optimistic order to avoid visual "snap back".
+            // If backend returns different ids/order, trust backend response.
+            const optimisticIds = reordered.map((c) => c.id).join('|');
+            const backendIds = (saved ?? []).map((c) => c.id).join('|');
+            if (saved.length && optimisticIds !== backendIds) {
+                setCourts(saved);
+            } else if (saved.length) {
+                const byId = new Map(saved.map((c) => [c.id, c]));
+                setCourts((prev) => prev.map((c) => byId.get(c.id) ?? c));
+            }
             window.dispatchEvent(new CustomEvent('padel:courts-reordered'));
         } catch {
+            if (reqSeq !== reorderRequestSeqRef.current) return;
             toast.error(t('fetch_error'));
-            fetchData();
+            setCourts(previous);
         }
     };
 
@@ -200,9 +220,11 @@ export const ClubDashboard = () => {
                     ) : isConfigPage ? (
                         <ClubSettingsTab initialClub={club} />
                     ) : isPersonalPage ? (
-                        <ClubStaffTab clubId={club?.id ?? null} />
+                        <ClubStaffTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isInventoryPage ? (
-                        <InventoryControl clubId={club?.id ?? null} />
+                        <InventoryControl clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isSchoolPage ? (
+                        <ClubSchoolTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : (
                         <>
                             <div className="flex items-center justify-between gap-3">
