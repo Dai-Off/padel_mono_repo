@@ -16,6 +16,7 @@ export type ReservationType =
     | 'open_match'
     | 'pozo'
     | 'fixed_recurring'
+    | 'school_course'
     | 'school_group'
     | 'school_individual'
     | 'flat_rate'

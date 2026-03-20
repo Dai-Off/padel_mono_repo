@@ -24,6 +24,7 @@ const bookingTypeColors: Record<ReservationType, string> = {
     'open_match':        'bg-[#7c3aed] text-white border-[#6d28d9]',           // Violeta — partido abierto
     'pozo':              'bg-[#ea580c] text-white border-[#c2410c]',           // Naranja — americanas/melee
     'fixed_recurring':   'bg-[#166534] text-white border-[#14532d]',           // Verde oscuro — turno fijo
+    'school_course':     'bg-[#fdf2f8] text-[#9d174d] border-[#f9a8d4]',          // Rosa claro — escuela curso
     'school_group':      'bg-[#fbcfe8] text-[#831843] border-[#f472b6]',      // Rosa — escuela grupo
     'school_individual': 'bg-[#fce7f3] text-[#9d174d] border-[#f9a8d4]',     // Rosa claro — clase particular
     'flat_rate':         'bg-[#be185d] text-white border-[#9d174d]',           // Fucsia — tarifa plana DPA
