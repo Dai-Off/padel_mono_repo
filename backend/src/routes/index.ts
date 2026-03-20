@@ -18,6 +18,7 @@ import pricingRulesRouter from './pricingRules';
 import clubStaffRouter from './clubStaff';
 import reservationTypePricesRouter from './reservationTypePrices';
 import inventoryRouter from './inventory';
+import schoolCoursesRouter from './schoolCourses';
 
 const router = Router();
 
@@ -44,6 +45,7 @@ router.use('/pricing-rules', pricingRulesRouter);
 router.use('/club-staff', clubStaffRouter);
 router.use('/reservation-type-prices', reservationTypePricesRouter);
 router.use('/inventario', inventoryRouter);
+router.use('/school-courses', schoolCoursesRouter);
 
 export default router;
 

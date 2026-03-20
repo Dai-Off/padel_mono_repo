@@ -9,7 +9,7 @@ function clampInt(n: number): number {
     return Number.isNaN(v) ? 0 : v;
 }
 
-export function InventoryControl({ clubId }: { clubId: string | null }) {
+export function InventoryControl({ clubId, clubResolved = true }: { clubId: string | null; clubResolved?: boolean }) {
     const [items, setItems] = useState<InventoryItem[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -371,6 +371,14 @@ export function InventoryControl({ clubId }: { clubId: string | null }) {
             setHistoryLoadingItemId(null);
         }
     };
+
+    if (!clubResolved) {
+        return (
+            <div className="flex justify-center py-16">
+                <div className="w-10 h-10 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
+            </div>
+        );
+    }
 
     if (!clubId) {
         return (
