@@ -1,9 +1,9 @@
 import React from 'react';
-import { useTranslation } from '../i18n/I18nContext';
+import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 
 // Props interace kept in case we add real data props later
 export const MetricsBar: React.FC = () => {
-    const { t } = useTranslation();
+    const { t } = useGrillaTranslation();
 
     return (
         <div className="mx-2 sm:mx-4 md:mx-6 mt-1.5 mb-0.5 bg-[#2a2a2a] rounded-lg p-1 sm:p-1.5 shadow-sm text-white flex-shrink-0 animate-in fade-in slide-in-from-top-4 duration-300">

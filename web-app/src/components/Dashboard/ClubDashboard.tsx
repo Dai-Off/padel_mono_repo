@@ -43,6 +43,8 @@ import { PageSpinner } from '../Layout/PageSpinner';
 import { ClubStaffTab } from '../Staff/ClubStaffTab';
 import { InventoryControl } from '../Inventory/InventoryControl';
 import { ClubSchoolTab } from '../School/ClubSchoolTab';
+import { ClubDashboardExtensions } from './ClubDashboardExtensions';
+import { ClubReviewsTab } from './ClubReviewsTab';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
@@ -52,6 +54,8 @@ export const ClubDashboard = () => {
     const isPersonalPage = location.pathname === '/personal';
     const isInventoryPage = location.pathname === '/inventario';
     const isSchoolPage = location.pathname === '/escuela';
+    const isCrmPage = location.pathname === '/crm';
+    const isResenasPage = location.pathname === '/resenas';
 
     const [loading, setLoading] = useState(true);
     const [clubResolved, setClubResolved] = useState(false);
@@ -115,7 +119,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage || isCrmPage || isResenasPage) {
             setLoading(false);
             return;
         }
@@ -128,7 +132,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, isCrmPage, isResenasPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -200,7 +204,8 @@ export const ClubDashboard = () => {
         }
     };
 
-    if (!club && loading) {
+    // Evita spinner doble en pantallas donde el tab ya se encarga del loader (CRM y Reseñas).
+    if (!club && loading && !isResenasPage && !isCrmPage) {
         return <PageSpinner />;
     }
 
@@ -217,6 +222,10 @@ export const ClubDashboard = () => {
                 <div className="max-w-7xl mx-auto space-y-6">
                     {isPlayersPage ? (
                         <ClubPlayersTab />
+                    ) : isResenasPage ? (
+                        <ClubReviewsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isCrmPage ? (
+                        <ClubDashboardExtensions clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isConfigPage ? (
                         <ClubSettingsTab initialClub={club} />
                     ) : isPersonalPage ? (

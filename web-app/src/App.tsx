@@ -88,6 +88,22 @@ function App() {
           }
         />
         <Route
+          path="/crm"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/resenas"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/onboarding"
           element={
             <ProtectedRoute>
