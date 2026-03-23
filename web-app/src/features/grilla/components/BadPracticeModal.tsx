@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { X, AlertTriangle, ArrowRight, Clock, Lightbulb } from 'lucide-react';
-import { useTranslation } from '../i18n/I18nContext';
+import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 
 export interface GapWarning {
@@ -27,7 +27,7 @@ export const BadPracticeModal: React.FC<BadPracticeModalProps> = ({
     onMoveToBetter,
     warnings
 }) => {
-    const { t } = useTranslation();
+    const { t } = useGrillaTranslation();
     const vvStyle = useVisualViewportFix(isOpen);
 
     useEffect(() => {
