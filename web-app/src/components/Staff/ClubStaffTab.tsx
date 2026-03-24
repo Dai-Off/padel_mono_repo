@@ -16,6 +16,7 @@ import { clubStaffService } from '../../services/clubStaff';
 import { PageSpinner } from '../Layout/PageSpinner';
 import type { ClubStaffMember, ScheduleBlock, Weekday } from '../../types/clubStaff';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 
 function initials(name: string): string {
     const p = name.trim().split(/\s+/).filter(Boolean);
@@ -260,6 +261,7 @@ function PasswordField({
 }
 
 export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string | null; clubResolved?: boolean }) {
+    const { t } = useTranslation();
     const [list, setList] = useState<ClubStaffMember[]>([]);
     const [loading, setLoading] = useState(false);
     const [modal, setModal] = useState<{ mode: 'create' | 'edit'; member?: ClubStaffMember } | null>(null);
@@ -424,14 +426,14 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
     return (
         <div className="space-y-5">
             <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-bold text-[#1A1A1A]">Gestión de personal</h2>
+                <h2 className="text-sm font-bold text-[#1A1A1A]">{t('personal_management_title')}</h2>
                 <button
                     type="button"
                     onClick={openCreate}
                     className="flex items-center gap-1.5 px-4 py-2.5 bg-[#E31E24] text-white rounded-xl text-xs font-bold hover:opacity-90"
                 >
                     <Plus className="w-3.5 h-3.5" />
-                    Añadir personal
+                    {t('personal_add')}
                 </button>
             </div>
 
@@ -443,7 +445,7 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
                         </div>
                         <div>
                             <p className="text-lg font-black text-[#1A1A1A]">{stats.total}</p>
-                            <p className="text-[10px] text-gray-400">Personal total</p>
+                            <p className="text-[10px] text-gray-400">{t('personal_stats_total')}</p>
                         </div>
                     </div>
                 </div>
@@ -454,7 +456,7 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
                         </div>
                         <div>
                             <p className="text-lg font-black text-[#1A1A1A]">{stats.active}</p>
-                            <p className="text-[10px] text-gray-400">Activos</p>
+                            <p className="text-[10px] text-gray-400">{t('personal_stats_active')}</p>
                         </div>
                     </div>
                 </div>
@@ -465,7 +467,7 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
                         </div>
                         <div>
                             <p className="text-lg font-black text-[#1A1A1A]">{stats.coaches}</p>
-                            <p className="text-[10px] text-gray-400">Entrenadores</p>
+                            <p className="text-[10px] text-gray-400">{t('personal_stats_coaches')}</p>
                         </div>
                     </div>
                 </div>
@@ -476,7 +478,7 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
             ) : (
                 <div className="space-y-3">
                     {list.length === 0 ? (
-                        <p className="text-sm text-gray-500 text-center py-8">Aún no hay personal registrado.</p>
+                        <p className="text-sm text-gray-500 text-center py-8">{t('personal_empty')}</p>
                     ) : (
                         list.map((member) => (
                             <div key={member.id} className="bg-white rounded-2xl border border-gray-100 p-4">
@@ -490,7 +492,7 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
                                             <span
                                                 className={`text-[10px] ${member.status === 'active' ? 'text-green-600' : 'text-gray-400'}`}
                                             >
-                                                {member.status === 'active' ? 'Activo' : 'Inactivo'}
+                                                {member.status === 'active' ? t('personal_status_active') : t('personal_status_inactive')}
                                             </span>
                                         </div>
                                         <p className="text-[10px] text-[#E31E24] font-semibold mb-2">{member.role || '—'}</p>
@@ -548,7 +550,7 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                     <div className="w-full max-w-md rounded-2xl bg-white border border-gray-200 p-5 shadow-xl max-h-[90vh] overflow-y-auto">
                         <h3 className="text-sm font-bold text-[#1A1A1A] mb-4">
-                            {modal.mode === 'create' ? 'Nuevo miembro' : 'Editar'}
+                            {modal.mode === 'create' ? t('personal_modal_create') : t('personal_modal_edit')}
                         </h3>
                         <div className="space-y-3">
                             <div>
@@ -629,8 +631,8 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
                                         setForm((f) => ({ ...f, status: e.target.value as 'active' | 'inactive' }))
                                     }
                                 >
-                                    <option value="active">Activo</option>
-                                    <option value="inactive">Inactivo</option>
+                                    <option value="active">{t('personal_status_active')}</option>
+                                    <option value="inactive">{t('personal_status_inactive')}</option>
                                 </select>
                             </div>
                         </div>
@@ -640,7 +642,7 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
                                 onClick={() => setModal(null)}
                                 className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700"
                             >
-                                Cancelar
+                                {t('cancel')}
                             </button>
                             <button
                                 type="button"
@@ -648,7 +650,7 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
                                 onClick={submit}
                                 className="px-3.5 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-bold disabled:opacity-50"
                             >
-                                {saving ? '…' : 'Guardar'}
+                                {saving ? '…' : t('save')}
                             </button>
                         </div>
                     </div>
@@ -658,21 +660,21 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
             {deleteId && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                     <div className="w-full max-w-sm rounded-2xl bg-white border border-gray-200 p-5 shadow-xl">
-                        <p className="text-sm font-semibold text-[#1A1A1A] mb-4">¿Eliminar este miembro?</p>
+                        <p className="text-sm font-semibold text-[#1A1A1A] mb-4">{t('personal_delete_title')}</p>
                         <div className="flex gap-2 justify-end">
                             <button
                                 type="button"
                                 onClick={() => setDeleteId(null)}
                                 className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold"
                             >
-                                Cancelar
+                                {t('cancel')}
                             </button>
                             <button
                                 type="button"
                                 onClick={confirmDelete}
                                 className="px-3.5 py-2 rounded-xl bg-red-600 text-white text-xs font-bold"
                             >
-                                Eliminar
+                                {t('personal_delete')}
                             </button>
                         </div>
                     </div>

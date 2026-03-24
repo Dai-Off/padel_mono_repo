@@ -108,7 +108,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                 }
             } catch {
                 if (!cancelled) {
-                    toast.error('Error al cargar los datos');
+                    toast.error(t('fetch_error'));
                     setStatus(initialClub ? 'ready' : 'no_club');
                 }
             }
@@ -126,10 +126,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
     }, [selectedClubId, selectedClub, loadClubIntoForm]);
 
     const handleLanguageChange = (lng: string) => {
-        i18n.changeLanguage(lng);
-        try {
-            localStorage.setItem('courthub-language', lng);
-        } catch {}
+        void i18n.changeLanguage(lng);
     };
 
     const handleSubmit = async (e: React.FormEvent) => {
@@ -205,26 +202,26 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                             label={t('club_name')}
                             value={form.name}
                             onChange={(v) => setForm((f) => ({ ...f, name: v }))}
-                            placeholder="Ej: Padel Club Madrid"
+                            placeholder={t('club_settings_name_placeholder')}
                         />
                         <InputField
                             label={t('address')}
                             value={form.address}
                             onChange={(v) => setForm((f) => ({ ...f, address: v }))}
-                            placeholder="Calle Deportiva 123"
+                            placeholder={t('club_settings_address_placeholder')}
                         />
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <InputField
                                 label={t('city')}
                                 value={form.city}
                                 onChange={(v) => setForm((f) => ({ ...f, city: v }))}
-                                placeholder="Madrid"
+                                placeholder={t('club_settings_city_placeholder')}
                             />
                             <InputField
                                 label={t('postal_code')}
                                 value={form.postal_code}
                                 onChange={(v) => setForm((f) => ({ ...f, postal_code: v }))}
-                                placeholder="28001"
+                                placeholder={t('club_settings_postal_code_placeholder')}
                             />
                         </div>
                         <div>
@@ -240,10 +237,10 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                             />
                         </div>
                         <InputField
-                            label="Logo URL"
+                            label={t('club_settings_logo_url_label')}
                             value={form.logo_url}
                             onChange={(v) => setForm((f) => ({ ...f, logo_url: v }))}
-                            placeholder="https://..."
+                            placeholder={t('club_settings_logo_url_placeholder')}
                         />
                     </div>
                 </div>

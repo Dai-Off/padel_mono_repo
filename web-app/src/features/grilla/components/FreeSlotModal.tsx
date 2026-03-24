@@ -9,7 +9,7 @@ import {
     Trophy
 } from 'lucide-react';
 import clsx from 'clsx';
-import { useTranslation } from '../i18n/I18nContext';
+import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 
 interface FreeSlotModalProps {
@@ -22,7 +22,7 @@ interface FreeSlotModalProps {
 }
 
 export const FreeSlotModal: React.FC<FreeSlotModalProps> = ({ isOpen, onClose, courtName, time, isDisabled, onConfirm }) => {
-    const { t } = useTranslation();
+    const { t } = useGrillaTranslation();
     const vvStyle = useVisualViewportFix(isOpen);
 
     // Prevent background scrolling when modal is open
