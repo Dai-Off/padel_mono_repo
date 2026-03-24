@@ -20,11 +20,27 @@
       ]
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.wematch.padel",
+      "runtimeVersion": {
+        "policy": "appVersion"
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "softwareKeyboardLayoutMode": "pan",
-      "package": "com.anonymous.padelapp"
+      "package": "com.anonymous.padelapp",
+      "runtimeVersion": "1.0.0"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "a3d1a65c-8c6a-40d6-9007-3226cbf37a20"
+      }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/a3d1a65c-8c6a-40d6-9007-3226cbf37a20"
     }
   }
 }

@@ -1,17 +1,22 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { login } from '../api/auth';
+import {
+  AuthLayout,
+  AuthBrand,
+  AuthInput,
+  AuthButton,
+  ErrorBanner,
+  AuthFormLink,
+  AuthFooter,
+} from '../components/auth';
 import { theme } from '../theme';
 
 type LoginScreenProps = {
@@ -22,9 +27,15 @@ export function LoginScreen({ onGoToRegister }: LoginScreenProps) {
   const { setSession } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [errorCode, setErrorCode] = useState<string | undefined>();
+
+  const clearError = () => {
+    setError('');
+    setErrorCode(undefined);
+  };
 
   const handleSubmit = async () => {
     const e = email.trim();
@@ -35,8 +46,7 @@ export function LoginScreen({ onGoToRegister }: LoginScreenProps) {
       return;
     }
 
-    setError('');
-    setErrorCode(undefined);
+    clearError();
     setLoading(true);
 
     try {
@@ -60,228 +70,130 @@ export function LoginScreen({ onGoToRegister }: LoginScreenProps) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={styles.content}>
-        <View style={styles.brand}>
-          <View style={styles.brandIcon}>
-            <Text style={styles.brandEmoji}>🎾</Text>
-          </View>
-          <Text style={styles.brandTitle}>WeMatch</Text>
-          <Text style={styles.brandSub}>Inicia sesión para buscar y crear partidos</Text>
-        </View>
-
-        <View style={styles.formCard}>
-          <Text style={styles.title}>Iniciar sesión</Text>
-
-          {error ? (
-            <View style={[styles.errorBanner, errorCode === 'EMAIL_NOT_CONFIRMED' && styles.errorBannerInfo]}>
-              <Ionicons
-                name={errorCode === 'EMAIL_NOT_CONFIRMED' ? 'information-circle' : 'alert-circle'}
-                size={18}
-                color={errorCode === 'EMAIL_NOT_CONFIRMED' ? '#2563eb' : '#E31E24'}
-              />
-              <Text
-                style={[
-                  styles.errorText,
-                  errorCode === 'EMAIL_NOT_CONFIRMED' && styles.errorTextInfo,
-                ]}
-              >
-                {error}
-              </Text>
-            </View>
-          ) : null}
-
-          <View style={styles.inputWrap}>
-            <Ionicons name="mail-outline" size={20} color="#9ca3af" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Email"
-              placeholderTextColor="#9ca3af"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              value={email}
-              onChangeText={(t) => { setEmail(t); setError(''); setErrorCode(undefined); }}
-              editable={!loading}
-            />
-          </View>
-          <View style={styles.inputWrap}>
-            <Ionicons name="lock-closed-outline" size={20} color="#9ca3af" style={styles.inputIcon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Contraseña"
-              placeholderTextColor="#9ca3af"
-              secureTextEntry
-              autoComplete="password"
-              value={password}
-              onChangeText={(t) => { setPassword(t); setError(''); setErrorCode(undefined); }}
-              editable={!loading}
-            />
-          </View>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.button,
-              pressed && styles.buttonPressed,
-              loading && styles.buttonDisabled,
-            ]}
-            onPress={handleSubmit}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="log-in-outline" size={20} color="#fff" style={styles.buttonIcon} />
-                <Text style={styles.buttonText}>Iniciar sesión</Text>
-              </>
-            )}
-          </Pressable>
-
-          <Pressable
-            onPress={onGoToRegister}
-            disabled={loading}
-            style={({ pressed }) => [styles.link, pressed && styles.pressed]}
-          >
-            <Text style={styles.linkText}>
-              ¿No tienes cuenta?{' '}
-              <Text style={styles.linkTextBold}>Regístrate</Text>
-            </Text>
-          </Pressable>
-        </View>
+    <AuthLayout>
+      <View style={styles.brandSection}>
+        <AuthBrand variant="logoOnly" />
       </View>
-    </KeyboardAvoidingView>
+
+      <View style={styles.formSection}>
+        {error ? (
+          <ErrorBanner
+            message={error}
+            variant={errorCode === 'EMAIL_NOT_CONFIRMED' ? 'info' : 'error'}
+          />
+        ) : null}
+
+        <AuthInput
+          label="Correo Electrónico"
+          icon="mail-outline"
+          placeholder="tu@email.com"
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoComplete="email"
+          value={email}
+          onChangeText={(t) => { setEmail(t); clearError(); }}
+          editable={!loading}
+        />
+
+        <AuthInput
+          label="Contraseña"
+          icon="lock-closed-outline"
+          placeholder="••••••••"
+          secureTextEntry
+          autoComplete="password"
+          value={password}
+          onChangeText={(t) => { setPassword(t); clearError(); }}
+          editable={!loading}
+        />
+
+        <View style={styles.extras}>
+          <Pressable
+            style={({ pressed }) => [styles.checkboxWrap, pressed && styles.pressed]}
+            onPress={() => setRememberMe(!rememberMe)}
+            disabled={loading}
+          >
+            <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+              {rememberMe ? (
+                <Ionicons name="checkmark" size={14} color={theme.auth.accent} />
+              ) : null}
+            </View>
+            <Text style={styles.checkboxLabel}>Recordarme</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.forgotLink, pressed && styles.pressed]}
+            onPress={() => { /* TODO: navegación a recuperar contraseña */ }}
+            disabled={loading}
+          >
+            <Text style={styles.forgotLinkText}>¿Olvidaste tu contraseña?</Text>
+          </Pressable>
+        </View>
+
+        <AuthButton
+          onPress={handleSubmit}
+          loading={loading}
+          disabled={loading}
+          icon="arrow-forward"
+        >
+          Iniciar Sesión
+        </AuthButton>
+
+        <AuthFormLink
+          prompt="¿No tienes cuenta?"
+          action="Regístrate gratis"
+          onPress={onGoToRegister}
+          disabled={loading}
+        />
+      </View>
+
+      <AuthFooter />
+    </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  brandSection: {
+    paddingTop: theme.spacing.xxl,
+    paddingBottom: theme.spacing.lg,
+    alignItems: 'center',
+  },
+  formSection: {
     flex: 1,
-    backgroundColor: '#f9fafb',
-    justifyContent: 'center',
   },
-  content: {
-    paddingHorizontal: theme.spacing.lg,
-  },
-  brand: {
-    alignItems: 'center',
-    marginBottom: theme.spacing.xl,
-  },
-  brandIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(227, 30, 36, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing.md,
-  },
-  brandEmoji: {
-    fontSize: 32,
-  },
-  brandTitle: {
-    fontSize: theme.fontSize.xxl,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    marginBottom: 4,
-  },
-  brandSub: {
-    fontSize: theme.fontSize.sm,
-    color: '#6b7280',
-  },
-  formCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: theme.spacing.xl,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-  },
-  title: {
-    fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    marginBottom: theme.spacing.lg,
-  },
-  errorBanner: {
+  extras: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    backgroundColor: 'rgba(227, 30, 36, 0.1)',
-    borderRadius: 12,
-    marginBottom: theme.spacing.md,
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.sm,
   },
-  errorBannerInfo: {
-    backgroundColor: '#eff6ff',
+  checkboxWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  errorText: {
-    flex: 1,
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: theme.auth.textSecondary,
+    marginRight: theme.spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: theme.auth.inputBg,
+    borderColor: theme.auth.accent,
+  },
+  checkboxLabel: {
     fontSize: theme.fontSize.sm,
-    color: '#E31E24',
+    color: theme.auth.label,
+  },
+  forgotLink: {
+    paddingVertical: 4,
+  },
+  forgotLinkText: {
+    fontSize: theme.fontSize.sm,
     fontWeight: '500',
-  },
-  errorTextInfo: {
-    color: '#2563eb',
-  },
-  inputWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 48,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-    marginBottom: theme.spacing.md,
-  },
-  inputIcon: {
-    marginLeft: 16,
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    height: 48,
-    paddingHorizontal: 8,
-    paddingRight: 16,
-    fontSize: theme.fontSize.base,
-    color: '#1A1A1A',
-  },
-  button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 48,
-    backgroundColor: '#E31E24',
-    borderRadius: 16,
-    marginTop: theme.spacing.sm,
-    marginBottom: theme.spacing.lg,
-  },
-  buttonIcon: {
-    marginRight: 8,
-  },
-  buttonPressed: {
-    opacity: 0.9,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    fontSize: theme.fontSize.base,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  link: {
-    alignSelf: 'center',
-    paddingVertical: 8,
-  },
-  linkText: {
-    fontSize: theme.fontSize.sm,
-    color: '#6b7280',
-  },
-  linkTextBold: {
-    fontWeight: '600',
-    color: '#1A1A1A',
+    color: theme.auth.accent,
   },
   pressed: {
     opacity: 0.9,
