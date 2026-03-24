@@ -12,6 +12,8 @@ import { playerService } from '../../../services/player';
 import { apiFetchWithAuth } from '../../../services/api';
 import { reservationTypePricesService } from '../../../services/reservationTypePrices';
 import type { Player } from '../../../types/api';
+import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
+import { calendarLocale } from '../i18n/calendarLocale';
 
 interface ReservationModalProps {
     clubId?: string | null;
@@ -33,6 +35,7 @@ const PlayerSearch: React.FC<{
     selectedPlayer: Player | null;
     required?: boolean;
 }> = ({ label, placeholder, onSelect, selectedPlayer, required }) => {
+    const { t } = useGrillaTranslation();
     const [query, setQuery] = useState('');
     const [results, setResults] = useState<Player[]>([]);
     const [isSearching, setIsSearching] = useState(false);
@@ -81,7 +84,7 @@ const PlayerSearch: React.FC<{
         e.preventDefault();
         const { first_name, last_name, phone, email } = altaForm;
         if (!first_name.trim() || !last_name.trim() || !phone.trim() || !email.trim()) {
-            setAltaError('Todos los campos son obligatorios.');
+            setAltaError(t('playerSearch.allFieldsRequired'));
             return;
         }
         setAltaSubmitting(true);
@@ -92,7 +95,10 @@ const PlayerSearch: React.FC<{
             setAltaOpen(false);
             setAltaForm({ first_name: '', last_name: '', phone: '', email: '' });
         } catch (err: unknown) {
-            const msg = err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : 'Error al dar de alta el jugador.';
+            const msg =
+                err && typeof err === 'object' && 'message' in err
+                    ? String((err as { message: string }).message)
+                    : t('playerSearch.manualAddError');
             setAltaError(msg);
         } finally {
             setAltaSubmitting(false);
@@ -156,7 +162,7 @@ const PlayerSearch: React.FC<{
                             </div>
                             <button
                                 type="button"
-                                title="Dar de alta jugador"
+                                title={t('playerSearch.addPlayerTooltip')}
                                 onClick={() => { setAltaOpen(true); setAltaError(''); }}
                                 className="flex items-center justify-center w-10 h-10 rounded-md bg-[#00726b] hover:bg-[#005a4f] text-white transition-colors shrink-0"
                             >
@@ -187,7 +193,7 @@ const PlayerSearch: React.FC<{
                         )}
                         {showResults && results.length === 0 && query.trim() && !isSearching && (
                             <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl p-4 text-center">
-                                <p className="text-sm text-gray-500">No se encontraron jugadores</p>
+                                <p className="text-sm text-gray-500">{t('playerSearch.noPlayersFound')}</p>
                             </div>
                         )}
                     </>
@@ -199,7 +205,7 @@ const PlayerSearch: React.FC<{
                 <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setAltaOpen(false)}>
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-base font-bold text-gray-900">Alta manual en el club</h3>
+                            <h3 className="text-base font-bold text-gray-900">{t('playerSearch.manualAddTitle')}</h3>
                             <button onClick={() => setAltaOpen(false)} className="p-1 hover:bg-gray-100 rounded-full text-gray-500">
                                 <X size={18} />
                             </button>
@@ -209,7 +215,14 @@ const PlayerSearch: React.FC<{
                                 <input
                                     key={field}
                                     type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'}
-                                    placeholder={{ first_name: 'Nombre', last_name: 'Apellidos', phone: 'Teléfono', email: 'Email' }[field]}
+                                    placeholder={
+                                        {
+                                            first_name: t('playerSearch.namePh'),
+                                            last_name: t('playerSearch.lastNamePh'),
+                                            phone: t('playerSearch.phonePh'),
+                                            email: t('playerSearch.emailPh'),
+                                        }[field]
+                                    }
                                     value={altaForm[field]}
                                     onChange={(e) => setAltaForm(prev => ({ ...prev, [field]: e.target.value }))}
                                     className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#00726b] focus:border-transparent outline-none"
@@ -221,7 +234,7 @@ const PlayerSearch: React.FC<{
                                 disabled={altaSubmitting}
                                 className="mt-1 w-full py-2.5 rounded-lg bg-[#00726b] hover:bg-[#005a4f] text-white text-sm font-bold transition-colors disabled:opacity-60"
                             >
-                                {altaSubmitting ? 'Dando de alta...' : 'Dar de alta'}
+                                {altaSubmitting ? t('playerSearch.submitting') : t('playerSearch.submit')}
                             </button>
                         </form>
                     </div>
@@ -235,6 +248,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
+    const { t, i18n } = useGrillaTranslation();
     const isEditMode = !!editingBookingData;
 
     // Form States
@@ -416,8 +430,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 if (conflicts.length > 0) {
                     const c = conflicts[0];
                     const cTime = new Date(c.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-                    const cName = c.players ? `${c.players.first_name} ${c.players.last_name}` : 'otra reserva';
-                    setOverlapError(`Conflicto con la reserva de ${cName} a las ${cTime}. Ajusta la duración o el horario.`);
+                    const cName = c.players ? `${c.players.first_name} ${c.players.last_name}` : t('reservation.otherBookingName');
+                    setOverlapError(t('reservation.overlapConflict', { name: cName, time: cTime }));
                     return;
                 }
             } catch {
@@ -463,7 +477,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             onClose();
         } catch (err) {
             console.error('Error saving reservation:', err);
-            alert('Error al guardar la reserva');
+            alert(t('reservation.saveError'));
         } finally {
             setIsSaving(false);
         }
@@ -477,7 +491,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             onClose();
         } catch (err) {
             console.error('Error marking paid:', err);
-            alert('Error al marcar como pagado');
+            alert(t('reservation.markPaidError'));
         } finally {
             setIsMarkingPaid(false);
         }
@@ -491,14 +505,18 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             onClose();
         } catch (err) {
             console.error('Error deleting booking:', err);
-            alert('Error al eliminar la reserva');
+            alert(t('reservation.deleteError'));
         } finally {
             setIsDeleting(false);
         }
     };
 
-    const formattedDate = new Date().toLocaleDateString('es-ES', {
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    const dateForLabel = bookingDate ? new Date(`${bookingDate}T12:00:00`) : new Date();
+    const formattedDate = dateForLabel.toLocaleDateString(calendarLocale(i18n.language), {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
     });
 
     const courtDisplayName = editingBookingData?.courtName || reservation.courtName || reservation.courtId;
@@ -524,7 +542,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     <div className="flex flex-col gap-2">
                         <div className="flex items-center gap-3 flex-wrap">
                             <h2 className="text-xl font-bold text-gray-900 leading-tight">
-                                {isEditMode ? 'Editar Reserva' : 'Nueva Reserva'}
+                                {isEditMode ? t('reservation.modalTitleEdit') : t('reservation.modalTitleNew')}
                             </h2>
                             {courtDisplayName && (
                                 <span className="px-3 py-0.5 bg-[#006A6A] text-white text-sm font-bold rounded-md uppercase tracking-wide">
@@ -546,7 +564,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     disabled={isMarkingPaid}
                                     className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
                                 >
-                                    {isMarkingPaid ? 'Procesando...' : 'Marcar como pagado'}
+                                    {isMarkingPaid ? t('reservation.markPaidProcessing') : t('reservation.markPaid')}
                                 </button>
                             )}
                             {isEditMode && hasChanges && (
@@ -555,7 +573,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     disabled={!organizer || isSaving}
                                     className="px-4 py-1.5 bg-orange-500 text-white text-xs font-bold rounded-md hover:bg-orange-600 disabled:opacity-50 transition-colors ring-2 ring-orange-300"
                                 >
-                                    {isSaving ? 'Actualizando...' : 'Actualizar'}
+                                    {isSaving ? t('reservation.updating') : t('reservation.update')}
                                 </button>
                             )}
                             {!isEditMode && (
@@ -565,14 +583,14 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                         disabled={!organizer || isSaving}
                                         className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
                                     >
-                                        Pagar
+                                        {t('reservation.pay')}
                                     </button>
                                     <button
                                         onClick={() => handleSave('pending_payment')}
                                         disabled={!organizer || isSaving}
                                         className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
                                     >
-                                        Reservar (Pendiente de pago)
+                                        {t('reservation.reservePending')}
                                     </button>
                                 </>
                             )}
@@ -580,7 +598,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 onClick={onClose}
                                 className="px-4 py-1.5 bg-gray-200 text-gray-700 text-xs font-bold rounded-md hover:bg-gray-300 transition-colors"
                             >
-                                Cancelar
+                                {t('reservation.cancel')}
                             </button>
                         </div>
                     </div>
@@ -600,7 +618,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                         <div className="space-y-5">
                             {/* Fecha */}
                             <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-gray-700 w-32 shrink-0">Fecha:</span>
+                                <span className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.fieldDate')}</span>
                                 {isEditMode ? (
                                     <input
                                         type="date"
@@ -616,7 +634,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             {/* Inicio */}
                             <div className="flex items-center gap-2">
                                 <span className="text-sm font-bold text-gray-700 w-32 shrink-0">
-                                    Inicio:<span className="text-red-500">*</span>
+                                    {t('reservation.fieldStart')}<span className="text-red-500">*</span>
                                 </span>
                                 <div className="flex items-center gap-1">
                                     <select
@@ -643,7 +661,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
                             {/* Nº de reservas */}
                             <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-gray-700 w-32 shrink-0">Nº de reservas:</span>
+                                <span className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.fieldNumBookings')}</span>
                                 <select className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]">
                                     <option>1</option>
                                     <option>2</option>
@@ -655,22 +673,22 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             {/* Cliente */}
                             <div>
                                 <PlayerSearch
-                                    label="Cliente:*"
-                                    placeholder="Buscar cliente..."
+                                    label={t('reservation.clientLabel')}
+                                    placeholder={t('reservation.clientSearchPlaceholder')}
                                     selectedPlayer={organizer}
                                     onSelect={(p) => { setOrganizer(p); if (p) setOrganizerError(false); }}
                                     required
                                 />
                                 {organizerError && (
                                     <p className="mt-1 text-xs text-red-500 font-medium">
-                                        Debes seleccionar un cliente para guardar la reserva.
+                                        {t('reservation.organizerRequired')}
                                     </p>
                                 )}
                             </div>
 
                             {/* Observaciones */}
                             <div className="flex flex-col gap-1.5">
-                                <label className="text-sm font-bold text-gray-700">Observaciones:</label>
+                                <label className="text-sm font-bold text-gray-700">{t('reservation.notes')}</label>
                                 <textarea
                                     className="w-full p-3 border border-gray-300 rounded-lg text-sm bg-white h-24 focus:ring-2 focus:ring-[#006A6A] outline-none resize-none"
                                     value={notes}
@@ -688,7 +706,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     onChange={(e) => setConfirmEmail(e.target.checked)}
                                 />
                                 <label htmlFor="send-email" className="text-sm font-medium text-gray-700">
-                                    Enviar email con confirmación:
+                                    {t('reservation.sendEmailConfirm')}
                                 </label>
                             </div>
                         </div>
@@ -697,13 +715,13 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                         <div className="space-y-5">
                             {/* Instalación */}
                             <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-gray-700 w-32 shrink-0">Instalación:</span>
+                                <span className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.facility')}</span>
                                 <span className="text-sm text-gray-900 font-bold uppercase">{courtDisplayName}</span>
                             </div>
 
                             {/* Duración */}
                             <div className="flex items-center gap-2">
-                                <label className="text-sm font-bold text-gray-700 w-32 shrink-0">Duración:</label>
+                                <label className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.duration')}</label>
                                 <select
                                     className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
                                     value={duration}
@@ -717,30 +735,30 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
                             {/* Tipo de reserva */}
                             <div className="flex items-center gap-2">
-                                <label className="text-sm font-bold text-gray-700 w-32 shrink-0">Tipo de reserva:</label>
+                                <label className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.bookingType')}</label>
                                 <select
                                     className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
                                     value={resType}
                                     onChange={(e) => setResType(e.target.value)}
                                 >
-                                    <option value="standard">Pista privada</option>
-                                    <option value="open_match">Partido abierto</option>
-                                    <option value="pozo">Pozo / Americanas</option>
-                                    <option value="fixed_recurring">Turno fijo</option>
-                                    <option value="school_group">Escuela — clase grupal</option>
-                                    <option value="school_individual">Escuela — clase particular</option>
-                                    <option value="flat_rate">Tarifa plana</option>
-                                    <option value="tournament">Torneo</option>
-                                    <option value="blocked">Bloqueo administrativo</option>
+                                    <option value="standard">{t('reservation.type_standard')}</option>
+                                    <option value="open_match">{t('reservation.type_open_match')}</option>
+                                    <option value="pozo">{t('reservation.type_pozo')}</option>
+                                    <option value="fixed_recurring">{t('reservation.type_fixed_recurring')}</option>
+                                    <option value="school_group">{t('reservation.type_school_group')}</option>
+                                    <option value="school_individual">{t('reservation.type_school_individual')}</option>
+                                    <option value="flat_rate">{t('reservation.type_flat_rate')}</option>
+                                    <option value="tournament">{t('reservation.type_tournament')}</option>
+                                    <option value="blocked">{t('reservation.type_blocked')}</option>
                                 </select>
                             </div>
 
                             {/* Precio calculado (solo en modo creación) */}
                             {!isEditMode && formattedPrice != null && (
                                 <div className="flex items-center gap-2">
-                                    <span className="text-sm font-bold text-gray-700 w-32 shrink-0">Precio:</span>
+                                    <span className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.price')}</span>
                                     <span className="text-sm font-bold text-[#006A6A]">{formattedPrice}</span>
-                                    <span className="text-xs text-gray-500">({duration} min)</span>
+                                    <span className="text-xs text-gray-500">({t('reservation.minutesShort', { n: duration })})</span>
                                 </div>
                             )}
                         </div>
@@ -748,18 +766,18 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
                     {/* Resto de jugadores */}
                     <div className="mt-8 pt-6 border-t border-gray-200">
-                        <h3 className="text-lg font-bold text-gray-900 mb-5">Resto de jugadores</h3>
+                        <h3 className="text-lg font-bold text-gray-900 mb-5">{t('reservation.otherPlayers')}</h3>
                         <div className="space-y-4">
                             {[0, 1, 2].map((index) => (
                                 <PlayerSearch
                                     key={index}
-                                    label={`Jugador ${index + 2}:`}
+                                    label={t('reservation.playerLabel', { n: index + 2 })}
                                     onSelect={(player) => {
                                         const newPlayers = [...additionalPlayers];
                                         newPlayers[index] = player;
                                         setAdditionalPlayers(newPlayers);
                                     }}
-                                    placeholder={`Buscar jugador ${index + 2}...`}
+                                    placeholder={t('reservation.playerSearchPlaceholder', { n: index + 2 })}
                                     selectedPlayer={additionalPlayers[index]}
                                 />
                             ))}
@@ -776,13 +794,13 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors"
                             >
                                 <Trash2 size={15} />
-                                Eliminar reserva
+                                {t('reservation.deleteBooking')}
                             </button>
                         ) : (
                             <div className="flex flex-col gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
                                 <div className="flex items-center gap-2 text-red-700">
                                     <AlertTriangle size={16} className="shrink-0" />
-                                    <span className="text-sm font-bold">¿Estás seguro de que deseas eliminar esta reserva?</span>
+                                    <span className="text-sm font-bold">{t('reservation.deleteConfirm')}</span>
                                 </div>
                                 <label className="flex items-center gap-2 cursor-pointer w-fit">
                                     <input
@@ -791,7 +809,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                         checked={sendDeleteEmail}
                                         onChange={(e) => setSendDeleteEmail(e.target.checked)}
                                     />
-                                    <span className="text-sm text-red-700">Enviar email de cancelación al cliente</span>
+                                    <span className="text-sm text-red-700">{t('reservation.deleteSendEmail')}</span>
                                 </label>
                                 <div className="flex gap-2">
                                     <button
@@ -799,14 +817,14 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                         disabled={isDeleting}
                                         className="px-4 py-1.5 bg-red-600 text-white text-xs font-bold rounded-md hover:bg-red-700 disabled:opacity-50 transition-colors"
                                     >
-                                        {isDeleting ? 'Eliminando...' : 'Sí, eliminar'}
+                                        {isDeleting ? t('reservation.deleting') : t('reservation.deleteYes')}
                                     </button>
                                     <button
                                         onClick={() => { setShowDeleteConfirm(false); setSendDeleteEmail(false); }}
                                         disabled={isDeleting}
                                         className="px-4 py-1.5 bg-white text-gray-700 text-xs font-bold border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                                     >
-                                        Cancelar
+                                        {t('reservation.cancel')}
                                     </button>
                                 </div>
                             </div>
@@ -819,7 +837,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-[110]">
                         <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-lg border border-gray-100">
                             <div className="w-5 h-5 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
-                            <span className="text-sm font-bold text-gray-900">Procesando reserva...</span>
+                            <span className="text-sm font-bold text-gray-900">{t('reservation.processing')}</span>
                         </div>
                     </div>
                 )}

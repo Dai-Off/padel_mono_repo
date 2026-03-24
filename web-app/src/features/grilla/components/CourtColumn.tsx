@@ -4,7 +4,7 @@ import clsx from 'clsx';
 import type { Court, Reservation } from '../types';
 import { ReservationCard } from './ReservationCard';
 import { getGridIntervals, parseTimeStr, START_HOUR, END_HOUR, PIXELS_PER_MINUTE } from '../utils/timeGrid';
-import { useTranslation } from '../i18n/I18nContext';
+import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { useZoom } from '../context/ZoomContext';
 
 interface Props {
@@ -37,7 +37,7 @@ function parseCourtName(name: string): { main: string; sub?: string } {
 }
 
 export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, recentlyDroppedId, onReservationClick, onFreeSlotClick, onHeaderClick, onHoverStart, onHoverEnd, isFocusedMode, isCurrentlyFocused, isCompactView, compactPxPerMinute, totalCourts }) => {
-    const { tData } = useTranslation();
+    const { tData } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
     const isSmallZoom = !isCompactView && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
     const { setNodeRef, isOver } = useDroppable({
