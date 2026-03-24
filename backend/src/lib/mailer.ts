@@ -79,6 +79,14 @@ export async function sendInviteEmail(to: string, inviteUrl: string, clubName: s
   return invokeEdgeFunction('send-invitation-email', { to, inviteUrl, clubName });
 }
 
+export async function sendClubCrmEmail(
+  to: string,
+  subject: string,
+  html: string
+): Promise<{ sent: boolean; error?: string }> {
+  return invokeEdgeFunction('send-email', { to, subject, html });
+}
+
 export async function sendStaffAccountEmail(
   to: string,
   staffName: string,
