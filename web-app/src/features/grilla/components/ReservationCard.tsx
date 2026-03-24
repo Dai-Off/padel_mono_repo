@@ -5,7 +5,7 @@ import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Reservation, ReservationType } from '../types';
 import { PIXELS_PER_MINUTE, START_HOUR } from '../utils/timeGrid';
-import { useTranslation } from '../i18n/I18nContext';
+import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { useZoom } from '../context/ZoomContext';
 
 interface Props {
@@ -36,14 +36,15 @@ const bookingTypeColors: Record<ReservationType, string> = {
 const pendingPaymentStyle = 'border-dashed opacity-80';
 
 export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justDropped, onClick, compactPxPerMinute, onHoverStart, onHoverEnd }) => {
-    const { tData } = useTranslation();
+    const { tData, t } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: reservation.id,
         data: reservation,
     });
 
-    const displayLabel = tData(reservation.matchType || reservation.playerName);
+    const source = (reservation.matchType || reservation.playerName || '').trim();
+    const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : t('grid.noClient');
     const isCompact = !!compactPxPerMinute;
     const isSmallZoom = !isCompact && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
     const isShortBooking = reservation.durationMinutes <= 60;

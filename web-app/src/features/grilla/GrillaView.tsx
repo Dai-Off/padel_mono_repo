@@ -4,9 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { Calendar, Printer, Menu, ArrowLeft, X, Globe } from 'lucide-react';
 import { MainMenu } from '../../components/Layout/MainMenu';
 import clsx from 'clsx';
-import { useTranslation } from './i18n/I18nContext';
-import type { Locale } from './i18n/translations';
-import { I18nProvider } from './i18n/I18nContext';
+import { useGrillaTranslation } from './i18n/useGrillaTranslation';
+import { calendarLocale } from './i18n/calendarLocale';
 import {
   DndContext,
   DragOverlay,
@@ -210,9 +209,7 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
     return rawBookings.map((b: any) => {
         const start = new Date(b.start_at);
         const organizer = b.players;
-        const playerName = organizer
-            ? `${organizer.first_name} ${organizer.last_name}`
-            : 'Sin cliente';
+        const playerName = organizer ? `${organizer.first_name} ${organizer.last_name}` : '';
         return {
             id: b.id,
             courtId: b.court_id,
@@ -302,7 +299,7 @@ const ZoomScrollbars = () => {
 
 function GrillaViewInner() {
   const navigate = useNavigate();
-  const { t, locale, setLocale } = useTranslation();
+  const { t, i18n } = useGrillaTranslation();
   const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const today = new Date(); // Always current date — recomputed each render so chips are never stale
@@ -978,19 +975,32 @@ function GrillaViewInner() {
                 </button>
                 {langMenuOpen && (
                   <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[60] overflow-hidden min-w-[160px] animate-in fade-in slide-in-from-top-2 duration-150">
-                    {([['es', 'Español 🇪🇸'], ['zh-HK', '中文（繁體）🇭🇰']] as [Locale, string][]).map(([code, label]) => (
-                      <button
-                        key={code}
-                        onClick={() => { setLocale(code); setLangMenuOpen(false); }}
-                        className={clsx(
-                          "w-full text-left px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2",
-                          locale === code ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-50"
-                        )}
-                      >
-                        {locale === code && <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>}
-                        {label}
-                      </button>
-                    ))}
+                    {(
+                      [
+                        ['es', 'Español 🇪🇸'],
+                        ['en', 'English 🇬🇧'],
+                        ['zh', '中文 🇨🇳'],
+                      ] as const
+                    ).map(([code, label]) => {
+                      const active = i18n.language === code || i18n.language.startsWith(`${code}-`);
+                      return (
+                        <button
+                          key={code}
+                          type="button"
+                          onClick={() => {
+                            void i18n.changeLanguage(code);
+                            setLangMenuOpen(false);
+                          }}
+                          className={clsx(
+                            'w-full text-left px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2',
+                            active ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+                          )}
+                        >
+                          {active && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+                          {label}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1078,7 +1088,7 @@ function GrillaViewInner() {
                         </button>
                       )}
                       <h2 className="text-xs md:text-sm font-semibold text-[#003366] capitalize">
-                      {`${t('toolbar.reservationsOf')} ${selectedDate.toLocaleDateString(locale === 'zh-HK' ? 'zh-HK' : 'es', { weekday: 'long' })}, ${selectedDate.toLocaleDateString(locale === 'zh-HK' ? 'zh-HK' : 'es', { day: 'numeric', month: 'long', year: 'numeric' })}`}
+                      {`${t('toolbar.reservationsOf')} ${selectedDate.toLocaleDateString(calendarLocale(i18n.language), { weekday: 'long' })}, ${selectedDate.toLocaleDateString(calendarLocale(i18n.language), { day: 'numeric', month: 'long', year: 'numeric' })}`}
                     </h2>
                     </div>
                     {/* Controls row */}
@@ -1090,7 +1100,7 @@ function GrillaViewInner() {
                         <button
                           onClick={() => setSelectedDate(addDays(selectedDate, -1))}
                           className="px-1.5 py-0.5 bg-white border border-gray-300 rounded text-[10px] text-gray-700 hover:bg-gray-50 transition-colors"
-                          title="Día anterior"
+                          title={t('toolbar.prevDayTitle')}
                         >{t('toolbar.prevDay')}</button>
 
                         <div className="relative">
@@ -1119,7 +1129,7 @@ function GrillaViewInner() {
                         <button
                           onClick={() => setSelectedDate(addDays(selectedDate, 1))}
                           className="px-1.5 py-0.5 bg-white border border-gray-300 rounded text-[10px] text-gray-700 hover:bg-gray-50 transition-colors"
-                          title="Día siguiente"
+                          title={t('toolbar.nextDayTitle')}
                         >{t('toolbar.nextDay')}</button>
                       </div>
 
@@ -1376,14 +1386,6 @@ function GrillaViewInner() {
   );
 }
 
-/**
- * GrillaView – Self-contained scheduling grid feature.
- * Wraps the inner view with the feature's own I18nProvider.
- */
 export default function GrillaView() {
-  return (
-    <I18nProvider>
-      <GrillaViewInner />
-    </I18nProvider>
-  );
+  return <GrillaViewInner />;
 }
