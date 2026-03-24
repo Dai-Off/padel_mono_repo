@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
-import { Animated, Dimensions, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Dimensions, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { theme } from '../../theme';
 
 type MobileSidebarProps = {
   visible: boolean;
@@ -31,7 +33,7 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
 
   const backdropOpacity = backdropAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, 0.6],
+    outputRange: [0, 1],
   });
 
   return (
@@ -40,9 +42,13 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
       pointerEvents={visible ? 'box-none' : 'none'}
     >
       <Animated.View
-        style={[styles.backdrop, { opacity: backdropOpacity }]}
+        style={[styles.backdropWrap, { opacity: backdropOpacity }]}
         pointerEvents={visible ? 'auto' : 'none'}
       >
+        {Platform.OS === 'ios' ? (
+          <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
+        ) : null}
+        <View style={[StyleSheet.absoluteFill, styles.backdropOverlay]} />
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={onClose}
@@ -68,21 +74,23 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
 }
 
 const styles = StyleSheet.create({
-  overlay: { zIndex: 20 },
-  backdrop: {
+  overlay: {
+    zIndex: 40,
+  },
+  backdropWrap: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000',
+  },
+  backdropOverlay: {
+    backgroundColor: theme.sidebar.overlayBg,
   },
   sidebar: {
     position: 'absolute',
     left: 0,
-    backgroundColor: '#fff',
-    borderRightWidth: 1,
-    borderRightColor: '#f3f4f6',
+    backgroundColor: theme.sidebar.bg,
     shadowColor: '#000',
     shadowOffset: { width: 4, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 16,
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 24,
   },
 });
