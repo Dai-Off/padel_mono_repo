@@ -40,4 +40,40 @@ export const theme = {
   minTouchTarget: 44, // Mínimo recomendado para áreas táctiles (Apple HIG, Android)
   screenWidth: SCREEN_WIDTH,
   screenHeight: SCREEN_HEIGHT,
+
+  /** Colores para pantallas de auth (landing, login, register) - tema oscuro */
+  auth: {
+    bg: '#0F0F0F',
+    inputBg: '#1A1A1A',
+    inputBorder: 'rgba(255,255,255,0.1)',
+    accent: '#F18F34',
+    accentShadow: 'rgba(241, 143, 52, 0.4)',
+    text: '#ffffff',
+    textMuted: '#9ca3af',
+    textSecondary: '#6b7280',
+    label: '#9ca3af',
+    error: '#E31E24',
+    errorBg: 'rgba(227, 30, 36, 0.1)',
+    info: '#2563eb',
+    infoBg: 'rgba(37, 99, 235, 0.1)',
+  },
+
+  /** Colores sidebar (tema oscuro, consistente con auth) */
+  sidebar: {
+    bg: '#0F0F0F',
+    overlayBg: 'rgba(0,0,0,0.6)',
+    avatarGradientFrom: '#F18F34',
+    avatarGradientTo: '#E95F32',
+    buttonBg: 'rgba(255,255,255,0.06)',
+    buttonBorder: 'rgba(255,255,255,0.08)',
+    /** Variantes de icono para items del menú */
+    iconVariants: {
+      orange: { from: 'rgba(241,143,52,0.2)', to: 'rgba(233,95,50,0.1)', color: '#F18F34' },
+      purple: { from: 'rgba(168,85,247,0.2)', to: 'rgba(147,51,234,0.1)', color: '#c084fc' },
+      emerald: { from: 'rgba(16,185,129,0.2)', to: 'rgba(5,150,105,0.1)', color: '#34d399' },
+      sky: { from: 'rgba(14,165,233,0.2)', to: 'rgba(37,99,235,0.1)', color: '#38bdf8' },
+      neutral: { from: 'rgba(255,255,255,0.08)', to: 'rgba(255,255,255,0.04)', color: '#9ca3af' },
+      red: { from: 'rgba(239,68,68,0.2)', to: 'rgba(239,68,68,0.1)', color: '#f87171' },
+    },
+  },
 } as const;

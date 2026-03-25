@@ -1,5 +1,5 @@
 import { useContext, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
@@ -11,13 +11,14 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { MainApp } from './src/screens/MainApp';
 import { RegisterScreen } from './src/screens/RegisterScreen';
 import { STRIPE_PUBLISHABLE_KEY } from './src/config';
+import { theme } from './src/theme';
 
 type AuthScreen = 'login' | 'register';
 
 function AuthFlowWrapper() {
   const [screen, setScreen] = useState<AuthScreen>('login');
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.container, styles.authContainer]} edges={['top', 'bottom']}>
       {screen === 'login' ? (
         <LoginScreen onGoToRegister={() => setScreen('register')} />
       ) : (
@@ -53,7 +54,7 @@ function AppContent() {
 
   return (
     <>
-      <StatusBar style="dark" />
+      <StatusBar style="light" />
       <AuthFlowWrapper />
     </>
   );
@@ -78,5 +79,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  authContainer: {
+    backgroundColor: theme.auth.bg,
   },
 });

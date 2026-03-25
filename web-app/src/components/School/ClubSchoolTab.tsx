@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Edit, Trash2, Users, GraduationCap } from 'lucide-react';
 import { toast } from 'sonner';
+import { useTranslation } from 'react-i18next';
 import { schoolCoursesService } from '../../services/schoolCourses';
 import { clubStaffService } from '../../services/clubStaff';
 import { courtService } from '../../services/court';
@@ -56,6 +57,7 @@ function scheduleText(course: SchoolCourse): string {
 }
 
 export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string | null; clubResolved?: boolean }) {
+  const { t } = useTranslation();
   const [courses, setCourses] = useState<SchoolCourse[]>([]);
   const [staff, setStaff] = useState<ClubStaffMember[]>([]);
   const [courts, setCourts] = useState<Court[]>([]);
@@ -203,33 +205,33 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-bold text-[#1A1A1A]">Gestion escuela</h2>
+        <h2 className="text-sm font-bold text-[#1A1A1A]">{t('school_management_title')}</h2>
         <button
           type="button"
           onClick={openCreate}
           className="flex items-center gap-1.5 px-4 py-2.5 bg-[#E31E24] text-white rounded-xl text-xs font-bold hover:opacity-90"
         >
           <Plus className="w-3.5 h-3.5" />
-          Nuevo curso
+          {t('school_add_course')}
         </button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
           <p className="text-lg font-black text-[#1A1A1A]">{stats.totalCourses}</p>
-          <p className="text-[10px] text-gray-400">Cursos</p>
+          <p className="text-[10px] text-gray-400">{t('school_stats_courses')}</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
           <p className="text-lg font-black text-[#1A1A1A]">{stats.totalEnrolled}</p>
-          <p className="text-[10px] text-gray-400">Alumnos anotados</p>
+          <p className="text-[10px] text-gray-400">{t('school_stats_enrolled')}</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
           <p className="text-lg font-black text-[#1A1A1A]">{stats.padel}</p>
-          <p className="text-[10px] text-gray-400">Padel</p>
+          <p className="text-[10px] text-gray-400">{t('sport_padel')}</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
           <p className="text-lg font-black text-[#1A1A1A]">{stats.tenis}</p>
-          <p className="text-[10px] text-gray-400">Tenis</p>
+          <p className="text-[10px] text-gray-400">{t('sport_tennis')}</p>
         </div>
       </div>
 
@@ -239,16 +241,16 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
           value={sportFilter}
           onChange={(e) => setSportFilter(e.target.value as SchoolSport | 'all')}
         >
-          <option value="all">Todos deportes</option>
-          <option value="padel">Padel</option>
-          <option value="tenis">Tenis</option>
+          <option value="all">{t('school_filter_all_sports')}</option>
+          <option value="padel">{t('sport_padel')}</option>
+          <option value="tenis">{t('sport_tennis')}</option>
         </select>
         <select
           className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
           value={levelFilter}
           onChange={(e) => setLevelFilter(e.target.value as SchoolLevel | 'all')}
         >
-          <option value="all">Todos niveles</option>
+          <option value="all">{t('school_filter_all_levels')}</option>
           {LEVELS.map((l) => (
             <option key={l} value={l}>
               {l}
@@ -262,7 +264,7 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
           <div className="w-10 h-10 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
         </div>
       ) : courses.length === 0 ? (
-        <p className="text-sm text-gray-500 text-center py-8">No hay cursos cargados.</p>
+        <p className="text-sm text-gray-500 text-center py-8">{t('school_empty_courses')}</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {courses.map((course) => (
@@ -306,7 +308,7 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
       {modal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="w-full max-w-lg rounded-2xl bg-white border border-gray-200 p-5 shadow-xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-sm font-bold text-[#1A1A1A] mb-4">{modal.mode === 'create' ? 'Nuevo curso' : 'Editar curso'}</h3>
+            <h3 className="text-sm font-bold text-[#1A1A1A] mb-4">{modal.mode === 'create' ? t('school_modal_create') : t('school_modal_edit')}</h3>
             <div className="space-y-3">
               <input className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Nombre" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
               <div className="grid grid-cols-2 gap-2">
@@ -360,8 +362,8 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
               </div>
             </div>
             <div className="flex gap-2 justify-end mt-5">
-              <button type="button" onClick={() => setModal(null)} className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700">Cancelar</button>
-              <button type="button" disabled={saving} onClick={submit} className="px-3.5 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-bold disabled:opacity-50">{saving ? '...' : 'Guardar'}</button>
+              <button type="button" onClick={() => setModal(null)} className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700">{t('cancel')}</button>
+              <button type="button" disabled={saving} onClick={submit} className="px-3.5 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-bold disabled:opacity-50">{saving ? '...' : t('save')}</button>
             </div>
           </div>
         </div>
@@ -370,10 +372,10 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
       {deleteId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white border border-gray-200 p-5 shadow-xl">
-            <p className="text-sm font-semibold text-[#1A1A1A] mb-4">Eliminar este curso?</p>
+            <p className="text-sm font-semibold text-[#1A1A1A] mb-4">{t('school_delete_title')}</p>
             <div className="flex gap-2 justify-end">
-              <button type="button" onClick={() => setDeleteId(null)} className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold">Cancelar</button>
-              <button type="button" onClick={doDelete} className="px-3.5 py-2 rounded-xl bg-red-600 text-white text-xs font-bold">Eliminar</button>
+              <button type="button" onClick={() => setDeleteId(null)} className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold">{t('cancel')}</button>
+              <button type="button" onClick={doDelete} className="px-3.5 py-2 rounded-xl bg-red-600 text-white text-xs font-bold">{t('school_delete')}</button>
             </div>
           </div>
         </div>

@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Edit, Minus, Package, Plus, Trash2, Upload } fr
 import { toast } from 'sonner';
 import type { InventoryItem, InventoryMovement, InventoryMovementType } from '../../types/inventory';
 import { inventoryService } from '../../services/inventory';
+import { useTranslation } from 'react-i18next';
 
 function clampInt(n: number): number {
     const v = Math.floor(Number.isFinite(n) ? n : 0);
@@ -10,6 +11,7 @@ function clampInt(n: number): number {
 }
 
 export function InventoryControl({ clubId, clubResolved = true }: { clubId: string | null; clubResolved?: boolean }) {
+    const { t } = useTranslation();
     const [items, setItems] = useState<InventoryItem[]>([]);
     const [loading, setLoading] = useState(false);
 
@@ -392,7 +394,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
         <div className="space-y-5">
             <div className="flex items-center justify-between gap-3">
                 <div>
-                    <h2 className="text-sm font-bold text-[#1A1A1A]">Control de inventario</h2>
+                    <h2 className="text-sm font-bold text-[#1A1A1A]">{t('inventory_management_title')}</h2>
                 </div>
                 <button
                     type="button"
@@ -400,25 +402,25 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                     className="flex items-center gap-1.5 px-4 py-2.5 bg-[#E31E24] text-white rounded-xl text-xs font-bold hover:opacity-90"
                 >
                     <Plus className="w-3.5 h-3.5" />
-                    Añadir producto
+                    {t('inventory_add_product')}
                 </button>
             </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="bg-white rounded-2xl border border-gray-100 p-4">
-                        <p className="text-[10px] font-semibold text-gray-500">Productos Total</p>
+                        <p className="text-[10px] font-semibold text-gray-500">{t('inventory_stats_total_products')}</p>
                         <p className="text-lg font-black text-[#1A1A1A]">{stats.totalProducts}</p>
                     </div>
                     <div className="bg-white rounded-2xl border border-gray-100 p-4">
-                        <p className="text-[10px] font-semibold text-gray-500">Stock OK</p>
+                        <p className="text-[10px] font-semibold text-gray-500">{t('inventory_stats_stock_ok')}</p>
                         <p className="text-lg font-black text-[#1A1A1A] text-green-600">{stats.stockOk}</p>
                     </div>
                     <div className="bg-white rounded-2xl border border-gray-100 p-4">
-                        <p className="text-[10px] font-semibold text-gray-500">Stock Bajo</p>
+                        <p className="text-[10px] font-semibold text-gray-500">{t('inventory_stats_stock_low')}</p>
                         <p className="text-lg font-black text-[#1A1A1A] text-red-600">{stats.stockLow}</p>
                     </div>
                     <div className="bg-white rounded-2xl border border-gray-100 p-4">
-                        <p className="text-[10px] font-semibold text-gray-500">Valor Total</p>
+                        <p className="text-[10px] font-semibold text-gray-500">{t('inventory_stats_total_value')}</p>
                         <p className="text-lg font-black text-[#1A1A1A]">{formatMoneyFromCents(stats.totalValueCents, stats.currency)}</p>
                     </div>
                 </div>
@@ -426,16 +428,16 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                 <div className="bg-white rounded-2xl border border-gray-100 p-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
                         <div className="lg:col-span-2">
-                            <label className="text-[10px] font-semibold text-gray-500">Buscar por nombre</label>
+                            <label className="text-[10px] font-semibold text-gray-500">{t('inventory_search_label')}</label>
                             <input
                                 className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                                placeholder="Ej: Pelotas"
+                                placeholder={t('inventory_search_placeholder')}
                                 value={searchText}
                                 onChange={(e) => setSearchText(e.target.value)}
                             />
                         </div>
                         <div>
-                            <label className="text-[10px] font-semibold text-gray-500">Fecha desde</label>
+                            <label className="text-[10px] font-semibold text-gray-500">{t('inventory_filter_date_from')}</label>
                             <input
                                 type="date"
                                 className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
@@ -444,7 +446,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                             />
                         </div>
                         <div>
-                            <label className="text-[10px] font-semibold text-gray-500">Fecha hasta</label>
+                            <label className="text-[10px] font-semibold text-gray-500">{t('inventory_filter_date_to')}</label>
                             <input
                                 type="date"
                                 className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
@@ -453,36 +455,36 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                             />
                         </div>
                         <div>
-                            <label className="text-[10px] font-semibold text-gray-500">Estado stock</label>
+                            <label className="text-[10px] font-semibold text-gray-500">{t('inventory_filter_stock_status')}</label>
                             <select
                                 className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
                                 value={stockFilter}
                                 onChange={(e) => setStockFilter(e.target.value as 'all' | 'inStock' | 'outOfStock')}
                             >
-                                <option value="all">Todos</option>
-                                <option value="inStock">Con stock</option>
-                                <option value="outOfStock">Sin stock</option>
+                                <option value="all">{t('inventory_filter_all')}</option>
+                                <option value="inStock">{t('inventory_filter_in_stock')}</option>
+                                <option value="outOfStock">{t('inventory_filter_out_of_stock')}</option>
                             </select>
                         </div>
                         <div>
-                            <label className="text-[10px] font-semibold text-gray-500">Orden</label>
+                            <label className="text-[10px] font-semibold text-gray-500">{t('inventory_sort_label')}</label>
                             <div className="mt-0.5 flex gap-2">
                                 <select
                                     className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
                                     value={sortBy}
                                     onChange={(e) => setSortBy(e.target.value as 'name' | 'stock' | 'value')}
                                 >
-                                    <option value="name">Nombre</option>
-                                    <option value="stock">Stock</option>
-                                    <option value="value">Valor</option>
+                                    <option value="name">{t('inventory_sort_name')}</option>
+                                    <option value="stock">{t('inventory_sort_stock')}</option>
+                                    <option value="value">{t('inventory_sort_value')}</option>
                                 </select>
                                 <select
                                     className="w-[100px] rounded-xl border border-gray-200 px-3 py-2 text-sm"
                                     value={sortDir}
                                     onChange={(e) => setSortDir(e.target.value as 'asc' | 'desc')}
                                 >
-                                    <option value="asc">Asc</option>
-                                    <option value="desc">Desc</option>
+                                    <option value="asc">{t('inventory_sort_asc')}</option>
+                                    <option value="desc">{t('inventory_sort_desc')}</option>
                                 </select>
                             </div>
                         </div>
@@ -494,7 +496,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                     <div className="w-10 h-10 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
                 </div>
             ) : filteredItems.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-8">Aún no hay productos registrados.</p>
+                <p className="text-sm text-gray-500 text-center py-8">{t('inventory_empty_products')}</p>
             ) : (
                 <div className="space-y-3">
                     {filteredItems.map((item) => {
@@ -665,7 +667,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
                     <div className="w-full max-w-md rounded-2xl bg-white border border-gray-200 p-5 shadow-xl max-h-[90vh] overflow-y-auto">
                         <h3 className="text-sm font-bold text-[#1A1A1A] mb-4">
-                            {itemModal.mode === 'create' ? 'Nuevo producto' : 'Editar producto'}
+                            {itemModal.mode === 'create' ? t('inventory_modal_create') : t('inventory_modal_edit')}
                         </h3>
 
                         <div className="space-y-3">
@@ -789,14 +791,14 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                                 onClick={() => setItemModal(null)}
                                 className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700"
                             >
-                                Cancelar
+                                {t('cancel')}
                             </button>
                             <button
                                 type="button"
                                 onClick={submitItem}
                                 className="px-3.5 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-bold hover:opacity-90"
                             >
-                                Guardar
+                                {t('save')}
                             </button>
                         </div>
                     </div>
