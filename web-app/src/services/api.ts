@@ -120,6 +120,36 @@ export async function apiFetchWithAuth<T>(path: string, options: RequestInit = {
     return response.json();
 }
 
+export async function apiFetchBlobWithAuth(path: string): Promise<Blob> {
+    let session = getStoredSession();
+    if (session && isTokenExpiringSoon(session.expires_at)) {
+        session = (await refreshSessionTokenIfPossible()) ?? session;
+    }
+    const token = session?.access_token ?? null;
+    const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+    const headers = new Headers();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    let response = await fetch(url, { method: 'GET', headers });
+    if (response.status === 401 && session?.refresh_token) {
+        const refreshed = await refreshSessionTokenIfPossible();
+        if (refreshed?.access_token) {
+            const retryHeaders = new Headers();
+            retryHeaders.set('Authorization', `Bearer ${refreshed.access_token}`);
+            response = await fetch(url, { method: 'GET', headers: retryHeaders });
+        }
+    }
+    if (!response.ok) {
+        if (response.status === 401 && getStoredToken()) {
+            try { localStorage.removeItem('padel_session'); } catch { /* ignore */ }
+            sessionStorage.setItem('padel_session_expired', '1');
+            window.location.assign('/login');
+        }
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        throw new HttpError(errorData.error || errorData.message || 'API Request failed', response.status);
+    }
+    return response.blob();
+}
+
 export class ApiService {
     protected async get<T>(path: string): Promise<T> {
         return apiFetch<T>(path, { method: 'GET' });

@@ -46,6 +46,8 @@ import { ClubSchoolTab } from '../School/ClubSchoolTab';
 import { ClubPaymentsTab } from '../Payments/ClubPayments';
 import { ClubCheckinTab } from './ClubDashboardExtensions';
 import { ClubCashClosingTab } from '../CashClosing/ClubCashClosing';
+import { ClubDashboardExtensions } from './ClubDashboardExtensions';
+import { ClubReviewsTab } from './ClubReviewsTab';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
@@ -58,6 +60,8 @@ export const ClubDashboard = () => {
     const isPaymentsPage = location.pathname === '/pagos';
     const isCheckinPage = location.pathname === '/checkIn';
     const isCashClosingPage = location.pathname === '/cierreCaja';
+    const isCrmPage = location.pathname === '/crm';
+    const isResenasPage = location.pathname === '/resenas';
 
     const [loading, setLoading] = useState(true);
     const [clubResolved, setClubResolved] = useState(false);
@@ -121,7 +125,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage) {
             setLoading(false);
             return;
         }
@@ -134,7 +138,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -206,7 +210,8 @@ export const ClubDashboard = () => {
         }
     };
 
-    if (!club && loading) {
+    // Evita spinner doble en pantallas donde el tab ya se encarga del loader (CRM y Reseñas).
+    if (!club && loading && !isResenasPage && !isCrmPage) {
         return <PageSpinner />;
     }
 
@@ -223,6 +228,10 @@ export const ClubDashboard = () => {
                 <div className="max-w-7xl mx-auto space-y-6">
                     {isPlayersPage ? (
                         <ClubPlayersTab />
+                    ) : isResenasPage ? (
+                        <ClubReviewsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isCrmPage ? (
+                        <ClubDashboardExtensions clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isConfigPage ? (
                         <ClubSettingsTab initialClub={club} />
                     ) : isPersonalPage ? (

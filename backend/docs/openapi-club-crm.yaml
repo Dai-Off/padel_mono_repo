@@ -1,0 +1,216 @@
+openapi: 3.0.3
+info:
+  title: Padel API — Club CRM (clientes / jugadores)
+  version: 1.0.0
+  description: |
+    Gestión de clientes del club: listado (reservas en pistas del club + altas manuales),
+    exportación CSV, alta manual, edición y envío de correos (individual o masivo vía Edge Function send-email).
+    Requiere JWT de administrador global o dueño del club con acceso al `club_id`.
+servers:
+  - url: /
+tags:
+  - name: Club CRM
+    description: CRM por club — jugadores asociados al club
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ClubClientPlayer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        first_name: { type: string }
+        last_name: { type: string }
+        email: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        elo_rating: { type: integer }
+        status: { type: string, enum: [active, blocked, deleted] }
+        auth_user_id: { type: string, format: uuid, nullable: true }
+security:
+  - bearerAuth: []
+paths:
+  /club-clients:
+    get:
+      tags: [Club CRM]
+      summary: Listar clientes del club
+      parameters:
+        - name: club_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+          description: Filtro por nombre, apellidos, email o teléfono
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { const: true }
+                  players:
+                    type: array
+                    items: { $ref: '#/components/schemas/ClubClientPlayer' }
+              example:
+                ok: true
+                players:
+                  - id: "11111111-1111-1111-1111-111111111111"
+                    first_name: "Ana"
+                    last_name: "Ruiz"
+                    email: ana@example.com
+                    phone: "+34 600 000 000"
+                    elo_rating: 1250
+                    status: active
+        '400': { description: Falta club_id }
+        '403': { description: Sin acceso al club }
+
+  /club-clients/export:
+    get:
+      tags: [Club CRM]
+      summary: Descargar CSV de clientes
+      parameters:
+        - name: club_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: CSV UTF-8 con BOM
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+
+  /club-clients/manual:
+    post:
+      tags: [Club CRM]
+      summary: Crear cliente manualmente en el club
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [club_id, first_name, last_name, phone]
+              properties:
+                club_id: { type: string, format: uuid }
+                first_name: { type: string }
+                last_name: { type: string }
+                phone: { type: string }
+                email: { type: string, nullable: true }
+            example:
+              club_id: "22222222-2222-2222-2222-222222222222"
+              first_name: "Luis"
+              last_name: "Pérez"
+              phone: "+34 611 222 333"
+              email: luis@example.com
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              example:
+                ok: true
+                player:
+                  id: "33333333-3333-3333-3333-333333333333"
+                  first_name: Luis
+        '409': { description: Duplicado teléfono o email }
+
+  /club-clients/send-email:
+    post:
+      tags: [Club CRM]
+      summary: Enviar email a selección o a todos los que tengan email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [club_id, subject, body_html, mode]
+              properties:
+                club_id: { type: string, format: uuid }
+                subject: { type: string, example: "Oferta fin de semana" }
+                body_html:
+                  type: string
+                  description: HTML. Placeholders opcionales {{nombre}} y {{apellidos}}.
+                mode: { type: string, enum: [selected, all] }
+                player_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+            examples:
+              masivo:
+                summary: Todos con email
+                value:
+                  club_id: "22222222-2222-2222-2222-222222222222"
+                  subject: "Hola desde el club"
+                  body_html: "<p>Hola {{nombre}},</p><p>Gracias por jugar con nosotros.</p>"
+                  mode: all
+              uno:
+                summary: Un jugador
+                value:
+                  club_id: "22222222-2222-2222-2222-222222222222"
+                  subject: "Recordatorio"
+                  body_html: "<p>Hola {{nombre}},</p>"
+                  mode: selected
+                  player_ids: ["33333333-3333-3333-3333-333333333333"]
+      responses:
+        '200':
+          description: Desglose por destinatario
+          content:
+            application/json:
+              example:
+                ok: true
+                sent_count: 2
+                failed_count: 0
+                results:
+                  - to: ana@example.com
+                    ok: true
+                    player_id: "11111111-1111-1111-1111-111111111111"
+
+  /club-clients/{playerId}:
+    put:
+      tags: [Club CRM]
+      summary: Actualizar cliente
+      parameters:
+        - name: playerId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [club_id]
+              properties:
+                club_id: { type: string, format: uuid }
+                first_name: { type: string }
+                last_name: { type: string }
+                email: { type: string, nullable: true }
+                phone: { type: string, nullable: true }
+                elo_rating: { type: integer }
+                status: { type: string, enum: [active, blocked, deleted] }
+            example:
+              club_id: "22222222-2222-2222-2222-222222222222"
+              phone: "+34 600 111 222"
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example:
+                ok: true
+                player:
+                  id: "33333333-3333-3333-3333-333333333333"
+                  phone: "+34 600 111 222"
