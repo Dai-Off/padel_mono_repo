@@ -957,3 +957,144 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
     res.status(500).json({ ok: false, error: (err as Error).message });
   }
 }
+
+type SimulatedTurnPaymentStatus = 'approved' | 'pending' | 'rejected';
+
+/**
+ * @openapi
+ * /payments/simulate-turn-payment:
+ *   post:
+ *     tags: [Payments]
+ *     summary: Simular pago de turno (pasarela mock)
+ *     description: |
+ *       Simula una pasarela de pagos para validar el flujo de cobro de turnos sin depender de Stripe u otro proveedor real.
+ *       No genera cobros reales ni persiste transacciones finales.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: header
+ *         name: Authorization
+ *         required: true
+ *         schema: { type: string }
+ *         description: Token Bearer del usuario autenticado.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [booking_id, amount_cents]
+ *             properties:
+ *               booking_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: ID del turno/reserva a cobrar.
+ *               amount_cents:
+ *                 type: integer
+ *                 minimum: 50
+ *                 description: Monto en centavos.
+ *               currency:
+ *                 type: string
+ *                 default: EUR
+ *                 example: EUR
+ *               force_status:
+ *                 type: string
+ *                 enum: [approved, pending, rejected]
+ *                 description: Fuerza un estado de respuesta para pruebas.
+ *           examples:
+ *             approved:
+ *               value:
+ *                 booking_id: "7fa11d8c-4cbc-4ed4-b6bf-95b6539df24b"
+ *                 amount_cents: 3200
+ *                 currency: "EUR"
+ *                 force_status: "approved"
+ *     responses:
+ *       200:
+ *         description: Resultado de simulación generado
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   simulated: true
+ *                   gateway: "mock"
+ *                   booking_id: "7fa11d8c-4cbc-4ed4-b6bf-95b6539df24b"
+ *                   amount_cents: 3200
+ *                   currency: "EUR"
+ *                   status: "approved"
+ *                   transaction_id: "MOCK_2f122f6e1f"
+ *       400:
+ *         description: Validación de entrada
+ *         content:
+ *           application/json:
+ *             example: { ok: false, error: "booking_id y amount_cents son obligatorios" }
+ *       401:
+ *         description: Sin token o sesión inválida
+ *       404:
+ *         description: Turno/reserva no encontrada
+ *       500:
+ *         description: Error interno
+ */
+export async function simulateTurnPaymentHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const { booking_id, amount_cents, currency, force_status } = req.body ?? {};
+  if (!booking_id || amount_cents == null) {
+    res.status(400).json({ ok: false, error: 'booking_id y amount_cents son obligatorios' });
+    return;
+  }
+
+  const parsedAmount = Number(amount_cents);
+  if (!Number.isFinite(parsedAmount) || parsedAmount < 50) {
+    res.status(400).json({ ok: false, error: 'amount_cents debe ser un entero mayor o igual a 50' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesion invalida o expirada' });
+      return;
+    }
+
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('id, status, total_price_cents, currency')
+      .eq('id', booking_id)
+      .maybeSingle();
+
+    if (!booking) {
+      res.status(404).json({ ok: false, error: 'Turno/reserva no encontrada' });
+      return;
+    }
+
+    const statusPool: SimulatedTurnPaymentStatus[] = ['approved', 'pending', 'rejected'];
+    const randomStatus = statusPool[Math.floor(Math.random() * statusPool.length)];
+    const forced = typeof force_status === 'string' ? force_status : null;
+    const status = statusPool.includes(forced as SimulatedTurnPaymentStatus)
+      ? (forced as SimulatedTurnPaymentStatus)
+      : randomStatus;
+
+    const transactionId = `MOCK_${Math.random().toString(36).slice(2, 12).toUpperCase()}`;
+    res.json({
+      ok: true,
+      simulated: true,
+      gateway: 'mock',
+      booking_id: booking.id,
+      amount_cents: Math.trunc(parsedAmount),
+      currency: (currency ?? booking.currency ?? 'EUR').toString().toUpperCase(),
+      status,
+      transaction_id: transactionId,
+      message: 'Simulacion completada. No se realizo ningun cobro real.',
+    });
+  } catch (err) {
+    console.error('[payments/simulate-turn-payment]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}

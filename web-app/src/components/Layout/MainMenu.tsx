@@ -34,7 +34,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
 
     const principalItems = [
         { id: 'resumen', path: '/grilla', icon: BarChart3, label: t('menu_resumen'), color: 'rgb(227, 30, 36)', bgColor: 'rgba(227, 30, 36, 0.06)' },
-        { id: 'pistas', path: '/', icon: Grid3x3, label: t('menu_pistas'), color: 'rgb(91, 141, 238)', bgColor: 'rgba(91, 141, 238, 0.1)' },
+        { id: 'pistas', path: '/pistas', icon: Grid3x3, label: t('menu_pistas'), color: 'rgb(91, 141, 238)', bgColor: 'rgba(91, 141, 238, 0.1)' },
         { id: 'reservas', path: '/grilla', icon: Calendar, label: t('menu_reservas'), color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.06)' },
         { id: 'horarios', path: '/horarios', icon: Clock, label: t('menu_horarios'), color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
     ];
