@@ -39,7 +39,6 @@ function App() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/"
           element={
@@ -48,32 +47,94 @@ function App() {
             </ProtectedRoute>
           }
         />
-
-        {/* DASHBOARD ROUTES */}
-        {[
-          "/pistas",
-          "/jugadores",
-          "/configuracion",
-          "/personal",
-          "/inventario",
-          "/escuela",
-          "/pagos",
-          "/crm",
-          "/checkIn",
-          "/cierreCaja",
-          "/resenas",
-        ].map((path) => (
-          <Route
-            key={path}
-            path={path}
-            element={
-              <ProtectedRoute>
-                <ClubDashboard />
-              </ProtectedRoute>
-            }
-          />
-        ))}
-
+        <Route
+          path="/pistas"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/jugadores"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/configuracion"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/personal"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/inventario"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/escuela"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/pagos"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/crm"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/checkIn"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/cierreCaja"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/resenas"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="/onboarding"
           element={
@@ -82,7 +143,6 @@ function App() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/grilla"
           element={
@@ -91,7 +151,6 @@ function App() {
             </ProtectedRoute>
           }
         />
-
         <Route
           path="/precios"
           element={

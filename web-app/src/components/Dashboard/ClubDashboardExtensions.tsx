@@ -48,8 +48,7 @@ function PulseDot({ color }: { color: string }) {
         animate={{ scale: [1, 1.8, 1], opacity: [0.75, 0, 0.75] }}
         transition={{ duration: 2, repeat: Infinity }}
       />
-      <span className="relative inline-flex rounded-full h-2 w-2" style={{ backgroundColor: color }} />
-    </span>
+      <span className="relative inline-flex rounded-full h-2 w-2" style={{ backgroundColor: color }} /></span>
   );
 }
 
