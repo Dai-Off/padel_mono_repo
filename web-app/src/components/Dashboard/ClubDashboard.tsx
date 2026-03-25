@@ -43,6 +43,9 @@ import { PageSpinner } from '../Layout/PageSpinner';
 import { ClubStaffTab } from '../Staff/ClubStaffTab';
 import { InventoryControl } from '../Inventory/InventoryControl';
 import { ClubSchoolTab } from '../School/ClubSchoolTab';
+import { ClubPaymentsTab } from '../Payments/ClubPayments';
+import { ClubCheckinTab } from './ClubDashboardExtensions';
+import { ClubCashClosingTab } from '../CashClosing/ClubCashClosing';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
@@ -52,6 +55,9 @@ export const ClubDashboard = () => {
     const isPersonalPage = location.pathname === '/personal';
     const isInventoryPage = location.pathname === '/inventario';
     const isSchoolPage = location.pathname === '/escuela';
+    const isPaymentsPage = location.pathname === '/pagos';
+    const isCheckinPage = location.pathname === '/checkIn';
+    const isCashClosingPage = location.pathname === '/cierreCaja';
 
     const [loading, setLoading] = useState(true);
     const [clubResolved, setClubResolved] = useState(false);
@@ -115,7 +121,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage) {
             setLoading(false);
             return;
         }
@@ -128,7 +134,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -225,6 +231,12 @@ export const ClubDashboard = () => {
                         <InventoryControl clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isSchoolPage ? (
                         <ClubSchoolTab clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isPaymentsPage ? (
+                        <ClubPaymentsTab />
+                    ) : isCheckinPage ? (
+                        <ClubCheckinTab />
+                    ) : isCashClosingPage ? (
+                        <ClubCashClosingTab />
                     ) : (
                         <>
                             <div className="flex items-center justify-between gap-3">

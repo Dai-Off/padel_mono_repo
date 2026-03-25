@@ -2,136 +2,217 @@
 
 Base URL: `http://localhost:3000` (o la que uses en `PORT`).
 
-Sin pagos ni precios por ahora: `payment_transactions` y `pricing_rules` quedan para más adelante.
+## Root
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/` | Mensaje de bienvenida de la API. |
 
 ## Auth
 
-Usuarios en Supabase Auth. Un usuario puede ser **jugador** (tiene fila en `players` con `auth_user_id`), **dueño de club** (fila en `club_owners` con `auth_user_id`) o ambos.
+Usuarios en Supabase Auth. Un usuario puede ser **jugador** (fila en `players` con `auth_user_id`), **dueño de club** (fila en `club_owners` con `auth_user_id`) o ambos.
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/auth/register` | Registro como **jugador**. Body: `{ email, password, name? }`. Crea usuario Auth; si ya existe un jugador con ese email (alta manual sin cuenta), se vincula `auth_user_id` a esa fila; si no, se crea nueva fila en `players`. Mín. 6 caracteres en password. Así se sincronizan altas manuales y registro por app. |
-| POST | `/auth/login` | Login. Body: `{ email, password }`. Devuelve user y session (access_token, refresh_token, expires_at). |
-| POST | `/auth/forgot-password` | Restablecer contraseña. Body: `{ email }`. Genera enlace de recuperación (Supabase) y lo envía por email vía Edge Function `send-email` (Resend). Redirect: `FRONTEND_URL/reset-password`. Respuesta: `{ ok, message? }`. |
-| GET | `/auth/me` | Usuario actual y roles. Header: `Authorization: Bearer <access_token>`. Respuesta: `{ user, roles: { player_id?, club_owner_id? }, clubs?: [...] }`. |
-| POST | `/auth/register-club-owner` | Completar registro como **dueño** desde invite. Body: `{ application_id, token, password }`. Valida token, crea usuario Auth, `club_owner` (con auth_user_id), `club` y `courts` desde la solicitud; devuelve session. |
-
-## Solicitudes de club (club_applications)
-
-Crear solicitud y subir imagen son públicos. **Listar, detalle, aprobar y rechazar requieren admin:** header `Authorization: Bearer <access_token>` y que ese usuario esté en la tabla `admins`. Ver `docs/CREAR_ADMIN.md`.
-
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| GET | `/club-applications` | Listar (**admin**). Query: `?status=pending|contacted|approved|rejected`. |
-| GET | `/club-applications/:id` | Detalle (**admin**). |
-| GET | `/club-applications/:id/validate-invite` | Validar token del link. Query: `?token=xxx`. Público. |
-| POST | `/club-applications/:id/approve` | Aprobar (**admin**). Crea invite, devuelve `invite_url`. El backend invoca la Edge Function `send-email`, que envía el correo con Resend. Respuesta: `invite_url`, `email_sent`, `email_error` (si falló). Ver `docs/EMAIL_EDGE_FUNCTIONS.md`. |
-| POST | `/club-applications/:id/reject` | Rechazar (**admin**). Body opcional: `{ reason }`. |
-| POST | `/club-applications/upload` | Subir imagen. Público. Body: `multipart/form-data`, campo `file`. Usa el bucket **"club-images"** (sin espacios): así la URL pública no devuelve 400. En Supabase: Storage → New bucket → nombre `club-images` → Public bucket = sí. (Storage → bucket → Public). |
-| POST | `/club-applications` | Crear solicitud. Público. Body JSON (obligatorios + opcionales). Respuesta 201: `{ ok: true, id }`. |
+| POST | `/auth/register` | Registro como **jugador**. Body: `{ email, password, name? }`. Crea usuario Auth; si ya existe jugador manual con ese email, vincula `auth_user_id`; si no, crea fila en `players`. |
+| POST | `/auth/login` | Login. Body: `{ email, password }`. Devuelve user y session (`access_token`, `refresh_token`, `expires_at`). |
+| POST | `/auth/forgot-password` | Restablecer contraseña. Body: `{ email }`. Genera enlace de recuperación y envía email. |
+| GET | `/auth/me` | Usuario actual y roles. Header: `Authorization: Bearer <access_token>`. Respuesta: `{ user, roles: { player_id?, club_owner_id?, admin_id? }, clubs?: [...] }`. |
+| POST | `/auth/register-club-owner` | Completar registro de dueño desde invite. Body: `{ application_id, token, password }`. |
 
 ## Health
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/health` | Estado del servidor |
-| GET | `/health/supabase` | Comprueba conexión a Supabase |
+| GET | `/health` | Estado del servidor. |
+| GET | `/health/supabase` | Comprueba conexión a Supabase. |
 
-## Jugadores (players)
-
-Los jugadores pueden darse de alta **por la app** (registro con email/password) o **de forma manual en el club** (sin cuenta hasta que se registren). Ambas fuentes comparten la misma tabla; al registrarse por app con un email que ya existe por alta manual, se vincula la cuenta a ese jugador (sincronización, sin duplicados).
+## Home
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/players/me` | Jugador actual. Header: `Authorization: Bearer <access_token>`. Respuesta: `{ ok, player }`. 401 si no hay token o sesión inválida; 404 si no hay jugador con ese email. |
-| GET | `/players` | Lista (límite 50) |
-| GET | `/players/:id` | Detalle |
-| POST | `/players/manual` | **Alta manual en el club.** Body: `first_name`, `last_name`, `phone` (obligatorios), `email?` (opcional). Crea jugador sin `auth_user_id`. Si ya existe jugador con ese teléfono o correo (no borrado), responde 409. Respuesta 201: `{ ok, player }`. |
-| POST | `/players` | Crear (body: first_name, last_name, email, phone?, elo_rating?). Requiere email. |
-| PUT | `/players/:id` | Actualizar |
-| DELETE | `/players/:id` | Borrado lógico (status=deleted) |
+| GET | `/home/zone-trends` | Tendencias por zona para dashboard/home. |
+
+## Search
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/search/courts` | Búsqueda de pistas. |
+
+## Solicitudes de club (club_applications)
+
+Crear solicitud y subir imagen son públicos. Listar, detalle, aprobar/rechazar/reenviar invite requieren admin (`Authorization: Bearer <token>` y usuario en `admins`).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/club-applications` | Listar (**admin**). Query: `?status=pending|contacted|approved|rejected`. |
+| GET | `/club-applications/:id` | Detalle (**admin**). |
+| GET | `/club-applications/:id/validate-invite` | Validar token del invite. Query: `?token=...` (público). |
+| POST | `/club-applications/:id/approve` | Aprobar solicitud (**admin**). |
+| POST | `/club-applications/:id/resend-invite` | Regenerar y reenviar invite (**admin**). |
+| POST | `/club-applications/:id/reject` | Rechazar solicitud (**admin**). Body opcional: `{ reason }`. |
+| POST | `/club-applications/upload` | Subir imagen (público). Body `multipart/form-data` con campo `file`. |
+| POST | `/club-applications` | Crear solicitud (público). |
+
+## Jugadores (players)
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/players/me` | Jugador actual por token. |
+| GET | `/players` | Lista (filtros por query). |
+| GET | `/players/:id` | Detalle. |
+| POST | `/players/manual` | Alta manual de jugador (sin cuenta Auth). |
+| POST | `/players` | Crear jugador. |
+| PUT | `/players/:id` | Actualizar jugador. |
+| DELETE | `/players/:id` | Borrado lógico (`status=deleted`). |
 
 ## Dueños de club (club_owners)
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/club-owners` | Lista |
-| GET | `/club-owners/:id` | Detalle |
-| POST | `/club-owners` | Crear (name, email, phone?, stripe_connect_account_id?). stripe_connect_account_id opcional (NULL hasta conectar Stripe). |
-| PUT | `/club-owners/:id` | Actualizar (kyc_status, status, etc.) |
-| DELETE | `/club-owners/:id` | Borrado lógico |
+| GET | `/club-owners` | Lista. |
+| GET | `/club-owners/:id` | Detalle. |
+| POST | `/club-owners` | Crear. |
+| PUT | `/club-owners/:id` | Actualizar. |
+| DELETE | `/club-owners/:id` | Borrado lógico. |
 
 ## Clubs
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/clubs` | Lista. Query: `?owner_id=uuid` |
-| GET | `/clubs/:id` | Detalle |
-| POST | `/clubs` | Crear (owner_id, fiscal_tax_id, fiscal_legal_name, name, address, city, postal_code, …) |
-| PUT | `/clubs/:id` | Actualizar |
-| DELETE | `/clubs/:id` | Borrado físico |
+| GET | `/clubs` | Lista. Query: `?owner_id=uuid`. |
+| GET | `/clubs/:id` | Detalle. |
+| POST | `/clubs` | Crear club. |
+| PUT | `/clubs/:id` | Actualizar club. |
+| DELETE | `/clubs/:id` | Borrado físico. |
 
 ## Pistas (courts)
 
-CRUD de pistas de un club. Todas las rutas bajo `/courts`.
-
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/courts` | Listar. Query: `?club_id=uuid` (opcional, filtra por club). Respuesta: `{ ok: true, courts: [...] }`. Cada pista: id, created_at, club_id, name, indoor, glass_type, status, lighting?, last_maintenance? (si existen columnas; ver migración 003_courts_lighting_maintenance.sql). |
-| GET | `/courts/:id` | Ver una. Respuesta: `{ ok: true, court: { ... } }`. 404 si no existe. |
-| POST | `/courts` | Crear. Body: `{ "club_id", "name", "indoor"? (boolean), "glass_type"? ("normal" \| "panoramic"), "lighting"? (boolean), "last_maintenance"? (ISO date) }`. Respuesta: `{ ok: true, court }`. 400 si faltan club_id o name. |
-| PUT | `/courts/:id` | Editar. Body: `{ "name"?, "indoor"?, "glass_type"?, "status"?, "lighting"?, "last_maintenance"? }`. Respuesta: `{ ok: true, court }`. 400 si body vacío, 404 si no existe. |
-| DELETE | `/courts/:id` | Borrar. Respuesta: `{ ok: true, deleted: id }`. |
+| GET | `/courts` | Listar. Query opcional: `?club_id=uuid`. |
+| PUT | `/courts/reorder` | Reordenar pistas del club. |
+| GET | `/courts/:id` | Ver una pista. |
+| POST | `/courts` | Crear pista. |
+| PUT | `/courts/:id` | Editar pista. |
+| DELETE | `/courts/:id` | Borrar pista. |
 
 ## Reservas (bookings)
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | GET | `/bookings` | Lista. Query: `?court_id=`, `?organizer_player_id=` |
-| GET | `/bookings/:id` | Detalle |
-| POST | `/bookings` | Crear (court_id, organizer_player_id, start_at, end_at, total_price_cents, …) |
-| PUT | `/bookings/:id` | Actualizar (status, cancelled_by, cancellation_reason) |
-| DELETE | `/bookings/:id` | Cancelar reserva (status=cancelled) |
+| POST | `/bookings/:id/mark-paid` | Marcar reserva como pagada. |
+| GET | `/bookings/:id` | Detalle. |
+| POST | `/bookings` | Crear reserva. |
+| PUT | `/bookings/:id` | Actualizar reserva. |
+| DELETE | `/bookings/:id` | Cancelar reserva (`status=cancelled`). |
 
 ## Participantes de reserva (booking_participants)
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | GET | `/booking-participants` | Lista. Query: `?booking_id=`, `?player_id=` |
-| GET | `/booking-participants/:id` | Detalle |
-| POST | `/booking-participants` | Crear (booking_id, player_id, role, share_amount_cents?) |
-| PUT | `/booking-participants/:id` | Actualizar (role, share_amount_cents, payment_status) |
-| DELETE | `/booking-participants/:id` | Borrado físico |
+| GET | `/booking-participants/:id` | Detalle. |
+| POST | `/booking-participants` | Crear participante. |
+| PUT | `/booking-participants/:id` | Actualizar participante. |
+| DELETE | `/booking-participants/:id` | Borrado físico. |
 
 ## Partidos (matches)
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/matches` | Lista. Query: `?booking_id=`, `?expand=1` (incluye booking, court, club) |
-| GET | `/matches/:id` | Detalle |
-| POST | `/matches/create-with-booking` | Crear booking + match: court_id, organizer_player_id, start_at, end_at, total_price_cents, timezone?, visibility?, elo_min?, elo_max?, gender?, competitive? |
-| POST | `/matches` | Crear (booking_id existente: visibility?, elo_min?, elo_max?, gender?, competitive?) |
-| PUT | `/matches/:id` | Actualizar |
-| DELETE | `/matches/:id` | Cancelar (status=cancelled) |
+| GET | `/matches` | Lista. Query: `?booking_id=`, `?expand=1`. |
+| GET | `/matches/:id` | Detalle. |
+| POST | `/matches/create-with-booking` | Crear booking + match. |
+| POST | `/matches/:id/prepare-join` | Preparar unión a partido (pre-check y datos de pago/slot). |
+| POST | `/matches/:id/join` | Unirse al partido. |
+| POST | `/matches` | Crear match sobre booking existente. |
+| PUT | `/matches/:id` | Actualizar match. |
+| DELETE | `/matches/:id` | Cancelar match (`status=cancelled`). |
 
 ## Jugadores de partido (match_players)
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | GET | `/match-players` | Lista. Query: `?match_id=`, `?player_id=` |
-| GET | `/match-players/:id` | Detalle |
-| POST | `/match-players` | Crear (match_id, player_id, team: A|B) |
-| PUT | `/match-players/:id` | Actualizar (team, invite_status, result, rating_change) |
-| DELETE | `/match-players/:id` | Borrado físico |
+| GET | `/match-players/:id` | Detalle. |
+| POST | `/match-players` | Crear (match_id, player_id, team: A/B). |
+| PUT | `/match-players/:id` | Actualizar (team, invite_status, result, rating_change). |
+| DELETE | `/match-players/:id` | Borrado físico. |
+
+## Pagos (payments)
+
+Incluye flujo real con Stripe y flujo mock para pruebas.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/payments/webhook` | Webhook de Stripe (raw body). |
+| GET | `/payments/transactions` | Lista transacciones del jugador autenticado. Query opcional: `?limit=` |
+| POST | `/payments/customer-portal` | Crea sesión del portal de cliente Stripe. |
+| POST | `/payments/create-intent` | Crea PaymentIntent para participante de booking existente. |
+| POST | `/payments/create-intent-for-new-match` | Crea PaymentIntent para nuevo partido (sin crear booking/match aún). |
+| POST | `/payments/confirm-client` | Confirmación cliente tras pago exitoso (crea/actualiza entidades según metadata). |
+| POST | `/payments/simulate-turn-payment` | Simula pasarela de pago de turno/reserva (mock, sin cobro real). |
+
+## Precios por tipo de reserva (reservation_type_prices)
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/reservation-type-prices` | Obtener precios por tipo para un club. |
+| PUT | `/reservation-type-prices` | Actualizar precios por tipo para un club. |
+
+## Pricing Rules
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/pricing-rules/seed-defaults` | Sembrar reglas de pricing por defecto. |
+
+## Personal del club (club_staff)
+
+Requiere auth y permisos de dueño/admin.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/club-staff` | Listar personal del club (`club_id` query requerido). |
+| POST | `/club-staff` | Crear miembro de staff. |
+| PUT | `/club-staff/:id` | Actualizar miembro de staff. |
+| DELETE | `/club-staff/:id` | Eliminar miembro de staff. |
+
+## Inventario (`/inventario`)
+
+Requiere auth y permisos de dueño/admin.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/inventario/items` | Listar items. |
+| POST | `/inventario/items` | Crear item. |
+| PUT | `/inventario/items/:id` | Actualizar item. |
+| DELETE | `/inventario/items/:id` | Eliminar item. |
+| GET | `/inventario/movements` | Listar movimientos de stock. |
+| POST | `/inventario/movements` | Crear movimiento de stock. |
+| POST | `/inventario/items/:id/image` | Subir imagen de item (multipart/form-data). |
+
+## Escuela (`/school-courses`)
+
+Requiere auth y permisos de dueño/admin.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/school-courses` | Listar cursos. |
+| GET | `/school-courses/:id` | Detalle de curso. |
+| POST | `/school-courses` | Crear curso. |
+| PUT | `/school-courses/:id` | Actualizar curso. |
+| GET | `/school-courses/slots` | Consultar slots/disponibilidad de cursos. |
+| DELETE | `/school-courses/:id` | Eliminar curso. |
+| POST | `/school-courses/:id/enrollments` | Crear inscripción/alumno en curso. |
 
 ## Privacidad (privacy_logs) – solo escritura
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/privacy-logs` | Registrar evento GDPR (body: user_id?, action_type, ip, user_agent?). action_type: accept_terms, revoke_marketing, delete_account_request, export_data |
+| POST | `/privacy-logs` | Registrar evento GDPR (`action_type`: accept_terms, revoke_marketing, delete_account_request, export_data). |
 
 ---
 
-**Migraciones:** Ejecutar en Supabase: `004_roles_and_applications.sql` (auth_user_id, invites); `005_admins.sql` (tabla admins); `006_players_manual_and_sync.sql` (email opcional en players, índice único en phone para altas manuales y sincronización). Para crear el primer admin: ver `docs/CREAR_ADMIN.md`.
-
-**No implementado en este MVP:** `pricing_rules`, `payment_transactions` (pagos con Stripe u otra pasarela después).
+**Migraciones:** Ejecutar en Supabase las migraciones del repo (`supabase/migrations`) y revisar docs operativas como `docs/CREAR_ADMIN.md` y `docs/EMAIL_EDGE_FUNCTIONS.md`.
