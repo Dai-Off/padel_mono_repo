@@ -35,6 +35,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     ...theme.headerPadding,
     gap: 16,
+    backgroundColor: '#fff',
   },
   slot: { alignItems: 'center', justifyContent: 'center' },
   right: { alignItems: 'flex-end' },

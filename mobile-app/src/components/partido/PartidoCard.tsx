@@ -6,19 +6,30 @@ import type { PartidoItem, PartidoPlayer } from '../../screens/PartidosScreen';
 function PlayerSlot({
   player,
   isPrivate,
+  surface = 'light',
 }: {
   player: PartidoPlayer;
   isPrivate?: boolean;
+  surface?: 'light' | 'dark';
 }) {
+  const d = surface === 'dark';
   if (player.isFree) {
     return (
       <View style={styles.playerSlot}>
-        <View style={[styles.playerAvatarFree, isPrivate && styles.playerAvatarFreePrivate]}>
+        <View
+          style={[
+            styles.playerAvatarFree,
+            isPrivate && styles.playerAvatarFreePrivate,
+            d && styles.playerAvatarFreeDark,
+          ]}
+        >
           <Text style={isPrivate ? styles.playerAvatarFreeDash : styles.playerAvatarFreePlus}>
             {isPrivate ? '—' : '+'}
           </Text>
         </View>
-        <Text style={[styles.playerFreeLabel, isPrivate && styles.playerFreeLabelPrivate]}>Libre</Text>
+        <Text style={[styles.playerFreeLabel, isPrivate && styles.playerFreeLabelPrivate]}>
+          Libre
+        </Text>
       </View>
     );
   }
@@ -31,7 +42,9 @@ function PlayerSlot({
           <Text style={styles.playerInitialText}>{player.initial ?? player.name[0]}</Text>
         </View>
       )}
-      <Text style={styles.playerName} numberOfLines={1}>{player.name}</Text>
+      <Text style={[styles.playerName, d && styles.playerNameDark]} numberOfLines={1}>
+        {player.name}
+      </Text>
       <View style={styles.levelBadge}>
         <Text style={styles.levelBadgeText}>{player.level}</Text>
       </View>
@@ -42,16 +55,47 @@ function PlayerSlot({
 type PartidoCardProps = {
   item: PartidoItem;
   onPress: () => void;
+  /** Lista sobre fondo oscuro (Mis partidos en Partidos). */
+  surface?: 'light' | 'dark';
 };
 
-export function PartidoCard({ item, onPress }: PartidoCardProps) {
+export function PartidoCard({
+  item,
+  onPress,
+  surface = 'light',
+}: PartidoCardProps) {
+  const d = surface === 'dark';
   return (
-    <Pressable style={({ pressed }) => [styles.card, pressed && styles.pressed]} onPress={onPress}>
+    <Pressable
+      style={({ pressed }) => [
+        styles.card,
+        d && styles.cardDark,
+        pressed && styles.pressed,
+      ]}
+      onPress={onPress}
+    >
       <View style={styles.cardHeader}>
-        <Text style={styles.cardDateTime}>{item.dateTime}</Text>
+        <Text style={[styles.cardDateTime, d && styles.cardDateTimeDark]}>
+          {item.dateTime}
+        </Text>
         <View style={styles.cardBadgeWrap}>
-          <View style={[styles.cardBadge, item.mode === 'competitivo' ? styles.cardBadgeCompetitivo : styles.cardBadgeAmistoso]}>
-            <Text style={[styles.cardBadgeText, item.mode === 'competitivo' && styles.cardBadgeTextComp]}>
+          <View
+            style={[
+              styles.cardBadge,
+              item.mode === 'competitivo' ? styles.cardBadgeCompetitivo : styles.cardBadgeAmistoso,
+              d &&
+                (item.mode === 'competitivo'
+                  ? styles.cardBadgeCompetitivoOnDark
+                  : styles.cardBadgeDark),
+            ]}
+          >
+            <Text
+              style={[
+                styles.cardBadgeText,
+                item.mode === 'competitivo' && styles.cardBadgeTextComp,
+                d && item.mode !== 'competitivo' && styles.cardBadgeTextDark,
+              ]}
+            >
               {item.mode === 'competitivo' ? 'Competitivo' : 'Amistoso'}
             </Text>
           </View>
@@ -59,13 +103,17 @@ export function PartidoCard({ item, onPress }: PartidoCardProps) {
       </View>
       <View style={styles.cardMeta}>
         <View style={styles.cardMetaRow}>
-          <Ionicons name="people-outline" size={12} color="#9ca3af" />
-          <Text style={styles.cardMetaText}>{item.typeLabel}</Text>
+          <Ionicons name="people-outline" size={12} color={d ? '#6b7280' : '#9ca3af'} />
+          <Text style={[styles.cardMetaText, d && styles.cardMetaTextDark]}>
+            {item.typeLabel}
+          </Text>
         </View>
-        <Text style={styles.cardLevelRange}>📊 {item.levelRange}</Text>
+        <Text style={[styles.cardLevelRange, d && styles.cardLevelRangeDark]}>
+          📊 {item.levelRange}
+        </Text>
       </View>
       {item.visibility === 'private' ? (
-        <View style={styles.privateReservadoRow}>
+        <View style={[styles.privateReservadoRow, d && styles.privateReservadoRowDark]}>
           <View style={styles.privateReservadoAvatar}>
             {(() => {
               const org = item.players.find((p) => !p.isFree);
@@ -79,26 +127,36 @@ export function PartidoCard({ item, onPress }: PartidoCardProps) {
               );
             })()}
           </View>
-          <Text style={styles.privateReservadoLabel}>Tu reserva</Text>
+          <Text style={[styles.privateReservadoLabel, d && styles.privateReservadoLabelDark]}>
+            Tu reserva
+          </Text>
         </View>
       ) : (
         <View style={styles.playersRow}>
           {item.players.map((p, i) => (
-            <PlayerSlot key={i} player={p} isPrivate={false} />
+            <PlayerSlot key={i} player={p} isPrivate={false} surface={surface} />
           ))}
         </View>
       )}
-      <View style={styles.venueRow}>
-        <View style={styles.venueIconWrap}>
+      <View style={[styles.venueRow, d && styles.venueRowDark]}>
+        <View style={[styles.venueIconWrap, d && styles.venueIconWrapDark]}>
           <Text style={styles.venueEmoji}>🏢</Text>
         </View>
         <View style={styles.venueBody}>
-          <Text style={styles.venueName} numberOfLines={1}>{item.venue}</Text>
-          <Text style={styles.venueLocation}>{item.location}</Text>
+          <Text style={[styles.venueName, d && styles.venueNameDark]} numberOfLines={1}>
+            {item.venue}
+          </Text>
+          <Text style={[styles.venueLocation, d && styles.venueLocationDark]}>
+            {item.location}
+          </Text>
         </View>
         <View style={styles.venuePrice}>
-          <Text style={styles.venuePriceValue}>{item.price}</Text>
-          <Text style={styles.venueDuration}>{item.duration}</Text>
+          <Text style={[styles.venuePriceValue, d && styles.venuePriceValueDark]}>
+            {item.price}
+          </Text>
+          <Text style={[styles.venueDuration, d && styles.venueDurationDark]}>
+            {item.duration}
+          </Text>
         </View>
       </View>
     </Pressable>
@@ -245,4 +303,41 @@ const styles = StyleSheet.create({
   venuePriceValue: { fontSize: theme.fontSize.base, fontWeight: '700', color: '#E31E24' },
   venueDuration: { fontSize: 10, color: '#9ca3af' },
   pressed: { opacity: 0.9 },
+  cardDark: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  cardDateTimeDark: { color: '#fff' },
+  cardBadgeDark: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  cardBadgeCompetitivoOnDark: {
+    backgroundColor: 'rgba(227,30,36,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(227,30,36,0.35)',
+  },
+  cardBadgeTextDark: { color: '#d1d5db' },
+  cardMetaTextDark: { color: '#9ca3af' },
+  cardLevelRangeDark: { color: '#9ca3af' },
+  privateReservadoRowDark: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  privateReservadoLabelDark: { color: '#d1d5db' },
+  venueRowDark: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  venueIconWrapDark: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  venueNameDark: { color: '#fff' },
+  venueLocationDark: { color: '#9ca3af' },
+  venuePriceValueDark: { color: '#fb923c' },
+  venueDurationDark: { color: '#9ca3af' },
+  playerNameDark: { color: '#e5e7eb' },
+  playerAvatarFreeDark: {
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
 });

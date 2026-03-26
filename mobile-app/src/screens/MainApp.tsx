@@ -1,10 +1,15 @@
 import { useState } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { SearchCourtResult } from '../api/search';
 import { BackHeader } from '../components/layout/BackHeader';
-import { BottomNavbar } from '../components/layout/BottomNavbar';
+import { BottomNavbar, type MainTabId } from '../components/layout/BottomNavbar';
+import { HomeHeader } from '../components/layout/HomeHeader';
+import { MobileSidebar } from '../components/layout/MobileSidebar';
 import { ScreenLayout } from '../components/layout/ScreenLayout';
+import { SidebarContent } from '../components/layout/SidebarContent';
+import { SidebarProvider } from '../contexts/SidebarContext';
+import { useSidebar } from '../hooks/useSidebar';
+import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
 import { ClubDetailScreen } from './ClubDetailScreen';
 import { CompeticionesScreen } from './CompeticionesScreen';
 import { HomeScreen } from './HomeScreen';
@@ -15,21 +20,42 @@ import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
-
-type TabId = 'inicio' | 'reservar' | 'competir' | 'partidos';
+import { TiendaScreen } from './TiendaScreen';
 
 export function MainApp() {
-  const insets = useSafeAreaInsets();
-  const [activeTab, setActiveTab] = useState<TabId>('inicio');
+  const sidebar = useSidebar(false);
+  const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [showTusPagos, setShowTusPagos] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
+  const [crearPartidoFlow, setCrearPartidoFlow] = useState<{
+    open: boolean;
+    organizerId: string | null;
+  }>({ open: false, organizerId: null });
+  const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
 
-  const showClubDetail = activeTab === 'reservar' && clubDetailCourt != null;
+  const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
 
   const renderContent = () => {
+    if (crearPartidoFlow.open) {
+      const bumpPartidos = () => setPartidosRefreshNonce((n) => n + 1);
+      const closeFlow = () => {
+        setCrearPartidoFlow({ open: false, organizerId: null });
+        bumpPartidos();
+      };
+      return (
+        <CrearPartidoLocationSheet
+          presentation="fullscreen"
+          initialStep="clubs"
+          organizerPlayerId={crearPartidoFlow.organizerId}
+          onClose={closeFlow}
+          onSiguiente={closeFlow}
+          onPartidoCreado={closeFlow}
+        />
+      );
+    }
     if (showTransacciones) {
       return (
         <TransaccionesScreen onBack={() => setShowTransacciones(false)} />
@@ -72,22 +98,29 @@ export function MainApp() {
       case 'inicio':
         return (
           <HomeScreen
-            onPartidoPress={(p) => setSelectedPartido(p)}
             onNavigateToTab={(tab) => setActiveTab(tab)}
+            onPartidoPress={(p) => setSelectedPartido(p)}
           />
         );
-      case 'reservar':
+      case 'pistas':
         return (
           <MatchSearchScreen
             onCourtPress={(court) => setClubDetailCourt(court)}
+            onBack={() => setActiveTab('inicio')}
           />
         );
-      case 'competir':
+      case 'tienda':
+        return <TiendaScreen />;
+      case 'torneos':
         return <CompeticionesScreen />;
       case 'partidos':
         return (
           <PartidosScreen
             onPartidoPress={(p) => setSelectedPartido(p)}
+            onOpenWeMatchClubsFlow={(organizerId) =>
+              setCrearPartidoFlow({ open: true, organizerId })
+            }
+            partidosRefreshNonce={partidosRefreshNonce}
           />
         );
       default:
@@ -95,29 +128,78 @@ export function MainApp() {
     }
   };
 
+  const showMainTabs =
+    !showTusPagos &&
+    !showTransacciones &&
+    !showPartidoDetail &&
+    !showClubDetail &&
+    !crearPartidoFlow.open;
+
   const customHeader =
-    showTusPagos || showTransacciones || showPartidoDetail ? undefined : activeTab === 'reservar' && !showClubDetail ? (
-      <BackHeader title="Buscador" onBack={() => setActiveTab('inicio')} />
-    ) : activeTab === 'competir' ? (
-      <BackHeader title="Competiciones" onBack={() => setActiveTab('inicio')} />
-    ) : activeTab === 'partidos' ? (
-      <BackHeader title="Partidos" onBack={() => setActiveTab('inicio')} />
-    ) : undefined;
+    showTusPagos || showTransacciones || showPartidoDetail || crearPartidoFlow.open
+      ? undefined
+      : activeTab === 'tienda'
+          ? <BackHeader title="Tienda" onBack={() => setActiveTab('inicio')} />
+          : activeTab === 'torneos'
+            ? <BackHeader title="Torneos" onBack={() => setActiveTab('inicio')} />
+            : activeTab === 'partidos'
+              ? (
+                  <BackHeader
+                    title="Partidos"
+                    tone="dark"
+                    onBack={() => setActiveTab('inicio')}
+                  />
+                )
+              : activeTab === 'inicio'
+                ? (
+                    <HomeHeader onMenuPress={sidebar.toggle} />
+                  )
+                : undefined;
+
+  const layoutBackgroundColor =
+    showPartidoDetail
+      ? '#0F0F0F'
+      : crearPartidoFlow.open
+        ? '#0F0F0F'
+        : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
+          ? '#000000'
+          : showMainTabs && activeTab === 'pistas'
+            ? '#0F0F0F'
+            : '#ffffff';
 
   return (
     <View style={styles.container}>
-      <ScreenLayout
-        customHeader={customHeader}
-        hideHeader={showClubDetail || showPartidoDetail || showTusPagos || showTransacciones}
-        onNavigateToTusPagos={() => setShowTusPagos(true)}
-      >
-        {renderContent()}
-      </ScreenLayout>
-      {!showClubDetail && !showPartidoDetail && !showTusPagos && !showTransacciones && (
-        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-          <BottomNavbar activeTab={activeTab} onTabChange={setActiveTab} />
+      <SidebarProvider close={sidebar.close} onNavigateToTusPagos={() => setShowTusPagos(true)}>
+        <View style={styles.mainColumn}>
+          <ScreenLayout
+            sidebar={sidebar}
+            customHeader={customHeader}
+            hideHeader={
+              showClubDetail ||
+              showPartidoDetail ||
+              showTusPagos ||
+              showTransacciones ||
+              crearPartidoFlow.open ||
+              (showMainTabs && activeTab === 'pistas')
+            }
+            layoutBackgroundColor={layoutBackgroundColor}
+          >
+            {renderContent()}
+          </ScreenLayout>
+          {!showClubDetail &&
+            !showPartidoDetail &&
+            !showTusPagos &&
+            !showTransacciones &&
+            !crearPartidoFlow.open && (
+            <View style={styles.bottomBar}>
+              <BottomNavbar activeTab={activeTab} onTabChange={setActiveTab} />
+            </View>
+          )}
         </View>
-      )}
+        <MobileSidebar visible={sidebar.isOpen} onClose={sidebar.close}>
+          <SidebarContent />
+        </MobileSidebar>
+      </SidebarProvider>
     </View>
   );
 }
@@ -127,7 +209,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
+  /** Columna explícita: ScreenLayout + barra inferior compartidos en flex (evita barra invisible en Android). */
+  mainColumn: {
+    flex: 1,
+    minHeight: 0,
+  },
+  /** Ancho completo del dispositivo (sin márgenes laterales). */
   bottomBar: {
-    backgroundColor: '#fff',
+    width: '100%',
+    alignSelf: 'stretch',
   },
 });
