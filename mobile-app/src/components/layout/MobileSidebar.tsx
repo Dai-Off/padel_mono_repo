@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
-import { Animated, Dimensions, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { theme } from '../../theme';
 
@@ -11,7 +11,9 @@ type MobileSidebarProps = {
 };
 
 export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps) {
-  const { width, height } = Dimensions.get('window');
+  const { width: windowWidth } = useWindowDimensions();
+  /** Evita ancho 0 en el primer frame (Android) y animaciones con valor inválido. */
+  const width = Math.max(windowWidth, 1);
   const slideAnim = useRef(new Animated.Value(-width)).current;
   const backdropAnim = useRef(new Animated.Value(0)).current;
 
@@ -60,8 +62,8 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
           styles.sidebar,
           {
             width,
-            height,
             top: 0,
+            bottom: 0,
             left: 0,
             transform: [{ translateX: slideAnim }],
           },
@@ -74,8 +76,16 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
 }
 
 const styles = StyleSheet.create({
+  /**
+   * Por encima del header/navbar: zIndex (iOS) y elevation (Android, orden de dibujado).
+   * Elevation fija en Android para que al cerrar el drawer no quede el menú debajo del header.
+   */
   overlay: {
-    zIndex: 40,
+    zIndex: 999,
+    ...Platform.select({
+      android: { elevation: 100 },
+      default: {},
+    }),
   },
   backdropWrap: {
     ...StyleSheet.absoluteFillObject,

@@ -1,4 +1,12 @@
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Image,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { SearchCourtResult } from '../../api/search';
@@ -19,6 +27,9 @@ type SearchCourtCardProps = {
   onFavoritePress?: () => void;
 };
 
+const IMAGE_SIZE = 112;
+
+/** Tarjeta tipo glass (referencia BuscadorScreen web). */
 export function SearchCourtCard({
   court,
   onPress,
@@ -26,200 +37,261 @@ export function SearchCourtCard({
   onFavoritePress,
 }: SearchCourtCardProps) {
   const imageUri = court.imageUrl;
-  const locationText = court.distanceKm != null
-    ? `${Math.round(court.distanceKm)}km - ${court.city}`
-    : court.city;
+  const title = court.courtName || court.clubName;
+  const locationLine =
+    court.distanceKm != null
+      ? `${Math.round(court.distanceKm)}km`
+      : '';
+  const cityPart = court.city || '';
 
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.cardOuter, pressed && styles.pressed]}
       accessibilityRole="button"
       accessibilityLabel={`${court.courtName} - ${court.clubName}, ${court.minPriceFormatted}`}
     >
-      <View style={styles.imageWrap}>
-        {imageUri ? (
-          <Image
-            source={{ uri: imageUri }}
-            style={styles.image}
-            resizeMode="cover"
-            accessibilityIgnoresInvertColors
-          />
-        ) : (
-          <View style={[styles.image, styles.imagePlaceholder]} />
-        )}
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.6)']}
-          style={styles.gradient}
-        />
-        <Pressable
-          onPress={onFavoritePress}
-          style={({ pressed: p }) => [styles.favButton, p && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Añadir a favoritos"
-        >
-          <Ionicons name="heart-outline" size={16} color="#6b7280" />
-        </Pressable>
-        <View style={styles.priceBadge}>
-          <Text style={styles.priceLabel}>1h desde</Text>
-          <Text style={styles.priceValue}>{court.minPriceFormatted}</Text>
-        </View>
-        <View style={styles.titleWrap}>
-          <Text style={styles.title}>{court.courtName}</Text>
-          <Text style={styles.subtitle}>{court.clubName}</Text>
-          <View style={styles.locationRow}>
-            <Ionicons name="location-outline" size={12} color="rgba(255,255,255,0.7)" />
-            <Text style={styles.location} numberOfLines={1}>{locationText}</Text>
+      <LinearGradient
+        colors={['rgba(255,255,255,0.07)', 'rgba(255,255,255,0.03)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.cardGradient}
+      >
+        <View style={styles.cardInner}>
+          <Pressable
+            onPress={onFavoritePress}
+            style={({ pressed: p }) => [styles.favButton, p && styles.pressed]}
+            accessibilityRole="button"
+            accessibilityLabel="Favorito"
+          >
+            <Ionicons name="heart-outline" size={14} color="#fff" />
+          </Pressable>
+
+          <View style={styles.row}>
+            <View style={styles.imageCol}>
+              {imageUri ? (
+                <Image
+                  source={{ uri: imageUri }}
+                  style={styles.image}
+                  resizeMode="cover"
+                  accessibilityIgnoresInvertColors
+                />
+              ) : (
+                <View style={[styles.image, styles.imagePlaceholder]} />
+              )}
+              <LinearGradient
+                colors={['rgba(0,0,0,0.35)', 'transparent']}
+                style={styles.imageOverlay}
+                pointerEvents="none"
+              />
+              <View style={styles.priceBadge}>
+                <Text style={styles.priceValue}>{court.minPriceFormatted}</Text>
+                <Text style={styles.pricePer}>/h</Text>
+              </View>
+            </View>
+
+            <View style={styles.body}>
+              <Text style={styles.title} numberOfLines={1}>
+                {title}
+              </Text>
+              <View style={styles.metaRow}>
+                <Ionicons name="navigate" size={14} color="#737373" />
+                {locationLine ? (
+                  <Text style={styles.metaDist}>{locationLine}</Text>
+                ) : null}
+                {locationLine && cityPart ? (
+                  <Text style={styles.metaDot}>•</Text>
+                ) : null}
+                {cityPart ? (
+                  <Text style={styles.metaCity} numberOfLines={1}>
+                    {cityPart}
+                  </Text>
+                ) : null}
+              </View>
+              <View style={styles.tags}>
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>{getCerramientoLabel(court.indoor)}</Text>
+                </View>
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>{getParedesLabel(court.glassType)}</Text>
+                </View>
+              </View>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.slotsScroll}
+              >
+                {court.timeSlots.map((slot) => (
+                  <Pressable
+                    key={slot}
+                    onPress={() => onTimeSlotPress?.(court.id, slot)}
+                    style={({ pressed }) => [styles.slotButton, pressed && styles.pressed]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Reservar a las ${slot}`}
+                  >
+                    <Text style={styles.slotText}>{slot}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
           </View>
         </View>
-      </View>
-      <View style={styles.body}>
-        <View style={styles.tags}>
-          <View style={styles.tag}>
-            <Text style={styles.tagText}>{getCerramientoLabel(court.indoor)}</Text>
-          </View>
-          <View style={styles.tag}>
-            <Text style={styles.tagText}>{getParedesLabel(court.glassType)}</Text>
-          </View>
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.slotsScroll}
-        >
-          {court.timeSlots.map((slot) => (
-            <Pressable
-              key={slot}
-              onPress={() => onTimeSlotPress?.(court.id, slot)}
-              style={({ pressed }) => [styles.slotButton, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel={`Reservar a las ${slot}`}
-            >
-              <Text style={styles.slotText}>{slot}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
+      </LinearGradient>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+  cardOuter: {
+    borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.08)',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 10,
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
   },
-  pressed: { opacity: 0.9 },
-  imageWrap: {
-    height: 160,
+  cardGradient: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  cardInner: {
     position: 'relative',
+  },
+  pressed: { opacity: 0.92 },
+  favButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 14,
+    padding: 14,
+  },
+  imageCol: {
+    width: IMAGE_SIZE,
+    height: IMAGE_SIZE,
+    borderRadius: 12,
+    overflow: 'hidden',
+    flexShrink: 0,
   },
   image: {
     width: '100%',
     height: '100%',
   },
   imagePlaceholder: {
-    backgroundColor: '#e5e7eb',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  gradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-  },
-  favButton: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  imageOverlay: {
+    ...StyleSheet.absoluteFillObject,
   },
   priceBadge: {
     position: 'absolute',
-    bottom: 12,
-    right: 12,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  priceLabel: {
-    fontSize: 10,
-    color: '#6b7280',
+    bottom: 6,
+    left: 6,
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
   priceValue: {
-    fontSize: theme.fontSize.base,
-    fontWeight: '700',
-    color: '#1A1A1A',
-  },
-  titleWrap: {
-    position: 'absolute',
-    bottom: 12,
-    left: 12,
-    right: 80,
-  },
-  title: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: '700',
+    fontSize: theme.fontSize.xs,
+    fontWeight: '900',
     color: '#fff',
   },
-  subtitle: {
-    fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.85)',
-    marginTop: 2,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-    gap: 4,
-  },
-  location: {
-    fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.7)',
-    flex: 1,
+  pricePer: {
+    fontSize: 9,
+    color: '#d1d5db',
+    marginLeft: 1,
   },
   body: {
-    padding: theme.spacing.md,
+    flex: 1,
+    minWidth: 0,
+  },
+  title: {
+    fontSize: theme.fontSize.base,
+    fontWeight: '700',
+    color: '#fff',
+    paddingRight: 36,
+    marginBottom: 4,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 6,
+    flexWrap: 'nowrap',
+  },
+  metaDist: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: '500',
+    color: '#a3a3a3',
+  },
+  metaDot: {
+    fontSize: theme.fontSize.xs,
+    color: '#525252',
+  },
+  metaCity: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: theme.fontSize.xs,
+    color: '#a3a3a3',
   },
   tags: {
     flexDirection: 'row',
-    gap: theme.spacing.xs,
-    marginBottom: theme.spacing.sm,
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
   },
   tag: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   tagText: {
-    fontSize: 10,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#d4d4d4',
+    textTransform: 'uppercase',
   },
   slotsScroll: {
     flexDirection: 'row',
-    gap: theme.spacing.xs,
+    gap: 6,
+    alignItems: 'center',
   },
   slotButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   slotText: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: '500',
-    color: '#1A1A1A',
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
   },
 });

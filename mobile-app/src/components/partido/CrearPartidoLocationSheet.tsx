@@ -24,15 +24,28 @@ import { theme } from '../../theme';
 
 export type LocationType = 'club_wematch' | 'pista_externa';
 
+export type CrearPartidoFlowStep = 'location' | 'clubs' | 'configurar' | 'pista_externa';
+
 type CrearPartidoLocationSheetProps = {
-  visible: boolean;
+  /** `fullscreen` = pantalla completa (club + horarios). `modal` = solo “¿Dónde se juega?” (+ pista externa). */
+  presentation?: 'modal' | 'fullscreen';
+  visible?: boolean;
+  /** Paso inicial (p. ej. `clubs` en pantalla completa tras elegir WeMatch en el modal). */
+  initialStep?: CrearPartidoFlowStep;
+  /**
+   * Si true (solo con `presentation="modal"`): al pulsar Siguiente con “WeMatch” no abre clubes aquí;
+   * llama `onContinueWeMatch` y el padre abre la pantalla completa de clubes.
+   */
+  modalOnlyWeMatch?: boolean;
+  /** Tras WeMatch + Siguiente en modal; el padre cierra el modal y abre pantalla completa. */
+  onContinueWeMatch?: () => void;
   onClose: () => void;
   onSiguiente: (locationType: LocationType) => void;
   onPartidoCreado?: () => void;
   organizerPlayerId?: string | null;
 };
 
-type Step = 'location' | 'clubs' | 'configurar' | 'pista_externa';
+type Step = CrearPartidoFlowStep;
 
 type GenderOption = 'any' | 'male' | 'female' | 'mixed';
 
@@ -62,7 +75,11 @@ function getInitials(fullName?: string | null, email?: string): string {
 }
 
 export function CrearPartidoLocationSheet({
-  visible,
+  presentation = 'modal',
+  visible = true,
+  initialStep = 'location',
+  modalOnlyWeMatch = false,
+  onContinueWeMatch,
   onClose,
   onSiguiente,
   onPartidoCreado,
@@ -71,7 +88,7 @@ export function CrearPartidoLocationSheet({
   const { session } = useAuth();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const insets = useSafeAreaInsets();
-  const [step, setStep] = useState<Step>('location');
+  const [step, setStep] = useState<Step>(initialStep);
   const [selected, setSelected] = useState<LocationType>('club_wematch');
   const [clubs, setClubs] = useState<ClubDisplay[]>([]);
   const [clubsLoading, setClubsLoading] = useState(false);
@@ -80,14 +97,14 @@ export function CrearPartidoLocationSheet({
   const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!visible) {
+    if (presentation === 'modal' && !visible) {
       setStep('location');
       setClubsError(null);
       setCreateError(null);
       setSelectedSlot(null);
       setSelectedClub(null);
     }
-  }, [visible]);
+  }, [visible, presentation]);
 
   const orgId = organizerProp ?? null;
 
@@ -106,10 +123,11 @@ export function CrearPartidoLocationSheet({
   }, []);
 
   useEffect(() => {
-    if (visible && step === 'clubs') {
+    const active = presentation === 'fullscreen' || visible;
+    if (active && step === 'clubs') {
       loadClubs();
     }
-  }, [visible, step, loadClubs]);
+  }, [visible, presentation, step, loadClubs]);
 
   const [pistaReservada, setPistaReservada] = useState(false);
   const [partidoPrivado, setPartidoPrivado] = useState(false);
@@ -207,6 +225,10 @@ export function CrearPartidoLocationSheet({
 
   const handleSiguiente = () => {
     if (selected === 'club_wematch') {
+      if (modalOnlyWeMatch && onContinueWeMatch) {
+        onContinueWeMatch();
+        return;
+      }
       setStep('clubs');
     } else if (selected === 'pista_externa') {
       setStep('pista_externa');
@@ -215,44 +237,76 @@ export function CrearPartidoLocationSheet({
     }
   };
 
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
-      <View style={styles.overlay}>
-        <Pressable
-          style={styles.overlayBackdrop}
-          onPress={onClose}
-          accessibilityLabel="Cerrar"
-        />
-        <View
-          style={[
-            styles.sheet,
-            { paddingBottom: Math.max(insets.bottom, theme.spacing.lg) },
-            (step === 'clubs' || step === 'configurar' || step === 'pista_externa') && {
-              height: Dimensions.get('window').height * 0.92,
-            },
-          ]}
-        >
-          <View style={styles.handle} />
-          <View style={[styles.header, (step === 'pista_externa' || step === 'configurar') && styles.headerPista]}>
+  /** Paso ubicación o listado de clubes: cromado oscuro (auth) unificado */
+  const matchFlowDark = step === 'location' || step === 'clubs';
+
+  const isModal = presentation === 'modal';
+  const tallStep = step === 'clubs' || step === 'configurar' || step === 'pista_externa';
+
+  const sheetBodyStyle = [
+    styles.sheet,
+    matchFlowDark && styles.sheetLocation,
+    !isModal && styles.sheetFullscreen,
+    { paddingBottom: Math.max(insets.bottom, theme.spacing.lg) },
+    isModal &&
+      tallStep && {
+        height: Dimensions.get('window').height * 0.92,
+      },
+    !isModal && tallStep && styles.sheetFullscreenTall,
+  ];
+
+  const sheetElement = (
+          <View style={sheetBodyStyle}>
+          {isModal && (
+            <View style={[styles.handle, matchFlowDark && styles.handleLocation]} />
+          )}
+          <View
+            style={[
+              styles.header,
+              (step === 'pista_externa' || step === 'configurar') && styles.headerPista,
+              step === 'configurar' && styles.headerConfig,
+              step === 'clubs' && presentation === 'fullscreen' && styles.headerClubsFullscreenWrap,
+            ]}
+          >
             {step === 'configurar' ? (
-              <Pressable
-                onPress={() => {
-                  setStep('clubs');
-                  setSelectedSlot(null);
-                  setSelectedClub(null);
-                  setCreateError(null);
-                  loadClubs();
-                }}
-                style={({ pressed }) => [styles.headerBackOnly, pressed && styles.pressed]}
-              >
-                <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
-              </Pressable>
+              <>
+                <Pressable
+                  onPress={() => {
+                    setStep('clubs');
+                    setSelectedSlot(null);
+                    setSelectedClub(null);
+                    setCreateError(null);
+                    loadClubs();
+                  }}
+                  style={({ pressed }) => [
+                    styles.headerConfigCloseBtn,
+                    pressed && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cerrar"
+                >
+                  <Ionicons name="close" size={20} color="#1A1A1A" />
+                </Pressable>
+                <Text style={styles.headerConfigTitle} numberOfLines={1}>
+                  Configura tu partido
+                </Text>
+                <View style={styles.headerConfigRightSpacer} />
+              </>
+            ) : step === 'clubs' && presentation === 'fullscreen' ? (
+              <View style={styles.headerClubsFullscreen}>
+                <Pressable
+                  onPress={onClose}
+                  style={({ pressed }) => [styles.headerClubsBackBtn, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Volver"
+                >
+                  <Ionicons name="arrow-back" size={20} color={theme.auth.text} />
+                </Pressable>
+                <Text style={styles.headerClubsTitle} numberOfLines={1}>
+                  Encontrar nuevos partidos
+                </Text>
+                <View style={styles.headerClubsRightSpacer} />
+              </View>
             ) : step === 'clubs' ? (
               <Pressable
                 onPress={() => {
@@ -261,8 +315,8 @@ export function CrearPartidoLocationSheet({
                 }}
                 style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
               >
-                <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
-                <Text style={styles.backLabel}>Atrás</Text>
+                <Ionicons name="chevron-back" size={24} color={theme.auth.text} />
+                <Text style={[styles.backLabel, styles.backLabelOnDark]}>Atrás</Text>
               </Pressable>
             ) : step === 'pista_externa' ? (
               <Pressable
@@ -272,12 +326,20 @@ export function CrearPartidoLocationSheet({
                 <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
               </Pressable>
             ) : (
-              <Text style={styles.headerTitle}>Donde se juega el partido?</Text>
+              <Text style={[styles.headerTitle, step === 'location' && styles.headerTitleLocation]}>
+                Donde se juega el partido?
+              </Text>
             )}
-            {step !== 'pista_externa' && step !== 'configurar' && (
+            {step !== 'pista_externa' &&
+              step !== 'configurar' &&
+              !(step === 'clubs' && presentation === 'fullscreen') && (
             <View style={styles.headerActions}>
               <Pressable
-                style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+                style={({ pressed }) => [
+                  styles.iconButton,
+                  matchFlowDark && styles.iconButtonLocation,
+                  pressed && styles.pressed,
+                ]}
                 accessibilityRole="button"
                 accessibilityLabel="Info"
               >
@@ -285,7 +347,11 @@ export function CrearPartidoLocationSheet({
               </Pressable>
               <Pressable
                 onPress={onClose}
-                style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+                style={({ pressed }) => [
+                  styles.iconButton,
+                  matchFlowDark && styles.iconButtonLocation,
+                  pressed && styles.pressed,
+                ]}
                 accessibilityRole="button"
                 accessibilityLabel="Cerrar"
               >
@@ -294,6 +360,49 @@ export function CrearPartidoLocationSheet({
             </View>
             )}
           </View>
+
+          {step === 'clubs' && presentation === 'fullscreen' && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.clubsFiltersScroll}
+              contentContainerStyle={styles.clubsFiltersRow}
+            >
+              <Pressable
+                style={({ pressed }) => [styles.clubsFilterIconBtn, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Filtros"
+              >
+                <Ionicons name="filter" size={16} color={theme.auth.text} />
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.clubsFilterChip, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Deporte"
+              >
+                <Text style={styles.clubsFilterChipText}>Padel</Text>
+                <Ionicons name="chevron-down" size={14} color={theme.auth.text} />
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.clubsFilterChip, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Clubes"
+              >
+                <Text style={styles.clubsFilterChipText}>
+                  {clubsLoading ? 'Clubes' : `${clubs.length} Clubs`}
+                </Text>
+                <Ionicons name="chevron-down" size={14} color={theme.auth.text} />
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.clubsFilterChip, pressed && styles.pressed]}
+                accessibilityRole="button"
+                accessibilityLabel="Días"
+              >
+                <Text style={styles.clubsFilterChipText}>Jue-Vie-Sab</Text>
+                <Ionicons name="chevron-down" size={14} color={theme.auth.text} />
+              </Pressable>
+            </ScrollView>
+          )}
 
           {step === 'pista_externa' ? (
             <ScrollView
@@ -361,7 +470,7 @@ export function CrearPartidoLocationSheet({
                 <Switch
                   value={pistaReservada}
                   onValueChange={setPistaReservada}
-                  trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
+                  trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
                   thumbColor="#fff"
                 />
               </View>
@@ -373,7 +482,7 @@ export function CrearPartidoLocationSheet({
                   <Switch
                     value={partidoPrivado}
                     onValueChange={setPartidoPrivado}
-                    trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
+                    trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
                     thumbColor="#fff"
                   />
                   <Pressable style={styles.infoButton}>
@@ -449,7 +558,7 @@ export function CrearPartidoLocationSheet({
                       <View style={[styles.configRadio, gender === opt.value && styles.configRadioSelected]}>
                         {gender === opt.value && <View style={styles.configRadioDot} />}
                       </View>
-                      <View>
+                      <View style={styles.configGenderTextWrap}>
                         <Text style={styles.configGenderLabel}>{opt.label}</Text>
                         <Text style={styles.configGenderSub}>{opt.sub}</Text>
                       </View>
@@ -470,7 +579,7 @@ export function CrearPartidoLocationSheet({
                     <Switch
                       value={partidoPrivado}
                       onValueChange={setPartidoPrivado}
-                      trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
+                      trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
                       thumbColor="#fff"
                     />
                   </View>
@@ -503,7 +612,7 @@ export function CrearPartidoLocationSheet({
               </ScrollView>
               <View style={styles.configurarFooter}>
                 <Pressable
-                  style={({ pressed }) => [styles.ctaButton, pressed && styles.pressed]}
+                  style={({ pressed }) => [styles.ctaButton, styles.ctaButtonConfig, pressed && styles.pressed]}
                   onPress={handleCheckout}
                   disabled={creating}
                 >
@@ -514,24 +623,28 @@ export function CrearPartidoLocationSheet({
           ) : step === 'clubs' ? (
             clubsLoading ? (
               <View style={styles.clubsStateWrapper}>
-                <View style={styles.clubsStateCard}>
-                  <View style={styles.clubsStateIconWrap}>
-                    <ActivityIndicator size="large" color="#E31E24" />
+                <View style={[styles.clubsStateCard, styles.clubsStateCardDark]}>
+                  <View style={[styles.clubsStateIconWrap, styles.clubsStateIconWrapDark]}>
+                    <ActivityIndicator size="large" color={theme.auth.accent} />
                   </View>
-                  <Text style={styles.clubsStateTitle}>Buscando pistas</Text>
-                  <Text style={styles.clubsStateSub}>Obteniendo disponibilidad de clubes...</Text>
+                  <Text style={[styles.clubsStateTitle, styles.clubsStateTitleDark]}>Buscando pistas</Text>
+                  <Text style={[styles.clubsStateSub, styles.clubsStateSubDark]}>
+                    Obteniendo disponibilidad de clubes...
+                  </Text>
                 </View>
               </View>
             ) : clubsError ? (
               <View style={styles.clubsStateWrapper}>
-                <View style={styles.clubsStateCard}>
-                  <View style={styles.clubsStateIconWrap}>
-                    <Ionicons name="cloud-offline-outline" size={32} color="#6b7280" />
+                <View style={[styles.clubsStateCard, styles.clubsStateCardDark]}>
+                  <View style={[styles.clubsStateIconWrap, styles.clubsStateIconWrapDark]}>
+                    <Ionicons name="cloud-offline-outline" size={32} color={theme.auth.textMuted} />
                   </View>
-                  <Text style={styles.clubsStateTitle}>{clubsError}</Text>
-                  <Text style={styles.clubsStateSub}>Comprueba la conexión e inténtalo de nuevo</Text>
+                  <Text style={[styles.clubsStateTitle, styles.clubsStateTitleDark]}>{clubsError}</Text>
+                  <Text style={[styles.clubsStateSub, styles.clubsStateSubDark]}>
+                    Comprueba la conexión e inténtalo de nuevo
+                  </Text>
                   <Pressable
-                    style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
+                    style={({ pressed }) => [styles.retryButton, styles.retryButtonApp, pressed && styles.pressed]}
                     onPress={loadClubs}
                   >
                     <Text style={styles.retryButtonText}>Reintentar</Text>
@@ -540,12 +653,14 @@ export function CrearPartidoLocationSheet({
               </View>
             ) : clubs.length === 0 ? (
               <View style={styles.clubsStateWrapper}>
-                <View style={styles.clubsStateCard}>
-                  <View style={styles.clubsStateIconWrap}>
+                <View style={[styles.clubsStateCard, styles.clubsStateCardDark]}>
+                  <View style={[styles.clubsStateIconWrap, styles.clubsStateIconWrapDark]}>
                     <Text style={styles.clubsEmptyEmoji}>🏟️</Text>
                   </View>
-                  <Text style={styles.clubsStateTitle}>Sin pistas</Text>
-                  <Text style={styles.clubsStateSub}>No se encontraron clubes con pistas. Añade clubs y courts en la base de datos.</Text>
+                  <Text style={[styles.clubsStateTitle, styles.clubsStateTitleDark]}>Sin pistas</Text>
+                  <Text style={[styles.clubsStateSub, styles.clubsStateSubDark]}>
+                    No se encontraron clubes con pistas. Añade clubs y courts en la base de datos.
+                  </Text>
                 </View>
               </View>
             ) : (
@@ -555,41 +670,47 @@ export function CrearPartidoLocationSheet({
                 showsVerticalScrollIndicator={false}
               >
                 {createError && (
-                  <View style={styles.createErrorBanner}>
+                  <View style={[styles.createErrorBanner, styles.createErrorBannerDark]}>
                     <Ionicons name="alert-circle" size={18} color="#E31E24" />
                     <Text style={styles.createErrorText}>{createError}</Text>
                   </View>
                 )}
-                <View style={[styles.banner, { marginBottom: 20 }]}>
-                  <Text style={styles.bannerTitle}>Disponibilidad de los clubes WeMatch</Text>
-                  <Text style={styles.bannerSub}>Reserva tu plaza y lanza un nuevo Partido Abierto!</Text>
+                <View style={styles.bannerGlass}>
+                  <Text style={styles.bannerGlassTitle}>Disponibilidad de los clubes WeMatch</Text>
+                  <Text style={styles.bannerGlassSub}>
+                    Reserva tu plaza y lanza un nuevo Partido Abierto!
+                  </Text>
                 </View>
                 {clubs.map((club) => (
-                  <View key={club.clubId} style={styles.clubCard}>
-                    <View style={styles.clubHeader}>
+                  <View key={club.clubId} style={styles.clubCardGlass}>
+                    <View style={styles.clubHeaderGlass}>
                       {club.imageUrl ? (
-                        <Image source={{ uri: club.imageUrl }} style={styles.clubImage} resizeMode="cover" />
+                        <Image
+                          source={{ uri: club.imageUrl }}
+                          style={[styles.clubImage, styles.clubImageGlass]}
+                          resizeMode="cover"
+                        />
                       ) : (
-                        <View style={[styles.clubImage, styles.clubImagePlaceholder]} />
+                        <View style={[styles.clubImage, styles.clubImagePlaceholder, styles.clubImageGlass]} />
                       )}
                       <View style={styles.clubInfo}>
-                        <Text style={styles.clubName} numberOfLines={2}>
+                        <Text style={styles.clubNameGlass} numberOfLines={2}>
                           {club.clubName}
                         </Text>
-                        <Text style={styles.clubLocation}>{club.location}</Text>
+                        <Text style={styles.clubLocationGlass}>{club.location}</Text>
                       </View>
                     </View>
                     {club.dates.map((d, dateIdx) => (
                       <View
                         key={`${d.dateStr}-${d.label}`}
                         style={[
-                          styles.dateSection,
-                          dateIdx === club.dates.length - 1 && styles.dateSectionLast,
+                          styles.dateSectionGlass,
+                          dateIdx === club.dates.length - 1 && styles.dateSectionGlassLast,
                         ]}
                       >
-                        <Text style={styles.dateLabel}>{d.label}</Text>
+                        <Text style={styles.dateLabelGlass}>{d.label}</Text>
                         {d.slots.length === 0 ? (
-                          <Text style={styles.noSlotsText}>Sin horarios disponibles</Text>
+                          <Text style={styles.noSlotsTextGlass}>Sin horarios disponibles</Text>
                         ) : (
                           <ScrollView
                             horizontal
@@ -601,15 +722,15 @@ export function CrearPartidoLocationSheet({
                               <Pressable
                                 key={`${slot.courtId}-${slot.dateStr}-${slot.time}`}
                                 style={({ pressed }) => [
-                                  styles.slotButton,
-                                  pressed && styles.slotPressed,
+                                  styles.slotButtonGlass,
+                                  pressed && styles.slotPressedGlass,
                                   creating && styles.slotDisabled,
                                 ]}
                                 onPress={() => handleSlotPress(slot, club)}
                                 disabled={creating}
                               >
-                                <Text style={styles.slotTime}>{slot.time}</Text>
-                                <Text style={styles.slotDuration}>{slot.duration}</Text>
+                                <Text style={styles.slotTimeGlass}>{slot.time}</Text>
+                                <Text style={styles.slotDurationGlass}>{slot.duration}</Text>
                               </Pressable>
                             ))}
                           </ScrollView>
@@ -626,22 +747,31 @@ export function CrearPartidoLocationSheet({
           <Pressable
             style={({ pressed }) => [
               styles.optionCard,
-              selected === 'club_wematch' && styles.optionSelected,
+              selected === 'club_wematch' && step !== 'location' && styles.optionSelected,
+              step === 'location' && styles.optionCardLocation,
+              selected === 'club_wematch' && step === 'location' && styles.optionCardLocationSelected,
               pressed && styles.pressed,
             ]}
-            onPress={() => {
-              setSelected('club_wematch');
-              setStep('clubs');
-            }}
+            onPress={() => setSelected('club_wematch')}
             accessibilityRole="button"
             accessibilityState={{ selected: selected === 'club_wematch' }}
           >
-            <View style={styles.optionIconWrap}>
+            <View
+              style={[
+                styles.optionIconWrap,
+                step === 'location' &&
+                  (selected === 'club_wematch'
+                    ? styles.optionIconWrapLocationSelected
+                    : styles.optionIconWrapLocationNeutral),
+              ]}
+            >
               <Text style={styles.optionEmoji}>🏟️</Text>
             </View>
             <View style={styles.optionBody}>
-              <Text style={styles.optionTitle}>En un club WeMatch</Text>
-              <Text style={styles.optionDesc}>
+              <Text style={[styles.optionTitle, step === 'location' && styles.optionTitleLocation]}>
+                En un club WeMatch
+              </Text>
+              <Text style={[styles.optionDesc, step === 'location' && styles.optionDescLocation]}>
                 Elige en que club WeMatch quieres jugar y publica tu partido para que cualquier jugador pueda apuntarse.
               </Text>
             </View>
@@ -650,35 +780,83 @@ export function CrearPartidoLocationSheet({
           <Pressable
             style={({ pressed }) => [
               styles.optionCard,
-              selected === 'pista_externa' && styles.optionSelected,
+              selected === 'pista_externa' && step !== 'location' && styles.optionSelected,
+              step === 'location' && styles.optionCardLocation,
+              step === 'location' && styles.optionCardLocationSecond,
+              selected === 'pista_externa' && step === 'location' && styles.optionCardLocationSelected,
               pressed && styles.pressed,
             ]}
             onPress={() => setSelected('pista_externa')}
             accessibilityRole="button"
             accessibilityState={{ selected: selected === 'pista_externa' }}
           >
-            <View style={[styles.optionIconWrap, styles.optionIconGray]}>
-              <Ionicons name="location-outline" size={20} color="#6b7280" />
+            <View
+              style={[
+                styles.optionIconWrap,
+                step !== 'location' && styles.optionIconGray,
+                step === 'location' &&
+                  (selected === 'pista_externa'
+                    ? styles.optionIconWrapLocationSelected
+                    : styles.optionIconWrapLocationNeutral),
+              ]}
+            >
+              <Ionicons
+                name="location-outline"
+                size={20}
+                color={step === 'location' ? '#9ca3af' : '#6b7280'}
+              />
             </View>
             <View style={styles.optionBody}>
-              <Text style={styles.optionTitle}>Ya se en que pista voy a jugar</Text>
-              <Text style={styles.optionDesc}>
+              <Text style={[styles.optionTitle, step === 'location' && styles.optionTitleLocation]}>
+                Ya se en que pista voy a jugar
+              </Text>
+              <Text style={[styles.optionDesc, step === 'location' && styles.optionDescLocation]}>
                 Juega en un club o instalacion que esta fuera de las opciones que ofrece WeMatch.
               </Text>
             </View>
           </Pressable>
 
           <Pressable
-            style={({ pressed }) => [styles.ctaButton, pressed && styles.pressed]}
+            style={({ pressed }) => [
+              styles.ctaButton,
+              step === 'location' && styles.ctaButtonLocation,
+              pressed && styles.pressed,
+            ]}
             onPress={handleSiguiente}
             accessibilityRole="button"
             accessibilityLabel="Siguiente"
           >
-            <Text style={styles.ctaButtonText}>Siguiente</Text>
+            <Text style={[styles.ctaButtonText, step === 'location' && styles.ctaButtonTextLocation]}>Siguiente</Text>
           </Pressable>
+          {step === 'location' && <View style={styles.locationBottomSpacer} />}
           </>
           )}
-        </View>
+          </View>
+  );
+
+  if (!isModal) {
+    return (
+      <View style={styles.fullscreenRoot}>
+        {sheetElement}
+      </View>
+    );
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
+      <View style={styles.overlay}>
+        <Pressable
+          style={styles.overlayBackdrop}
+          onPress={onClose}
+          accessibilityLabel="Cerrar"
+        />
+        {sheetElement}
       </View>
     </Modal>
   );
@@ -695,10 +873,35 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   sheet: {
-    backgroundColor: '#fff',
+    backgroundColor: '#FAFAFA',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: theme.spacing.lg,
+  },
+  sheetLocation: {
+    backgroundColor: theme.auth.bg,
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.sm,
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+  /** Pantalla completa: sin forma de bottom sheet */
+  sheetFullscreen: {
+    flex: 1,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    width: '100%',
+    alignSelf: 'stretch',
+    minHeight: 0,
+  },
+  sheetFullscreenTall: {
+    flex: 1,
+  },
+  fullscreenRoot: {
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
+    backgroundColor: theme.auth.bg,
   },
   handle: {
     width: 40,
@@ -709,17 +912,94 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 20,
   },
+  handleLocation: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 24,
   },
+  /** Pantalla clubes fullscreen — referencia StartMatchFlow (px-5 pt-4 pb-3) */
+  headerClubsFullscreenWrap: {
+    width: '100%',
+    marginBottom: 16,
+  },
+  headerClubsFullscreen: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  headerClubsBackBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerClubsTitle: {
+    flex: 1,
+    fontSize: theme.fontSize.sm,
+    fontWeight: '700',
+    color: theme.auth.text,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+  },
+  headerClubsRightSpacer: {
+    width: 40,
+    height: 40,
+  },
+  /** Franja de filtros bajo header (clubes fullscreen): gap-2 px-5 pb-4 */
+  clubsFiltersScroll: {
+    width: '100%',
+    maxHeight: 52,
+  },
+  clubsFiltersRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: 16,
+  },
+  clubsFilterIconBtn: {
+    padding: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    flexShrink: 0,
+  },
+  clubsFilterChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: theme.auth.accent,
+    borderRadius: 12,
+    flexShrink: 0,
+  },
+  clubsFilterChipText: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: '600',
+    color: theme.auth.text,
+  },
   headerTitle: {
     flex: 1,
     fontSize: theme.fontSize.lg,
     fontWeight: '700',
     color: '#1A1A1A',
+  },
+  headerTitleLocation: {
+    color: theme.auth.text,
   },
   headerActions: {
     flexDirection: 'row',
@@ -734,6 +1014,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  iconButtonLocation: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
   optionCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -743,6 +1028,20 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
     borderRadius: 16,
     marginBottom: 12,
+  },
+  optionCardLocation: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 16,
+  },
+  optionCardLocationSelected: {
+    borderWidth: 2,
+    borderColor: theme.auth.accent,
+    backgroundColor: 'rgba(241, 143, 52, 0.1)',
+  },
+  optionCardLocationSecond: {
+    marginBottom: 24,
   },
   optionSelected: {
     borderWidth: 2,
@@ -759,6 +1058,16 @@ const styles = StyleSheet.create({
   },
   optionIconGray: {
     backgroundColor: '#f9fafb',
+  },
+  optionIconWrapLocationSelected: {
+    backgroundColor: 'rgba(241, 143, 52, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(241, 143, 52, 0.3)',
+  },
+  optionIconWrapLocationNeutral: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   optionEmoji: {
     fontSize: 18,
@@ -777,17 +1086,46 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     lineHeight: 18,
   },
+  optionTitleLocation: {
+    color: theme.auth.text,
+  },
+  optionDescLocation: {
+    color: theme.auth.textMuted,
+  },
   ctaButton: {
-    backgroundColor: '#E31E24',
+    backgroundColor: theme.auth.accent,
     borderRadius: 16,
     paddingVertical: 16,
+    paddingHorizontal: 20,
     alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
     marginTop: 12,
+  },
+  ctaButtonConfig: {
+    marginTop: 0,
+  },
+  ctaButtonLocation: {
+    backgroundColor: theme.auth.accent,
+    marginTop: 0,
+  },
+  ctaButtonTextLocation: {
+    color: '#fff',
+    textAlign: 'center',
+    width: '100%',
+    flexShrink: 0,
+  },
+  locationBottomSpacer: {
+    height: 16,
   },
   ctaButtonText: {
     fontSize: 14,
     fontWeight: '700',
     color: '#fff',
+    textAlign: 'center',
+    includeFontPadding: false,
+    width: '100%',
+    flexShrink: 0,
   },
   bottomSpacer: {
     height: 16,
@@ -805,10 +1143,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     marginBottom: 0,
   },
+  /** Header light del paso `configurar` (como StartMatchFlow) */
+  headerConfig: {
+    backgroundColor: 'rgba(250,250,250,0.95)',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+    paddingVertical: 16,
+    marginBottom: 0,
+  },
+  headerConfigCloseBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(250,250,250,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(229,231,235,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerConfigTitle: {
+    flex: 1,
+    fontSize: theme.fontSize.sm,
+    fontWeight: '700',
+    color: '#1A1A1A',
+    textAlign: 'center',
+  },
+  headerConfigRightSpacer: {
+    width: 40,
+    height: 40,
+  },
   backLabel: {
     fontSize: theme.fontSize.base,
     fontWeight: '600',
     color: '#1A1A1A',
+  },
+  backLabelOnDark: {
+    color: theme.auth.text,
   },
   clubsWrapper: {
     flex: 1,
@@ -824,20 +1194,97 @@ const styles = StyleSheet.create({
   clubsContent: {
     paddingBottom: theme.spacing.xl,
   },
-  banner: {
-    backgroundColor: 'rgba(243,244,246,0.6)',
+  /** Listado clubes — panel tipo glass (referencia StartMatchFlow) */
+  bannerGlass: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
     borderRadius: 16,
     padding: 16,
+    marginBottom: 20,
   },
-  bannerTitle: {
-    fontSize: 14,
+  bannerGlassTitle: {
+    fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
     marginBottom: 2,
   },
-  bannerSub: {
-    fontSize: 12,
-    color: '#6b7280',
+  bannerGlassSub: {
+    fontSize: theme.fontSize.xs,
+    color: theme.auth.textMuted,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+  },
+  clubCardGlass: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+  },
+  clubHeaderGlass: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  clubImageGlass: {
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  clubNameGlass: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: '700',
+    color: theme.auth.text,
+    marginBottom: 2,
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+  },
+  clubLocationGlass: {
+    fontSize: theme.fontSize.xs,
+    color: theme.auth.textMuted,
+  },
+  dateSectionGlass: {
+    marginBottom: 12,
+  },
+  dateSectionGlassLast: {
+    marginBottom: 0,
+  },
+  dateLabelGlass: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: '700',
+    color: theme.auth.text,
+    marginBottom: 8,
+  },
+  slotButtonGlass: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 60,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 12,
+    backgroundColor: '#f3f4f6',
+  },
+  slotPressedGlass: {
+    borderColor: theme.auth.accent,
+    backgroundColor: 'rgba(241, 143, 52, 0.08)',
+  },
+  slotTimeGlass: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  slotDurationGlass: {
+    fontSize: 10,
+    color: '#9ca3af',
+    marginTop: 2,
+  },
+  noSlotsTextGlass: {
+    fontSize: theme.fontSize.xs,
+    color: theme.auth.textMuted,
+    fontStyle: 'italic',
   },
   clubsStateWrapper: {
     flex: 1,
@@ -873,13 +1320,25 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 16,
   },
+  clubsStateCardDark: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  clubsStateIconWrapDark: {
+    backgroundColor: 'rgba(241, 143, 52, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(241, 143, 52, 0.25)',
+  },
+  clubsStateTitleDark: {
+    color: theme.auth.text,
+  },
+  clubsStateSubDark: {
+    color: theme.auth.textMuted,
+    marginBottom: 0,
+  },
   clubsEmptyEmoji: {
     fontSize: 28,
-  },
-  noSlotsText: {
-    fontSize: 12,
-    color: '#9ca3af',
-    fontStyle: 'italic',
   },
   retryButton: {
     marginTop: 8,
@@ -887,6 +1346,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     backgroundColor: '#E31E24',
     borderRadius: 12,
+  },
+  retryButtonApp: {
+    backgroundColor: theme.auth.accent,
+    marginTop: 16,
   },
   retryButtonText: {
     fontSize: 14,
@@ -902,35 +1365,22 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 16,
   },
+  createErrorBannerDark: {
+    backgroundColor: 'rgba(227, 30, 36, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(227, 30, 36, 0.35)',
+  },
   createErrorText: {
     flex: 1,
     fontSize: 12,
     color: '#E31E24',
     fontWeight: '500',
   },
-  clubsList: {
-    gap: 20,
-  },
-  clubCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-    padding: 16,
-    marginBottom: 20,
-  },
-  clubHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
   clubImage: {
     width: 64,
     height: 64,
     borderRadius: 12,
   },
-  clubImagePlaceholder: { backgroundColor: '#e5e7eb' },
   clubImagePlaceholder: {
     backgroundColor: '#f3f4f6',
     alignItems: 'center',
@@ -943,60 +1393,13 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  clubName: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    marginBottom: 2,
-    lineHeight: 18,
-  },
-  clubLocation: {
-    fontSize: 12,
-    color: '#9ca3af',
-  },
-  dateSection: {
-    marginBottom: 12,
-  },
-  dateSectionLast: {
-    marginBottom: 0,
-  },
-  dateLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    marginBottom: 8,
-  },
   slotsRow: {
     flexDirection: 'row',
     gap: 8,
     paddingBottom: 4,
   },
-  slotButton: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 60,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 12,
-  },
-  slotPressed: {
-    borderColor: '#E31E24',
-    backgroundColor: 'rgba(227,30,36,0.05)',
-  },
   slotDisabled: {
     opacity: 0.6,
-  },
-  slotTime: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#1A1A1A',
-  },
-  slotDuration: {
-    fontSize: 10,
-    color: '#9ca3af',
   },
   pistaScroll: {
     flex: 1,
@@ -1146,10 +1549,11 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   configurarContent: {
+    paddingTop: theme.spacing.lg,
     paddingBottom: 100,
   },
   configSection: {
-    marginBottom: 24,
+    marginBottom: 20,
   },
   configSectionTitle: {
     fontSize: 14,
@@ -1166,11 +1570,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#e5e7eb',
     backgroundColor: '#fff',
-    marginBottom: 8,
+    marginBottom: 12,
+    alignSelf: 'stretch',
   },
   configOptionSelected: {
-    borderColor: '#E31E24',
-    backgroundColor: 'rgba(227,30,36,0.05)',
+    borderColor: theme.auth.accent,
+    backgroundColor: 'rgba(241,143,52,0.08)',
   },
   configRadio: {
     width: 24,
@@ -1183,16 +1588,18 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   configRadioSelected: {
-    borderColor: '#E31E24',
+    borderColor: theme.auth.accent,
   },
   configRadioDot: {
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: '#E31E24',
+    backgroundColor: theme.auth.accent,
   },
   configOptionBody: {
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   configOptionTitle: {
     fontSize: 14,
@@ -1209,6 +1616,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
     paddingVertical: 12,
+    alignSelf: 'stretch',
+  },
+  configGenderTextWrap: {
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   configGenderLabel: {
     fontSize: 14,
@@ -1228,7 +1641,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: '#e5e7eb',
     backgroundColor: '#fff',
   },
   privacyLeft: {
@@ -1290,11 +1703,15 @@ const styles = StyleSheet.create({
   configClubPrice: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#E31E24',
+    color: theme.auth.accent,
     marginTop: 4,
   },
   configurarFooter: {
-    paddingTop: 16,
-    paddingBottom: Math.max(24, 0),
+    width: '100%',
+    backgroundColor: 'rgba(250,250,250,0.95)',
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+    paddingTop: 12,
+    paddingBottom: 16,
   },
 });

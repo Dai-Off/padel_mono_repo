@@ -3,27 +3,29 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../theme';
 
-const FILTER_BAR_RIGHT_INSET = 32;
+const FILTER_BAR_RIGHT_INSET = 24;
+const ACCENT = theme.auth.accent;
 
 type SearchFilterBarProps = {
   sportLabel: string;
   dateLabel: string;
   timeRangeLabel: string;
-  onFiltersPress?: () => void;
   onSportPress?: () => void;
   onDatePress?: () => void;
   onTimeRangePress?: () => void;
+  /** Badge “Cerca” cuando el orden es por distancia (referencia BuscadorScreen). */
+  showCercaBadge?: boolean;
 };
 
-/** Barra horizontal de filtros para el buscador de partidos. Scroll horizontal en pantallas pequeñas. */
+/** Fila horizontal de chips (deporte, fecha, hora) + badge Cerca. */
 export function SearchFilterBar({
   sportLabel,
   dateLabel,
   timeRangeLabel,
-  onFiltersPress,
   onSportPress,
   onDatePress,
   onTimeRangePress,
+  showCercaBadge = true,
 }: SearchFilterBarProps) {
   const insets = useSafeAreaInsets();
   const rightInset = Math.max(FILTER_BAR_RIGHT_INSET, insets.right + 8);
@@ -35,18 +37,19 @@ export function SearchFilterBar({
       contentContainerStyle={styles.scrollContent}
       style={styles.scroll}
     >
-      <Pressable
-        onPress={onFiltersPress}
-        style={({ pressed }) => [styles.filtersButton, pressed && styles.pressed]}
-        accessibilityRole="button"
-        accessibilityLabel="Filtros"
-      >
-        <Ionicons name="options" size={16} color="#1A1A1A" />
-      </Pressable>
-
       <FilterChip label={sportLabel} onPress={onSportPress} />
       <FilterChip label={dateLabel} onPress={onDatePress} />
-      <FilterChip label={timeRangeLabel} onPress={onTimeRangePress} />
+      <FilterChip
+        label={timeRangeLabel}
+        onPress={onTimeRangePress}
+        icon="time-outline"
+      />
+      {showCercaBadge && (
+        <View style={styles.cercaBadge} accessibilityLabel="Orden: cercanía">
+          <Ionicons name="trending-up" size={12} color={ACCENT} />
+          <Text style={styles.cercaText}>Cerca</Text>
+        </View>
+      )}
       <View style={{ width: rightInset, flexShrink: 0 }} />
     </ScrollView>
   );
@@ -55,9 +58,11 @@ export function SearchFilterBar({
 function FilterChip({
   label,
   onPress,
+  icon,
 }: {
   label: string;
   onPress?: () => void;
+  icon?: keyof typeof Ionicons.glyphMap;
 }) {
   return (
     <Pressable
@@ -66,10 +71,13 @@ function FilterChip({
       accessibilityRole="button"
       accessibilityLabel={label}
     >
+      {icon ? (
+        <Ionicons name={icon} size={12} color="rgba(255,255,255,0.9)" />
+      ) : null}
       <Text style={styles.chipLabel} numberOfLines={1}>
         {label}
       </Text>
-      <Ionicons name="chevron-down" size={14} color="#fff" />
+      <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.75)" />
     </Pressable>
   );
 }
@@ -81,35 +89,48 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.spacing.xs,
-    paddingLeft: theme.spacing.lg,
-    paddingBottom: theme.spacing.sm,
-  },
-  filtersButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 8,
+    paddingLeft: 0,
+    paddingBottom: 0,
   },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: '#1A1A1A',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    maxWidth: 200,
   },
   chipLabel: {
     fontSize: theme.fontSize.xs,
     fontWeight: '600',
     color: '#fff',
+    flexShrink: 1,
+  },
+  cercaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 'auto',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(241,143,52,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.2)',
+  },
+  cercaText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: ACCENT,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
   pressed: {
-    opacity: 0.8,
+    opacity: 0.85,
   },
 });
