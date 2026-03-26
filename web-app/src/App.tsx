@@ -43,6 +43,14 @@ function App() {
           path="/"
           element={
             <ProtectedRoute>
+              <Navigate to="/grilla?menu=resumen" replace />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/pistas"
+          element={
+            <ProtectedRoute>
               <ClubDashboard />
             </ProtectedRoute>
           }
@@ -88,7 +96,31 @@ function App() {
           }
         />
         <Route
+          path="/pagos"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/crm"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/checkIn"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/cierreCaja"
           element={
             <ProtectedRoute>
               <ClubDashboard />
