@@ -1,6 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BarChart3, Calculator, CheckCircle2, History, Search, TrendingDown, TrendingUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import { PageSpinner } from '../Layout/PageSpinner';
+import { clubStaffService } from '../../services/clubStaff';
+import { HttpError } from '../../services/api';
+import {
+  paymentsService,
+  type CashClosingBookingExpected,
+  type CashClosingSavedRecord,
+} from '../../services/payments';
+import type { ClubStaffMember } from '../../types/clubStaff';
 
 type CashBreakdown = {
   bills_500: number;
@@ -33,6 +43,21 @@ type CashClosingRecord = {
   status: 'perfect' | 'surplus' | 'deficit';
 };
 
+function mapSavedToLocal(r: CashClosingSavedRecord): CashClosingRecord {
+  return {
+    id: r.id,
+    date: new Date(r.closed_at),
+    employeeName: r.employee_name,
+    realCashTotal: r.real_cash_cents / 100,
+    realCardTotal: r.real_card_cents / 100,
+    systemCashTotal: r.system_cash_cents / 100,
+    systemCardTotal: r.system_card_cents / 100,
+    totalDifference: r.difference_cents / 100,
+    observations: r.observations ?? '',
+    status: r.status,
+  };
+}
+
 const emptyBreakdown: CashBreakdown = {
   bills_500: 0, bills_200: 0, bills_100: 0, bills_50: 0, bills_20: 0, bills_10: 0, bills_5: 0,
   coins_2: 0, coins_1: 0, coins_050: 0, coins_020: 0, coins_010: 0, coins_005: 0, coins_002: 0, coins_001: 0,
@@ -46,18 +71,31 @@ const denominations: { key: keyof CashBreakdown; label: string; value: number }[
   { key: 'coins_002', label: '0.02EUR', value: 0.02 }, { key: 'coins_001', label: '0.01EUR', value: 0.01 },
 ];
 
-export function ClubCashClosingTab() {
+export function ClubCashClosingTab({
+  clubId,
+  clubResolved = true,
+}: {
+  clubId: string | null;
+  clubResolved?: boolean;
+}) {
   const { t } = useTranslation();
   const [view, setView] = useState<'new' | 'history'>('new');
-  const [employeeName, setEmployeeName] = useState('');
+  const [staff, setStaff] = useState<ClubStaffMember[]>([]);
+  const [employeeId, setEmployeeId] = useState('');
+  const selectedEmployeeName = useMemo(
+    () => staff.find((s) => s.id === employeeId)?.name ?? '',
+    [staff, employeeId]
+  );
   const [observations, setObservations] = useState('');
   const [cardTotal, setCardTotal] = useState('');
   const [cashBreakdown, setCashBreakdown] = useState<CashBreakdown>(emptyBreakdown);
   const [historyRecords, setHistoryRecords] = useState<CashClosingRecord[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-
-  const systemCashTotal = 216.16;
-  const systemCardTotal = 188.0;
+  const [expectedBookings, setExpectedBookings] = useState<CashClosingBookingExpected[]>([]);
+  const [systemCashTotal, setSystemCashTotal] = useState(0);
+  const [systemCardTotal, setSystemCardTotal] = useState(0);
+  const [loadingExpected, setLoadingExpected] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const realCashTotal = useMemo(
     () => denominations.reduce((acc, d) => acc + (cashBreakdown[d.key] * d.value), 0),
@@ -66,35 +104,95 @@ export function ClubCashClosingTab() {
   const realCardTotal = Number(cardTotal) || 0;
   const totalDifference = (realCashTotal + realCardTotal) - (systemCashTotal + systemCardTotal);
 
-  const canSave = employeeName.trim() !== '' && (realCashTotal > 0 || realCardTotal > 0);
+  const canSave = employeeId.trim() !== '' && (realCashTotal > 0 || realCardTotal > 0);
 
   const filteredHistory = historyRecords.filter((r) => {
     const q = searchTerm.toLowerCase();
     return r.employeeName.toLowerCase().includes(q) || r.id.toLowerCase().includes(q);
   });
 
-  const saveClosing = () => {
-    if (!canSave) return;
-    const status: CashClosingRecord['status'] = Math.abs(totalDifference) < 0.01 ? 'perfect' : totalDifference > 0 ? 'surplus' : 'deficit';
-    const record: CashClosingRecord = {
-      id: `ARQ-${Date.now()}`,
-      date: new Date(),
-      employeeName: employeeName.trim(),
-      realCashTotal,
-      realCardTotal,
-      systemCashTotal,
-      systemCardTotal,
-      totalDifference,
-      observations: observations.trim(),
-      status,
+  useEffect(() => {
+    if (!clubResolved || !clubId) return;
+    let cancelled = false;
+    setLoadingExpected(true);
+
+    (async () => {
+      try {
+        const [staffRows, expected] = await Promise.all([
+          clubStaffService.list(clubId),
+          paymentsService.getCashClosingExpected(clubId),
+        ]);
+        if (cancelled) return;
+
+        setStaff(staffRows ?? []);
+        setExpectedBookings(expected.bookings ?? []);
+        setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
+        setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
+
+        try {
+          const recs = await paymentsService.listCashClosingRecords(clubId);
+          if (!cancelled) setHistoryRecords(recs.map(mapSavedToLocal));
+        } catch (histErr) {
+          if (!cancelled) setHistoryRecords([]);
+          if (!cancelled && histErr instanceof HttpError && histErr.status === 503) {
+            toast.error(
+              'Falta la tabla de arqueos en la base de datos. Aplica la migración 012_club_cash_closings.sql en Supabase.'
+            );
+          } else if (!cancelled) {
+            toast.error((histErr as Error).message || t('payments_load_error'));
+          }
+        }
+      } catch (e) {
+        if (cancelled) return;
+        toast.error((e as Error).message || t('payments_load_error'));
+      } finally {
+        if (!cancelled) setLoadingExpected(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
     };
-    setHistoryRecords((prev) => [record, ...prev]);
-    setCashBreakdown(emptyBreakdown);
-    setCardTotal('');
-    setEmployeeName('');
-    setObservations('');
-    setView('history');
+  }, [clubId, clubResolved]);
+
+  const saveClosing = async () => {
+    if (!canSave || !clubId) return;
+    if (!selectedEmployeeName) return;
+    setSaving(true);
+    try {
+      const forDate = new Date().toISOString().slice(0, 10);
+      const saved = await paymentsService.createCashClosingRecord({
+        club_id: clubId,
+        staff_id: employeeId,
+        for_date: forDate,
+        real_cash_cents: Math.round(realCashTotal * 100),
+        real_card_cents: Math.round(realCardTotal * 100),
+        system_cash_cents: Math.round(systemCashTotal * 100),
+        system_card_cents: Math.round(systemCardTotal * 100),
+        observations: observations.trim() || undefined,
+      });
+      setHistoryRecords((prev) => [mapSavedToLocal(saved), ...prev]);
+      setCashBreakdown(emptyBreakdown);
+      setCardTotal('');
+      setEmployeeId('');
+      setObservations('');
+      setView('history');
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 503) {
+        toast.error(
+          'Falta la tabla de arqueos en la base de datos. Aplica la migración 012_club_cash_closings.sql en Supabase.'
+        );
+      } else {
+        toast.error((e as Error).message || t('payments_load_error'));
+      }
+    } finally {
+      setSaving(false);
+    }
   };
+
+  if (!clubResolved) return <PageSpinner />;
+  if (!clubId) return <p className="text-sm text-gray-500 text-center py-12">No se pudo determinar el club.</p>;
+  if (loadingExpected && view === 'new') return <PageSpinner />;
 
   return (
     <div className="space-y-5">
@@ -173,13 +271,18 @@ export function ClubCashClosingTab() {
               ))}
             </div>
             <div className="grid md:grid-cols-2 gap-3 mt-4">
-              <input
-                type="text"
-                value={employeeName}
-                onChange={(e) => setEmployeeName(e.target.value)}
-                placeholder={t('cash_employee')}
+              <select
+                value={employeeId}
+                onChange={(e) => setEmployeeId(e.target.value)}
                 className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
-              />
+              >
+                <option value="">{t('cash_employee')}</option>
+                {staff.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
               <input
                 type="number"
                 min={0}
@@ -197,12 +300,41 @@ export function ClubCashClosingTab() {
               className="w-full mt-3 px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs resize-none"
               rows={3}
             />
+            <div className="mt-4 bg-gray-50 border border-gray-100 rounded-2xl p-4">
+              <h4 className="text-[10px] font-bold text-gray-500 mb-2">Esperado (hoy)</h4>
+              {loadingExpected ? (
+                <p className="text-xs text-gray-400">Cargando...</p>
+              ) : expectedBookings.length === 0 ? (
+                <p className="text-xs text-gray-400">Sin pagos registrados para este día.</p>
+              ) : (
+                <div className="space-y-2 max-h-[180px] overflow-auto pr-1">
+                  {expectedBookings.slice(0, 12).map((b) => {
+                    const time = b.start_at
+                      ? new Date(b.start_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+                      : '-';
+                    return (
+                      <div key={b.booking_id} className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-[#1A1A1A] truncate">{b.court_name ?? 'Reserva'}</p>
+                          <p className="text-[10px] text-gray-400">{time}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] text-gray-500">Físico: €{(b.cash_paid_cents / 100).toFixed(2)}</p>
+                          <p className="text-[10px] text-gray-500">Tarjeta: €{(b.card_paid_cents / 100).toFixed(2)}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <button
-              onClick={saveClosing}
-              disabled={!canSave}
+              type="button"
+              onClick={() => void saveClosing()}
+              disabled={!canSave || saving}
               className="mt-4 px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1A1A1A] text-white disabled:opacity-40"
             >
-              {t('cash_save_closing')}
+              {saving ? t('loading') : t('cash_save_closing')}
             </button>
           </div>
 
@@ -217,6 +349,12 @@ export function ClubCashClosingTab() {
                 {Math.abs(totalDifference) < 0.01 ? <CheckCircle2 className="w-5 h-5" /> : totalDifference > 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
                 {totalDifference > 0 ? '+' : ''}
                 {totalDifference.toFixed(2)}€
+              </p>
+            </div>
+            <div className="bg-white rounded-2xl border border-gray-100 p-4">
+              <p className="text-[10px] text-gray-400">Sistema (esperado)</p>
+              <p className="text-[12px] font-bold text-[#1A1A1A]">
+                Físico: €{systemCashTotal.toFixed(2)} • Tarjeta: €{systemCardTotal.toFixed(2)}
               </p>
             </div>
           </div>
@@ -242,10 +380,11 @@ export function ClubCashClosingTab() {
           ) : (
             filteredHistory.map((record) => (
               <div key={record.id} className="bg-white rounded-2xl border border-gray-100 p-4">
-                <p className="text-xs font-bold text-[#1A1A1A]">{record.id}</p>
-                <p className="text-[10px] text-gray-400 mt-1">{record.employeeName} • {record.date.toLocaleString('es-ES')}</p>
+                <p className="text-xs font-bold text-[#1A1A1A]">{record.date.toLocaleString('es-ES')}</p>
+                <p className="text-[10px] text-gray-400 mt-1">{record.employeeName}</p>
                 <p className="text-[10px] text-gray-500 mt-2">
                   Real: {(record.realCashTotal + record.realCardTotal).toFixed(2)}€ • Sistema: {(record.systemCashTotal + record.systemCardTotal).toFixed(2)}€
+                  {record.observations ? ` • ${record.observations}` : ''}
                 </p>
               </div>
             ))

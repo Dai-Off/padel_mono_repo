@@ -587,6 +587,597 @@ export async function listTransactionsHandler(req: Request, res: Response): Prom
   }
 }
 
+function canAccessClubForPayments(req: Request, clubId: string): boolean {
+  if (req.authContext?.adminId) return true;
+  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
+}
+
+/**
+ * GET /payments/club-transactions
+ * Lista transacciones cuyas reservas pertenecen a pistas del club (dueño / admin).
+ * Requiere `attachAuthContext` + `requireClubOwnerOrAdmin` en el router.
+ *
+ * @openapi
+ * /payments/club-transactions:
+ *   get:
+ *     tags: [Payments]
+ *     summary: Listar transacciones del club (panel dueño/admin)
+ *     description: |
+ *       Devuelve pagos asociados a reservas en pistas del `club_id`. Incluye datos del pagador (jugador).
+ *       No usar para la app del jugador; para eso existe GET /payments/transactions.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 100, maximum: 200 }
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok: { type: boolean, example: true }
+ *                 transactions:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: string, format: uuid }
+ *                       amount_cents: { type: integer }
+ *                       currency: { type: string }
+ *                       status: { type: string }
+ *                       created_at: { type: string, format: date-time }
+ *                       booking_id: { type: string, format: uuid }
+ *                       start_at: { type: string, nullable: true }
+ *                       end_at: { type: string, nullable: true }
+ *                       court_name: { type: string, nullable: true }
+ *                       club_name: { type: string, nullable: true }
+ *                       city: { type: string, nullable: true }
+ *                       payer_first_name: { type: string, nullable: true }
+ *                       payer_last_name: { type: string, nullable: true }
+ *                       payer_email: { type: string, nullable: true }
+ *             example:
+ *               ok: true
+ *               transactions:
+ *                 - id: "uuid"
+ *                   amount_cents: 2500
+ *                   currency: "EUR"
+ *                   status: "succeeded"
+ *                   payer_first_name: "Ana"
+ *                   payer_last_name: "García"
+ *       400: { description: Falta club_id }
+ *       401: { description: Sin token o sesión inválida }
+ *       403: { description: Sin acceso al club o sin rol dueño/admin }
+ *       500: { description: Error de base de datos }
+ */
+export async function listClubTransactionsHandler(req: Request, res: Response): Promise<void> {
+  const clubId = String(req.query.club_id ?? '').trim();
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 200);
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: rows, error } = await supabase
+      .from('payment_transactions')
+      .select(`
+        id,
+        amount_cents,
+        currency,
+        status,
+        created_at,
+        booking_id,
+        players ( first_name, last_name, email ),
+        bookings!inner (
+          start_at,
+          end_at,
+          courts!inner (
+            id,
+            name,
+            club_id,
+            clubs ( id, name, city )
+          )
+        )
+      `)
+      .eq('bookings.courts.club_id', clubId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('[payments/club-transactions]', error);
+      res.status(500).json({ ok: false, error: error.message });
+      return;
+    }
+
+    const transactions = (rows ?? []).map((t: Record<string, unknown>) => {
+      const rawB = t.bookings;
+      const b = (Array.isArray(rawB) ? rawB[0] : rawB) as Record<string, unknown> | null;
+      const rawCourt = b?.courts;
+      const court = (Array.isArray(rawCourt) ? rawCourt[0] : rawCourt) as Record<string, unknown> | null;
+      const rawClub = court?.clubs;
+      const club = (Array.isArray(rawClub) ? rawClub[0] : rawClub) as Record<string, unknown> | null;
+      const rawPayer = t.players;
+      const payer = (Array.isArray(rawPayer) ? rawPayer[0] : rawPayer) as Record<string, unknown> | null;
+      return {
+        id: t.id,
+        amount_cents: t.amount_cents,
+        currency: t.currency,
+        status: t.status,
+        created_at: t.created_at,
+        booking_id: t.booking_id,
+        start_at: b?.start_at ?? null,
+        end_at: b?.end_at ?? null,
+        court_name: court?.name ?? null,
+        club_name: club?.name ?? null,
+        city: club?.city ?? null,
+        payer_first_name: payer?.first_name ?? null,
+        payer_last_name: payer?.last_name ?? null,
+        payer_email: payer?.email ?? null,
+      };
+    });
+
+    res.json({ ok: true, transactions });
+  } catch (err) {
+    console.error('[payments/club-transactions]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * GET /payments/cash-closing/expected
+ * Calcula el "esperado" para el arqueo de caja de un día:
+ * - suma pagos `succeeded` asociados a bookings de ese día en el club
+ * - separa entre `cash` (físico) y `card` (no físico)
+ *   usando prefijo en `stripe_payment_intent_id` mock (`CASH_`) y/o `bookings.source_channel='manual'`.
+ *
+ * @openapi
+ * /payments/cash-closing/expected:
+ *   get:
+ *     tags: [Cash closing]
+ *     summary: Obtener esperado de arqueo de caja (por club y día)
+ *     description: |
+ *       Devuelve el total esperado para el arqueo de caja, relacionado con los bookings de ese día.
+ *       Incluye por cada booking cuánto se pagó en `cash` y cuánto en `card`.
+ *       Requiere JWT con acceso al club (admin o dueño).
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *         description: ID del club
+ *       - in: query
+ *         name: date
+ *         required: false
+ *         schema: { type: string, example: "2026-03-25" }
+ *         description: Fecha en formato YYYY-MM-DD (por defecto: hoy)
+ *       - in: query
+ *         name: limit
+ *         required: false
+ *         schema: { type: integer, default: 500, maximum: 5000 }
+ *         description: Límite de registros de transacciones consultadas
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             example:
+ *               ok: true
+ *               date: "2026-03-25"
+ *               systemCashTotal_cents: 12800
+ *               systemCardTotal_cents: 6400
+ *               bookings:
+ *                 - booking_id: "uuid"
+ *                   start_at: "2026-03-25T18:00:00.000Z"
+ *                   court_name: "Pista 1"
+ *                   total_price_cents: 3200
+ *                   cash_paid_cents: 3200
+ *                   card_paid_cents: 0
+ *       400: { description: Falta club_id o date inválida }
+ *       401: { description: Sin token o sesión inválida }
+ *       403: { description: Sin acceso al club }
+ *       500: { description: Error de base de datos }
+ */
+export async function cashClosingExpectedHandler(req: Request, res: Response): Promise<void> {
+  const clubId = String(req.query.club_id ?? '').trim();
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+
+  const dateStr = String(req.query.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  const limit = Math.min(parseInt(req.query.limit as string) || 500, 5000);
+
+  // Interpretación simple en UTC para evitar dependencias externas.
+  const startUtc = new Date(`${dateStr}T00:00:00.000Z`);
+  if (Number.isNaN(startUtc.getTime())) {
+    res.status(400).json({ ok: false, error: 'date inválida. Usa YYYY-MM-DD.' });
+    return;
+  }
+  const endUtc = new Date(startUtc);
+  endUtc.setUTCDate(endUtc.getUTCDate() + 1);
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: rows, error } = await supabase
+      .from('payment_transactions')
+      .select(`
+        id,
+        amount_cents,
+        currency,
+        status,
+        stripe_payment_intent_id,
+        booking_id,
+        bookings (
+          id,
+          start_at,
+          end_at,
+          total_price_cents,
+          source_channel,
+          courts (
+            id,
+            name,
+            club_id,
+            clubs ( id, name, city )
+          )
+        )
+      `)
+      .eq('status', 'succeeded')
+      .eq('bookings.courts.club_id', clubId)
+      .gte('bookings.start_at', startUtc.toISOString())
+      .lt('bookings.start_at', endUtc.toISOString())
+      .limit(limit);
+
+    if (error) {
+      console.error('[payments/cash-closing/expected]', error);
+      res.status(500).json({ ok: false, error: error.message });
+      return;
+    }
+
+    type BookingExpected = {
+      booking_id: string;
+      start_at: string | null;
+      end_at: string | null;
+      court_name: string | null;
+      total_price_cents: number | null;
+      cash_paid_cents: number;
+      card_paid_cents: number;
+    };
+
+    const byBooking = new Map<string, BookingExpected>();
+    let systemCashTotalCents = 0;
+    let systemCardTotalCents = 0;
+
+    for (const r of (rows ?? []) as Record<string, unknown>[]) {
+      const rawBooking = (r as any).bookings;
+      const b = (Array.isArray(rawBooking) ? rawBooking[0] : rawBooking) as Record<string, unknown> | null;
+      if (!b) continue;
+
+      const bookingId = (b.id as string) || (r.booking_id as string) || '';
+      if (!bookingId) continue;
+
+      const rawCourts = b.courts;
+      const court = (Array.isArray(rawCourts) ? rawCourts[0] : rawCourts) as Record<string, unknown> | null;
+
+      const stripeRef = r.stripe_payment_intent_id as string | null;
+      const sourceChannel = (b.source_channel as string | null) ?? null;
+      const isCash =
+        (typeof stripeRef === 'string' && stripeRef.startsWith('CASH_')) || sourceChannel === 'manual';
+
+      const amount = typeof r.amount_cents === 'number' ? r.amount_cents : 0;
+
+      const cur = byBooking.get(bookingId) ?? {
+        booking_id: bookingId,
+        start_at: (b.start_at as string | null) ?? null,
+        end_at: (b.end_at as string | null) ?? null,
+        court_name: court?.name ? String(court.name) : null,
+        total_price_cents: typeof b.total_price_cents === 'number' ? b.total_price_cents : null,
+        cash_paid_cents: 0,
+        card_paid_cents: 0,
+      };
+
+      if (isCash) cur.cash_paid_cents += amount;
+      else cur.card_paid_cents += amount;
+
+      byBooking.set(bookingId, cur);
+    }
+
+    for (const b of byBooking.values()) {
+      systemCashTotalCents += b.cash_paid_cents;
+      systemCardTotalCents += b.card_paid_cents;
+    }
+
+    const systemCashTotalEur = Math.round((systemCashTotalCents / 100) * 100) / 100;
+    const systemCardTotalEur = Math.round((systemCardTotalCents / 100) * 100) / 100;
+
+    res.json({
+      ok: true,
+      date: dateStr,
+      systemCashTotal_cents: systemCashTotalCents,
+      systemCardTotal_cents: systemCardTotalCents,
+      systemCashTotal_eur: systemCashTotalEur,
+      systemCardTotal_eur: systemCardTotalEur,
+      bookings: Array.from(byBooking.values()).sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? '')),
+    });
+  } catch (err) {
+    console.error('[payments/cash-closing/expected]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+type CashClosingStatus = 'perfect' | 'surplus' | 'deficit';
+
+function cashClosingStatusFromDiffCents(diffCents: number): CashClosingStatus {
+  if (Math.abs(diffCents) < 1) return 'perfect';
+  return diffCents > 0 ? 'surplus' : 'deficit';
+}
+
+/**
+ * GET /payments/cash-closing/records
+ * Historial de arqueos guardados para el club.
+ *
+ * @openapi
+ * /payments/cash-closing/records:
+ *   get:
+ *     tags: [Cash closing]
+ *     summary: Listar arqueos de caja guardados
+ *     description: Devuelve los cierres persistidos del club, más recientes primero.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50, maximum: 200 }
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             example:
+ *               ok: true
+ *               records:
+ *                 - id: "uuid"
+ *                   closed_at: "2026-03-25T18:00:00Z"
+ *                   employee_name: "Ana"
+ *                   real_cash_cents: 21600
+ *                   status: "perfect"
+ *       400: { description: Falta club_id }
+ *       401: { description: Sin token }
+ *       403: { description: Sin acceso al club }
+ *       500: { description: Error de base de datos }
+ *       503: { description: Tabla no migrada }
+ */
+export async function listCashClosingRecordsHandler(req: Request, res: Response): Promise<void> {
+  const clubId = String(req.query.club_id ?? '').trim();
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+  const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('club_cash_closings')
+      .select(
+        'id, club_id, staff_id, employee_name, closed_at, for_date, real_cash_cents, real_card_cents, system_cash_cents, system_card_cents, difference_cents, observations, status'
+      )
+      .eq('club_id', clubId)
+      .order('closed_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      if (error.message.includes('relation') && error.message.includes('does not exist')) {
+        res.status(503).json({
+          ok: false,
+          error: 'Tabla club_cash_closings no existe. Aplica la migración 012 en Supabase.',
+        });
+        return;
+      }
+      console.error('[payments/cash-closing/records]', error);
+      res.status(500).json({ ok: false, error: error.message });
+      return;
+    }
+
+    res.json({ ok: true, records: data ?? [] });
+  } catch (err) {
+    console.error('[payments/cash-closing/records]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/cash-closing/records
+ * Guarda un arqueo de caja (persistente).
+ *
+ * @openapi
+ * /payments/cash-closing/records:
+ *   post:
+ *     tags: [Cash closing]
+ *     summary: Guardar arqueo de caja
+ *     description: |
+ *       Persiste el cierre con montos en céntimos y valida que `staff_id` pertenezca al club.
+ *       Calcula `difference_cents` y `status` en servidor.
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_id, staff_id, real_cash_cents, real_card_cents, system_cash_cents, system_card_cents]
+ *             properties:
+ *               club_id: { type: string, format: uuid }
+ *               staff_id: { type: string, format: uuid }
+ *               for_date: { type: string, example: "2026-03-25", description: Día del arqueo (YYYY-MM-DD) }
+ *               real_cash_cents: { type: integer, minimum: 0 }
+ *               real_card_cents: { type: integer, minimum: 0 }
+ *               system_cash_cents: { type: integer, minimum: 0 }
+ *               system_card_cents: { type: integer, minimum: 0 }
+ *               observations: { type: string }
+ *           example:
+ *             club_id: "uuid"
+ *             staff_id: "uuid"
+ *             for_date: "2026-03-25"
+ *             real_cash_cents: 21600
+ *             real_card_cents: 18800
+ *             system_cash_cents: 21600
+ *             system_card_cents: 18800
+ *             observations: "OK"
+ *     responses:
+ *       201:
+ *         description: Creado
+ *       400: { description: Validación }
+ *       401: { description: Sin token }
+ *       403: { description: Sin acceso o staff no pertenece al club }
+ *       500: { description: Error de base de datos }
+ *       503: { description: Tabla no migrada }
+ */
+export async function createCashClosingRecordHandler(req: Request, res: Response): Promise<void> {
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const {
+    club_id: bodyClubId,
+    staff_id,
+    for_date,
+    real_cash_cents,
+    real_card_cents,
+    system_cash_cents,
+    system_card_cents,
+    observations,
+  } = req.body ?? {};
+
+  const clubId = typeof bodyClubId === 'string' ? bodyClubId.trim() : '';
+  const staffId = typeof staff_id === 'string' ? staff_id.trim() : '';
+
+  if (!clubId || !staffId) {
+    res.status(400).json({ ok: false, error: 'club_id y staff_id son obligatorios' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+
+  const rc = Math.trunc(Number(real_cash_cents));
+  const rcd = Math.trunc(Number(real_card_cents));
+  const sc = Math.trunc(Number(system_cash_cents));
+  const scd = Math.trunc(Number(system_card_cents));
+  if (![rc, rcd, sc, scd].every((n) => Number.isFinite(n) && n >= 0)) {
+    res.status(400).json({ ok: false, error: 'Los montos en céntimos deben ser números >= 0' });
+    return;
+  }
+
+  const forDateStr =
+    typeof for_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(for_date.trim())
+      ? for_date.trim()
+      : new Date().toISOString().slice(0, 10);
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+
+    const { data: staffRow, error: staffErr } = await supabase
+      .from('club_staff')
+      .select('id, club_id, name, status')
+      .eq('id', staffId)
+      .maybeSingle();
+
+    if (staffErr) {
+      res.status(500).json({ ok: false, error: staffErr.message });
+      return;
+    }
+    if (!staffRow || staffRow.club_id !== clubId) {
+      res.status(403).json({ ok: false, error: 'El empleado no pertenece a este club' });
+      return;
+    }
+    if (staffRow.status !== 'active') {
+      res.status(400).json({ ok: false, error: 'El empleado no está activo' });
+      return;
+    }
+
+    const employeeName = String(staffRow.name ?? '').trim() || 'Empleado';
+    const diffCents = Math.trunc(rc + rcd - sc - scd);
+    const status = cashClosingStatusFromDiffCents(diffCents);
+
+    const { data: inserted, error: insErr } = await supabase
+      .from('club_cash_closings')
+      .insert({
+        club_id: clubId,
+        staff_id: staffId,
+        employee_name: employeeName,
+        for_date: forDateStr,
+        real_cash_cents: rc,
+        real_card_cents: rcd,
+        system_cash_cents: sc,
+        system_card_cents: scd,
+        difference_cents: diffCents,
+        observations: typeof observations === 'string' ? observations.trim().slice(0, 2000) : null,
+        status,
+      })
+      .select(
+        'id, club_id, staff_id, employee_name, closed_at, for_date, real_cash_cents, real_card_cents, system_cash_cents, system_card_cents, difference_cents, observations, status'
+      )
+      .maybeSingle();
+
+    if (insErr) {
+      if (insErr.message.includes('relation') && insErr.message.includes('does not exist')) {
+        res.status(503).json({
+          ok: false,
+          error: 'Tabla club_cash_closings no existe. Aplica la migración 012 en Supabase.',
+        });
+        return;
+      }
+      console.error('[payments/cash-closing/records POST]', insErr);
+      res.status(500).json({ ok: false, error: insErr.message });
+      return;
+    }
+
+    res.status(201).json({ ok: true, record: inserted });
+  } catch (err) {
+    console.error('[payments/cash-closing/records POST]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
 async function processNewMatchPayment(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
   pi: Stripe.PaymentIntent
@@ -959,16 +1550,18 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
 }
 
 type SimulatedTurnPaymentStatus = 'approved' | 'pending' | 'rejected';
+type SimulatedTurnPaymentMethod = 'cash' | 'card';
 
 /**
  * @openapi
  * /payments/simulate-turn-payment:
  *   post:
  *     tags: [Payments]
- *     summary: Simular pago de turno (pasarela mock)
+ *     summary: Simular y confirmar pago de turno (sin pasarela real)
  *     description: |
- *       Simula una pasarela de pagos para validar el flujo de cobro de turnos sin depender de Stripe u otro proveedor real.
- *       No genera cobros reales ni persiste transacciones finales.
+ *       Endpoint mock para entornos sin pasarela real (o para pruebas manuales).
+ *       Por defecto (`always_paid=true`) marca el `booking_participants.payment_status=paid`,
+ *       actualiza el `booking` si corresponde y crea una `payment_transactions` mock con estado `succeeded`.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: header
@@ -996,10 +1589,31 @@ type SimulatedTurnPaymentStatus = 'approved' | 'pending' | 'rejected';
  *                 type: string
  *                 default: EUR
  *                 example: EUR
+ *               payment_method:
+ *                 type: string
+ *                 enum: [cash, card]
+ *                 default: cash
+ *                 description: |
+ *                   Clasifica el pago como físico (cash) o no físico (card).
+ *                   Se refleja en `stripe_payment_intent_id` mock (prefijo `CASH_` o `MOCK_`).
+ *               participant_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: |
+ *                   ID de `booking_participants` a marcar como pagado.
+ *                   Si se omite, se usa el participante `organizer` si existe; si no, el primero disponible.
+ *               payer_player_id:
+ *                 type: string
+ *                 format: uuid
+ *                 description: Jugador que figura como pagador en `payment_transactions` (opcional).
  *               force_status:
  *                 type: string
  *                 enum: [approved, pending, rejected]
- *                 description: Fuerza un estado de respuesta para pruebas.
+ *                 description: Fuerza el estado de simulación si `always_paid=false`.
+ *               always_paid:
+ *                 type: boolean
+ *                 default: true
+ *                 description: Si es `true`, siempre se marca como aprobado y se persiste como `succeeded`.
  *           examples:
  *             approved:
  *               value:
@@ -1007,31 +1621,35 @@ type SimulatedTurnPaymentStatus = 'approved' | 'pending' | 'rejected';
  *                 amount_cents: 3200
  *                 currency: "EUR"
  *                 force_status: "approved"
+ *                 payment_method: "cash"
+ *                 always_paid: true
  *     responses:
  *       200:
- *         description: Resultado de simulación generado
+ *         description: Pago simulado y confirmado (si `always_paid=true`)
  *         content:
  *           application/json:
  *             examples:
  *               ok:
  *                 value:
  *                   ok: true
- *                   simulated: true
+ *                   paid: true
  *                   gateway: "mock"
  *                   booking_id: "7fa11d8c-4cbc-4ed4-b6bf-95b6539df24b"
+ *                   participant_id: "..."
+ *                   payment_method: "cash"
  *                   amount_cents: 3200
  *                   currency: "EUR"
  *                   status: "approved"
- *                   transaction_id: "MOCK_2f122f6e1f"
+ *                   transaction_id: "CASH_..."
  *       400:
  *         description: Validación de entrada
  *         content:
  *           application/json:
  *             example: { ok: false, error: "booking_id y amount_cents son obligatorios" }
+ *       404:
+ *         description: Turno/reserva o participante no encontrada
  *       401:
  *         description: Sin token o sesión inválida
- *       404:
- *         description: Turno/reserva no encontrada
  *       500:
  *         description: Error interno
  */
@@ -1043,7 +1661,16 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
     return;
   }
 
-  const { booking_id, amount_cents, currency, force_status } = req.body ?? {};
+  const {
+    booking_id,
+    amount_cents,
+    currency,
+    force_status,
+    payment_method,
+    participant_id,
+    payer_player_id,
+    always_paid,
+  } = req.body ?? {};
   if (!booking_id || amount_cents == null) {
     res.status(400).json({ ok: false, error: 'booking_id y amount_cents son obligatorios' });
     return;
@@ -1063,9 +1690,18 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
       return;
     }
 
+    const paymentMethodRaw = typeof payment_method === 'string' ? payment_method : null;
+    const payment_method_validated: SimulatedTurnPaymentMethod = paymentMethodRaw === 'cash' ? 'cash' : 'card';
+    if (paymentMethodRaw != null && !['cash', 'card'].includes(paymentMethodRaw)) {
+      res.status(400).json({ ok: false, error: 'payment_method inválido. Usa cash o card.' });
+      return;
+    }
+
+    const alwaysPaid = always_paid === undefined ? true : Boolean(always_paid);
+
     const { data: booking } = await supabase
       .from('bookings')
-      .select('id, status, total_price_cents, currency')
+      .select('id, status, total_price_cents, currency, source_channel')
       .eq('id', booking_id)
       .maybeSingle();
 
@@ -1074,24 +1710,141 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
       return;
     }
 
+    const { data: participantRows, error: participantErr } = await supabase
+      .from('booking_participants')
+      .select('id, role, player_id, share_amount_cents')
+      .eq('booking_id', booking_id);
+    if (participantErr) {
+      res.status(500).json({ ok: false, error: participantErr.message });
+      return;
+    }
+    if (!participantRows || participantRows.length === 0) {
+      res.status(404).json({ ok: false, error: 'No existe booking_participants para este booking' });
+      return;
+    }
+
+    const chosenParticipant = participant_id
+      ? participantRows.find((p) => p.id === participant_id) ?? null
+      : (participantRows.find((p) => p.role === 'organizer') ?? participantRows[0]);
+
+    if (!chosenParticipant) {
+      res.status(404).json({ ok: false, error: 'participant_id no encontrado para este booking' });
+      return;
+    }
+
+    const forced = typeof force_status === 'string' ? force_status : null;
     const statusPool: SimulatedTurnPaymentStatus[] = ['approved', 'pending', 'rejected'];
     const randomStatus = statusPool[Math.floor(Math.random() * statusPool.length)];
-    const forced = typeof force_status === 'string' ? force_status : null;
-    const status = statusPool.includes(forced as SimulatedTurnPaymentStatus)
+    const simulatedStatus = statusPool.includes(forced as SimulatedTurnPaymentStatus)
       ? (forced as SimulatedTurnPaymentStatus)
       : randomStatus;
+    const finalStatus: SimulatedTurnPaymentStatus = alwaysPaid ? 'approved' : simulatedStatus;
 
-    const transactionId = `MOCK_${Math.random().toString(36).slice(2, 12).toUpperCase()}`;
+    const transactionPrefix = payment_method_validated === 'cash' ? 'CASH' : 'MOCK';
+    const transactionId = `${transactionPrefix}_${booking_id}_${chosenParticipant.id}`;
+    const currencyOut = (currency ?? booking.currency ?? 'EUR').toString().toUpperCase();
+    const amountToCharge = Math.trunc(parsedAmount);
+    const payerId = (payer_player_id != null && String(payer_player_id).trim())
+      ? String(payer_player_id).trim()
+      : chosenParticipant.player_id;
+
+    if (finalStatus !== 'approved') {
+      res.json({
+        ok: true,
+        paid: false,
+        simulated: true,
+        gateway: 'mock',
+        booking_id: booking.id,
+        participant_id: chosenParticipant.id,
+        payment_method: payment_method_validated,
+        amount_cents: amountToCharge,
+        currency: currencyOut,
+        status: finalStatus,
+        transaction_id: transactionId,
+        message: 'Simulación completada. No se confirmó el pago.',
+      });
+      return;
+    }
+
+    const { data: existingTx } = await supabase
+      .from('payment_transactions')
+      .select('id')
+      .eq('stripe_payment_intent_id', transactionId)
+      .maybeSingle();
+
+    if (!existingTx) {
+      await supabase.from('payment_transactions').insert({
+        booking_id: booking.id,
+        payer_player_id: payerId,
+        amount_cents: amountToCharge,
+        currency: currencyOut,
+        stripe_payment_intent_id: transactionId,
+        status: 'succeeded',
+      });
+    } else {
+      await supabase
+        .from('payment_transactions')
+        .update({ status: 'succeeded', updated_at: new Date().toISOString() })
+        .eq('stripe_payment_intent_id', transactionId);
+    }
+
+    await supabase
+      .from('booking_participants')
+      .update({ payment_status: 'paid' })
+      .eq('id', chosenParticipant.id);
+
+    if (chosenParticipant.role === 'organizer') {
+      const nextSourceChannel = payment_method_validated === 'cash' ? 'manual' : 'mobile';
+      await supabase
+        .from('bookings')
+        .update({
+          status: 'confirmed',
+          source_channel: nextSourceChannel,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', booking.id);
+    }
+
+    if (chosenParticipant.role === 'guest') {
+      const { data: match } = await supabase
+        .from('matches')
+        .select('id')
+        .eq('booking_id', booking.id)
+        .maybeSingle();
+
+      if (match) {
+        const { data: existing } = await supabase
+          .from('match_players')
+          .select('id')
+          .eq('match_id', match.id)
+          .eq('player_id', chosenParticipant.player_id)
+          .maybeSingle();
+
+        if (!existing) {
+          await supabase.from('match_players').insert({
+            match_id: match.id,
+            player_id: chosenParticipant.player_id,
+            team: 'A',
+            invite_status: 'accepted',
+            slot_index: null,
+          });
+        }
+      }
+    }
+
     res.json({
       ok: true,
+      paid: true,
       simulated: true,
       gateway: 'mock',
       booking_id: booking.id,
-      amount_cents: Math.trunc(parsedAmount),
-      currency: (currency ?? booking.currency ?? 'EUR').toString().toUpperCase(),
-      status,
+      participant_id: chosenParticipant.id,
+      payment_method: payment_method_validated,
+      amount_cents: amountToCharge,
+      currency: currencyOut,
+      status: finalStatus,
       transaction_id: transactionId,
-      message: 'Simulacion completada. No se realizo ningun cobro real.',
+      message: 'Pago simulado y confirmado (sin pasarela real).',
     });
   } catch (err) {
     console.error('[payments/simulate-turn-payment]', err);

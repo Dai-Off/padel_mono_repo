@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner';
 import { paymentsService, type PaymentTransaction } from '../../services/payments';
 import { useTranslation } from 'react-i18next';
+import { PageSpinner } from '../Layout/PageSpinner';
 
 type PaymentMethod = 'TPV' | 'App';
 type PaymentStatus = 'completed' | 'pending' | 'failed' | 'refunded';
@@ -70,12 +71,14 @@ function mapStatus(status: string): PaymentStatus {
 function toPayment(tx: PaymentTransaction): Payment {
   const dt = new Date(tx.created_at);
   const bookingLabel = tx.booking_id ? `Reserva ${tx.booking_id.slice(0, 8)}` : 'Pago';
+  const payerName = [tx.payer_first_name, tx.payer_last_name].filter(Boolean).join(' ').trim();
+  const clientLabel = payerName || tx.payer_email || tx.club_name || 'Cliente';
   return {
     id: tx.id,
     dateIso: tx.created_at,
     dateLabel: Number.isNaN(dt.getTime()) ? '-' : dt.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
     time: Number.isNaN(dt.getTime()) ? '-' : dt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
-    client: tx.club_name || 'Club',
+    client: clientLabel,
     concept: bookingLabel,
     method: tx.booking_id ? 'App' : 'TPV',
     amount: Math.round((tx.amount_cents ?? 0) / 100),
@@ -100,7 +103,13 @@ function PaymentStatusBadge({ status }: { status: PaymentStatus }) {
   );
 }
 
-export function ClubPaymentsTab() {
+export function ClubPaymentsTab({
+  clubId,
+  clubResolved = true,
+}: {
+  clubId: string | null;
+  clubResolved?: boolean;
+}) {
   const { t } = useTranslation();
   const [allPayments, setAllPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -110,11 +119,12 @@ export function ClubPaymentsTab() {
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
+    if (!clubId) return;
     let mounted = true;
     (async () => {
       setLoading(true);
       try {
-        const rows = await paymentsService.listTransactions(100);
+        const rows = await paymentsService.listClubTransactions(clubId, 100);
         if (!mounted) return;
         setAllPayments(rows.map(toPayment));
       } catch (e) {
@@ -128,7 +138,7 @@ export function ClubPaymentsTab() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [clubId]);
   const todayKey = new Date().toDateString();
 
   const filteredPayments = allPayments.filter((payment) => {
@@ -176,6 +186,13 @@ export function ClubPaymentsTab() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  if (!clubResolved) {
+    return <PageSpinner />;
+  }
+  if (!clubId) {
+    return <p className="text-sm text-gray-500 text-center py-12">No se pudo determinar el club.</p>;
+  }
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
@@ -334,7 +351,6 @@ export function ClubPaymentsTab() {
                     <span>{payment.concept}</span>
                     {payment.courtName && <span>• {payment.courtName}</span>}
                     <span>• {payment.time}</span>
-                    <span className="text-[9px] text-gray-300">{payment.id}</span>
                   </div>
                 </div>
                 <PaymentStatusBadge status={payment.status} />

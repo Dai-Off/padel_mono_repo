@@ -241,11 +241,11 @@ export const ClubDashboard = () => {
                     ) : isSchoolPage ? (
                         <ClubSchoolTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isPaymentsPage ? (
-                        <ClubPaymentsTab />
+                        <ClubPaymentsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isCheckinPage ? (
                         <ClubCheckinTab />
                     ) : isCashClosingPage ? (
-                        <ClubCashClosingTab />
+                        <ClubCashClosingTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : (
                         <>
                             <div className="flex items-center justify-between gap-3">
