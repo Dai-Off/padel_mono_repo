@@ -1,8 +1,14 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { theme } from '../../theme';
+import { SafeText } from '../ui/SafeText';
+import { lineHeightFor, theme } from '../../theme';
 
 const LOGO = require('../../../assets/images/wematch-logo.png');
+
+const SPLASH_UNDERLINE_FALLBACK_W = Math.min(
+  theme.screenWidth - 48,
+  Math.ceil(theme.fontSize.xxl * 7.2),
+);
 
 type AuthBrandProps = {
   subtitle?: string;
@@ -30,21 +36,48 @@ export function AuthBrand({ subtitle = '', variant = 'default' }: AuthBrandProps
       </View>
       {isLogoOnly ? null : isSplash ? (
         <View style={styles.brandWrap}>
-          <Text style={styles.title}>
-            <Text style={styles.brandWe}>We</Text>
-            <Text style={styles.brandMatch}>Match</Text>
-          </Text>
-          <LinearGradient
-            colors={['transparent', theme.auth.accent, 'transparent']}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            style={styles.underline}
-          />
+          {Platform.OS === 'android' ? (
+            <View style={styles.splashAndroidColumn}>
+              <Text
+                textBreakStrategy="simple"
+                maxFontSizeMultiplier={1.35}
+                style={[styles.title, styles.splashAndroidTitle]}
+                accessibilityRole="header"
+                accessibilityLabel="WeMatch"
+              >
+                WeMatch
+              </Text>
+              <LinearGradient
+                colors={['transparent', theme.auth.accent, 'transparent']}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.underline}
+              />
+            </View>
+          ) : (
+            <>
+              <Text
+                maxFontSizeMultiplier={1.5}
+                style={styles.title}
+                accessibilityRole="header"
+                accessibilityLabel="WeMatch"
+              >
+                <Text style={styles.brandWe}>We</Text>
+                <Text style={styles.brandMatch}>Match</Text>
+              </Text>
+              <LinearGradient
+                colors={['transparent', theme.auth.accent, 'transparent']}
+                start={{ x: 0, y: 0.5 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.underline}
+              />
+            </>
+          )}
         </View>
       ) : (
         <>
-          <Text style={styles.title}>WeMatch</Text>
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          <SafeText style={styles.title}>WeMatch</SafeText>
+          {subtitle ? <SafeText style={styles.subtitle}>{subtitle}</SafeText> : null}
         </>
       )}
     </View>
@@ -58,12 +91,21 @@ const styles = StyleSheet.create({
   },
   containerSplash: {
     marginBottom: 0,
+    alignSelf: 'stretch',
+    width: '100%',
+    alignItems: 'center',
   },
   containerLogoOnly: {
     marginBottom: theme.spacing.xl,
   },
   brandWrap: {
+    alignSelf: 'stretch',
     alignItems: 'center',
+    minWidth: 0,
+    ...Platform.select({
+      android: { flexShrink: 0, overflow: 'visible' as const },
+      default: {},
+    }),
   },
   logoWrap: {
     width: 128,
@@ -83,21 +125,45 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: theme.fontSize.xxl,
+    lineHeight: lineHeightFor(theme.fontSize.xxl),
     fontWeight: '700',
     color: theme.auth.text,
     marginBottom: 4,
+    textAlign: 'center',
+    ...Platform.select({
+      android: { flexShrink: 0, includeFontPadding: false, paddingVertical: 1 },
+      default: {},
+    }),
+  },
+  splashAndroidColumn: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  splashAndroidTitle: {
+    alignSelf: 'stretch',
+    width: '100%',
+    paddingHorizontal: theme.spacing.lg,
+    includeFontPadding: false,
   },
   brandWe: {
     color: theme.auth.text,
+    fontSize: theme.fontSize.xxl,
+    lineHeight: lineHeightFor(theme.fontSize.xxl),
+    fontWeight: '700',
   },
   brandMatch: {
     color: theme.auth.accent,
+    fontSize: theme.fontSize.xxl,
+    lineHeight: lineHeightFor(theme.fontSize.xxl),
+    fontWeight: '700',
   },
   underline: {
-    width: 120,
+    width: SPLASH_UNDERLINE_FALLBACK_W,
+    maxWidth: '92%',
     height: 3,
     marginTop: 6,
     borderRadius: 2,
+    alignSelf: 'center',
     shadowColor: theme.auth.accent,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.8,
@@ -106,6 +172,11 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     fontSize: theme.fontSize.sm,
+    lineHeight: lineHeightFor(theme.fontSize.sm),
     color: theme.auth.textSecondary,
+    ...Platform.select({
+      android: { includeFontPadding: false, paddingVertical: 1 },
+      default: {},
+    }),
   },
 });

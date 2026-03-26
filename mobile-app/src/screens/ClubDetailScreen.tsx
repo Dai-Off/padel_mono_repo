@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -380,6 +381,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
               onPress={() => setActiveTab(tab)}
               style={({ pressed }) => [
                 styles.tab,
+                tab === 'Partidos abiertos' && styles.tabPartidosAbiertos,
                 activeTab === tab ? styles.tabActive : styles.tabInactive,
                 pressed && styles.pressed,
               ]}
@@ -389,7 +391,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                   styles.tabText,
                   activeTab === tab ? styles.tabTextActive : styles.tabTextInactive,
                 ]}
-                numberOfLines={1}
+                numberOfLines={tab === 'Partidos abiertos' ? 1 : 2}
               >
                 {tab}
               </Text>
@@ -475,7 +477,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
               </View>
               <View style={styles.section}>
                 {timeSlotsLoading ? (
-                  <ActivityIndicator size="small" color="#E31E24" style={{ paddingVertical: 16 }} />
+                  <ActivityIndicator size="small" color={theme.auth.accent} style={{ paddingVertical: 16 }} />
                 ) : timeSlotsForDate.length > 0 ? (
                   <ScrollView
                     horizontal
@@ -515,7 +517,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                   <Switch
                     value={alertsEnabled}
                     onValueChange={setAlertsEnabled}
-                    trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
+                    trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
                     thumbColor="#fff"
                   />
                 </View>
@@ -529,7 +531,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                     Selecciona primero un horario para ver qué pistas están libres.
                   </Text>
                   ) : clubCourtsLoading ? (
-                    <ActivityIndicator size="small" color="#E31E24" style={{ paddingVertical: 16 }} />
+                    <ActivityIndicator size="small" color={theme.auth.accent} style={{ paddingVertical: 16 }} />
                   ) : clubCourts.length > 0 ? (
                   (() => {
                     const courtsToShow = selectedTimeSlot
@@ -614,7 +616,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
               </View>
               {partidosLoading ? (
                 <View style={[styles.section, styles.partidosEmptySection]}>
-                  <ActivityIndicator size="large" color="#E31E24" />
+                  <ActivityIndicator size="large" color={theme.auth.accent} />
                   <Text style={[styles.partidosEmptySubtitle, { marginTop: 12 }]}>Cargando partidos...</Text>
                 </View>
               ) : clubPartidos.length > 0 ? (
@@ -651,7 +653,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                   <Switch
                     value={partidosAlertsEnabled}
                     onValueChange={setPartidosAlertsEnabled}
-                    trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
+                    trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
                     thumbColor="#fff"
                   />
                 </View>
@@ -797,7 +799,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#0F0F0F',
   },
   header: {
     flexDirection: 'row',
@@ -805,15 +807,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: theme.spacing.lg,
     ...theme.headerPadding,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#0F0F0F',
   },
   headerButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(0,0,0,0.4)',
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -824,7 +826,7 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.8 },
   tabsScroll: {
     flexGrow: 0,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: 'transparent',
   },
   tabsContent: {
     flexDirection: 'row',
@@ -834,28 +836,43 @@ const styles = StyleSheet.create({
     paddingBottom: theme.spacing.sm,
   },
   tab: {
-    paddingHorizontal: theme.spacing.md,
+    paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 12,
     flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** Ancho extra para que “Partidos abiertos” quepa en una línea sin solaparse. */
+  tabPartidosAbiertos: {
+    minWidth: 220,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
   },
   tabActive: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: theme.auth.accent,
   },
   tabInactive: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   tabText: {
     fontSize: theme.fontSize.xs,
     fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 16,
+    ...Platform.select({
+      android: {
+        includeFontPadding: false,
+      },
+    }),
   },
   tabTextActive: {
     color: '#fff',
   },
   tabTextInactive: {
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   scroll: {
     flex: 1,
@@ -880,7 +897,7 @@ const styles = StyleSheet.create({
     width: 128,
     height: 128,
     borderRadius: 64,
-    backgroundColor: 'rgba(227, 30, 36, 0.1)',
+    backgroundColor: 'rgba(241, 143, 52, 0.15)',
   },
   heroContent: {
     position: 'relative',
@@ -939,17 +956,17 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.8)',
   },
   section: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     padding: theme.spacing.lg,
     marginBottom: theme.spacing.md,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   sectionTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
     marginBottom: theme.spacing.md,
   },
   tagsRow: {
@@ -961,17 +978,17 @@ const styles = StyleSheet.create({
   tag: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 12,
   },
   tagText: {
     fontSize: theme.fontSize.xs,
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
     fontWeight: '500',
   },
   pistasLabel: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
     marginBottom: theme.spacing.lg,
   },
   actionsRow: {
@@ -985,7 +1002,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingVertical: theme.spacing.md,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: theme.auth.accent,
     borderRadius: 16,
   },
   actionLabel: {
@@ -999,26 +1016,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     paddingVertical: theme.spacing.md,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: 'rgba(255,255,255,0.1)',
     borderRadius: 16,
   },
   actionLabelOutline: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   mapPlaceholder: {
     height: 144,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   mapPlaceholderText: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.5)',
   },
   scheduleRow: {
     flexDirection: 'row',
@@ -1026,16 +1043,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f9fafb',
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   scheduleDay: {
     fontSize: theme.fontSize.xs,
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   scheduleHours: {
     fontSize: theme.fontSize.xs,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   amenitiesRow: {
     flexDirection: 'row',
@@ -1049,20 +1066,20 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 12,
   },
   amenityText: {
     fontSize: theme.fontSize.xs,
     fontWeight: '500',
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   promoCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: theme.spacing.md,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
   },
   promoLeft: {
@@ -1075,7 +1092,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(227, 30, 36, 0.1)',
+    backgroundColor: 'rgba(241, 143, 52, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1088,7 +1105,7 @@ const styles = StyleSheet.create({
   promoTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   promoSub: {
     fontSize: 10,
@@ -1098,7 +1115,7 @@ const styles = StyleSheet.create({
   promoCta: {
     fontSize: theme.fontSize.xs,
     fontWeight: '700',
-    color: '#E31E24',
+    color: theme.auth.accent,
   },
   topPlayersScroll: {
     flexDirection: 'row',
@@ -1134,7 +1151,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 6,
-    backgroundColor: '#E31E24',
+    backgroundColor: theme.auth.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1145,21 +1162,21 @@ const styles = StyleSheet.create({
   },
   topPlayerName: {
     fontSize: 10,
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
     fontWeight: '500',
     marginTop: 6,
     maxWidth: 48,
     textAlign: 'center',
   },
   resultCard: {
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     padding: theme.spacing.md,
     marginBottom: theme.spacing.sm,
   },
   resultDate: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.5)',
     textAlign: 'right',
     marginBottom: theme.spacing.sm,
   },
@@ -1186,7 +1203,7 @@ const styles = StyleSheet.create({
   resultName: {
     fontSize: 9,
     fontWeight: '500',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   resultLevel: {
     backgroundColor: '#fde047',
@@ -1207,12 +1224,12 @@ const styles = StyleSheet.create({
   resultScoreWin: {
     fontSize: 24,
     fontWeight: '800',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   resultScoreLose: {
     fontSize: 24,
     fontWeight: '800',
-    color: '#d1d5db',
+    color: 'rgba(255,255,255,0.35)',
   },
   resultScoreDash: {
     fontSize: 18,
@@ -1223,12 +1240,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: theme.spacing.md,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
   },
   accountText: {
     fontSize: theme.fontSize.xs,
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
     flex: 1,
     marginRight: theme.spacing.sm,
   },
@@ -1243,7 +1260,7 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1257,7 +1274,7 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   dateBtnActive: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: theme.auth.accent,
   },
   dateBtnInactive: {
     backgroundColor: 'transparent',
@@ -1265,16 +1282,16 @@ const styles = StyleSheet.create({
   dateDayName: {
     fontSize: 10,
     fontWeight: '600',
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   dateDayNum: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   dateMonth: {
     fontSize: 10,
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   dateTextActive: {
     color: '#fff',
@@ -1287,7 +1304,7 @@ const styles = StyleSheet.create({
   toggleLabel: {
     fontSize: theme.fontSize.xs,
     fontWeight: '500',
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   timeSlotsCarousel: {
     flexDirection: 'row',
@@ -1300,13 +1317,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.md,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   timeSlotBtnSelected: {
-    backgroundColor: '#E31E24',
-    borderColor: '#E31E24',
+    backgroundColor: theme.auth.accent,
+    borderColor: theme.auth.accent,
   },
   timeSlotTextSelected: {
     color: '#fff',
@@ -1314,7 +1331,7 @@ const styles = StyleSheet.create({
   timeSlotText: {
     fontSize: theme.fontSize.xs,
     fontWeight: '600',
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   alertHeader: {
     flexDirection: 'row',
@@ -1331,21 +1348,21 @@ const styles = StyleSheet.create({
   alertSectionTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   alertSub: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
   },
   reservaTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
     marginBottom: 4,
   },
   reservaSub: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
     marginBottom: theme.spacing.md,
   },
   courtList: {
@@ -1354,9 +1371,9 @@ const styles = StyleSheet.create({
   courtCard: {
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   courtCardHeader: {
     flexDirection: 'row',
@@ -1367,11 +1384,11 @@ const styles = StyleSheet.create({
   courtCardName: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   courtCardSub: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
     marginTop: 2,
   },
   courtCardActions: {
@@ -1382,7 +1399,7 @@ const styles = StyleSheet.create({
   },
   courtPriceBtn: {
     flex: 1,
-    backgroundColor: '#E31E24',
+    backgroundColor: theme.auth.accent,
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: theme.spacing.sm,
@@ -1400,10 +1417,10 @@ const styles = StyleSheet.create({
   },
   courtReservarBtn: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: 'rgba(255,255,255,0.1)',
     paddingVertical: 8,
     paddingHorizontal: theme.spacing.sm,
     alignItems: 'center',
@@ -1412,16 +1429,16 @@ const styles = StyleSheet.create({
   courtReservarText: {
     fontSize: theme.fontSize.xs,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   courtReservarTextDisabled: {
     fontSize: theme.fontSize.xs,
     fontWeight: '600',
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
   },
   courtReservarBtnDisabled: {
-    backgroundColor: '#f9fafb',
-    opacity: 0.9,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    opacity: 0.85,
   },
   courtRow: {
     flexDirection: 'row',
@@ -1430,8 +1447,8 @@ const styles = StyleSheet.create({
     padding: theme.spacing.md,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
-    backgroundColor: '#fff',
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   courtRowLeft: {
     flex: 1,
@@ -1439,17 +1456,17 @@ const styles = StyleSheet.create({
   courtName: {
     fontSize: theme.fontSize.sm,
     fontWeight: '600',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   courtSub: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
     marginTop: 2,
   },
   partidosSectionTitle: {
     fontSize: theme.fontSize.lg,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
     marginBottom: 4,
   },
   partidosSectionSub: {
@@ -1475,13 +1492,15 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: theme.spacing.md,
     paddingVertical: 10,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
     borderRadius: 12,
   },
   partidosFilterText: {
     fontSize: theme.fontSize.xs,
     fontWeight: '600',
-    color: '#fff',
+    color: 'rgba(255,255,255,0.9)',
   },
   partidosEmptySection: {
     padding: 40,
@@ -1494,7 +1513,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: theme.spacing.md,
@@ -1505,7 +1524,7 @@ const styles = StyleSheet.create({
   partidosEmptyTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
     marginBottom: 4,
     textAlign: 'center',
   },
@@ -1523,7 +1542,7 @@ const styles = StyleSheet.create({
   partidosAlertTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   partidosAlertDesc: {
     fontSize: theme.fontSize.xs,
@@ -1541,17 +1560,17 @@ const styles = StyleSheet.create({
   manageAlertsText: {
     fontSize: theme.fontSize.xs,
     fontWeight: '700',
-    color: '#E31E24',
+    color: theme.auth.accent,
   },
   partidosReservaTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
     marginBottom: 4,
   },
   partidosReservaSub: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
     marginBottom: 8,
   },
   partidosReservaHint: {
@@ -1561,7 +1580,7 @@ const styles = StyleSheet.create({
   },
   partidosReservaHintText: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
   },
   partidosClockEmoji: {
     fontSize: 16,
@@ -1575,7 +1594,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: theme.spacing.md,
@@ -1586,31 +1605,31 @@ const styles = StyleSheet.create({
   emptyStateTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
     marginBottom: 4,
   },
   emptyStateSub: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
   },
   compCard: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.1)',
     overflow: 'hidden',
     marginBottom: theme.spacing.md,
   },
   compCardBar: {
     height: 4,
-    backgroundColor: '#E31E24',
+    backgroundColor: theme.auth.accent,
   },
   compCardContent: {
     padding: theme.spacing.lg,
   },
   compCardDate: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
     marginBottom: theme.spacing.sm,
   },
   compCardMain: {
@@ -1621,7 +1640,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: 'rgba(227, 30, 36, 0.1)',
+    backgroundColor: 'rgba(241, 143, 52, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1630,13 +1649,13 @@ const styles = StyleSheet.create({
   },
   compCardDateTime: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
     marginBottom: 4,
   },
   compCardTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
     marginBottom: 8,
   },
   compCardTags: {
@@ -1650,13 +1669,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 8,
   },
   compTagText: {
     fontSize: 10,
     fontWeight: '500',
-    color: '#6b7280',
+    color: 'rgba(255,255,255,0.6)',
   },
   compCardMeta: {
     flexDirection: 'row',
@@ -1666,7 +1685,7 @@ const styles = StyleSheet.create({
   },
   compCardMetaText: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: 'rgba(255,255,255,0.6)',
   },
   compCardTeams: {
     flexDirection: 'row',
