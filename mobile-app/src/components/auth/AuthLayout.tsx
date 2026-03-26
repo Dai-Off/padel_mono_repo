@@ -31,7 +31,8 @@ export function AuthLayout({ children, scrollable }: AuthLayoutProps) {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      enabled
     >
       {content}
     </KeyboardAvoidingView>
@@ -45,6 +46,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
     paddingHorizontal: theme.spacing.lg,
   },
   scroll: {
@@ -52,6 +56,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
+    width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.xl,
     paddingTop: theme.spacing.xxl,

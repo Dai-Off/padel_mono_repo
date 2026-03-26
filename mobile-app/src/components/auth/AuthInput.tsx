@@ -1,8 +1,8 @@
 import type { ComponentProps } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../../theme';
+import { lineHeightFor, theme } from '../../theme';
 
 type AuthInputProps = ComponentProps<typeof TextInput> & {
   label: string;
@@ -45,9 +45,14 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: theme.fontSize.sm,
+    lineHeight: lineHeightFor(theme.fontSize.sm),
     fontWeight: '500',
     color: theme.auth.label,
     marginBottom: 10,
+    ...Platform.select({
+      android: { includeFontPadding: false, paddingVertical: 1 },
+      default: {},
+    }),
   },
   inputWrap: {
     flexDirection: 'row',
@@ -70,6 +75,11 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 0,
     fontSize: theme.fontSize.base,
+    lineHeight: lineHeightFor(theme.fontSize.base),
     color: theme.auth.text,
+    ...Platform.select({
+      android: { includeFontPadding: false },
+      default: {},
+    }),
   },
 });
