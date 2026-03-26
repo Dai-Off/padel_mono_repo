@@ -1,27 +1,33 @@
 import type { ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SidebarProvider } from '../../contexts/SidebarContext';
-import { useSidebar } from '../../hooks/useSidebar';
 import { AppHeader } from './AppHeader';
 import { HamburgerButton } from './HamburgerButton';
-import { MobileSidebar } from './MobileSidebar';
 import { NavbarActions } from './NavbarActions';
-import { SidebarContent } from './SidebarContent';
+
+/** Control del menú lateral (estado vive en MainApp para cubrir también la navbar inferior). */
+export type ScreenLayoutSidebar = {
+  toggle: () => void;
+  close: () => void;
+};
 
 type ScreenLayoutProps = {
   children: ReactNode;
-  /** Cuando se proporciona, reemplaza el header por defecto (hamburger + acciones) */
   customHeader?: ReactNode;
-  /** Cuando true, no se muestra header (la pantalla maneja su propio encabezado) */
   hideHeader?: boolean;
-  /** Callback cuando el sidebar navega a "Tus pagos" */
-  onNavigateToTusPagos?: () => void;
+  sidebar: ScreenLayoutSidebar;
+  /** Fondo del layout (p. ej. #000 en home con header glass). Por defecto blanco. */
+  layoutBackgroundColor?: string;
 };
 
-export function ScreenLayout({ children, customHeader, hideHeader, onNavigateToTusPagos }: ScreenLayoutProps) {
+export function ScreenLayout({
+  children,
+  customHeader,
+  hideHeader,
+  sidebar,
+  layoutBackgroundColor = '#fff',
+}: ScreenLayoutProps) {
   const insets = useSafeAreaInsets();
-  const sidebar = useSidebar(false);
 
   const header = customHeader ?? (
     <AppHeader
@@ -31,18 +37,15 @@ export function ScreenLayout({ children, customHeader, hideHeader, onNavigateToT
   );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      {!hideHeader && (
-        <View style={styles.headerWrapper}>
-          {header}
-        </View>
-      )}
-      <View style={styles.content}>{children}</View>
-      <SidebarProvider close={sidebar.close} onNavigateToTusPagos={onNavigateToTusPagos}>
-        <MobileSidebar visible={sidebar.isOpen} onClose={sidebar.close}>
-          <SidebarContent />
-        </MobileSidebar>
-      </SidebarProvider>
+    <View style={[styles.container, { backgroundColor: layoutBackgroundColor }]}>
+      <View style={[styles.main, { paddingTop: insets.top }]}>
+        {!hideHeader && (
+          <View style={styles.headerWrapper}>
+            {header}
+          </View>
+        )}
+        <View style={styles.content}>{children}</View>
+      </View>
     </View>
   );
 }
@@ -50,10 +53,13 @@ export function ScreenLayout({ children, customHeader, hideHeader, onNavigateToT
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+  },
+  main: {
+    flex: 1,
+    minHeight: 0,
   },
   headerWrapper: {
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
   },
   content: {
     flex: 1,

@@ -8,6 +8,9 @@ export const scaleFont = (size: number) => {
   return Math.round(size * Math.min(scale, 1.5));
 };
 
+/** lineHeight ≥ 1.2× fontSize — en Android evita recorte vertical (includeFontPadding). */
+export const lineHeightFor = (fontSize: number) => Math.round(fontSize * 1.2);
+
 /** Spacing base: pantallas pequeñas (< 375px) usan valores ligeramente menores */
 export const getSpacing = (base: number): number => {
   if (SCREEN_WIDTH < 360) return Math.max(base - 4, 12);
@@ -40,6 +43,8 @@ export const theme = {
   minTouchTarget: 44, // Mínimo recomendado para áreas táctiles (Apple HIG, Android)
   screenWidth: SCREEN_WIDTH,
   screenHeight: SCREEN_HEIGHT,
+  /** Mismo helper exportado arriba; incluido aquí para uso `theme.lineHeightFor` sin import suelto. */
+  lineHeightFor,
 
   /** Colores para pantallas de auth (landing, login, register) - tema oscuro */
   auth: {

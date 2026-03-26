@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +16,14 @@ import {
   AuthFormLink,
   AuthFooter,
 } from '../components/auth';
+import {
+  loginCheckboxInner,
+  loginExtrasColLeft,
+  loginExtrasColRight,
+  loginExtrasRow,
+  loginForgotLabel,
+} from '../styles/authScreenStyles';
+import { SafeText } from '../components/ui/SafeText';
 import { theme } from '../theme';
 
 type LoginScreenProps = {
@@ -106,26 +113,36 @@ export function LoginScreen({ onGoToRegister }: LoginScreenProps) {
           editable={!loading}
         />
 
-        <View style={styles.extras}>
-          <Pressable
-            style={({ pressed }) => [styles.checkboxWrap, pressed && styles.pressed]}
-            onPress={() => setRememberMe(!rememberMe)}
-            disabled={loading}
-          >
-            <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-              {rememberMe ? (
-                <Ionicons name="checkmark" size={14} color={theme.auth.accent} />
-              ) : null}
-            </View>
-            <Text style={styles.checkboxLabel}>Recordarme</Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [styles.forgotLink, pressed && styles.pressed]}
-            onPress={() => { /* TODO: navegación a recuperar contraseña */ }}
-            disabled={loading}
-          >
-            <Text style={styles.forgotLinkText}>¿Olvidaste tu contraseña?</Text>
-          </Pressable>
+        <View style={loginExtrasRow}>
+          <View style={loginExtrasColLeft}>
+            <Pressable
+              style={({ pressed }) => [styles.checkboxWrap, pressed && styles.pressed]}
+              onPress={() => setRememberMe(!rememberMe)}
+              disabled={loading}
+            >
+              <View style={loginCheckboxInner}>
+                <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+                  {rememberMe ? (
+                    <Ionicons name="checkmark" size={14} color={theme.auth.accent} />
+                  ) : null}
+                </View>
+                <View style={styles.checkboxLabelOuter}>
+                  <SafeText style={styles.checkboxLabel}>Recordarme</SafeText>
+                </View>
+              </View>
+            </Pressable>
+          </View>
+          <View style={loginExtrasColRight}>
+            <Pressable
+              style={({ pressed }) => [styles.forgotPressable, pressed && styles.pressed]}
+              onPress={() => { /* TODO: navegación a recuperar contraseña */ }}
+              disabled={loading}
+            >
+              <SafeText style={loginForgotLabel}>
+                ¿Olvidaste tu contraseña?
+              </SafeText>
+            </Pressable>
+          </View>
         </View>
 
         <AuthButton
@@ -158,12 +175,18 @@ const styles = StyleSheet.create({
   },
   formSection: {
     flex: 1,
+    width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
   },
-  extras: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing.sm,
+  forgotPressable: {
+    width: '100%',
+    alignItems: 'flex-end',
+    paddingVertical: 4,
+  },
+  checkboxLabelOuter: {
+    flexShrink: 0,
+    minWidth: 102,
   },
   checkboxWrap: {
     flexDirection: 'row',
@@ -186,14 +209,6 @@ const styles = StyleSheet.create({
   checkboxLabel: {
     fontSize: theme.fontSize.sm,
     color: theme.auth.label,
-  },
-  forgotLink: {
-    paddingVertical: 4,
-  },
-  forgotLinkText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: '500',
-    color: theme.auth.accent,
   },
   pressed: {
     opacity: 0.9,
