@@ -6,18 +6,6 @@ import { toast } from 'sonner';
 import { apiFetchWithAuth } from '../../services/api';
 import { RESERVATION_TYPES } from '../../services/reservationTypePrices';
 
-const TYPE_LABELS: Record<string, string> = {
-  standard: 'Pista privada',
-  open_match: 'Partido abierto',
-  pozo: 'Pozo / Americanas',
-  fixed_recurring: 'Turno fijo',
-  school_group: 'Escuela — clase grupal',
-  school_individual: 'Escuela — clase particular',
-  flat_rate: 'Tarifa plana',
-  tournament: 'Torneo',
-  blocked: 'Bloqueo administrativo',
-};
-
 function formatCentsToEur(cents: number): string {
   return (cents / 100).toFixed(2).replace('.', ',');
 }
@@ -64,8 +52,8 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
       })
       .catch((err) => {
         if (cancelled || err?.name === 'AbortError') return;
-        setError(err instanceof Error ? err.message : 'Error al cargar');
-        toast.error('Error al cargar los datos');
+        setError(err instanceof Error ? err.message : t('precios_load_error'));
+        toast.error(t('precios_load_error'));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -93,7 +81,7 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
       if (res?.ok) {
         toast.success(t('save_success'));
       } else {
-        throw new Error('Error al guardar');
+        throw new Error(t('precios_save_error'));
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('error_saving'));
@@ -116,7 +104,7 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
           {RESERVATION_TYPES.map((type) => (
             <div key={type} className="flex items-center gap-2">
               <label className="text-[11px] font-medium text-gray-600 w-40 shrink-0 truncate">
-                {TYPE_LABELS[type] ?? type}
+                {t(`reservation_type_${type}`)}
               </label>
               <div className="flex-1 flex items-center gap-1">
                 <input
@@ -124,10 +112,10 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
                   inputMode="decimal"
                   value={formatCentsToEur(prices[type] ?? 0)}
                   onChange={(e) => handleChange(type, e.target.value)}
-                  placeholder="0,00"
+                  placeholder={t('precios_input_placeholder')}
                   className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm text-[#1A1A1A] focus:ring-2 focus:ring-[#E31E24]/30 focus:border-[#E31E24]/30"
                 />
-                <span className="text-[10px] text-gray-400 shrink-0">€/h</span>
+                <span className="text-[10px] text-gray-400 shrink-0">{t('precios_price_suffix')}</span>
               </div>
             </div>
           ))}

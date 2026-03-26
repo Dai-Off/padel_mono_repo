@@ -42,9 +42,11 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   ].join(', ');
   const mode: PartidoMode = m.competitive ? 'competitivo' : 'amistoso';
   const typeLabel = m.gender === 'mixed' ? 'Mixto' : 'Todos los jugadores';
-  const levelRange = m.elo_min != null && m.elo_max != null
-    ? `${(m.elo_min / 1000).toFixed(2)} - ${(m.elo_max / 1000).toFixed(2)}`
-    : '0,25 - 1,25';
+  const fmtElo = (v: number) => (v / 1000).toFixed(2).replace('.', ',');
+  const levelRange =
+    m.elo_min != null && m.elo_max != null
+      ? `${fmtElo(m.elo_min)} - ${fmtElo(m.elo_max)}`
+      : '0,25 - 1,25';
 
   const durationMin = durationMinutes(b.start_at, b.end_at);
 

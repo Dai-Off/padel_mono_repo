@@ -1,22 +1,14 @@
-import { StyleSheet, Text, View } from 'react-native';
-import { theme } from '../../theme';
+import { View } from 'react-native';
+import { authFooterTextStyle, authFooterWrap } from '../../styles/authScreenStyles';
+import { SafeText } from '../ui/SafeText';
 
 export function AuthFooter() {
   const year = new Date().getFullYear();
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.text}>© {year} WeMatch. Todos los derechos reservados.</Text>
+    <View style={authFooterWrap}>
+      <SafeText style={authFooterTextStyle}>
+        © {year} WeMatch. Todos los derechos reservados.
+      </SafeText>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: {
-    paddingVertical: theme.spacing.lg,
-    alignItems: 'center',
-  },
-  text: {
-    fontSize: theme.fontSize.xs,
-    color: theme.auth.textSecondary,
-  },
-});
