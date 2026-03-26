@@ -24,7 +24,7 @@ export function SearchResultsList({
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.resultCount}>Buscando pistas...</Text>
+        <Text style={styles.resultCount}>Buscando pistas…</Text>
         <View style={styles.list}>
           {Array.from({ length: SKELETON_COUNT }).map((_, i) => (
             <SearchCourtCardSkeleton key={i} />
@@ -37,7 +37,8 @@ export function SearchResultsList({
   return (
     <View style={styles.container}>
       <Text style={styles.resultCount}>
-        {results.length} {results.length === 1 ? 'resultado' : 'resultados'}
+        {results.length}{' '}
+        {results.length === 1 ? 'pista encontrada' : 'pistas encontradas'}
       </Text>
       <View style={styles.list}>
         {results.map((court) => (
@@ -56,12 +57,12 @@ export function SearchResultsList({
 
 const styles = StyleSheet.create({
   container: {
-    paddingTop: theme.spacing.sm,
+    paddingTop: 0,
   },
   resultCount: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '500',
-    color: '#9ca3af',
+    fontWeight: '600',
+    color: '#737373',
     marginBottom: theme.spacing.md,
   },
   list: {

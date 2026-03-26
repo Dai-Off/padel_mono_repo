@@ -1,5 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { theme } from '../../theme';
+import { Platform, StyleSheet, Text, View } from 'react-native';
+import { authFormLinkWrap } from '../../styles/authScreenStyles';
+import { lineHeightFor, theme } from '../../theme';
 
 type AuthFormLinkProps = {
   prompt: string;
@@ -8,42 +9,52 @@ type AuthFormLinkProps = {
   disabled?: boolean;
 };
 
+/**
+ * Un solo árbol de Text (prompt + acción) para que Android no recorte el segundo segmento en flex row.
+ */
 export function AuthFormLink({ prompt, action, onPress, disabled }: AuthFormLinkProps) {
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.prompt}>{prompt}{' '}</Text>
-      <Pressable
-        onPress={onPress}
-        disabled={disabled}
-        style={({ pressed }) => [styles.link, pressed && styles.pressed]}
-      >
-        <Text style={styles.linkText}>{action}</Text>
-      </Pressable>
+    <View style={authFormLinkWrap}>
+      <Text style={styles.block} accessibilityRole="text">
+        <Text style={styles.prompt}>{prompt}</Text>
+        <Text style={styles.prompt}> </Text>
+        <Text
+          style={[styles.linkText, disabled && styles.linkDisabled]}
+          onPress={disabled ? undefined : onPress}
+          accessibilityRole="link"
+        >
+          {action}
+        </Text>
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: theme.spacing.sm,
+  block: {
+    width: '100%',
+    textAlign: 'center',
   },
   prompt: {
     fontSize: theme.fontSize.sm,
+    lineHeight: lineHeightFor(theme.fontSize.sm),
     color: theme.auth.textSecondary,
-  },
-  link: {
-    paddingVertical: 4,
+    ...Platform.select({
+      android: { includeFontPadding: false, paddingVertical: 1 },
+      default: {},
+    }),
   },
   linkText: {
     fontSize: theme.fontSize.sm,
+    lineHeight: lineHeightFor(theme.fontSize.sm),
     fontWeight: '600',
     color: theme.auth.accent,
+    ...Platform.select({
+      android: { includeFontPadding: false, paddingVertical: 1 },
+      default: {},
+    }),
   },
-  pressed: {
-    opacity: 0.9,
+  linkDisabled: {
+    opacity: 0.5,
   },
 });

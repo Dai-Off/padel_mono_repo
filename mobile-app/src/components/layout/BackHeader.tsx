@@ -7,21 +7,33 @@ type BackHeaderProps = {
   title: string;
   onBack: () => void;
   rightSlot?: ReactNode;
+  /** Fondo oscuro (p. ej. pantalla Partidos con layout negro). */
+  tone?: 'light' | 'dark';
 };
 
-/** Header reutilizable con botón atrás, título centrado y slot derecho opcional. Diseñado para fondos claros (iOS/Android). */
-export function BackHeader({ title, onBack, rightSlot }: BackHeaderProps) {
+/** Header reutilizable con botón atrás, título centrado y slot derecho opcional. */
+export function BackHeader({
+  title,
+  onBack,
+  rightSlot,
+  tone = 'light',
+}: BackHeaderProps) {
+  const dark = tone === 'dark';
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, dark && styles.containerDark]}>
       <Pressable
         onPress={onBack}
-        style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+        style={({ pressed }) => [
+          styles.backButton,
+          dark && styles.backButtonDark,
+          pressed && styles.pressed,
+        ]}
         accessibilityRole="button"
         accessibilityLabel="Volver"
       >
-        <Ionicons name="arrow-back" size={20} color="#1A1A1A" />
+        <Ionicons name="arrow-back" size={20} color={dark ? '#fff' : '#1A1A1A'} />
       </Pressable>
-      <Text style={styles.title} numberOfLines={1}>
+      <Text style={[styles.title, dark && styles.titleDark]} numberOfLines={1}>
         {title}
       </Text>
       <View style={styles.rightSlot}>
@@ -38,6 +50,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: theme.spacing.lg,
     ...theme.headerPadding,
+    backgroundColor: '#fff',
+  },
+  containerDark: {
+    backgroundColor: '#000000',
   },
   backButton: {
     width: 40,
@@ -49,6 +65,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  backButtonDark: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
   pressed: {
     opacity: 0.8,
   },
@@ -58,6 +78,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1A1A1A',
     textAlign: 'center',
+  },
+  titleDark: {
+    color: '#ffffff',
   },
   rightSlot: {
     width: 40,

@@ -1,6 +1,8 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../../theme';
+import { authButtonInner } from '../../styles/authScreenStyles';
+import { lineHeightFor, theme } from '../../theme';
+import { SafeText } from '../ui/SafeText';
 
 type AuthButtonProps = {
   children: string;
@@ -30,10 +32,14 @@ export function AuthButton({
       {loading ? (
         <ActivityIndicator color="#fff" />
       ) : (
-        <>
-          <Text style={styles.text}>{children}</Text>
-          <Ionicons name={icon} size={20} color="#fff" style={styles.icon} />
-        </>
+        <View style={authButtonInner}>
+          <View style={styles.buttonContent}>
+            <SafeText style={styles.text} numberOfLines={2}>
+              {children}
+            </SafeText>
+            <Ionicons name={icon} size={20} color="#fff" style={styles.icon} />
+          </View>
+        </View>
       )}
     </Pressable>
   );
@@ -41,13 +47,17 @@ export function AuthButton({
 
 const styles = StyleSheet.create({
   button: {
+    alignSelf: 'stretch',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    width: '100%',
+    minWidth: 0,
+    overflow: 'visible',
     marginTop: theme.spacing.xl,
     marginBottom: theme.spacing.lg,
     paddingVertical: theme.spacing.md,
-    paddingHorizontal: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.xl,
     backgroundColor: theme.auth.accent,
     borderRadius: 16,
     shadowColor: theme.auth.accentShadow,
@@ -62,12 +72,32 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.5,
   },
+  /**
+   * Texto + icono juntos y centrados.
+   * No usar flexShrink aquí ni en el Text: en Android recorta “Iniciar Sesión” (ver authScreenStyles).
+   */
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: '100%',
+    flexShrink: 0,
+  },
   text: {
     fontSize: theme.fontSize.base,
+    lineHeight: lineHeightFor(theme.fontSize.base),
     fontWeight: '700',
     color: '#fff',
+    textAlign: 'center',
+    flexShrink: 0,
+    paddingRight: theme.spacing.xs,
+    ...Platform.select({
+      android: { includeFontPadding: false, paddingVertical: 1 },
+      default: {},
+    }),
   },
   icon: {
-    marginLeft: theme.spacing.sm,
+    marginLeft: theme.spacing.md,
+    flexShrink: 0,
   },
 });
