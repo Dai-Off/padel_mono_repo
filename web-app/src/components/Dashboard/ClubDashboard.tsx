@@ -243,7 +243,7 @@ export const ClubDashboard = () => {
                     ) : isPaymentsPage ? (
                         <ClubPaymentsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isCheckinPage ? (
-                        <ClubCheckinTab />
+                        <ClubCheckinTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isCashClosingPage ? (
                         <ClubCashClosingTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : (
