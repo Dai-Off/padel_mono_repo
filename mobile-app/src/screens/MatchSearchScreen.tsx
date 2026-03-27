@@ -59,7 +59,7 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
         style={[
           styles.stickyHeader,
           {
-            paddingTop: insets.top + 12,
+            paddingTop: 6,
             paddingBottom: 12,
           },
         ]}
