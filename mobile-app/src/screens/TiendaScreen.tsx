@@ -13,7 +13,7 @@ export function TiendaScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#0F0F0F',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -21,11 +21,11 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#111827',
+    color: '#FFFFFF',
     marginBottom: 8,
   },
   sub: {
     fontSize: 15,
-    color: '#6b7280',
+    color: '#9CA3AF',
   },
 });
