@@ -139,9 +139,9 @@ export function MainApp() {
     showTusPagos || showTransacciones || showPartidoDetail || crearPartidoFlow.open
       ? undefined
       : activeTab === 'tienda'
-          ? <BackHeader title="Tienda" onBack={() => setActiveTab('inicio')} />
+          ? <BackHeader title="Tienda" tone="dark" onBack={() => setActiveTab('inicio')} />
           : activeTab === 'torneos'
-            ? <BackHeader title="Torneos" onBack={() => setActiveTab('inicio')} />
+            ? <BackHeader title="Torneos" tone="dark" onBack={() => setActiveTab('inicio')} />
             : activeTab === 'partidos'
               ? (
                   <BackHeader
@@ -163,7 +163,7 @@ export function MainApp() {
         ? '#0F0F0F'
         : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
           ? '#000000'
-          : showMainTabs && activeTab === 'pistas'
+          : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
             ? '#0F0F0F'
             : '#ffffff';
 

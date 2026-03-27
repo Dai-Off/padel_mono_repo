@@ -171,7 +171,7 @@ export function CompeticionesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: '#0F0F0F',
   },
   content: {
     paddingHorizontal: theme.spacing.lg,
@@ -182,7 +182,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 4,
     padding: 4,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
     borderRadius: 12,
     marginBottom: theme.spacing.md,
   },
@@ -194,7 +196,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   segmentedBtnActive: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -204,20 +206,20 @@ const styles = StyleSheet.create({
   segmentedText: {
     fontSize: theme.fontSize.xs,
     fontWeight: '600',
-    color: '#6b7280',
+    color: '#9ca3af',
   },
   segmentedTextActive: {
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   pressed: { opacity: 0.9 },
   list: {
     gap: theme.spacing.sm,
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.1)',
     overflow: 'hidden',
   },
   cardBar: {
@@ -266,7 +268,7 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: '#ffffff',
   },
   cardPrice: {
     fontSize: theme.fontSize.base,
@@ -295,7 +297,7 @@ const styles = StyleSheet.create({
   progressTrack: {
     flex: 1,
     height: 6,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 3,
     overflow: 'hidden',
   },
@@ -311,13 +313,13 @@ const styles = StyleSheet.create({
   levelBadge: {
     paddingHorizontal: 8,
     paddingVertical: 2,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: 6,
   },
   levelText: {
     fontSize: 10,
     fontWeight: '500',
-    color: '#6b7280',
+    color: '#d1d5db',
   },
   emptyState: {
     paddingVertical: theme.spacing.xxl,

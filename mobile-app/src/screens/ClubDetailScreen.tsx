@@ -357,14 +357,14 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
             accessibilityRole="button"
             accessibilityLabel="Volver"
           >
-            <Ionicons name="arrow-back" size={20} color="#1A1A1A" />
+            <Ionicons name="arrow-back" size={20} color="#fff" />
           </Pressable>
           <View style={styles.headerRight}>
             <Pressable style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}>
-              <Ionicons name="notifications-outline" size={20} color="#1A1A1A" />
+              <Ionicons name="notifications-outline" size={20} color="#fff" />
             </Pressable>
             <Pressable style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}>
-              <Ionicons name="heart-outline" size={20} color="#1A1A1A" />
+              <Ionicons name="heart-outline" size={20} color="#fff" />
             </Pressable>
           </View>
         </View>
@@ -626,17 +626,18 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                       key={item.id}
                       item={item}
                       onPress={() => onPartidoPress?.(item)}
+                      surface="dark"
                     />
                   ))}
                 </View>
               ) : (
-                <View style={[styles.section, styles.partidosEmptySection]}>
+                <View style={[styles.section, styles.partidosEmptySection, styles.partidosOpenEmptySection]}>
                   <View style={styles.partidosEmptyState}>
                     <View style={styles.partidosEmptyIcon}>
                       <Text style={styles.partidosEmptyEmoji}>🎾</Text>
                     </View>
-                    <Text style={styles.partidosEmptyTitle}>No hay partidos abiertos</Text>
-                    <Text style={styles.partidosEmptySubtitle}>No hay Partidos Abiertos en este club ahora</Text>
+                    <Text style={styles.partidosEmptyTitle}>No hay pistas disponibles hoy</Text>
+                    <Text style={styles.partidosEmptySubtitle}>Prueba otro día o busca en otro club</Text>
                   </View>
                 </View>
               )}
@@ -1504,6 +1505,12 @@ const styles = StyleSheet.create({
   },
   partidosEmptySection: {
     padding: 40,
+  },
+  partidosOpenEmptySection: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   partidosEmptyState: {
     alignItems: 'center',
