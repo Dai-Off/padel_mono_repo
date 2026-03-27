@@ -60,16 +60,16 @@ export function ClubInfoSheet({ visible, onClose, partido }: ClubInfoSheetProps)
         <View style={[styles.sheet, { height: sheetHeight, paddingBottom: Math.max(insets.bottom, 24) }]}>
           <View style={styles.handle} />
           <View style={styles.header}>
-          <Pressable
-            onPress={onClose}
-            style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Cerrar"
-          >
-            <Ionicons name="arrow-back" size={20} color="#1A1A1A" />
-          </Pressable>
-          <Text style={styles.headerTitle}>Info del Club</Text>
-        </View>
+            <Pressable
+              onPress={onClose}
+              style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Cerrar"
+            >
+              <Ionicons name="arrow-back" size={20} color={theme.auth.text} />
+            </Pressable>
+            <Text style={styles.headerTitle}>Info del Club</Text>
+          </View>
 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.clubCard}>
@@ -96,7 +96,7 @@ export function ClubInfoSheet({ visible, onClose, partido }: ClubInfoSheetProps)
           <View style={styles.infoList}>
             <View style={styles.infoRow}>
               <View style={styles.infoIcon}>
-                <Ionicons name="information-circle-outline" size={20} color="#6b7280" />
+                <Ionicons name="information-circle-outline" size={20} color={theme.auth.textSecondary} />
               </View>
               <View style={styles.infoBody}>
                 <Text style={styles.infoLabel}>Nombre de pista</Text>
@@ -114,7 +114,7 @@ export function ClubInfoSheet({ visible, onClose, partido }: ClubInfoSheetProps)
             </View>
             <View style={styles.infoRow}>
               <View style={styles.infoIcon}>
-                <Ionicons name="calendar-outline" size={20} color="#6b7280" />
+                <Ionicons name="calendar-outline" size={20} color={theme.auth.textSecondary} />
               </View>
               <View style={styles.infoBody}>
                 <Text style={styles.infoLabel}>Fecha y hora</Text>
@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
   },
   sheet: {
-    backgroundColor: '#fff',
+    backgroundColor: theme.auth.bg,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     overflow: 'hidden',
@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: 'rgba(255,255,255,0.18)',
     alignSelf: 'center',
     marginTop: 8,
     marginBottom: 8,
@@ -161,20 +161,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomColor: 'rgba(255,255,255,0.08)',
   },
   backBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
     fontSize: theme.fontSize.base,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
   },
   pressed: { opacity: 0.9 },
   scroll: { flex: 1 },
@@ -187,7 +189,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     padding: 16,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
     borderRadius: 16,
     marginBottom: 24,
   },
@@ -195,7 +199,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 12,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   clubInfo: {
     flex: 1,
@@ -204,25 +208,25 @@ const styles = StyleSheet.create({
   clubName: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
     marginBottom: 4,
   },
   clubAddress: {
     fontSize: theme.fontSize.xs,
-    color: '#6b7280',
+    color: theme.auth.textSecondary,
   },
   mapBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#E31E24',
+    backgroundColor: theme.auth.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sectionTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
     marginBottom: 16,
   },
   infoList: {
@@ -238,7 +242,9 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 12,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -250,7 +256,7 @@ const styles = StyleSheet.create({
   },
   infoLabel: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: theme.auth.label,
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 2,
@@ -258,6 +264,6 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: theme.fontSize.sm,
     fontWeight: '500',
-    color: '#1A1A1A',
+    color: theme.auth.text,
   },
 });

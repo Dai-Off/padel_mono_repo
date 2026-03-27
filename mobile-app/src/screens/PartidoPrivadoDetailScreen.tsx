@@ -31,14 +31,14 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
           accessibilityRole="button"
           accessibilityLabel="Volver"
         >
-          <Ionicons name="arrow-back" size={20} color="#1A1A1A" />
+          <Ionicons name="arrow-back" size={20} color={theme.auth.text} />
         </Pressable>
         <View style={styles.headerRight}>
           <Pressable style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}>
-            <Ionicons name="share-social-outline" size={16} color="#1A1A1A" />
+            <Ionicons name="share-social-outline" size={16} color={theme.auth.text} />
           </Pressable>
           <Pressable style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}>
-            <Ionicons name="ellipsis-horizontal" size={16} color="#1A1A1A" />
+            <Ionicons name="ellipsis-horizontal" size={16} color={theme.auth.text} />
           </Pressable>
         </View>
       </View>
@@ -141,22 +141,22 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FAFAFA' },
+  container: { flex: 1, backgroundColor: theme.auth.bg },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: theme.spacing.lg,
     ...theme.headerPadding,
-    backgroundColor: '#FAFAFA',
+    backgroundColor: theme.auth.bg,
   },
   headerBtn: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -169,10 +169,10 @@ const styles = StyleSheet.create({
     gap: theme.spacing.md,
   },
   infoCard: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.08)',
     padding: theme.spacing.lg,
   },
   infoTop: {
@@ -185,7 +185,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
-    backgroundColor: 'rgba(227,30,36,0.1)',
+    backgroundColor: 'rgba(241, 143, 52, 0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -194,31 +194,31 @@ const styles = StyleSheet.create({
   sportTitle: {
     fontSize: theme.fontSize.lg,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
   },
   sportDate: {
     fontSize: 12,
-    color: '#6b7280',
+    color: theme.auth.textSecondary,
     marginTop: 2,
     textTransform: 'capitalize',
   },
   infoGrid: { flexDirection: 'row', gap: 12 },
   infoCell: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
     padding: 12,
   },
   infoCellLabel: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: theme.auth.label,
     letterSpacing: 1,
     marginBottom: 2,
   },
   infoCellValue: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
   },
   statusRow: { flexDirection: 'row', gap: 8 },
   statusBadge: {
@@ -227,24 +227,24 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   statusDot: { width: 8, height: 8, borderRadius: 4 },
-  statusText: { fontSize: 12, fontWeight: '500', color: '#6b7280' },
+  statusText: { fontSize: 12, fontWeight: '500', color: theme.auth.textSecondary },
   playersCard: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.08)',
     padding: theme.spacing.lg,
   },
   playersTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
     marginBottom: theme.spacing.md,
   },
   privateReservadoRow: {
@@ -253,14 +253,14 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
   },
   privateReservadoAvatar: {
     width: 48,
     height: 48,
     borderRadius: 12,
-    backgroundColor: 'rgba(227,30,36,0.1)',
+    backgroundColor: 'rgba(241, 143, 52, 0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -269,21 +269,21 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 12,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  privateReservadoInitial: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  privateReservadoIcon: { fontSize: 20, fontWeight: '700', color: '#E31E24' },
-  privateReservadoName: { fontSize: 14, fontWeight: '700', color: '#1A1A1A' },
-  privateReservadoSub: { fontSize: 12, color: '#6b7280', marginTop: 2 },
+  privateReservadoInitial: { fontSize: 16, fontWeight: '700', color: theme.auth.text },
+  privateReservadoIcon: { fontSize: 20, fontWeight: '700', color: theme.auth.accent },
+  privateReservadoName: { fontSize: 14, fontWeight: '700', color: theme.auth.text },
+  privateReservadoSub: { fontSize: 12, color: theme.auth.textSecondary, marginTop: 2 },
   venueBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
     padding: theme.spacing.md,
   },
@@ -292,23 +292,23 @@ const styles = StyleSheet.create({
     height: 56,
     borderRadius: 12,
   },
-  venueImagePlaceholder: { backgroundColor: '#e5e7eb' },
+  venueImagePlaceholder: { backgroundColor: 'rgba(255,255,255,0.08)' },
   venueBody: { flex: 1, marginLeft: 16, minWidth: 0 },
   venueName: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
   },
   venueAddress: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: theme.auth.textMuted,
     marginTop: 2,
   },
   venueMapBtn: {
     width: 36,
     height: 36,
     borderRadius: 12,
-    backgroundColor: '#E31E24',
+    backgroundColor: theme.auth.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
