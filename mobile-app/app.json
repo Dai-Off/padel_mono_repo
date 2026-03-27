@@ -17,7 +17,8 @@
           "merchantIdentifier": "merchant.com.wematch.padel",
           "enableGooglePay": false
         }
-      ]
+      ],
+      "expo-font"
     ],
     "ios": {
       "supportsTablet": true,
