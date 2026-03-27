@@ -22,6 +22,7 @@ import {
 import { toast } from 'sonner';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { clubClientService } from '../../services/clubClients';
+import { checkinService, type CheckinBookingItem } from '../../services/checkin';
 import type { Player } from '../../types/api';
 
 function AnimSection({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
@@ -82,13 +83,73 @@ function StatCard({
   );
 }
 
-export function ClubCheckinTab() {
+type CheckinProps = {
+  clubId: string | null;
+  clubResolved: boolean;
+};
+
+export function ClubCheckinTab({ clubId, clubResolved }: CheckinProps) {
   const { t } = useTranslation();
-  const [checkins] = useState<
-    { id: number; player: string; court: string; checkIn: string; checkOut: string | null; status: 'active' | 'completed' | 'no-show'; initials: string }[]
-  >([]);
+  const [bookings, setBookings] = useState<CheckinBookingItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [qrToken, setQrToken] = useState<string | null>(null);
   const qrValue = useMemo(() => (qrToken ? `padel://checkin/${qrToken}` : ''), [qrToken]);
+
+  useEffect(() => {
+    if (!clubResolved) return;
+    if (!clubId) {
+      setBookings([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    void (async () => {
+      try {
+        const items = await checkinService.getToday(clubId);
+        setBookings(items);
+      } catch {
+        toast.error(t('checkin_empty'));
+        setBookings([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [clubResolved, clubId, t]);
+
+  const checkins = useMemo(() => {
+    const now = Date.now();
+    return bookings.flatMap((booking) =>
+      booking.participants.map((participant) => {
+        const start = new Date(booking.start_at);
+        const end = new Date(booking.end_at);
+        let status: 'active' | 'completed' | 'no-show' | 'pending' = 'pending';
+        if (booking.started_turn && now >= end.getTime()) status = 'completed';
+        else if (booking.started_turn) status = 'active';
+        else if (now > end.getTime()) status = 'no-show';
+        return {
+          id: participant.participant_id,
+          player: participant.player_name,
+          court: booking.court_name,
+          checkIn: start.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+          checkOut: end.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
+          status,
+          initials: initials(participant.player_name.split(' ')[0] || '', participant.player_name.split(' ').slice(1).join(' ') || ''),
+          isPaid: participant.is_paid,
+        };
+      })
+    );
+  }, [bookings]);
+
+  const stats = useMemo(() => {
+    const activeNow = checkins.filter((c) => c.status === 'active').length;
+    const today = checkins.length;
+    const noShows = checkins.filter((c) => c.status === 'no-show').length;
+    const attendanceRate = today > 0 ? Math.round(((today - noShows) / today) * 100) : 0;
+    return { activeNow, today, noShows, attendanceRate };
+  }, [checkins]);
+
+  if (!clubResolved || loading) return <PageSpinner />;
+  if (!clubId) return <div className="rounded-2xl border border-amber-100 bg-amber-50/80 p-5 text-sm text-amber-900">{t('crm_no_club')}</div>;
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
@@ -106,10 +167,10 @@ export function ClubCheckinTab() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <StatCard label={t('checkin_active_now')} value="0" icon={<CheckCircle className="w-4 h-4" />} color="#22C55E" delay={0} />
-        <StatCard label={t('checkin_today')} value="0" icon={<UserCheck className="w-4 h-4" />} color="#5B8DEE" delay={0.05} />
-        <StatCard label={t('checkin_no_shows')} value="0" icon={<XCircle className="w-4 h-4" />} color="#E31E24" delay={0.1} />
-        <StatCard label={t('checkin_attendance_rate')} value="0%" icon={<TrendingUp className="w-4 h-4" />} color="#8B5CF6" delay={0.15} />
+        <StatCard label={t('checkin_active_now')} value={String(stats.activeNow)} icon={<CheckCircle className="w-4 h-4" />} color="#22C55E" delay={0} />
+        <StatCard label={t('checkin_today')} value={String(stats.today)} icon={<UserCheck className="w-4 h-4" />} color="#5B8DEE" delay={0.05} />
+        <StatCard label={t('checkin_no_shows')} value={String(stats.noShows)} icon={<XCircle className="w-4 h-4" />} color="#E31E24" delay={0.1} />
+        <StatCard label={t('checkin_attendance_rate')} value={`${stats.attendanceRate}%`} icon={<TrendingUp className="w-4 h-4" />} color="#8B5CF6" delay={0.15} />
       </div>
 
       <AnimSection delay={0.2}>
@@ -135,17 +196,15 @@ export function ClubCheckinTab() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <div className={`px-2.5 py-1 rounded-lg border text-[10px] font-semibold ${item.isPaid ? 'bg-green-50 border-green-100 text-green-700' : 'bg-amber-50 border-amber-100 text-amber-700'}`}>
+                    {item.isPaid ? 'Pagado' : 'Pendiente pago'}
+                  </div>
                   <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-gray-100 bg-gray-50">
-                    <PulseDot color={item.status === 'active' ? '#22C55E' : item.status === 'completed' ? '#5B8DEE' : '#E31E24'} />
+                    <PulseDot color={item.status === 'active' ? '#22C55E' : item.status === 'completed' ? '#5B8DEE' : item.status === 'pending' ? '#F59E0B' : '#E31E24'} />
                     <span className="text-[10px] font-semibold text-[#1A1A1A]">
-                      {item.status === 'active' ? 'En pista' : item.status === 'completed' ? 'OK' : 'No-show'}
+                      {item.status === 'active' ? 'En pista' : item.status === 'completed' ? 'OK' : item.status === 'pending' ? 'Pendiente' : 'No-show'}
                     </span>
                   </div>
-                  {item.status === 'active' && (
-                    <motion.button whileTap={{ scale: 0.95 }} className="px-2.5 py-1 bg-[#1A1A1A] text-white rounded-lg text-[10px] font-bold">
-                      Finalizar
-                    </motion.button>
-                  )}
                 </div>
               </div>
             ))}
