@@ -683,24 +683,27 @@ POST /learning/courses/:id/submit:
 
 ## 6. Orden de implementación
 
-### Fase 1 — Infraestructura
+### Fase 1 — Infraestructura ✅ COMPLETADA
 
-| # | Tarea | Archivos |
-|---|-------|----------|
-| 1.1 | Crear SQL de tablas | `backend/db/014_learning_module.sql` |
-| 1.2 | Ejecutar SQL en Supabase | Dashboard de Supabase |
-| 1.3 | Crear `learning.ts` con router base + registro en `index.ts` | `backend/src/routes/learning.ts`, `backend/src/routes/index.ts` |
+| # | Tarea | Estado |
+|---|-------|--------|
+| 1.1 | Crear SQL de tablas (`backend/db/014_learning_module.sql`) | ✅ Hecho |
+| 1.2 | Ejecutar SQL en Supabase | ✅ Hecho |
+| 1.3 | Crear `learning.ts` con router base + registro en `index.ts` | ✅ Hecho |
 
-### Fase 2 — Lecciones diarias (core)
+### Fase 2 — Lecciones diarias (core) ✅ COMPLETADA
 
-| # | Tarea | Detalle |
-|---|-------|---------|
-| 2.1 | Helper: obtener player_id desde auth | Función reutilizable que dado `req.authContext.userId` obtiene el `player_id` de la tabla `players` |
-| 2.2 | Algoritmo de selección | Función pura que recibe (preguntas, historial, elo) y devuelve 5 preguntas |
-| 2.3 | `GET /learning/daily-lesson` | Integra 2.1 + 2.2. Verifica si ya completó hoy. |
-| 2.4 | `POST /learning/daily-lesson/complete` | Corrección, puntuación, elo, log, sesión. SIN rachas todavía. |
+| # | Tarea | Estado |
+|---|-------|--------|
+| 2.1 | Helper: `getPlayerFromAuth` (busca player por `auth_user_id`) | ✅ Hecho |
+| 2.2 | Algoritmo de selección (pesos dinámicos, 5 componentes, reglas de variedad) | ✅ Hecho |
+| 2.3 | `GET /learning/daily-lesson` (verifica si completó hoy por timezone, sanitiza respuestas) | ✅ Hecho |
+| 2.4 | `POST /learning/daily-lesson/complete` (corrección por tipo, puntuación, XP, elo, log + sesión) | ✅ Hecho |
+| 2.5 | Documentar rutas en `backend/API.md` | ✅ Hecho |
 
-### Fase 3 — Rachas
+> TypeScript compila sin errores. Servidor arranca correctamente con `npm run dev`.
+
+### Fase 3 — Rachas ⬜ SIGUIENTE
 
 | # | Tarea | Detalle |
 |---|-------|---------|

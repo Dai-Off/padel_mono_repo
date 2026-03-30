@@ -21,6 +21,7 @@ import inventoryRouter from './inventory';
 import schoolCoursesRouter from './schoolCourses';
 import clubClientsRouter from './clubClients';
 import clubReviewsRouter from './clubReviews';
+import learningRouter from './learning';
 
 const router = Router();
 
@@ -50,6 +51,7 @@ router.use('/inventario', inventoryRouter);
 router.use('/school-courses', schoolCoursesRouter);
 router.use('/club-clients', clubClientsRouter);
 router.use('/club-reviews', clubReviewsRouter);
+router.use('/learning', learningRouter);
 
 export default router;
 
