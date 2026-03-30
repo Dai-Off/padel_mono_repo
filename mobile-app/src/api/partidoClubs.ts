@@ -5,6 +5,8 @@ export type SlotForCreate = {
   time: string;
   duration: string;
   courtId: string;
+  /** Nombre de pista (SearchCourtResult.courtName) para confirmación post-pago. */
+  courtName: string;
   dateStr: string;
   dateLabel: string;
   minPriceCents: number;
@@ -53,6 +55,7 @@ function toSlots(r: SearchCourtResult, dateStr: string, dateLabel: string): Slot
     time,
     duration: '90min',
     courtId: r.id,
+    courtName: r.courtName,
     dateStr,
     dateLabel,
     minPriceCents: r.minPriceCents || 0,

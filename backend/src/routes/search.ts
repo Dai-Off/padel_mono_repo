@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 
 const router = Router();
@@ -19,6 +20,16 @@ export type SearchCourtResult = {
   minPriceCents: number;
   minPriceFormatted: string;
   timeSlots: string[];
+};
+
+type ClubSearchRow = {
+  id: string;
+  name: string;
+  city: string;
+  address: string;
+  lat: number | null;
+  lng: number | null;
+  logo_url: string | null;
 };
 
 /** GET /search/courts - Busca pistas con disponibilidad. Filtros opcionales por query. */
@@ -50,15 +61,26 @@ router.get('/courts', async (req: Request, res: Response) => {
     const clubIds = [...new Set(courts.map((c) => c.club_id))];
     const { data: clubs, error: clubsError } = await supabase
       .from('clubs')
-      .select('id, name, city, address, lat, lng')
+      .select('id, name, city, address, lat, lng, logo_url')
       .in('id', clubIds);
     if (clubsError) return res.status(500).json({ ok: false, error: clubsError.message });
 
-    const clubMap = new Map(clubs?.map((c) => [c.id, c]) ?? []);
+    const clubMap = new Map<string, ClubSearchRow>(
+      (clubs ?? []).map((c) => [c.id, c as ClubSearchRow])
+    );
     const missingClubIds = clubIds.filter((id) => !clubMap.has(id));
     if (missingClubIds.length) {
       console.log('[search/courts] Clubs not found for court(s):', missingClubIds);
     }
+
+    const resolvedLogoByClubId = new Map<string, string | null>(
+      await Promise.all(
+        [...clubMap.entries()].map(async ([id, club]) => {
+          const url = await resolveClubLogoUrlForClient(supabase, club.logo_url);
+          return [id, url] as const;
+        })
+      )
+    );
 
     const courtIds = courts.map((c) => c.id);
 
@@ -189,6 +211,8 @@ router.get('/courts', async (req: Request, res: Response) => {
 
         const minPriceFormatted = minPriceCents ? `${Math.round(minPriceCents / 100)}€` : '-';
 
+        const logoUrl = resolvedLogoByClubId.get(club.id) ?? null;
+
         return [{
           id: court.id,
           clubId: club.id,
@@ -200,7 +224,7 @@ router.get('/courts', async (req: Request, res: Response) => {
           lng: club.lng,
           indoor: court.indoor,
           glassType: court.glass_type,
-          imageUrl: null as string | null,
+          imageUrl: logoUrl,
           distanceKm: null as number | null,
           minPriceCents,
           minPriceFormatted,

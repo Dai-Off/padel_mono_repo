@@ -14,3 +14,4 @@ export { IAAfinidadCard } from './IAAfinidadCard';
 export { MissionsHomeSection } from './MissionsHomeSection';
 export type { HomeMission } from './MissionsHomeSection';
 export { EnDirectoSection } from './EnDirectoSection';
+export { ProximosPartidosSection } from './ProximosPartidosSection';
