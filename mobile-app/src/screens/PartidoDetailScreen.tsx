@@ -24,6 +24,7 @@ import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
 import { fetchMyPlayerId } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
+import { MatchEvaluationFlow } from '../components/partido/MatchEvaluationFlow';
 import type { PartidoItem, PartidoPlayer } from './PartidosScreen';
 
 const BG = '#0F0F0F';
@@ -68,6 +69,8 @@ type TabId = 'info' | 'players' | 'club';
 type PartidoDetailScreenProps = {
   partido: PartidoItem;
   onBack: () => void;
+  /** Tras evaluar el partido: ir al tab inicio (y cerrar modal desde el padre). */
+  onGoHome?: () => void;
 };
 
 function PulseDot() {
@@ -79,7 +82,7 @@ function PulseDot() {
   );
 }
 
-export function PartidoDetailScreen({ partido: initialPartido, onBack }: PartidoDetailScreenProps) {
+export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome }: PartidoDetailScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -88,16 +91,24 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
   const [activeTab, setActiveTab] = useState<TabId>('info');
   const [favorite, setFavorite] = useState(false);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
+  /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido (fetch async). */
+  const [playerContextResolved, setPlayerContextResolved] = useState(() => !session?.access_token);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
   const [joiningSlotIndex, setJoiningSlotIndex] = useState<number | null>(null);
   const [clubInfoVisible, setClubInfoVisible] = useState(false);
+  const [evaluationVisible, setEvaluationVisible] = useState(false);
 
   useEffect(() => {
-    if (session?.access_token) {
-      fetchMyPlayerId(session.access_token).then(setCurrentPlayerId);
-    } else {
+    if (!session?.access_token) {
       setCurrentPlayerId(null);
+      setPlayerContextResolved(true);
+      return;
     }
+    setPlayerContextResolved(false);
+    fetchMyPlayerId(session.access_token)
+      .then(setCurrentPlayerId)
+      .catch(() => setCurrentPlayerId(null))
+      .finally(() => setPlayerContextResolved(true));
   }, [session?.access_token]);
 
   const isInMatch = currentPlayerId != null && (partido.playerIds ?? []).includes(currentPlayerId);
@@ -191,9 +202,35 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
     }
   };
 
-  const bottomReserve = insets.bottom + 88;
   const joinBusy = joiningSlotIndex !== null;
-  const canPressCta = firstFreeIndex >= 0 && !isInMatch && !joinBusy;
+  const matchPhase = partido.matchPhase ?? 'upcoming';
+  /** Usuario apuntado y partido aún no cerrado: barra inferior con finalizar + papelera. */
+  const showFinishBar =
+    playerContextResolved && isInMatch && matchPhase !== 'past';
+  const bottomReserve = insets.bottom + (showFinishBar ? 100 : 88);
+  const canPressCta =
+    playerContextResolved &&
+    firstFreeIndex >= 0 &&
+    !isInMatch &&
+    !joinBusy &&
+    matchPhase !== 'past';
+
+  const handleTrashMatch = useCallback(() => {
+    Alert.alert(
+      '¿Eliminar partido?',
+      'Si abandonas, puede afectar a tus compañeros. Esta acción puede no estar disponible aún.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Continuar',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert('Próximamente', 'La baja del partido estará disponible pronto.');
+          },
+        },
+      ]
+    );
+  }, []);
 
   return (
     <View style={styles.root}>
@@ -398,7 +435,10 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
                         key={i}
                         player={p}
                         onJoin={
-                          p.isFree && !isInMatch && (joiningSlotIndex == null || joiningSlotIndex === i)
+                          playerContextResolved &&
+                          p.isFree &&
+                          !isInMatch &&
+                          (joiningSlotIndex == null || joiningSlotIndex === i)
                             ? () => handleJoin(i)
                             : undefined
                         }
@@ -415,6 +455,7 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
                           key={i}
                           player={p}
                           onJoin={
+                            playerContextResolved &&
                             p.isFree &&
                             !isInMatch &&
                             (joiningSlotIndex == null || joiningSlotIndex === slotIdx)
@@ -459,31 +500,65 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack }: Partido
         </View>
       </ScrollView>
 
-      <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-        <Pressable
-          style={({ pressed }) => [
-            styles.ctaBtn,
-            !canPressCta && styles.ctaBtnDisabled,
-            pressed && canPressCta && styles.pressed,
-          ]}
-          onPress={() => firstFreeIndex >= 0 && handleJoin(firstFreeIndex)}
-          disabled={!canPressCta}
-        >
-          {joinBusy ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <View style={styles.ctaTextWrap}>
-              <Text style={styles.ctaText}>
-                {isInMatch
-                  ? 'Ya estás en el partido'
-                  : firstFreeIndex < 0
-                    ? 'No hay plazas libres'
-                    : `Reservar plaza - ${partido.price}`}
-              </Text>
-            </View>
-          )}
-        </Pressable>
-      </View>
+      {!playerContextResolved ? (
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <View style={styles.bottomBarLoading}>
+            <ActivityIndicator color={ACCENT} size="small" />
+          </View>
+        </View>
+      ) : showFinishBar ? (
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <View style={styles.finishBarRow}>
+            <Pressable
+              onPress={handleTrashMatch}
+              style={({ pressed }) => [styles.finishBarTrash, pressed && styles.pressed]}
+              accessibilityLabel="Eliminar o abandonar partido"
+            >
+              <Ionicons name="trash-outline" size={22} color="#f87171" />
+            </Pressable>
+            <Pressable
+              onPress={() => setEvaluationVisible(true)}
+              style={({ pressed }) => [styles.finishBarCta, pressed && styles.pressed]}
+            >
+              <Text style={styles.finishBarCtaText}>Finalizar Partido</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.ctaBtn,
+              !canPressCta && styles.ctaBtnDisabled,
+              pressed && canPressCta && styles.pressed,
+            ]}
+            onPress={() => firstFreeIndex >= 0 && handleJoin(firstFreeIndex)}
+            disabled={!canPressCta}
+          >
+            {joinBusy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <View style={styles.ctaTextWrap}>
+                <Text style={styles.ctaText}>
+                  {isInMatch
+                    ? 'Ya estás en el partido'
+                    : firstFreeIndex < 0
+                      ? 'No hay plazas libres'
+                      : `Reservar plaza - ${partido.price}`}
+                </Text>
+              </View>
+            )}
+          </Pressable>
+        </View>
+      )}
+
+      <MatchEvaluationFlow
+        visible={evaluationVisible}
+        partido={partido}
+        currentPlayerId={currentPlayerId}
+        onClose={() => setEvaluationVisible(false)}
+        onGoHome={onGoHome}
+      />
 
       <ClubInfoSheet
         visible={clubInfoVisible}
@@ -952,11 +1027,47 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 10,
+    paddingHorizontal: 20,
     paddingTop: 12,
     backgroundColor: 'rgba(15,15,15,0.95)',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  finishBarRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 12,
+  },
+  finishBarTrash: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  finishBarCta: {
+    flex: 1,
+    minHeight: 56,
+    borderRadius: 16,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  finishBarCtaText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#fff',
+  },
+  bottomBarLoading: {
+    minHeight: 56,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 8,
   },
   ctaBtn: {
     width: '100%',
