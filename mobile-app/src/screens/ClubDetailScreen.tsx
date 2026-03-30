@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import * as Linking from 'expo-linking';
-import { LinearGradient } from 'expo-linear-gradient';
+import { useCallback, useEffect, useMemo, useState } from "react";
+import * as Linking from "expo-linking";
+import { LinearGradient } from "expo-linear-gradient";
 import {
   ActivityIndicator,
   Alert,
@@ -11,23 +11,26 @@ import {
   Switch,
   Text,
   View,
-} from 'react-native';
-import { useStripe } from '@stripe/stripe-react-native';
-import { Ionicons } from '@expo/vector-icons';
-import type { SearchCourtResult } from '../api/search';
-import { fetchSearchCourts } from '../api/search';
-import { fetchClubById } from '../api/clubs';
-import { fetchCourtsByClubId, type Court } from '../api/courts';
-import { fetchMatches } from '../api/matches';
-import { mapMatchToPartido } from '../api/mapMatchToPartido';
-import { createIntentForNewMatch, confirmPaymentFromClient } from '../api/payments';
-import { fetchMyPlayerId } from '../api/players';
-import { useAuth } from '../contexts/AuthContext';
-import { PartidoCard } from '../components/partido/PartidoCard';
-import type { BookingConfirmationData } from './BookingConfirmationScreen';
-import { PrivateReservationModal } from '../components/partido/PrivateReservationModal';
-import type { PartidoItem } from './PartidosScreen';
-import { theme } from '../theme';
+} from "react-native";
+import { useStripe } from "@stripe/stripe-react-native";
+import { Ionicons } from "@expo/vector-icons";
+import type { SearchCourtResult } from "../api/search";
+import { fetchSearchCourts } from "../api/search";
+import { fetchClubById } from "../api/clubs";
+import { fetchCourtsByClubId, type Court } from "../api/courts";
+import { fetchMatches } from "../api/matches";
+import { mapMatchToPartido } from "../api/mapMatchToPartido";
+import {
+  createIntentForNewMatch,
+  confirmPaymentFromClient,
+} from "../api/payments";
+import { fetchMyPlayerId } from "../api/players";
+import { useAuth } from "../contexts/AuthContext";
+import { PartidoCard } from "../components/partido/PartidoCard";
+import type { BookingConfirmationData } from "./BookingConfirmationScreen";
+import { PrivateReservationModal } from "../components/partido/PrivateReservationModal";
+import type { PartidoItem } from "./PartidosScreen";
+import { theme } from "../theme";
 
 const DURATION_MIN = 60;
 
@@ -37,53 +40,85 @@ type ClubDetailScreenProps = {
   onPartidoPress?: (partido: PartidoItem) => void;
 };
 
-const TABS = ['Home', 'Reservar', 'Partidos abiertos', 'Competiciones'] as const;
+const TABS = [
+  "Home",
+  "Reservar",
+  "Partidos abiertos",
+  "Competiciones",
+] as const;
 type TabId = (typeof TABS)[number];
 
-const DAYS = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM'];
-const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const DAYS = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"];
+const MONTHS = [
+  "Ene",
+  "Feb",
+  "Mar",
+  "Abr",
+  "May",
+  "Jun",
+  "Jul",
+  "Ago",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dic",
+];
 
 /** Fecha en YYYY-MM-DD según hora local (evita desfase por toISOString en UTC). */
 function toDateStringLocal(date: Date): string {
   const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
 
-
 function getCerramientoLabel(indoor: boolean): string {
-  return indoor ? 'Indoor' : 'Exterior';
+  return indoor ? "Indoor" : "Exterior";
 }
 
 function getParedesLabel(glassType: string): string {
-  return glassType === 'panoramic' ? 'Cristal' : 'Muro';
+  return glassType === "panoramic" ? "Cristal" : "Muro";
 }
 
 /** Formatea weekly_schedule (jsonb) a texto legible. Si está vacío devuelve null. */
-function formatWeeklySchedule(ws: Record<string, unknown> | null | undefined): string | null {
-  if (!ws || typeof ws !== 'object' || Object.keys(ws).length === 0) return null;
+function formatWeeklySchedule(
+  ws: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!ws || typeof ws !== "object" || Object.keys(ws).length === 0)
+    return null;
   const DAY_NAMES: Record<string, string> = {
-    '0': 'Dom', '1': 'Lun', '2': 'Mar', '3': 'Mié', '4': 'Jue', '5': 'Vie', '6': 'Sáb',
-    mon: 'Lun', tue: 'Mar', wed: 'Mié', thu: 'Jue', fri: 'Vie', sat: 'Sáb', sun: 'Dom',
+    "0": "Dom",
+    "1": "Lun",
+    "2": "Mar",
+    "3": "Mié",
+    "4": "Jue",
+    "5": "Vie",
+    "6": "Sáb",
+    mon: "Lun",
+    tue: "Mar",
+    wed: "Mié",
+    thu: "Jue",
+    fri: "Vie",
+    sat: "Sáb",
+    sun: "Dom",
   };
   const lines: string[] = [];
   const keys = Object.keys(ws).sort();
   for (const k of keys) {
     const v = ws[k];
     const dayLabel = DAY_NAMES[k] ?? k;
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
       const obj = v as Record<string, unknown>;
       const open = obj.open ?? obj.open_time ?? obj.start;
       const close = obj.close ?? obj.close_time ?? obj.end;
       if (open != null && close != null) {
         lines.push(`${dayLabel}: ${String(open)} - ${String(close)}`);
       }
-    } else if (typeof v === 'string' && v) {
+    } else if (typeof v === "string" && v) {
       lines.push(`${dayLabel}: ${v}`);
     }
   }
-  return lines.length > 0 ? lines.join('\n') : null;
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 function getNextDays(count: number) {
@@ -102,29 +137,57 @@ function getNextDays(count: number) {
   return out;
 }
 
-function matchBelongsToClub(match: { bookings?: { courts?: { club_id?: string } | null } | null }, clubId: string): boolean {
+function matchBelongsToClub(
+  match: { bookings?: { courts?: { club_id?: string } | null } | null },
+  clubId: string,
+): boolean {
   const clubIdFromMatch = match.bookings?.courts?.club_id;
   return clubIdFromMatch != null && clubIdFromMatch === clubId;
 }
 
 function formatDateTimeForConfirmation(date: Date, time: string): string {
-  const dayNames = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
-  const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const dayNames = ["DOM", "LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB"];
+  const months = [
+    "Ene",
+    "Feb",
+    "Mar",
+    "Abr",
+    "May",
+    "Jun",
+    "Jul",
+    "Ago",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dic",
+  ];
   const d = new Date(date);
-  d.setHours(parseInt(time.slice(0, 2), 10), parseInt(time.slice(3, 5) || '0', 10), 0, 0);
-  const dayName = dayNames[d.getDay()] ?? 'Día';
+  d.setHours(
+    parseInt(time.slice(0, 2), 10),
+    parseInt(time.slice(3, 5) || "0", 10),
+    0,
+    0,
+  );
+  const dayName = dayNames[d.getDay()] ?? "Día";
   const dayNum = d.getDate();
-  const month = months[d.getMonth()] ?? '';
+  const month = months[d.getMonth()] ?? "";
   return `${dayName}, ${dayNum} ${month} · ${time}`;
 }
 
-export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailScreenProps) {
+export function ClubDetailScreen({
+  court,
+  onClose,
+  onPartidoPress,
+}: ClubDetailScreenProps) {
   const { session } = useAuth();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
-  const [activeTab, setActiveTab] = useState<TabId>('Home');
+  const [activeTab, setActiveTab] = useState<TabId>("Home");
   const [clubPartidos, setClubPartidos] = useState<PartidoItem[]>([]);
-  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
-  const [confirmationModalData, setConfirmationModalData] = useState<BookingConfirmationData | null>(null);
+  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(
+    null,
+  );
+  const [confirmationModalData, setConfirmationModalData] =
+    useState<BookingConfirmationData | null>(null);
   const [partidosLoading, setPartidosLoading] = useState(false);
   const [clubCourts, setClubCourts] = useState<Court[]>([]);
   const [scheduleText, setScheduleText] = useState<string | null>(null);
@@ -137,7 +200,11 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
       fetchCourtsByClubId(court.clubId),
     ]);
     setClubCourts(courts);
-    setScheduleText(club?.weekly_schedule ? formatWeeklySchedule(club.weekly_schedule as Record<string, unknown>) : null);
+    setScheduleText(
+      club?.weekly_schedule
+        ? formatWeeklySchedule(club.weekly_schedule as Record<string, unknown>)
+        : null,
+    );
     setClubCourtsLoading(false);
   }, [court.clubId]);
 
@@ -152,14 +219,14 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
       .filter((m) => matchBelongsToClub(m, court.clubId))
       .map(mapMatchToPartido)
       .filter((p): p is PartidoItem => p != null)
-      .filter((p) => p.matchPhase !== 'past')
-      .filter((p) => p.visibility !== 'private');
+      .filter((p) => p.matchPhase !== "past")
+      .filter((p) => p.visibility !== "private");
     setClubPartidos(filtered);
     setPartidosLoading(false);
   }, [court.clubId]);
 
   useEffect(() => {
-    if (activeTab === 'Partidos abiertos') {
+    if (activeTab === "Partidos abiertos") {
       loadClubPartidos();
     }
   }, [activeTab, loadClubPartidos]);
@@ -167,9 +234,13 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [partidosAlertsEnabled, setPartidosAlertsEnabled] = useState(false);
   const [timeSlotsForDate, setTimeSlotsForDate] = useState<string[]>([]);
-  const [slotsByCourt, setSlotsByCourt] = useState<Record<string, string[]>>({});
+  const [slotsByCourt, setSlotsByCourt] = useState<Record<string, string[]>>(
+    {},
+  );
   const [timeSlotsLoading, setTimeSlotsLoading] = useState(false);
-  const [courtPrices, setCourtPrices] = useState<Record<string, { minPriceCents: number; minPriceFormatted: string }>>({});
+  const [courtPrices, setCourtPrices] = useState<
+    Record<string, { minPriceCents: number; minPriceFormatted: string }>
+  >({});
   const [expandedCourtId, setExpandedCourtId] = useState<string | null>(null);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
   const [reserving, setReserving] = useState(false);
@@ -193,7 +264,10 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
         });
         const clubResults = results.filter((r) => r.clubId === court.clubId);
         const allSlots: string[] = [];
-        const prices: Record<string, { minPriceCents: number; minPriceFormatted: string }> = {};
+        const prices: Record<
+          string,
+          { minPriceCents: number; minPriceFormatted: string }
+        > = {};
         for (const r of clubResults) {
           const courtSlots = r.timeSlots ?? [];
           allSlots.push(...courtSlots);
@@ -201,7 +275,8 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
           if (r.minPriceCents > 0) {
             prices[r.id] = {
               minPriceCents: r.minPriceCents,
-              minPriceFormatted: r.minPriceFormatted ?? `${Math.round(r.minPriceCents / 100)}€`,
+              minPriceFormatted:
+                r.minPriceFormatted ?? `${Math.round(r.minPriceCents / 100)}€`,
             };
           }
         }
@@ -216,11 +291,11 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
         setTimeSlotsLoading(false);
       }
     },
-    [court.clubId]
+    [court.clubId],
   );
 
   useEffect(() => {
-    if (activeTab === 'Reservar') {
+    if (activeTab === "Reservar") {
       // Al cambiar de día, limpiamos horario seleccionado y pista expandida
       setSelectedTimeSlot(null);
       setExpandedCourtId(null);
@@ -237,17 +312,28 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
   }, [session?.access_token]);
 
   const handleReservar = useCallback(
-    async (c: Court, priceInfo: { minPriceCents: number; minPriceFormatted: string } | undefined) => {
+    async (
+      c: Court,
+      priceInfo:
+        | { minPriceCents: number; minPriceFormatted: string }
+        | undefined,
+    ) => {
       if (!selectedTimeSlot) {
-        Alert.alert('Elige un horario', 'Selecciona primero una hora en la lista de arriba.');
+        Alert.alert(
+          "Elige un horario",
+          "Selecciona primero una hora en la lista de arriba.",
+        );
         return;
       }
       if (!organizerPlayerId || !session?.access_token) {
-        Alert.alert('Inicia sesión', 'Debes iniciar sesión para reservar.');
+        Alert.alert("Inicia sesión", "Debes iniciar sesión para reservar.");
         return;
       }
       if (!priceInfo || priceInfo.minPriceCents <= 0) {
-        Alert.alert('No disponible', 'No hay precio disponible para esta pista en la fecha seleccionada.');
+        Alert.alert(
+          "No disponible",
+          "No hay precio disponible para esta pista en la fecha seleccionada.",
+        );
         return;
       }
 
@@ -268,56 +354,69 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
           end_at,
           total_price_cents: totalPriceCents,
           pay_full: true,
-          visibility: 'private',
+          visibility: "private",
           competitive: false,
-          gender: 'any',
+          gender: "any",
         },
-        session.access_token
+        session.access_token,
       );
 
       if (!intentRes.ok || !intentRes.clientSecret) {
         setReserving(false);
-        const errMsg = intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.';
-        if (errMsg.includes('esa hora') || errMsg.includes('otro horario')) {
-          Alert.alert('Horario no disponible', 'Ya tienes un partido a esa hora. Elige otro horario.');
+        const errMsg =
+          intentRes.error ?? "No se pudo iniciar el pago. Inténtalo de nuevo.";
+        if (errMsg.includes("esa hora") || errMsg.includes("otro horario")) {
+          Alert.alert(
+            "Horario no disponible",
+            "Ya tienes un partido a esa hora. Elige otro horario.",
+          );
         } else {
-          Alert.alert('Error', errMsg);
+          Alert.alert("Error", errMsg);
         }
         return;
       }
 
-      const returnURL = Linking.createURL('stripe-redirect');
+      const returnURL = Linking.createURL("stripe-redirect");
       const { error: initErr } = await initPaymentSheet({
         paymentIntentClientSecret: intentRes.clientSecret,
-        merchantDisplayName: 'WeMatch Padel',
+        merchantDisplayName: "WeMatch Padel",
         returnURL,
       });
 
       if (initErr) {
         setReserving(false);
-        Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+        Alert.alert(
+          "Error",
+          "Error al configurar el pago. Inténtalo de nuevo.",
+        );
         return;
       }
 
       const { error: presentErr } = await presentPaymentSheet();
       if (presentErr) {
         setReserving(false);
-        if (presentErr.code === 'Canceled') {
+        if (presentErr.code === "Canceled") {
           // Usuario canceló, no mostrar error
         } else {
-          Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
+          Alert.alert(
+            "Error",
+            "Error al procesar el pago. Inténtalo de nuevo.",
+          );
         }
         return;
       }
 
       const confirmRes = await confirmPaymentFromClient(
         intentRes.paymentIntentId!,
-        session.access_token
+        session.access_token,
       );
       setReserving(false);
 
       if (!confirmRes.ok) {
-        Alert.alert('Error', 'No se pudo confirmar la reserva. Inténtalo de nuevo.');
+        Alert.alert(
+          "Error",
+          "No se pudo confirmar la reserva. Inténtalo de nuevo.",
+        );
         return;
       }
 
@@ -328,10 +427,13 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
       setConfirmationModalData({
         courtName: c.name,
         clubName: court.clubName,
-        dateTimeFormatted: formatDateTimeForConfirmation(selectedDate, selectedTimeSlot),
+        dateTimeFormatted: formatDateTimeForConfirmation(
+          selectedDate,
+          selectedTimeSlot,
+        ),
         duration: `${DURATION_MIN} min`,
         priceFormatted: priceInfo.minPriceFormatted,
-        matchVisibility: 'private',
+        matchVisibility: "private",
       });
     },
     [
@@ -343,197 +445,277 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
       initPaymentSheet,
       presentPaymentSheet,
       loadTimeSlotsForDate,
-    ]
+    ],
   );
 
   return (
     <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable
-            onPress={onClose}
-            style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Volver"
-          >
-            <Ionicons name="arrow-back" size={20} color="#fff" />
-          </Pressable>
-          <View style={styles.headerRight}>
-            <Pressable style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}>
-              <Ionicons name="notifications-outline" size={20} color="#fff" />
-            </Pressable>
-            <Pressable style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}>
-              <Ionicons name="heart-outline" size={20} color="#fff" />
-            </Pressable>
-          </View>
-        </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.tabsScroll}
-          contentContainerStyle={styles.tabsContent}
-        >
-          {TABS.map((tab) => (
-            <Pressable
-              key={tab}
-              onPress={() => setActiveTab(tab)}
-              style={({ pressed }) => [
-                styles.tab,
-                tab === 'Partidos abiertos' && styles.tabPartidosAbiertos,
-                activeTab === tab ? styles.tabActive : styles.tabInactive,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.tabText,
-                  activeTab === tab ? styles.tabTextActive : styles.tabTextInactive,
-                ]}
-                numberOfLines={tab === 'Partidos abiertos' ? 1 : 2}
-              >
-                {tab}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[
-            styles.scrollContent,
-            { paddingBottom: theme.scrollBottomPadding },
+      <View style={styles.header}>
+        <Pressable
+          onPress={onClose}
+          style={({ pressed }) => [
+            styles.headerButton,
+            pressed && styles.pressed,
           ]}
-          showsVerticalScrollIndicator={false}
+          accessibilityRole="button"
+          accessibilityLabel="Volver"
         >
-          <View style={styles.hero}>
-            <LinearGradient
-              colors={['#1a1a1a', '#2a2a2a']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.heroGradient}
+          <Ionicons name="arrow-back" size={20} color="#fff" />
+        </Pressable>
+        <View style={styles.headerRight}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.headerButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="notifications-outline" size={20} color="#fff" />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.headerButton,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Ionicons name="heart-outline" size={20} color="#fff" />
+          </Pressable>
+        </View>
+      </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabsScroll}
+        contentContainerStyle={styles.tabsContent}
+      >
+        {TABS.map((tab) => (
+          <Pressable
+            key={tab}
+            onPress={() => setActiveTab(tab)}
+            style={({ pressed }) => [
+              styles.tab,
+              tab === "Partidos abiertos" && styles.tabPartidosAbiertos,
+              activeTab === tab ? styles.tabActive : styles.tabInactive,
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text
+              style={[
+                styles.tabText,
+                activeTab === tab
+                  ? styles.tabTextActive
+                  : styles.tabTextInactive,
+              ]}
+              numberOfLines={tab === "Partidos abiertos" ? 1 : 2}
             >
-              <View style={styles.heroOrb} />
-              <View style={styles.heroContent}>
-                <View style={styles.statusRow}>
-                  <View style={styles.statusDot} />
-                  <Text style={styles.statusText}>Abierto ahora</Text>
+              {tab}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: theme.scrollBottomPadding },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.hero}>
+          <LinearGradient
+            colors={["#1a1a1a", "#2a2a2a"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.heroGradient}
+          >
+            <View style={styles.heroOrb} />
+            <View style={styles.heroContent}>
+              <View style={styles.statusRow}>
+                <View style={styles.statusDot} />
+                <Text style={styles.statusText}>Abierto ahora</Text>
+              </View>
+              <Text style={styles.heroTitle}>{court.clubName}</Text>
+              <View style={styles.heroLocation}>
+                <Ionicons
+                  name="location-outline"
+                  size={14}
+                  color="rgba(255,255,255,0.5)"
+                />
+                <Text style={styles.heroAddress} numberOfLines={1}>
+                  {court.address || court.city}
+                </Text>
+              </View>
+              <View style={styles.heroStats}>
+                <View style={styles.heroStat}>
+                  <Ionicons name="star" size={12} color="#fbbf24" />
+                  <Text style={styles.heroStatText}>4.8</Text>
                 </View>
-                <Text style={styles.heroTitle}>{court.clubName}</Text>
-                <View style={styles.heroLocation}>
-                  <Ionicons name="location-outline" size={14} color="rgba(255,255,255,0.5)" />
-                  <Text style={styles.heroAddress} numberOfLines={1}>
-                    {court.address || court.city}
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroStatText}>
+                    {clubCourtsLoading
+                      ? "..."
+                      : clubCourts.length === 0
+                        ? "Sin pistas"
+                        : clubCourts.length === 1
+                          ? "1 Pista"
+                          : `${clubCourts.length} Pistas`}
                   </Text>
                 </View>
-                <View style={styles.heroStats}>
-                  <View style={styles.heroStat}>
-                    <Ionicons name="star" size={12} color="#fbbf24" />
-                    <Text style={styles.heroStatText}>4.8</Text>
-                  </View>
+                {court.distanceKm != null && (
                   <View style={styles.heroStat}>
                     <Text style={styles.heroStatText}>
-                      {clubCourtsLoading ? '...' : clubCourts.length === 0
-                        ? 'Sin pistas'
-                        : clubCourts.length === 1
-                          ? '1 Pista'
-                          : `${clubCourts.length} Pistas`}
+                      {Math.round(court.distanceKm)}km
                     </Text>
                   </View>
-                  {court.distanceKm != null && (
-                    <View style={styles.heroStat}>
-                      <Text style={styles.heroStatText}>{Math.round(court.distanceKm)}km</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            </LinearGradient>
-          </View>
-
-          {activeTab === 'Reservar' ? (
-            <>
-              <View style={styles.section}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.datePickerRow}>
-                  <Pressable style={styles.dateSearchBtn}>
-                    <Ionicons name="search-outline" size={16} color="#6b7280" />
-                  </Pressable>
-                  {dateOptions.map((opt, i) => (
-                    <Pressable
-                      key={i}
-                      onPress={() => setSelectedDateIndex(i)}
-                      style={({ pressed }) => [
-                        styles.dateBtn,
-                        selectedDateIndex === i ? styles.dateBtnActive : styles.dateBtnInactive,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <Text style={[styles.dateDayName, selectedDateIndex === i && styles.dateTextActive]}>{opt.dayName}</Text>
-                      <Text style={[styles.dateDayNum, selectedDateIndex === i && styles.dateTextActive]}>{opt.day}</Text>
-                      <Text style={[styles.dateMonth, selectedDateIndex === i && styles.dateTextActive]}>{opt.month}</Text>
-                    </Pressable>
-                  ))}
-                </ScrollView>
-              </View>
-              <View style={styles.section}>
-                {timeSlotsLoading ? (
-                  <ActivityIndicator size="small" color={theme.auth.accent} style={{ paddingVertical: 16 }} />
-                ) : timeSlotsForDate.length > 0 ? (
-                  <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.timeSlotsCarousel}
-                  >
-                    {timeSlotsForDate.map((slot) => {
-                      const isSelected = selectedTimeSlot === slot;
-                      return (
-                        <Pressable
-                          key={slot}
-                          onPress={() => setSelectedTimeSlot(slot)}
-                          style={({ pressed }) => [
-                            styles.timeSlotBtn,
-                            isSelected && styles.timeSlotBtnSelected,
-                            pressed && styles.pressed,
-                          ]}
-                        >
-                          <Text style={[styles.timeSlotText, isSelected && styles.timeSlotTextSelected]}>{slot}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </ScrollView>
-                ) : (
-                  <Text style={styles.partidosEmptySubtitle}>Sin horarios disponibles</Text>
                 )}
               </View>
-              <View style={styles.section}>
-                <View style={styles.alertHeader}>
-                  <View>
-                    <View style={styles.alertTitleRow}>
-                      <Ionicons name="notifications-outline" size={16} color="#f97316" />
-                      <Text style={styles.alertSectionTitle}>Alertas prioritarias</Text>
-                    </View>
-                    <Text style={styles.alertSub}>Configura tu alerta con un click</Text>
+            </View>
+          </LinearGradient>
+        </View>
+
+        {activeTab === "Reservar" ? (
+          <>
+            <View style={styles.section}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.datePickerRow}
+              >
+                <Pressable style={styles.dateSearchBtn}>
+                  <Ionicons name="search-outline" size={16} color="#6b7280" />
+                </Pressable>
+                {dateOptions.map((opt, i) => (
+                  <Pressable
+                    key={i}
+                    onPress={() => setSelectedDateIndex(i)}
+                    style={({ pressed }) => [
+                      styles.dateBtn,
+                      selectedDateIndex === i
+                        ? styles.dateBtnActive
+                        : styles.dateBtnInactive,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.dateDayName,
+                        selectedDateIndex === i && styles.dateTextActive,
+                      ]}
+                    >
+                      {opt.dayName}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.dateDayNum,
+                        selectedDateIndex === i && styles.dateTextActive,
+                      ]}
+                    >
+                      {opt.day}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.dateMonth,
+                        selectedDateIndex === i && styles.dateTextActive,
+                      ]}
+                    >
+                      {opt.month}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
+            <View style={styles.section}>
+              {timeSlotsLoading ? (
+                <ActivityIndicator
+                  size="small"
+                  color={theme.auth.accent}
+                  style={{ paddingVertical: 16 }}
+                />
+              ) : timeSlotsForDate.length > 0 ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.timeSlotsCarousel}
+                >
+                  {timeSlotsForDate.map((slot) => {
+                    const isSelected = selectedTimeSlot === slot;
+                    return (
+                      <Pressable
+                        key={slot}
+                        onPress={() => setSelectedTimeSlot(slot)}
+                        style={({ pressed }) => [
+                          styles.timeSlotBtn,
+                          isSelected && styles.timeSlotBtnSelected,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.timeSlotText,
+                            isSelected && styles.timeSlotTextSelected,
+                          ]}
+                        >
+                          {slot}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              ) : (
+                <Text style={styles.partidosEmptySubtitle}>
+                  Sin horarios disponibles
+                </Text>
+              )}
+            </View>
+            <View style={styles.section}>
+              <View style={styles.alertHeader}>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.alertTitleRow}>
+                    <Ionicons
+                      name="notifications-outline"
+                      size={16}
+                      color="#f97316"
+                    />
+                    <Text style={styles.alertSectionTitle}>
+                      Alertas prioritarias
+                    </Text>
                   </View>
-                  <Switch
-                    value={alertsEnabled}
-                    onValueChange={setAlertsEnabled}
-                    trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
-                    thumbColor="#fff"
-                  />
-                </View>
-              </View>
-              <View style={styles.section}>
-                <Text style={styles.reservaTitle}>Reserva una pista</Text>
-                <Text style={styles.reservaSub}>Crea un partido privado e invita a tus amigos</Text>
-                <View style={styles.courtList}>
-                  {!selectedTimeSlot ? (
-                  <Text style={styles.partidosEmptySubtitle}>
-                    Selecciona primero un horario para ver qué pistas están libres.
+                  <Text style={styles.alertSub}>
+                    Configura tu alerta con un click
                   </Text>
-                  ) : clubCourtsLoading ? (
-                    <ActivityIndicator size="small" color={theme.auth.accent} style={{ paddingVertical: 16 }} />
-                  ) : clubCourts.length > 0 ? (
+                </View>
+                <Switch
+                  value={alertsEnabled}
+                  onValueChange={setAlertsEnabled}
+                  trackColor={{ false: "#e5e7eb", true: theme.auth.accent }}
+                  thumbColor="#fff"
+                />
+              </View>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.reservaTitle}>Reserva una pista</Text>
+              <Text style={styles.reservaSub}>
+                Crea un partido privado e invita a tus amigos
+              </Text>
+              <View style={styles.courtList}>
+                {!selectedTimeSlot ? (
+                  <Text style={styles.partidosEmptySubtitle}>
+                    Selecciona primero un horario para ver qué pistas están
+                    libres.
+                  </Text>
+                ) : clubCourtsLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={theme.auth.accent}
+                    style={{ paddingVertical: 16 }}
+                  />
+                ) : clubCourts.length > 0 ? (
                   (() => {
                     const courtsToShow = selectedTimeSlot
-                      ? clubCourts.filter((c) => (slotsByCourt[c.id] ?? []).includes(selectedTimeSlot))
+                      ? clubCourts.filter((c) =>
+                          (slotsByCourt[c.id] ?? []).includes(selectedTimeSlot),
+                        )
                       : clubCourts;
 
                     if (courtsToShow.length === 0 && selectedTimeSlot) {
@@ -550,34 +732,51 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                       return (
                         <View key={c.id} style={styles.courtCard}>
                           <Pressable
-                            style={({ pressed }) => [styles.courtCardHeader, pressed && styles.pressed]}
-                            onPress={() => setExpandedCourtId(isExpanded ? null : c.id)}
+                            style={({ pressed }) => [
+                              styles.courtCardHeader,
+                              pressed && styles.pressed,
+                            ]}
+                            onPress={() =>
+                              setExpandedCourtId(isExpanded ? null : c.id)
+                            }
                           >
                             <View style={styles.courtRowLeft}>
                               <Text style={styles.courtCardName}>{c.name}</Text>
                               <Text style={styles.courtCardSub}>
-                                {getCerramientoLabel(c.indoor)} | {getParedesLabel(c.glass_type)} | Dobles
+                                {getCerramientoLabel(c.indoor)} |{" "}
+                                {getParedesLabel(c.glass_type)} | Dobles
                               </Text>
                             </View>
                             <Ionicons
-                              name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                              name={isExpanded ? "chevron-up" : "chevron-down"}
                               size={20}
                               color="#9ca3af"
                             />
                           </Pressable>
                           {isExpanded && (
                             <View style={styles.courtCardActions}>
-                                <Pressable style={({ pressed }) => [styles.courtPriceBtn, pressed && styles.pressed]}>
-                                  <Text style={styles.courtPriceAmount}>
-                                    {priceInfo?.minPriceFormatted ?? '-'}
-                                  </Text>
-                                  <Text style={styles.courtPriceDuration}>60 min</Text>
-                                </Pressable>
-                                <Pressable
+                              <Pressable
+                                style={({ pressed }) => [
+                                  styles.courtPriceBtn,
+                                  pressed && styles.pressed,
+                                ]}
+                              >
+                                <Text style={styles.courtPriceAmount}>
+                                  {priceInfo?.minPriceFormatted ?? "-"}
+                                </Text>
+                                <Text style={styles.courtPriceDuration}>
+                                  60 min
+                                </Text>
+                              </Pressable>
+                              <Pressable
                                 style={({ pressed }) => [
                                   styles.courtReservarBtn,
-                                  (!selectedTimeSlot || reserving) && styles.courtReservarBtnDisabled,
-                                  pressed && !reserving && selectedTimeSlot && styles.pressed,
+                                  (!selectedTimeSlot || reserving) &&
+                                    styles.courtReservarBtnDisabled,
+                                  pressed &&
+                                    !reserving &&
+                                    selectedTimeSlot &&
+                                    styles.pressed,
                                 ]}
                                 onPress={() =>
                                   selectedTimeSlot
@@ -587,11 +786,20 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                                 disabled={reserving || !selectedTimeSlot}
                               >
                                 {reserving ? (
-                                  <ActivityIndicator size="small" color="#1A1A1A" />
+                                  <ActivityIndicator
+                                    size="small"
+                                    color="#1A1A1A"
+                                  />
                                 ) : !selectedTimeSlot ? (
-                                  <Text style={styles.courtReservarTextDisabled}>Elige hora</Text>
+                                  <Text
+                                    style={styles.courtReservarTextDisabled}
+                                  >
+                                    Elige hora
+                                  </Text>
                                 ) : (
-                                  <Text style={styles.courtReservarText}>Reservar</Text>
+                                  <Text style={styles.courtReservarText}>
+                                    Reservar
+                                  </Text>
                                 )}
                               </Pressable>
                             </View>
@@ -600,191 +808,288 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
                       );
                     });
                   })()
-                  ) : (
-                    <Text style={styles.partidosEmptySubtitle}>Sin pistas en este club</Text>
-                  )}
-                </View>
+                ) : (
+                  <Text style={styles.partidosEmptySubtitle}>
+                    Sin pistas en este club
+                  </Text>
+                )}
               </View>
-            </>
-          ) : activeTab === 'Partidos abiertos' ? (
-            <>
-              <View style={styles.section}>
-                <Text style={styles.partidosSectionTitle}>Partidos abiertos en {court.clubName}</Text>
-                <Text style={styles.partidosSectionSub}>Únete a un partido en este club</Text>
+            </View>
+          </>
+        ) : activeTab === "Partidos abiertos" ? (
+          <>
+            <View style={styles.section}>
+              <Text style={styles.partidosSectionTitle}>
+                Partidos abiertos en {court.clubName}
+              </Text>
+              <Text style={styles.partidosSectionSub}>
+                Únete a un partido en este club
+              </Text>
+            </View>
+            {partidosLoading ? (
+              <View style={[styles.section, styles.partidosEmptySection]}>
+                <ActivityIndicator size="large" color={theme.auth.accent} />
+                <Text style={[styles.partidosEmptySubtitle, { marginTop: 12 }]}>
+                  Cargando partidos...
+                </Text>
               </View>
-              {partidosLoading ? (
-                <View style={[styles.section, styles.partidosEmptySection]}>
-                  <ActivityIndicator size="large" color={theme.auth.accent} />
-                  <Text style={[styles.partidosEmptySubtitle, { marginTop: 12 }]}>Cargando partidos...</Text>
-                </View>
-              ) : clubPartidos.length > 0 ? (
-                <View style={[styles.section, styles.partidosListWrap]}>
-                  {clubPartidos.map((item) => (
-                    <PartidoCard
-                      key={item.id}
-                      item={item}
-                      onPress={() => onPartidoPress?.(item)}
-                      surface="dark"
-                    />
-                  ))}
-                </View>
-              ) : (
-                <View style={[styles.section, styles.partidosEmptySection, styles.partidosOpenEmptySection]}>
-                  <View style={styles.partidosEmptyState}>
-                    <View style={styles.partidosEmptyIcon}>
-                      <Text style={styles.partidosEmptyEmoji}>🎾</Text>
-                    </View>
-                    <Text style={styles.partidosEmptyTitle}>No hay pistas disponibles hoy</Text>
-                    <Text style={styles.partidosEmptySubtitle}>Prueba otro día o busca en otro club</Text>
-                  </View>
-                </View>
-              )}
-              <View style={styles.section}>
-                <View style={styles.partidosAlertHeader}>
-                  <Ionicons name="notifications-outline" size={16} color="#f97316" />
-                  <Text style={styles.partidosAlertTitle}>Alertas prioritarias</Text>
-                </View>
-                <Text style={styles.partidosAlertDesc}>Configura tu alerta con tus preferencias predefinidas</Text>
-                <View style={styles.partidosAlertRow}>
-                  <Pressable style={({ pressed }) => [styles.manageAlertsBtn, pressed && styles.pressed]}>
-                    <Text style={styles.manageAlertsText}>Gestionar alertas</Text>
-                  </Pressable>
-                  <Switch
-                    value={partidosAlertsEnabled}
-                    onValueChange={setPartidosAlertsEnabled}
-                    trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
-                    thumbColor="#fff"
+            ) : clubPartidos.length > 0 ? (
+              <View style={[styles.section, styles.partidosListWrap]}>
+                {clubPartidos.map((item) => (
+                  <PartidoCard
+                    key={item.id}
+                    item={item}
+                    onPress={() => onPartidoPress?.(item)}
+                    surface="dark"
                   />
-                </View>
+                ))}
               </View>
-            </>
-          ) : activeTab === 'Competiciones' ? (
-            <>
-              <View style={styles.partidosFiltersWrap}>
-                <View style={styles.partidosFilters}>
-                  <Pressable style={({ pressed }) => [styles.partidosFilterBtn, pressed && styles.pressed]}>
-                    <Text style={styles.partidosFilterText}>Todos los deportes</Text>
-                    <Ionicons name="chevron-down" size={14} color="#fff" />
-                  </Pressable>
-                  <Pressable style={({ pressed }) => [styles.partidosFilterBtn, pressed && styles.pressed]}>
-                    <Text style={styles.partidosFilterText}>Cualquier día</Text>
-                    <Ionicons name="chevron-down" size={14} color="#fff" />
-                  </Pressable>
-                  <Pressable style={({ pressed }) => [styles.partidosFilterBtn, pressed && styles.pressed]}>
-                    <Text style={styles.partidosFilterText}>Mixto</Text>
-                    <Ionicons name="chevron-down" size={14} color="#fff" />
-                  </Pressable>
-                </View>
-              </View>
-              <View style={styles.partidosEmptySection}>
+            ) : (
+              <View
+                style={[
+                  styles.section,
+                  styles.partidosEmptySection,
+                  styles.partidosOpenEmptySection,
+                ]}
+              >
                 <View style={styles.partidosEmptyState}>
                   <View style={styles.partidosEmptyIcon}>
-                    <Text style={styles.partidosEmptyEmoji}>🏆</Text>
+                    <Text style={styles.partidosEmptyEmoji}>🎾</Text>
                   </View>
-                  <Text style={styles.partidosEmptyTitle}>No hay competiciones</Text>
-                  <Text style={styles.partidosEmptySubtitle}>Próximamente podrás ver competiciones de este club</Text>
+                  <Text style={styles.partidosEmptyTitle}>
+                    No hay pistas disponibles hoy
+                  </Text>
+                  <Text style={styles.partidosEmptySubtitle}>
+                    Prueba otro día o busca en otro club
+                  </Text>
                 </View>
               </View>
-            </>
-          ) : (
-            <>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Información del club</Text>
-            <View style={styles.tagsRow}>
-              <View style={styles.tag}>
-                <Text style={styles.tagText}>🎾 Pádel</Text>
+            )}
+            <View style={styles.section}>
+              <View style={styles.partidosAlertHeader}>
+                <Ionicons
+                  name="notifications-outline"
+                  size={16}
+                  color="#f97316"
+                />
+                <Text style={styles.partidosAlertTitle}>
+                  Alertas prioritarias
+                </Text>
               </View>
-              <View style={styles.tag}>
-                <Text style={styles.tagText}>🎾 Tenis</Text>
-              </View>
-            </View>
-            <Text style={styles.pistasLabel}>
-              {clubCourts.length === 0 ? 'Pista disponible' : clubCourts.length === 1 ? '1 pista' : `${clubCourts.length} pistas`}
-            </Text>
-            <View style={styles.amenitiesRow}>
-              <View style={styles.amenity}>
-                <Ionicons name="accessibility-outline" size={14} color="#6b7280" />
-                <Text style={styles.amenityText}>Accesible</Text>
-              </View>
-              <View style={styles.amenity}>
-                <Ionicons name="construct-outline" size={14} color="#6b7280" />
-                <Text style={styles.amenityText}>Alquiler de material</Text>
-              </View>
-              <View style={styles.amenity}>
-                <Ionicons name="car-outline" size={14} color="#6b7280" />
-                <Text style={styles.amenityText}>Parking</Text>
-              </View>
-            </View>
-            <View style={styles.tagsRow}>
-              <View style={styles.tag}>
-                <Text style={styles.tagText}>{getCerramientoLabel(court.indoor)}</Text>
-              </View>
-              <View style={styles.tag}>
-                <Text style={styles.tagText}>{getParedesLabel(court.glassType)}</Text>
-              </View>
-            </View>
-            <View style={styles.actionsRow}>
-              <Pressable style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}>
-                <Ionicons name="navigate" size={20} color="#fff" />
-                <Text style={styles.actionLabel}>CÓMO LLEGAR</Text>
-              </Pressable>
-              <Pressable style={({ pressed }) => [styles.actionButtonOutline, pressed && styles.pressed]}>
-                <Ionicons name="globe-outline" size={20} color="#6b7280" />
-                <Text style={styles.actionLabelOutline}>WEB</Text>
-              </Pressable>
-              <Pressable style={({ pressed }) => [styles.actionButtonOutline, pressed && styles.pressed]}>
-                <Ionicons name="call-outline" size={20} color="#6b7280" />
-                <Text style={styles.actionLabelOutline}>LLAMAR</Text>
-              </Pressable>
-            </View>
-            <View style={styles.mapPlaceholder}>
-              <Text style={styles.mapPlaceholderText}>Mapa de ubicación</Text>
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Horarios</Text>
-            <View style={[styles.scheduleRow, { borderBottomWidth: 0 }]}>
-              <Text style={styles.scheduleDay}>Horarios</Text>
-              <Text style={styles.scheduleHours} numberOfLines={3}>
-                {scheduleText ?? 'Consulta en el club'}
+              <Text style={styles.partidosAlertDesc}>
+                Configura tu alerta con tus preferencias predefinidas
               </Text>
+              <View style={styles.partidosAlertRow}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.manageAlertsBtn,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.manageAlertsText}>Gestionar alertas</Text>
+                </Pressable>
+                <Switch
+                  value={partidosAlertsEnabled}
+                  onValueChange={setPartidosAlertsEnabled}
+                  trackColor={{ false: "#e5e7eb", true: theme.auth.accent }}
+                  thumbColor="#fff"
+                />
+              </View>
             </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Promociones</Text>
-            <View style={styles.partidosEmptyState}>
-              <Text style={styles.partidosEmptySubtitle}>No hay promociones disponibles</Text>
+          </>
+        ) : activeTab === "Competiciones" ? (
+          <>
+            <View style={styles.partidosFiltersWrap}>
+              <View style={styles.partidosFilters}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.partidosFilterBtn,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.partidosFilterText}>
+                    Todos los deportes
+                  </Text>
+                  <Ionicons name="chevron-down" size={14} color="#fff" />
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.partidosFilterBtn,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.partidosFilterText}>Cualquier día</Text>
+                  <Ionicons name="chevron-down" size={14} color="#fff" />
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.partidosFilterBtn,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.partidosFilterText}>Mixto</Text>
+                  <Ionicons name="chevron-down" size={14} color="#fff" />
+                </Pressable>
+              </View>
             </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Top Jugadores</Text>
-            <View style={styles.partidosEmptyState}>
-              <Text style={styles.partidosEmptySubtitle}>No hay datos de jugadores</Text>
+            <View style={styles.partidosEmptySection}>
+              <View style={styles.partidosEmptyState}>
+                <View style={styles.partidosEmptyIcon}>
+                  <Text style={styles.partidosEmptyEmoji}>🏆</Text>
+                </View>
+                <Text style={styles.partidosEmptyTitle}>
+                  No hay competiciones
+                </Text>
+                <Text style={styles.partidosEmptySubtitle}>
+                  Próximamente podrás ver competiciones de este club
+                </Text>
+              </View>
             </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Resultados recientes</Text>
-            <View style={styles.partidosEmptyState}>
-              <Text style={styles.partidosEmptySubtitle}>No hay resultados recientes</Text>
-            </View>
-          </View>
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>¿Tienes cuenta en este Club?</Text>
-            <Pressable style={({ pressed }) => [styles.accountCard, pressed && styles.pressed]}>
-              <Text style={styles.accountText}>
-                Asocia tu cuenta y recibe los mismos beneficios que te ofrece el club.
+          </>
+        ) : (
+          <>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Información del club</Text>
+              <View style={styles.tagsRow}>
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>🎾 Pádel</Text>
+                </View>
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>🎾 Tenis</Text>
+                </View>
+              </View>
+              <Text style={styles.pistasLabel}>
+                {clubCourts.length === 0
+                  ? "Pista disponible"
+                  : clubCourts.length === 1
+                    ? "1 pista"
+                    : `${clubCourts.length} pistas`}
               </Text>
-              <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
-            </Pressable>
-          </View>
-            </>
-          )}
-        </ScrollView>
+              <View style={styles.amenitiesRow}>
+                <View style={styles.amenity}>
+                  <Ionicons
+                    name="accessibility-outline"
+                    size={14}
+                    color="#6b7280"
+                  />
+                  <Text style={styles.amenityText}>Accesible</Text>
+                </View>
+                <View style={styles.amenity}>
+                  <Ionicons
+                    name="construct-outline"
+                    size={14}
+                    color="#6b7280"
+                  />
+                  <Text style={styles.amenityText}>Alquiler de material</Text>
+                </View>
+                <View style={styles.amenity}>
+                  <Ionicons name="car-outline" size={14} color="#6b7280" />
+                  <Text style={styles.amenityText}>Parking</Text>
+                </View>
+              </View>
+              <View style={styles.tagsRow}>
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>
+                    {getCerramientoLabel(court.indoor)}
+                  </Text>
+                </View>
+                <View style={styles.tag}>
+                  <Text style={styles.tagText}>
+                    {getParedesLabel(court.glassType)}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.actionsRow}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.actionButton,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Ionicons name="navigate" size={20} color="#fff" />
+                  <Text style={styles.actionLabel}>CÓMO LLEGAR</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.actionButtonOutline,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Ionicons name="globe-outline" size={20} color="#6b7280" />
+                  <Text style={styles.actionLabelOutline}>WEB</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.actionButtonOutline,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Ionicons name="call-outline" size={20} color="#6b7280" />
+                  <Text style={styles.actionLabelOutline}>LLAMAR</Text>
+                </Pressable>
+              </View>
+              <View style={styles.mapPlaceholder}>
+                <Text style={styles.mapPlaceholderText}>Mapa de ubicación</Text>
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Horarios</Text>
+              <View style={[styles.scheduleRow, { borderBottomWidth: 0 }]}>
+                <Text style={styles.scheduleDay}>Horarios</Text>
+                <Text style={styles.scheduleHours} numberOfLines={3}>
+                  {scheduleText ?? "Consulta en el club"}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Promociones</Text>
+              <View style={styles.partidosEmptyState}>
+                <Text style={styles.partidosEmptySubtitle}>
+                  No hay promociones disponibles
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Top Jugadores</Text>
+              <View style={styles.partidosEmptyState}>
+                <Text style={styles.partidosEmptySubtitle}>
+                  No hay datos de jugadores
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Resultados recientes</Text>
+              <View style={styles.partidosEmptyState}>
+                <Text style={styles.partidosEmptySubtitle}>
+                  No hay resultados recientes
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                ¿Tienes cuenta en este Club?
+              </Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.accountCard,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={styles.accountText}>
+                  Asocia tu cuenta y recibe los mismos beneficios que te ofrece
+                  el club.
+                </Text>
+                <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+              </Pressable>
+            </View>
+          </>
+        )}
+      </ScrollView>
 
       {confirmationModalData != null ? (
         <PrivateReservationModal
@@ -793,44 +1098,44 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
           onClose={() => setConfirmationModalData(null)}
         />
       ) : null}
-      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F0F',
+    backgroundColor: "#0F0F0F",
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: theme.spacing.lg,
     ...theme.headerPadding,
-    backgroundColor: '#0F0F0F',
+    backgroundColor: "#0F0F0F",
   },
   headerButton: {
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+    backgroundColor: "rgba(0,0,0,0.4)",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "rgba(255,255,255,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerRight: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: theme.spacing.xs,
   },
   pressed: { opacity: 0.8 },
   tabsScroll: {
     flexGrow: 0,
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
   },
   tabsContent: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: theme.spacing.xs,
     paddingHorizontal: theme.spacing.lg,
     paddingRight: theme.spacing.lg + 8,
@@ -841,8 +1146,8 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 12,
     flexShrink: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   /** Ancho extra para que “Partidos abiertos” quepa en una línea sin solaparse. */
   tabPartidosAbiertos: {
@@ -854,15 +1159,15 @@ const styles = StyleSheet.create({
     backgroundColor: theme.auth.accent,
   },
   tabInactive: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
   },
   tabText: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 16,
+    fontWeight: "600",
+    textAlign: "center",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
     ...Platform.select({
       android: {
         includeFontPadding: false,
@@ -870,10 +1175,10 @@ const styles = StyleSheet.create({
     }),
   },
   tabTextActive: {
-    color: '#fff',
+    color: "#fff",
   },
   tabTextInactive: {
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
   },
   scroll: {
     flex: 1,
@@ -881,32 +1186,33 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: theme.spacing.lg,
     paddingBottom: 40,
+    flexGrow: 1,
   },
   hero: {
     marginBottom: theme.spacing.lg,
     borderRadius: 16,
-    overflow: 'hidden',
+    overflow: "hidden",
   },
   heroGradient: {
     padding: theme.spacing.lg,
-    position: 'relative',
+    position: "relative",
   },
   heroOrb: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     right: 0,
     width: 128,
     height: 128,
     borderRadius: 64,
-    backgroundColor: 'rgba(241, 143, 52, 0.15)',
+    backgroundColor: "rgba(241, 143, 52, 0.15)",
   },
   heroContent: {
-    position: 'relative',
+    position: "relative",
     zIndex: 10,
   },
   statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     marginBottom: 8,
   },
@@ -914,93 +1220,106 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#22c55e',
+    backgroundColor: "#22c55e",
   },
   statusText: {
     fontSize: 10,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.5)',
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.5)",
     letterSpacing: 1,
+    lineHeight: 14,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   heroTitle: {
     fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: "700",
+    color: "#fff",
     marginBottom: 4,
+    lineHeight: theme.lineHeightFor(theme.fontSize.lg),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   heroLocation: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
   },
   heroAddress: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.5)',
+    color: "rgba(255,255,255,0.5)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    flexShrink: 1,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   heroStats: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: theme.spacing.sm,
     marginTop: theme.spacing.md,
   },
   heroStat: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: "rgba(255,255,255,0.1)",
     borderRadius: 12,
   },
   heroStatText: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.8)',
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.8)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   section: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 16,
     padding: theme.spacing.lg,
     marginBottom: theme.spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
   },
   sectionTitle: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     marginBottom: theme.spacing.md,
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   tagsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: theme.spacing.xs,
     marginBottom: theme.spacing.sm,
   },
   tag: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 12,
   },
   tagText: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.6)',
-    fontWeight: '500',
+    color: "rgba(255,255,255,0.6)",
+    fontWeight: "500",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   pistasLabel: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
     marginBottom: theme.spacing.lg,
   },
   actionsRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: theme.spacing.sm,
     marginBottom: theme.spacing.lg,
   },
   actionButton: {
     flex: 1,
-    flexDirection: 'column',
-    alignItems: 'center',
+    flexDirection: "column",
+    alignItems: "center",
     gap: 8,
     paddingVertical: theme.spacing.md,
     backgroundColor: theme.auth.accent,
@@ -1008,84 +1327,104 @@ const styles = StyleSheet.create({
   },
   actionLabel: {
     fontSize: 10,
-    fontWeight: '600',
-    color: '#fff',
+    fontWeight: "600",
+    color: "#fff",
+    lineHeight: 14,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   actionButtonOutline: {
     flex: 1,
-    flexDirection: 'column',
-    alignItems: 'center',
+    flexDirection: "column",
+    alignItems: "center",
     gap: 8,
     paddingVertical: theme.spacing.md,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
     borderRadius: 16,
   },
   actionLabelOutline: {
     fontSize: 10,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: 14,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   mapPlaceholder: {
     height: 144,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: theme.spacing.md,
   },
   mapPlaceholderText: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.5)',
+    color: "rgba(255,255,255,0.5)",
+    textAlign: "center",
+    alignSelf: "stretch",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   scheduleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: "rgba(255,255,255,0.1)",
+    flexWrap: "wrap",
+    gap: theme.spacing.sm,
   },
   scheduleDay: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    flexShrink: 0,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   scheduleHours: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    flex: 1,
+    textAlign: "right",
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   amenitiesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: theme.spacing.xs,
     marginBottom: theme.spacing.lg,
   },
   amenity: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 12,
   },
   amenityText: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: "500",
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   promoCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: theme.spacing.md,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 16,
   },
   promoLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: theme.spacing.sm,
     flex: 1,
   },
@@ -1093,9 +1432,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(241, 143, 52, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(241, 143, 52, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   promoEmoji: {
     fontSize: 18,
@@ -1105,95 +1444,103 @@ const styles = StyleSheet.create({
   },
   promoTitle: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   promoSub: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: "#9ca3af",
     marginTop: 2,
+    lineHeight: 14,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   promoCta: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '700',
+    fontWeight: "700",
     color: theme.auth.accent,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   topPlayersScroll: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: theme.spacing.sm,
     paddingRight: theme.spacing.lg,
   },
   topPlayerItem: {
-    alignItems: 'center',
+    alignItems: "center",
     flexShrink: 0,
   },
   topPlayerAvatar: {
     width: 48,
     height: 48,
     borderRadius: 12,
-    backgroundColor: '#1A1A1A',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
+    backgroundColor: "#1A1A1A",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
   },
   topPlayerImg: {
-    width: '100%',
-    height: '100%',
+    width: "100%",
+    height: "100%",
   },
   topPlayerInitial: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: "700",
+    color: "#fff",
   },
   topPlayerBadge: {
-    position: 'absolute',
+    position: "absolute",
     top: -4,
     right: -4,
     width: 20,
     height: 20,
     borderRadius: 6,
     backgroundColor: theme.auth.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   topPlayerRank: {
     fontSize: 9,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: "700",
+    color: "#fff",
   },
   topPlayerName: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.6)',
-    fontWeight: '500',
+    color: "rgba(255,255,255,0.6)",
+    fontWeight: "500",
     marginTop: 6,
     maxWidth: 48,
-    textAlign: 'center',
+    textAlign: "center",
+    lineHeight: 14,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   resultCard: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 16,
     padding: theme.spacing.md,
     marginBottom: theme.spacing.sm,
   },
   resultDate: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.5)',
-    textAlign: 'right',
+    color: "rgba(255,255,255,0.5)",
+    textAlign: "right",
     marginBottom: theme.spacing.sm,
   },
   resultRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: theme.spacing.sm,
   },
   resultTeams: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: theme.spacing.sm,
   },
   resultTeam: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
   },
   resultAvatar: {
@@ -1203,112 +1550,120 @@ const styles = StyleSheet.create({
   },
   resultName: {
     fontSize: 9,
-    fontWeight: '500',
-    color: '#ffffff',
+    fontWeight: "500",
+    color: "#ffffff",
   },
   resultLevel: {
-    backgroundColor: '#fde047',
+    backgroundColor: "#fde047",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
   },
   resultLevelText: {
     fontSize: 8,
-    fontWeight: '700',
-    color: '#1A1A1A',
+    fontWeight: "700",
+    color: "#1A1A1A",
   },
   resultScore: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
   },
   resultScoreWin: {
     fontSize: 24,
-    fontWeight: '800',
-    color: '#ffffff',
+    fontWeight: "800",
+    color: "#ffffff",
   },
   resultScoreLose: {
     fontSize: 24,
-    fontWeight: '800',
-    color: 'rgba(255,255,255,0.35)',
+    fontWeight: "800",
+    color: "rgba(255,255,255,0.35)",
   },
   resultScoreDash: {
     fontSize: 18,
-    color: '#d1d5db',
+    color: "#d1d5db",
   },
   accountCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: theme.spacing.md,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 16,
   },
   accountText: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
     flex: 1,
     marginRight: theme.spacing.sm,
   },
   datePickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: theme.spacing.xs,
     paddingRight: theme.spacing.lg,
   },
   dateSearchBtn: {
     width: 48,
-    height: 56,
+    minHeight: 56,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   dateBtn: {
     width: 48,
-    height: 56,
+    minHeight: 56,
     paddingVertical: 8,
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     flexShrink: 0,
   },
   dateBtnActive: {
     backgroundColor: theme.auth.accent,
   },
   dateBtnInactive: {
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
   },
   dateDayName: {
     fontSize: 10,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: 14,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   dateDayNum: {
     fontSize: 18,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: 22,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   dateMonth: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: 14,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   dateTextActive: {
-    color: '#fff',
+    color: "#fff",
   },
   toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   toggleLabel: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: "500",
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   timeSlotsCarousel: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: theme.spacing.xs,
     paddingRight: theme.spacing.lg,
   },
@@ -1318,82 +1673,106 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.md,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "rgba(255,255,255,0.1)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   timeSlotBtnSelected: {
     backgroundColor: theme.auth.accent,
     borderColor: theme.auth.accent,
   },
   timeSlotTextSelected: {
-    color: '#fff',
+    color: "#fff",
   },
   timeSlotText: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    alignSelf: "stretch",
+    textAlign: "center",
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   alertHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     gap: theme.spacing.sm,
   },
   alertTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     marginBottom: 4,
   },
   alertSectionTitle: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   alertSub: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   reservaTitle: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     marginBottom: 4,
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    width: "100%",
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   reservaSub: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
     marginBottom: theme.spacing.md,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    alignSelf: "stretch",
+    textAlign: "left",
+    minHeight: theme.lineHeightFor(theme.fontSize.xs) * 2,
+    maxWidth: "100%",
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtList: {
     gap: theme.spacing.md,
   },
   courtCard: {
     borderRadius: 16,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
+    // overflow:hidden es necesario para el borderRadius visual
+    // pero aseguramos que el texto tenga espacio adecuado con courtRowLeft flex:1
   },
   courtCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: theme.spacing.md,
   },
   courtCardName: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtCardSub: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
     marginTop: 2,
+    lineHeight: 16,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtCardActions: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: theme.spacing.xs,
     paddingHorizontal: theme.spacing.md,
     paddingBottom: theme.spacing.md,
@@ -1404,76 +1783,97 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: theme.spacing.sm,
-    alignItems: 'center',
+    alignItems: "center",
   },
   courtPriceAmount: {
     fontSize: 14,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: "700",
+    color: "#fff",
+    lineHeight: 18,
+    alignSelf: "stretch",
+    textAlign: "center",
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtPriceDuration: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.9)',
+    color: "rgba(255,255,255,0.9)",
     marginTop: 1,
+    lineHeight: 14,
+    alignSelf: "stretch",
+    textAlign: "center",
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtReservarBtn: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
     paddingVertical: 8,
     paddingHorizontal: theme.spacing.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   courtReservarText: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    alignSelf: "stretch",
+    textAlign: "center",
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtReservarTextDisabled: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    alignSelf: "stretch",
+    textAlign: "center",
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtReservarBtnDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: "rgba(255,255,255,0.03)",
     opacity: 0.85,
   },
   courtRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     padding: theme.spacing.md,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
   courtRowLeft: {
     flex: 1,
+    minWidth: 0,
   },
   courtName: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '600',
-    color: '#ffffff',
+    fontWeight: "600",
+    color: "#ffffff",
   },
   courtSub: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
     marginTop: 2,
   },
   partidosSectionTitle: {
     fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     marginBottom: 4,
+    lineHeight: theme.lineHeightFor(theme.fontSize.lg),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosSectionSub: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
+    color: "#9ca3af",
     marginBottom: theme.spacing.md,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosListWrap: {
     gap: 12,
@@ -1483,25 +1883,27 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
   },
   partidosFilters: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: theme.spacing.xs,
   },
   partidosFilterBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     paddingHorizontal: theme.spacing.md,
     paddingVertical: 10,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: "rgba(255,255,255,0.1)",
     borderRadius: 12,
   },
   partidosFilterText: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.9)',
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.9)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosEmptySection: {
     padding: 40,
@@ -1509,20 +1911,22 @@ const styles = StyleSheet.create({
   partidosOpenEmptySection: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
   partidosEmptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
+    alignSelf: "stretch",
+    paddingHorizontal: theme.spacing.sm,
   },
   partidosEmptyIcon: {
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: theme.spacing.md,
   },
   partidosEmptyEmoji: {
@@ -1530,80 +1934,100 @@ const styles = StyleSheet.create({
   },
   partidosEmptyTitle: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     marginBottom: 4,
-    textAlign: 'center',
+    textAlign: "center",
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosEmptySubtitle: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
-    textAlign: 'center',
+    color: "#9ca3af",
+    textAlign: "center",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    alignSelf: "stretch",
+    paddingHorizontal: theme.spacing.xs,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosAlertHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     marginBottom: 8,
   },
   partidosAlertTitle: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosAlertDesc: {
     fontSize: theme.fontSize.xs,
-    color: '#9ca3af',
+    color: "#9ca3af",
     marginBottom: theme.spacing.sm,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosAlertRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   manageAlertsBtn: {
     paddingVertical: 4,
   },
   manageAlertsText: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '700',
+    fontWeight: "700",
     color: theme.auth.accent,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosReservaTitle: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     marginBottom: 4,
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosReservaSub: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
     marginBottom: 8,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosReservaHint: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
   },
   partidosReservaHintText: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosClockEmoji: {
     fontSize: 16,
   },
   emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: theme.spacing.xl,
+    alignSelf: "stretch",
+    paddingHorizontal: theme.spacing.sm,
   },
   emptyStateIcon: {
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(255,255,255,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: theme.spacing.md,
   },
   emptyStateEmoji: {
@@ -1611,20 +2035,24 @@ const styles = StyleSheet.create({
   },
   emptyStateTitle: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     marginBottom: 4,
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   emptyStateSub: {
     fontSize: theme.fontSize.xs,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   compCard: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    overflow: 'hidden',
+    borderColor: "rgba(255,255,255,0.1)",
+    overflow: "hidden",
     marginBottom: theme.spacing.md,
   },
   compCardBar: {
@@ -1636,106 +2064,108 @@ const styles = StyleSheet.create({
   },
   compCardDate: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
     marginBottom: theme.spacing.sm,
   },
   compCardMain: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: theme.spacing.md,
   },
   compCardIcon: {
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: 'rgba(241, 143, 52, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "rgba(241, 143, 52, 0.15)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   compCardBody: {
     flex: 1,
   },
   compCardDateTime: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
     marginBottom: 4,
   },
   compCardTitle: {
     fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: "700",
+    color: "#ffffff",
     marginBottom: 8,
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   compCardTags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: theme.spacing.xs,
     marginBottom: theme.spacing.sm,
   },
   compTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 8,
   },
   compTagText: {
     fontSize: 10,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: "500",
+    color: "rgba(255,255,255,0.6)",
   },
   compCardMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
     marginBottom: theme.spacing.sm,
   },
   compCardMetaText: {
     fontSize: 10,
-    color: 'rgba(255,255,255,0.6)',
+    color: "rgba(255,255,255,0.6)",
   },
   compCardTeams: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   compTeamDots: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   compTeamDot: {
     width: 20,
     height: 20,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#fff',
+    borderColor: "#fff",
   },
   compCardTeamsText: {
     fontSize: 10,
-    color: '#9ca3af',
-    fontWeight: '500',
+    color: "#9ca3af",
+    fontWeight: "500",
   },
   compCardFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginTop: theme.spacing.md,
     paddingTop: theme.spacing.md,
     borderTopWidth: 1,
-    borderTopColor: '#f9fafb',
+    borderTopColor: "#f9fafb",
   },
   compCardVenue: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
   },
   compVenueName: {
     fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-    color: '#1A1A1A',
+    fontWeight: "600",
+    color: "#1A1A1A",
   },
   compVenueSub: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: "#9ca3af",
   },
 });
