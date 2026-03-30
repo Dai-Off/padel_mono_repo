@@ -1,4 +1,5 @@
 import type { MatchEnriched } from './matches';
+import { getMatchListPhase } from '../domain/matchLifecycle';
 import type { PartidoItem, PartidoMode, PartidoPlayer } from '../screens/PartidosScreen';
 
 function formatDateTime(startAt: string, endAt: string): string {
@@ -91,10 +92,13 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   });
   const players = slots;
 
+  const matchPhase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
+
   return {
     id: m.id,
     playerIds,
     visibility: m.visibility === 'private' ? 'private' : 'public',
+    matchPhase,
     dateTime: formatDateTime(b.start_at, b.end_at),
     mode,
     typeLabel,
