@@ -189,7 +189,7 @@ El core del módulo. Cada lección diaria consiste en 5 preguntas seleccionadas 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | `id` | uuid | Identificador único |
-| `type` | text | `test_classic` \| `true_false` \| `match_columns` \| `order_sequence` |
+| `type` | text | `test_classic` \| `true_false` \| `multi_select` \| `match_columns` \| `order_sequence` |
 | `level` | numeric | Nivel de dificultad (0.5, 1.0, 1.5…). Misma escala que `elo_rating` en `players`. |
 | `area` | text | `technique` \| `tactics` \| `physical` \| `mental_vocabulary` |
 | `has_video` | boolean | Si la pregunta tiene vídeo asociado |
@@ -222,6 +222,18 @@ El core del módulo. Cada lección diaria consiste en 5 preguntas seleccionadas 
   "correct_answer": true
 }
 ```
+
+#### Respuesta múltiple (`multi_select`)
+
+```json
+{
+  "question": "string",
+  "options": ["string", "string", "string", "string"],
+  "correct_indices": [0, 2]
+}
+```
+
+El usuario debe seleccionar todas las opciones correctas (mínimo 2, máximo 3 de 4). Se considera correcta solo si la selección coincide exactamente.
 
 #### Empareja columnas (`match_columns`)
 
@@ -581,7 +593,7 @@ Añadir las claves en los archivos de `web-app/src/locales/es/` y `web-app/src/l
 | Detección de desequilibrios por área | El algoritmo no diferencia áreas en el MVP |
 | Desbloqueo de cursos por actividad en el club | Solo por `elo_rating` |
 | Hitos compartibles tipo Strava | V2 |
-| Tipos de pregunta: zona de impacto, selección múltiple | V2 |
+| Tipos de pregunta: zona de impacto | V2 |
 | Integración completa de certificación con reservas | V2 |
 | Insignias de pista | V2 |
 | i18n en mobile app | No existe en el proyecto — V2 si se implementa globalmente |
