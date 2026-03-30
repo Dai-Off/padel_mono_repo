@@ -1,13 +1,20 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { recordPayment } from '../lib/payment';
+import { attachAuthContext } from '../middleware/attachAuthContext';
 
 const router = Router();
+router.use(attachAuthContext);
 
 const SELECT_LIST =
-  'id, created_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, players!bookings_organizer_player_id_fkey(first_name, last_name)';
+  'id, created_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, players!bookings_organizer_player_id_fkey(first_name, last_name)';
 const SELECT_ONE =
-  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, email))';
+  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, email))';
+
+function canAccessClub(req: Request, clubId: string): boolean {
+  if (req.authContext?.adminId) return true;
+  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
+}
 
 function dateToWeekday(d: Date): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
   const idx = d.getUTCDay();
@@ -134,6 +141,219 @@ router.get('/', async (req: Request, res: Response) => {
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, bookings: data ?? [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /bookings/checkin/today:
+ *   get:
+ *     tags: [Check-in]
+ *     summary: Check de turnos del dia para club
+ *     description: |
+ *       Devuelve los turnos del dia con los jugadores que deben presentarse,
+ *       estado de pago por participante e indicador de inicio de turno.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *         description: ID del club a consultar.
+ *       - in: query
+ *         name: date
+ *         required: false
+ *         schema: { type: string, example: "2026-03-27" }
+ *         description: Fecha YYYY-MM-DD. Si no se envia, usa hoy (UTC).
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             example:
+ *               ok: true
+ *               date: "2026-03-27"
+ *               items:
+ *                 - booking_id: "uuid-booking"
+ *                   court_id: "uuid-court"
+ *                   court_name: "Pista 1"
+ *                   start_at: "2026-03-27T18:00:00.000Z"
+ *                   end_at: "2026-03-27T19:30:00.000Z"
+ *                   started_at: null
+ *                   started_turn: false
+ *                   booking_status: "confirmed"
+ *                   participants:
+ *                     - participant_id: "uuid-participant"
+ *                       player_id: "uuid-player"
+ *                       player_name: "Ana Garcia"
+ *                       payment_status: "paid"
+ *                       is_paid: true
+ *                       must_present: true
+ *       400: { description: Falta club_id o date invalida }
+ *       401: { description: Sin token o sesion invalida }
+ *       403: { description: Sin acceso al club }
+ *       500: { description: Error interno }
+ */
+router.get('/checkin/today', async (req: Request, res: Response) => {
+  if (!req.authContext) return res.status(401).json({ ok: false, error: 'Token requerido' });
+  const clubId = String(req.query.club_id ?? '').trim();
+  if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  const dateStr = String(req.query.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  const startUtc = new Date(`${dateStr}T00:00:00.000Z`);
+  if (Number.isNaN(startUtc.getTime())) {
+    return res.status(400).json({ ok: false, error: 'date invalida. Usa YYYY-MM-DD.' });
+  }
+  const endUtc = new Date(startUtc);
+  endUtc.setUTCDate(endUtc.getUTCDate() + 1);
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: clubCourts, error: courtsErr } = await supabase
+      .from('courts')
+      .select('id')
+      .eq('club_id', clubId);
+    if (courtsErr) return res.status(500).json({ ok: false, error: courtsErr.message });
+    const courtIds = (clubCourts ?? []).map((c: { id: string }) => c.id);
+    if (courtIds.length === 0) return res.json({ ok: true, date: dateStr, items: [] });
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .select(`
+        id,
+        court_id,
+        start_at,
+        end_at,
+        started_at,
+        status,
+        courts ( name ),
+        booking_participants (
+          id,
+          player_id,
+          payment_status,
+          players ( first_name, last_name )
+        )
+      `)
+      .in('court_id', courtIds)
+      .neq('status', 'cancelled')
+      .gte('start_at', startUtc.toISOString())
+      .lt('start_at', endUtc.toISOString())
+      .order('start_at', { ascending: true });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    const items = (data ?? []).map((b: any) => {
+      const rawCourt = b.courts;
+      const court = Array.isArray(rawCourt) ? rawCourt[0] : rawCourt;
+      const participants = (Array.isArray(b.booking_participants) ? b.booking_participants : []).map((p: any) => {
+        const rawPlayer = p.players;
+        const player = Array.isArray(rawPlayer) ? rawPlayer[0] : rawPlayer;
+        const firstName = String(player?.first_name ?? '').trim();
+        const lastName = String(player?.last_name ?? '').trim();
+        return {
+          participant_id: p.id,
+          player_id: p.player_id,
+          player_name: `${firstName} ${lastName}`.trim() || 'Jugador',
+          payment_status: p.payment_status ?? 'pending',
+          is_paid: p.payment_status === 'paid',
+          must_present: true,
+        };
+      });
+      return {
+        booking_id: b.id,
+        court_id: b.court_id,
+        court_name: String(court?.name ?? 'Pista'),
+        start_at: b.start_at,
+        end_at: b.end_at,
+        started_at: b.started_at ?? null,
+        started_turn: Boolean(b.started_at),
+        booking_status: b.status,
+        participants,
+      };
+    });
+    return res.json({ ok: true, date: dateStr, items });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /bookings/{id}/start-turn:
+ *   post:
+ *     tags: [Check-in]
+ *     summary: Marcar inicio de turno
+ *     description: Marca el inicio real del turno seteando `started_at`.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *         description: ID del booking.
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               started_at:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Fecha/hora opcional; por defecto usa ahora.
+ *           example:
+ *             started_at: "2026-03-27T18:05:00.000Z"
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             example:
+ *               ok: true
+ *               booking:
+ *                 id: "uuid-booking"
+ *                 started_at: "2026-03-27T18:05:00.000Z"
+ *       404: { description: Booking no encontrado }
+ *       400: { description: started_at invalido }
+ *       500: { description: Error interno }
+ */
+router.post('/:id/start-turn', async (req: Request, res: Response) => {
+  if (!req.authContext) return res.status(401).json({ ok: false, error: 'Token requerido' });
+  const { id } = req.params;
+  const startedAtRaw = req.body?.started_at;
+  const startedAt = startedAtRaw ? new Date(String(startedAtRaw)) : new Date();
+  if (Number.isNaN(startedAt.getTime())) {
+    return res.status(400).json({ ok: false, error: 'started_at invalido' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: bookingRef, error: bookingRefErr } = await supabase
+      .from('bookings')
+      .select('id, courts ( club_id )')
+      .eq('id', id)
+      .maybeSingle();
+    if (bookingRefErr) return res.status(500).json({ ok: false, error: bookingRefErr.message });
+    if (!bookingRef) return res.status(404).json({ ok: false, error: 'Booking not found' });
+    const rawCourt = (bookingRef as any).courts;
+    const court = Array.isArray(rawCourt) ? rawCourt[0] : rawCourt;
+    const clubId = String(court?.club_id ?? '');
+    if (!clubId || !canAccessClub(req, clubId)) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const { data, error } = await supabase
+      .from('bookings')
+      .update({
+        started_at: startedAt.toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select(SELECT_ONE)
+      .maybeSingle();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!data) return res.status(404).json({ ok: false, error: 'Booking not found' });
+    return res.json({ ok: true, booking: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
