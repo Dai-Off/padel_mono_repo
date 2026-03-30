@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { finalizePastMatches, finalizePastMatchesThrottled } from '../lib/finalizePastMatches';
+import { getMatchListPhase } from '../lib/matchLifecycle';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 
 const router = Router();
@@ -7,6 +9,21 @@ const SELECT_LIST =
   'id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status';
 const SELECT_ONE =
   'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status';
+
+function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
+  return `id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status,
+          ${bookingRel} (
+            id, start_at, end_at, total_price_cents, currency, court_id,
+            courts (
+              id, club_id, name, indoor, glass_type,
+              clubs (id, name, address, city)
+            )
+          ),
+          match_players (
+            id, team, created_at, slot_index,
+            players (id, first_name, last_name, elo_rating)
+          )`;
+}
 
 function dateToWeekday(d: Date): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
   const idx = d.getUTCDay();
@@ -76,41 +93,62 @@ async function hasCourtConflict(courtId: string, startAt: string, endAt: string)
 router.get('/', async (req: Request, res: Response) => {
   const booking_id = req.query.booking_id as string | undefined;
   const expand = req.query.expand === '1' || req.query.expand === 'true';
+  /** Solo partidos no jugados aún: end_at futuro y estado distinto de cancelado/finalizado. Query param explícito para no romper clientes que listan histórico. */
+  const active_only = req.query.active_only === '1' || req.query.active_only === 'true';
   try {
+    await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
+    const nowIso = new Date().toISOString();
+
     if (expand) {
-      let q = supabase
-        .from('matches')
-        .select(
-          `id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status,
-          bookings (
-            id, start_at, end_at, total_price_cents, currency, court_id,
-            courts (
-              id, club_id, name, indoor, glass_type,
-              clubs (id, name, address, city)
-            )
-          ),
-          match_players (
-            id, team, created_at, slot_index,
-            players (id, first_name, last_name, elo_rating)
-          )`
-        )
-        .order('created_at', { ascending: false })
-        .limit(50);
+      const bookingRel = active_only ? 'bookings!inner' : 'bookings';
+      let q = supabase.from('matches').select(expandSelect(bookingRel));
+      if (active_only) {
+        q = q
+          .not('status', 'eq', 'cancelled')
+          .not('status', 'eq', 'finished')
+          .gt('bookings.end_at', nowIso)
+          .order('start_at', { ascending: true, foreignTable: 'bookings' })
+          .limit(100);
+      } else {
+        q = q.order('created_at', { ascending: false }).limit(50);
+      }
       if (booking_id) q = q.eq('booking_id', booking_id);
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      return res.json({ ok: true, matches: data ?? [] });
+      const rows = data ?? [];
+      if (active_only) {
+        const filtered = rows.filter((row: any) => {
+          const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
+          return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
+        });
+        return res.json({ ok: true, matches: filtered });
+      }
+      return res.json({ ok: true, matches: rows });
     }
-    let q = supabase
-      .from('matches')
-      .select(SELECT_LIST)
-      .order('created_at', { ascending: false })
-      .limit(50);
+
+    let q = active_only
+      ? supabase
+          .from('matches')
+          .select(`${SELECT_LIST}, bookings!inner(end_at, start_at)`)
+          .not('status', 'eq', 'cancelled')
+          .not('status', 'eq', 'finished')
+          .gt('bookings.end_at', nowIso)
+          .order('start_at', { ascending: true, foreignTable: 'bookings' })
+          .limit(100)
+      : supabase.from('matches').select(SELECT_LIST).order('created_at', { ascending: false }).limit(50);
     if (booking_id) q = q.eq('booking_id', booking_id);
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, matches: data ?? [] });
+    const rows = data ?? [];
+    if (active_only) {
+      const filtered = rows.filter((row: any) => {
+        const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
+        return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
+      });
+      return res.json({ ok: true, matches: filtered });
+    }
+    return res.json({ ok: true, matches: rows });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -120,24 +158,12 @@ router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const expand = req.query.expand === '1' || req.query.expand === 'true';
   try {
+    await finalizePastMatches();
     const supabase = getSupabaseServiceRoleClient();
     if (expand) {
       const { data, error } = await supabase
         .from('matches')
-        .select(
-          `id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status,
-          bookings (
-            id, start_at, end_at, total_price_cents, currency, court_id,
-            courts (
-              id, club_id, name, indoor, glass_type,
-              clubs (id, name, address, city)
-            )
-          ),
-          match_players (
-            id, team, created_at, slot_index,
-            players (id, first_name, last_name, elo_rating)
-          )`
-        )
+        .select(expandSelect('bookings'))
         .eq('id', id)
         .maybeSingle();
       if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -267,6 +293,7 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'slot_index (0-3) es obligatorio' });
   }
   try {
+    await finalizePastMatches();
     const supabase = getSupabaseServiceRoleClient();
     const { data: { user }, error } = await supabase.auth.getUser(token);
     if (error || !user?.email) {
@@ -291,6 +318,9 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
     if (!match) return res.status(404).json({ ok: false, error: 'Partido no encontrado' });
     if (match.status === 'cancelled') {
       return res.status(400).json({ ok: false, error: 'El partido está cancelado' });
+    }
+    if (match.status === 'finished') {
+      return res.status(400).json({ ok: false, error: 'El partido ya finalizó.' });
     }
     if (!match.booking_id) {
       return res.status(400).json({ ok: false, error: 'El partido no tiene reserva asociada' });
@@ -324,6 +354,18 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
       .select('start_at, end_at')
       .eq('id', match.booking_id)
       .maybeSingle();
+    const joinPhase = getMatchListPhase(
+      Date.now(),
+      match.status,
+      targetBooking?.start_at,
+      targetBooking?.end_at
+    );
+    if (joinPhase === 'past') {
+      return res.status(400).json({
+        ok: false,
+        error: 'El partido ya finalizó o no está disponible.',
+      });
+    }
     const targetStart = targetBooking?.start_at ? new Date(targetBooking.start_at).getTime() : 0;
     const targetEnd = targetBooking?.end_at ? new Date(targetBooking.end_at).getTime() : 0;
     if (targetStart && targetEnd) {

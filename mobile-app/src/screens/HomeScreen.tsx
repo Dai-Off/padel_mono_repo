@@ -3,6 +3,7 @@ import { ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchMatches } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import { fetchMyPlayerId } from '../api/players';
 import {
   CompetitiveLeagueHomeCard,
   DailyLessonCard,
@@ -14,8 +15,10 @@ import {
   INICIO_PAD_TOP,
   INICIO_STACK_GAP,
   MissionsHomeSection,
+  ProximosPartidosSection,
   SeasonPassHomeCard,
 } from '../components/home/inicio';
+import { selectMyUpcomingMatches } from '../domain/selectMyUpcomingMatches';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeStats } from '../hooks/useHomeStats';
 import type { PartidoItem } from './PartidosScreen';
@@ -32,15 +35,27 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps)
   const { session } = useAuth();
   const { stats, loading: statsLoading } = useHomeStats();
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
+  const [misProximosPartidos, setMisProximosPartidos] = useState<PartidoItem[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(true);
 
   const loadMatches = useCallback(async () => {
     setMatchesLoading(true);
     const token = session?.access_token ?? null;
-    const matches = await fetchMatches({ expand: true, token });
+    const [playerId, matches] = await Promise.all([
+      token ? fetchMyPlayerId(token) : Promise.resolve(null),
+      fetchMatches({ expand: true, token }),
+    ]);
+    const mineRaw = selectMyUpcomingMatches(matches, playerId);
+    const misProximos = mineRaw
+      .map(mapMatchToPartido)
+      .filter((p): p is PartidoItem => p != null)
+      .filter((p) => p.visibility !== 'private');
+    setMisProximosPartidos(misProximos);
+
     const all = matches
       .map(mapMatchToPartido)
-      .filter((p): p is PartidoItem => p != null);
+      .filter((p): p is PartidoItem => p != null)
+      .filter((p) => p.matchPhase !== 'past');
     setPartidos(all.filter((p) => p.visibility !== 'private'));
     setMatchesLoading(false);
   }, [session?.access_token]);
@@ -63,6 +78,12 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps)
       ]}
       showsVerticalScrollIndicator={false}
     >
+      <ProximosPartidosSection
+        items={misProximosPartidos}
+        /** No acoplar a session aquí: en iOS la sesión hidrata tarde y `loading` quedaba false con items vacíos → la sección se ocultaba por completo (early return). */
+        loading={matchesLoading}
+        onPartidoPress={onPartidoPress}
+      />
       <DailyLessonCard onPress={() => onNavigateToTab?.('partidos')} />
       <SeasonPassHomeCard />
       <CompetitiveLeagueHomeCard
@@ -78,7 +99,7 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps)
       <IAAfinidadCard />
       <MissionsHomeSection />
       <EnDirectoSection
-        partidos={partidos}
+        partidos={partidos.filter((p) => p.matchPhase === 'live')}
         loading={matchesLoading}
         onPartidoPress={onPartidoPress}
         onOpenPartidos={() => onNavigateToTab?.('partidos')}
