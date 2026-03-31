@@ -3,9 +3,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { androidReadableText } from './textStyles';
 
-export function IAAfinidadCard() {
+type IAAfinidadCardProps = {
+  onPress?: () => void;
+};
+
+export function IAAfinidadCard({ onPress }: IAAfinidadCardProps) {
   return (
-    <Pressable style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}>
+    <Pressable style={({ pressed }) => [styles.wrap, pressed && styles.pressed]} onPress={onPress}>
       <View style={styles.blob} />
       <LinearGradient
         colors={['rgba(147,51,234,0.15)', 'rgba(236,72,153,0.12)', 'rgba(225,29,72,0.1)']}
