@@ -16,6 +16,7 @@ import { PartidoCard } from '../components/partido/PartidoCard';
 import { PartidoOpenCard } from '../components/partido/PartidoOpenCard';
 import { PartidoOpenCardSkeleton } from '../components/partido/PartidoOpenCardSkeleton';
 import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
+import type { MatchListPhase } from '../domain/matchLifecycle';
 import { lineHeightFor, theme } from '../theme';
 
 export type PartidoMode = 'competitivo' | 'amistoso';
@@ -45,6 +46,8 @@ export type PartidoItem = {
   venueAddress?: string;
   courtName?: string;
   courtType?: string;
+  /** upcoming = por jugar, live = en horario, past = ya jugado (no debería aparecer en listados activos). */
+  matchPhase?: MatchListPhase;
 };
 
 type PartidosScreenProps = {
@@ -77,7 +80,8 @@ export function PartidosScreen({
     setOrganizerPlayerId(playerId);
     const allPartidos = matches
       .map(mapMatchToPartido)
-      .filter((p): p is PartidoItem => p != null);
+      .filter((p): p is PartidoItem => p != null)
+      .filter((p) => p.matchPhase !== 'past');
     setOpenPartidos(allPartidos.filter((p) => p.visibility !== 'private'));
     setMyPartidos(
       allPartidos.filter(

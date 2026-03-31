@@ -57,10 +57,15 @@ type FetchMatchesOptions = {
   bookingId?: string;
   expand?: boolean;
   token?: string | null;
+  /**
+   * Solo partidos pendientes o en curso (excluye ya jugados por horario y estado).
+   * Por defecto true para listados en la app.
+   */
+  activeOnly?: boolean;
 };
 
 export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<MatchEnriched[]> {
-  const { bookingId, expand = true, token } = options;
+  const { bookingId, expand = true, token, activeOnly = true } = options;
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -68,6 +73,7 @@ export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<M
   const url = new URL(`${API_URL}/matches`);
   if (bookingId) url.searchParams.set('booking_id', bookingId);
   if (expand) url.searchParams.set('expand', '1');
+  if (activeOnly) url.searchParams.set('active_only', '1');
 
   try {
     const res = await fetch(url.toString(), { headers });

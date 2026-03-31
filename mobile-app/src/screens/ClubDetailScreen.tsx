@@ -24,10 +24,8 @@ import { createIntentForNewMatch, confirmPaymentFromClient } from '../api/paymen
 import { fetchMyPlayerId } from '../api/players';
 import { useAuth } from '../contexts/AuthContext';
 import { PartidoCard } from '../components/partido/PartidoCard';
-import {
-  BookingConfirmationModal,
-  type BookingConfirmationData,
-} from '../components/partido/BookingConfirmationModal';
+import type { BookingConfirmationData } from './BookingConfirmationScreen';
+import { PrivateReservationModal } from '../components/partido/PrivateReservationModal';
 import type { PartidoItem } from './PartidosScreen';
 import { theme } from '../theme';
 
@@ -126,7 +124,6 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
   const [activeTab, setActiveTab] = useState<TabId>('Home');
   const [clubPartidos, setClubPartidos] = useState<PartidoItem[]>([]);
   const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
-  const [confirmationModalVisible, setConfirmationModalVisible] = useState(false);
   const [confirmationModalData, setConfirmationModalData] = useState<BookingConfirmationData | null>(null);
   const [partidosLoading, setPartidosLoading] = useState(false);
   const [clubCourts, setClubCourts] = useState<Court[]>([]);
@@ -155,6 +152,7 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
       .filter((m) => matchBelongsToClub(m, court.clubId))
       .map(mapMatchToPartido)
       .filter((p): p is PartidoItem => p != null)
+      .filter((p) => p.matchPhase !== 'past')
       .filter((p) => p.visibility !== 'private');
     setClubPartidos(filtered);
     setPartidosLoading(false);
@@ -333,8 +331,8 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
         dateTimeFormatted: formatDateTimeForConfirmation(selectedDate, selectedTimeSlot),
         duration: `${DURATION_MIN} min`,
         priceFormatted: priceInfo.minPriceFormatted,
+        matchVisibility: 'private',
       });
-      setConfirmationModalVisible(true);
     },
     [
       selectedTimeSlot,
@@ -788,11 +786,13 @@ export function ClubDetailScreen({ court, onClose, onPartidoPress }: ClubDetailS
           )}
         </ScrollView>
 
-        <BookingConfirmationModal
-          visible={confirmationModalVisible}
+      {confirmationModalData != null ? (
+        <PrivateReservationModal
+          visible
           data={confirmationModalData}
-          onClose={() => setConfirmationModalVisible(false)}
+          onClose={() => setConfirmationModalData(null)}
         />
+      ) : null}
       </View>
   );
 }

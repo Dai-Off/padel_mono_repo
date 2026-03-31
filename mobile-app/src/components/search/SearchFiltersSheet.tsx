@@ -31,6 +31,8 @@ type SearchFiltersSheetProps = {
   onClear?: () => void;
   initialFilters?: SearchFiltersState;
   resultCount: number;
+  /** Texto del CTA: lista de clubes (Pistas) vs genérico. */
+  resultCountKind?: 'clubs' | 'results';
 };
 
 export type SearchFiltersState = {
@@ -95,6 +97,13 @@ function FilterChip({
 }
 
 /** Hoja de filtros que se abre al tocar el botón de filtros en el buscador. */
+function formatResultCtaLabel(n: number, kind: 'clubs' | 'results') {
+  if (kind === 'clubs') {
+    return n === 1 ? 'Ver 1 club' : `Ver ${n} clubes`;
+  }
+  return `Ver ${n} resultados`;
+}
+
 export function SearchFiltersSheet({
   visible,
   onClose,
@@ -102,6 +111,7 @@ export function SearchFiltersSheet({
   onClear,
   initialFilters,
   resultCount,
+  resultCountKind = 'results',
 }: SearchFiltersSheetProps) {
   const insets = useSafeAreaInsets();
   const [filters, setFilters] = useState<SearchFiltersState>(() =>
@@ -274,9 +284,11 @@ export function SearchFiltersSheet({
               onPress={handleApply}
               style={({ pressed }) => [styles.ctaButton, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel={`Ver ${resultCount} resultados`}
+              accessibilityLabel={formatResultCtaLabel(resultCount, resultCountKind)}
             >
-              <Text style={styles.ctaButtonText}>Ver {resultCount} resultados</Text>
+              <Text style={styles.ctaButtonText}>
+                {formatResultCtaLabel(resultCount, resultCountKind)}
+              </Text>
             </Pressable>
           </ScrollView>
           </View>
