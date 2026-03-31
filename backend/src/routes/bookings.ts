@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { recordPayment } from '../lib/payment';
 import { attachAuthContext } from '../middleware/attachAuthContext';
+import { findTournamentConflict } from '../lib/tournamentConflicts';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -93,6 +94,16 @@ async function hasCourtConflict(params: {
   });
   if (courseOverlap) {
     return { conflict: true, reason: 'La pista está ocupada por un curso de escuela en ese horario' };
+  }
+
+  const tConflict = await findTournamentConflict({
+    clubId,
+    courtIds: [params.courtId],
+    startAt: params.startAt,
+    endAt: params.endAt,
+  });
+  if (tConflict) {
+    return { conflict: true, reason: tConflict };
   }
   return { conflict: false };
 }
