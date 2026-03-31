@@ -1257,19 +1257,23 @@ const styles = StyleSheet.create({
   },
   heroStat: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     backgroundColor: "rgba(255,255,255,0.1)",
     borderRadius: 12,
+    alignSelf: "flex-start",
   },
   heroStatText: {
     fontSize: theme.fontSize.xs,
     fontWeight: "600",
     color: "rgba(255,255,255,0.8)",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
-    ...Platform.select({ android: { includeFontPadding: false } }),
+    ...Platform.select({
+      android: {
+        includeFontPadding: false,
+      },
+    }),
   },
   section: {
     backgroundColor: "rgba(255,255,255,0.06)",
@@ -1292,12 +1296,16 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: theme.spacing.xs,
     marginBottom: theme.spacing.sm,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   tag: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 12,
+    ...Platform.select({
+      android: { includeFontPadding: false },
+    }),
   },
   tagText: {
     fontSize: theme.fontSize.xs,
