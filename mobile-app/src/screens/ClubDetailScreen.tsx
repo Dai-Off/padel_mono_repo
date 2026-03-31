@@ -1163,7 +1163,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
   },
-  tabText: {
+  tabText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "600",
     textAlign: "center",
@@ -1174,10 +1176,14 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  tabTextActive: {
+  tabTextActive: {    flexShrink: 1,
+    maxWidth: "100%",
+
     color: "#fff",
   },
-  tabTextInactive: {
+  tabTextInactive: {    flexShrink: 1,
+    maxWidth: "100%",
+
     color: "rgba(255,255,255,0.6)",
   },
   scroll: {
@@ -1222,7 +1228,9 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: "#22c55e",
   },
-  statusText: {
+  statusText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     fontWeight: "600",
     color: "rgba(255,255,255,0.5)",
@@ -1230,12 +1238,14 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  heroTitle: {
+  heroTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.lg,
     fontWeight: "700",
     color: "#fff",
     marginBottom: 4,
     lineHeight: theme.lineHeightFor(theme.fontSize.lg),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   heroLocation: {
@@ -1243,7 +1253,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
   },
-  heroAddress: {
+  heroAddress: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     color: "rgba(255,255,255,0.5)",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
@@ -1252,6 +1263,7 @@ const styles = StyleSheet.create({
   },
   heroStats: {
     flexDirection: "row",
+    flexWrap: "wrap",
     gap: theme.spacing.sm,
     marginTop: theme.spacing.md,
   },
@@ -1263,12 +1275,15 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     backgroundColor: "rgba(255,255,255,0.1)",
     borderRadius: 12,
+    flexShrink: 1,
   },
-  heroStatText: {
+  heroStatText: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "600",
     color: "rgba(255,255,255,0.8)",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   section: {
@@ -1279,12 +1294,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
   },
-  sectionTitle: {
+  sectionTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "700",
     color: "#ffffff",
     marginBottom: theme.spacing.md,
     lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   tagsRow: {
@@ -1299,17 +1316,22 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 12,
   },
-  tagText: {
+  tagText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     color: "rgba(255,255,255,0.6)",
     fontWeight: "500",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  pistasLabel: {
+  pistasLabel: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     color: "rgba(255,255,255,0.6)",
     marginBottom: theme.spacing.lg,
+    width: "100%",
+    flexShrink: 1,
   },
   actionsRow: {
     flexDirection: "row",
@@ -1322,10 +1344,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     paddingVertical: theme.spacing.md,
+    paddingHorizontal: 4,
     backgroundColor: theme.auth.accent,
     borderRadius: 16,
   },
   actionLabel: {
+    textAlign: "center",
+
     fontSize: 10,
     fontWeight: "600",
     color: "#fff",
@@ -1338,12 +1363,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     paddingVertical: theme.spacing.md,
+    paddingHorizontal: 4,
     backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
     borderRadius: 16,
   },
   actionLabelOutline: {
+    textAlign: "center",
+
     fontSize: 10,
     fontWeight: "600",
     color: "rgba(255,255,255,0.6)",
@@ -1358,7 +1386,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: theme.spacing.md,
   },
-  mapPlaceholderText: {
+  mapPlaceholderText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     color: "rgba(255,255,255,0.5)",
     textAlign: "center",
@@ -1376,14 +1406,16 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: theme.spacing.sm,
   },
-  scheduleDay: {
+  scheduleDay: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     color: "rgba(255,255,255,0.6)",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
     flexShrink: 0,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  scheduleHours: {
+  scheduleHours: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "600",
     color: "#ffffff",
@@ -1407,7 +1439,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 12,
   },
-  amenityText: {
+  amenityText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "500",
     color: "rgba(255,255,255,0.6)",
@@ -1436,27 +1470,35 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  promoEmoji: {
+  promoEmoji: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 18,
   },
   promoTextWrap: {
     flex: 1,
   },
-  promoTitle: {
+  promoTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "600",
     color: "#ffffff",
     lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  promoSub: {
+  promoSub: {    maxWidth: "100%",
+
     fontSize: 10,
     color: "#9ca3af",
     marginTop: 2,
     lineHeight: 14,
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  promoCta: {
+  promoCta: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "700",
     color: theme.auth.accent,
@@ -1485,7 +1527,9 @@ const styles = StyleSheet.create({
     width: "100%",
     height: "100%",
   },
-  topPlayerInitial: {
+  topPlayerInitial: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "700",
     color: "#fff",
@@ -1501,12 +1545,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  topPlayerRank: {
+  topPlayerRank: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 9,
     fontWeight: "700",
     color: "#fff",
   },
-  topPlayerName: {
+  topPlayerName: {    flexShrink: 1,
+
     fontSize: 10,
     color: "rgba(255,255,255,0.6)",
     fontWeight: "500",
@@ -1522,7 +1569,9 @@ const styles = StyleSheet.create({
     padding: theme.spacing.md,
     marginBottom: theme.spacing.sm,
   },
-  resultDate: {
+  resultDate: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     color: "rgba(255,255,255,0.5)",
     textAlign: "right",
@@ -1548,7 +1597,9 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 12,
   },
-  resultName: {
+  resultName: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 9,
     fontWeight: "500",
     color: "#ffffff",
@@ -1559,7 +1610,9 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 4,
   },
-  resultLevelText: {
+  resultLevelText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 8,
     fontWeight: "700",
     color: "#1A1A1A",
@@ -1569,17 +1622,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
-  resultScoreWin: {
+  resultScoreWin: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 24,
     fontWeight: "800",
     color: "#ffffff",
   },
-  resultScoreLose: {
+  resultScoreLose: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 24,
     fontWeight: "800",
     color: "rgba(255,255,255,0.35)",
   },
-  resultScoreDash: {
+  resultScoreDash: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 18,
     color: "#d1d5db",
   },
@@ -1591,7 +1650,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 16,
   },
-  accountText: {
+  accountText: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     color: "rgba(255,255,255,0.6)",
     flex: 1,
@@ -1627,27 +1687,35 @@ const styles = StyleSheet.create({
   dateBtnInactive: {
     backgroundColor: "transparent",
   },
-  dateDayName: {
+  dateDayName: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     fontWeight: "600",
     color: "rgba(255,255,255,0.6)",
     lineHeight: 14,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  dateDayNum: {
+  dateDayNum: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 18,
     fontWeight: "700",
     color: "rgba(255,255,255,0.6)",
     lineHeight: 22,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  dateMonth: {
+  dateMonth: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     color: "rgba(255,255,255,0.6)",
     lineHeight: 14,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  dateTextActive: {
+  dateTextActive: {    flexShrink: 1,
+    maxWidth: "100%",
+
     color: "#fff",
   },
   toggleRow: {
@@ -1655,7 +1723,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  toggleLabel: {
+  toggleLabel: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "500",
     color: "rgba(255,255,255,0.6)",
@@ -1681,10 +1751,14 @@ const styles = StyleSheet.create({
     backgroundColor: theme.auth.accent,
     borderColor: theme.auth.accent,
   },
-  timeSlotTextSelected: {
+  timeSlotTextSelected: {    flexShrink: 1,
+    maxWidth: "100%",
+
     color: "#fff",
   },
-  timeSlotText: {
+  timeSlotText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "600",
     color: "rgba(255,255,255,0.6)",
@@ -1705,7 +1779,8 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 4,
   },
-  alertSectionTitle: {
+  alertSectionTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "700",
     color: "#ffffff",
@@ -1717,6 +1792,10 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.xs,
     color: "rgba(255,255,255,0.6)",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    width: "100%",
+    maxWidth: "100%",
+    minHeight: theme.lineHeightFor(theme.fontSize.xs) * 2,
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   reservaTitle: {
@@ -1726,6 +1805,9 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     lineHeight: theme.lineHeightFor(theme.fontSize.sm),
     width: "100%",
+    maxWidth: "100%",
+    minHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   reservaSub: {
@@ -1733,10 +1815,10 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.6)",
     marginBottom: theme.spacing.md,
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
-    alignSelf: "stretch",
-    textAlign: "left",
-    minHeight: theme.lineHeightFor(theme.fontSize.xs) * 2,
+    width: "100%",
     maxWidth: "100%",
+    minHeight: theme.lineHeightFor(theme.fontSize.xs) * 2,
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtList: {
@@ -1757,18 +1839,22 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     padding: theme.spacing.md,
   },
-  courtCardName: {
+  courtCardName: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "700",
     color: "#ffffff",
     lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  courtCardSub: {
+  courtCardSub: {    maxWidth: "100%",
+
     fontSize: 12,
     color: "rgba(255,255,255,0.6)",
     marginTop: 2,
     lineHeight: 16,
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtCardActions: {
@@ -1785,7 +1871,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.sm,
     alignItems: "center",
   },
-  courtPriceAmount: {
+  courtPriceAmount: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 14,
     fontWeight: "700",
     color: "#fff",
@@ -1794,7 +1882,9 @@ const styles = StyleSheet.create({
     textAlign: "center",
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  courtPriceDuration: {
+  courtPriceDuration: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     color: "rgba(255,255,255,0.9)",
     marginTop: 1,
@@ -1814,7 +1904,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  courtReservarText: {
+  courtReservarText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "700",
     color: "#ffffff",
@@ -1823,7 +1915,9 @@ const styles = StyleSheet.create({
     textAlign: "center",
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  courtReservarTextDisabled: {
+  courtReservarTextDisabled: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "600",
     color: "rgba(255,255,255,0.6)",
@@ -1850,22 +1944,28 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  courtName: {
+  courtName: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "600",
     color: "#ffffff",
   },
-  courtSub: {
+  courtSub: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     color: "rgba(255,255,255,0.6)",
     marginTop: 2,
   },
-  partidosSectionTitle: {
+  partidosSectionTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.lg,
     fontWeight: "700",
     color: "#ffffff",
     marginBottom: 4,
     lineHeight: theme.lineHeightFor(theme.fontSize.lg),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosSectionSub: {
@@ -1873,6 +1973,10 @@ const styles = StyleSheet.create({
     color: "#9ca3af",
     marginBottom: theme.spacing.md,
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    width: "100%",
+    maxWidth: "100%",
+    minHeight: theme.lineHeightFor(theme.fontSize.xs) * 2,
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosListWrap: {
@@ -1898,7 +2002,9 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.1)",
     borderRadius: 12,
   },
-  partidosFilterText: {
+  partidosFilterText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "600",
     color: "rgba(255,255,255,0.9)",
@@ -1929,16 +2035,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: theme.spacing.md,
   },
-  partidosEmptyEmoji: {
+  partidosEmptyEmoji: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 30,
   },
-  partidosEmptyTitle: {
+  partidosEmptyTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "700",
     color: "#ffffff",
     marginBottom: 4,
     textAlign: "center",
     lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosEmptySubtitle: {
@@ -1946,7 +2056,10 @@ const styles = StyleSheet.create({
     color: "#9ca3af",
     textAlign: "center",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
-    alignSelf: "stretch",
+    width: "100%",
+    maxWidth: "100%",
+    minHeight: theme.lineHeightFor(theme.fontSize.xs) * 2,
+    flexShrink: 1,
     paddingHorizontal: theme.spacing.xs,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
@@ -1956,11 +2069,13 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
-  partidosAlertTitle: {
+  partidosAlertTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "700",
     color: "#ffffff",
     lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosAlertDesc: {
@@ -1968,6 +2083,10 @@ const styles = StyleSheet.create({
     color: "#9ca3af",
     marginBottom: theme.spacing.sm,
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    width: "100%",
+    maxWidth: "100%",
+    minHeight: theme.lineHeightFor(theme.fontSize.xs) * 2,
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosAlertRow: {
@@ -1978,19 +2097,23 @@ const styles = StyleSheet.create({
   manageAlertsBtn: {
     paddingVertical: 4,
   },
-  manageAlertsText: {
+  manageAlertsText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "700",
     color: theme.auth.accent,
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  partidosReservaTitle: {
+  partidosReservaTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "700",
     color: "#ffffff",
     marginBottom: 4,
     lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosReservaSub: {
@@ -1998,6 +2121,10 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.6)",
     marginBottom: 8,
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    width: "100%",
+    maxWidth: "100%",
+    minHeight: theme.lineHeightFor(theme.fontSize.xs) * 2,
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosReservaHint: {
@@ -2005,13 +2132,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
-  partidosReservaHintText: {
+  partidosReservaHintText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     color: "rgba(255,255,255,0.6)",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  partidosClockEmoji: {
+  partidosClockEmoji: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 16,
   },
   emptyState: {
@@ -2030,21 +2161,29 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: theme.spacing.md,
   },
-  emptyStateEmoji: {
+  emptyStateEmoji: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 28,
   },
-  emptyStateTitle: {
+  emptyStateTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "700",
     color: "#ffffff",
     marginBottom: 4,
     lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   emptyStateSub: {
     fontSize: theme.fontSize.xs,
     color: "rgba(255,255,255,0.6)",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    width: "100%",
+    maxWidth: "100%",
+    minHeight: theme.lineHeightFor(theme.fontSize.xs) * 2,
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   compCard: {
@@ -2062,7 +2201,9 @@ const styles = StyleSheet.create({
   compCardContent: {
     padding: theme.spacing.lg,
   },
-  compCardDate: {
+  compCardDate: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     color: "rgba(255,255,255,0.6)",
     marginBottom: theme.spacing.sm,
@@ -2082,17 +2223,21 @@ const styles = StyleSheet.create({
   compCardBody: {
     flex: 1,
   },
-  compCardDateTime: {
+  compCardDateTime: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     color: "rgba(255,255,255,0.6)",
     marginBottom: 4,
   },
-  compCardTitle: {
+  compCardTitle: {    maxWidth: "100%",
+
     fontSize: theme.fontSize.sm,
     fontWeight: "700",
     color: "#ffffff",
     marginBottom: 8,
     lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    flexShrink: 1,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   compCardTags: {
@@ -2109,7 +2254,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 8,
   },
-  compTagText: {
+  compTagText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     fontWeight: "500",
     color: "rgba(255,255,255,0.6)",
@@ -2120,7 +2267,9 @@ const styles = StyleSheet.create({
     gap: 4,
     marginBottom: theme.spacing.sm,
   },
-  compCardMetaText: {
+  compCardMetaText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     color: "rgba(255,255,255,0.6)",
   },
@@ -2140,7 +2289,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#fff",
   },
-  compCardTeamsText: {
+  compCardTeamsText: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     color: "#9ca3af",
     fontWeight: "500",
@@ -2159,12 +2310,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
   },
-  compVenueName: {
+  compVenueName: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: theme.fontSize.xs,
     fontWeight: "600",
     color: "#1A1A1A",
   },
-  compVenueSub: {
+  compVenueSub: {    flexShrink: 1,
+    maxWidth: "100%",
+
     fontSize: 10,
     color: "#9ca3af",
   },
