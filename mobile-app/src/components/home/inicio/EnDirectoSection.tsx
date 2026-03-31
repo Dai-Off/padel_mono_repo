@@ -1,4 +1,5 @@
 import {
+  ActivityIndicator,
   Image,
   Platform,
   Pressable,
@@ -11,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { PartidoItem } from '../../../screens/PartidosScreen';
-import { ACCENT, INICIO_PAD_H } from './constants';
+import { ACCENT } from './constants';
 import { DASH, dash } from './dash';
 import {
   androidReadableText,
@@ -55,8 +56,10 @@ export function EnDirectoSection({
 }: Props) {
   const insets = useSafeAreaInsets();
   const countLine = loading
-    ? DASH
-    : `${partidos.length} evento${partidos.length === 1 ? '' : 's'} próximo${partidos.length === 1 ? '' : 's'}`;
+    ? 'Buscando partidos en curso…'
+    : partidos.length === 0
+      ? 'Nadie en pista en este momento'
+      : `${partidos.length} partido${partidos.length === 1 ? '' : 's'} en curso`;
 
   return (
     <View style={styles.section}>
@@ -95,16 +98,16 @@ export function EnDirectoSection({
           <Text style={styles.sub}>{countLine}</Text>
         </View>
       </View>
+      {partidos.length > 0 ? (
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={[
           styles.scroll,
-          { paddingRight: INICIO_PAD_H + insets.right },
+          { paddingRight: 12 + insets.right },
         ]}
       >
-        {partidos.length > 0 ? (
-          partidos.map((p) => {
+          {partidos.map((p) => {
               const { date, time } = splitDateTime(p.dateTime);
               const modeLabel =
                 p.mode === 'competitivo' ? 'Competitivo' : 'Partido';
@@ -199,61 +202,81 @@ export function EnDirectoSection({
                   </View>
                 </Pressable>
               );
-            })
-        ) : (
-          <Pressable
-            onPress={() => onOpenPartidos?.()}
-            style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-          >
-            <View style={[styles.imgWrap, styles.placeholderImg]}>
-              <Ionicons name="image-outline" size={48} color="#4b5563" />
-            </View>
-            <View style={styles.body}>
-              <View style={styles.typePill}>
-                <Text style={styles.typePillText}>{DASH}</Text>
-              </View>
-              <Text style={styles.cardTitle} numberOfLines={1}>
-                {DASH}
-              </Text>
-              <View style={styles.placeRow}>
-                <Ionicons name="location" size={14} color="#9ca3af" />
-                <Text style={styles.place}>{DASH}</Text>
-              </View>
-              <View style={styles.metaRow}>
-                <View style={styles.metaItem}>
-                  <Ionicons name="calendar-outline" size={14} color="#9ca3af" />
-                  <Text style={styles.metaText}>{DASH}</Text>
-                </View>
-                <View style={styles.metaItem}>
-                  <Ionicons name="time-outline" size={14} color="#9ca3af" />
-                  <Text style={styles.metaText}>{DASH}</Text>
-                </View>
-              </View>
-              <View style={styles.footerRow}>
-                <Text style={styles.footerMuted}>{DASH}</Text>
-                <LinearGradient
-                  colors={[ACCENT, '#FFA940']}
-                  style={styles.ctaIcon}
-                >
-                  <Ionicons
-                    name="arrow-up"
-                    size={18}
-                    color="#fff"
-                    style={styles.ctaArrow}
-                  />
-                </LinearGradient>
-              </View>
-            </View>
-          </Pressable>
-        )}
+            })}
       </ScrollView>
+      ) : (
+        <View style={styles.fullWidthRow}>
+          {loading ? (
+            <View
+              style={[styles.emptyStateOuter, styles.skeletonCard]}
+              accessibilityRole="progressbar"
+            >
+              <View style={styles.skeletonImg}>
+                <ActivityIndicator size="small" color={ACCENT} />
+              </View>
+              <View style={styles.skeletonBody}>
+                <View style={styles.skeletonLineShort} />
+                <View style={styles.skeletonLineLong} />
+                <View style={styles.skeletonLineMed} />
+              </View>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => onOpenPartidos?.()}
+              accessibilityRole="button"
+              accessibilityLabel="Ver partidos abiertos"
+              style={({ pressed }) => [
+                styles.emptyStateOuter,
+                pressed && styles.pressed,
+              ]}
+            >
+              <LinearGradient
+                colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.02)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.emptyGradient}
+              >
+                <View style={styles.emptyIconWrap}>
+                  <Ionicons
+                    name="radio-outline"
+                    size={36}
+                    color="rgba(241, 143, 52, 0.85)"
+                  />
+                </View>
+                <Text
+                  style={styles.emptyTitle}
+                  {...(Platform.OS === 'android'
+                    ? { textBreakStrategy: 'simple' as const }
+                    : {})}
+                >
+                  No hay partidos en directo
+                </Text>
+                <Text
+                  style={styles.emptySubtitle}
+                  {...(Platform.OS === 'android'
+                    ? { textBreakStrategy: 'simple' as const }
+                    : {})}
+                >
+                  Ahora mismo no hay ningún partido dentro de su horario.{'\n'}
+                  Cuando alguien esté jugando, lo mostraremos aquí.
+                </Text>
+                <View style={styles.emptyCtaWrap}>
+                  <Text style={styles.emptyCtaText}>
+                    Explorar partidos <Text style={styles.emptyCtaChevronText}>›</Text>
+                  </Text>
+                </View>
+              </LinearGradient>
+            </Pressable>
+          )}
+        </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  /** Misma columna que el resto del inicio (sin márgenes negativos: evita desbordes). */
   section: {
-    marginHorizontal: -INICIO_PAD_H,
     alignSelf: 'stretch',
     width: '100%',
   },
@@ -261,15 +284,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 20,
-    paddingHorizontal: INICIO_PAD_H,
+    paddingHorizontal: 0,
     paddingBottom: 4,
   },
-  /** Más ancho útil para el título (menos padding lateral que iOS). */
+  /** Alineación título en Android (misma idea que otras secciones). */
   headerAndroid: {
     alignSelf: 'stretch',
     width: '100%',
     minWidth: '100%',
-    paddingHorizontal: 8,
     paddingVertical: 2,
   },
   headerTextBlock: {
@@ -335,11 +357,32 @@ const styles = StyleSheet.create({
   scroll: {
     flexDirection: 'row',
     gap: 16,
-    paddingLeft: INICIO_PAD_H,
+    paddingLeft: 0,
     paddingBottom: 8,
+  },
+  /** Misma anchura útil que las demás secciones (columna del ScrollView padre). */
+  fullWidthRow: {
+    width: '100%',
+    paddingBottom: 8,
+    alignSelf: 'stretch',
   },
   card: {
     width: CARD_W,
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  cardFullWidth: {
+    width: '100%',
+    maxWidth: '100%',
+    alignSelf: 'stretch',
+  },
+  /** Sin width fijo 280: en Android si no gana el merge, el texto del CTA se recorta. */
+  emptyStateOuter: {
+    alignSelf: 'stretch',
+    width: '100%',
     borderRadius: 24,
     overflow: 'hidden',
     backgroundColor: 'rgba(255,255,255,0.06)',
@@ -483,4 +526,108 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ctaArrow: { transform: [{ rotate: '45deg' }] },
+  skeletonCard: {
+    justifyContent: 'flex-start',
+  },
+  skeletonImg: {
+    height: 160,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  skeletonBody: {
+    padding: 16,
+    gap: 10,
+  },
+  skeletonLineShort: {
+    height: 10,
+    width: '40%',
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  skeletonLineLong: {
+    height: 12,
+    width: '88%',
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  skeletonLineMed: {
+    height: 10,
+    width: '65%',
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  emptyGradient: {
+    paddingHorizontal: 20,
+    paddingVertical: 22,
+    minHeight: 220,
+    justifyContent: 'center',
+    width: '100%',
+    alignSelf: 'stretch',
+  },
+  emptyIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    backgroundColor: 'rgba(241, 143, 52, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241, 143, 52, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  emptyTitle: androidReadableText({
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#f9fafb',
+    marginBottom: 8,
+    lineHeight: 22,
+    ...Platform.select({
+      android: {
+        includeFontPadding: false,
+        flexShrink: 1,
+        width: '100%' as const,
+      },
+      default: {},
+    }),
+  }),
+  emptySubtitle: androidReadableText({
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#9ca3af',
+    marginBottom: 16,
+    ...Platform.select({
+      android: {
+        includeFontPadding: false,
+        flexShrink: 1,
+        width: '100%' as const,
+      },
+      default: {},
+    }),
+  }),
+  emptyCtaWrap: {
+    alignSelf: 'stretch',
+    width: '100%',
+  },
+  /** Sin androidReadableText aquí: evita interacciones raras con medición en fila (Android). */
+  emptyCtaText: Platform.select({
+    ios: {
+      fontSize: 14,
+      fontWeight: '700' as const,
+      color: ACCENT,
+    },
+    default: {
+      fontSize: 14,
+      fontWeight: '700' as const,
+      color: ACCENT,
+      includeFontPadding: false,
+    },
+  }),
+  emptyCtaChevronText: {
+    fontSize: 18,
+    fontWeight: '700' as const,
+    color: ACCENT,
+  },
 });
