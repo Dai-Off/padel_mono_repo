@@ -1269,13 +1269,12 @@ const styles = StyleSheet.create({
   },
   heroStat: {
     flexDirection: "row",
-    alignItems: "center",
     gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     backgroundColor: "rgba(255,255,255,0.1)",
     borderRadius: 12,
-    flexShrink: 1,
+    alignSelf: "flex-start",
   },
   heroStatText: {    maxWidth: "100%",
 
@@ -1283,8 +1282,11 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: "rgba(255,255,255,0.8)",
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
-    flexShrink: 1,
-    ...Platform.select({ android: { includeFontPadding: false } }),
+    ...Platform.select({
+      android: {
+        includeFontPadding: false,
+      },
+    }),
   },
   section: {
     backgroundColor: "rgba(255,255,255,0.06)",
@@ -1309,12 +1311,16 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: theme.spacing.xs,
     marginBottom: theme.spacing.sm,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   tag: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 12,
+    ...Platform.select({
+      android: { includeFontPadding: false },
+    }),
   },
   tagText: {    flexShrink: 1,
     maxWidth: "100%",
