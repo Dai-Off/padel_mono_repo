@@ -421,6 +421,7 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome 
           </View>
 
           <View
+            style={{ paddingVertical: 16 }}
             onLayout={(e) => {
               sectionY.current.players = e.nativeEvent.layout.y;
             }}
