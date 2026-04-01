@@ -12,10 +12,17 @@ export type ClubDetail = {
   schedule_exceptions?: unknown[];
 };
 
-export async function fetchClubById(id: string): Promise<ClubDetail | null> {
+export async function fetchClubById(
+  id: string,
+  accessToken?: string | null,
+): Promise<ClubDetail | null> {
   try {
+    if (!accessToken) return null;
     const res = await fetch(`${API_URL}/clubs/${id}`, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
     });
     const json = (await res.json()) as { ok?: boolean; club?: ClubDetail; error?: string };
     if (!res.ok) {
