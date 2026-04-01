@@ -1,16 +1,23 @@
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import type { PartidoItem, PartidoPlayer } from '../../screens/PartidosScreen';
+import {
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
+import type { PartidoItem, PartidoPlayer } from "../../screens/PartidosScreen";
 
-const ACCENT = '#F18F34';
-const ACCENT_END = '#E95F32';
+const ACCENT = "#F18F34";
+const ACCENT_END = "#E95F32";
 
 const PLACEHOLDER_URIS = [
-  'https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=400&h=300&fit=crop',
-  'https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?w=400&h=300&fit=crop',
-  'https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=400&h=300&fit=crop',
-  'https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?w=400&h=300&fit=crop',
+  "https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=400&h=300&fit=crop",
+  "https://images.unsplash.com/photo-1612872087720-bb876e2e67d1?w=400&h=300&fit=crop",
+  "https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=400&h=300&fit=crop",
+  "https://images.unsplash.com/photo-1622279457486-62dcc4a431d6?w=400&h=300&fit=crop",
 ];
 
 function pickPlaceholderUri(id: string): string {
@@ -19,15 +26,18 @@ function pickPlaceholderUri(id: string): string {
   return PLACEHOLDER_URIS[h % PLACEHOLDER_URIS.length];
 }
 
-function splitDateTime(dateTime: string): { datePart: string; timePart: string } {
-  const parts = dateTime.split(' · ');
+function splitDateTime(dateTime: string): {
+  datePart: string;
+  timePart: string;
+} {
+  const parts = dateTime.split(" · ");
   if (parts.length >= 2) {
     return {
-      datePart: parts[0]?.trim() ?? '',
-      timePart: parts[1]?.trim() ?? '',
+      datePart: parts[0]?.trim() ?? "",
+      timePart: parts[1]?.trim() ?? "",
     };
   }
-  return { datePart: dateTime, timePart: '' };
+  return { datePart: dateTime, timePart: "" };
 }
 
 function durationHuman(raw: string): string {
@@ -38,8 +48,8 @@ function durationHuman(raw: string): string {
   if (n < 60) return `${n} min`;
   const h = Math.floor(n / 60);
   const m = n % 60;
-  if (m === 0) return h === 1 ? '1 hora' : `${h} horas`;
-  return `${h} hora${h > 1 ? 's' : ''} ${m} minutos`;
+  if (m === 0) return h === 1 ? "1 hora" : `${h} horas`;
+  return `${h} hora${h > 1 ? "s" : ""} ${m} minutos`;
 }
 
 function countFree(players: PartidoPlayer[]): number {
@@ -70,7 +80,7 @@ function PlayerFace({ player }: { player: PartidoPlayer }) {
         <Image source={{ uri: player.avatar }} style={styles.slotAvatar} />
       ) : (
         <Text style={styles.slotInitials} numberOfLines={1}>
-          {(player.initial ?? player.name?.slice(0, 2) ?? '?').toUpperCase()}
+          {(player.initial ?? player.name?.slice(0, 2) ?? "?").toUpperCase()}
         </Text>
       )}
     </LinearGradient>
@@ -89,7 +99,7 @@ export function PartidoOpenCard({ item, onPress }: Props) {
       style={({ pressed }) => [styles.card, pressed && styles.pressed]}
     >
       <LinearGradient
-        colors={['rgba(255,255,255,0.07)', 'rgba(255,255,255,0.03)']}
+        colors={["rgba(255,255,255,0.07)", "rgba(255,255,255,0.03)"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}
@@ -100,7 +110,7 @@ export function PartidoOpenCard({ item, onPress }: Props) {
           <View style={styles.thumbWrap}>
             <Image source={{ uri }} style={styles.thumb} />
             <LinearGradient
-              colors={['rgba(0,0,0,0.42)', 'transparent']}
+              colors={["rgba(0,0,0,0.42)", "transparent"]}
               start={{ x: 0, y: 1 }}
               end={{ x: 1, y: 0 }}
               style={styles.thumbOverlay}
@@ -139,7 +149,7 @@ export function PartidoOpenCard({ item, onPress }: Props) {
               </View>
               <View style={styles.badge}>
                 <Text style={styles.badgeTxt} numberOfLines={1}>
-                  📊 {item.levelRange.replace(/\./g, ',')}
+                  📊 {item.levelRange.replace(/\./g, ",")}
                 </Text>
               </View>
             </View>
@@ -168,11 +178,11 @@ const SLOT = 28;
 const styles = StyleSheet.create({
   card: {
     borderRadius: 12,
-    overflow: 'hidden',
+    overflow: "hidden",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    position: 'relative',
-    shadowColor: '#000',
+    borderColor: "rgba(255,255,255,0.08)",
+    position: "relative",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.2,
     shadowRadius: 10,
@@ -183,49 +193,49 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: "rgba(255,255,255,0.06)",
   },
   inner: {
-    padding: 14,
-    position: 'relative',
+    padding: 12,
+    position: "relative",
     zIndex: 2,
   },
   row: {
-    flexDirection: 'row',
-    gap: 14,
-    alignItems: 'flex-start',
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "flex-start",
   },
   thumbWrap: {
     width: 112,
     height: 112,
     borderRadius: 12,
-    overflow: 'hidden',
+    overflow: "hidden",
     flexShrink: 0,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: "rgba(0,0,0,0.3)",
   },
-  thumb: { width: '100%', height: '100%' },
+  thumb: { width: "100%", height: "100%" },
   thumbOverlay: {
     ...StyleSheet.absoluteFillObject,
   },
   priceTag: {
-    position: 'absolute',
+    position: "absolute",
     left: 6,
     bottom: 6,
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: "rgba(0,0,0,0.72)",
   },
   priceLine: { lineHeight: 14 },
   priceMain: {
     fontSize: 12,
-    fontWeight: '900',
-    color: '#fff',
+    fontWeight: "900",
+    color: "#fff",
   },
   priceSub: {
     fontSize: 9,
-    color: '#d1d5db',
-    fontWeight: '600',
+    color: "#d1d5db",
+    fontWeight: "600",
   },
   body: {
     flex: 1,
@@ -234,33 +244,33 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: "700",
+    color: "#fff",
     lineHeight: 20,
     paddingRight: 8,
   },
   timeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
-    flexWrap: 'wrap',
+    flexWrap: "wrap",
     marginBottom: 2,
   },
   dateTxt: {
     fontSize: 12,
-    color: '#9ca3af',
-    fontWeight: '500',
+    color: "#9ca3af",
+    fontWeight: "500",
     flexShrink: 1,
   },
-  dot: { fontSize: 12, color: '#4b5563' },
+  dot: { fontSize: 12, color: "#4b5563" },
   timeTxt: {
     fontSize: 12,
-    color: '#6b7280',
-    fontWeight: '500',
+    color: "#6b7280",
+    fontWeight: "500",
   },
   badgesRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 6,
     marginBottom: 4,
   },
@@ -268,30 +278,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: "rgba(255,255,255,0.1)",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    maxWidth: '100%',
+    borderColor: "rgba(255,255,255,0.1)",
+    maxWidth: "100%",
   },
   badgeTxt: {
     fontSize: 9,
-    fontWeight: '700',
-    color: '#d1d5db',
-    textTransform: 'uppercase',
+    fontWeight: "700",
+    color: "#d1d5db",
+    textTransform: "uppercase",
   },
   slotsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     paddingVertical: 2,
+    paddingRight: 8,
   },
   slotFill: {
     width: SLOT,
     height: SLOT,
     borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
   },
   slotAvatar: {
     width: SLOT,
@@ -300,29 +311,31 @@ const styles = StyleSheet.create({
   },
   slotInitials: {
     fontSize: 9,
-    fontWeight: '800',
-    color: '#fff',
+    fontWeight: "800",
+    color: "#fff",
   },
   slotFree: {
     width: SLOT,
     height: SLOT,
     borderRadius: 6,
     borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderStyle: "dashed",
+    borderColor: "rgba(255,255,255,0.2)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   slotPlus: {
     fontSize: 12,
-    color: '#6b7280',
-    fontWeight: '600',
+    color: "#6b7280",
+    fontWeight: "600",
   },
   libresTxt: {
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: "800",
     color: ACCENT,
     marginLeft: 4,
-    alignSelf: 'center',
+    alignSelf: "center",
+    flexShrink: 0,
+    paddingRight: 12,
   },
 });
