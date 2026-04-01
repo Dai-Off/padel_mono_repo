@@ -21,6 +21,7 @@ import { createIntentForNewMatch, confirmPaymentFromClient } from '../../api/pay
 import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
+import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
 
 export type LocationType = 'club_wematch' | 'pista_externa';
 
@@ -41,7 +42,8 @@ type CrearPartidoLocationSheetProps = {
   onContinueWeMatch?: () => void;
   onClose: () => void;
   onSiguiente: (locationType: LocationType) => void;
-  onPartidoCreado?: () => void;
+  /** Tras pago y confirmación en backend; datos para pantalla de éxito. */
+  onPartidoCreado?: (data: BookingConfirmationData) => void;
   organizerPlayerId?: string | null;
 };
 
@@ -63,6 +65,16 @@ function buildStartEnd(dateStr: string, time: string): { start_at: string; end_a
     start_at: start.toISOString(),
     end_at: end.toISOString(),
   };
+}
+
+function formatDateTimeForBookingConfirm(dateStr: string, time: string): string {
+  const d = new Date(`${dateStr}T${time}:00`);
+  const dayNames = ['DOM', 'LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB'];
+  const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const dayName = dayNames[d.getDay()] ?? 'Día';
+  const dayNum = d.getDate();
+  const month = months[d.getMonth()] ?? '';
+  return `${dayName}, ${dayNum} ${month} · ${time}`;
 }
 
 function getInitials(fullName?: string | null, email?: string): string {
@@ -219,8 +231,20 @@ export function CrearPartidoLocationSheet({
       return;
     }
 
-    onPartidoCreado?.();
-    onClose();
+    const confirmation: BookingConfirmationData = {
+      courtName: selectedSlot.courtName,
+      clubName: selectedClub.clubName,
+      dateTimeFormatted: formatDateTimeForBookingConfirm(selectedSlot.dateStr, selectedSlot.time),
+      duration: `${DURATION_MIN} min`,
+      priceFormatted: slotPriceForDuration(selectedSlot),
+      matchVisibility: partidoPrivado ? 'private' : 'public',
+    };
+    /** El padre (p. ej. MainApp) cierra el flujo dentro de `onPartidoCreado`; no llamar `onClose` después para evitar carrera con la pantalla de éxito. */
+    if (onPartidoCreado) {
+      onPartidoCreado(confirmation);
+    } else {
+      onClose();
+    }
   }, [selectedSlot, selectedClub, competitive, gender, orgId, session?.access_token, initPaymentSheet, presentPaymentSheet, onPartidoCreado, onClose, partidoPrivado]);
 
   const handleSiguiente = () => {

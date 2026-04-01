@@ -9,6 +9,11 @@ import { ScreenLayout } from '../components/layout/ScreenLayout';
 import { SidebarContent } from '../components/layout/SidebarContent';
 import { SidebarProvider } from '../contexts/SidebarContext';
 import { useSidebar } from '../hooks/useSidebar';
+import {
+  BookingConfirmationScreen,
+  type BookingConfirmationData,
+} from './BookingConfirmationScreen';
+import { PrivateReservationModal } from '../components/partido/PrivateReservationModal';
 import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
 import { ClubDetailScreen } from './ClubDetailScreen';
 import { CompeticionesScreen } from './CompeticionesScreen';
@@ -34,6 +39,7 @@ export function MainApp() {
     organizerId: string | null;
   }>({ open: false, organizerId: null });
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
+  const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
@@ -52,7 +58,11 @@ export function MainApp() {
           organizerPlayerId={crearPartidoFlow.organizerId}
           onClose={closeFlow}
           onSiguiente={closeFlow}
-          onPartidoCreado={closeFlow}
+          onPartidoCreado={(data) => {
+            setCrearPartidoFlow({ open: false, organizerId: null });
+            bumpPartidos();
+            setBookingSuccessData(data);
+          }}
         />
       );
     }
@@ -82,6 +92,10 @@ export function MainApp() {
         <PartidoDetailScreen
           partido={selectedPartido}
           onBack={() => setSelectedPartido(null)}
+          onGoHome={() => {
+            setSelectedPartido(null);
+            setActiveTab('inicio');
+          }}
         />
       );
     }
@@ -129,6 +143,7 @@ export function MainApp() {
   };
 
   const showMainTabs =
+    bookingSuccessData == null &&
     !showTusPagos &&
     !showTransacciones &&
     !showPartidoDetail &&
@@ -136,7 +151,11 @@ export function MainApp() {
     !crearPartidoFlow.open;
 
   const customHeader =
-    showTusPagos || showTransacciones || showPartidoDetail || crearPartidoFlow.open
+    bookingSuccessData != null ||
+    showTusPagos ||
+    showTransacciones ||
+    showPartidoDetail ||
+    crearPartidoFlow.open
       ? undefined
       : activeTab === 'tienda'
           ? <BackHeader title="Tienda" tone="dark" onBack={() => setActiveTab('inicio')} />
@@ -157,15 +176,17 @@ export function MainApp() {
                 : undefined;
 
   const layoutBackgroundColor =
-    showPartidoDetail
-      ? '#0F0F0F'
-      : crearPartidoFlow.open
+    bookingSuccessData != null
+      ? '#000000'
+      : showPartidoDetail
         ? '#0F0F0F'
-        : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
-          ? '#000000'
-          : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
-            ? '#0F0F0F'
-            : '#ffffff';
+        : crearPartidoFlow.open
+          ? '#0F0F0F'
+          : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
+            ? '#000000'
+            : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
+              ? '#0F0F0F'
+              : '#ffffff';
 
   return (
     <View style={styles.container}>
@@ -175,6 +196,7 @@ export function MainApp() {
             sidebar={sidebar}
             customHeader={customHeader}
             hideHeader={
+              bookingSuccessData != null ||
               showClubDetail ||
               showPartidoDetail ||
               showTusPagos ||
@@ -186,7 +208,8 @@ export function MainApp() {
           >
             {renderContent()}
           </ScreenLayout>
-          {!showClubDetail &&
+          {bookingSuccessData == null &&
+            !showClubDetail &&
             !showPartidoDetail &&
             !showTusPagos &&
             !showTransacciones &&
@@ -200,6 +223,22 @@ export function MainApp() {
           <SidebarContent />
         </MobileSidebar>
       </SidebarProvider>
+
+      {bookingSuccessData != null && bookingSuccessData.matchVisibility === 'private' ? (
+        <PrivateReservationModal
+          visible
+          data={bookingSuccessData}
+          onClose={() => setBookingSuccessData(null)}
+        />
+      ) : null}
+      {bookingSuccessData != null && bookingSuccessData.matchVisibility === 'public' ? (
+        <View style={styles.bookingSuccessOverlay} accessibilityViewIsModal>
+          <BookingConfirmationScreen
+            data={bookingSuccessData}
+            onClose={() => setBookingSuccessData(null)}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -218,5 +257,11 @@ const styles = StyleSheet.create({
   bottomBar: {
     width: '100%',
     alignSelf: 'stretch',
+  },
+  /** Por encima de ScreenLayout y navbar: la confirmación no puede quedar recortada por el contenedor flex. */
+  bookingSuccessOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2000,
+    elevation: 2000,
   },
 });

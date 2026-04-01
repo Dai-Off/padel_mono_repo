@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  Alert,
   Platform,
   Pressable,
   ScrollView,
@@ -13,13 +14,15 @@ import { SearchFilterBar } from '../components/search/SearchFilterBar';
 import { SearchFiltersSheet } from '../components/search/SearchFiltersSheet';
 import { theme } from '../theme';
 import { SearchResultsList } from '../components/search/SearchResultsList';
+import { aggregateCourtsByClub } from '../domain/aggregateCourtsByClub';
 import { useMatchSearch } from '../hooks/useMatchSearch';
 import type { SearchCourtResult } from '../api/search';
 
 const BG = '#0F0F0F';
 
 type MatchSearchScreenProps = {
-  onCourtPress?: (court: SearchCourtResult) => void;
+  /** Al elegir un club: se abre el detalle con una pista representativa (mismo `clubId`). */
+  onCourtPress?: (representativeCourt: SearchCourtResult) => void;
   onBack?: () => void;
 };
 
@@ -33,7 +36,6 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
     applyFilters,
     clearFilters,
     results,
-    resultCount,
     loading,
     sportLabel,
     dateLabel,
@@ -52,6 +54,16 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
         r.city.toLowerCase().includes(q)
     );
   }, [results, searchQuery]);
+
+  const clubGroups = useMemo(
+    () => aggregateCourtsByClub(filteredResults),
+    [filteredResults]
+  );
+
+  const clubCountForFilters = useMemo(
+    () => aggregateCourtsByClub(results).length,
+    [results]
+  );
 
   return (
     <View style={styles.root}>
@@ -121,9 +133,15 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
         keyboardShouldPersistTaps="handled"
       >
         <SearchResultsList
-          results={filteredResults}
+          clubGroups={clubGroups}
           loading={loading}
-          onCourtPress={onCourtPress}
+          onClubPress={onCourtPress}
+          onFavoritePress={(court) =>
+            Alert.alert(
+              'Favoritos',
+              `Próximamente podrás guardar «${court.clubName}» en favoritos.`
+            )
+          }
         />
       </ScrollView>
 
@@ -133,7 +151,8 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
         onApply={applyFilters}
         onClear={clearFilters}
         initialFilters={filters}
-        resultCount={resultCount}
+        resultCount={clubCountForFilters}
+        resultCountKind="clubs"
       />
     </View>
   );
