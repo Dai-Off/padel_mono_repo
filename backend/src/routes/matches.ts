@@ -2,16 +2,17 @@ import { Router, Request, Response } from 'express';
 import { finalizePastMatches, finalizePastMatchesThrottled } from '../lib/finalizePastMatches';
 import { getMatchListPhase } from '../lib/matchLifecycle';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { hasCourtConflict } from '../lib/courtConflict';
 
 const router = Router();
 
 const SELECT_LIST =
-  'id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status';
+  'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team';
 const SELECT_ONE =
-  'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status';
+  'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_confirmed_at';
 
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
-  return `id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status,
+  return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team,
           ${bookingRel} (
             id, start_at, end_at, total_price_cents, currency, court_id,
             courts (
@@ -25,71 +26,26 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
           )`;
 }
 
-function dateToWeekday(d: Date): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
-  const idx = d.getUTCDay();
-  if (idx === 0) return 'sun';
-  return (['mon', 'tue', 'wed', 'thu', 'fri', 'sat'][idx - 1] as 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat');
-}
-
-async function hasCourtConflict(courtId: string, startAt: string, endAt: string): Promise<string | null> {
-  const supabase = getSupabaseServiceRoleClient();
-  const startMs = new Date(startAt).getTime();
-  const endMs = new Date(endAt).getTime();
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs >= endMs) return 'Rango horario inválido';
-
-  const { data: existingBookings, error: bErr } = await supabase
-    .from('bookings')
-    .select('id, start_at, end_at, status')
-    .eq('court_id', courtId)
-    .neq('status', 'cancelled');
-  if (bErr) return bErr.message;
-  const bookingOverlap = (existingBookings ?? []).some((b: any) => {
-    const s = new Date(b.start_at).getTime();
-    const e = new Date(b.end_at).getTime();
-    return startMs < e && endMs > s;
-  });
-  if (bookingOverlap) return 'La pista ya tiene una reserva en ese horario';
-
-  const { data: court, error: cErr } = await supabase
-    .from('courts')
-    .select('club_id')
-    .eq('id', courtId)
-    .maybeSingle();
-  if (cErr) return cErr.message;
-  const clubId = (court as { club_id?: string } | null)?.club_id;
-  if (!clubId) return null;
-
-  const dateStr = startAt.slice(0, 10);
-  const weekday = dateToWeekday(new Date(`${dateStr}T00:00:00Z`));
-  const { data: courses, error: scErr } = await supabase
-    .from('club_school_courses')
-    .select('id, starts_on, ends_on, is_active')
-    .eq('club_id', clubId)
-    .eq('court_id', courtId)
-    .eq('is_active', true);
-  if (scErr) return scErr.message;
-  const validCourseIds = (courses ?? [])
-    .filter((c: any) => (!c.starts_on || dateStr >= c.starts_on) && (!c.ends_on || dateStr <= c.ends_on))
-    .map((c: any) => c.id);
-  if (!validCourseIds.length) return null;
-  const { data: days, error: dayErr } = await supabase
-    .from('club_school_course_days')
-    .select('course_id, weekday, start_time, end_time')
-    .in('course_id', validCourseIds)
-    .eq('weekday', weekday);
-  if (dayErr) return dayErr.message;
-
-  const reqStartMin = Number(startAt.slice(11, 13)) * 60 + Number(startAt.slice(14, 16));
-  const reqEndMin = Number(endAt.slice(11, 13)) * 60 + Number(endAt.slice(14, 16));
-  const courseOverlap = (days ?? []).some((d: any) => {
-    const s = Number(String(d.start_time).slice(0, 2)) * 60 + Number(String(d.start_time).slice(3, 5));
-    const e = Number(String(d.end_time).slice(0, 2)) * 60 + Number(String(d.end_time).slice(3, 5));
-    return reqStartMin < e && reqEndMin > s;
-  });
-  if (courseOverlap) return 'La pista está ocupada por un curso de escuela en ese horario';
-  return null;
-}
-
+/**
+ * @openapi
+ * /matches:
+ *   get:
+ *     tags: [Matches]
+ *     summary: Listar partidos
+ *     parameters:
+ *       - in: query
+ *         name: booking_id
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: expand
+ *         schema: { type: string, enum: ['1', 'true'] }
+ *     responses:
+ *       200:
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok: { value: { ok: true, matches: [] } }
+ */
 router.get('/', async (req: Request, res: Response) => {
   const booking_id = req.query.booking_id as string | undefined;
   const expand = req.query.expand === '1' || req.query.expand === 'true';
@@ -154,6 +110,24 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /matches/{id}:
+ *   get:
+ *     tags: [Matches]
+ *     summary: Detalle de partido
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: expand
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: OK }
+ *       404: { description: No encontrado }
+ */
 router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const expand = req.query.expand === '1' || req.query.expand === 'true';
@@ -183,7 +157,28 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-/** Crea booking + match en una sola llamada. body: court_id, organizer_player_id, start_at, end_at, total_price_cents, visibility?, competitive? */
+/**
+ * @openapi
+ * /matches/create-with-booking:
+ *   post:
+ *     tags: [Matches]
+ *     summary: Crear reserva y partido
+ *     description: |
+ *       Partido competitivo abierto (`type=open`) fija `elo_min`/`elo_max` en ±1 respecto al organizador.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [court_id, organizer_player_id, start_at, end_at, total_price_cents]
+ *             properties:
+ *               type: { type: string, enum: [open, matchmaking], default: open }
+ *               competitive: { type: boolean, default: true }
+ *     responses:
+ *       201: { description: Creado }
+ *       409: { description: Conflicto de pista }
+ */
 router.post('/create-with-booking', async (req: Request, res: Response) => {
   const {
     court_id,
@@ -198,6 +193,7 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     gender,
     competitive,
     source_channel,
+    type: bodyType,
   } = req.body ?? {};
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents == null) {
     return res.status(400).json({
@@ -212,6 +208,21 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     }
 
     const supabase = getSupabaseServiceRoleClient();
+    const type = bodyType === 'matchmaking' ? 'matchmaking' : 'open';
+    const isCompetitive = competitive !== false;
+    let eloMinIns = elo_min != null ? Number(elo_min) : null;
+    let eloMaxIns = elo_max != null ? Number(elo_max) : null;
+    if (isCompetitive && type === 'open') {
+      const { data: orgPl } = await supabase
+        .from('players')
+        .select('elo_rating')
+        .eq('id', organizer_player_id)
+        .maybeSingle();
+      const elo = Number((orgPl as { elo_rating?: number } | null)?.elo_rating ?? 3.5);
+      eloMinIns = Math.round((elo - 1) * 10) / 10;
+      eloMaxIns = Math.round((elo + 1) * 10) / 10;
+    }
+
     const { data: booking, error: errBooking } = await supabase
       .from('bookings')
       .insert([
@@ -240,10 +251,11 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
         {
           booking_id: booking.id,
           visibility: visibility === 'public' ? 'public' : 'private',
-          elo_min: elo_min != null ? Number(elo_min) : null,
-          elo_max: elo_max != null ? Number(elo_max) : null,
+          elo_min: eloMinIns,
+          elo_max: eloMaxIns,
           gender: gender ?? 'any',
-          competitive: competitive !== false,
+          competitive: isCompetitive,
+          type,
         },
       ])
       .select(SELECT_ONE)
@@ -311,7 +323,7 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
 
     const { data: match, error: errMatch } = await supabase
       .from('matches')
-      .select('id, booking_id, status')
+      .select('id, booking_id, status, competitive, type, elo_min, elo_max')
       .eq('id', matchId)
       .maybeSingle();
     if (errMatch) return res.status(500).json({ ok: false, error: errMatch.message });
@@ -324,6 +336,27 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
     }
     if (!match.booking_id) {
       return res.status(400).json({ ok: false, error: 'El partido no tiene reserva asociada' });
+    }
+
+    const { data: joinPlayer, error: errJP } = await supabase
+      .from('players')
+      .select('elo_rating, initial_rating_completed')
+      .eq('id', playerId)
+      .maybeSingle();
+    if (errJP) return res.status(500).json({ ok: false, error: errJP.message });
+
+    const mCompetitive = !!(match as { competitive?: boolean }).competitive;
+    const mType = String((match as { type?: string }).type ?? 'open');
+    if (mCompetitive && !(joinPlayer as { initial_rating_completed?: boolean })?.initial_rating_completed) {
+      return res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
+    }
+    const eloJoin = Number((joinPlayer as { elo_rating?: number }).elo_rating ?? 0);
+    const eloMin = (match as { elo_min?: number | null }).elo_min;
+    const eloMax = (match as { elo_max?: number | null }).elo_max;
+    if (mCompetitive && mType === 'open' && eloMin != null && eloMax != null) {
+      if (eloJoin < eloMin || eloJoin > eloMax) {
+        return res.status(403).json({ ok: false, error: 'Tu nivel no está en el rango permitido para este partido' });
+      }
     }
 
     const { data: existing } = await supabase
@@ -443,23 +476,60 @@ router.post('/:id/join', async (_req: Request, res: Response) => {
   });
 });
 
+/**
+ * @openapi
+ * /matches:
+ *   post:
+ *     tags: [Matches]
+ *     summary: Crear partido ligado a una reserva existente
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [booking_id]
+ *             properties:
+ *               booking_id: { type: string, format: uuid }
+ *               type: { type: string, enum: [open, matchmaking] }
+ *     responses:
+ *       201: { description: Creado }
+ */
 router.post('/', async (req: Request, res: Response) => {
-  const { booking_id, visibility, elo_min, elo_max, gender, competitive } = req.body ?? {};
+  const { booking_id, visibility, elo_min, elo_max, gender, competitive, type: bodyType } = req.body ?? {};
   if (!booking_id) {
     return res.status(400).json({ ok: false, error: 'booking_id es obligatorio' });
   }
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const type = bodyType === 'matchmaking' ? 'matchmaking' : 'open';
+    const isCompetitive = competitive !== false;
+    let eloMinIns = elo_min != null ? Number(elo_min) : null;
+    let eloMaxIns = elo_max != null ? Number(elo_max) : null;
+    if (isCompetitive && type === 'open') {
+      const { data: bk } = await supabase
+        .from('bookings')
+        .select('organizer_player_id')
+        .eq('id', booking_id)
+        .maybeSingle();
+      const orgId = (bk as { organizer_player_id?: string } | null)?.organizer_player_id;
+      if (orgId) {
+        const { data: orgPl } = await supabase.from('players').select('elo_rating').eq('id', orgId).maybeSingle();
+        const elo = Number((orgPl as { elo_rating?: number } | null)?.elo_rating ?? 3.5);
+        eloMinIns = Math.round((elo - 1) * 10) / 10;
+        eloMaxIns = Math.round((elo + 1) * 10) / 10;
+      }
+    }
     const { data, error } = await supabase
       .from('matches')
       .insert([
         {
           booking_id,
           visibility: visibility === 'public' ? 'public' : 'private',
-          elo_min: elo_min != null ? Number(elo_min) : null,
-          elo_max: elo_max != null ? Number(elo_max) : null,
+          elo_min: eloMinIns,
+          elo_max: eloMaxIns,
           gender: gender ?? 'any',
-          competitive: competitive !== false,
+          competitive: isCompetitive,
+          type,
         },
       ])
       .select(SELECT_ONE)
@@ -471,9 +541,42 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /matches/{id}:
+ *   put:
+ *     tags: [Matches]
+ *     summary: Actualizar partido
+ *     description: No permite modificar marcador (`score_status`, `sets`, etc.); usar rutas `/matches/:id/score/*`.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200: { description: OK }
+ *       400: { description: Campos de marcador bloqueados }
+ */
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { visibility, elo_min, elo_max, gender, competitive, status } = req.body ?? {};
+  const body = req.body ?? {};
+  const blocked = [
+    'score_status',
+    'sets',
+    'match_end_reason',
+    'retired_team',
+    'leveling_applied_at',
+    'friendly_count_applied_at',
+    'score_first_proposer_team',
+    'score_confirmed_at',
+  ];
+  if (Object.keys(body).some((k) => blocked.includes(k))) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Marcador y estado de puntuación solo se actualizan vía /matches/:id/score/*',
+    });
+  }
+  const { visibility, elo_min, elo_max, gender, competitive, status } = body;
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (visibility !== undefined) update.visibility = visibility;
   if (elo_min !== undefined) update.elo_min = elo_min;

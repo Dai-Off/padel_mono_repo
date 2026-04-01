@@ -112,6 +112,22 @@ function App() {
           }
         />
         <Route
+          path="/torneos"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/torneos/:id"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/checkIn"
           element={
             <ProtectedRoute>

@@ -48,6 +48,7 @@ import { ClubCheckinTab } from './ClubDashboardExtensions';
 import { ClubCashClosingTab } from '../CashClosing/ClubCashClosing';
 import { ClubDashboardExtensions } from './ClubDashboardExtensions';
 import { ClubReviewsTab } from './ClubReviewsTab';
+import { ClubTournamentsTab } from './ClubTournamentsTab';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
@@ -59,6 +60,7 @@ export const ClubDashboard = () => {
     const isSchoolPage = location.pathname === '/escuela';
     const isPaymentsPage = location.pathname === '/pagos';
     const isCheckinPage = location.pathname === '/checkIn';
+    const isTorneosPage = location.pathname === '/torneos' || location.pathname.startsWith('/torneos/');
     const isCashClosingPage = location.pathname === '/cierreCaja';
     const isCrmPage = location.pathname === '/crm';
     const isResenasPage = location.pathname === '/resenas';
@@ -125,7 +127,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isTorneosPage) {
             setLoading(false);
             return;
         }
@@ -138,7 +140,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isTorneosPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -232,6 +234,8 @@ export const ClubDashboard = () => {
                         <ClubReviewsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isCrmPage ? (
                         <ClubDashboardExtensions clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isTorneosPage ? (
+                        <ClubTournamentsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isConfigPage ? (
                         <ClubSettingsTab initialClub={club} />
                     ) : isPersonalPage ? (
