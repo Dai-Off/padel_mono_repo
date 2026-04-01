@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from "react-native";
 
 /** Placeholder hasta alinear con la tienda web. */
 export function TiendaScreen() {
@@ -13,19 +13,21 @@ export function TiendaScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F0F',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#0F0F0F",
+    alignItems: "center",
+    justifyContent: "center",
     padding: 24,
   },
   title: {
     fontSize: 20,
-    fontWeight: '700',
-    color: '#FFFFFF',
+    fontWeight: "700",
+    color: "#FFFFFF",
     marginBottom: 8,
   },
   sub: {
     fontSize: 15,
-    color: '#9CA3AF',
+    color: "#9CA3AF",
+    width: "40%",
+    textAlign: "center",
   },
 });

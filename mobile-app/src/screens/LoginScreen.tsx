@@ -77,7 +77,7 @@ export function LoginScreen({ onGoToRegister }: LoginScreenProps) {
   };
 
   return (
-    <AuthLayout>
+    <AuthLayout scrollable>
       <View style={styles.brandSection}>
         <AuthBrand variant="logoOnly" />
       </View>
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   formSection: {
-    flex: 1,
+    flexGrow: 1,
     width: '100%',
     minWidth: 0,
     alignSelf: 'stretch',
