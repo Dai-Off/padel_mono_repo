@@ -147,6 +147,33 @@ async function validateCourseSchedulingConflicts(params: {
       return 'Conflicto: ya existe una reserva/partido en esa pista y horario';
     }
   }
+
+  // 3) Conflicts against tournaments
+  let tournamentsQ = supabase
+    .from('tournaments')
+    .select('id, start_at, end_at, status, tournament_courts!inner(court_id)')
+    .eq('club_id', params.clubId)
+    .eq('tournament_courts.court_id', params.courtId)
+    .neq('status', 'cancelled');
+  const fromTournamentDate = params.startsOn ?? new Date().toISOString().slice(0, 10);
+  tournamentsQ = tournamentsQ.gte('start_at', `${fromTournamentDate}T00:00:00Z`);
+  if (params.endsOn) {
+    tournamentsQ = tournamentsQ.lte('start_at', `${params.endsOn}T23:59:59Z`);
+  }
+  const { data: tournaments, error: tErr } = await tournamentsQ;
+  if (tErr) return tErr.message;
+  for (const t of tournaments ?? []) {
+    const wd = isoToWeekday(String((t as { start_at: string }).start_at));
+    if (!params.weekdays.includes(wd)) continue;
+    const tStart = String((t as { start_at: string }).start_at).slice(11, 16);
+    const tEnd = String((t as { end_at: string }).end_at).slice(11, 16);
+    if (!validHHMM(tStart) || !validHHMM(tEnd)) continue;
+    const tStartMin = minutes(tStart);
+    const tEndMin = minutes(tEnd);
+    if (reqStart < tEndMin && reqEnd > tStartMin) {
+      return 'Conflicto: ya existe un torneo en esa pista y horario';
+    }
+  }
   return null;
 }
 
