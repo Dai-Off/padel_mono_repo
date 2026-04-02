@@ -45,7 +45,6 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
         data: court,
     });
 
-    const isVirtual = court.id === 'pista-virtual';
     const intervals = getGridIntervals();
     const ppm = (isCompactView && compactPxPerMinute) ? compactPxPerMinute : PIXELS_PER_MINUTE;
     const height = (intervals.length - 1) * 30 * ppm;
@@ -54,8 +53,6 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
 
     // Calculate free slots
     const getFreeSlots = () => {
-        if (isVirtual) return [];
-
         const slots = [];
         const startMin = START_HOUR * 60;
         const endMin = END_HOUR * 60;
@@ -88,22 +85,19 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
         <div className={clsx(
             "flex-1 border-r-2 border-white flex flex-col relative transition-all duration-300 ease-in-out",
             isCompactView ? "min-w-0 w-0" : "min-w-[81px] max-w-[161px]",
-            isVirtual && "bg-gray-50/50",
             // Dim non-focused courts when in focus mode
-            isFocusedMode && !isCurrentlyFocused && !isVirtual && "bg-gray-50 opacity-60 grayscale-[20%]"
+            isFocusedMode && !isCurrentlyFocused && "bg-gray-50 opacity-60 grayscale-[20%]"
         )}>
             {/* Court Header */}
             <div
-                onClick={() => !isVirtual && onHeaderClick?.(court.id)}
+                onClick={() => onHeaderClick?.(court.id)}
                 className={clsx(
                     "border-b border-[#b0b0b0] flex flex-col items-center justify-center font-bold transition-colors",
                     isCompactView ? "h-6 text-[7px] leading-tight px-0.5 text-center" : isSmallZoom ? "h-[22px] text-[14px]" : "h-[22px] text-[10px]",
                     // Header colors — white background with dark teal text
-                    isVirtual
-                        ? "text-slate-500 bg-white"
-                        : isCurrentlyFocused
-                            ? "bg-[#e8f5e9] text-[#005a4f] cursor-pointer"
-                            : "bg-white text-[#005a4f] cursor-pointer hover:bg-[#f0faf0]"
+                    isCurrentlyFocused
+                        ? "bg-[#e8f5e9] text-[#005a4f] cursor-pointer"
+                        : "bg-white text-[#005a4f] cursor-pointer hover:bg-[#f0faf0]"
                 )}
             >
                 {isCompactView ? (

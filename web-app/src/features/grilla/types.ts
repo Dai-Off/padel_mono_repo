@@ -23,17 +23,22 @@ export type ReservationType =
     | 'tournament'
     | 'blocked';
 
+export type PaymentMethod = 'cash' | 'card' | 'wallet' | null;
+
 export interface PlayerDetails {
     name: string;
-    isMember: boolean; // true = socio, false = no socio
-    level: number; // e.g., 2.98
-    paidAmount: number; // e.g., 3.67
+    isMember: boolean;
+    level: number;
+    paidAmount: number;
+    paymentMethod?: PaymentMethod;
+    walletAmountCents?: number;
 }
 
 export interface Court {
     id: string;
     name: string;
     locationId?: string; // Optional for backward compatibility but used for tabs
+    is_hidden?: boolean;
 }
 
 export interface Reservation {
@@ -51,6 +56,7 @@ export interface Reservation {
     source_channel?: 'mobile' | 'web' | 'manual' | 'system';
     playerEmail?: string;
     totalPrice?: number;
+    totalPaidCents?: number;
     isPaidIcon?: boolean;
     paymentNumber?: number;
     hasYellowAlert?: boolean;

@@ -209,38 +209,25 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                 </div>
             )}
 
-            {/* Payment icons: white circle (count) + red circle (paid) */}
-            {reservation.isPaidIcon && reservation.paymentNumber !== undefined && (
-                <div className="absolute bottom-0.5 right-0.5 flex items-center gap-0.5 z-20">
-                    {/* White circle with player count */}
+            {/* Payment status indicator — bottom right */}
+            {reservation.totalPrice != null && reservation.totalPrice > 0 && (() => {
+                const totalCents = Math.round(reservation.totalPrice! * 100);
+                const paidCents = reservation.totalPaidCents ?? 0;
+                const isFullyPaid = paidCents >= totalCents;
+                const size = isCompact ? 8 : isSmallZoom ? 20 : 12;
+                return (
                     <div
-                        className="flex items-center justify-center rounded-full bg-white shadow font-bold leading-none"
-                        style={{
-                            width: isCompact ? 10 : isSmallZoom ? 26 : 16,
-                            height: isCompact ? 10 : isSmallZoom ? 26 : 16,
-                            fontSize: isCompact ? 7 : isSmallZoom ? 12 : 9
-                        }}
-                    >
-                        {reservation.paymentNumber}
-                    </div>
-                    {/* Red circle with minus (paid indicator) */}
-                    <div
-                        className="flex items-center justify-center rounded-full bg-red-500 leading-none"
-                        style={{
-                            width: isCompact ? 10 : isSmallZoom ? 26 : 16,
-                            height: isCompact ? 10 : isSmallZoom ? 26 : 16,
-                        }}
-                    >
-                        <span style={{
-                            display: 'block',
-                            width: isCompact ? 6 : isSmallZoom ? 12 : 8,
-                            height: isCompact ? 1.5 : isSmallZoom ? 3 : 2,
-                            backgroundColor: 'white',
-                            borderRadius: 2
-                        }} />
-                    </div>
-                </div>
-            )}
+                        className={clsx(
+                            "absolute bottom-0.5 right-0.5 z-20 rounded-full border",
+                            isFullyPaid
+                                ? "bg-emerald-700 border-emerald-900"
+                                : "bg-red-600 border-red-800"
+                        )}
+                        style={{ width: size, height: size }}
+                        title={isFullyPaid ? 'Pagado' : `Pendiente: ${((totalCents - paidCents) / 100).toFixed(2)} €`}
+                    />
+                );
+            })()}
         </div>
     );
 };

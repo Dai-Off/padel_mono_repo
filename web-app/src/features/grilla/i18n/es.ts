@@ -24,6 +24,8 @@ export const es: TranslationKeys = {
         dateLabel: 'Fecha:',
         prevDay: 'Día −',
         nextDay: 'Día +',
+        courtsTab: 'Pistas',
+        waitlistTab: 'Pista Oculta',
     },
 
     metrics: {

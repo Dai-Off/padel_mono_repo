@@ -143,7 +143,21 @@
     "type_school_individual": "Escuela — clase particular",
     "type_flat_rate": "Tarifa plana",
     "type_tournament": "Torneo",
-    "type_blocked": "Bloqueo administrativo"
+    "type_blocked": "Bloqueo administrativo",
+    "save": "Guardar",
+    "walletCredit": "Saldo: {{amount}} €",
+    "walletDebt": "Deuda: {{amount}} €",
+    "walletApply": "Aplicar",
+    "walletRemove": "Quitar",
+    "walletLoading": "Cargando saldo…",
+    "paymentAmount": "Importe (€)",
+    "paymentCash": "Efectivo",
+    "paymentCard": "Tarjeta",
+    "paymentTotal": "Total",
+    "paymentCollected": "Cobrado",
+    "paymentPending": "Pendiente",
+    "shareAmount": "Parte: {{amount}} €",
+    "duplicatePlayerError": "Este jugador ya está añadido en la reserva."
   },
   "playerSearch": {
     "allFieldsRequired": "Todos los campos son obligatorios.",
