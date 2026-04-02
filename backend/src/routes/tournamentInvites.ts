@@ -6,6 +6,7 @@ import { generateInviteToken, hashInviteToken } from '../lib/inviteToken';
 import { getFrontendUrl } from '../lib/env';
 import { sendInviteEmail } from '../lib/mailer';
 import { cleanupExpiredTournamentInvites, getTournamentSlots, refreshTournamentStatus } from '../services/tournamentsService';
+import { playerMeetsTournamentGender } from '../lib/tournamentGender';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -189,7 +190,7 @@ router.post('/invites/:token/accept', async (req: Request, res: Response) => {
 
     const { data: tournament } = await supabase
       .from('tournaments')
-      .select('id, status, max_players, elo_min, elo_max')
+      .select('id, status, max_players, elo_min, elo_max, gender')
       .eq('id', (inscription as { tournament_id: string }).tournament_id)
       .maybeSingle();
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
@@ -205,7 +206,7 @@ router.post('/invites/:token/accept', async (req: Request, res: Response) => {
       return res.status(409).json({ ok: false, error: 'No hay cupos disponibles' });
     }
 
-    const { data: existingPlayer } = await supabase.from('players').select('id, elo_rating').eq('email', email).maybeSingle();
+    const { data: existingPlayer } = await supabase.from('players').select('id, elo_rating, gender').eq('email', email).maybeSingle();
     let player1Id = (inscription as any).player_id_1 ?? null;
     let player2Id = (inscription as any).player_id_2 ?? null;
     if (!existingPlayer) {
@@ -239,6 +240,22 @@ router.post('/invites/:token/accept', async (req: Request, res: Response) => {
       const eloMax = (tournament as any).elo_max;
       if (eloMin != null && eloMax != null && (elo < eloMin || elo > eloMax)) {
         return res.status(403).json({ ok: false, error: 'Tu nivel Elo no est? en el rango permitido' });
+      }
+    }
+
+    let acceptingPlayerId: string | null = null;
+    const em1 = String((inscription as { invite_email_1?: string | null }).invite_email_1 ?? '').toLowerCase();
+    const em2 = String((inscription as { invite_email_2?: string | null }).invite_email_2 ?? '').toLowerCase();
+    if (em1 === email) acceptingPlayerId = player1Id;
+    else if (em2 === email) acceptingPlayerId = player2Id;
+    if (acceptingPlayerId) {
+      const { data: plG } = await supabase.from('players').select('gender').eq('id', acceptingPlayerId).maybeSingle();
+      if (!playerMeetsTournamentGender((tournament as { gender?: string }).gender, (plG as { gender?: string } | null)?.gender)) {
+        return res.status(403).json({
+          ok: false,
+          error:
+            'Tu género en el perfil no coincide con la categoría del torneo. Actualiza tu perfil o contacta al club.',
+        });
       }
     }
 
