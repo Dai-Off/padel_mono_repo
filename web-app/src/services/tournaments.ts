@@ -1,5 +1,8 @@
 import { apiFetchWithAuth } from './api';
 
+export type TournamentPrize = { label: string; amount_cents: number };
+
+
 export type TournamentListItem = {
   id: string;
   club_id: string;
@@ -8,6 +11,8 @@ export type TournamentListItem = {
   duration_min: number;
   price_cents: number;
   prize_total_cents?: number;
+  /** Premios por puesto (campeón, subcampeón, etc.). Vacío si solo hay bolsa legacy. */
+  prizes?: TournamentPrize[] | null;
   currency: string;
   elo_min: number | null;
   elo_max: number | null;
@@ -18,7 +23,10 @@ export type TournamentListItem = {
   invite_ttl_minutes: number;
   status: 'open' | 'closed' | 'cancelled';
   visibility?: 'public' | 'private';
+  /** Opcional. null/sin valor = sin filtro por género. male, female, mixed = categoría explícita. */
+  gender?: 'male' | 'female' | 'mixed' | null;
   description: string | null;
+  normas?: string | null;
   tournament_courts?: { court_id: string }[];
   confirmed_count?: number;
   pending_count?: number;

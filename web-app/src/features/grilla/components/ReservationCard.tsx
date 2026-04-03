@@ -45,7 +45,7 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
 
     const source = (reservation.matchType || reservation.playerName || '').trim();
     const isLoadingName = !source && reservation.status !== 'available' && reservation.status !== 'past';
-    const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : null;
+    const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : (isLoadingName ? null : t('grid.noClient'));
     const isCompact = !!compactPxPerMinute;
     const isSmallZoom = !isCompact && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
     const isShortBooking = reservation.durationMinutes <= 60;
@@ -241,6 +241,39 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                     />
                 );
             })()}
+
+            {/* Payment icons: white circle (count) + red circle (paid) */}
+            {reservation.isPaidIcon && reservation.paymentNumber !== undefined && (
+                <div className="absolute bottom-0.5 right-0.5 flex items-center gap-0.5 z-20">
+                    {/* White circle with player count */}
+                    <div
+                        className="flex items-center justify-center rounded-full bg-white shadow font-bold leading-none"
+                        style={{
+                            width: isCompact ? 10 : isSmallZoom ? 26 : 16,
+                            height: isCompact ? 10 : isSmallZoom ? 26 : 16,
+                            fontSize: isCompact ? 7 : isSmallZoom ? 12 : 9
+                        }}
+                    >
+                        {reservation.paymentNumber}
+                    </div>
+                    {/* Red circle with minus (paid indicator) */}
+                    <div
+                        className="flex items-center justify-center rounded-full bg-red-500 leading-none"
+                        style={{
+                            width: isCompact ? 10 : isSmallZoom ? 26 : 16,
+                            height: isCompact ? 10 : isSmallZoom ? 26 : 16,
+                        }}
+                    >
+                        <span style={{
+                            display: 'block',
+                            width: isCompact ? 6 : isSmallZoom ? 12 : 8,
+                            height: isCompact ? 1.5 : isSmallZoom ? 3 : 2,
+                            backgroundColor: 'white',
+                            borderRadius: 2
+                        }} />
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

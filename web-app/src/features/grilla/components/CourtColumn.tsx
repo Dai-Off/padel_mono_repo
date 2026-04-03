@@ -49,6 +49,7 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
     const ppm = (isCompactView && compactPxPerMinute) ? compactPxPerMinute : PIXELS_PER_MINUTE;
     const height = (intervals.length - 1) * 30 * ppm;
 
+    const isVirtual = /virtual/i.test(court.name);
     const { main: courtMain, sub: courtSub } = parseCourtName(tData(court.name));
 
     // Calculate free slots
@@ -95,9 +96,11 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
                     "border-b border-[#b0b0b0] flex flex-col items-center justify-center font-bold transition-colors",
                     isCompactView ? "h-6 text-[7px] leading-tight px-0.5 text-center" : isSmallZoom ? "h-[22px] text-[14px]" : "h-[22px] text-[10px]",
                     // Header colors — white background with dark teal text
-                    isCurrentlyFocused
-                        ? "bg-[#e8f5e9] text-[#005a4f] cursor-pointer"
-                        : "bg-white text-[#005a4f] cursor-pointer hover:bg-[#f0faf0]"
+                    isVirtual
+                        ? "text-slate-500 bg-white"
+                        : isCurrentlyFocused
+                            ? "bg-[#e8f5e9] text-[#005a4f] cursor-pointer"
+                            : "bg-white text-[#005a4f] cursor-pointer hover:bg-[#f0faf0]"
                 )}
             >
                 {isCompactView ? (

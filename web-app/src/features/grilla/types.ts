@@ -27,9 +27,9 @@ export type PaymentMethod = 'cash' | 'card' | 'wallet' | null;
 
 export interface PlayerDetails {
     name: string;
-    isMember: boolean;
-    level: number;
-    paidAmount: number;
+    isMember: boolean; // true = socio, false = no socio
+    level: number; // e.g., 2.98
+    paidAmount: number; // e.g., 3.67
     paymentMethod?: PaymentMethod;
     walletAmountCents?: number;
 }

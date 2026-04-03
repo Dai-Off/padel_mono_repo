@@ -93,6 +93,8 @@ export const HoverTooltip: React.FC<HoverTooltipProps> = ({ reservation, anchorE
                     {player.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
                   </div>
                   <span className="text-gray-800 truncate">{player.name}</span>
+                  <span className="text-gray-500 text-[11px] ml-1">({player.isMember ? 'Socio' : 'No socio'})</span>
+                  <span className="text-gray-500 text-[11px] ml-1">(Nivel: {player.level.toFixed(2).replace('.', ',')})</span>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {player.paidAmount > 0 && player.paymentMethod && (
