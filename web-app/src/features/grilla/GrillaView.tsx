@@ -644,6 +644,96 @@ function GrillaViewInner() {
       }
   };
 
+  const handleMoveToHidden = async (bookingId: string) => {
+    // Find the booking in current reservations
+    const booking = reservations.find(r => r.id === bookingId);
+    if (!booking) throw new Error('Reserva no encontrada');
+
+    // Get all hidden courts
+    const hiddenCourts = courts.filter(c => c.is_hidden);
+    if (hiddenCourts.length === 0) throw new Error('No hay pistas ocultas configuradas');
+
+    // Find the first hidden court with no overlap at this time
+    const startMin = parseTimeStr(booking.startTime);
+    const endMin = startMin + booking.durationMinutes;
+
+    let targetCourtId: string | null = null;
+    for (const hc of hiddenCourts) {
+      const courtReservations = reservations.filter(r => r.courtId === hc.id && r.id !== bookingId);
+      const hasOverlap = courtReservations.some(r => {
+        const rStart = parseTimeStr(r.startTime);
+        const rEnd = rStart + r.durationMinutes;
+        return startMin < rEnd && endMin > rStart;
+      });
+      if (!hasOverlap) {
+        targetCourtId = hc.id;
+        break;
+      }
+    }
+
+    if (!targetCourtId) {
+      throw new Error('No hay horario disponible en ninguna pista oculta para este turno');
+    }
+
+    // Move via backend PUT
+    const res = await apiFetchWithAuth<any>(`/bookings/${bookingId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ court_id: targetCourtId }),
+    });
+    if (!res.ok) throw new Error(res.error || 'Error al mover la reserva');
+
+    // Update local state and close modal
+    setReservations(prev => prev.map(r =>
+      r.id === bookingId ? { ...r, courtId: targetCourtId! } : r
+    ));
+    setSelectedModalReservationId(null);
+    setEditingBookingData(null);
+    refresh();
+  };
+
+  const handleMoveToVisible = async (bookingId: string) => {
+    const booking = reservations.find(r => r.id === bookingId);
+    if (!booking) throw new Error('Reserva no encontrada');
+
+    // Get all non-hidden courts
+    const visibleCourts = courts.filter(c => !c.is_hidden);
+    if (visibleCourts.length === 0) throw new Error('No hay pistas oficiales configuradas');
+
+    const startMin = parseTimeStr(booking.startTime);
+    const endMin = startMin + booking.durationMinutes;
+
+    let targetCourtId: string | null = null;
+    for (const vc of visibleCourts) {
+      const courtReservations = reservations.filter(r => r.courtId === vc.id && r.id !== bookingId);
+      const hasOverlap = courtReservations.some(r => {
+        const rStart = parseTimeStr(r.startTime);
+        const rEnd = rStart + r.durationMinutes;
+        return startMin < rEnd && endMin > rStart;
+      });
+      if (!hasOverlap) {
+        targetCourtId = vc.id;
+        break;
+      }
+    }
+
+    if (!targetCourtId) {
+      throw new Error('No hay horario disponible en ninguna pista oficial para este turno');
+    }
+
+    const res = await apiFetchWithAuth<any>(`/bookings/${bookingId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ court_id: targetCourtId }),
+    });
+    if (!res.ok) throw new Error(res.error || 'Error al mover la reserva');
+
+    setReservations(prev => prev.map(r =>
+      r.id === bookingId ? { ...r, courtId: targetCourtId! } : r
+    ));
+    setSelectedModalReservationId(null);
+    setEditingBookingData(null);
+    refresh();
+  };
+
   const handleCreateBooking = async (bookingData: any) => {
       try {
           // Prepare dates (use local-time methods to avoid UTC offset shifting the day)
@@ -1542,6 +1632,13 @@ function GrillaViewInner() {
           onUpdate={handleUpdateBooking}
           onDelete={handleDeleteBooking}
           onMarkPaid={handleMarkPaid}
+          onMoveToHidden={hasHiddenCourts ? handleMoveToHidden : undefined}
+          onMoveToVisible={hasHiddenCourts ? handleMoveToVisible : undefined}
+          isOnHiddenCourt={(() => {
+            const res = reservations.find(r => r.id === selectedModalReservationId);
+            if (!res) return false;
+            return courts.find(c => c.id === res.courtId)?.is_hidden === true;
+          })()}
         />
 
         <SchoolCourseModal

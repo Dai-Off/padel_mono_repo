@@ -8,6 +8,8 @@ import {
     UserPlus,
     Wallet,
     AlertCircle,
+    EyeOff,
+    Eye,
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
@@ -27,6 +29,9 @@ interface ReservationModalProps {
     onUpdate?: (bookingId: string, data: any) => Promise<void>;
     onDelete?: (bookingId: string, sendEmail: boolean) => Promise<void>;
     onMarkPaid?: (bookingId: string) => Promise<void>;
+    onMoveToHidden?: (bookingId: string) => Promise<void>;
+    onMoveToVisible?: (bookingId: string) => Promise<void>;
+    isOnHiddenCourt?: boolean;
 }
 
 // Helper: Player Search Component
@@ -394,7 +399,7 @@ const PaymentSlot: React.FC<{
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
     const { t, i18n } = useGrillaTranslation();
@@ -419,6 +424,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [paymentError, setPaymentError] = useState<string | null>(null);
     const [pricesByType, setPricesByType] = useState<Record<string, { price_per_hour_cents: number }>>({});
     const [isMarkingPaid, setIsMarkingPaid] = useState(false);
+    const [isMovingToHidden, setIsMovingToHidden] = useState(false);
+    const [moveToHiddenError, setMoveToHiddenError] = useState<string | null>(null);
     // Pago por slot: [0]=organizador, [1-3]=jugadores adicionales
     const [slotPayments, setSlotPayments] = useState<SlotPayment[]>([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
 
@@ -827,6 +834,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 </span>
                             )}
                         </div>
+                        {isEditMode && editingBookingData?.created_at && (
+                            <span className="text-[11px] text-gray-400">
+                                Creada el {new Date(editingBookingData.created_at).toLocaleDateString(calendarLocale(i18n.language), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                        )}
                         {overlapError && (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium mt-1">
                                 <AlertTriangle size={13} className="shrink-0" />
@@ -837,6 +849,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium mt-1">
                                 <AlertCircle size={13} className="shrink-0" />
                                 {paymentError}
+                            </div>
+                        )}
+                        {moveToHiddenError && (
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-700 font-medium mt-1">
+                                <AlertTriangle size={13} className="shrink-0" />
+                                {moveToHiddenError}
                             </div>
                         )}
                         <div className="flex gap-2 flex-wrap">
@@ -853,6 +871,50 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             >
                                 {t('reservation.cancel')}
                             </button>
+                            {isEditMode && editingBookingData && isOnHiddenCourt && onMoveToVisible && (
+                                <button
+                                    onClick={async () => {
+                                        setMoveToHiddenError(null);
+                                        setIsMovingToHidden(true);
+                                        try {
+                                            await onMoveToVisible(editingBookingData.id);
+                                            onClose();
+                                        } catch (err: any) {
+                                            setMoveToHiddenError(err.message || 'Error al desocultar la reserva');
+                                        } finally {
+                                            setIsMovingToHidden(false);
+                                        }
+                                    }}
+                                    disabled={isMovingToHidden}
+                                    title="Mover a pista oficial"
+                                    className="flex items-center gap-1.5 px-4 py-1.5 bg-[#005bc5] text-white text-xs font-bold rounded-md hover:bg-[#004fa8] disabled:opacity-50 transition-colors"
+                                >
+                                    <Eye size={14} />
+                                    {isMovingToHidden ? 'Moviendo...' : 'Desocultar'}
+                                </button>
+                            )}
+                            {isEditMode && editingBookingData && !isOnHiddenCourt && onMoveToHidden && (
+                                <button
+                                    onClick={async () => {
+                                        setMoveToHiddenError(null);
+                                        setIsMovingToHidden(true);
+                                        try {
+                                            await onMoveToHidden(editingBookingData.id);
+                                            onClose();
+                                        } catch (err: any) {
+                                            setMoveToHiddenError(err.message || 'Error al mover a pista oculta');
+                                        } finally {
+                                            setIsMovingToHidden(false);
+                                        }
+                                    }}
+                                    disabled={isMovingToHidden}
+                                    title="Enviar a pista oculta"
+                                    className="flex items-center gap-1.5 px-4 py-1.5 bg-gray-600 text-white text-xs font-bold rounded-md hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                                >
+                                    <EyeOff size={14} />
+                                    {isMovingToHidden ? 'Moviendo...' : 'Ocultar'}
+                                </button>
+                            )}
                         </div>
                     </div>
                     <button
