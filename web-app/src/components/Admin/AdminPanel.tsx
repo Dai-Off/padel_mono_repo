@@ -21,44 +21,56 @@ export const AdminPanel = () => {
     const [statusFilter, setStatusFilter] = useState<string>(STATUS_TAB_ALL);
     const [selectedApplication, setSelectedApplication] = useState<ClubApplication | null>(null);
 
-    const fetchApplications = useCallback(async () => {
-        setLoading(true);
-        try {
-            const token = authService.getSession()?.access_token;
-            if (!token) {
-                navigate('/login');
-                return;
-            }
-            const me = await authService.getMe();
-            if (!me.ok || !me.roles?.admin_id) {
-                navigate('/');
-                return;
-            }
-            const status = statusFilter === STATUS_TAB_ALL ? undefined : (statusFilter as ApplicationStatus);
-            const data = await adminApplicationsService.list(status);
-            setApplications(data);
-        } catch (e) {
-            if (e instanceof HttpError) {
-                if (e.status === 401) {
-                    authService.logout();
+    const fetchApplications = useCallback(
+        async (opts?: { silent?: boolean }) => {
+            const silent = opts?.silent === true;
+            if (!silent) setLoading(true);
+            try {
+                const token = authService.getSession()?.access_token;
+                if (!token) {
                     navigate('/login');
                     return;
                 }
-                if (e.status === 403) {
+                const me = await authService.getMe();
+                if (!me.ok || !me.roles?.admin_id) {
                     navigate('/');
                     return;
                 }
+                const status = statusFilter === STATUS_TAB_ALL ? undefined : (statusFilter as ApplicationStatus);
+                const data = await adminApplicationsService.list(status);
+                setApplications(data);
+            } catch (e) {
+                if (e instanceof HttpError) {
+                    if (e.status === 401) {
+                        authService.logout();
+                        navigate('/login');
+                        return;
+                    }
+                    if (e.status === 403) {
+                        navigate('/');
+                        return;
+                    }
+                }
+                toast.error(t('fetch_error'));
+                setApplications([]);
+            } finally {
+                if (!silent) setLoading(false);
             }
-            toast.error(t('fetch_error'));
-            setApplications([]);
-        } finally {
-            setLoading(false);
-        }
-    }, [statusFilter, navigate, t]);
+        },
+        [statusFilter, navigate, t]
+    );
 
     useEffect(() => {
-        fetchApplications();
+        void fetchApplications();
     }, [fetchApplications]);
+
+    useEffect(() => {
+        if (!selectedApplication) return;
+        const fresh = applications.find((a) => a.id === selectedApplication.id);
+        if (fresh && fresh !== selectedApplication) {
+            setSelectedApplication(fresh);
+        }
+    }, [applications, selectedApplication]);
 
     const handleApprove = async (id: string) => {
         return adminApplicationsService.approve(id);
@@ -66,7 +78,7 @@ export const AdminPanel = () => {
 
     const handleReject = async (id: string, reason?: string) => {
         await adminApplicationsService.reject(id, reason);
-        toast.success(t('admin_status_rejected'));
+        toast.error(t('admin_reject_done'));
     };
 
     if (loading && applications.length === 0) {
@@ -117,12 +129,12 @@ export const AdminPanel = () => {
             <ApplicationDetailModal
                 application={selectedApplication}
                 onClose={() => {
-                    fetchApplications();
                     setSelectedApplication(null);
+                    void fetchApplications({ silent: true });
                 }}
+                onSilentRefresh={() => void fetchApplications({ silent: true })}
                 onApprove={handleApprove}
                 onReject={handleReject}
-                onDone={fetchApplications}
             />
         </div>
     );

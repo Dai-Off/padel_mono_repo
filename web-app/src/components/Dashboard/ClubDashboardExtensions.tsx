@@ -316,18 +316,25 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
       return;
     }
     setLoading(true);
+    let cancelled = false;
     const tmr = window.setTimeout(async () => {
       try {
         const list = await clubClientService.list(clubId, searchQuery.trim() || undefined);
+        if (cancelled) return;
         setPlayers(list ?? []);
       } catch {
-        toast.error(t('crm_fetch_error'));
-        setPlayers([]);
+        if (!cancelled) {
+          toast.error(t('crm_fetch_error'));
+          setPlayers([]);
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }, 320);
-    return () => window.clearTimeout(tmr);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(tmr);
+    };
   }, [clubResolved, clubId, searchQuery, t]);
 
   const filteredPlayers = useMemo(() => {

@@ -1,5 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+/** Evita re-escanear todas las reservas del club en cada tecla de búsqueda CRM / invitar. */
+const clubPlayerIdsCache = new Map<string, { ids: string[]; expiresAt: number }>();
+const CLUB_PLAYER_IDS_TTL_MS = 90_000;
+
 export async function fetchBookingRelatedPlayerIds(
   supabase: SupabaseClient,
   clubId: string
@@ -47,9 +51,20 @@ export async function fetchLinkedPlayerIds(
 }
 
 export async function getClubClientPlayerIds(supabase: SupabaseClient, clubId: string): Promise<string[]> {
+  const now = Date.now();
+  const hit = clubPlayerIdsCache.get(clubId);
+  if (hit && hit.expiresAt > now) return hit.ids;
+
   const [fromBookings, linked] = await Promise.all([
     fetchBookingRelatedPlayerIds(supabase, clubId),
     fetchLinkedPlayerIds(supabase, clubId),
   ]);
-  return [...new Set([...fromBookings, ...linked])];
+  const ids = [...new Set([...fromBookings, ...linked])];
+  clubPlayerIdsCache.set(clubId, { ids, expiresAt: now + CLUB_PLAYER_IDS_TTL_MS });
+  return ids;
+}
+
+/** Tras alta/edición manual en CRM; próxima lista verá datos frescos. */
+export function invalidateClubClientPlayerIdsCache(clubId: string): void {
+  clubPlayerIdsCache.delete(clubId);
 }

@@ -53,11 +53,30 @@ function toPublicPlayer(row: Row): Row {
 }
 
 const SELECT_PUBLIC_INTERNAL = `
-  id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id,
+  id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url,
   mu, sigma, elo_rating, sp,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents
 `;
+
+const AVATAR_URL_MAX = 2048;
+
+type AvatarNormalize =
+  | { ok: true; mode: 'omit' }
+  | { ok: true; mode: 'set'; value: string | null }
+  | { ok: false; error: string };
+
+function normalizeAvatarUrl(body: Record<string, unknown>): AvatarNormalize {
+  if (!Object.prototype.hasOwnProperty.call(body, 'avatar_url')) return { ok: true, mode: 'omit' };
+  const raw = body.avatar_url;
+  if (raw === null) return { ok: true, mode: 'set', value: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'avatar_url debe ser texto o null' };
+  const t = raw.trim();
+  if (!t) return { ok: true, mode: 'set', value: null };
+  if (t.length > AVATAR_URL_MAX) return { ok: false, error: `avatar_url admite como máximo ${AVATAR_URL_MAX} caracteres` };
+  if (!/^https?:\/\//i.test(t)) return { ok: false, error: 'avatar_url debe ser una URL http(s) absoluta' };
+  return { ok: true, mode: 'set', value: t };
+}
 
 /**
  * @openapi
@@ -94,6 +113,164 @@ router.get('/me', async (req: Request, res: Response) => {
     if (errPlayer) return res.status(500).json({ ok: false, error: errPlayer.message });
     if (!player) return res.status(404).json({ ok: false, error: 'No existe jugador con tu email' });
     return res.json({ ok: true, player: toPublicPlayer(player as Row) });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /players/me:
+ *   patch:
+ *     tags: [Players]
+ *     summary: Actualizar perfil del jugador autenticado
+ *     description: |
+ *       Actualiza nombre y/o foto de perfil (`avatar_url`, URL pública tras subir al bucket `player-avatars`).
+ *       Si envías `first_name` o `last_name`, ambos son obligatorios y no vacíos.
+ *       Puedes enviar solo `avatar_url` (o `null` para quitarla) sin cambiar el nombre.
+ *       Con nombres, también se sincroniza `user_metadata.full_name` en Auth.
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               first_name:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 80
+ *                 example: Ana
+ *               last_name:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 80
+ *                 example: García López
+ *               avatar_url:
+ *                 type: string
+ *                 nullable: true
+ *                 description: URL pública (http/https), máx. 2048 caracteres; null borra la foto
+ *                 example: https://xxx.supabase.co/storage/v1/object/public/player-avatars/...
+ *           examples:
+ *             names:
+ *               value: { first_name: "Ana", last_name: "García López" }
+ *             avatar:
+ *               value: { avatar_url: "https://example.com/storage/v1/object/public/player-avatars/u/avatar.jpg" }
+ *     responses:
+ *       200:
+ *         description: Perfil actualizado
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, player: {} }
+ *       400:
+ *         description: Datos inválidos
+ *       401:
+ *         description: Token inválido o ausente
+ *       404:
+ *         description: No hay jugador asociado a esta cuenta
+ *       500:
+ *         description: Error interno
+ */
+router.patch('/me', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'Token requerido' });
+  }
+
+  const body = req.body ?? {};
+  const hasFirst = Object.prototype.hasOwnProperty.call(body, 'first_name');
+  const hasLast = Object.prototype.hasOwnProperty.call(body, 'last_name');
+  const firstRaw = typeof body.first_name === 'string' ? body.first_name.trim() : '';
+  const lastRaw = typeof body.last_name === 'string' ? body.last_name.trim() : '';
+
+  let firstFinal: string | null = null;
+  let lastFinal: string | null = null;
+  if (hasFirst || hasLast) {
+    if (!firstRaw || !lastRaw) {
+      return res.status(400).json({ ok: false, error: 'first_name y last_name son obligatorios juntos (texto no vacío)' });
+    }
+    if (firstRaw.length > 80 || lastRaw.length > 80) {
+      return res.status(400).json({ ok: false, error: 'first_name y last_name admiten como máximo 80 caracteres' });
+    }
+    firstFinal = firstRaw;
+    lastFinal = lastRaw;
+  }
+
+  const avatarNorm = normalizeAvatarUrl(body as Record<string, unknown>);
+  if (!avatarNorm.ok) {
+    return res.status(400).json({ ok: false, error: avatarNorm.error });
+  }
+
+  if (!firstFinal && avatarNorm.mode === 'omit') {
+    return res.status(400).json({ ok: false, error: 'Envía first_name y last_name, y/o avatar_url' });
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const {
+      data: { user },
+      error: authErr,
+    } = await supabase.auth.getUser(token);
+    if (authErr || !user?.id) {
+      return res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+    }
+
+    const email = user.email ? String(user.email).trim().toLowerCase() : '';
+
+    const { data: byAuth, error: e1 } = await supabase
+      .from('players')
+      .select('id')
+      .eq('auth_user_id', user.id)
+      .neq('status', 'deleted')
+      .maybeSingle();
+    if (e1) return res.status(500).json({ ok: false, error: e1.message });
+
+    let playerId: string | null = (byAuth as { id?: string } | null)?.id ?? null;
+    if (!playerId && email) {
+      const { data: byEmail, error: e2 } = await supabase
+        .from('players')
+        .select('id')
+        .eq('email', email)
+        .neq('status', 'deleted')
+        .maybeSingle();
+      if (e2) return res.status(500).json({ ok: false, error: e2.message });
+      playerId = (byEmail as { id?: string } | null)?.id ?? null;
+    }
+
+    if (!playerId) {
+      return res.status(404).json({ ok: false, error: 'No existe jugador vinculado a esta cuenta' });
+    }
+
+    const now = new Date().toISOString();
+    const patch: Record<string, unknown> = { updated_at: now };
+    if (firstFinal && lastFinal) {
+      patch.first_name = firstFinal;
+      patch.last_name = lastFinal;
+    }
+    if (avatarNorm.mode === 'set') {
+      patch.avatar_url = avatarNorm.value;
+    }
+
+    const { data: updated, error: upErr } = await supabase.from('players').update(patch).eq('id', playerId).select(SELECT_PUBLIC_INTERNAL).maybeSingle();
+
+    if (upErr) return res.status(500).json({ ok: false, error: upErr.message });
+    if (!updated) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+
+    if (firstFinal && lastFinal) {
+      const fullName = `${firstFinal} ${lastFinal}`.trim();
+      const { error: metaErr } = await supabase.auth.admin.updateUserById(user.id, {
+        user_metadata: { ...(typeof user.user_metadata === 'object' && user.user_metadata ? user.user_metadata : {}), full_name: fullName },
+      });
+      if (metaErr) {
+        console.error('[PATCH /players/me] auth metadata sync:', metaErr.message);
+      }
+    }
+
+    return res.json({ ok: true, player: toPublicPlayer(updated as Row) });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -360,12 +537,24 @@ router.get('/:id/feedback-summary', async (req: Request, res: Response) => {
  *   get:
  *     tags: [Players]
  *     summary: Listar jugadores
+ *     description: Sin `q` devuelve los últimos jugadores. Con `q`, filtra por nombre (nombre/apellido) o teléfono (no por email).
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         schema: { type: string }
+ *         description: Texto de búsqueda (nombre, apellido o teléfono)
  */
 router.get('/', async (req: Request, res: Response) => {
   const query = req.query.q as string | undefined;
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const terms = String(query ?? '')
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
 
+    const searchFetchLimit = terms.length <= 1 ? 80 : 160;
     let q = supabase
       .from('players')
       .select(
@@ -373,10 +562,13 @@ router.get('/', async (req: Request, res: Response) => {
          mu, sigma, elo_rating, sp, matches_played_competitive, matches_played_friendly, matches_played_matchmaking`
       )
       .order('created_at', { ascending: false })
-      .limit(50);
+      .limit(terms.length ? searchFetchLimit : 50);
 
-    if (query) {
-      q = q.or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%,email.ilike.%${query}%`);
+    if (terms.length) {
+      const orExpr = terms
+        .flatMap((t) => [`first_name.ilike.%${t}%`, `last_name.ilike.%${t}%`, `phone.ilike.%${t}%`])
+        .join(',');
+      q = q.or(orExpr);
     }
 
     const { data, error } = await q;
@@ -385,7 +577,22 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(500).json({ ok: false, error: error.message });
     }
 
-    const players = (data ?? []).map((row) => toPublicPlayer(row as Row));
+    let players = (data ?? []).map((row) => toPublicPlayer(row as Row));
+    if (terms.length) {
+      players = players.filter((p) => {
+        const full = `${String(p.first_name ?? '')} ${String(p.last_name ?? '')}`.toLowerCase();
+        const phone = String(p.phone ?? '').toLowerCase();
+        const phoneDigits = phone.replace(/\D/g, '');
+        return terms.every((t) => {
+          if (full.includes(t)) return true;
+          if (phone.includes(t)) return true;
+          const td = t.replace(/\D/g, '');
+          if (td.length > 0 && phoneDigits.includes(td)) return true;
+          return false;
+        });
+      });
+      players = players.slice(0, 50);
+    }
     return res.json({ ok: true, players });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';

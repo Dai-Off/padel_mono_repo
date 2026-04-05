@@ -50,6 +50,17 @@ import './grilla.css';
 // In-memory cache for bookings by date (avoids re-fetching when switching dates)
 const bookingsCache: Record<string, { data: any[]; ts: number }> = {};
 const CACHE_TTL = 60_000; // 1 minute
+const MAX_BOOKINGS_CACHE_DATES = 50;
+
+function putBookingsCache(dateKey: string, data: any[]) {
+  bookingsCache[dateKey] = { data, ts: Date.now() };
+  const keys = Object.keys(bookingsCache);
+  if (keys.length <= MAX_BOOKINGS_CACHE_DATES) return;
+  keys.sort((a, b) => bookingsCache[a].ts - bookingsCache[b].ts);
+  for (let i = 0; i < keys.length - MAX_BOOKINGS_CACHE_DATES; i++) {
+    delete bookingsCache[keys[i]];
+  }
+}
 
 const toDateStr = (d: Date | string) =>
     typeof d === 'string'
@@ -133,7 +144,7 @@ const useClubData = (dateOrStr: Date | string) => {
           players: { first_name: 'Curso', last_name: slot.course_name },
         }));
         const merged = [...raw, ...schoolAsBookings];
-        bookingsCache[date] = { data: merged, ts: Date.now() };
+        putBookingsCache(date, merged);
         return mapBookings(merged, courtsData);
     }, [clubId]);
 
@@ -190,7 +201,7 @@ const useClubData = (dateOrStr: Date | string) => {
                           notes: `${slot.course_name}${slot.staff_name ? ` - ${slot.staff_name}` : ''}`,
                           players: { first_name: 'Curso', last_name: slot.course_name },
                         }));
-                        bookingsCache[ds] = { data: [...(bRes.bookings || []), ...schoolAsBookings], ts: Date.now() };
+                        putBookingsCache(ds, [...(bRes.bookings || []), ...schoolAsBookings]);
                     } catch { /* silent prefetch */ }
                 }
             }
@@ -369,22 +380,29 @@ function GrillaViewInner() {
       setCompactPxPerMinute(0.30);
     };
 
-    computeCompactPpm();
-    window.addEventListener('resize', () => {
+    const onResize = () => {
       computeCompactPpm();
       setIsMobileDevice(window.innerWidth <= 768);
-    });
-    // Safari iOS uses orientationchange
-    window.addEventListener('orientationchange', () => {
-      setTimeout(() => {
+    };
+
+    let orientationTimer: ReturnType<typeof setTimeout> | null = null;
+    const onOrientationChange = () => {
+      if (orientationTimer) clearTimeout(orientationTimer);
+      orientationTimer = setTimeout(() => {
+        orientationTimer = null;
         computeCompactPpm();
         setIsMobileDevice(window.innerWidth <= 768);
       }, 100);
-    });
+    };
+
+    computeCompactPpm();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onOrientationChange);
 
     return () => {
-      window.removeEventListener('resize', computeCompactPpm);
-      window.removeEventListener('orientationchange', computeCompactPpm);
+      if (orientationTimer) clearTimeout(orientationTimer);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onOrientationChange);
     };
   }, []);
 

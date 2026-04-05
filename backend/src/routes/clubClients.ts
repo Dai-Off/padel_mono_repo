@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
-import { getClubClientPlayerIds } from '../lib/clubClientPlayers';
+import { getClubClientPlayerIds, invalidateClubClientPlayerIdsCache } from '../lib/clubClientPlayers';
 import { sendClubCrmEmail } from '../lib/mailer';
 
 const router = Router();
@@ -41,7 +41,7 @@ function csvEscape(v: string | number | null | undefined): string {
  *       - in: query
  *         name: q
  *         schema: { type: string }
- *         description: Buscar por nombre o email (opcional)
+ *         description: Buscar por nombre o teléfono (opcional; no por email)
  *     responses:
  *       200:
  *         description: Lista de jugadores
@@ -73,9 +73,8 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
 
     if (q) {
       const esc = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
-      query = query.or(
-        `first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,email.ilike.%${esc}%,phone.ilike.%${esc}%`
-      );
+      query = query.or(`first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,phone.ilike.%${esc}%`);
+      query = query.limit(60);
     }
 
     const { data, error } = await query;
@@ -129,9 +128,7 @@ router.get('/export', requireClubOwnerOrAdmin, async (req: Request, res: Respons
     let query = supabase.from('players').select(PLAYER_LIST_FIELDS).in('id', ids).order('last_name', { ascending: true });
     if (q) {
       const esc = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
-      query = query.or(
-        `first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,email.ilike.%${esc}%,phone.ilike.%${esc}%`
-      );
+      query = query.or(`first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,phone.ilike.%${esc}%`);
     }
     const { data, error } = await query;
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -269,6 +266,7 @@ router.post('/manual', requireClubOwnerOrAdmin, async (req: Request, res: Respon
       }
     }
 
+    invalidateClubClientPlayerIdsCache(clubId);
     return res.status(201).json({ ok: true, player: created });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
