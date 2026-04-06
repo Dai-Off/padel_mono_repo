@@ -1,8 +1,8 @@
 import { X } from 'lucide-react';
 import { useForm } from 'react-hook-form';
-import type { Court } from '../../types/court';
+import type { Court, CourtVisibilityWindow } from '../../types/court';
 import type { MeResponse } from '../../types/auth';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clubService, type Club } from '../../services/club';
 import { authService } from '../../services/auth';
@@ -28,9 +28,22 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
             glass_type: 'normal',
             status: 'operational',
             lighting: true,
-            last_maintenance: new Date().toISOString().split('T')[0]
+            last_maintenance: new Date().toISOString().split('T')[0],
+            is_hidden: false,
         }
     });
+
+    const [windowsText, setWindowsText] = useState('');
+    const [windowsError, setWindowsError] = useState('');
+
+    useEffect(() => {
+        if (court?.visibility_windows != null && Array.isArray(court.visibility_windows)) {
+            setWindowsText(JSON.stringify(court.visibility_windows, null, 2));
+        } else {
+            setWindowsText('');
+        }
+        setWindowsError('');
+    }, [court]);
 
     useEffect(() => {
         setClubsReady(false);
@@ -57,9 +70,29 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
 
     useEffect(() => {
         if (court) {
-            reset(court);
+            reset({ ...court, is_hidden: Boolean(court.is_hidden) });
         }
     }, [court, reset]);
+
+    const submitCourt = useCallback((data: Partial<Court>) => {
+        setWindowsError('');
+        let visibility_windows: CourtVisibilityWindow[] | null | undefined = undefined;
+        if (windowsText.trim()) {
+            try {
+                visibility_windows = JSON.parse(windowsText) as CourtVisibilityWindow[];
+            } catch {
+                setWindowsError(t('visibility_windows_invalid'));
+                return;
+            }
+        } else if (court) {
+            visibility_windows = null;
+        }
+        onSubmit({
+            ...data,
+            is_hidden: Boolean(data.is_hidden),
+            visibility_windows,
+        });
+    }, [windowsText, court, onSubmit, t]);
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-primary/20 backdrop-blur-sm animate-fadein">
@@ -78,7 +111,7 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
                 </div>
 
                 {/* Body */}
-                <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                <form onSubmit={handleSubmit(submitCourt)} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
                     {clubsReady && !isAdmin && clubs.length === 1 && <input type="hidden" {...register('club_id')} />}
                     {clubsReady && (isAdmin || clubs.length !== 1) && (
                         <div className="space-y-1.5">
@@ -169,6 +202,33 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
                             />
                             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand"></div>
                         </label>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-[#FAFAFA] rounded-2xl border border-border-subtle">
+                        <div className="space-y-0.5 pr-2">
+                            <span className="text-sm font-bold text-primary">{t('is_hidden_court')}</span>
+                            <p className="text-[10px] text-muted-foreground font-medium leading-snug">{t('is_hidden_court_desc')}</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input type="checkbox" {...register('is_hidden')} className="sr-only peer" />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand" />
+                        </label>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider px-1">
+                            {t('visibility_windows')}
+                        </label>
+                        <textarea
+                            value={windowsText}
+                            onChange={(e) => { setWindowsText(e.target.value); setWindowsError(''); }}
+                            rows={4}
+                            spellCheck={false}
+                            placeholder='[{"days_of_week":[1,2,3,4,5],"start_minutes":480,"end_minutes":1320}]'
+                            className="w-full px-4 py-3 rounded-2xl border border-border-subtle focus:outline-none focus:ring-4 focus:ring-brand/5 focus:border-brand bg-[#FAFAFA] text-xs font-mono transition-all"
+                        />
+                        <p className="text-[10px] text-muted-foreground px-1">{t('visibility_windows_desc')}</p>
+                        {windowsError ? <span className="text-[10px] text-error font-bold px-1">{windowsError}</span> : null}
                     </div>
 
                     {/* Last Maintenance Date */}

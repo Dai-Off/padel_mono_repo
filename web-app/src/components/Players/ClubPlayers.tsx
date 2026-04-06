@@ -86,7 +86,7 @@ export function ClubPlayersTab() {
     const last = manualForm.last_name.trim();
     const phone = manualForm.phone.trim();
     const email = manualForm.email.trim();
-    if (!first || !last || !phone || !email) {
+    if (!first || !last || !phone) {
       toast.error(t('players_manual_required'));
       return;
     }
@@ -96,7 +96,7 @@ export function ClubPlayersTab() {
         first_name: first,
         last_name: last,
         phone,
-        email,
+        email: email || undefined,
       });
       toast.success(t('players_manual_success'));
       setManualOpen(false);
@@ -200,7 +200,7 @@ export function ClubPlayersTab() {
                         {player.first_name} {player.last_name}
                       </p>
                       <span className="px-1.5 py-0.5 rounded-lg bg-purple-50 text-purple-600 text-[9px] font-bold border border-purple-100">
-                        ELO {player.elo_rating}
+                        {t('players_level_badge', { n: player.elo_rating })}
                       </span>
                       <div className="flex items-center gap-1">
                         <PulseDot color={player.status === 'active' ? '#22C55E' : '#9CA3AF'} />
@@ -209,9 +209,12 @@ export function ClubPlayersTab() {
                         </span>
                       </div>
                     </div>
-                    <div className="flex flex-wrap gap-3 text-[10px] text-gray-400">
-                      {player.email ? <span>{player.email}</span> : <span>{t('players_no_email')}</span>}
-                      {player.phone && <span>{player.phone}</span>}
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <Phone className="w-3 h-3 shrink-0 text-gray-400" />
+                        {player.phone?.trim() ? player.phone : <span className="text-amber-600/90">{t('players_no_phone')}</span>}
+                      </span>
+                      <span>{player.email ? player.email : t('players_no_email')}</span>
                     </div>
                   </div>
                   <motion.button
@@ -280,15 +283,17 @@ export function ClubPlayersTab() {
                     ) : (
                       <span className="flex items-center gap-1 text-gray-400">{t('players_no_email')}</span>
                     )}
-                    {selectedPlayer.phone && (
-                      <span className="flex items-center gap-1">
-                        <Phone className="w-3 h-3" />
-                        {selectedPlayer.phone}
-                      </span>
-                    )}
+                    <span className="flex items-center gap-1">
+                      <Phone className="w-3 h-3 shrink-0" />
+                      {selectedPlayer.phone?.trim() ? (
+                        selectedPlayer.phone
+                      ) : (
+                        <span className="text-amber-700">{t('players_no_phone')}</span>
+                      )}
+                    </span>
                     <span className="flex items-center gap-1">
                       <Zap className="w-3 h-3" />
-                      ELO {selectedPlayer.elo_rating}
+                      {t('players_level_badge', { n: selectedPlayer.elo_rating })}
                     </span>
                   </div>
                 </div>
@@ -357,7 +362,9 @@ export function ClubPlayersTab() {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-gray-500 mb-1">{t('email_label')}</label>
+                  <label className="block text-[10px] font-bold text-gray-500 mb-1">
+                    {t('email_label')} <span className="font-normal text-gray-400">({t('players_optional')})</span>
+                  </label>
                   <input
                     type="email"
                     value={manualForm.email}

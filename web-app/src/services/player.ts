@@ -3,6 +3,25 @@ import { getSupabaseClient } from '../lib/supabase';
 import type { Player, ApiResponse } from '../types/api';
 
 export const playerService = {
+    getMyProfile: async (): Promise<Player> => {
+        const response = await apiFetchWithAuth<ApiResponse<{ player: Player }>>('/players/me', { method: 'GET' });
+        if (!response.player) throw new Error('No se pudo cargar el perfil');
+        return response.player;
+    },
+
+    updateMyProfile: async (data: { first_name: string; last_name: string; phone: string }): Promise<Player> => {
+        const response = await apiFetchWithAuth<ApiResponse<{ player: Player }>>('/players/me', {
+            method: 'PATCH',
+            body: JSON.stringify({
+                first_name: data.first_name.trim(),
+                last_name: data.last_name.trim(),
+                phone: data.phone.trim(),
+            }),
+        });
+        if (!response.player) throw new Error('Error al guardar');
+        return response.player;
+    },
+
     getAll: async (query?: string): Promise<Player[]> => {
         const path = query ? `/players?q=${encodeURIComponent(query)}` : '/players';
         const response = await apiFetch<ApiResponse<{ players: Player[] }>>(path);
@@ -51,6 +70,15 @@ export const playerService = {
         const response = await apiFetchWithAuth<ApiResponse<{ player: Player }>>('/players/me', {
             method: 'PATCH',
             body: JSON.stringify({ avatar_url }),
+        });
+        return response.player;
+    },
+
+    /** Perfil del jugador logueado: teléfono (único). Puede combinarse con nombre/avatar en otras llamadas. */
+    updateMyPhone: async (phone: string): Promise<Player> => {
+        const response = await apiFetchWithAuth<ApiResponse<{ player: Player }>>('/players/me', {
+            method: 'PATCH',
+            body: JSON.stringify({ phone: phone.trim() }),
         });
         return response.player;
     },

@@ -83,14 +83,20 @@ const PlayerSearch: React.FC<{
     const handleAltaSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const { first_name, last_name, phone, email } = altaForm;
-        if (!first_name.trim() || !last_name.trim() || !phone.trim() || !email.trim()) {
-            setAltaError(t('playerSearch.allFieldsRequired'));
+        if (!first_name.trim() || !last_name.trim() || !phone.trim()) {
+            setAltaError(t('playerSearch.coreFieldsRequired'));
             return;
         }
         setAltaSubmitting(true);
         setAltaError('');
         try {
-            const newPlayer = await playerService.createManual({ first_name: first_name.trim(), last_name: last_name.trim(), phone: phone.trim(), email: email.trim() });
+            const emailTrim = email.trim();
+            const newPlayer = await playerService.createManual({
+                first_name: first_name.trim(),
+                last_name: last_name.trim(),
+                phone: phone.trim(),
+                email: emailTrim || undefined,
+            });
             onSelect(newPlayer);
             setAltaOpen(false);
             setAltaForm({ first_name: '', last_name: '', phone: '', email: '' });
@@ -119,7 +125,11 @@ const PlayerSearch: React.FC<{
                             </div>
                             <div>
                                 <p className="text-sm font-bold text-gray-900">{selectedPlayer.first_name} {selectedPlayer.last_name}</p>
-                                <p className="text-[10px] text-gray-500">{selectedPlayer.email}</p>
+                                <p className="text-[10px] text-gray-500">
+                                    {selectedPlayer.phone?.trim()
+                                        ? `${selectedPlayer.phone} · Elo ${Math.round(Number(selectedPlayer.elo_rating) || 0)}`
+                                        : selectedPlayer.email || t('playerSearch.noContactLine')}
+                                </p>
                             </div>
                         </div>
                         <button
@@ -185,7 +195,11 @@ const PlayerSearch: React.FC<{
                                         </div>
                                         <div className="truncate">
                                             <p className="text-sm font-bold text-gray-900 truncate">{p.first_name} {p.last_name}</p>
-                                            <p className="text-[11px] text-gray-500 truncate">{p.email}</p>
+                                            <p className="text-[11px] text-gray-500 truncate">
+                                                {p.phone?.trim()
+                                                    ? `${p.phone} · Elo ${Math.round(Number(p.elo_rating) || 0)}`
+                                                    : p.email || t('playerSearch.noContactLine')}
+                                            </p>
                                         </div>
                                     </button>
                                 ))}
@@ -211,22 +225,27 @@ const PlayerSearch: React.FC<{
                             </button>
                         </div>
                         <form onSubmit={handleAltaSubmit} className="flex flex-col gap-3">
+                            <p className="text-[11px] text-gray-500">{t('playerSearch.manualAddHint')}</p>
                             {(['first_name', 'last_name', 'phone', 'email'] as const).map((field) => (
-                                <input
-                                    key={field}
-                                    type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'}
-                                    placeholder={
-                                        {
-                                            first_name: t('playerSearch.namePh'),
-                                            last_name: t('playerSearch.lastNamePh'),
-                                            phone: t('playerSearch.phonePh'),
-                                            email: t('playerSearch.emailPh'),
-                                        }[field]
-                                    }
-                                    value={altaForm[field]}
-                                    onChange={(e) => setAltaForm(prev => ({ ...prev, [field]: e.target.value }))}
-                                    className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#00726b] focus:border-transparent outline-none"
-                                />
+                                <div key={field}>
+                                    {field === 'email' && (
+                                        <span className="text-[10px] text-gray-400 block mb-0.5">{t('playerSearch.emailOptional')}</span>
+                                    )}
+                                    <input
+                                        type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'}
+                                        placeholder={
+                                            {
+                                                first_name: t('playerSearch.namePh'),
+                                                last_name: t('playerSearch.lastNamePh'),
+                                                phone: t('playerSearch.phonePh'),
+                                                email: t('playerSearch.emailPh'),
+                                            }[field]
+                                        }
+                                        value={altaForm[field]}
+                                        onChange={(e) => setAltaForm(prev => ({ ...prev, [field]: e.target.value }))}
+                                        className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#00726b] focus:border-transparent outline-none"
+                                    />
+                                </div>
                             ))}
                             {altaError && <p className="text-xs text-red-500">{altaError}</p>}
                             <button
@@ -269,6 +288,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [overlapError, setOverlapError] = useState<string | null>(null);
     const [pricesByType, setPricesByType] = useState<Record<string, { price_per_hour_cents: number }>>({});
     const [isMarkingPaid, setIsMarkingPaid] = useState(false);
+    const [guestInviteMode, setGuestInviteMode] = useState<'single' | 'double'>('double');
 
     // Track original values to detect changes in edit mode
     const originalRef = useRef<{
@@ -356,6 +376,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             const slots: (Player | null)[] = [null, null, null];
             guests.forEach((g: Player, i: number) => { slots[i] = g; });
             setAdditionalPlayers(slots);
+            setGuestInviteMode(guests.length <= 1 ? 'single' : 'double');
 
             // Snapshot original values for change detection
             originalRef.current = {
@@ -373,6 +394,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             // Create mode: reset everything
             setOrganizer(null);
             setAdditionalPlayers([null, null, null]);
+            setGuestInviteMode('double');
             setDuration(reservation?.durationMinutes || 90);
             setResType('standard');
             setNotes('');
@@ -752,6 +774,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     <option value="blocked">{t('reservation.type_blocked')}</option>
                                 </select>
                             </div>
+                            {resType === 'open_match' && (
+                                <p className="text-[11px] text-gray-500 leading-snug">{t('reservation.openMatchPlayersHint')}</p>
+                            )}
 
                             {/* Precio calculado (solo en modo creación) */}
                             {!isEditMode && formattedPrice != null && (
@@ -766,9 +791,33 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
                     {/* Resto de jugadores */}
                     <div className="mt-8 pt-6 border-t border-gray-200">
-                        <h3 className="text-lg font-bold text-gray-900 mb-5">{t('reservation.otherPlayers')}</h3>
+                        <h3 className="text-lg font-bold text-gray-900 mb-3">{t('reservation.otherPlayers')}</h3>
+                        {!isEditMode && (
+                            <div className="mb-4 flex flex-col gap-1.5">
+                                <label className="text-sm font-bold text-gray-700">{t('reservation.inviteModeLabel')}</label>
+                                <select
+                                    className="max-w-md p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
+                                    value={guestInviteMode}
+                                    onChange={(e) => {
+                                        const v = e.target.value === 'single' ? 'single' : 'double';
+                                        setGuestInviteMode(v);
+                                        if (v === 'single') {
+                                            setAdditionalPlayers((prev) => [prev[0] ?? null, null, null]);
+                                        }
+                                    }}
+                                >
+                                    <option value="single">{t('reservation.inviteMode_single')}</option>
+                                    <option value="double">{t('reservation.inviteMode_double')}</option>
+                                </select>
+                            </div>
+                        )}
+                        {isEditMode && (
+                            <p className="text-[11px] text-gray-500 mb-4">
+                                {guestInviteMode === 'single' ? t('reservation.inviteMode_single') : t('reservation.inviteMode_double')}
+                            </p>
+                        )}
                         <div className="space-y-4">
-                            {[0, 1, 2].map((index) => (
+                            {(guestInviteMode === 'single' ? [0] : [0, 1, 2]).map((index) => (
                                 <PlayerSearch
                                     key={index}
                                     label={t('reservation.playerLabel', { n: index + 2 })}

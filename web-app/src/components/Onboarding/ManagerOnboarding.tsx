@@ -14,7 +14,7 @@ import {
     Package,
     Headphones,
 } from 'lucide-react';
-import { Header } from '../Layout/Header';
+import { PortalTealHeader } from '../Layout/PortalTealHeader';
 
 interface ChecklistItemProps {
     icon: React.ReactNode;
@@ -61,7 +61,7 @@ export const ManagerOnboarding: React.FC = () => {
 
     return (
         <div className="min-h-screen bg-background">
-            <Header clubName={t('onboarding_title')} onToggleMenu={() => {}} />
+            <PortalTealHeader clubName={t('onboarding_title')} onMenuClick={() => navigate('/grilla')} />
             <main className="max-w-2xl mx-auto px-4 py-8">
                 <button
                     type="button"

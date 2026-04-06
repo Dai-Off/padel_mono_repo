@@ -22,6 +22,10 @@
   --color-success: #22C55E; /* green-500 */
   --color-warning: #F59E0B; /* amber-500 */
   --color-error: #E31E24;   /* rojo marca */
+
+  /* Cabecera fija del portal (grilla / dashboard) */
+  --color-portal-header: #00726b;
+  --color-portal-header-edge: #005a4f;
 }
 
 @layer base {

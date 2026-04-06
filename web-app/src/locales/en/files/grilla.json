@@ -22,7 +22,9 @@
     "prevDay": "Day −",
     "nextDay": "Day +",
     "prevDayTitle": "Previous day",
-    "nextDayTitle": "Next day"
+    "nextDayTitle": "Next day",
+    "hiddenCourts": "Hidden courts",
+    "hiddenCourtsTitle": "Show or hide columns for courts marked hidden (excluded from public search)"
   },
   "metrics": {
     "occupancy": "Occupancy",
@@ -100,9 +102,12 @@
     "addExtra": "Add extra",
     "reservationFallback": "Booking",
     "clientLabel": "Client:*",
-    "clientSearchPlaceholder": "Search client…",
+    "clientSearchPlaceholder": "Search by name or phone…",
+    "inviteModeLabel": "Match guests",
+    "inviteMode_single": "Singles (1 guest)",
+    "inviteMode_double": "Doubles / up to 3 guests",
     "playerLabel": "Player {{n}}:",
-    "playerSearchPlaceholder": "Search player {{n}}…",
+    "playerSearchPlaceholder": "Name or phone — player {{n}}",
     "saveError": "Could not save the booking.",
     "markPaidError": "Could not mark as paid.",
     "deleteError": "Could not delete the booking.",
@@ -143,10 +148,15 @@
     "type_school_individual": "School — private lesson",
     "type_flat_rate": "Flat rate",
     "type_tournament": "Tournament",
-    "type_blocked": "Admin block"
+    "type_blocked": "Admin block",
+    "openMatchPlayersHint": "Open match: the client is the organizer; add up to 3 more players below (4 on court). Match visibility and Elo rules are set when creating the match from the app or club rules."
   },
   "playerSearch": {
     "allFieldsRequired": "All fields are required.",
+    "coreFieldsRequired": "First name, last name and phone are required.",
+    "manualAddHint": "Phone required. Email is optional.",
+    "emailOptional": "Optional",
+    "noContactLine": "No email / phone",
     "manualAddError": "Could not register the player.",
     "noPlayersFound": "No players found",
     "manualAddTitle": "Manual club registration",

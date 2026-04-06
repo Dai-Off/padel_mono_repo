@@ -1,10 +1,28 @@
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 
 export type CompetitionFormat = 'single_elim' | 'group_playoff' | 'round_robin';
-export type MatchRules = { best_of_sets: number; allow_draws?: boolean };
+export type MatchRules = {
+  best_of_sets: number;
+  allow_draws?: boolean;
+  bracket_seed_strategy?:
+    | 'registration_order'
+    | 'random'
+    | 'elo_snake'
+    | 'elo_top_vs_bottom'
+    | 'elo_tier_mid'
+    | string;
+};
 export type SetScore = { games_a: number; games_b: number };
 
 type TeamRow = { id: string; name: string; slot_index: number };
+type TeamCandidate = { p1: string; p2: string; name: string };
+type InscriptionRow = {
+  player_id_1: string | null;
+  player_id_2: string | null;
+  status: string;
+  invited_at: string;
+  division_id?: string | null;
+};
 
 function nextPowerOfTwo(n: number): number {
   let p = 1;
@@ -34,6 +52,168 @@ async function fetchPlayerNames(playerIds: string[]): Promise<Record<string, str
   return out;
 }
 
+async function fetchPlayerElos(playerIds: string[]): Promise<Record<string, number>> {
+  const ids = [...new Set(playerIds.filter(Boolean))];
+  if (!ids.length) return {};
+  const supabase = getSupabaseServiceRoleClient();
+  const { data } = await supabase.from('players').select('id,elo_rating').in('id', ids);
+  const out: Record<string, number> = {};
+  for (const row of data ?? []) {
+    const e = Number((row as any).elo_rating ?? 0);
+    out[(row as any).id as string] = Number.isFinite(e) ? e : 0;
+  }
+  return out;
+}
+
+function avgPairElo(p1: string, p2: string, elo: Record<string, number>): number {
+  return ((elo[p1] ?? 0) + (elo[p2] ?? 0)) / 2;
+}
+
+/** Bracket positions 0..size-1 -> seed index (0 = strongest in this draw) for a full bracket of `size`. */
+function bracketSeedIndices(size: number): number[] {
+  let arr = [0, 1];
+  while (arr.length < size) {
+    const len = arr.length;
+    const next: number[] = [];
+    for (let i = 0; i < len; i += 1) {
+      next.push(arr[i]);
+      next.push(2 * len - 1 - arr[i]);
+    }
+    arr = next;
+  }
+  return arr;
+}
+
+function applyBracketSeedOrder(
+  candidates: TeamCandidate[],
+  strategy: string,
+  eloById: Record<string, number>
+): TeamCandidate[] {
+  if (candidates.length < 2) return [...candidates];
+  const s = String(strategy || 'registration_order');
+  if (s === 'registration_order') return [...candidates];
+  if (s === 'random') {
+    const copy = [...candidates];
+    for (let i = copy.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+  }
+  const ranked = [...candidates].sort(
+    (a, b) => avgPairElo(b.p1, b.p2, eloById) - avgPairElo(a.p1, a.p2, eloById)
+  );
+  if (s === 'elo_tier_mid') {
+    const avgs = ranked.map((c) => avgPairElo(c.p1, c.p2, eloById)).sort((x, y) => x - y);
+    const mid = avgs[Math.floor(avgs.length / 2)] ?? 0;
+    return [...ranked].sort(
+      (a, b) =>
+        Math.abs(avgPairElo(a.p1, a.p2, eloById) - mid) -
+        Math.abs(avgPairElo(b.p1, b.p2, eloById) - mid)
+    );
+  }
+  if (s === 'elo_snake') {
+    const n = ranked.length;
+    const b = nextPowerOfTwo(Math.max(2, n));
+    if (b !== n) return ranked;
+    const perm = bracketSeedIndices(b);
+    return perm.map((seedIdx) => ranked[seedIdx]);
+  }
+  if (s === 'elo_top_vs_bottom') {
+    const n = ranked.length;
+    if (n < 2) return [...ranked];
+    const b = nextPowerOfTwo(Math.max(2, n));
+    if (b === n) {
+      const perm = bracketSeedIndices(n);
+      return perm.map((seedIdx) => ranked[seedIdx]);
+    }
+    const out: TeamCandidate[] = [];
+    let lo = 0;
+    let hi = n - 1;
+    while (lo <= hi) {
+      if (lo === hi) {
+        out.push(ranked[lo]);
+        break;
+      }
+      out.push(ranked[lo++]);
+      out.push(ranked[hi--]);
+    }
+    return out;
+  }
+  return [...candidates];
+}
+
+async function buildTeamCandidatesFromInscriptions(
+  tournamentId: string,
+  filterIns: (row: InscriptionRow) => boolean
+): Promise<TeamCandidate[]> {
+  const supabase = getSupabaseServiceRoleClient();
+  const { data: t } = await supabase
+    .from('tournaments')
+    .select('registration_mode')
+    .eq('id', tournamentId)
+    .maybeSingle();
+  const registrationMode = String((t as any)?.registration_mode ?? 'individual');
+
+  const { data: ins, error: insErr } = await supabase
+    .from('tournament_inscriptions')
+    .select('player_id_1,player_id_2,status,invited_at,division_id')
+    .eq('tournament_id', tournamentId)
+    .eq('status', 'confirmed')
+    .order('invited_at', { ascending: true });
+  if (insErr) throw new Error(insErr.message);
+
+  const rows = (ins ?? []).filter((x) => filterIns(x as InscriptionRow)) as InscriptionRow[];
+  const nameById = await fetchPlayerNames(
+    rows.flatMap((r) => [r.player_id_1, r.player_id_2].filter(Boolean) as string[])
+  );
+
+  const out: TeamCandidate[] = [];
+  if (registrationMode === 'pair') {
+    for (const row of rows) {
+      const p1 = row.player_id_1 as string | null;
+      const p2 = row.player_id_2 as string | null;
+      if (!p1 || !p2) continue;
+      const n1 = nameById[p1] ?? 'Jugador 1';
+      const n2 = nameById[p2] ?? 'Jugador 2';
+      out.push({ p1, p2, name: `${n1} / ${n2}` });
+    }
+  } else {
+    const singles = rows.map((x) => x.player_id_1).filter(Boolean) as string[];
+    for (let i = 0; i + 1 < singles.length; i += 2) {
+      const p1 = String(singles[i]);
+      const p2 = String(singles[i + 1]);
+      out.push({
+        p1,
+        p2,
+        name: `${nameById[p1] ?? 'Jugador 1'} / ${nameById[p2] ?? 'Jugador 2'}`,
+      });
+    }
+  }
+  return out;
+}
+
+async function insertTeamsFromCandidates(
+  tournamentId: string,
+  ordered: TeamCandidate[],
+  divisionId: string | null
+): Promise<TeamRow[]> {
+  if (!ordered.length) return [];
+  const supabase = getSupabaseServiceRoleClient();
+  const teamsPayload: Array<Record<string, unknown>> = ordered.map((c, i) => ({
+    tournament_id: tournamentId,
+    slot_index: i + 1,
+    player_id_1: c.p1,
+    player_id_2: c.p2,
+    name: c.name,
+    status: 'active',
+    ...(divisionId ? { division_id: divisionId } : {}),
+  }));
+  const { data: teams, error } = await supabase.from('tournament_teams').insert(teamsPayload).select('id,name,slot_index');
+  if (error) throw new Error(error.message);
+  return (teams ?? []) as TeamRow[];
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function clearTournamentCompetitionTables(tournamentId: string): Promise<void> {
@@ -56,7 +236,7 @@ async function clearTournamentCompetitionTables(tournamentId: string): Promise<v
 
 async function resolveManualTeamPayload(
   tournamentId: string,
-  registrationMode: 'individual' | 'pair',
+  registrationMode: 'individual' | 'pair' | 'both',
   key: string
 ): Promise<{ player_id_1: string; player_id_2: string; name: string }> {
   const supabase = getSupabaseServiceRoleClient();
@@ -133,81 +313,30 @@ export async function setupTournamentCompetition(params: {
   standingsRules?: Record<string, unknown>;
 }): Promise<void> {
   const supabase = getSupabaseServiceRoleClient();
-  const bestOf = ensureBestOf(Number(params.matchRules?.best_of_sets ?? 3));
+  const { data: cur, error: cErr } = await supabase
+    .from('tournaments')
+    .select('match_rules')
+    .eq('id', params.tournamentId)
+    .maybeSingle();
+  if (cErr) throw new Error(cErr.message);
+  const prev = ((cur as any)?.match_rules || {}) as Record<string, unknown>;
+  const bestOf = ensureBestOf(Number(params.matchRules?.best_of_sets ?? prev.best_of_sets ?? 3));
+  const nextRules: Record<string, unknown> = {
+    ...prev,
+    best_of_sets: bestOf,
+    allow_draws: Boolean(params.matchRules?.allow_draws ?? prev.allow_draws),
+  };
+  if (params.matchRules?.bracket_seed_strategy != null) {
+    nextRules.bracket_seed_strategy = String(params.matchRules.bracket_seed_strategy);
+  }
   const payload = {
     competition_format: params.format,
-    match_rules: { best_of_sets: bestOf, allow_draws: Boolean(params.matchRules?.allow_draws) },
+    match_rules: nextRules,
     standings_rules: params.standingsRules ?? {},
     updated_at: new Date().toISOString(),
   };
   const { error } = await supabase.from('tournaments').update(payload).eq('id', params.tournamentId);
   if (error) throw new Error(error.message);
-}
-
-async function buildTeamsFromInscriptions(tournamentId: string): Promise<TeamRow[]> {
-  const supabase = getSupabaseServiceRoleClient();
-  const { data: t } = await supabase
-    .from('tournaments')
-    .select('registration_mode')
-    .eq('id', tournamentId)
-    .maybeSingle();
-  const registrationMode = String((t as any)?.registration_mode ?? 'individual');
-
-  const { data: ins, error: insErr } = await supabase
-    .from('tournament_inscriptions')
-    .select('player_id_1,player_id_2,status,invited_at')
-    .eq('tournament_id', tournamentId)
-    .eq('status', 'confirmed')
-    .order('invited_at', { ascending: true });
-  if (insErr) throw new Error(insErr.message);
-
-  const allPlayerIds: string[] = [];
-  for (const row of ins ?? []) {
-    if ((row as any).player_id_1) allPlayerIds.push((row as any).player_id_1);
-    if ((row as any).player_id_2) allPlayerIds.push((row as any).player_id_2);
-  }
-  const nameById = await fetchPlayerNames(allPlayerIds);
-
-  const teamsPayload: Array<Record<string, unknown>> = [];
-  let slot = 1;
-  if (registrationMode === 'pair') {
-    for (const row of ins ?? []) {
-      const p1 = (row as any).player_id_1 as string | null;
-      const p2 = (row as any).player_id_2 as string | null;
-      if (!p1 || !p2) continue;
-      const n1 = nameById[p1] ?? 'Jugador 1';
-      const n2 = nameById[p2] ?? 'Jugador 2';
-      teamsPayload.push({
-        tournament_id: tournamentId,
-        slot_index: slot++,
-        player_id_1: p1,
-        player_id_2: p2,
-        name: `${n1} / ${n2}`,
-        status: 'active',
-      });
-    }
-  } else {
-    const singles = (ins ?? []).map((x: any) => x.player_id_1).filter(Boolean);
-    for (let i = 0; i + 1 < singles.length; i += 2) {
-      const p1 = String(singles[i]);
-      const p2 = String(singles[i + 1]);
-      teamsPayload.push({
-        tournament_id: tournamentId,
-        slot_index: slot++,
-        player_id_1: p1,
-        player_id_2: p2,
-        name: `${nameById[p1] ?? 'Jugador 1'} / ${nameById[p2] ?? 'Jugador 2'}`,
-        status: 'active',
-      });
-    }
-  }
-
-  await clearTournamentCompetitionTables(tournamentId);
-
-  if (!teamsPayload.length) return [];
-  const { data: teams, error } = await supabase.from('tournament_teams').insert(teamsPayload).select('id,name,slot_index');
-  if (error) throw new Error(error.message);
-  return (teams ?? []) as TeamRow[];
 }
 
 async function createRoundRobinMatches(params: {
@@ -239,7 +368,13 @@ async function createRoundRobinMatches(params: {
   if (error) throw new Error(error.message);
 }
 
-async function createSingleElimination(params: { tournamentId: string; teams: TeamRow[]; stageName?: string; stageType?: string }): Promise<void> {
+async function createSingleElimination(params: {
+  tournamentId: string;
+  teams: TeamRow[];
+  stageName?: string;
+  stageType?: string;
+  stageOrder?: number;
+}): Promise<void> {
   const supabase = getSupabaseServiceRoleClient();
   const { data: stage, error: sErr } = await supabase
     .from('tournament_stages')
@@ -247,7 +382,7 @@ async function createSingleElimination(params: { tournamentId: string; teams: Te
       tournament_id: params.tournamentId,
       stage_type: params.stageType ?? 'single_elim',
       stage_name: params.stageName ?? 'Eliminación directa',
-      stage_order: 1,
+      stage_order: params.stageOrder ?? 1,
     })
     .select('id')
     .single();
@@ -311,7 +446,7 @@ export async function generateTournamentFixturesManual(
   if (format !== 'single_elim') {
     throw new Error('La generación manual del cuadro solo está disponible para eliminación directa');
   }
-  const registrationMode = String((tournament as any).registration_mode ?? 'individual') as 'individual' | 'pair';
+  const registrationMode = String((tournament as any).registration_mode ?? 'individual') as 'individual' | 'pair' | 'both';
   if (!Array.isArray(teamKeys) || teamKeys.length < 2) {
     throw new Error('Indica al menos dos equipos en el orden del cuadro');
   }
@@ -358,15 +493,83 @@ export async function generateTournamentFixtures(tournamentId: string): Promise<
   const supabase = getSupabaseServiceRoleClient();
   const { data: tournament, error: tErr } = await supabase
     .from('tournaments')
-    .select('competition_format, standings_rules')
+    .select('competition_format, standings_rules, match_rules, level_mode')
     .eq('id', tournamentId)
     .maybeSingle();
   if (tErr) throw new Error(tErr.message);
   if (!tournament) throw new Error('Torneo no encontrado');
   const format = String((tournament as any).competition_format || 'single_elim') as CompetitionFormat;
   const standingsRules = ((tournament as any).standings_rules || {}) as Record<string, unknown>;
+  const matchRules = ((tournament as any).match_rules || {}) as MatchRules;
+  const seedStrategy = String(matchRules.bracket_seed_strategy ?? 'registration_order');
+  const levelMode = String((tournament as any).level_mode ?? 'single_band');
 
-  const teams = await buildTeamsFromInscriptions(tournamentId);
+  await clearTournamentCompetitionTables(tournamentId);
+
+  if (levelMode === 'multi_division') {
+    const { data: divs, error: dErr } = await supabase
+      .from('tournament_divisions')
+      .select('id,label,code')
+      .eq('tournament_id', tournamentId)
+      .order('sort_order', { ascending: true });
+    if (dErr) throw new Error(dErr.message);
+    if (!divs?.length) throw new Error('Configura al menos una categoría para un torneo multi-división');
+
+    let totalTeams = 0;
+    let stageOrder = 1;
+    for (const div of divs) {
+      const divId = (div as any).id as string;
+      const label = String((div as any).label || (div as any).code || 'Categoría');
+      const base = await buildTeamCandidatesFromInscriptions(
+        tournamentId,
+        (row) => String(row.division_id ?? '') === divId
+      );
+      const elo = await fetchPlayerElos(base.flatMap((c) => [c.p1, c.p2]));
+      const ordered = applyBracketSeedOrder(base, seedStrategy, elo);
+      const teams = await insertTeamsFromCandidates(tournamentId, ordered, divId);
+      totalTeams += teams.length;
+      if (teams.length < 2) continue;
+
+      if (format === 'single_elim') {
+        await createSingleElimination({
+          tournamentId,
+          teams,
+          stageName: `${label} — eliminación`,
+          stageOrder: stageOrder++,
+        });
+      } else if (format === 'round_robin') {
+        const { data: stage, error: sErr } = await supabase
+          .from('tournament_stages')
+          .insert({
+            tournament_id: tournamentId,
+            stage_type: 'round_robin',
+            stage_name: `${label} — todos contra todos`,
+            stage_order: stageOrder++,
+          })
+          .select('id')
+          .single();
+        if (sErr) throw new Error(sErr.message);
+        await createRoundRobinMatches({ tournamentId, stageId: (stage as any).id, teams });
+      } else {
+        throw new Error(
+          'El formato grupos+playoff con varias categorías no está soportado; usa eliminación directa o una sola categoría.'
+        );
+      }
+    }
+    if (totalTeams < 2) {
+      throw new Error('Se requieren al menos 2 equipos confirmados con categoría asignada');
+    }
+    const { count } = await supabase
+      .from('tournament_stage_matches')
+      .select('id', { head: true, count: 'exact' })
+      .eq('tournament_id', tournamentId);
+    return { teams_count: totalTeams, matches_count: count ?? 0 };
+  }
+
+  const base = await buildTeamCandidatesFromInscriptions(tournamentId, () => true);
+  const elo = await fetchPlayerElos(base.flatMap((c) => [c.p1, c.p2]));
+  const ordered = applyBracketSeedOrder(base, seedStrategy, elo);
+  const teams = await insertTeamsFromCandidates(tournamentId, ordered, null);
   if (teams.length < 2) throw new Error('Se requieren al menos 2 parejas para generar fixture');
 
   if (format === 'single_elim') {

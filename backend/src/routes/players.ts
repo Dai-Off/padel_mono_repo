@@ -126,8 +126,10 @@ router.get('/me', async (req: Request, res: Response) => {
  *     summary: Actualizar perfil del jugador autenticado
  *     description: |
  *       Actualiza nombre y/o foto de perfil (`avatar_url`, URL pública tras subir al bucket `player-avatars`).
- *       Si envías `first_name` o `last_name`, ambos son obligatorios y no vacíos.
+ *       Si envías `first_name` o `last_name`, ambos son obligatorios y no vacíos, y debe existir teléfono
+ *       (en el cuerpo como `phone` o ya guardado en el jugador); sin teléfono no se actualizan los nombres.
  *       Puedes enviar solo `avatar_url` (o `null` para quitarla) sin cambiar el nombre.
+ *       Puedes enviar `phone` (texto no vacío) para actualizar el teléfono de contacto; debe ser único entre jugadores activos.
  *       Con nombres, también se sincroniza `user_metadata.full_name` en Auth.
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
@@ -152,6 +154,12 @@ router.get('/me', async (req: Request, res: Response) => {
  *                 nullable: true
  *                 description: URL pública (http/https), máx. 2048 caracteres; null borra la foto
  *                 example: https://xxx.supabase.co/storage/v1/object/public/player-avatars/...
+ *               phone:
+ *                 type: string
+ *                 minLength: 5
+ *                 maxLength: 40
+ *                 description: Teléfono de contacto (único si ya existe en otro jugador)
+ *                 example: "+34600111222"
  *           examples:
  *             names:
  *               value: { first_name: "Ana", last_name: "García López" }
@@ -205,8 +213,24 @@ router.patch('/me', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: avatarNorm.error });
   }
 
-  if (!firstFinal && avatarNorm.mode === 'omit') {
-    return res.status(400).json({ ok: false, error: 'Envía first_name y last_name, y/o avatar_url' });
+  const hasPhone = Object.prototype.hasOwnProperty.call(body, 'phone');
+  let phoneFinal: string | null = null;
+  if (hasPhone) {
+    if (body.phone === null || body.phone === undefined) {
+      return res.status(400).json({ ok: false, error: 'phone no puede ser null; omite el campo si no quieres cambiarlo' });
+    }
+    if (typeof body.phone !== 'string') {
+      return res.status(400).json({ ok: false, error: 'phone debe ser texto' });
+    }
+    const ph = body.phone.trim();
+    if (ph.length < 5 || ph.length > 40) {
+      return res.status(400).json({ ok: false, error: 'phone debe tener entre 5 y 40 caracteres' });
+    }
+    phoneFinal = ph;
+  }
+
+  if (!firstFinal && avatarNorm.mode === 'omit' && !hasPhone) {
+    return res.status(400).json({ ok: false, error: 'Envía first_name y last_name, y/o avatar_url, y/o phone' });
   }
 
   try {
@@ -245,6 +269,18 @@ router.patch('/me', async (req: Request, res: Response) => {
       return res.status(404).json({ ok: false, error: 'No existe jugador vinculado a esta cuenta' });
     }
 
+    const { data: curPhoneRow } = await supabase.from('players').select('phone').eq('id', playerId).maybeSingle();
+    const curPhoneTrim = String((curPhoneRow as { phone?: string | null } | null)?.phone ?? '').trim();
+    if (firstFinal && lastFinal) {
+      const effectivePhone = phoneFinal !== null ? phoneFinal : curPhoneTrim;
+      if (effectivePhone.length < 5) {
+        return res.status(400).json({
+          ok: false,
+          error: 'El teléfono de contacto es obligatorio para mantener el nombre completo; envía phone (5–40 caracteres)',
+        });
+      }
+    }
+
     const now = new Date().toISOString();
     const patch: Record<string, unknown> = { updated_at: now };
     if (firstFinal && lastFinal) {
@@ -253,6 +289,20 @@ router.patch('/me', async (req: Request, res: Response) => {
     }
     if (avatarNorm.mode === 'set') {
       patch.avatar_url = avatarNorm.value;
+    }
+    if (phoneFinal !== null) {
+      const { data: dupPhone, error: dupErr } = await supabase
+        .from('players')
+        .select('id')
+        .eq('phone', phoneFinal)
+        .neq('id', playerId)
+        .neq('status', 'deleted')
+        .maybeSingle();
+      if (dupErr) return res.status(500).json({ ok: false, error: dupErr.message });
+      if (dupPhone) {
+        return res.status(409).json({ ok: false, error: 'Ya existe otro jugador con este teléfono' });
+      }
+      patch.phone = phoneFinal;
     }
 
     const { data: updated, error: upErr } = await supabase.from('players').update(patch).eq('id', playerId).select(SELECT_PUBLIC_INTERNAL).maybeSingle();

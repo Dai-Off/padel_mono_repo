@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Award, Calendar, Clock3, Copy, DollarSign, Loader2, Plus, Shield, Trash2, TrendingUp, Users } from 'lucide-react';
+import { ArrowLeft, Award, Calendar, Clock3, Copy, DollarSign, Loader2, Plus, Shield, Trash2, TrendingUp, Users, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { PageSpinner } from '../Layout/PageSpinner';
+import { ClubLeaguesTab } from '../Leagues/ClubLeaguesTab';
 import {
   tournamentsService,
   type CompetitionMatch,
@@ -15,6 +16,7 @@ import {
   type TournamentInscription,
   type TournamentListItem,
   type TournamentPrize,
+  type TournamentDivisionRow,
 } from '../../services/tournaments';
 import { courtService } from '../../services/court';
 import type { Court } from '../../types/court';
@@ -502,14 +504,20 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const { i18n, t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<TournamentListItem[]>([]);
   const [selected, setSelected] = useState<TournamentListItem | null>(null);
   const [detail, setDetail] = useState<TournamentInscription[]>([]);
+  const [divisionsDetail, setDivisionsDetail] = useState<TournamentDivisionRow[]>([]);
   const [tab, setTab] = useState<'general' | 'jugadores' | 'chat' | 'competicion' | 'ajustes'>('general');
   const [createOpen, setCreateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [posterFileCreate, setPosterFileCreate] = useState<File | null>(null);
+  const [posterPreviewUrl, setPosterPreviewUrl] = useState<string | null>(null);
+  const posterInputCreateRef = useRef<HTMLInputElement | null>(null);
+  const [posterUploading, setPosterUploading] = useState(false);
   const [courts, setCourts] = useState<Court[]>([]);
   const [selectedCourtIds, setSelectedCourtIds] = useState<string[]>([]);
   const [addParticipantOpen, setAddParticipantOpen] = useState(false);
@@ -527,6 +535,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [competition, setCompetition] = useState<CompetitionView | null>(null);
   const [competitionFormat, setCompetitionFormat] = useState<'single_elim' | 'group_playoff' | 'round_robin'>('single_elim');
   const [bestOfSets, setBestOfSets] = useState('3');
+  const [bracketSeedStrategy, setBracketSeedStrategy] = useState('registration_order');
   const [groupSize, setGroupSize] = useState('4');
   const [qualifiersPerGroup, setQualifiersPerGroup] = useState('2');
   const [podiumDraftByPos, setPodiumDraftByPos] = useState<Record<number, string>>({});
@@ -554,6 +563,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [form, setForm] = useState({
     name: '',
     start_at: '',
+    recurring_enabled: false,
+    recurring_end_date: '',
+    recurring_weekdays: [1] as number[],
+    recurring_registration_close_hours: '12',
     registration_closed_at: '',
     cancellation_notice_hours: '24',
     duration_min: '120',
@@ -580,9 +593,12 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     elo_max: '',
     registration_closed_at: '',
     normas: '',
+    poster_url: '',
   });
   const routeId = location.pathname.startsWith('/torneos/') ? location.pathname.split('/')[2] : null;
   const isDetailRoute = Boolean(routeId);
+  const rootTabParam = searchParams.get('tab');
+  const topTab: 'torneos' | 'ligas' = !isDetailRoute && rootTabParam === 'ligas' ? 'ligas' : 'torneos';
   const lang = i18n.resolvedLanguage?.startsWith('zh') ? 'zh' : i18n.resolvedLanguage?.startsWith('en') ? 'en' : 'es';
   const tx = {
     pageTitle: lang === 'en' ? 'Tournament and Events Management' : lang === 'zh' ? '锦标赛与活动管理' : 'Gestión de Torneos y Eventos',
@@ -627,6 +643,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     const res = await tournamentsService.detail(id);
     if (gen !== detailFetchGenRef.current) return;
     setDetail(res.inscriptions ?? []);
+    setDivisionsDetail(res.divisions ?? []);
     setSelected((prev) => {
       if (prev?.id !== id) return prev;
       const merged = {
@@ -679,6 +696,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   useEffect(() => {
     if (!selected?.id) return;
     setDetail([]);
+    setDivisionsDetail([]);
     void refreshDetail(selected.id);
   }, [selected?.id, refreshDetail]);
 
@@ -720,7 +738,21 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
   useEffect(() => {
     if (createOpen) setCreatePrizeRows([newPrizeRow('Campeón')]);
+    else {
+      setPosterFileCreate(null);
+      if (posterInputCreateRef.current) posterInputCreateRef.current.value = '';
+    }
   }, [createOpen]);
+
+  useEffect(() => {
+    if (!posterFileCreate) {
+      setPosterPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(posterFileCreate);
+    setPosterPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [posterFileCreate]);
 
   useEffect(() => {
     if (!selected) return;
@@ -739,6 +771,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       elo_max: selected.elo_max != null ? String(selected.elo_max) : '',
       registration_closed_at: selected.registration_closed_at ? new Date(selected.registration_closed_at).toISOString().slice(0, 16) : '',
       normas: String(selected.normas ?? ''),
+      poster_url: String(selected.poster_url ?? ''),
     });
   }, [selected?.id]);
 
@@ -806,6 +839,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       setCompetition(view);
       if (view.tournament?.competition_format) setCompetitionFormat(view.tournament.competition_format);
       setBestOfSets(String(view.tournament?.match_rules?.best_of_sets ?? 3));
+      setBracketSeedStrategy(String(view.tournament?.match_rules?.bracket_seed_strategy ?? 'registration_order'));
       setGroupSize(String((view.tournament?.standings_rules?.group_size as number | undefined) ?? 4));
       setQualifiersPerGroup(String((view.tournament?.standings_rules?.qualifiers_per_group as number | undefined) ?? 2));
       const maxFromPodium = (view.podium ?? []).reduce((m, r) => Math.max(m, r.position), 0);
@@ -1008,7 +1042,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
           <h2 className="text-sm font-bold text-[#1A1A1A]">{tx.pageTitle}</h2>
           <p className="text-[11px] text-gray-500 mt-0.5">{tx.pageSubtitle}</p>
         </div>
-        {!isDetailRoute && (
+        {!isDetailRoute && topTab === 'torneos' && (
           <button
             type="button"
             onClick={() => setCreateOpen(true)}
@@ -1021,6 +1055,33 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       </div>
 
       {!isDetailRoute && (
+        <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1">
+          <button
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.delete('tab');
+              setSearchParams(next, { replace: true });
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${topTab === 'torneos' ? 'bg-[#1A1A1A] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+          >
+            {t('menu_torneos')}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams);
+              next.set('tab', 'ligas');
+              setSearchParams(next, { replace: true });
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${topTab === 'ligas' ? 'bg-[#1A1A1A] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
+          >
+            {t('menu_ligas')}
+          </button>
+        </div>
+      )}
+
+      {!isDetailRoute && topTab === 'torneos' && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatCard label={tx.totalTournaments} value={String(stats.total)} icon={<Award className="w-4 h-4" />} color="#5B8DEE" />
           <StatCard label={tx.inProgress} value={String(stats.inProgress)} icon={<TrendingUp className="w-4 h-4" />} color="#22C55E" />
@@ -1029,7 +1090,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
         </div>
       )}
 
-      {!isDetailRoute && (
+      {!isDetailRoute && topTab === 'torneos' && (
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="divide-y divide-gray-100">
             {items.map((row) => {
@@ -1077,6 +1138,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
         </div>
       )}
 
+      {!isDetailRoute && topTab === 'ligas' && (
+        <ClubLeaguesTab clubId={clubId} clubResolved={clubResolved} />
+      )}
+
       {isDetailRoute && selected && (
         <div className="space-y-4">
           <div className="flex items-center gap-2">
@@ -1093,9 +1158,21 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
           <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <p className="text-sm font-black text-[#1A1A1A]">{tx.detailTitle}</p>
-                <p className="text-xs text-gray-500">{selected.name || selected.description || 'Sin nombre'}</p>
+              <div className="flex items-start gap-3 min-w-0">
+                {selected.poster_url ? (
+                  <img
+                    src={selected.poster_url}
+                    alt=""
+                    className="w-16 h-16 md:w-20 md:h-20 rounded-xl object-cover border border-gray-100 shrink-0"
+                  />
+                ) : null}
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-[#1A1A1A]">{tx.detailTitle}</p>
+                  <p className="text-xs text-gray-500">{selected.name || selected.description || 'Sin nombre'}</p>
+                  {selected.level_mode === 'multi_division' ? (
+                    <p className="text-[10px] text-amber-800 font-semibold mt-1">Multi-categoría</p>
+                  ) : null}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 {(['general', 'jugadores', 'chat', 'competicion', 'ajustes'] as const).map((x) => (
@@ -1143,6 +1220,24 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     <p className="text-xs font-semibold whitespace-pre-wrap">{selected.normas || 'Sin normas cargadas'}</p>
                   </div>
                 </div>
+                {divisionsDetail.length > 0 && (
+                  <div className="rounded-xl border border-gray-100 bg-white px-3 py-2">
+                    <p className="text-[10px] text-gray-500 uppercase mb-1">Categorías del torneo</p>
+                    <ul className="text-xs text-gray-800 space-y-1">
+                      {divisionsDetail.map((d) => (
+                        <li key={d.id}>
+                          <span className="font-semibold">{d.label}</span>{' '}
+                          <span className="text-gray-500">
+                            ({d.code})
+                            {d.elo_min != null || d.elo_max != null
+                              ? ` · Elo ${d.elo_min ?? '—'}–${d.elo_max ?? '—'}`
+                              : ''}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -1169,7 +1264,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       <p className="text-[11px] text-amber-800 mt-1">{pairingGateMessage}</p>
                       <p className="text-[11px] text-amber-700/90 mt-2">
                         Modo{' '}
-                        <span className="font-semibold">{selected.registration_mode === 'pair' ? 'parejas' : 'individual'}</span>
+                        <span className="font-semibold">{selected.registration_mode === 'pair' ? 'parejas' : selected.registration_mode === 'both' ? 'ambos' : 'individual'}</span>
                         : en parejas deben estar los dos jugadores confirmados; en individual necesitas un número par de jugadores
                         (el sistema empareja en orden de inscripción).
                       </p>
@@ -1249,6 +1344,33 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                           >
                             {isConfirmed ? 'confirmado' : 'pendiente'}
                           </span>
+                          {selected.level_mode === 'multi_division' && divisionsDetail.length > 0 ? (
+                            <select
+                              value={ins.division_id ?? ''}
+                              onChange={async (e) => {
+                                if (!selected) return;
+                                const v = e.target.value;
+                                const nextId = v === '' ? null : v;
+                                try {
+                                  await tournamentsService.setInscriptionDivision(selected.id, ins.id, nextId);
+                                  setDetail((prev) =>
+                                    prev.map((row) => (row.id === ins.id ? { ...row, division_id: nextId } : row))
+                                  );
+                                  toast.success('Categoría actualizada');
+                                } catch (err) {
+                                  toast.error((err as Error).message || 'No se pudo actualizar');
+                                }
+                              }}
+                              className="text-[10px] rounded-lg border border-gray-200 px-1.5 py-1 max-w-[140px]"
+                            >
+                              <option value="">Sin categoría</option>
+                              {divisionsDetail.map((d) => (
+                                <option key={d.id} value={d.id}>
+                                  {d.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null}
                           <button
                             type="button"
                             onClick={async () => {
@@ -1385,6 +1507,20 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         className="mt-1 w-full text-xs outline-none"
                       />
                     </div>
+                    <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 md:col-span-2">
+                      <p className="text-[10px] uppercase text-gray-500 font-semibold">Orden al generar cuadro</p>
+                      <select
+                        value={bracketSeedStrategy}
+                        onChange={(e) => setBracketSeedStrategy(e.target.value)}
+                        className="mt-1 w-full text-xs outline-none bg-transparent"
+                      >
+                        <option value="registration_order">Orden de inscripción</option>
+                        <option value="random">Aleatorio</option>
+                        <option value="elo_snake">Elo — cruces tipo bracket (potencia de 2)</option>
+                        <option value="elo_top_vs_bottom">Elo — mejor vs peor (1ª ronda)</option>
+                        <option value="elo_tier_mid">Elo — priorizar nivel medio</option>
+                      </select>
+                    </div>
                     {isGroupPlayoff && (
                       <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
                         <p className="text-[10px] uppercase text-gray-500 font-semibold">Tamaño grupo</p>
@@ -1415,7 +1551,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         if (!selected) return;
                         await tournamentsService.setupCompetition(selected.id, {
                           format: competitionFormat,
-                          match_rules: { best_of_sets: Number(bestOfSets) || 3, allow_draws: false },
+                          match_rules: {
+                            best_of_sets: Number(bestOfSets) || 3,
+                            allow_draws: false,
+                            bracket_seed_strategy: bracketSeedStrategy,
+                          },
                           standings_rules: { group_size: Number(groupSize) || 4, qualifiers_per_group: Number(qualifiersPerGroup) || 2 },
                         });
                         toast.success('Configuración guardada');
@@ -1719,13 +1859,46 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     <option value="male">Masculino</option>
                     <option value="female">Femenino</option>
                   </select>
-                  <input type="datetime-local" value={settingsForm.registration_closed_at} onChange={(e) => setSettingsForm((p) => ({ ...p, registration_closed_at: e.target.value }))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2" />
+                  <input type="datetime-local" step={1800} value={settingsForm.registration_closed_at} onChange={(e) => setSettingsForm((p) => ({ ...p, registration_closed_at: e.target.value }))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2" />
                   <textarea
                     value={settingsForm.normas}
                     onChange={(e) => setSettingsForm((p) => ({ ...p, normas: e.target.value }))}
                     placeholder="Normas del torneo"
                     className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2"
                   />
+                  <input
+                    value={settingsForm.poster_url}
+                    onChange={(e) => setSettingsForm((p) => ({ ...p, poster_url: e.target.value }))}
+                    placeholder="URL cartel (https)"
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2"
+                  />
+                  <div className="md:col-span-2 flex flex-wrap items-center gap-2">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      disabled={posterUploading || !selected || !clubId}
+                      className="text-[11px] max-w-full"
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = '';
+                        if (!f || !selected || !clubId) return;
+                        setPosterUploading(true);
+                        try {
+                          const url = await tournamentsService.uploadPoster(clubId, selected.id, f);
+                          setSettingsForm((p) => ({ ...p, poster_url: url }));
+                          await tournamentsService.update(selected.id, { poster_url: url });
+                          toast.success('Cartel subido');
+                          await refreshList(selected.id);
+                          await refreshDetail(selected.id);
+                        } catch (err) {
+                          toast.error(err instanceof Error ? err.message : 'No se pudo subir el cartel');
+                        } finally {
+                          setPosterUploading(false);
+                        }
+                      }}
+                    />
+                    {posterUploading && <Loader2 className="w-4 h-4 animate-spin text-gray-500" />}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -1742,7 +1915,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     }
                     setSavingSettings(true);
                     try {
-                      await tournamentsService.update(selected.id, {
+                      const updatedTournament = await tournamentsService.update(selected.id, {
                         name: settingsForm.name || null,
                         start_at: settingsForm.start_at ? new Date(settingsForm.start_at).toISOString() : selected.start_at,
                         duration_min: Number(settingsForm.duration_min),
@@ -1759,10 +1932,12 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                             : null,
                         normas: settingsForm.normas || null,
                         registration_closed_at: settingsForm.registration_closed_at ? new Date(settingsForm.registration_closed_at).toISOString() : null,
+                        poster_url: settingsForm.poster_url.trim() || null,
                       });
+                      setItems((prev) => prev.map((it) => (it.id === selected.id ? { ...it, ...updatedTournament } : it)));
+                      setSelected((prev) => (prev?.id === selected.id ? { ...prev, ...updatedTournament } : prev));
                       toast.success('Ajustes guardados');
-                      await refreshList(selected.id);
-                      await refreshDetail(selected.id);
+                      void Promise.allSettled([refreshList(selected.id), refreshDetail(selected.id)]);
                     } finally {
                       setSavingSettings(false);
                     }
@@ -1801,6 +1976,56 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
             <div className="p-6 space-y-5 overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="rounded-2xl border border-gray-200 bg-white p-3 md:col-span-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Imagen del torneo</label>
+                      <p className="text-[11px] text-gray-500 mt-1">Sube un cartel para mostrarlo en la lista y detalle.</p>
+                    </div>
+                    {!posterFileCreate && (
+                      <button
+                        type="button"
+                        onClick={() => posterInputCreateRef.current?.click()}
+                        className="shrink-0 px-3 py-2 rounded-lg bg-[#E31E24] text-white text-xs font-semibold"
+                      >
+                        Agregar imagen
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    ref={posterInputCreateRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null;
+                      e.target.value = '';
+                      setPosterFileCreate(f);
+                    }}
+                  />
+                  {posterPreviewUrl && posterFileCreate && (
+                    <div className="relative mt-3 rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
+                      <img
+                        src={posterPreviewUrl}
+                        alt="Vista previa del cartel"
+                        className="w-full max-h-48 object-contain bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPosterFileCreate(null);
+                          if (posterInputCreateRef.current) posterInputCreateRef.current.value = '';
+                        }}
+                        className="absolute top-2 right-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/55 text-white hover:bg-black/70"
+                        aria-label="Quitar imagen"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                      <p className="text-[10px] text-gray-500 px-2 py-1.5 truncate border-t border-gray-100 bg-white">{posterFileCreate.name}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-3 md:col-span-2">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Nombre del torneo</label>
                   <input
                     value={form.name}
@@ -1824,11 +2049,74 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Recurrencia</label>
+                  <label className="mt-1.5 flex items-center gap-2 text-xs text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={form.recurring_enabled}
+                      onChange={(e) => setForm((p) => ({ ...p, recurring_enabled: e.target.checked }))}
+                    />
+                    Crear torneos semanales automáticamente
+                  </label>
+                  {form.recurring_enabled && (
+                    <div className="mt-2 space-y-2">
+                      <input
+                        type="date"
+                        value={form.recurring_end_date}
+                        onChange={(e) => setForm((p) => ({ ...p, recurring_end_date: e.target.value }))}
+                        className="w-full text-xs outline-none rounded-lg border border-black bg-white px-2 py-1.5"
+                      />
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          { id: 1, label: 'Lun' },
+                          { id: 2, label: 'Mar' },
+                          { id: 3, label: 'Mié' },
+                          { id: 4, label: 'Jue' },
+                          { id: 5, label: 'Vie' },
+                          { id: 6, label: 'Sáb' },
+                          { id: 0, label: 'Dom' },
+                        ].map((d) => {
+                          const active = form.recurring_weekdays.includes(d.id);
+                          return (
+                            <button
+                              key={d.id}
+                              type="button"
+                              onClick={() =>
+                                setForm((p) => ({
+                                  ...p,
+                                  recurring_weekdays: p.recurring_weekdays.includes(d.id)
+                                    ? p.recurring_weekdays.filter((x) => x !== d.id)
+                                    : [...p.recurring_weekdays, d.id].sort((a, b) => a - b),
+                                }))
+                              }
+                              className={`px-2 py-1 rounded-md border text-[11px] ${active ? 'bg-[#E31E24] text-white border-[#E31E24]' : 'bg-white text-gray-700 border-gray-300'}`}
+                            >
+                              {d.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={form.recurring_registration_close_hours}
+                        onChange={(e) => setForm((p) => ({ ...p, recurring_registration_close_hours: e.target.value }))}
+                        placeholder="Cierre inscripción (hs antes)"
+                        className="w-full text-xs outline-none rounded-lg border border-black bg-white px-2 py-1.5"
+                      />
+                      <p className="text-[11px] text-gray-500">Usa la hora de inicio como base y crea ocurrencias hasta la fecha indicada.</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Cierre de inscripción</label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-gray-400" />
                     <input
                       type="datetime-local"
+                      step={1800}
                       value={form.registration_closed_at}
                       onChange={(e) => setForm((p) => ({ ...p, registration_closed_at: e.target.value }))}
                       className="w-full text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5"
@@ -1968,7 +2256,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Modo inscripción (elige uno)</label>
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Modo inscripción</label>
                   <select
                     value={form.registration_mode}
                     onChange={(e) => setForm((p) => ({ ...p, registration_mode: e.target.value }))}
@@ -1976,8 +2264,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   >
                     <option value="individual">Individual</option>
                     <option value="pair">Parejas</option>
+                    <option value="both">Ambos (individual o parejas)</option>
                   </select>
-                  <p className="text-[11px] text-gray-500 mt-1">Puedes configurar el torneo para inscripción individual o por parejas.</p>
+                  <p className="text-[11px] text-gray-500 mt-1">Puedes permitir inscripción individual, por parejas o sin restricción (ambos).</p>
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
@@ -2025,10 +2314,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Descripción</label>
-                <textarea
-                  value={form.description}
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-3">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Descripción</label>
+                  <textarea
+                    value={form.description}
                   onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
                   placeholder="Describe formato, premio, reglas..."
                   className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
@@ -2088,6 +2378,21 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     toast.error('El inicio debe ser en punto o y media (ej: 09:00, 09:30)');
                     return;
                   }
+                  if (form.recurring_enabled) {
+                    if (!form.recurring_end_date) {
+                      toast.error('Indica fecha fin de recurrencia');
+                      return;
+                    }
+                    if (!form.recurring_weekdays.length) {
+                      toast.error('Selecciona al menos un día de la semana');
+                      return;
+                    }
+                    const startDateOnly = form.start_at.slice(0, 10);
+                    if (form.recurring_end_date < startDateOnly) {
+                      toast.error('La fecha fin no puede ser anterior al inicio');
+                      return;
+                    }
+                  }
                   if (!isValidDuration30(form.duration_min)) {
                     toast.error('La duración debe ser múltiplo de 30 (30, 60, 90, 120...)');
                     return;
@@ -2127,7 +2432,59 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   setSaving(true);
                   const savingToastId = toast.loading('Guardando torneo...');
                   try {
+                    if (form.recurring_enabled) {
+                      const [startDate, startTime] = form.start_at.split('T');
+                      const recurringPayload = {
+                        ...payload,
+                        start_date: startDate,
+                        end_date: form.recurring_end_date,
+                        start_time: startTime?.slice(0, 5) ?? '00:00',
+                        weekdays: form.recurring_weekdays,
+                        registration_close_hours_before_start: Number(form.recurring_registration_close_hours || 0),
+                        cancellation_hours_before_start: Number(form.cancellation_notice_hours || 0),
+                      };
+                      const result = await tournamentsService.createRecurring(recurringPayload);
+                      setCreateOpen(false);
+                      setSelectedCourtIds([]);
+                      setPosterFileCreate(null);
+                      setForm({
+                        name: '',
+                        start_at: '',
+                        recurring_enabled: false,
+                        recurring_end_date: '',
+                        recurring_weekdays: [1],
+                        recurring_registration_close_hours: '12',
+                        registration_closed_at: '',
+                        cancellation_notice_hours: '24',
+                        duration_min: '120',
+                        price_cents: '0',
+                        max_players: '12',
+                        registration_mode: 'individual',
+                        visibility: 'private',
+                        gender: '',
+                        invite_ttl_minutes: '1440',
+                        elo_min: '',
+                        elo_max: '',
+                        description: '',
+                        normas: '',
+                      });
+                      await refreshList();
+                      toast.success(`Serie creada: ${result.created_count} torneo(s), omitidos ${result.skipped_count}`, { id: savingToastId });
+                      return;
+                    }
                     const created = await tournamentsService.create(payload);
+                    if (posterFileCreate && clubId) {
+                      try {
+                        const url = await tournamentsService.uploadPoster(clubId, created.id, posterFileCreate);
+                        await tournamentsService.update(created.id, { poster_url: url });
+                        (created as { poster_url?: string }).poster_url = url;
+                      } catch (err) {
+                        toast.error(
+                          `Torneo creado; cartel no subido: ${err instanceof Error ? err.message : 'error'}`
+                        );
+                      }
+                    }
+                    setPosterFileCreate(null);
                     setItems((prev) => {
                       const next = [{ ...created, confirmed_count: 0, pending_count: 0 }, ...prev.filter((x) => x.id !== created.id)];
                       return next;
@@ -2138,6 +2495,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     setForm({
                       name: '',
                       start_at: '',
+                      recurring_enabled: false,
+                      recurring_end_date: '',
+                      recurring_weekdays: [1],
+                      recurring_registration_close_hours: '12',
                       registration_closed_at: '',
                       cancellation_notice_hours: '24',
                       duration_min: '120',
@@ -2332,16 +2693,18 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   if (!selected) return;
                   let freshInscriptions: TournamentInscription[];
                   let freshTournament: TournamentListItem;
+                  let freshDivisions: TournamentDivisionRow[];
                   try {
                     const fresh = await tournamentsService.detail(selected.id);
                     freshInscriptions = fresh.inscriptions ?? [];
                     freshTournament = fresh.tournament;
+                    freshDivisions = fresh.divisions ?? [];
                   } catch {
                     toast.error('No se pudieron cargar las inscripciones. Intenta de nuevo.');
                     setGenerateModeOpen(false);
                     return;
                   }
-                  const mode = selected.registration_mode === 'pair' ? 'pair' : 'individual';
+                  const mode = freshTournament.registration_mode === 'pair' ? 'pair' : 'individual';
                   const check = validatePairsForManualBracket(mode, freshInscriptions);
                   if (!check.ok) {
                     toast.error(check.message);
@@ -2358,6 +2721,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     return;
                   }
                   setDetail(freshInscriptions);
+                  setDivisionsDetail(freshDivisions);
                   setSelected(freshTournament);
                   setPairingGateMessage(null);
                   setGenerateModeOpen(false);

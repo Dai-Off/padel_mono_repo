@@ -43,7 +43,7 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
         setRejectMode(false);
         setRejectReason('');
         setCopied(false);
-    }, [application.id]);
+    }, [application?.id]);
 
     if (!application) return null;
 

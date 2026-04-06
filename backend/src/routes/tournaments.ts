@@ -17,6 +17,7 @@ import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { playerMeetsTournamentGender, tournamentGenderFromBody } from '../lib/tournamentGender';
 import { parsePrizesFromBody, sumPrizeCents, type TournamentPrizeEntry } from '../lib/tournamentPrizes';
 import { buildTournamentInviteUrl } from '../lib/env';
+import { normalizePosterUrl } from '../lib/tournamentPosterUrl';
 import {
   computeStandings,
   generateTournamentFixtures,
@@ -36,6 +37,77 @@ function canAccessClub(req: Request, clubId: string): boolean {
   return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
 }
 
+type DivisionInputRow = {
+  code: string;
+  label: string;
+  elo_min: number | null;
+  elo_max: number | null;
+  sort_order: number;
+};
+
+function parseDivisionsInput(raw: unknown): { ok: true; rows: DivisionInputRow[] } | { ok: false; error: string } {
+  if (raw == null) return { ok: true, rows: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: 'divisions debe ser un array' };
+  const rows: DivisionInputRow[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || !item) return { ok: false, error: 'Cada división debe ser un objeto' };
+    const o = item as Record<string, unknown>;
+    const code = String(o.code ?? '').trim();
+    const label = String(o.label ?? '').trim();
+    if (!code || !label) return { ok: false, error: 'Cada división requiere code y label' };
+    rows.push({
+      code,
+      label,
+      elo_min: o.elo_min != null ? Number(o.elo_min) : null,
+      elo_max: o.elo_max != null ? Number(o.elo_max) : null,
+      sort_order: Number.isFinite(Number(o.sort_order)) ? Number(o.sort_order) : rows.length,
+    });
+  }
+  const codes = new Set(rows.map((r) => r.code));
+  if (codes.size !== rows.length) return { ok: false, error: 'code de división duplicado' };
+  return { ok: true, rows };
+}
+
+async function replaceTournamentDivisions(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  tournamentId: string,
+  rows: DivisionInputRow[]
+): Promise<void> {
+  const { error: delErr } = await supabase.from('tournament_divisions').delete().eq('tournament_id', tournamentId);
+  if (delErr) throw new Error(delErr.message);
+  if (!rows.length) return;
+  const ins = rows.map((r) => ({
+    tournament_id: tournamentId,
+    code: r.code,
+    label: r.label,
+    elo_min: r.elo_min,
+    elo_max: r.elo_max,
+    sort_order: r.sort_order,
+  }));
+  const { error } = await supabase.from('tournament_divisions').insert(ins);
+  if (error) throw new Error(error.message);
+}
+
+async function pickDivisionIdForElo(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  tournamentId: string,
+  playerElo: number
+): Promise<string | null> {
+  const { data: divs } = await supabase
+    .from('tournament_divisions')
+    .select('id,elo_min,elo_max,sort_order')
+    .eq('tournament_id', tournamentId)
+    .order('sort_order', { ascending: true });
+  for (const d of divs ?? []) {
+    const min = (d as any).elo_min != null ? Number((d as any).elo_min) : null;
+    const max = (d as any).elo_max != null ? Number((d as any).elo_max) : null;
+    if (min != null && playerElo < min) continue;
+    if (max != null && playerElo > max) continue;
+    return String((d as any).id);
+  }
+  return null;
+}
+
 function asIso(value: unknown): string {
   return new Date(String(value)).toISOString();
 }
@@ -48,6 +120,42 @@ function isHalfHourStart(iso: string): boolean {
 
 function isDurationAllowed(durationMin: number): boolean {
   return Number.isInteger(durationMin) && durationMin >= 30 && durationMin % 30 === 0;
+}
+
+function normalizeRegistrationMode(value: unknown): 'individual' | 'pair' | 'both' {
+  const mode = String(value ?? '').trim();
+  if (mode === 'pair' || mode === 'both') return mode;
+  return 'individual';
+}
+
+function asYmd(value: unknown): string | null {
+  const s = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return s;
+}
+
+function asHm(value: unknown): string | null {
+  const s = String(value ?? '').trim();
+  if (!/^\d{2}:\d{2}$/.test(s)) return null;
+  const hh = Number(s.slice(0, 2));
+  const mm = Number(s.slice(3, 5));
+  if (!Number.isInteger(hh) || !Number.isInteger(mm) || hh < 0 || hh > 23) return null;
+  if (!(mm === 0 || mm === 30)) return null;
+  return s;
+}
+
+function parseWeekdays(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  const out = new Set<number>();
+  for (const item of raw) {
+    const n = Number(item);
+    if (Number.isInteger(n) && n >= 0 && n <= 6) out.add(n);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+function buildUtcIsoFromYmdHm(ymd: string, hm: string): string {
+  return `${ymd}T${hm}:00.000Z`;
 }
 
 async function getPlayerDisplayName(playerId: string): Promise<string> {
@@ -68,7 +176,7 @@ async function getTournamentForPlayer(
   const { data: tournament, error } = await supabase
     .from('tournaments')
     .select(
-      'id, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas'
+      'id, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode'
     )
     .eq('id', tournamentId)
     .maybeSingle();
@@ -234,7 +342,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
       .from('tournaments')
-      .select('id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, tournament_courts(court_id)')
+      .select('id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, tournament_courts(court_id)')
       .eq('club_id', clubId)
       .order('start_at', { ascending: true });
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -291,7 +399,7 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament, error } = await supabase
       .from('tournaments')
-      .select('id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, tournament_courts(court_id)')
+      .select('id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, tournament_courts(court_id)')
       .eq('id', id)
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -304,17 +412,19 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     await refreshTournamentStatus(id, { skipInviteCleanup: true });
 
     const inscriptionSelect =
-      'id, status, invited_at, expires_at, confirmed_at, invite_email_1, invite_email_2, player_id_1, player_id_2, players_1:players!tournament_inscriptions_player_id_1_fkey(id, first_name, last_name, email, avatar_url, elo_rating), players_2:players!tournament_inscriptions_player_id_2_fkey(id, first_name, last_name, email, avatar_url, elo_rating)';
+      'id, status, invited_at, expires_at, confirmed_at, invite_email_1, invite_email_2, player_id_1, player_id_2, division_id, players_1:players!tournament_inscriptions_player_id_1_fkey(id, first_name, last_name, email, avatar_url, elo_rating), players_2:players!tournament_inscriptions_player_id_2_fkey(id, first_name, last_name, email, avatar_url, elo_rating)';
     const fullTournamentSelect =
-      'id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, tournament_courts(court_id)';
+      'id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, tournament_courts(court_id)';
 
-    const [{ data: tournamentFresh, error: t2Err }, { data: inscriptions, error: iErr }] = await Promise.all([
+    const [{ data: tournamentFresh, error: t2Err }, { data: inscriptions, error: iErr }, { data: divisions, error: divErr }] = await Promise.all([
       supabase.from('tournaments').select(fullTournamentSelect).eq('id', id).maybeSingle(),
       supabase.from('tournament_inscriptions').select(inscriptionSelect).eq('tournament_id', id).order('invited_at', { ascending: true }),
+      supabase.from('tournament_divisions').select('id,code,label,elo_min,elo_max,sort_order').eq('tournament_id', id).order('sort_order', { ascending: true }),
     ]);
     if (t2Err) return res.status(500).json({ ok: false, error: t2Err.message });
     if (!tournamentFresh) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
     if (iErr) return res.status(500).json({ ok: false, error: iErr.message });
+    if (divErr) return res.status(500).json({ ok: false, error: divErr.message });
 
     const sorted = [...(inscriptions ?? [])].sort((a: any, b: any) => {
       const pa = a.status === 'confirmed' ? 0 : 1;
@@ -329,6 +439,7 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
       ok: true,
       tournament: tournamentFresh,
       inscriptions: sorted,
+      divisions: divisions ?? [],
       counts: {
         confirmed: slots.confirmedPlayers,
         pending: slots.pendingPlayers,
@@ -364,7 +475,7 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
  *               elo_min: { type: integer, nullable: true }
  *               elo_max: { type: integer, nullable: true }
  *               max_players: { type: integer, minimum: 2 }
- *               registration_mode: { type: string, enum: [individual, pair] }
+ *               registration_mode: { type: string, enum: [individual, pair, both], description: 'individual, pair o both (sin restricción)' }
  *               registration_closed_at: { type: string, format: date-time, nullable: true }
  *               cancellation_cutoff_at: { type: string, format: date-time, nullable: true }
  *               invite_ttl_minutes: { type: integer, minimum: 1 }
@@ -444,35 +555,52 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
     const conflict = await findTournamentConflict({ clubId, courtIds, startAt, endAt });
     if (conflict) return res.status(409).json({ ok: false, error: conflict });
 
+    const levelMode = body.level_mode === 'multi_division' ? 'multi_division' : 'single_band';
+    const divParsed = parseDivisionsInput(body.divisions);
+    if (!divParsed.ok) return res.status(400).json({ ok: false, error: divParsed.error });
+    if (levelMode === 'multi_division' && divParsed.rows.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Torneo multi-división requiere al menos una categoría en divisions' });
+    }
+    const posterNorm = normalizePosterUrl(body as Record<string, unknown>, 'poster_url');
+    if (!posterNorm.ok) return res.status(400).json({ ok: false, error: posterNorm.error });
+
     const supabase = getSupabaseServiceRoleClient();
     const organizerPlayerId = await resolveOrganizerPlayerId(req, clubId);
-    const { data: tournament, error } = await supabase
-      .from('tournaments')
-      .insert({
-        club_id: clubId,
-        name: body.name != null ? String(body.name).trim() || null : null,
-        start_at: startAt,
-        end_at: endAt,
-        duration_min: duration,
-        price_cents: Math.max(0, Number(body.price_cents ?? 0)),
-        prize_total_cents: insertPrizeTotalCents,
-        prizes: insertPrizes,
-        currency: String(body.currency ?? 'EUR'),
-        visibility: body.visibility === 'public' ? 'public' : 'private',
-        gender: genderParsed ?? null,
-        elo_min: body.elo_min != null ? Number(body.elo_min) : null,
-        elo_max: body.elo_max != null ? Number(body.elo_max) : null,
-        max_players: Math.max(2, Number(body.max_players)),
-        registration_mode: body.registration_mode === 'pair' ? 'pair' : 'individual',
-        registration_closed_at: body.registration_closed_at ? asIso(body.registration_closed_at) : null,
-        cancellation_cutoff_at: body.cancellation_cutoff_at ? asIso(body.cancellation_cutoff_at) : null,
-        invite_ttl_minutes: Math.max(1, Number(body.invite_ttl_minutes ?? 1440)),
-        description: body.description != null ? String(body.description) : null,
-        normas: body.normas != null ? String(body.normas) : null,
-      })
-      .select('*')
-      .single();
+    const insertRow: Record<string, unknown> = {
+      club_id: clubId,
+      name: body.name != null ? String(body.name).trim() || null : null,
+      start_at: startAt,
+      end_at: endAt,
+      duration_min: duration,
+      price_cents: Math.max(0, Number(body.price_cents ?? 0)),
+      prize_total_cents: insertPrizeTotalCents,
+      prizes: insertPrizes,
+      currency: String(body.currency ?? 'EUR'),
+      visibility: body.visibility === 'public' ? 'public' : 'private',
+      gender: genderParsed ?? null,
+      elo_min: body.elo_min != null ? Number(body.elo_min) : null,
+      elo_max: body.elo_max != null ? Number(body.elo_max) : null,
+      max_players: Math.max(2, Number(body.max_players)),
+      registration_mode: normalizeRegistrationMode(body.registration_mode),
+      registration_closed_at: body.registration_closed_at ? asIso(body.registration_closed_at) : null,
+      cancellation_cutoff_at: body.cancellation_cutoff_at ? asIso(body.cancellation_cutoff_at) : null,
+      invite_ttl_minutes: Math.max(1, Number(body.invite_ttl_minutes ?? 1440)),
+      description: body.description != null ? String(body.description) : null,
+      normas: body.normas != null ? String(body.normas) : null,
+      level_mode: levelMode,
+    };
+    if (posterNorm.mode === 'set') insertRow.poster_url = posterNorm.value;
+
+    const { data: tournament, error } = await supabase.from('tournaments').insert(insertRow).select('*').single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    if (levelMode === 'multi_division') {
+      try {
+        await replaceTournamentDivisions(supabase, tournament.id, divParsed.rows);
+      } catch (e) {
+        return res.status(500).json({ ok: false, error: (e as Error).message });
+      }
+    }
 
     const rows = courtIds.map((courtId: string) => ({ tournament_id: tournament.id, court_id: courtId }));
     const { error: cErr } = await supabase.from('tournament_courts').insert(rows);
@@ -488,6 +616,245 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
     });
 
     return res.status(201).json({ ok: true, tournament });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/recurring:
+ *   post:
+ *     tags: [Tournaments]
+ *     summary: Crear torneos recurrentes semanales
+ *     description: |
+ *       Genera múltiples torneos semanales (por días seleccionados) dentro de un rango de fechas.
+ *       Reutiliza la configuración del torneo (precio, reglas, Elo, género, visibilidad, etc.).
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_id, start_date, end_date, start_time, duration_min, max_players, court_ids, weekdays]
+ *             properties:
+ *               club_id: { type: string, format: uuid, description: Club dueño de la serie }
+ *               name: { type: string, nullable: true, description: Nombre base de cada torneo }
+ *               start_date: { type: string, format: date, example: '2026-04-06' }
+ *               end_date: { type: string, format: date, example: '2026-06-30' }
+ *               start_time: { type: string, example: '19:30', description: 'Hora fija en formato HH:mm (solo :00 o :30)' }
+ *               weekdays:
+ *                 type: array
+ *                 description: 'Días de la semana a crear (0=domingo ... 6=sábado)'
+ *                 items: { type: integer, minimum: 0, maximum: 6 }
+ *                 example: [1]
+ *               duration_min: { type: integer, minimum: 30 }
+ *               price_cents: { type: integer, minimum: 0 }
+ *               prize_total_cents: { type: integer, minimum: 0 }
+ *               prizes:
+ *                 type: array
+ *                 maxItems: 20
+ *                 items:
+ *                   type: object
+ *                   required: [label, amount_cents]
+ *                   properties:
+ *                     label: { type: string }
+ *                     amount_cents: { type: integer, minimum: 0 }
+ *               currency: { type: string, example: EUR }
+ *               visibility: { type: string, enum: [private, public] }
+ *               gender:
+ *                 type: string
+ *                 nullable: true
+ *                 enum: [male, female, mixed]
+ *               elo_min: { type: integer, nullable: true }
+ *               elo_max: { type: integer, nullable: true }
+ *               max_players: { type: integer, minimum: 2 }
+ *               registration_mode: { type: string, enum: [individual, pair, both] }
+ *               registration_close_hours_before_start:
+ *                 type: number
+ *                 minimum: 0
+ *                 nullable: true
+ *                 description: Horas antes del inicio para cerrar inscripción en cada ocurrencia
+ *               cancellation_hours_before_start:
+ *                 type: number
+ *                 minimum: 0
+ *                 nullable: true
+ *                 description: Horas antes del inicio para cutoff de cancelación en cada ocurrencia
+ *               invite_ttl_minutes: { type: integer, minimum: 1 }
+ *               description: { type: string, nullable: true }
+ *               normas: { type: string, nullable: true }
+ *               poster_url: { type: string, nullable: true }
+ *               level_mode: { type: string, enum: [single_band, multi_division] }
+ *               divisions:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     code: { type: string }
+ *                     label: { type: string }
+ *                     elo_min: { type: integer, nullable: true }
+ *                     elo_max: { type: integer, nullable: true }
+ *                     sort_order: { type: integer }
+ *               court_ids:
+ *                 type: array
+ *                 items: { type: string, format: uuid }
+ *           examples:
+ *             monday_american:
+ *               value:
+ *                 club_id: "11111111-1111-1111-1111-111111111111"
+ *                 name: "Americano Lunes"
+ *                 start_date: "2026-04-06"
+ *                 end_date: "2026-06-29"
+ *                 start_time: "20:00"
+ *                 weekdays: [1]
+ *                 duration_min: 120
+ *                 max_players: 12
+ *                 registration_mode: "both"
+ *                 price_cents: 1500
+ *                 cancellation_hours_before_start: 24
+ *                 registration_close_hours_before_start: 12
+ *                 normas: "Formato americano, 1 set por rotación."
+ *                 court_ids: ["22222222-2222-2222-2222-222222222222"]
+ *     responses:
+ *       201:
+ *         description: Serie creada (con detalle de creados y omitidos)
+ *       400:
+ *         description: Validación de datos (fechas/horas/semana/divisiones)
+ *       403:
+ *         description: Sin acceso al club
+ *       409:
+ *         description: Todos los horarios entran en conflicto
+ */
+router.post('/recurring', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const body = req.body ?? {};
+  const clubId = String(body.club_id ?? '').trim();
+  const courtIds = Array.isArray(body.court_ids) ? body.court_ids.map(String) : [];
+  const startDate = asYmd(body.start_date);
+  const endDate = asYmd(body.end_date);
+  const startTime = asHm(body.start_time);
+  const weekdays = parseWeekdays(body.weekdays);
+  if (!clubId || !startDate || !endDate || !startTime || !body.duration_min || !body.max_players || !courtIds.length || !weekdays.length) {
+    return res.status(400).json({
+      ok: false,
+      error: 'club_id, start_date, end_date, start_time, weekdays, duration_min, max_players y court_ids son obligatorios',
+    });
+  }
+  if (startDate > endDate) {
+    return res.status(400).json({ ok: false, error: 'start_date no puede ser mayor a end_date' });
+  }
+  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  const genderParsed = tournamentGenderFromBody(body.gender);
+  if (genderParsed === false) {
+    return res.status(400).json({ ok: false, error: 'gender debe ser male, female, mixed, null u omitirse' });
+  }
+  const duration = Number(body.duration_min);
+  if (!isDurationAllowed(duration)) {
+    return res.status(400).json({ ok: false, error: 'duration_min debe ser múltiplo de 30 (30, 60, 90, 120...)' });
+  }
+
+  let insertPrizes: TournamentPrizeEntry[] = [];
+  let insertPrizeTotalCents = Math.max(0, Number(body.prize_total_cents ?? 0));
+  if (Array.isArray(body.prizes)) {
+    const parsed = parsePrizesFromBody(body.prizes);
+    if (!parsed.ok) return res.status(400).json({ ok: false, error: parsed.error });
+    insertPrizes = parsed.prizes;
+    insertPrizeTotalCents = sumPrizeCents(parsed.prizes);
+  }
+  const levelMode = body.level_mode === 'multi_division' ? 'multi_division' : 'single_band';
+  const divParsed = parseDivisionsInput(body.divisions);
+  if (!divParsed.ok) return res.status(400).json({ ok: false, error: divParsed.error });
+  if (levelMode === 'multi_division' && divParsed.rows.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Torneo multi-división requiere al menos una categoría en divisions' });
+  }
+  const posterNorm = normalizePosterUrl(body as Record<string, unknown>, 'poster_url');
+  if (!posterNorm.ok) return res.status(400).json({ ok: false, error: posterNorm.error });
+
+  const registrationCloseHours =
+    body.registration_close_hours_before_start != null ? Math.max(0, Number(body.registration_close_hours_before_start)) : null;
+  const cancellationHours =
+    body.cancellation_hours_before_start != null ? Math.max(0, Number(body.cancellation_hours_before_start)) : null;
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const organizerPlayerId = await resolveOrganizerPlayerId(req, clubId);
+    const created: Array<{ id: string; start_at: string }> = [];
+    const skipped: Array<{ start_at: string; reason: string }> = [];
+    let cursor = new Date(`${startDate}T00:00:00.000Z`);
+    const end = new Date(`${endDate}T00:00:00.000Z`);
+    while (cursor.getTime() <= end.getTime()) {
+      const wd = cursor.getUTCDay();
+      if (weekdays.includes(wd)) {
+        const ymd = cursor.toISOString().slice(0, 10);
+        const startAt = buildUtcIsoFromYmdHm(ymd, startTime);
+        const endAt = new Date(new Date(startAt).getTime() + duration * 60000).toISOString();
+        const conflict = await findTournamentConflict({ clubId, courtIds, startAt, endAt });
+        if (conflict) {
+          skipped.push({ start_at: startAt, reason: conflict });
+        } else {
+          const startMs = new Date(startAt).getTime();
+          const insertRow: Record<string, unknown> = {
+            club_id: clubId,
+            name: body.name != null ? String(body.name).trim() || null : null,
+            start_at: startAt,
+            end_at: endAt,
+            duration_min: duration,
+            price_cents: Math.max(0, Number(body.price_cents ?? 0)),
+            prize_total_cents: insertPrizeTotalCents,
+            prizes: insertPrizes,
+            currency: String(body.currency ?? 'EUR'),
+            visibility: body.visibility === 'public' ? 'public' : 'private',
+            gender: genderParsed ?? null,
+            elo_min: body.elo_min != null ? Number(body.elo_min) : null,
+            elo_max: body.elo_max != null ? Number(body.elo_max) : null,
+            max_players: Math.max(2, Number(body.max_players)),
+            registration_mode: normalizeRegistrationMode(body.registration_mode),
+            registration_closed_at: registrationCloseHours != null ? new Date(startMs - registrationCloseHours * 60 * 60 * 1000).toISOString() : null,
+            cancellation_cutoff_at: cancellationHours != null ? new Date(startMs - cancellationHours * 60 * 60 * 1000).toISOString() : null,
+            invite_ttl_minutes: Math.max(1, Number(body.invite_ttl_minutes ?? 1440)),
+            description: body.description != null ? String(body.description) : null,
+            normas: body.normas != null ? String(body.normas) : null,
+            level_mode: levelMode,
+          };
+          if (posterNorm.mode === 'set') insertRow.poster_url = posterNorm.value;
+          const { data: tournament, error } = await supabase.from('tournaments').insert(insertRow).select('*').single();
+          if (error) {
+            skipped.push({ start_at: startAt, reason: error.message });
+          } else {
+            if (levelMode === 'multi_division') {
+              try {
+                await replaceTournamentDivisions(supabase, tournament.id, divParsed.rows);
+              } catch (e) {
+                skipped.push({ start_at: startAt, reason: (e as Error).message });
+                cursor.setUTCDate(cursor.getUTCDate() + 1);
+                continue;
+              }
+            }
+            const rows = courtIds.map((courtId: string) => ({ tournament_id: tournament.id, court_id: courtId }));
+            const { error: cErr } = await supabase.from('tournament_courts').insert(rows);
+            if (cErr) {
+              skipped.push({ start_at: startAt, reason: cErr.message });
+              cursor.setUTCDate(cursor.getUTCDate() + 1);
+              continue;
+            }
+            await syncTournamentBookings({
+              tournamentId: tournament.id,
+              courtIds,
+              startAt,
+              endAt,
+              organizerPlayerId,
+              notes: body.description != null ? String(body.description) : null,
+            });
+            created.push({ id: String(tournament.id), start_at: startAt });
+          }
+        }
+      }
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    if (!created.length) {
+      return res.status(409).json({ ok: false, error: 'No se pudo crear ninguna ocurrencia', skipped });
+    }
+    return res.status(201).json({ ok: true, created_count: created.length, skipped_count: skipped.length, created, skipped });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -540,6 +907,10 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
  *                 type: string
  *                 nullable: true
  *                 description: 'Nombre visible del torneo. null para limpiar'
+ *               registration_mode:
+ *                 type: string
+ *                 enum: [individual, pair, both]
+ *                 description: 'Modo de inscripción: individual, parejas o ambos'
  *     responses:
  *       200: { description: Torneo actualizado }
  *       400: { description: gender o prizes inválido }
@@ -610,15 +981,43 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     if (body.description !== undefined) update.description = body.description != null ? String(body.description) : null;
     if (body.name !== undefined) update.name = body.name != null ? String(body.name).trim() || null : null;
     if (body.normas !== undefined) update.normas = body.normas != null ? String(body.normas) : null;
-    if (body.registration_mode !== undefined) update.registration_mode = body.registration_mode === 'pair' ? 'pair' : 'individual';
+    if (body.registration_mode !== undefined) update.registration_mode = normalizeRegistrationMode(body.registration_mode);
     if (body.gender !== undefined) {
       const g = tournamentGenderFromBody(body.gender);
       if (g === false) return res.status(400).json({ ok: false, error: 'gender debe ser male, female, mixed, null u omitirse' });
       update.gender = g;
     }
+    if (body.level_mode !== undefined) {
+      update.level_mode = body.level_mode === 'multi_division' ? 'multi_division' : 'single_band';
+    }
+    const posterUp = normalizePosterUrl(body as Record<string, unknown>, 'poster_url');
+    if (!posterUp.ok) return res.status(400).json({ ok: false, error: posterUp.error });
+    if (posterUp.mode === 'set') update.poster_url = posterUp.value;
 
     const { data: tournament, error: upErr } = await supabase.from('tournaments').update(update).eq('id', id).select('*').single();
     if (upErr) return res.status(500).json({ ok: false, error: upErr.message });
+
+    if (body.divisions !== undefined) {
+      const { count, error: tcErr } = await supabase
+        .from('tournament_teams')
+        .select('id', { head: true, count: 'exact' })
+        .eq('tournament_id', id);
+      if (tcErr) return res.status(500).json({ ok: false, error: tcErr.message });
+      if ((count ?? 0) > 0) {
+        return res.status(400).json({ ok: false, error: 'No se pueden cambiar categorías si ya hay equipos generados' });
+      }
+      const d = parseDivisionsInput(body.divisions);
+      if (!d.ok) return res.status(400).json({ ok: false, error: d.error });
+      const lm = String((tournament as { level_mode?: string }).level_mode ?? 'single_band');
+      if (lm === 'multi_division' && d.rows.length === 0) {
+        return res.status(400).json({ ok: false, error: 'Torneo multi-división requiere al menos una categoría' });
+      }
+      try {
+        await replaceTournamentDivisions(supabase, id, d.rows);
+      } catch (e) {
+        return res.status(500).json({ ok: false, error: (e as Error).message });
+      }
+    }
 
     if (Array.isArray(body.court_ids)) {
       await supabase.from('tournament_courts').delete().eq('tournament_id', id);
@@ -894,7 +1293,7 @@ router.post('/:id/participants', requireClubOwnerOrAdmin, async (req: Request, r
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament, error: tErr } = await supabase
       .from('tournaments')
-      .select('id, club_id, status, max_players, invite_ttl_minutes, registration_mode, elo_min, elo_max, gender')
+      .select('id, club_id, status, max_players, invite_ttl_minutes, registration_mode, elo_min, elo_max, gender, level_mode')
       .eq('id', tournamentId)
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
@@ -905,7 +1304,7 @@ router.post('/:id/participants', requireClubOwnerOrAdmin, async (req: Request, r
     if (String((tournament as { status: string }).status) !== 'open') {
       return res.status(400).json({ ok: false, error: 'El torneo no está abierto' });
     }
-    if (String((tournament as { registration_mode?: string }).registration_mode ?? 'individual') !== 'individual') {
+    if (!['individual', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode ?? 'individual'))) {
       return res.status(400).json({ ok: false, error: 'Este torneo no admite alta individual confirmada' });
     }
 
@@ -932,10 +1331,32 @@ router.post('/:id/participants', requireClubOwnerOrAdmin, async (req: Request, r
     if (existingIns) return res.status(409).json({ ok: false, error: 'El jugador ya está inscripto en este torneo' });
 
     const elo = Number((player as { elo_rating?: number }).elo_rating ?? 3.5);
-    const eloMin = (tournament as any).elo_min;
-    const eloMax = (tournament as any).elo_max;
-    if (eloMin != null && eloMax != null && (elo < eloMin || elo > eloMax)) {
-      return res.status(403).json({ ok: false, error: 'El nivel Elo del jugador no está en el rango permitido' });
+    const levelModePart = String((tournament as any).level_mode ?? 'single_band');
+    if (levelModePart === 'single_band') {
+      const eloMin = (tournament as any).elo_min;
+      const eloMax = (tournament as any).elo_max;
+      if (eloMin != null && eloMax != null && (elo < eloMin || elo > eloMax)) {
+        return res.status(403).json({ ok: false, error: 'El nivel Elo del jugador no está en el rango permitido' });
+      }
+    }
+    let divisionIdPart: string | null = null;
+    if (levelModePart === 'multi_division') {
+      const manualDiv = req.body?.division_id != null ? String(req.body.division_id).trim() : '';
+      if (manualDiv) {
+        const { data: divRow } = await supabase
+          .from('tournament_divisions')
+          .select('id')
+          .eq('id', manualDiv)
+          .eq('tournament_id', tournamentId)
+          .maybeSingle();
+        if (!divRow) return res.status(400).json({ ok: false, error: 'division_id no válido para este torneo' });
+        divisionIdPart = manualDiv;
+      } else {
+        divisionIdPart = await pickDivisionIdForElo(supabase, tournamentId, elo);
+        if (!divisionIdPart) {
+          return res.status(400).json({ ok: false, error: 'No hay categoría que encaje con el Elo del jugador; asigna division_id manualmente' });
+        }
+      }
     }
     if (!playerMeetsTournamentGender((tournament as { gender?: string }).gender, (player as { gender?: string }).gender)) {
       return res.status(403).json({
@@ -955,6 +1376,7 @@ router.post('/:id/participants', requireClubOwnerOrAdmin, async (req: Request, r
       confirmed_at: nowIso,
       player_id_1: playerId,
       token_hash: tokenHash,
+      ...(divisionIdPart ? { division_id: divisionIdPart } : {}),
     });
     if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
 
@@ -966,6 +1388,86 @@ router.post('/:id/participants', requireClubOwnerOrAdmin, async (req: Request, r
       message: `${joinedName} se ha unido al torneo.`,
     });
     await refreshTournamentStatus(tournamentId, { force: true, skipInviteCleanup: true });
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/inscriptions/{inscriptionId}/division:
+ *   put:
+ *     tags: [Tournaments]
+ *     summary: Asignar categoría a una inscripción (torneo multi-división)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: path
+ *         name: inscriptionId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               division_id: { type: string, format: uuid, nullable: true, description: 'null para quitar asignación' }
+ *     responses:
+ *       200: { description: Actualizado }
+ *       400: { description: División no pertenece al torneo }
+ *       404: { description: No encontrado }
+ */
+router.put('/:id/inscriptions/:inscriptionId/division', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  const inscriptionId = req.params.inscriptionId;
+  const divisionIdRaw = req.body?.division_id;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: tournament, error: tErr } = await supabase
+      .from('tournaments')
+      .select('id, club_id, level_mode')
+      .eq('id', tournamentId)
+      .maybeSingle();
+    if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
+    if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    if (String((tournament as { level_mode?: string }).level_mode ?? 'single_band') !== 'multi_division') {
+      return res.status(400).json({ ok: false, error: 'Solo aplica a torneos multi-división' });
+    }
+    let divisionId: string | null = null;
+    if (divisionIdRaw != null) {
+      divisionId = String(divisionIdRaw).trim();
+      const { data: div, error: dErr } = await supabase
+        .from('tournament_divisions')
+        .select('id')
+        .eq('id', divisionId)
+        .eq('tournament_id', tournamentId)
+        .maybeSingle();
+      if (dErr) return res.status(500).json({ ok: false, error: dErr.message });
+      if (!div) return res.status(400).json({ ok: false, error: 'Categoría no válida para este torneo' });
+    }
+    const { data: ins, error: iErr } = await supabase
+      .from('tournament_inscriptions')
+      .select('id')
+      .eq('id', inscriptionId)
+      .eq('tournament_id', tournamentId)
+      .maybeSingle();
+    if (iErr) return res.status(500).json({ ok: false, error: iErr.message });
+    if (!ins) return res.status(404).json({ ok: false, error: 'Inscripción no encontrada' });
+    const { error: uErr } = await supabase
+      .from('tournament_inscriptions')
+      .update({ division_id: divisionId, updated_at: new Date().toISOString() })
+      .eq('id', inscriptionId)
+      .eq('tournament_id', tournamentId);
+    if (uErr) return res.status(500).json({ ok: false, error: uErr.message });
     return res.json({ ok: true });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -1050,7 +1552,7 @@ router.delete('/:id/inscriptions/:inscriptionId', requireClubOwnerOrAdmin, async
  *     tags: [Tournaments]
  *     summary: Intercambiar jugadores entre dos inscripciones (modo individual)
  *     description: |
- *       Solo torneos `registration_mode = individual`. Intercambia `player_id_1` e `invite_email_1`
+ *       Solo torneos `registration_mode = individual|both`. Intercambia `player_id_1` e `invite_email_1`
  *       entre dos filas confirmadas (cambia con quien queda emparejado al generar equipos).
  *       Si ya existía fixture generado, conviene volver a generar competición.
  *     security: [{ bearerAuth: [] }]
@@ -1094,8 +1596,8 @@ router.post('/:id/inscriptions/swap-singles', requireClubOwnerOrAdmin, async (re
     if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
-    if (String((tournament as { registration_mode?: string }).registration_mode ?? 'individual') !== 'individual') {
-      return res.status(400).json({ ok: false, error: 'Solo disponible en torneos modo individual' });
+    if (!['individual', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode ?? 'individual'))) {
+      return res.status(400).json({ ok: false, error: 'Solo disponible en torneos modo individual o ambos' });
     }
     if (String((tournament as { status: string }).status) === 'cancelled') {
       return res.status(400).json({ ok: false, error: 'Torneo cancelado' });
@@ -1225,8 +1727,8 @@ router.put('/:id/inscriptions/singles-pairing', requireClubOwnerOrAdmin, async (
     if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
-    if (String((tournament as { registration_mode?: string }).registration_mode ?? 'individual') !== 'individual') {
-      return res.status(400).json({ ok: false, error: 'Solo disponible en torneos modo individual' });
+    if (!['individual', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode ?? 'individual'))) {
+      return res.status(400).json({ ok: false, error: 'Solo disponible en torneos modo individual o ambos' });
     }
     if (String((tournament as { status: string }).status) === 'cancelled') {
       return res.status(400).json({ ok: false, error: 'Torneo cancelado' });
@@ -1373,8 +1875,8 @@ router.post('/:id/inscriptions/:inscriptionId/assign-partner', requireClubOwnerO
     if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
-    if (String((tournament as { registration_mode?: string }).registration_mode) !== 'pair') {
-      return res.status(400).json({ ok: false, error: 'Solo en torneos modo parejas' });
+    if (!['pair', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode))) {
+      return res.status(400).json({ ok: false, error: 'Solo en torneos modo parejas o ambos' });
     }
     if (String((tournament as { status: string }).status) !== 'open') {
       return res.status(400).json({ ok: false, error: 'El torneo no está abierto' });
@@ -1616,7 +2118,7 @@ router.get('/public/list', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     let q = supabase
       .from('tournaments')
-      .select('id, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, max_players, status, description, normas')
+      .select('id, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, max_players, status, description, normas, poster_url, level_mode')
       .eq('visibility', 'public')
       .neq('status', 'cancelled')
       .order('start_at', { ascending: true });
@@ -1674,7 +2176,7 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament, error } = await supabase
       .from('tournaments')
-      .select('id, visibility, status, max_players, invite_ttl_minutes, gender')
+      .select('id, visibility, status, max_players, invite_ttl_minutes, gender, elo_min, elo_max, level_mode')
       .eq('id', tournamentId)
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -1699,7 +2201,7 @@ router.post('/:id/join', async (req: Request, res: Response) => {
       .maybeSingle();
     if (existingIns) return res.json({ ok: true, already_joined: true });
 
-    const { data: joinPlayer } = await supabase.from('players').select('gender').eq('id', auth.playerId).maybeSingle();
+    const { data: joinPlayer } = await supabase.from('players').select('gender, elo_rating').eq('id', auth.playerId).maybeSingle();
     if (
       !playerMeetsTournamentGender(
         (tournament as { gender?: string }).gender,
@@ -1713,6 +2215,26 @@ router.post('/:id/join', async (req: Request, res: Response) => {
       });
     }
 
+    const playerElo = Number((joinPlayer as { elo_rating?: number } | null)?.elo_rating ?? 0);
+    const levelMode = String((tournament as any).level_mode ?? 'single_band');
+    if (levelMode === 'single_band') {
+      const emin = (tournament as any).elo_min != null ? Number((tournament as any).elo_min) : null;
+      const emax = (tournament as any).elo_max != null ? Number((tournament as any).elo_max) : null;
+      if (emin != null && playerElo < emin) {
+        return res.status(400).json({ ok: false, error: 'Tu Elo está por debajo del mínimo de este torneo' });
+      }
+      if (emax != null && playerElo > emax) {
+        return res.status(400).json({ ok: false, error: 'Tu Elo supera el máximo de este torneo' });
+      }
+    }
+    let divisionId: string | null = null;
+    if (levelMode === 'multi_division') {
+      divisionId = await pickDivisionIdForElo(supabase, tournamentId, playerElo);
+      if (!divisionId) {
+        return res.status(400).json({ ok: false, error: 'No hay una categoría definida para tu nivel (Elo)' });
+      }
+    }
+
     const { tokenHash } = generateInviteToken();
     const expiresAt = new Date(Date.now() + Number((tournament as any).invite_ttl_minutes) * 60000).toISOString();
     const { error: insErr } = await supabase.from('tournament_inscriptions').insert({
@@ -1723,6 +2245,7 @@ router.post('/:id/join', async (req: Request, res: Response) => {
       confirmed_at: new Date().toISOString(),
       player_id_1: auth.playerId,
       token_hash: tokenHash,
+      ...(divisionId ? { division_id: divisionId } : {}),
     });
     if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
     const { data: pl } = await supabase.from('players').select('first_name,last_name').eq('id', auth.playerId).maybeSingle();
@@ -1841,7 +2364,7 @@ router.post('/:id/join-pair', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament, error } = await supabase
       .from('tournaments')
-      .select('id, visibility, status, max_players, invite_ttl_minutes, registration_mode, elo_min, elo_max, gender')
+      .select('id, visibility, status, max_players, invite_ttl_minutes, registration_mode, elo_min, elo_max, gender, level_mode')
       .eq('id', tournamentId)
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -1849,7 +2372,7 @@ router.post('/:id/join-pair', async (req: Request, res: Response) => {
     if (String((tournament as any).visibility) !== 'public') {
       return res.status(403).json({ ok: false, error: 'Solo torneos públicos permiten unión directa por parejas' });
     }
-    if (String((tournament as any).registration_mode) !== 'pair') {
+    if (!['pair', 'both'].includes(String((tournament as any).registration_mode))) {
       return res.status(400).json({ ok: false, error: 'Este torneo no admite inscripción por parejas' });
     }
     if (String((tournament as any).status) !== 'open') {
@@ -1873,10 +2396,20 @@ router.post('/:id/join-pair', async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: 'No puedes invitarte a ti mismo como pareja' });
     }
     const elo = Number((me as { elo_rating?: number } | null)?.elo_rating ?? 1200);
-    const eloMin = (tournament as any).elo_min;
-    const eloMax = (tournament as any).elo_max;
-    if (eloMin != null && eloMax != null && (elo < eloMin || elo > eloMax)) {
-      return res.status(403).json({ ok: false, error: 'Tu nivel Elo no está en el rango permitido' });
+    const levelModePair = String((tournament as any).level_mode ?? 'single_band');
+    if (levelModePair === 'single_band') {
+      const eloMin = (tournament as any).elo_min;
+      const eloMax = (tournament as any).elo_max;
+      if (eloMin != null && eloMax != null && (elo < eloMin || elo > eloMax)) {
+        return res.status(403).json({ ok: false, error: 'Tu nivel Elo no está en el rango permitido' });
+      }
+    }
+    let divisionIdPair: string | null = null;
+    if (levelModePair === 'multi_division') {
+      divisionIdPair = await pickDivisionIdForElo(supabase, tournamentId, elo);
+      if (!divisionIdPair) {
+        return res.status(400).json({ ok: false, error: 'No hay una categoría definida para tu nivel (Elo)' });
+      }
     }
     if (!playerMeetsTournamentGender((tournament as { gender?: string }).gender, (me as { gender?: string } | null)?.gender)) {
       return res.status(403).json({
@@ -1897,6 +2430,7 @@ router.post('/:id/join-pair', async (req: Request, res: Response) => {
       invite_email_2: teammateEmail,
       token_hash: tokenHash,
       invite_url: inviteUrl,
+      ...(divisionIdPair ? { division_id: divisionIdPair } : {}),
     });
     if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
 
@@ -2114,6 +2648,10 @@ router.post('/:id/chat/player', async (req: Request, res: Response) => {
  *                 properties:
  *                   best_of_sets: { type: integer, example: 3 }
  *                   allow_draws: { type: boolean, example: false }
+ *                   bracket_seed_strategy:
+ *                     type: string
+ *                     enum: [registration_order, random, elo_snake, elo_top_vs_bottom, elo_tier_mid]
+ *                     description: Orden de equipos al generar el cuadro automático
  *               standings_rules:
  *                 type: object
  *                 properties:

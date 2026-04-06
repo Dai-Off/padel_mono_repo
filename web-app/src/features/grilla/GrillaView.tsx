@@ -1,8 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-
-import { Calendar, Printer, Menu, ArrowLeft, X, Globe } from 'lucide-react';
+import { Calendar, Printer, Menu, ArrowLeft, X, Eye, EyeOff } from 'lucide-react';
 import { MainMenu } from '../../components/Layout/MainMenu';
+import { PortalTealHeader } from '../../components/Layout/PortalTealHeader';
 import clsx from 'clsx';
 import { useGrillaTranslation } from './i18n/useGrillaTranslation';
 import { calendarLocale } from './i18n/calendarLocale';
@@ -32,10 +31,12 @@ import { ReservationCard } from './components/ReservationCard';
 import { ReservationModal } from './components/ReservationModal';
 import { SchoolCourseModal } from './components/SchoolCourseModal';
 
+import { GrillaQuickNav } from './components/GrillaQuickNav';
 import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
 import { HoverTooltip } from './components/HoverTooltip';
 import { pixelsToTime, timeToPixels, parseTimeStr, START_HOUR, END_HOUR, PIXELS_PER_MINUTE } from './utils/timeGrid';
+import { courtVisibleInGridForDate } from './courtVisibility';
 import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
 import dropSoundAsset from '../../assets/sounds/sfx2.mp3';
@@ -92,7 +93,11 @@ const useClubData = (dateOrStr: Date | string) => {
         if (!clubId) return [];
         let courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${clubId}`);
         let courtsData: Court[] = (courtsRes.courts || []).map((c: any) => ({
-            id: c.id, name: c.name, locationId: 'sede-central'
+            id: c.id,
+            name: c.name,
+            locationId: 'sede-central',
+            is_hidden: Boolean(c.is_hidden),
+            visibility_windows: c.visibility_windows ?? null,
         }));
 
         if (courtsData.length === 0) {
@@ -101,7 +106,11 @@ const useClubData = (dateOrStr: Date | string) => {
                 const firstClub = allClubsRes.result[0];
                 courtsRes = await apiFetch<any>(`/courts?club_id=${firstClub.id}`);
                 courtsData = (courtsRes.courts || []).map((c: any) => ({
-                    id: c.id, name: c.name, locationId: 'sede-central'
+                    id: c.id,
+                    name: c.name,
+                    locationId: 'sede-central',
+                    is_hidden: Boolean(c.is_hidden),
+                    visibility_windows: c.visibility_windows ?? null,
                 }));
             }
         }
@@ -309,10 +318,23 @@ const ZoomScrollbars = () => {
 };
 
 function GrillaViewInner() {
-  const navigate = useNavigate();
   const { t, i18n } = useGrillaTranslation();
-  const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [portalClubName, setPortalClubName] = useState('');
+
+  useEffect(() => {
+    authService
+      .getMe()
+      .then((me) => {
+        setIsAdmin(Boolean(me.ok && me.roles?.admin_id));
+        const n = (me.clubs?.[0] as { name?: string } | undefined)?.name;
+        if (typeof n === 'string' && n.trim()) setPortalClubName(n.trim());
+      })
+      .catch(() => {
+        setIsAdmin(false);
+      });
+  }, []);
   const today = new Date(); // Always current date — recomputed each render so chips are never stale
   const [selectedDate, setSelectedDate] = useState<Date>(today);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -329,17 +351,28 @@ function GrillaViewInner() {
   }, [today, selectedDate]);
   const { courts, reservations: serverReservations, refresh, clubId } = useClubData(selectedDate);
 
-  // Filter courts and reservations by the active location tab
-  const activeCourts = useMemo(() => {
-    return courts.length > 0 ? courts : [];
-  }, [courts]);
+  const [showHiddenCourts, setShowHiddenCourts] = useState(false);
+
+  const gridCourts = useMemo(() => {
+    const dateStr = formatDateForInput(selectedDate);
+    const gridStartMin = START_HOUR * 60;
+    const gridEndMin = END_HOUR * 60 + 30;
+    return courts.filter((c) => {
+      if (!c.is_hidden) return true;
+      if (!showHiddenCourts) return false;
+      return courtVisibleInGridForDate(c.visibility_windows, dateStr, gridStartMin, gridEndMin);
+    });
+  }, [courts, showHiddenCourts, selectedDate]);
+
+  const hasHiddenCourts = useMemo(() => courts.some((c) => c.is_hidden), [courts]);
 
   const [reservations, setReservations] = useState<Reservation[]>([]);
 
   useEffect(() => {
-    setReservations(serverReservations);
+    const allowed = new Set(gridCourts.map((c) => c.id));
+    setReservations(serverReservations.filter((r) => allowed.has(r.courtId)));
     setRecentlyDroppedId(null);
-  }, [serverReservations]);
+  }, [serverReservations, gridCourts]);
 
   // Current time indicator — updates every minute
   const [nowMinutes, setNowMinutes] = useState<number>(() => {
@@ -363,6 +396,12 @@ function GrillaViewInner() {
   const [editingBookingData, setEditingBookingData] = useState<any | null>(null);
   const [hoveredTooltip, setHoveredTooltip] = useState<{ res: Reservation, el: HTMLElement } | null>(null);
   const [focusedCourtId, setFocusedCourtId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (focusedCourtId && !gridCourts.some((c) => c.id === focusedCourtId)) {
+      setFocusedCourtId(null);
+    }
+  }, [focusedCourtId, gridCourts]);
 
   // Ref to control the zoom-pan-pinch library programmatically
   const transformComponentRef = useRef<ReactZoomPanPinchRef | null>(null);
@@ -891,35 +930,35 @@ function GrillaViewInner() {
   // Navigation handlers for single court view
   const handleNextCourt = () => {
     if (!focusedCourtId) return;
-    const currentIndex = activeCourts.findIndex(c => c.id === focusedCourtId);
-    if (currentIndex < activeCourts.length - 1) {
-      setFocusedCourtId(activeCourts[currentIndex + 1].id);
+    const currentIndex = gridCourts.findIndex(c => c.id === focusedCourtId);
+    if (currentIndex < gridCourts.length - 1) {
+      setFocusedCourtId(gridCourts[currentIndex + 1].id);
     }
   };
 
   const handlePrevCourt = () => {
     if (!focusedCourtId) return;
-    const currentIndex = activeCourts.findIndex(c => c.id === focusedCourtId);
+    const currentIndex = gridCourts.findIndex(c => c.id === focusedCourtId);
     if (currentIndex > 0) {
-      setFocusedCourtId(activeCourts[currentIndex - 1].id);
+      setFocusedCourtId(gridCourts[currentIndex - 1].id);
     }
   };
 
   const visibleCourts = useMemo(() => {
-    if (!focusedCourtId) return activeCourts;
+    if (!focusedCourtId) return gridCourts;
 
-    const currentIndex = activeCourts.findIndex(c => c.id === focusedCourtId);
+    const currentIndex = gridCourts.findIndex(c => c.id === focusedCourtId);
     let startIndex = Math.max(0, currentIndex - 1);
 
-    if (startIndex + 3 > activeCourts.length) {
-      startIndex = Math.max(0, activeCourts.length - 3);
+    if (startIndex + 3 > gridCourts.length) {
+      startIndex = Math.max(0, gridCourts.length - 3);
     }
 
-    return activeCourts.slice(startIndex, startIndex + 3);
-  }, [focusedCourtId, activeCourts]);
+    return gridCourts.slice(startIndex, startIndex + 3);
+  }, [focusedCourtId, gridCourts]);
 
-  const isFirstCourt = focusedCourtId === activeCourts[0]?.id;
-  const isLastCourt = focusedCourtId === activeCourts[activeCourts.length - 1]?.id;
+  const isFirstCourt = focusedCourtId === gridCourts[0]?.id;
+  const isLastCourt = focusedCourtId === gridCourts[gridCourts.length - 1]?.id;
 
   // Swipe handlers
   const onTouchStart = (e: React.TouchEvent) => {
@@ -957,81 +996,16 @@ function GrillaViewInner() {
     }
   };
 
-  const handleLogout = () => {
-    authService.logout();
-    navigate('/login', { replace: true });
-  };
-
   return (
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
-      <div className="h-[100dvh] flex flex-col bg-gray-100 font-sans overflow-x-hidden overflow-y-auto landscape:overflow-y-auto">
-        {/* ── Top Header ── */}
-        {!isMobileDevice && (
-          <header className="bg-[#00726b] px-4 md:px-6 py-1.5 md:py-2 z-50 flex-shrink-0 flex justify-between items-center border-b border-[#005a4f] gap-3">
-            <div className="flex items-center gap-3 md:gap-4">
-              <button onClick={() => setIsMenuOpen(true)} className="w-9 h-9 md:w-10 md:h-10 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors">
-                <Menu className="w-5 h-5 md:w-5 md:h-5 text-white" />
-              </button>
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">
-                <div className="w-full h-full rounded-full border border-gray-900 bg-white flex items-center justify-center">
-                  <span className="font-extrabold text-[10px] sm:text-xs text-black italic tracking-tighter">X7</span>
-                </div>
-              </div>
-              <div className="flex flex-col">
-                <h1 className="text-[13px] md:text-sm font-bold text-white leading-tight">{t('header.clubName')}</h1>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* Language Selector */}
-              <div className="relative">
-                <button
-                  onClick={() => setLangMenuOpen(prev => !prev)}
-                  className="w-9 h-9 md:w-10 md:h-10 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors"
-                  title={t('header.languageLabel')}
-                >
-                  <Globe className="w-4 h-4 md:w-5 md:h-5 text-white" />
-                </button>
-                {langMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[60] overflow-hidden min-w-[160px] animate-in fade-in slide-in-from-top-2 duration-150">
-                    {(
-                      [
-                        ['es', 'Español 🇪🇸'],
-                        ['en', 'English 🇬🇧'],
-                        ['zh', '中文 🇨🇳'],
-                      ] as const
-                    ).map(([code, label]) => {
-                      const active = i18n.language === code || i18n.language.startsWith(`${code}-`);
-                      return (
-                        <button
-                          key={code}
-                          type="button"
-                          onClick={() => {
-                            void i18n.changeLanguage(code);
-                            setLangMenuOpen(false);
-                          }}
-                          className={clsx(
-                            'w-full text-left px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2',
-                            active ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
-                          )}
-                        >
-                          {active && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={handleLogout}
-                className="bg-[#1f1f1f] hover:bg-black text-white px-4 py-2 md:px-5 md:py-2.5 rounded-full font-medium text-xs md:text-sm flex items-center gap-2 transition-colors flex-shrink-0 shadow-sm"
-              >
-                <ArrowLeft className="w-4 h-4 md:w-4.5 md:h-4.5" />
-                <span className="hidden sm:inline">{t('header.close')}</span>
-              </button>
-            </div>
-          </header>
-        )}
+      <div className="h-[100dvh] flex flex-col overflow-hidden bg-gray-100 font-sans">
+        <PortalTealHeader
+          clubName={portalClubName || t('header.clubName')}
+          onMenuClick={() => setIsMenuOpen(true)}
+        />
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto landscape:overflow-y-auto">
+        <GrillaQuickNav isAdmin={isAdmin} />
 
         {/* ── Single Court View Navigation (Conditionally Rendered) ── */}
         {focusedCourtId && (
@@ -1178,6 +1152,25 @@ function GrillaViewInner() {
                         </React.Fragment>
                       ))}
 
+                      {hasHiddenCourts && (
+                        <>
+                          <span className="text-gray-300 select-none">|</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowHiddenCourts((v) => !v)}
+                            className={clsx(
+                              'flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border transition-colors',
+                              showHiddenCourts
+                                ? 'bg-amber-100 border-amber-300 text-amber-900'
+                                : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                            )}
+                            title={t('toolbar.hiddenCourtsTitle')}
+                          >
+                            {showHiddenCourts ? <Eye className="w-3 h-3 shrink-0" /> : <EyeOff className="w-3 h-3 shrink-0" />}
+                            <span className="hidden sm:inline whitespace-nowrap">{t('toolbar.hiddenCourts')}</span>
+                          </button>
+                        </>
+                      )}
 
                       {/* Print */}
                       {!isMobileDevice && (
@@ -1272,7 +1265,7 @@ function GrillaViewInner() {
                               isFocusedMode={focusedCourtId !== null}
                               isCurrentlyFocused={court.id === focusedCourtId}
                               isCompactView={false}
-                              totalCourts={activeCourts.length}
+                              totalCourts={gridCourts.length}
                             />
                           ))}
                         </div>
@@ -1330,7 +1323,7 @@ function GrillaViewInner() {
                           isFocusedMode={focusedCourtId !== null}
                           isCurrentlyFocused={court.id === focusedCourtId}
                           isCompactView={false}
-                          totalCourts={activeCourts.length}
+                          totalCourts={gridCourts.length}
                           onHoverStart={(res, el) => setHoveredTooltip({ res, el })}
                           onHoverEnd={() => setHoveredTooltip(null)}
                         />
@@ -1398,8 +1391,14 @@ function GrillaViewInner() {
         reservation={hoveredTooltip?.res || null}
         anchorElement={hoveredTooltip?.el || null}
       />
+        </div>
       </div>
-      <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" />
+      <MainMenu
+        isOpen={isMenuOpen}
+        onClose={() => setIsMenuOpen(false)}
+        clubName={portalClubName || t('header.clubName')}
+        isAdmin={isAdmin}
+      />
     </ZoomContext.Provider>
   );
 }

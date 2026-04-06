@@ -82,7 +82,12 @@ export const AdminPanel = () => {
     };
 
     if (loading && applications.length === 0) {
-        return <PageSpinner />;
+        return (
+            <div className="min-h-screen bg-background text-foreground font-sans">
+                <AdminHeader />
+                <PageSpinner />
+            </div>
+        );
     }
 
     return (

@@ -1,6 +1,16 @@
 import { apiFetchWithAuth } from './api';
+import { getSupabaseClient } from '../lib/supabase';
 
 export type TournamentPrize = { label: string; amount_cents: number };
+
+export type TournamentDivisionRow = {
+  id: string;
+  code: string;
+  label: string;
+  elo_min: number | null;
+  elo_max: number | null;
+  sort_order: number;
+};
 
 export type TournamentListItem = {
   id: string;
@@ -17,7 +27,7 @@ export type TournamentListItem = {
   elo_min: number | null;
   elo_max: number | null;
   max_players: number;
-  registration_mode: 'individual' | 'pair';
+  registration_mode: 'individual' | 'pair' | 'both';
   registration_closed_at: string | null;
   cancellation_cutoff_at: string | null;
   invite_ttl_minutes: number;
@@ -27,6 +37,8 @@ export type TournamentListItem = {
   gender?: 'male' | 'female' | 'mixed' | null;
   description: string | null;
   normas?: string | null;
+  poster_url?: string | null;
+  level_mode?: 'single_band' | 'multi_division';
   tournament_courts?: { court_id: string }[];
   confirmed_count?: number;
   pending_count?: number;
@@ -55,6 +67,7 @@ export type TournamentInscription = {
     avatar_url?: string | null;
     elo_rating?: number | null;
   } | null;
+  division_id?: string | null;
 };
 
 type ListResponse = { ok: true; tournaments: TournamentListItem[] };
@@ -62,7 +75,15 @@ type DetailResponse = {
   ok: true;
   tournament: TournamentListItem;
   inscriptions: TournamentInscription[];
+  divisions?: TournamentDivisionRow[];
   counts: { confirmed: number; pending: number };
+};
+type RecurringCreateResponse = {
+  ok: true;
+  created_count: number;
+  skipped_count: number;
+  created: Array<{ id: string; start_at: string }>;
+  skipped: Array<{ start_at: string; reason: string }>;
 };
 
 export type TournamentChatMessage = {
@@ -111,7 +132,11 @@ export type CompetitionView = {
   tournament: {
     id: string;
     competition_format: CompetitionFormat | null;
-    match_rules: { best_of_sets?: number; allow_draws?: boolean } | null;
+    match_rules: {
+      best_of_sets?: number;
+      allow_draws?: boolean;
+      bracket_seed_strategy?: string;
+    } | null;
     standings_rules: Record<string, unknown> | null;
     status: string;
     visibility: 'public' | 'private';
@@ -141,6 +166,13 @@ export const tournamentsService = {
       body: JSON.stringify(payload),
     });
     return res.tournament;
+  },
+
+  async createRecurring(payload: Record<string, unknown>): Promise<RecurringCreateResponse> {
+    return apiFetchWithAuth<RecurringCreateResponse>(`/tournaments/recurring`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   },
 
   async update(id: string, payload: Record<string, unknown>): Promise<TournamentListItem> {
@@ -182,6 +214,13 @@ export const tournamentsService = {
   async removeInscription(tournamentId: string, inscriptionId: string): Promise<void> {
     await apiFetchWithAuth(`/tournaments/${tournamentId}/inscriptions/${inscriptionId}`, {
       method: 'DELETE',
+    });
+  },
+
+  async setInscriptionDivision(tournamentId: string, inscriptionId: string, divisionId: string | null): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/inscriptions/${inscriptionId}/division`, {
+      method: 'PUT',
+      body: JSON.stringify({ division_id: divisionId }),
     });
   },
 
@@ -240,7 +279,7 @@ export const tournamentsService = {
     tournamentId: string,
     payload: {
       format: CompetitionFormat;
-      match_rules?: { best_of_sets?: number; allow_draws?: boolean };
+      match_rules?: { best_of_sets?: number; allow_draws?: boolean; bracket_seed_strategy?: string };
       standings_rules?: Record<string, unknown>;
     }
   ): Promise<void> {
@@ -295,5 +334,25 @@ export const tournamentsService = {
       method: 'PUT',
       body: JSON.stringify({ podium }),
     });
+  },
+
+  /** Sube a `tournament-posters/{clubId}/{tournamentId}/poster.ext` y devuelve la URL pública. */
+  async uploadPoster(clubId: string, tournamentId: string, file: File): Promise<string> {
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error('Supabase no configurado');
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.user?.id) throw new Error('Inicia sesión');
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const safeExt = ext && ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext) ? ext : 'jpg';
+    const path = `${clubId}/${tournamentId}/poster.${safeExt}`;
+    const { error: upErr } = await supabase.storage.from('tournament-posters').upload(path, file, {
+      upsert: true,
+      contentType: file.type || undefined,
+    });
+    if (upErr) throw new Error(upErr.message);
+    const { data: pub } = supabase.storage.from('tournament-posters').getPublicUrl(path);
+    return `${pub.publicUrl}${pub.publicUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
   },
 };
