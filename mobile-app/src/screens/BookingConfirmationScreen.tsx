@@ -27,6 +27,10 @@ export type BookingConfirmationData = {
   matchVisibility: 'public' | 'private';
   /** Solo público: sustituye la línea bajo el CTA. */
   playersLine?: string;
+  /** Modal de club / torneo: badge «Partido» vs «Torneo». */
+  confirmationKind?: 'match' | 'tournament';
+  /** Ej. «15/16» en inscripción a torneo. */
+  spotsLine?: string;
 };
 
 type Props = {
