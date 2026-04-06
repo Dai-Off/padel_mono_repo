@@ -126,7 +126,7 @@ export function MainApp() {
       case 'tienda':
         return <TiendaScreen />;
       case 'torneos':
-        return <CompeticionesScreen />;
+        return <CompeticionesScreen onBack={() => setActiveTab('inicio')} />;
       case 'partidos':
         return (
           <PartidosScreen
@@ -159,9 +159,7 @@ export function MainApp() {
       ? undefined
       : activeTab === 'tienda'
           ? <BackHeader title="Tienda" tone="dark" onBack={() => setActiveTab('inicio')} />
-          : activeTab === 'torneos'
-            ? <BackHeader title="Torneos" tone="dark" onBack={() => setActiveTab('inicio')} />
-            : activeTab === 'partidos'
+          : activeTab === 'partidos'
               ? (
                   <BackHeader
                     title="Partidos"
@@ -202,7 +200,8 @@ export function MainApp() {
               showTusPagos ||
               showTransacciones ||
               crearPartidoFlow.open ||
-              (showMainTabs && activeTab === 'pistas')
+              (showMainTabs && activeTab === 'pistas') ||
+              (showMainTabs && activeTab === 'torneos')
             }
             layoutBackgroundColor={layoutBackgroundColor}
           >

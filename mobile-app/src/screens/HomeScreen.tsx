@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchMatches } from '../api/matches';
+import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchMyPlayerProfile } from '../api/players';
 import type { MyPlayerProfile } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
@@ -38,6 +39,8 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps)
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { stats, loading: statsLoading } = useHomeStats();
+  const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
+  const [tournamentsLoading, setTournamentsLoading] = useState(true);
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
   const [misProximosPartidos, setMisProximosPartidos] = useState<PartidoItem[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(true);
@@ -81,7 +84,25 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps)
     loadMatches();
   }, [loadMatches]);
 
-  const listLoading = statsLoading || matchesLoading;
+  useEffect(() => {
+    let mounted = true;
+    setTournamentsLoading(true);
+    fetchPublicTournaments(session?.access_token ?? null).then((r) => {
+      if (!mounted) return;
+      if (r.ok) {
+        /** Misma lista que Competiciones → públicos y no cancelados (open + closed). */
+        setPublicTournamentsCount(r.tournaments.length);
+      } else {
+        setPublicTournamentsCount(null);
+      }
+      setTournamentsLoading(false);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [session?.access_token]);
+
+  const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 
   const handleAiMatchSearch = useCallback(async (prompt: string) => {
     setAiLoading(true);
@@ -149,7 +170,7 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps)
           onNavigateToTab={onNavigateToTab}
           openMatchesCount={partidos.length}
           courtsFree={stats?.courtsFree}
-          tournamentsCount={stats?.tournaments}
+          tournamentsCount={publicTournamentsCount}
           loading={listLoading}
         />
         <IAAfinidadCard

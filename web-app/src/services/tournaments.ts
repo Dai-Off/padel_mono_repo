@@ -9,6 +9,7 @@ export type TournamentListItem = {
   start_at: string;
   end_at: string;
   duration_min: number;
+  /** Inscripción: importe en céntimos (API/backend). */
   price_cents: number;
   prize_total_cents?: number;
   /** Premios por puesto (campeón, subcampeón, etc.). Vacío si solo hay bolsa legacy. */

@@ -46,8 +46,8 @@ export function InicioQuickActions({
   const torneosSub = countLine(
     loading,
     tournamentsCount,
-    'torneo',
-    'torneos'
+    'torneo disponible',
+    'torneos disponibles'
   );
 
   return (
