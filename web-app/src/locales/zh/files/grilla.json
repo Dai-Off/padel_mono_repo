@@ -143,7 +143,20 @@
     "type_school_individual": "学校 — 私教课",
     "type_flat_rate": "固定费率",
     "type_tournament": "锦标赛",
-    "type_blocked": "管理封场"
+    "type_blocked": "管理封场",
+    "save": "保存",
+    "walletCredit": "余额：{{amount}} €",
+    "walletDebt": "欠款：{{amount}} €",
+    "walletApply": "使用",
+    "walletRemove": "移除",
+    "walletLoading": "加载余额中…",
+    "paymentAmount": "金额（€）",
+    "paymentCash": "现金",
+    "paymentCard": "刷卡",
+    "paymentTotal": "总计",
+    "paymentCollected": "已收",
+    "paymentPending": "待收",
+    "shareAmount": "份额：{{amount}} €"
   },
   "playerSearch": {
     "allFieldsRequired": "请填写所有字段。",

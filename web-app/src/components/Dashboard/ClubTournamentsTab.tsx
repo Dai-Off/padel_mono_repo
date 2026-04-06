@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Award, Calendar, Clock3, Copy, DollarSign, Loader2, Plus, Shield, TrendingUp, Users } from 'lucide-react';
+import { ArrowLeft, Award, Calendar, Clock3, Copy, DollarSign, Loader2, Plus, Shield, Trash2, TrendingUp, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { PageSpinner } from '../Layout/PageSpinner';
-import { tournamentsService, type TournamentChatMessage, type TournamentInscription, type TournamentListItem } from '../../services/tournaments';
+import {
+  tournamentsService,
+  type TournamentChatMessage,
+  type TournamentInscription,
+  type TournamentListItem,
+  type TournamentPrize,
+} from '../../services/tournaments';
 import { courtService } from '../../services/court';
 import type { Court } from '../../types/court';
 import { clubClientService } from '../../services/clubClients';
@@ -41,6 +47,37 @@ function StatCard({
   );
 }
 
+type PrizeFormRow = { localId: string; label: string; amountCents: string };
+
+function newPrizeRow(label = ''): PrizeFormRow {
+  return { localId: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, label, amountCents: '' };
+}
+
+function prizesToFormRows(prizes: TournamentPrize[] | null | undefined): PrizeFormRow[] {
+  const arr = Array.isArray(prizes) ? prizes : [];
+  if (arr.length === 0) return [newPrizeRow('Campeón')];
+  return arr.map((p) => {
+    const row = newPrizeRow();
+    return { ...row, label: p.label, amountCents: String(p.amount_cents ?? 0) };
+  });
+}
+
+function formRowsToPrizePayload(rows: PrizeFormRow[]): { label: string; amount_cents: number }[] {
+  return rows
+    .map((r) => ({
+      label: r.label.trim(),
+      amount_cents: Math.max(0, Math.round(Number(String(r.amountCents).replace(',', '.')) || 0)),
+    }))
+    .filter((x) => x.label.length > 0);
+}
+
+function tournamentGenderLabel(g: string | null | undefined): string {
+  if (g === 'male') return 'Masculino';
+  if (g === 'female') return 'Femenino';
+  if (g === 'mixed') return 'Mixto';
+  return 'Sin definir';
+}
+
 function timeAgoLabel(invitedAt: string): string {
   const diffMs = Date.now() - new Date(invitedAt).getTime();
   const mins = Math.max(0, Math.floor(diffMs / 60000));
@@ -75,30 +112,34 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [sendingChat, setSendingChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<TournamentChatMessage[]>([]);
   const [chatDraft, setChatDraft] = useState('');
+  const [createPrizeRows, setCreatePrizeRows] = useState<PrizeFormRow[]>(() => [newPrizeRow('Campeón')]);
   const [form, setForm] = useState({
     start_at: '',
     registration_closed_at: '',
     cancellation_notice_hours: '24',
     duration_min: '120',
     price_cents: '0',
-    prize_total_cents: '0',
     max_players: '12',
     visibility: 'private',
     registration_mode: 'individual',
+    gender: '',
     invite_ttl_minutes: '1440',
     elo_min: '',
     elo_max: '',
     description: '',
+    normas: '',
   });
   const [settingsForm, setSettingsForm] = useState({
     start_at: '',
     duration_min: '120',
     price_cents: '0',
-    prize_total_cents: '0',
+    prizeRows: [] as PrizeFormRow[],
     visibility: 'private',
+    gender: '',
     elo_min: '',
     elo_max: '',
     registration_closed_at: '',
+    normas: '',
   });
   const routeId = location.pathname.startsWith('/torneos/') ? location.pathname.split('/')[2] : null;
   const isDetailRoute = Boolean(routeId);
@@ -163,16 +204,25 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   }, [selected?.id]);
 
   useEffect(() => {
+    if (createOpen) setCreatePrizeRows([newPrizeRow('Campeón')]);
+  }, [createOpen]);
+
+  useEffect(() => {
     if (!selected) return;
     setSettingsForm({
       start_at: selected.start_at ? new Date(selected.start_at).toISOString().slice(0, 16) : '',
       duration_min: String(selected.duration_min ?? 120),
       price_cents: String(selected.price_cents ?? 0),
-      prize_total_cents: String(selected.prize_total_cents ?? 0),
+      prizeRows: prizesToFormRows(selected.prizes),
       visibility: String(selected.visibility ?? 'private'),
+      gender:
+        selected.gender === 'male' || selected.gender === 'female' || selected.gender === 'mixed'
+          ? selected.gender
+          : '',
       elo_min: selected.elo_min != null ? String(selected.elo_min) : '',
       elo_max: selected.elo_max != null ? String(selected.elo_max) : '',
       registration_closed_at: selected.registration_closed_at ? new Date(selected.registration_closed_at).toISOString().slice(0, 16) : '',
+      normas: String(selected.normas ?? ''),
     });
   }, [selected?.id]);
 
@@ -293,6 +343,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleDateString()}</span>
                         <span className="inline-flex items-center gap-1"><Clock3 className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         <span className="inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {confirmed + pending}/{row.max_players}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-700 font-medium">
+                          {tournamentGenderLabel(row.gender)}
+                        </span>
                         <span className="inline-flex items-center gap-1"><Award className="w-3.5 h-3.5" /> €{(((row.prize_total_cents ?? 0)) / 100).toFixed(0)}</span>
                       </div>
                     </div>
@@ -351,8 +404,27 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     <p className="text-xs font-semibold">{selected.duration_min} min</p>
                   </div>
                   <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
-                    <p className="text-[10px] text-gray-500 uppercase">Premio total</p>
-                    <p className="text-xs font-semibold">€{((selected.prize_total_cents ?? 0) / 100).toFixed(2)}</p>
+                    <p className="text-[10px] text-gray-500 uppercase">Categoría</p>
+                    <p className="text-xs font-semibold">{tournamentGenderLabel(selected.gender)}</p>
+                  </div>
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 md:col-span-2">
+                    <p className="text-[10px] text-gray-500 uppercase">Premios</p>
+                    <p className="text-xs font-semibold">Total: €{((selected.prize_total_cents ?? 0) / 100).toFixed(2)}</p>
+                    {Array.isArray(selected.prizes) && selected.prizes.length > 0 ? (
+                      <ul className="mt-1.5 space-y-0.5 text-[11px] text-gray-600 list-disc list-inside">
+                        {selected.prizes.map((p, i) => (
+                          <li key={`${p.label}-${i}`}>
+                            {p.label}: €{((p.amount_cents ?? 0) / 100).toFixed(2)}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-[11px] text-gray-500 mt-1">Bolsa única (sin desglose por puesto).</p>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 md:col-span-3">
+                    <p className="text-[10px] text-gray-500 uppercase">Normas</p>
+                    <p className="text-xs font-semibold whitespace-pre-wrap">{selected.normas || 'Sin normas cargadas'}</p>
                   </div>
                 </div>
                 <div className="flex gap-2">
@@ -468,14 +540,79 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   <input type="datetime-local" value={settingsForm.start_at} onChange={(e) => setSettingsForm((p) => ({ ...p, start_at: e.target.value }))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   <input value={settingsForm.duration_min} onChange={(e) => setSettingsForm((p) => ({ ...p, duration_min: e.target.value }))} placeholder="Duración (min)" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   <input value={settingsForm.price_cents} onChange={(e) => setSettingsForm((p) => ({ ...p, price_cents: e.target.value }))} placeholder="Precio (céntimos)" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
-                  <input value={settingsForm.prize_total_cents} onChange={(e) => setSettingsForm((p) => ({ ...p, prize_total_cents: e.target.value }))} placeholder="Premio total (céntimos)" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  <div className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2 space-y-2">
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase">Premios por puesto (céntimos)</p>
+                    {settingsForm.prizeRows.map((row) => (
+                      <div key={row.localId} className="flex flex-wrap gap-2 items-center">
+                        <input
+                          value={row.label}
+                          onChange={(e) =>
+                            setSettingsForm((p) => ({
+                              ...p,
+                              prizeRows: p.prizeRows.map((r) => (r.localId === row.localId ? { ...r, label: e.target.value } : r)),
+                            }))
+                          }
+                          placeholder="Ej. Subcampeón"
+                          className="flex-1 min-w-[120px] rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+                        />
+                        <input
+                          value={row.amountCents}
+                          onChange={(e) =>
+                            setSettingsForm((p) => ({
+                              ...p,
+                              prizeRows: p.prizeRows.map((r) => (r.localId === row.localId ? { ...r, amountCents: e.target.value } : r)),
+                            }))
+                          }
+                          placeholder="Céntimos"
+                          className="w-24 rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setSettingsForm((p) => ({
+                              ...p,
+                              prizeRows: p.prizeRows.length > 1 ? p.prizeRows.filter((r) => r.localId !== row.localId) : p.prizeRows,
+                            }))
+                          }
+                          className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50"
+                          aria-label="Quitar premio"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setSettingsForm((p) => ({ ...p, prizeRows: [...p.prizeRows, newPrizeRow('')] }))}
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#E31E24]"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Añadir premio
+                    </button>
+                  </div>
                   <input value={settingsForm.elo_min} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_min: e.target.value }))} placeholder="Elo mínimo" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   <input value={settingsForm.elo_max} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_max: e.target.value }))} placeholder="Elo máximo" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   <select value={settingsForm.visibility} onChange={(e) => setSettingsForm((p) => ({ ...p, visibility: e.target.value }))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs">
                     <option value="private">Privado</option>
                     <option value="public">Público</option>
                   </select>
+                  <select
+                    value={settingsForm.gender}
+                    onChange={(e) => setSettingsForm((p) => ({ ...p, gender: e.target.value }))}
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                  >
+                    <option value="">Sin definir (cualquier género, con Elo válido)</option>
+                    <option value="mixed">Mixto (explícito)</option>
+                    <option value="male">Masculino</option>
+                    <option value="female">Femenino</option>
+                  </select>
                   <input type="datetime-local" value={settingsForm.registration_closed_at} onChange={(e) => setSettingsForm((p) => ({ ...p, registration_closed_at: e.target.value }))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2" />
+                  <textarea
+                    value={settingsForm.normas}
+                    onChange={(e) => setSettingsForm((p) => ({ ...p, normas: e.target.value }))}
+                    placeholder="Normas del torneo"
+                    className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2"
+                  />
                 </div>
                 <button
                   type="button"
@@ -488,10 +625,17 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         start_at: settingsForm.start_at ? new Date(settingsForm.start_at).toISOString() : selected.start_at,
                         duration_min: Number(settingsForm.duration_min),
                         price_cents: Number(settingsForm.price_cents),
-                        prize_total_cents: Number(settingsForm.prize_total_cents),
+                        prizes: formRowsToPrizePayload(settingsForm.prizeRows),
                         elo_min: settingsForm.elo_min ? Number(settingsForm.elo_min) : null,
                         elo_max: settingsForm.elo_max ? Number(settingsForm.elo_max) : null,
                         visibility: settingsForm.visibility === 'public' ? 'public' : 'private',
+                        gender:
+                          settingsForm.gender === 'male' ||
+                          settingsForm.gender === 'female' ||
+                          settingsForm.gender === 'mixed'
+                            ? settingsForm.gender
+                            : null,
+                        normas: settingsForm.normas || null,
                         registration_closed_at: settingsForm.registration_closed_at ? new Date(settingsForm.registration_closed_at).toISOString() : null,
                       });
                       toast.success('Ajustes guardados');
@@ -526,15 +670,15 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
       {createOpen && (
         <div className="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/40 p-3 md:p-4 overflow-y-auto">
-          <div className="w-full max-w-2xl bg-gradient-to-b from-[#FFF7F7] to-white rounded-3xl border border-red-100 shadow-2xl overflow-hidden my-3 md:my-0 max-h-[92vh] flex flex-col">
-            <div className="px-6 py-5 border-b border-red-100 bg-gradient-to-r from-[#FFE8EA] to-white">
-              <p className="text-base font-black text-[#1A1A1A]">Crear torneo</p>
-              <p className="text-xs text-gray-600 mt-1">Configura horarios, cupos, Elo y canchas con un formato visual más claro.</p>
+          <div className="w-full max-w-2xl bg-gradient-to-b from-[#ED1C24]/10 to-white rounded-3xl border border-[#ED1C24]/20 shadow-2xl overflow-hidden my-3 md:my-0 max-h-[92vh] flex flex-col">
+            <div className="px-6 py-5 border-b border-[#ED1C24] bg-[#ED1C24]">
+              <p className="text-base font-black text-white">Crear torneo</p>
+              <p className="text-xs text-white/90 mt-1">Configura horarios, cupos, Elo y canchas con un formato visual más claro.</p>
             </div>
 
             <div className="p-6 space-y-5 overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Inicio</label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-gray-400" />
@@ -542,12 +686,12 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       type="datetime-local"
                       value={form.start_at}
                       onChange={(e) => setForm((p) => ({ ...p, start_at: e.target.value }))}
-                      className="w-full text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5"
+                      className="w-full text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5"
                     />
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Cierre de inscripción</label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-gray-400" />
@@ -555,13 +699,13 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       type="datetime-local"
                       value={form.registration_closed_at}
                       onChange={(e) => setForm((p) => ({ ...p, registration_closed_at: e.target.value }))}
-                      className="w-full text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5"
+                      className="w-full text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5"
                     />
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1">El torneo se cierra por cupo completo o por esta fecha/hora.</p>
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Política de cancelación</label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <Shield className="w-4 h-4 text-gray-400" />
@@ -569,14 +713,14 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       value={form.cancellation_notice_hours}
                       onChange={(e) => setForm((p) => ({ ...p, cancellation_notice_hours: e.target.value }))}
                       placeholder="24"
-                      className="w-16 text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5 text-center font-semibold"
+                      className="w-16 text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5 text-center font-semibold"
                     />
-                    <span className="text-xs px-2 py-1 rounded-md border border-red-100 bg-red-50 text-red-700">hs antes del inicio</span>
+                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">hs antes del inicio</span>
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1">Ejemplo: 24 hs antes del partido se puede cancelar la inscripción.</p>
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Duración (min)</label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <Clock3 className="w-4 h-4 text-gray-400" />
@@ -584,13 +728,13 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       value={form.duration_min}
                       onChange={(e) => setForm((p) => ({ ...p, duration_min: e.target.value }))}
                       placeholder="120"
-                      className="w-24 text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5 text-center font-semibold"
+                      className="w-24 text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5 text-center font-semibold"
                     />
-                    <span className="text-xs px-2 py-1 rounded-md border border-red-100 bg-red-50 text-red-700">min</span>
+                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">min</span>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Precio (céntimos)</label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <DollarSign className="w-4 h-4 text-gray-400" />
@@ -598,27 +742,61 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       value={form.price_cents}
                       onChange={(e) => setForm((p) => ({ ...p, price_cents: e.target.value }))}
                       placeholder="0"
-                      className="w-28 text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5 text-center font-semibold"
+                      className="w-28 text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5 text-center font-semibold"
                     />
-                    <span className="text-xs px-2 py-1 rounded-md border border-red-100 bg-red-50 text-red-700">céntimos</span>
+                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">céntimos</span>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Premio total (céntimos)</label>
-                  <div className="mt-1.5 flex items-center gap-2">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3 md:col-span-2">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
                     <Award className="w-4 h-4 text-gray-400" />
-                    <input
-                      value={form.prize_total_cents}
-                      onChange={(e) => setForm((p) => ({ ...p, prize_total_cents: e.target.value }))}
-                      placeholder="0"
-                      className="w-28 text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5 text-center font-semibold"
-                    />
-                    <span className="text-xs px-2 py-1 rounded-md border border-red-100 bg-red-50 text-red-700">céntimos</span>
+                    Premios por puesto (céntimos)
+                  </label>
+                  <p className="text-[11px] text-gray-500 mt-1 mb-2">Campeón, subcampeón, 3.er lugar, etc. El total del torneo es la suma.</p>
+                  <div className="space-y-2">
+                    {createPrizeRows.map((row) => (
+                      <div key={row.localId} className="flex flex-wrap gap-2 items-center">
+                        <input
+                          value={row.label}
+                          onChange={(e) =>
+                            setCreatePrizeRows((rows) => rows.map((r) => (r.localId === row.localId ? { ...r, label: e.target.value } : r)))
+                          }
+                          placeholder="Ej. Campeón"
+                          className="flex-1 min-w-[140px] text-sm rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5"
+                        />
+                        <input
+                          value={row.amountCents}
+                          onChange={(e) =>
+                            setCreatePrizeRows((rows) => rows.map((r) => (r.localId === row.localId ? { ...r, amountCents: e.target.value } : r)))
+                          }
+                          placeholder="Céntimos"
+                          className="w-28 text-sm rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5 text-center font-semibold"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCreatePrizeRows((rows) => (rows.length > 1 ? rows.filter((r) => r.localId !== row.localId) : rows))
+                          }
+                          className="p-2 rounded-lg border border-[#ED1C24]/20 text-gray-500 hover:bg-[#ED1C24]/10"
+                          aria-label="Quitar premio"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setCreatePrizeRows((rows) => [...rows, newPrizeRow('')])}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-[#ED1C24]"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Añadir premio
+                    </button>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Máximo jugadores</label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <Users className="w-4 h-4 text-gray-400" />
@@ -626,38 +804,38 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       value={form.max_players}
                       onChange={(e) => setForm((p) => ({ ...p, max_players: e.target.value }))}
                       placeholder="12"
-                      className="w-20 text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5 text-center font-semibold"
+                      className="w-20 text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5 text-center font-semibold"
                     />
-                    <span className="text-xs px-2 py-1 rounded-md border border-red-100 bg-red-50 text-red-700">jug.</span>
+                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">jug.</span>
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Elo mínimo</label>
                   <input
                     value={form.elo_min}
                     onChange={(e) => setForm((p) => ({ ...p, elo_min: e.target.value }))}
                     placeholder="Opcional (ej: 1.0)"
-                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5"
+                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5"
                   />
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Elo máximo</label>
                   <input
                     value={form.elo_max}
                     onChange={(e) => setForm((p) => ({ ...p, elo_max: e.target.value }))}
                     placeholder="Opcional (ej: 3.0)"
-                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5"
+                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5"
                   />
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Modo inscripción (elige uno)</label>
                   <select
                     value={form.registration_mode}
                     onChange={(e) => setForm((p) => ({ ...p, registration_mode: e.target.value }))}
-                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5"
+                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5"
                   >
                     <option value="individual">Individual</option>
                     <option value="pair">Parejas</option>
@@ -665,19 +843,36 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   <p className="text-[11px] text-gray-500 mt-1">Puedes configurar el torneo para inscripción individual o por parejas.</p>
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Visibilidad del torneo</label>
                   <select
                     value={form.visibility}
                     onChange={(e) => setForm((p) => ({ ...p, visibility: e.target.value }))}
-                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5"
+                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5"
                   >
                     <option value="private">Privado (solo invitación/enlace)</option>
                     <option value="public">Público (cualquiera puede ver y unirse)</option>
                   </select>
                 </div>
 
-                <div className="rounded-2xl border border-red-100 bg-white p-3">
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Categoría (género)</label>
+                  <select
+                    value={form.gender}
+                    onChange={(e) => setForm((p) => ({ ...p, gender: e.target.value }))}
+                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5"
+                  >
+                    <option value="">Sin definir (cualquier género, con Elo válido)</option>
+                    <option value="mixed">Mixto (explícito)</option>
+                    <option value="male">Masculino</option>
+                    <option value="female">Femenino</option>
+                  </select>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Sin definir: no se filtra por género del jugador. Masculino/femenino exigen el mismo género en el perfil. Mixto explícito tampoco filtra.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Tiempo de reserva de cupo (min)</label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <Shield className="w-4 h-4 text-gray-400" />
@@ -685,15 +880,15 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       value={form.invite_ttl_minutes}
                       onChange={(e) => setForm((p) => ({ ...p, invite_ttl_minutes: e.target.value }))}
                       placeholder="1440"
-                      className="w-24 text-sm outline-none rounded-lg border border-red-200 bg-red-50/50 px-2 py-1.5 text-center font-semibold"
+                      className="w-24 text-sm outline-none rounded-lg border border-[#ED1C24]/30 bg-[#ED1C24]/5 px-2 py-1.5 text-center font-semibold"
                     />
-                    <span className="text-xs px-2 py-1 rounded-md border border-red-100 bg-red-50 text-red-700">min</span>
+                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">min</span>
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1">Si el invitado no acepta en este tiempo, el cupo se libera automáticamente.</p>
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-red-100 bg-white p-3">
+              <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                 <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Descripción</label>
                 <textarea
                   value={form.description}
@@ -703,7 +898,17 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 />
               </div>
 
-              <div className="rounded-2xl border border-red-100 bg-white p-3">
+              <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
+                <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Normas</label>
+                <textarea
+                  value={form.normas}
+                  onChange={(e) => setForm((p) => ({ ...p, normas: e.target.value }))}
+                  placeholder="Reglas del torneo, puntualidad, formato, sanciones..."
+                  className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Canchas</p>
                   <p className="text-[11px] text-gray-500">{selectedCourtIds.length} seleccionada(s)</p>
@@ -732,7 +937,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
               </div>
             </div>
 
-            <div className="px-6 py-4 border-t border-red-100 bg-white flex justify-end gap-2 shrink-0">
+            <div className="px-6 py-4 border-t border-[#ED1C24]/20 bg-white flex justify-end gap-2 shrink-0">
               <button onClick={() => setCreateOpen(false)} className="px-3 py-2 rounded-xl bg-gray-100 text-xs font-semibold">Cerrar</button>
               <button
                 disabled={saving}
@@ -761,11 +966,16 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     max_players: Number(form.max_players),
                     registration_mode: form.registration_mode,
                     visibility: form.visibility === 'public' ? 'public' : 'private',
+                    gender:
+                      form.gender === 'male' || form.gender === 'female' || form.gender === 'mixed'
+                        ? form.gender
+                        : null,
                     invite_ttl_minutes: Number(form.invite_ttl_minutes),
-                    prize_total_cents: Number(form.prize_total_cents),
+                    prizes: formRowsToPrizePayload(createPrizeRows),
                     elo_min: form.elo_min ? Number(form.elo_min) : null,
                     elo_max: form.elo_max ? Number(form.elo_max) : null,
                     description: form.description || null,
+                    normas: form.normas || null,
                     court_ids: selectedCourtIds,
                   };
                   setSaving(true);
@@ -785,14 +995,15 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       cancellation_notice_hours: '24',
                       duration_min: '120',
                       price_cents: '0',
-                    prize_total_cents: '0',
                       max_players: '12',
                       registration_mode: 'individual',
                     visibility: 'private',
+                      gender: '',
                       invite_ttl_minutes: '1440',
                       elo_min: '',
                       elo_max: '',
                       description: '',
+                      normas: '',
                     });
                     navigate(`/torneos/${created.id}`);
                     toast.success('Torneo creado correctamente', { id: creatingToast });

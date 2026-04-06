@@ -9,6 +9,7 @@ export interface Court {
     status: 'operational' | 'maintenance' | 'closed';
     lighting?: boolean;
     last_maintenance?: string | null;
+    is_hidden?: boolean;
 }
 
 export type CourtStatus = Court['status'];

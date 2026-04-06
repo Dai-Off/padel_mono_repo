@@ -13,6 +13,14 @@ export function useVisualViewportFix(isOpen: boolean) {
             const vv = window.visualViewport;
             if (!vv) return;
 
+            // Only apply the fix when the user has actually pinch-zoomed (scale > 1).
+            // At scale 1 the default CSS fixed positioning works perfectly and applying
+            // transforms causes micro-jitter ("temblor") from rounding / event noise.
+            if (Math.abs(vv.scale - 1) < 0.01) {
+                setStyle({});
+                return;
+            }
+
             // To counteract pinch-zoom on fixed elements, we need to match the visual viewport's offset,
             // scale up the physical size by the zoom factor, and then apply an inverse CSS scale.
             // This mathematically cancels out the browser's zoom while perfectly covering the screen.

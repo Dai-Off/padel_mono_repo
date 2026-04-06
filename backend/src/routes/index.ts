@@ -27,6 +27,7 @@ import clubReviewsRouter from './clubReviews';
 import learningRouter from './learning';
 import tournamentsRouter from './tournaments';
 import tournamentInvitesRouter from './tournamentInvites';
+import walletRouter from './wallet';
 
 const router = Router();
 
@@ -65,6 +66,7 @@ router.use('/club-reviews', clubReviewsRouter);
 router.use('/learning', learningRouter);
 router.use('/tournaments', tournamentInvitesRouter);
 router.use('/tournaments', tournamentsRouter);
+router.use('/wallet', walletRouter);
 
 export default router;
 

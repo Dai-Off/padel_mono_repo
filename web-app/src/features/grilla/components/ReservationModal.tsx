@@ -1,11 +1,15 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
-import type { Reservation } from '../types';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import type { Reservation, PaymentMethod } from '../types';
 import {
     X,
     Search,
     Trash2,
     AlertTriangle,
     UserPlus,
+    Wallet,
+    AlertCircle,
+    EyeOff,
+    Eye,
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
@@ -25,6 +29,9 @@ interface ReservationModalProps {
     onUpdate?: (bookingId: string, data: any) => Promise<void>;
     onDelete?: (bookingId: string, sendEmail: boolean) => Promise<void>;
     onMarkPaid?: (bookingId: string) => Promise<void>;
+    onMoveToHidden?: (bookingId: string) => Promise<void>;
+    onMoveToVisible?: (bookingId: string) => Promise<void>;
+    isOnHiddenCourt?: boolean;
 }
 
 // Helper: Player Search Component
@@ -244,8 +251,155 @@ const PlayerSearch: React.FC<{
     );
 };
 
+// ─── Tipos de pago por slot ───────────────────────────────────────────────────
+interface SlotPayment {
+    paidAmountCents: number;
+    paymentMethod: PaymentMethod;
+    walletAmountCents: number;
+    walletBalanceCents: number | null;
+    walletLoading: boolean;
+}
+const defaultSlot = (): SlotPayment => ({
+    paidAmountCents: 0, paymentMethod: null,
+    walletAmountCents: 0, walletBalanceCents: null, walletLoading: false,
+});
+
+// ─── PaymentSlot: fila de cobro con selector de método ──────────────────────
+const PaymentSlot: React.FC<{
+    slot: SlotPayment;
+    shareAmountCents: number;
+    maxPayableCents: number;
+    onUpdate: (patch: Partial<SlotPayment>) => void;
+    isFullyPaid: boolean;
+    t: (key: string, opts?: Record<string, string | number>) => string;
+}> = ({ slot, shareAmountCents, maxPayableCents, onUpdate, isFullyPaid, t }) => {
+    const { walletBalanceCents, walletLoading, walletAmountCents, paidAmountCents, paymentMethod } = slot;
+
+    const [rawInput, setRawInput] = React.useState('');
+
+    // The "effective" amount is whichever bucket is active
+    const effectiveAmountCents = paymentMethod === 'wallet' ? walletAmountCents : paidAmountCents;
+    const thisSlotHasPaid = effectiveAmountCents > 0;
+
+    // When reservation is fully paid and THIS slot didn't contribute, lock it
+    const isLocked = isFullyPaid && !thisSlotHasPaid;
+
+    // Sync local text when external value changes (e.g. method switch, slot reset)
+    React.useEffect(() => {
+        setRawInput(effectiveAmountCents > 0 ? String(Math.round(effectiveAmountCents / 100)) : '');
+    }, [effectiveAmountCents]);
+
+    const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (isLocked) return;
+        const raw = e.target.value.replace(/[^0-9]/g, ''); // only digits
+        setRawInput(raw);
+        const euros = parseInt(raw || '0', 10);
+        const clamped = Math.min(euros * 100, maxPayableCents);
+        if (paymentMethod === 'wallet') {
+            onUpdate({ walletAmountCents: clamped, paidAmountCents: 0 });
+        } else {
+            onUpdate({ paidAmountCents: clamped });
+        }
+    };
+
+    return (
+        <div className="mt-2 space-y-2">
+            {/* Payment amount + method */}
+            <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs text-gray-500 font-medium shrink-0">
+                    {t('reservation.shareAmount', { amount: Math.round(shareAmountCents / 100) })}
+                </span>
+                <input
+                    type="text"
+                    inputMode="numeric"
+                    value={rawInput}
+                    onChange={handleAmountChange}
+                    disabled={isLocked}
+                    placeholder="0 €"
+                    className={`w-20 p-1.5 border border-gray-300 rounded-md text-xs bg-white outline-none focus:ring-2 focus:ring-[#006A6A] ${isLocked ? 'opacity-50 cursor-not-allowed bg-gray-100' : ''}`}
+                />
+                <div className="flex gap-1">
+                    <button
+                        type="button"
+                        disabled={isLocked}
+                        onClick={() => {
+                            if (paymentMethod === 'wallet') {
+                                onUpdate({ paymentMethod: 'cash', paidAmountCents: walletAmountCents || paidAmountCents, walletAmountCents: 0 });
+                            } else {
+                                onUpdate({ paymentMethod: paymentMethod === 'cash' ? null : 'cash' });
+                            }
+                        }}
+                        className={`px-2 py-1 text-xs font-bold rounded-md border transition-colors ${
+                            paymentMethod === 'cash'
+                                ? 'bg-[#006A6A] text-white border-[#006A6A]'
+                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                        }`}
+                    >
+                        {t('reservation.paymentCash')}
+                    </button>
+                    <button
+                        type="button"
+                        disabled={isLocked}
+                        onClick={() => {
+                            if (paymentMethod === 'wallet') {
+                                onUpdate({ paymentMethod: 'card', paidAmountCents: walletAmountCents || paidAmountCents, walletAmountCents: 0 });
+                            } else {
+                                onUpdate({ paymentMethod: paymentMethod === 'card' ? null : 'card' });
+                            }
+                        }}
+                        className={`px-2 py-1 text-xs font-bold rounded-md border transition-colors ${
+                            paymentMethod === 'card'
+                                ? 'bg-[#006A6A] text-white border-[#006A6A]'
+                                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                        }`}
+                    >
+                        {t('reservation.paymentCard')}
+                    </button>
+                    {(() => {
+                        const bal = walletBalanceCents ?? 0;
+                        const hasBalance = bal > 0;
+                        const isActive = paymentMethod === 'wallet';
+                        const isDisabled = !hasBalance && !isActive;
+                        return (
+                            <button
+                                type="button"
+                                disabled={isDisabled || isLocked}
+                                onClick={() => {
+                                    if (isActive) {
+                                        onUpdate({ paymentMethod: null, paidAmountCents: walletAmountCents, walletAmountCents: 0 });
+                                    } else {
+                                        onUpdate({ paymentMethod: 'wallet', walletAmountCents: paidAmountCents, paidAmountCents: 0 });
+                                    }
+                                }}
+                                className={`px-2 py-1 text-xs font-bold rounded-md border transition-colors flex items-center gap-1 ${
+                                    isActive
+                                        ? 'bg-[#006A6A] text-white border-[#006A6A]'
+                                        : isDisabled
+                                            ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed opacity-60'
+                                            : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                                }`}
+                                title={isDisabled ? 'Sin saldo disponible' : `Saldo: ${(bal / 100).toFixed(2)} €`}
+                            >
+                                <Wallet size={11} />
+                                {walletLoading
+                                    ? 'Wallet ...'
+                                    : `Wallet (${(bal / 100).toFixed(2)} €)`
+                                }
+                            </button>
+                        );
+                    })()}
+                </div>
+            </div>
+            {isLocked && (
+                <p className="text-[10px] text-emerald-600 font-bold">✓ Reserva pagada en su totalidad</p>
+            )}
+        </div>
+    );
+};
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
     const { t, i18n } = useGrillaTranslation();
@@ -267,30 +421,30 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [sendDeleteEmail, setSendDeleteEmail] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [overlapError, setOverlapError] = useState<string | null>(null);
+    const [paymentError, setPaymentError] = useState<string | null>(null);
     const [pricesByType, setPricesByType] = useState<Record<string, { price_per_hour_cents: number }>>({});
     const [isMarkingPaid, setIsMarkingPaid] = useState(false);
+    const [isMovingToHidden, setIsMovingToHidden] = useState(false);
+    const [moveToHiddenError, setMoveToHiddenError] = useState<string | null>(null);
+    // Pago por slot: [0]=organizador, [1-3]=jugadores adicionales
+    const [slotPayments, setSlotPayments] = useState<SlotPayment[]>([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
 
-    // Track original values to detect changes in edit mode
-    const originalRef = useRef<{
-        notes: string; duration: number; resType: string;
-        startHour: string; startMinute: string; bookingDate: string;
-        organizerId: string | null; guestIds: string[];
-    } | null>(null);
+    // ─── Helpers de pago ─────────────────────────────────────────────────────
+    const fetchWalletBalance = useCallback(async (playerId: string, slotIndex: number) => {
+        if (!clubId) return;
+        setSlotPayments(prev => { const n = [...prev]; n[slotIndex] = { ...n[slotIndex], walletLoading: true, walletBalanceCents: null }; return n; });
+        try {
+            const res = await apiFetchWithAuth<any>(`/wallet/balance?player_id=${playerId}&club_id=${clubId}`);
+            setSlotPayments(prev => { const n = [...prev]; n[slotIndex] = { ...n[slotIndex], walletLoading: false, walletBalanceCents: res.balance_cents ?? 0 }; return n; });
+        } catch {
+            setSlotPayments(prev => { const n = [...prev]; n[slotIndex] = { ...n[slotIndex], walletLoading: false }; return n; });
+        }
+    }, [clubId]);
 
-    const hasChanges = isEditMode && originalRef.current !== null && (() => {
-        const o = originalRef.current!;
-        const currentGuestIds = additionalPlayers.filter(Boolean).map(p => p!.id).sort().join(',');
-        return (
-            notes !== o.notes ||
-            duration !== o.duration ||
-            resType !== o.resType ||
-            startHour !== o.startHour ||
-            startMinute !== o.startMinute ||
-            bookingDate !== o.bookingDate ||
-            (organizer?.id ?? null) !== o.organizerId ||
-            currentGuestIds !== o.guestIds.sort().join(',')
-        );
-    })();
+    const updateSlotPayment = useCallback((slotIndex: number, patch: Partial<SlotPayment>) => {
+        setSlotPayments(prev => { const n = [...prev]; n[slotIndex] = { ...n[slotIndex], ...patch }; return n; });
+    }, []);
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Populate form on open
     useEffect(() => {
@@ -357,19 +511,34 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             guests.forEach((g: Player, i: number) => { slots[i] = g; });
             setAdditionalPlayers(slots);
 
-            // Snapshot original values for change detection
-            originalRef.current = {
-                notes: notesVal,
-                duration: dur,
-                resType: resTypeVal,
-                startHour: sh,
-                startMinute: sm,
-                bookingDate: dateVal,
-                organizerId: bd.organizer_player_id || null,
-                guestIds: guests.map((g: Player) => g.id),
-            };
+            // Inicializar pagos desde payment_transactions (manual_cash / manual_card)
+            const initPayments: SlotPayment[] = [defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()];
+            const txByPlayer = new Map<string, { paidAmountCents: number; walletAmountCents: number; paymentMethod: PaymentMethod }>();
+            (bd.payment_transactions || [])
+                .filter((t: any) => t.status === 'succeeded' && typeof t.stripe_payment_intent_id === 'string' && t.stripe_payment_intent_id.startsWith('manual_'))
+                .forEach((t: any) => {
+                    // Format: manual_cash_<bookingId>_<playerId> — method is the second segment
+                    const method = t.stripe_payment_intent_id.split('_')[1];
+                    const pm: PaymentMethod = (method === 'cash' || method === 'card' || method === 'wallet') ? method as PaymentMethod : null;
+                    txByPlayer.set(t.payer_player_id, {
+                        paidAmountCents: pm === 'wallet' ? 0 : t.amount_cents,
+                        walletAmountCents: pm === 'wallet' ? t.amount_cents : 0,
+                        paymentMethod: pm,
+                    });
+                });
+            const orgTx = txByPlayer.get(bd.organizer_player_id);
+            if (orgTx) initPayments[0] = { ...defaultSlot(), ...orgTx };
+            (bd.booking_participants || []).filter((p: any) => p.role === 'guest').slice(0, 3).forEach((p: any, i: number) => {
+                const tx = txByPlayer.get(p.player_id);
+                if (tx) initPayments[i + 1] = { ...defaultSlot(), ...tx };
+            });
+            setSlotPayments(initPayments);
+
+            // Fetch wallet balances for all players in edit mode
+            if (bd.organizer_player_id) fetchWalletBalance(bd.organizer_player_id, 0);
+            guests.forEach((g: Player, i: number) => { fetchWalletBalance(g.id, i + 1); });
         } else {
-            originalRef.current = null;
+            setSlotPayments([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
             // Create mode: reset everything
             setOrganizer(null);
             setAdditionalPlayers([null, null, null]);
@@ -387,31 +556,99 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         return () => { document.body.style.overflow = 'unset'; };
     }, [isOpen, reservation?.id, editingBookingData?.id]);
 
-    // Fetch prices when opening in create mode and clubId is available
+    // Fetch prices on open (both create and edit mode)
     useEffect(() => {
-        if (!isOpen || !clubId || !!editingBookingData) return;
+        if (!isOpen || !clubId) return;
         reservationTypePricesService.getByClub(clubId).then(setPricesByType).catch(() => setPricesByType({}));
-    }, [isOpen, clubId, editingBookingData?.id]);
+    }, [isOpen, clubId]);
 
     const totalPriceCents = useMemo(() => {
-        if (editingBookingData?.total_price_cents != null) return editingBookingData.total_price_cents;
-        const pricePerHour = pricesByType[resType]?.price_per_hour_cents ?? 0;
-        return Math.round((duration / 60) * pricePerHour);
-    }, [editingBookingData?.total_price_cents, pricesByType, resType, duration]);
+        const pricePerHour = pricesByType[resType]?.price_per_hour_cents;
+        // If club has a configured rate for this type, recalculate from current duration
+        if (pricePerHour != null && pricePerHour > 0) {
+            return Math.round((duration / 60) * pricePerHour);
+        }
+        // Fallback: use the stored price (no price rule configured)
+        return editingBookingData?.total_price_cents ?? 0;
+    }, [pricesByType, resType, duration, editingBookingData?.total_price_cents]);
 
     const formattedPrice = totalPriceCents != null && totalPriceCents >= 0
         ? (totalPriceCents / 100).toFixed(2).replace('.', ',') + ' €'
         : null;
 
+    // ─── Cálculos de pago ────────────────────────────────────────────────────
+    const nActivePlayers = useMemo(() =>
+        (organizer ? 1 : 0) + additionalPlayers.filter(Boolean).length,
+    [organizer, additionalPlayers]);
+
+    const sharePerSlotCents = useMemo(() =>
+        nActivePlayers > 0 && totalPriceCents ? Math.ceil(totalPriceCents / nActivePlayers) : 0,
+    [totalPriceCents, nActivePlayers]);
+
+    const totalCollectedCents = useMemo(() => {
+        const activeSlots = [
+            organizer ? slotPayments[0] : null,
+            ...additionalPlayers.map((p, i) => p ? slotPayments[i + 1] : null),
+        ];
+        return activeSlots.reduce((sum, s) => s ? sum + s.paidAmountCents + s.walletAmountCents : sum, 0);
+    }, [slotPayments, organizer, additionalPlayers]);
+
+    const pendingCents = Math.max(0, (totalPriceCents ?? 0) - totalCollectedCents);
+
+    const computedStatus: 'pending_payment' | 'confirmed' =
+        totalCollectedCents >= (totalPriceCents ?? 0) && (totalPriceCents ?? 0) > 0
+            ? 'confirmed'
+            : 'pending_payment';
+    // ─────────────────────────────────────────────────────────────────────────
+
     if (!isOpen || !reservation) return null;
 
-    const handleSave = async (status: 'confirmed' | 'pending_payment') => {
+    // Construye el array de participantes con datos de pago
+    const buildParticipants = () => {
+        const all: any[] = [];
+        if (organizer) {
+            all.push({
+                player_id: organizer.id,
+                role: 'organizer',
+                share_amount_cents: sharePerSlotCents,
+                paid_amount_cents: slotPayments[0].paidAmountCents,
+                payment_method: slotPayments[0].paymentMethod,
+                wallet_amount_cents: slotPayments[0].walletAmountCents,
+            });
+        }
+        additionalPlayers.forEach((p, i) => {
+            if (!p) return;
+            all.push({
+                player_id: p.id,
+                role: 'guest',
+                share_amount_cents: sharePerSlotCents,
+                paid_amount_cents: slotPayments[i + 1].paidAmountCents,
+                payment_method: slotPayments[i + 1].paymentMethod,
+                wallet_amount_cents: slotPayments[i + 1].walletAmountCents,
+            });
+        });
+        return all;
+    };
+
+    const handleSave = async () => {
         if (!organizer) {
             setOrganizerError(true);
             return;
         }
         setOrganizerError(false);
         setOverlapError(null);
+        setPaymentError(null);
+
+        // Validate payment method is selected when amount > 0
+        const activePlayers = [
+            organizer ? { name: `${organizer.first_name} ${organizer.last_name}`, slot: slotPayments[0] } : null,
+            ...additionalPlayers.map((p, i) => p ? { name: `${p.first_name} ${p.last_name}`, slot: slotPayments[i + 1] } : null),
+        ].filter(Boolean) as { name: string; slot: SlotPayment }[];
+        const missingMethod = activePlayers.find(p => (p.slot.paidAmountCents > 0 || p.slot.walletAmountCents > 0) && !p.slot.paymentMethod);
+        if (missingMethod) {
+            setPaymentError(`Selecciona la forma de pago para ${missingMethod.name}`);
+            return;
+        }
 
         // Validate no overlap with other bookings on the same court
         if (isEditMode && editingBookingData) {
@@ -442,42 +679,39 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         setIsSaving(true);
         try {
             if (isEditMode && onUpdate && editingBookingData) {
-                // Build start_at / end_at with the (possibly updated) date
                 const dateBase = bookingDate || new Date().toISOString().split('T')[0];
                 const startAt = new Date(`${dateBase}T${startHour}:${startMinute}`).toISOString();
                 const endAt = new Date(new Date(startAt).getTime() + duration * 60000).toISOString();
                 await onUpdate(editingBookingData.id, {
                     notes,
-                    status,
+                    booking_type: resType,
+                    status: computedStatus,
                     start_at: startAt,
                     end_at: endAt,
-                    participants: additionalPlayers
-                        .filter(p => p !== null)
-                        .map(p => ({ player_id: p!.id })),
+                    total_price_cents: totalPriceCents,
+                    participants: buildParticipants(),
                 });
-                } else if (onSave) {
-                // Create new booking
+            } else if (onSave) {
                 const data = {
                     court_id: reservation.courtId,
                     organizer_player_id: organizer.id,
                     start_at: `${startHour}:${startMinute}`,
                     duration_minutes: duration,
                     total_price_cents: totalPriceCents,
-                    status,
+                    status: computedStatus,
                     notes,
                     booking_type: resType || 'standard',
                     source_channel: 'manual',
-                    participants: additionalPlayers
-                        .filter(p => p !== null)
-                        .map(p => ({ player_id: p!.id })),
+                    participants: buildParticipants(),
                     send_email: confirmEmail,
                 };
                 await onSave(data);
             }
             onClose();
-        } catch (err) {
+        } catch (err: any) {
             console.error('Error saving reservation:', err);
-            alert(t('reservation.saveError'));
+            const detail = err?.message || err?.error || String(err);
+            alert(`${t('reservation.saveError')}\n\n${detail}`);
         } finally {
             setIsSaving(false);
         }
@@ -550,56 +784,97 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 </span>
                             )}
                         </div>
+                        {isEditMode && editingBookingData?.created_at && (
+                            <span className="text-[11px] text-gray-400">
+                                Creada el {new Date(editingBookingData.created_at).toLocaleDateString(calendarLocale(i18n.language), { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                        )}
                         {overlapError && (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium mt-1">
                                 <AlertTriangle size={13} className="shrink-0" />
                                 {overlapError}
                             </div>
                         )}
+                        {paymentError && (
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium mt-1">
+                                <AlertCircle size={13} className="shrink-0" />
+                                {paymentError}
+                            </div>
+                        )}
+                        {moveToHiddenError && (
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-md text-xs text-amber-700 font-medium mt-1">
+                                <AlertTriangle size={13} className="shrink-0" />
+                                {moveToHiddenError}
+                            </div>
+                        )}
                         <div className="flex gap-2 flex-wrap">
-                            {/* Actualizar — only shown in edit mode when there are changes */}
-                            {isEditMode && editingBookingData?.status === 'pending_payment' && onMarkPaid && (
-                                <button
-                                    onClick={handleMarkPaid}
-                                    disabled={isMarkingPaid}
-                                    className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
-                                >
-                                    {isMarkingPaid ? t('reservation.markPaidProcessing') : t('reservation.markPaid')}
-                                </button>
-                            )}
-                            {isEditMode && hasChanges && (
-                                <button
-                                    onClick={() => handleSave(editingBookingData?.status === 'confirmed' ? 'confirmed' : 'pending_payment')}
-                                    disabled={!organizer || isSaving}
-                                    className="px-4 py-1.5 bg-orange-500 text-white text-xs font-bold rounded-md hover:bg-orange-600 disabled:opacity-50 transition-colors ring-2 ring-orange-300"
-                                >
-                                    {isSaving ? t('reservation.updating') : t('reservation.update')}
-                                </button>
-                            )}
-                            {!isEditMode && (
-                                <>
-                                    <button
-                                        onClick={() => handleSave('confirmed')}
-                                        disabled={!organizer || isSaving}
-                                        className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
-                                    >
-                                        {t('reservation.pay')}
-                                    </button>
-                                    <button
-                                        onClick={() => handleSave('pending_payment')}
-                                        disabled={!organizer || isSaving}
-                                        className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
-                                    >
-                                        {t('reservation.reservePending')}
-                                    </button>
-                                </>
-                            )}
+                            <button
+                                onClick={() => handleSave()}
+                                disabled={!organizer || isSaving}
+                                className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
+                            >
+                                {isSaving ? t('reservation.processing') : t('reservation.save')}
+                            </button>
                             <button
                                 onClick={onClose}
                                 className="px-4 py-1.5 bg-gray-200 text-gray-700 text-xs font-bold rounded-md hover:bg-gray-300 transition-colors"
                             >
                                 {t('reservation.cancel')}
                             </button>
+                            {isEditMode && editingBookingData && onMarkPaid && (
+                                <button
+                                    type="button"
+                                    onClick={handleMarkPaid}
+                                    disabled={isMarkingPaid}
+                                    className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-md hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                                >
+                                    {isMarkingPaid ? t('reservation.markPaidProcessing') : t('reservation.markPaid')}
+                                </button>
+                            )}
+                            {isEditMode && editingBookingData && isOnHiddenCourt && onMoveToVisible && (
+                                <button
+                                    onClick={async () => {
+                                        setMoveToHiddenError(null);
+                                        setIsMovingToHidden(true);
+                                        try {
+                                            await onMoveToVisible(editingBookingData.id);
+                                            onClose();
+                                        } catch (err: any) {
+                                            setMoveToHiddenError(err.message || 'Error al desocultar la reserva');
+                                        } finally {
+                                            setIsMovingToHidden(false);
+                                        }
+                                    }}
+                                    disabled={isMovingToHidden}
+                                    title="Mover a pista oficial"
+                                    className="flex items-center gap-1.5 px-4 py-1.5 bg-[#005bc5] text-white text-xs font-bold rounded-md hover:bg-[#004fa8] disabled:opacity-50 transition-colors"
+                                >
+                                    <Eye size={14} />
+                                    {isMovingToHidden ? 'Moviendo...' : 'Desocultar'}
+                                </button>
+                            )}
+                            {isEditMode && editingBookingData && !isOnHiddenCourt && onMoveToHidden && (
+                                <button
+                                    onClick={async () => {
+                                        setMoveToHiddenError(null);
+                                        setIsMovingToHidden(true);
+                                        try {
+                                            await onMoveToHidden(editingBookingData.id);
+                                            onClose();
+                                        } catch (err: any) {
+                                            setMoveToHiddenError(err.message || 'Error al mover a pista oculta');
+                                        } finally {
+                                            setIsMovingToHidden(false);
+                                        }
+                                    }}
+                                    disabled={isMovingToHidden}
+                                    title="Enviar a pista oculta"
+                                    className="flex items-center gap-1.5 px-4 py-1.5 bg-gray-600 text-white text-xs font-bold rounded-md hover:bg-gray-700 disabled:opacity-50 transition-colors"
+                                >
+                                    <EyeOff size={14} />
+                                    {isMovingToHidden ? 'Moviendo...' : 'Ocultar'}
+                                </button>
+                            )}
                         </div>
                     </div>
                     <button
@@ -676,13 +951,37 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     label={t('reservation.clientLabel')}
                                     placeholder={t('reservation.clientSearchPlaceholder')}
                                     selectedPlayer={organizer}
-                                    onSelect={(p) => { setOrganizer(p); if (p) setOrganizerError(false); }}
+                                    onSelect={(p) => {
+                                        if (p && additionalPlayers.some(ap => ap?.id === p.id)) {
+                                            alert(t('reservation.duplicatePlayerError'));
+                                            return;
+                                        }
+                                        setOrganizer(p);
+                                        if (p) {
+                                            setOrganizerError(false);
+                                            fetchWalletBalance(p.id, 0);
+                                            updateSlotPayment(0, { paidAmountCents: 0 });
+                                        } else {
+                                            updateSlotPayment(0, defaultSlot());
+                                        }
+                                    }}
                                     required
                                 />
                                 {organizerError && (
                                     <p className="mt-1 text-xs text-red-500 font-medium">
                                         {t('reservation.organizerRequired')}
                                     </p>
+                                )}
+                                {/* Wallet badge + payment row for organizer */}
+                                {organizer && (
+                                    <PaymentSlot
+                                        slot={slotPayments[0]}
+                                        shareAmountCents={sharePerSlotCents}
+                                        maxPayableCents={pendingCents + slotPayments[0].paidAmountCents + slotPayments[0].walletAmountCents}
+                                        onUpdate={(patch) => updateSlotPayment(0, patch)}
+                                        isFullyPaid={computedStatus === 'confirmed'}
+                                        t={t}
+                                    />
                                 )}
                             </div>
 
@@ -753,8 +1052,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 </select>
                             </div>
 
-                            {/* Precio calculado (solo en modo creación) */}
-                            {!isEditMode && formattedPrice != null && (
+                            {/* Precio calculado */}
+                            {formattedPrice != null && (
                                 <div className="flex items-center gap-2">
                                     <span className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.price')}</span>
                                     <span className="text-sm font-bold text-[#006A6A]">{formattedPrice}</span>
@@ -769,19 +1068,57 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                         <h3 className="text-lg font-bold text-gray-900 mb-5">{t('reservation.otherPlayers')}</h3>
                         <div className="space-y-4">
                             {[0, 1, 2].map((index) => (
-                                <PlayerSearch
-                                    key={index}
-                                    label={t('reservation.playerLabel', { n: index + 2 })}
-                                    onSelect={(player) => {
-                                        const newPlayers = [...additionalPlayers];
-                                        newPlayers[index] = player;
-                                        setAdditionalPlayers(newPlayers);
-                                    }}
-                                    placeholder={t('reservation.playerSearchPlaceholder', { n: index + 2 })}
-                                    selectedPlayer={additionalPlayers[index]}
-                                />
+                                <div key={index}>
+                                    <PlayerSearch
+                                        label={t('reservation.playerLabel', { n: index + 2 })}
+                                        onSelect={(player) => {
+                                            if (player) {
+                                                // Duplicate check: not the organizer
+                                                if (organizer?.id === player.id) {
+                                                    alert(t('reservation.duplicatePlayerError'));
+                                                    return;
+                                                }
+                                                // Duplicate check: not in another additional slot
+                                                if (additionalPlayers.some((ap, i) => i !== index && ap?.id === player.id)) {
+                                                    alert(t('reservation.duplicatePlayerError'));
+                                                    return;
+                                                }
+                                            }
+                                            const newPlayers = [...additionalPlayers];
+                                            newPlayers[index] = player;
+                                            setAdditionalPlayers(newPlayers);
+                                            if (player) {
+                                                fetchWalletBalance(player.id, index + 1);
+                                                updateSlotPayment(index + 1, { paidAmountCents: 0 });
+                                            } else {
+                                                updateSlotPayment(index + 1, defaultSlot());
+                                            }
+                                        }}
+                                        placeholder={t('reservation.playerSearchPlaceholder', { n: index + 2 })}
+                                        selectedPlayer={additionalPlayers[index]}
+                                    />
+                                    {additionalPlayers[index] && (
+                                        <PaymentSlot
+                                            slot={slotPayments[index + 1]}
+                                            shareAmountCents={sharePerSlotCents}
+                                            maxPayableCents={pendingCents + slotPayments[index + 1].paidAmountCents + slotPayments[index + 1].walletAmountCents}
+                                            onUpdate={(patch) => updateSlotPayment(index + 1, patch)}
+                                            isFullyPaid={computedStatus === 'confirmed'}
+                                            t={t}
+                                        />
+                                    )}
+                                </div>
                             ))}
                         </div>
+
+                        {/* Totals bar */}
+                        {nActivePlayers > 0 && totalPriceCents > 0 && (
+                            <div className="mt-5 flex items-center justify-between px-4 py-3 bg-gray-100 rounded-lg text-sm font-bold text-gray-700 gap-4">
+                                <span>{t('reservation.paymentTotal')}: <span className="text-gray-900">{(totalPriceCents / 100).toFixed(2)} €</span></span>
+                                <span>{t('reservation.paymentCollected')}: <span className="text-[#006A6A]">{(totalCollectedCents / 100).toFixed(2)} €</span></span>
+                                <span>{t('reservation.paymentPending')}: <span className={pendingCents > 0 ? 'text-orange-600' : 'text-[#006A6A]'}>{(pendingCents / 100).toFixed(2)} €</span></span>
+                            </div>
+                        )}
                     </div>
                 </div>
 

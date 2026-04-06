@@ -26,6 +26,8 @@ export interface TranslationKeys {
         dateLabel: string;
         prevDay: string;
         nextDay: string;
+        courtsTab: string;
+        waitlistTab: string;
     };
 
     // Metrics Bar
