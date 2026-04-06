@@ -149,7 +149,21 @@
     "type_flat_rate": "Tarifa plana",
     "type_tournament": "Torneo",
     "type_blocked": "Bloqueo administrativo",
-    "openMatchPlayersHint": "Partido abierto: el organizador es el cliente; añade hasta 3 jugadores más abajo (4 en pista). La visibilidad y el Elo del partido se gestionan al crear el partido desde la app o reglas del club."
+    "openMatchPlayersHint": "Partido abierto: el organizador es el cliente; añade hasta 3 jugadores más abajo (4 en pista). La visibilidad y el Elo del partido se gestionan al crear el partido desde la app o reglas del club.",
+    "save": "Guardar",
+    "walletCredit": "Saldo: {{amount}} €",
+    "walletDebt": "Deuda: {{amount}} €",
+    "walletApply": "Aplicar",
+    "walletRemove": "Quitar",
+    "walletLoading": "Cargando saldo…",
+    "paymentAmount": "Importe (€)",
+    "paymentCash": "Efectivo",
+    "paymentCard": "Tarjeta",
+    "paymentTotal": "Total",
+    "paymentCollected": "Cobrado",
+    "paymentPending": "Pendiente",
+    "shareAmount": "Parte: {{amount}} €",
+    "duplicatePlayerError": "Este jugador ya está añadido en la reserva."
   },
   "playerSearch": {
     "allFieldsRequired": "Todos los campos son obligatorios.",

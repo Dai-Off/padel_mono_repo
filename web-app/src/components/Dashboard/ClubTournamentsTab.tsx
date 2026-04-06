@@ -71,6 +71,21 @@ function formatPlayerElo(elo: number | null | undefined): string {
   return String(Math.round(Number(elo)));
 }
 
+/** API guarda `price_cents`; el formulario del club usa euros para evitar confusiones (25 ≠ 25 céntimos). */
+function centsToEurosInput(cents: number): string {
+  const n = Number(cents ?? 0);
+  if (!Number.isFinite(n)) return '0';
+  const eur = n / 100;
+  if (eur === 0) return '0';
+  return Number.isInteger(eur) ? String(eur) : eur.toFixed(2);
+}
+
+function eurosInputToCents(raw: string): number {
+  const n = parseFloat(String(raw).replace(',', '.').trim());
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n * 100);
+}
+
 function StatCard({
   label,
   value,
@@ -570,7 +585,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     registration_closed_at: '',
     cancellation_notice_hours: '24',
     duration_min: '120',
-    price_cents: '0',
+    price_euros: '0',
     max_players: '12',
     visibility: 'private',
     registration_mode: 'individual',
@@ -585,7 +600,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     name: '',
     start_at: '',
     duration_min: '120',
-    price_cents: '0',
+    price_euros: '0',
     prizeRows: [] as PrizeFormRow[],
     visibility: 'private',
     gender: '',
@@ -760,7 +775,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       name: String(selected.name ?? ''),
       start_at: selected.start_at ? new Date(selected.start_at).toISOString().slice(0, 16) : '',
       duration_min: String(selected.duration_min ?? 120),
-      price_cents: String(selected.price_cents ?? 0),
+      price_euros: centsToEurosInput(selected.price_cents ?? 0),
       prizeRows: prizesToFormRows(selected.prizes),
       visibility: String(selected.visibility ?? 'private'),
       gender:
@@ -1792,7 +1807,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   <input value={settingsForm.name} onChange={(e) => setSettingsForm((p) => ({ ...p, name: e.target.value }))} placeholder="Nombre del torneo" className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2" />
                   <input type="datetime-local" step={1800} value={settingsForm.start_at} onChange={(e) => setSettingsForm((p) => ({ ...p, start_at: e.target.value }))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   <input type="number" min={30} step={30} value={settingsForm.duration_min} onChange={(e) => setSettingsForm((p) => ({ ...p, duration_min: e.target.value }))} placeholder="Duración (min)" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
-                  <input value={settingsForm.price_cents} onChange={(e) => setSettingsForm((p) => ({ ...p, price_cents: e.target.value }))} placeholder="Precio (céntimos)" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  <input value={settingsForm.price_euros} onChange={(e) => setSettingsForm((p) => ({ ...p, price_euros: e.target.value }))} placeholder="Ej. 25 o 25,50" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   <div className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2 space-y-2">
                     <p className="text-[10px] font-semibold text-gray-500 uppercase">Premios por puesto (céntimos)</p>
                     {settingsForm.prizeRows.map((row) => (
@@ -1919,7 +1934,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         name: settingsForm.name || null,
                         start_at: settingsForm.start_at ? new Date(settingsForm.start_at).toISOString() : selected.start_at,
                         duration_min: Number(settingsForm.duration_min),
-                        price_cents: Number(settingsForm.price_cents),
+                        price_cents: eurosInputToCents(settingsForm.price_euros),
                         prizes: formRowsToPrizePayload(settingsForm.prizeRows),
                         elo_min: settingsForm.elo_min ? Number(settingsForm.elo_min) : null,
                         elo_max: settingsForm.elo_max ? Number(settingsForm.elo_max) : null,
@@ -2157,17 +2172,17 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   </div>
                 </div>
 
-                <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Precio (céntimos)</label>
+                <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Precio inscripción (€)</label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <DollarSign className="w-4 h-4 text-gray-400" />
                     <input
-                      value={form.price_cents}
-                      onChange={(e) => setForm((p) => ({ ...p, price_cents: e.target.value }))}
+                      value={form.price_euros}
+                      onChange={(e) => setForm((p) => ({ ...p, price_euros: e.target.value }))}
                       placeholder="0"
                       className="w-28 text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5 text-center font-semibold"
                     />
-                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">céntimos</span>
+                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">€</span>
                   </div>
                 </div>
 
@@ -2413,7 +2428,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       return new Date(startMs - h * 60 * 60 * 1000).toISOString();
                     })(),
                     duration_min: Number(form.duration_min),
-                    price_cents: Number(form.price_cents),
+                    price_cents: eurosInputToCents(form.price_euros),
                     max_players: Number(form.max_players),
                     registration_mode: form.registration_mode,
                     visibility: form.visibility === 'public' ? 'public' : 'private',
@@ -2457,7 +2472,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         registration_closed_at: '',
                         cancellation_notice_hours: '24',
                         duration_min: '120',
-                        price_cents: '0',
+                        price_euros: '0',
                         max_players: '12',
                         registration_mode: 'individual',
                         visibility: 'private',
@@ -2502,7 +2517,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       registration_closed_at: '',
                       cancellation_notice_hours: '24',
                       duration_min: '120',
-                      price_cents: '0',
+                      price_euros: '0',
                       max_players: '12',
                       registration_mode: 'individual',
                     visibility: 'private',

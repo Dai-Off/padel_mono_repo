@@ -149,7 +149,21 @@
     "type_flat_rate": "固定费率",
     "type_tournament": "锦标赛",
     "type_blocked": "管理封场",
-    "openMatchPlayersHint": "公开赛：客户为组织者；下方最多再添加 3 名球员（场上共 4 人）。可见度与 Elo 规则在应用内创建赛事或俱乐部规则中设置。"
+    "openMatchPlayersHint": "公开赛：客户为组织者；下方最多再添加 3 名球员（场上共 4 人）。可见度与 Elo 规则在应用内创建赛事或俱乐部规则中设置。",
+    "save": "保存",
+    "walletCredit": "余额：{{amount}} €",
+    "walletDebt": "欠款：{{amount}} €",
+    "walletApply": "使用",
+    "walletRemove": "移除",
+    "walletLoading": "加载余额中…",
+    "paymentAmount": "金额（€）",
+    "paymentCash": "现金",
+    "paymentCard": "刷卡",
+    "paymentTotal": "总计",
+    "paymentCollected": "已收",
+    "paymentPending": "待收",
+    "shareAmount": "份额：{{amount}} €",
+    "duplicatePlayerError": "该球员已在预订中。"
   },
   "playerSearch": {
     "allFieldsRequired": "请填写所有字段。",

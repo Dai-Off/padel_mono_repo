@@ -32,6 +32,44 @@ import {
 const router = Router();
 router.use(attachAuthContext);
 
+/** Club embebido en torneos (listado y detalle público). */
+const CLUB_EMBED_PUBLIC =
+  'id, name, description, address, city, postal_code, lat, lng, logo_url';
+
+/** Listados públicos (lista + me-list): torneo + club. */
+const TOURNAMENT_PUBLIC_LIST_SELECT = [
+  'id',
+  'club_id',
+  'name',
+  'poster_url',
+  'level_mode',
+  'created_at',
+  'updated_at',
+  'start_at',
+  'end_at',
+  'duration_min',
+  'price_cents',
+  'prize_total_cents',
+  'prizes',
+  'currency',
+  'visibility',
+  'gender',
+  'max_players',
+  'status',
+  'description',
+  'normas',
+  'elo_min',
+  'elo_max',
+  'registration_mode',
+  'registration_closed_at',
+  'cancellation_cutoff_at',
+  'invite_ttl_minutes',
+  `clubs ( ${CLUB_EMBED_PUBLIC} )`,
+].join(', ');
+
+/** Detalle público: todo lo anterior + metadatos y pistas vinculadas. */
+const TOURNAMENT_PUBLIC_DETAIL_SELECT = `${TOURNAMENT_PUBLIC_LIST_SELECT}, cancelled_at, cancelled_reason, closed_at, created_by_player_id, tournament_courts(court_id)`;
+
 function canAccessClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
   return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
@@ -175,24 +213,22 @@ async function getTournamentForPlayer(
   const supabase = getSupabaseServiceRoleClient();
   const { data: tournament, error } = await supabase
     .from('tournaments')
-    .select(
-      'id, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode'
-    )
+    .select(TOURNAMENT_PUBLIC_DETAIL_SELECT)
     .eq('id', tournamentId)
     .maybeSingle();
   if (error) return { tournament: null, myInscription: null, error: error.message };
   if (!tournament) return { tournament: null, myInscription: null, error: 'Torneo no encontrado' };
 
-  const { data: myInscription, error: insErr } = await supabase
+  const { data: insRows, error: insErr } = await supabase
     .from('tournament_inscriptions')
-    .select('id, status, invited_at, expires_at, confirmed_at, cancelled_at, cancelled_reason, player_id_1, player_id_2')
+    .select('id, status, invited_at, expires_at, confirmed_at, cancelled_at, cancelled_reason, player_id_1, player_id_2, created_at')
     .eq('tournament_id', tournamentId)
     .or(`player_id_1.eq.${playerId},player_id_2.eq.${playerId}`)
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
   if (insErr) return { tournament, myInscription: null, error: insErr.message };
-  return { tournament, myInscription: myInscription ?? null };
+  const myInscription = insRows?.[0] ?? null;
+  return { tournament, myInscription };
 }
 
 async function cancelLinkedTournamentBookings(tournamentId: string): Promise<void> {
@@ -2118,14 +2154,131 @@ router.get('/public/list', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     let q = supabase
       .from('tournaments')
-      .select('id, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, max_players, status, description, normas, poster_url, level_mode')
+      .select(TOURNAMENT_PUBLIC_LIST_SELECT)
       .eq('visibility', 'public')
       .neq('status', 'cancelled')
       .order('start_at', { ascending: true });
     if (clubId) q = q.eq('club_id', clubId);
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, tournaments: data ?? [] });
+    const tournaments = (data ?? []) as unknown as Array<{ id: string } & Record<string, unknown>>;
+    const ids = tournaments.map((t) => t.id);
+    const countsByTournament: Record<string, { confirmed: number; pending: number }> = {};
+    if (ids.length > 0) {
+      const { data: insRows } = await supabase
+        .from('tournament_inscriptions')
+        .select('tournament_id, status')
+        .in('tournament_id', ids);
+      for (const row of insRows ?? []) {
+        const tid = String((row as { tournament_id: string }).tournament_id);
+        if (!countsByTournament[tid]) countsByTournament[tid] = { confirmed: 0, pending: 0 };
+        const st = String((row as { status: string }).status);
+        if (st === 'confirmed') countsByTournament[tid].confirmed += 1;
+        else if (st === 'pending') countsByTournament[tid].pending += 1;
+      }
+    }
+    const enriched = tournaments.map((t) => ({
+      ...t,
+      confirmed_count: countsByTournament[t.id]?.confirmed ?? 0,
+      pending_count: countsByTournament[t.id]?.pending ?? 0,
+    }));
+    return res.json({ ok: true, tournaments: enriched });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * Detalle público de un torneo (sin auth). Solo visibility=public y no cancelado.
+ */
+router.get('/public/:id', async (req: Request, res: Response) => {
+  const tournamentId = String(req.params.id ?? '').trim();
+  if (!tournamentId) return res.status(400).json({ ok: false, error: 'id requerido' });
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: tournament, error } = await supabase
+      .from('tournaments')
+      .select(TOURNAMENT_PUBLIC_DETAIL_SELECT)
+      .eq('id', tournamentId)
+      .eq('visibility', 'public')
+      .neq('status', 'cancelled')
+      .maybeSingle();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    await cleanupExpiredTournamentInvites(tournamentId);
+    await refreshTournamentStatus(tournamentId);
+    const slots = await getTournamentSlots(tournamentId);
+    return res.json({
+      ok: true,
+      tournament,
+      counts: { confirmed: slots.confirmedPlayers, pending: slots.pendingPlayers },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * Torneos públicos en los que el jugador autenticado tiene inscripción pendiente o confirmada.
+ */
+router.get('/player/me-list', async (req: Request, res: Response) => {
+  const auth = await getPlayerIdFromBearer(req);
+  if (auth.error || !auth.playerId) {
+    return res.status(401).json({ ok: false, error: auth.error ?? 'Token requerido' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const playerId = auth.playerId;
+    const { data: insRows, error: insErr } = await supabase
+      .from('tournament_inscriptions')
+      .select('tournament_id')
+      .or(`player_id_1.eq.${playerId},player_id_2.eq.${playerId}`)
+      .in('status', ['confirmed', 'pending']);
+    if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
+
+    const tournamentIds = [
+      ...new Set((insRows ?? []).map((r) => String((r as { tournament_id: string }).tournament_id))),
+    ];
+    if (tournamentIds.length === 0) {
+      return res.json({ ok: true, tournaments: [] });
+    }
+
+    const { data: tournaments, error: tErr } = await supabase
+      .from('tournaments')
+      .select(TOURNAMENT_PUBLIC_LIST_SELECT)
+      .in('id', tournamentIds)
+      .eq('visibility', 'public')
+      .neq('status', 'cancelled');
+    if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
+
+    const list = (tournaments ?? []) as unknown as Array<
+      Record<string, unknown> & { id: string; start_at: string }
+    >;
+    const ids = list.map((t) => String(t.id));
+    const countsByTournament: Record<string, { confirmed: number; pending: number }> = {};
+    if (ids.length > 0) {
+      const { data: countRows } = await supabase
+        .from('tournament_inscriptions')
+        .select('tournament_id, status')
+        .in('tournament_id', ids);
+      for (const ins of countRows ?? []) {
+        const tid = String((ins as { tournament_id: string }).tournament_id);
+        if (!countsByTournament[tid]) countsByTournament[tid] = { confirmed: 0, pending: 0 };
+        const st = String((ins as { status: string }).status);
+        if (st === 'confirmed') countsByTournament[tid].confirmed += 1;
+        else if (st === 'pending') countsByTournament[tid].pending += 1;
+      }
+    }
+    const enriched = list.map((t) => ({
+      ...t,
+      confirmed_count: countsByTournament[String(t.id)]?.confirmed ?? 0,
+      pending_count: countsByTournament[String(t.id)]?.pending ?? 0,
+    }));
+    enriched.sort(
+      (a, b) =>
+        new Date(String(a.start_at)).getTime() - new Date(String(b.start_at)).getTime(),
+    );
+    return res.json({ ok: true, tournaments: enriched });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -2176,11 +2329,17 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament, error } = await supabase
       .from('tournaments')
-      .select('id, visibility, status, max_players, invite_ttl_minutes, gender, elo_min, elo_max, level_mode')
+      .select('id, visibility, status, max_players, invite_ttl_minutes, gender, price_cents, elo_min, elo_max, level_mode')
       .eq('id', tournamentId)
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (Number((tournament as { price_cents?: number }).price_cents ?? 0) > 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Este torneo requiere pago. Completa la inscripción con tarjeta desde el botón Inscribirme.',
+      });
+    }
     if (String((tournament as any).visibility) !== 'public') {
       return res.status(403).json({ ok: false, error: 'Solo torneos públicos permiten unión directa' });
     }

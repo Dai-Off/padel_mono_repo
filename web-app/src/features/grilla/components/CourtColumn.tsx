@@ -1,5 +1,5 @@
 import React from 'react';
-import { useDroppable } from '@dnd-kit/core';
+import { useDroppable, useDraggable } from '@dnd-kit/core';
 import clsx from 'clsx';
 import type { Court, Reservation } from '../types';
 import { ReservationCard } from './ReservationCard';
@@ -15,6 +15,7 @@ interface Props {
     onReservationClick?: (reservation: Reservation) => void;
     onFreeSlotClick?: (courtId: string, courtName: string, timeStr: string, isDisabled: boolean) => void;
     onHeaderClick?: (courtId: string) => void;
+    onHeaderHover?: (courtId: string | null) => void;
     onHoverStart?: (res: Reservation, el: HTMLElement) => void;
     onHoverEnd?: () => void;
     isFocusedMode?: boolean;
@@ -36,7 +37,7 @@ function parseCourtName(name: string): { main: string; sub?: string } {
     return { main: mainParts, sub };
 }
 
-export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, recentlyDroppedId, onReservationClick, onFreeSlotClick, onHeaderClick, onHoverStart, onHoverEnd, isFocusedMode, isCurrentlyFocused, isCompactView, compactPxPerMinute, totalCourts }) => {
+export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, recentlyDroppedId, onReservationClick, onFreeSlotClick, onHeaderClick, onHeaderHover, onHoverStart, onHoverEnd, isFocusedMode, isCurrentlyFocused, isCompactView, compactPxPerMinute, totalCourts }) => {
     const { tData } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
     const isSmallZoom = !isCompactView && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
@@ -45,17 +46,21 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
         data: court,
     });
 
-    const isVirtual = court.id === 'pista-virtual';
+    // Make the court header draggable (to drag between tabs)
+    const { attributes: dragAttrs, listeners: dragListeners, setNodeRef: setDragRef, isDragging } = useDraggable({
+        id: `court-header-${court.id}`,
+        data: { type: 'court', court },
+    });
+
     const intervals = getGridIntervals();
     const ppm = (isCompactView && compactPxPerMinute) ? compactPxPerMinute : PIXELS_PER_MINUTE;
     const height = (intervals.length - 1) * 30 * ppm;
 
+    const isVirtual = /virtual/i.test(court.name);
     const { main: courtMain, sub: courtSub } = parseCourtName(tData(court.name));
 
     // Calculate free slots
     const getFreeSlots = () => {
-        if (isVirtual) return [];
-
         const slots = [];
         const startMin = START_HOUR * 60;
         const endMin = END_HOUR * 60;
@@ -88,22 +93,26 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
         <div className={clsx(
             "flex-1 border-r-2 border-white flex flex-col relative transition-all duration-300 ease-in-out",
             isCompactView ? "min-w-0 w-0" : "min-w-[81px] max-w-[161px]",
-            isVirtual && "bg-gray-50/50",
             // Dim non-focused courts when in focus mode
-            isFocusedMode && !isCurrentlyFocused && !isVirtual && "bg-gray-50 opacity-60 grayscale-[20%]"
+            isFocusedMode && !isCurrentlyFocused && "bg-gray-50 opacity-60 grayscale-[20%]"
         )}>
-            {/* Court Header */}
+            {/* Court Header — draggable to move between tabs */}
             <div
-                onClick={() => !isVirtual && onHeaderClick?.(court.id)}
+                ref={setDragRef}
+                {...dragListeners}
+                {...dragAttrs}
+                onClick={() => onHeaderClick?.(court.id)}
+                onMouseEnter={() => onHeaderHover?.(court.id)}
+                onMouseLeave={() => onHeaderHover?.(null)}
                 className={clsx(
-                    "border-b border-[#b0b0b0] flex flex-col items-center justify-center font-bold transition-colors",
+                    "border-b border-[#b0b0b0] flex flex-col items-center justify-center font-bold transition-colors touch-none relative",
                     isCompactView ? "h-6 text-[7px] leading-tight px-0.5 text-center" : isSmallZoom ? "h-[22px] text-[14px]" : "h-[22px] text-[10px]",
-                    // Header colors — white background with dark teal text
+                    isDragging && "opacity-40",
                     isVirtual
                         ? "text-slate-500 bg-white"
                         : isCurrentlyFocused
-                            ? "bg-[#e8f5e9] text-[#005a4f] cursor-pointer"
-                            : "bg-white text-[#005a4f] cursor-pointer hover:bg-[#f0faf0]"
+                            ? "bg-[#e8f5e9] text-[#005a4f] cursor-grab"
+                            : "bg-white text-[#005a4f] cursor-grab hover:bg-[#f0faf0]"
                 )}
             >
                 {isCompactView ? (

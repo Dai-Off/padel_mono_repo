@@ -307,8 +307,17 @@ router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Respons
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data: existing } = await supabase.from('courts').select('club_id').eq('id', id).maybeSingle();
+    const { data: existing } = await supabase.from('courts').select('club_id, is_hidden').eq('id', id).maybeSingle();
     if (!existing || !canAccessCourtClub(req, (existing as { club_id: string }).club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a esta pista' });
+
+    if (!(existing as { is_hidden: boolean }).is_hidden) {
+      return res.status(400).json({ ok: false, error: 'Solo se pueden eliminar físicamente las pistas ocultas.' });
+    }
+
+    // Limpiar dependencias (Pricing rules, Reservations) primero
+    await supabase.from('pricing_rules').delete().eq('court_id', id);
+    await supabase.from('reservations').delete().eq('court_id', id);
+
     const { error } = await supabase.from('courts').delete().eq('id', id);
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, deleted: id });

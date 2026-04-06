@@ -149,7 +149,21 @@
     "type_flat_rate": "Flat rate",
     "type_tournament": "Tournament",
     "type_blocked": "Admin block",
-    "openMatchPlayersHint": "Open match: the client is the organizer; add up to 3 more players below (4 on court). Match visibility and Elo rules are set when creating the match from the app or club rules."
+    "openMatchPlayersHint": "Open match: the client is the organizer; add up to 3 more players below (4 on court). Match visibility and Elo rules are set when creating the match from the app or club rules.",
+    "save": "Save",
+    "walletCredit": "Balance: {{amount}} €",
+    "walletDebt": "Debt: {{amount}} €",
+    "walletApply": "Apply",
+    "walletRemove": "Remove",
+    "walletLoading": "Loading balance…",
+    "paymentAmount": "Amount (€)",
+    "paymentCash": "Cash",
+    "paymentCard": "Card",
+    "paymentTotal": "Total",
+    "paymentCollected": "Collected",
+    "paymentPending": "Pending",
+    "shareAmount": "Share: {{amount}} €",
+    "duplicatePlayerError": "This player is already on the booking."
   },
   "playerSearch": {
     "allFieldsRequired": "All fields are required.",

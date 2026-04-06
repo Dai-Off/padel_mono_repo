@@ -44,7 +44,8 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
     });
 
     const source = (reservation.matchType || reservation.playerName || '').trim();
-    const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : t('grid.noClient');
+    const isLoadingName = !source && reservation.status !== 'available' && reservation.status !== 'past';
+    const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : (isLoadingName ? null : t('grid.noClient'));
     const isCompact = !!compactPxPerMinute;
     const isSmallZoom = !isCompact && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
     const isShortBooking = reservation.durationMinutes <= 60;
@@ -163,14 +164,26 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
 
             {/* Player / match label */}
             <div className={clsx(
-                "flex flex-col text-center relative z-10 overflow-hidden",
+                "flex flex-col text-center relative z-10 overflow-hidden items-center",
                 !isShortBooking && "pt-0.5",
                 isCompact && "hidden",
                 isVeryShort && "hidden",
             )}>
-                <span className="uppercase font-bold leading-tight break-words whitespace-normal text-[5.5px]">
-                    {displayLabel}
-                </span>
+                {isLoadingName ? (
+                    <div className="flex items-center gap-1 py-0.5">
+                        <svg className="animate-spin" style={{ width: isSmallZoom ? 14 : 8, height: isSmallZoom ? 14 : 8 }} viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                        <span className={clsx("opacity-70 italic", isSmallZoom ? "text-[10px]" : "text-[5px]")}>
+                            Cargando...
+                        </span>
+                    </div>
+                ) : (
+                    <span className="uppercase font-bold leading-tight break-words whitespace-normal text-[5.5px]">
+                        {displayLabel}
+                    </span>
+                )}
                 {!isCompact && reservation.totalPrice != null && reservation.totalPrice > 0 && (
                     <span className="text-[5px] opacity-90 mt-0.5">
                         {(reservation.totalPrice).toFixed(2).replace('.', ',')} €
@@ -208,6 +221,26 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                     )}
                 </div>
             )}
+
+            {/* Payment status indicator — bottom right */}
+            {reservation.totalPrice != null && reservation.totalPrice > 0 && (() => {
+                const totalCents = Math.round(reservation.totalPrice! * 100);
+                const paidCents = reservation.totalPaidCents ?? 0;
+                const isFullyPaid = paidCents >= totalCents;
+                const size = isCompact ? 8 : isSmallZoom ? 20 : 12;
+                return (
+                    <div
+                        className={clsx(
+                            "absolute bottom-0.5 right-0.5 z-20 rounded-full border",
+                            isFullyPaid
+                                ? "bg-emerald-700 border-emerald-900"
+                                : "bg-red-600 border-red-800"
+                        )}
+                        style={{ width: size, height: size }}
+                        title={isFullyPaid ? 'Pagado' : `Pendiente: ${((totalCents - paidCents) / 100).toFixed(2)} €`}
+                    />
+                );
+            })()}
 
             {/* Payment icons: white circle (count) + red circle (paid) */}
             {reservation.isPaidIcon && reservation.paymentNumber !== undefined && (
