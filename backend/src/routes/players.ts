@@ -209,7 +209,7 @@ router.post('/onboarding', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'answers debe ser un array' });
   }
 
-  const next = getNextQuestion(answers);
+  const next = await getNextQuestion(answers);
   if (next) {
     return res.status(400).json({ ok: false, error: 'Cuestionario incompleto', next_question: next });
   }
@@ -225,7 +225,7 @@ router.post('/onboarding', async (req: Request, res: Response) => {
     return res.status(409).json({ ok: false, error: 'Nivelación inicial ya completada' });
   }
 
-  const mu = calcInitialMu(answers);
+  const mu = await calcInitialMu(answers);
   const sigma = 8.333;
   const elo = calcEloRating(mu, sigma);
   const now = new Date().toISOString();

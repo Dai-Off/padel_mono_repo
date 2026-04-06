@@ -1,3 +1,5 @@
+import { getSupabaseServiceRoleClient } from '../lib/supabase';
+
 export type OnboardingAnswer = { question_id: string; value: string };
 
 export type Question = {
@@ -6,127 +8,107 @@ export type Question = {
   options: { value: string; label: string }[];
 };
 
-const Q = {
-  played_padel: 'played_padel',
-  racket_sports: 'racket_sports',
-  racket_years: 'racket_years',
-  padel_freq: 'padel_freq',
-  padel_time: 'padel_time',
-  padel_comp: 'padel_comp',
-  padel_skill: 'padel_skill',
-} as const;
+/**
+ * Obtiene la siguiente pregunta basada en las respuestas dadas hasta ahora.
+ * Sigue la lógica de branching definida en la base de datos (next_question_id).
+ */
+export async function getNextQuestion(answers: OnboardingAnswer[]): Promise<Question | null> {
+  const supabase = getSupabaseServiceRoleClient();
 
-export function getNextQuestion(answers: OnboardingAnswer[]): Question | null {
-  const by = (id: string) => answers.find((a) => a.question_id === id)?.value;
+  // Si no hay respuestas, devolvemos la primera pregunta (orden más bajo)
+  if (!answers || answers.length === 0) {
+    const { data: firstQ, error: errQ } = await supabase
+      .from('onboarding_questions')
+      .select('id')
+      .eq('is_active', true)
+      .order('order', { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
-  if (!by(Q.played_padel)) {
-    return {
-      id: Q.played_padel,
-      text: '¿Has jugado alguna vez al pádel?',
-      options: [
-        { value: 'yes', label: 'Sí' },
-        { value: 'no', label: 'No' },
-      ],
-    };
+    if (errQ || !firstQ) return null;
+    return fetchQuestionWithOptions(firstQ.id);
   }
 
-  if (by(Q.played_padel) === 'no') {
-    if (!by(Q.racket_sports)) {
-      return {
-        id: Q.racket_sports,
-        text: '¿Has practicado otros deportes de raqueta?',
-        options: [
-          { value: 'no', label: 'No' },
-          { value: 'yes', label: 'Sí' },
-        ],
-      };
-    }
-    if (by(Q.racket_sports) === 'yes' && !by(Q.racket_years)) {
-      return {
-        id: Q.racket_years,
-        text: '¿Cuántos años llevas en ese deporte?',
-        options: [
-          { value: 'lt2', label: 'Menos de 2' },
-          { value: '2to5', label: 'Entre 2 y 5' },
-          { value: 'gt5', label: 'Más de 5' },
-        ],
-      };
-    }
-    return null;
+  // Para ser robustos, seguimos la cadena desde la primera respuesta
+  // para encontrar cuál es la siguiente pregunta real tras la secuencia de respuestas.
+  const lastAnswer = answers[answers.length - 1];
+
+  const { data: option, error: errOpt } = await supabase
+    .from('onboarding_options')
+    .select('next_question_id')
+    .eq('question_id', lastAnswer.question_id)
+    .eq('value', lastAnswer.value)
+    .maybeSingle();
+
+  if (errOpt || !option || !option.next_question_id) {
+    return null; // Fin del cuestionario o no hay más ramas
   }
 
-  if (by(Q.played_padel) === 'yes') {
-    if (!by(Q.padel_freq)) {
-      return {
-        id: Q.padel_freq,
-        text: '¿Con qué frecuencia juegas al pádel?',
-        options: [
-          { value: 'low', label: 'Menos de 1 vez por semana' },
-          { value: 'high', label: 'Al menos 1 vez por semana' },
-        ],
-      };
-    }
-    if (by(Q.padel_freq) === 'low' && !by(Q.padel_time)) {
-      return {
-        id: Q.padel_time,
-        text: '¿Cuánto tiempo llevas jugando pádel?',
-        options: [
-          { value: 'lt1y', label: 'Menos de 1 año' },
-          { value: '1to3', label: 'Entre 1 y 3 años' },
-          { value: 'gt3', label: 'Más de 3 años' },
-        ],
-      };
-    }
-    if (by(Q.padel_freq) === 'high' && !by(Q.padel_comp)) {
-      return {
-        id: Q.padel_comp,
-        text: '¿Participas en competiciones?',
-        options: [
-          { value: 'no', label: 'No' },
-          { value: 'yes', label: 'Sí' },
-        ],
-      };
-    }
-    if (!by(Q.padel_skill)) {
-      return {
-        id: Q.padel_skill,
-        text: '¿Cómo valorarías tu nivel técnico actual en pádel?',
-        options: [
-          { value: 'low', label: 'Iniciación / básico' },
-          { value: 'mid', label: 'Intermedio' },
-          { value: 'high', label: 'Avanzado' },
-        ],
-      };
-    }
-  }
-
-  return null;
+  return fetchQuestionWithOptions(option.next_question_id);
 }
 
-export function calcInitialMu(answers: OnboardingAnswer[]): number {
-  const by = (id: string) => answers.find((a) => a.question_id === id)?.value;
+/**
+ * Calcula el Mu inicial basado en las respuestas y los ajustes definidos en la DB.
+ * Base Mu = 25.
+ */
+export async function calcInitialMu(answers: OnboardingAnswer[]): Promise<number> {
+  const supabase = getSupabaseServiceRoleClient();
   let mu = 25;
 
-  if (by(Q.played_padel) === 'no') {
-    if (by(Q.racket_sports) === 'no') mu = 20;
-    else if (by(Q.racket_years) === 'lt2') mu = 22;
-    else if (by(Q.racket_years) === '2to5') mu = 24;
-    else if (by(Q.racket_years) === 'gt5') mu = 26;
-    else mu = 22;
-  } else {
-    if (by(Q.padel_freq) === 'low') {
-      if (by(Q.padel_time) === 'lt1y') mu = 24;
-      else if (by(Q.padel_time) === '1to3') mu = 26;
-      else if (by(Q.padel_time) === 'gt3') mu = 27;
-      else mu = 25;
-    } else {
-      mu = by(Q.padel_comp) === 'yes' ? 30 : 28;
+  if (!answers || answers.length === 0) return mu;
+
+  // Calculamos la suma de todos los ajustes de las opciones seleccionadas
+  const questionIds = answers.map(a => a.question_id);
+  const values = answers.map(a => a.value);
+
+  // Consulta por lotes para ser más eficiente
+  const { data: options, error } = await supabase
+    .from('onboarding_options')
+    .select('mu_adjustment, question_id, value')
+    .in('question_id', questionIds)
+    .in('value', values);
+
+  if (error || !options) return mu;
+
+  // Solo sumamos los que coinciden exactamente con el par (id, valor)
+  for (const ans of answers) {
+    const match = options.find(o => o.question_id === ans.question_id && o.value === ans.value);
+    if (match) {
+      mu += Number(match.mu_adjustment);
     }
   }
 
-  const sk = by(Q.padel_skill);
-  if (sk === 'low') mu -= 1;
-  if (sk === 'high') mu += 1.5;
+  return Math.max(15, Math.min(45, mu));
+}
 
-  return Math.max(15, Math.min(40, mu));
+/**
+ * Helper para obtener una pregunta con todas sus opciones formateadas.
+ */
+async function fetchQuestionWithOptions(questionId: string): Promise<Question | null> {
+  const supabase = getSupabaseServiceRoleClient();
+
+  const { data: question, error: errQ } = await supabase
+    .from('onboarding_questions')
+    .select('id, text')
+    .eq('id', questionId)
+    .maybeSingle();
+
+  if (errQ || !question) return null;
+
+  const { data: options, error: errO } = await supabase
+    .from('onboarding_options')
+    .select('value, text')
+    .eq('question_id', questionId)
+    .order('order', { ascending: true });
+
+  if (errO || !options) return null;
+
+  return {
+    id: (question as { id: string }).id,
+    text: (question as { text: string }).text,
+    options: options.map(o => ({
+      value: o.value,
+      label: o.text
+    }))
+  };
 }
