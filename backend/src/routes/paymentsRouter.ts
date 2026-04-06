@@ -4,6 +4,7 @@ import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 import {
   createIntentHandler,
   createIntentForNewMatchHandler,
+  createIntentForTournamentHandler,
   confirmClientHandler,
   listTransactionsHandler,
   listClubTransactionsHandler,
@@ -25,6 +26,7 @@ router.post('/cash-closing/records', requireClubOwnerOrAdmin, createCashClosingR
 router.post('/customer-portal', customerPortalHandler);
 router.post('/create-intent', createIntentHandler);
 router.post('/create-intent-for-new-match', createIntentForNewMatchHandler);
+router.post('/create-intent-for-tournament', createIntentForTournamentHandler);
 router.post('/confirm-client', confirmClientHandler);
 router.post('/simulate-turn-payment', simulateTurnPaymentHandler);
 

@@ -169,3 +169,26 @@ export async function createIntentForNewMatch(
     return { ok: false, error: 'Error de conexión' };
   }
 }
+
+/** Mismo flujo que reserva en club: PaymentSheet + `confirmPaymentFromClient`. */
+export async function createIntentForTournament(
+  tournamentId: string,
+  token: string | null | undefined
+): Promise<CreatePaymentIntentResponse> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/payments/create-intent-for-tournament`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ tournament_id: tournamentId }),
+    });
+    const json = (await res.json()) as CreatePaymentIntentResponse;
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al crear el pago' };
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
