@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { Calendar, Menu, ArrowLeft, X, Globe, Wallet } from 'lucide-react';
+import { Calendar, Menu, ArrowLeft, X, Globe, Wallet, Gift, Plus, Loader2, MoreVertical, Trash2 } from 'lucide-react';
 import { MainMenu } from '../../components/Layout/MainMenu';
 import { PageSpinner } from '../../components/Layout/PageSpinner';
 import clsx from 'clsx';
@@ -32,7 +32,8 @@ import { CourtColumn } from './components/CourtColumn';
 import { ReservationCard } from './components/ReservationCard';
 import { ReservationModal } from './components/ReservationModal';
 import { SchoolCourseModal } from './components/SchoolCourseModal';
-import { WalletModal } from './components/WalletModal';
+import { BonusManagement } from './components/BonusManagement';
+import { WalletRecharge } from './components/WalletRecharge';
 
 import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
@@ -50,6 +51,7 @@ import { getSupabaseClient } from '../../lib/supabase';
 import './grilla.css';
 
 // Data hooks for real integration
+
 // In-memory cache for bookings by date (avoids re-fetching when switching dates)
 const bookingsCache: Record<string, { data: any[]; ts: number }> = {};
 const CACHE_TTL = 300_000; // 5 minutes — realtime keeps data in sync
@@ -73,6 +75,7 @@ const useClubData = (dateOrStr: Date | string) => {
     const [courts, setCourts] = useState<Court[]>([]);
     const [reservations, setReservations] = useState<Reservation[]>([]);
     const [loading, setLoading] = useState(true);
+    const [isCreatingCourt, setIsCreatingCourt] = useState(false);
     const [clubId, setClubId] = useState<string | null>(null);
     const courtsRef = useRef<Court[]>([]);
     const dateStr = toDateStr(dateOrStr);
@@ -306,7 +309,76 @@ const useClubData = (dateOrStr: Date | string) => {
     }, [clubId, dateStr]);
     // ─────────────────────────────────────────────────────────────────────────
 
-    return { courts, reservations, loading, refresh, clubId };
+    const toggleCourtHidden = useCallback((courtId: string) => {
+        setCourts(prev => {
+            const court = prev.find(c => c.id === courtId);
+            if (!court) return prev;
+            const newHidden = !court.is_hidden;
+            const updated = prev.map(c => c.id === courtId ? { ...c, is_hidden: newHidden } : c);
+            courtsRef.current = updated;
+            apiFetchWithAuth<any>(`/courts/${courtId}`, {
+                method: 'PUT',
+                body: JSON.stringify({ is_hidden: newHidden }),
+            }).catch(() => {});
+            return updated;
+        });
+    }, []);
+
+    const addHiddenCourt = useCallback(async () => {
+        if (!clubId) return;
+        setIsCreatingCourt(true);
+        const hiddenCount = courtsRef.current.filter(c => c.is_hidden).length;
+        const newName = `Pista Oculta ${hiddenCount + 1}`;
+        try {
+            const res = await apiFetchWithAuth<any>('/courts', {
+                method: 'POST',
+                body: JSON.stringify({ club_id: clubId, name: newName, is_hidden: true }),
+            });
+            if (res.ok && res.court) {
+                const newCourt = { id: res.court.id, name: res.court.name, locationId: 'sede-central', is_hidden: true };
+                setCourts(prev => {
+                    const up = [...prev, newCourt];
+                    courtsRef.current = up;
+                    return up;
+                });
+            } else {
+                throw new Error(res.error || 'Error creando pista');
+            }
+        } catch(e) {
+            console.error('Error addHiddenCourt:', e);
+            alert('Error creando nueva pista oculta');
+        } finally {
+            setIsCreatingCourt(false);
+        }
+    }, [clubId]);
+
+    const removeCourt = useCallback(async (courtId: string) => {
+        const confirmDelete = window.confirm("¿Seguro que deseas eliminar dinámicamente esta Pista Oculta?");
+        if (!confirmDelete) return;
+
+        // Optimistic update
+        const previousCourts = courtsRef.current;
+        setCourts(prev => {
+            const up = prev.filter(c => c.id !== courtId);
+            courtsRef.current = up;
+            return up;
+        });
+
+        try {
+            const res = await apiFetchWithAuth<any>(`/courts/${courtId}`, { method: 'DELETE' });
+            if (!res.ok) {
+                throw new Error(res.error || 'Error eliminando pista');
+            }
+        } catch(e) {
+            console.error('Error removeCourt:', e);
+            alert('Error al eliminar pista oculta. Se restablecerá la grilla.');
+            // Rollback
+            setCourts(previousCourts);
+            courtsRef.current = previousCourts;
+        }
+    }, []);
+
+    return { courts, reservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt };
 };
 
 // Pure mapping function — no network calls
@@ -449,9 +521,10 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
-  const { courts, reservations: serverReservations, loading, refresh, clubId } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt } = useClubData(selectedDate);
 
   const [grillaTab, setGrillaTab] = useState<'courts' | 'waitlist'>('courts');
+  const [showHiddenCourtsMenu, setShowHiddenCourtsMenu] = useState(false);
 
   // Check if there are hidden courts to show the tab
   const hasHiddenCourts = useMemo(() => courts.some(c => c.is_hidden), [courts]);
@@ -490,7 +563,8 @@ function GrillaViewInner() {
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('L');
   const [selectedModalReservationId, setSelectedModalReservationId] = useState<string | null>(null);
   const [selectedSchoolCourseId, setSelectedSchoolCourseId] = useState<string | null>(null);
-  const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const [bonusModalOpen, setBonusModalOpen] = useState(false);
+  const [rechargeModalOpen, setRechargeModalOpen] = useState(false);
   const [editingBookingData, setEditingBookingData] = useState<any | null>(null);
   const [hoveredTooltip, setHoveredTooltip] = useState<{ res: Reservation, el: HTMLElement } | null>(null);
   const [focusedCourtId, setFocusedCourtId] = useState<string | null>(null);
@@ -594,6 +668,14 @@ function GrillaViewInner() {
               body: JSON.stringify(bookingData),
           });
           if (res.ok) {
+              // Optimistic: update local state immediately from response
+              if (res.data) {
+                  const mapped = mapBookings([res.data], courts)[0];
+                  if (mapped) {
+                      setReservations(prev => prev.map(r => r.id === bookingId ? mapped : r));
+                  }
+              }
+              // Background refresh for consistency (non-blocking)
               refresh();
           } else {
               throw new Error(res.error || 'Unknown error');
@@ -610,6 +692,11 @@ function GrillaViewInner() {
         method: 'POST',
       });
       if (res.ok) {
+        // Optimistic: mark as confirmed locally
+        setReservations(prev => prev.map(r =>
+          r.id === bookingId ? { ...r, status: 'confirmed' as const, isPaidIcon: true } : r
+        ));
+        // Background refresh for consistency (non-blocking)
         refresh();
       } else {
         throw new Error(res.error || 'Error al marcar como pagado');
@@ -643,6 +730,8 @@ function GrillaViewInner() {
           throw err;
       }
   };
+
+  // toggleCourtHidden has been moved to useClubData.
 
   const handleMoveToHidden = async (bookingId: string) => {
     // Find the booking in current reservations
@@ -682,12 +771,14 @@ function GrillaViewInner() {
     });
     if (!res.ok) throw new Error(res.error || 'Error al mover la reserva');
 
-    // Update local state and close modal
+    // Optimistic: update local state and close modal immediately
+    const targetCourt = courts.find(c => c.id === targetCourtId);
     setReservations(prev => prev.map(r =>
-      r.id === bookingId ? { ...r, courtId: targetCourtId! } : r
+      r.id === bookingId ? { ...r, courtId: targetCourtId!, courtName: targetCourt?.name } : r
     ));
     setSelectedModalReservationId(null);
     setEditingBookingData(null);
+    // Background refresh for consistency (non-blocking)
     refresh();
   };
 
@@ -726,11 +817,14 @@ function GrillaViewInner() {
     });
     if (!res.ok) throw new Error(res.error || 'Error al mover la reserva');
 
+    // Optimistic: update local state and close modal immediately
+    const targetCourt = courts.find(c => c.id === targetCourtId);
     setReservations(prev => prev.map(r =>
-      r.id === bookingId ? { ...r, courtId: targetCourtId! } : r
+      r.id === bookingId ? { ...r, courtId: targetCourtId!, courtName: targetCourt?.name } : r
     ));
     setSelectedModalReservationId(null);
     setEditingBookingData(null);
+    // Background refresh for consistency (non-blocking)
     refresh();
   };
 
@@ -754,7 +848,17 @@ function GrillaViewInner() {
           });
 
           if (res.ok) {
-              await refresh(); // Refresh grid before modal closes
+              // Optimistic: insert from response immediately
+              if (res.data) {
+                  const mapped = mapBookings([res.data], courts)[0];
+                  if (mapped) {
+                      setReservations(prev =>
+                          prev.some(r => r.id === mapped.id) ? prev : [...prev, mapped]
+                      );
+                  }
+              }
+              // Background refresh for consistency (non-blocking)
+              refresh();
           } else {
               throw new Error(res.error || 'Unknown error');
           }
@@ -854,7 +958,29 @@ function GrillaViewInner() {
     return !hasOverlap;
   };
 
+  const [draggingCourt, setDraggingCourt] = useState<Court | null>(null);
+  const [hoveredCourtId, setHoveredCourtId] = useState<string | null>(null);
+  const tabCourtsRef = useRef<HTMLButtonElement>(null);
+  const tabWaitlistRef = useRef<HTMLButtonElement>(null);
+  const [tabHover, setTabHover] = useState<'courts' | 'waitlist' | null>(null);
+
+  const highlightedTab = useMemo(() => {
+    if (draggingCourt) return draggingCourt.is_hidden ? 'courts' : 'waitlist';
+    if (hoveredCourtId) {
+      const c = courts.find(c => c.id === hoveredCourtId);
+      if (c) return c.is_hidden ? 'courts' : 'waitlist';
+    }
+    return null;
+  }, [draggingCourt, hoveredCourtId, courts]);
+
   const handleDragStart = (event: DragStartEvent) => {
+    const data = event.active.data.current;
+    // Court header drag
+    if (data?.type === 'court') {
+      setDraggingCourt(data.court as Court);
+      return;
+    }
+    // Reservation drag
     setActiveId(event.active.id as string);
     const res = reservations.find(r => r.id === event.active.id);
     if (res) {
@@ -868,7 +994,34 @@ function GrillaViewInner() {
     }
   };
 
+  const lastPointerRef = useRef({ x: 0, y: 0 });
+
+  // Track pointer position globally during drag
+  useEffect(() => {
+    if (!draggingCourt) { setTabHover(null); return; }
+    const onPointer = (e: PointerEvent) => {
+      lastPointerRef.current = { x: e.clientX, y: e.clientY };
+      // Check tab hover
+      for (const { key, el } of [
+        { key: 'courts' as const, el: tabCourtsRef.current },
+        { key: 'waitlist' as const, el: tabWaitlistRef.current },
+      ]) {
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          setTabHover(key);
+          return;
+        }
+      }
+      setTabHover(null);
+    };
+    document.addEventListener('pointermove', onPointer);
+    return () => document.removeEventListener('pointermove', onPointer);
+  }, [draggingCourt]);
+
   const handleDragMove = (event: DragMoveEvent) => {
+    // Skip move logic for court header drags
+    if (draggingCourt) return;
     const { over, delta } = event;
     if (!over || !activeReservation) {
       setDragState(null);
@@ -897,6 +1050,39 @@ function GrillaViewInner() {
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over, delta } = event;
+
+    // ── Court header dropped on a tab (synchronous DOM hit-test) ──
+    if (draggingCourt) {
+      const court = draggingCourt;
+      setDraggingCourt(null);
+      setTabHover(null);
+
+      // Use last known pointer position for synchronous hit-test
+      // (reading tabHover state here would be stale due to React batching)
+      const { x, y } = lastPointerRef.current;
+      let droppedOn: 'courts' | 'waitlist' | null = null;
+      for (const { key, el } of [
+        { key: 'courts' as const, el: tabCourtsRef.current },
+        { key: 'waitlist' as const, el: tabWaitlistRef.current },
+      ]) {
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+          droppedOn = key;
+          break;
+        }
+      }
+
+      if (!droppedOn) return;
+      if (droppedOn === 'courts' && court.is_hidden) {
+        toggleCourtHidden(court.id);
+      } else if (droppedOn === 'waitlist' && !court.is_hidden) {
+        toggleCourtHidden(court.id);
+      }
+      return;
+    }
+
+    // ── Reservation drag ──
     setActiveId(null);
     setDragState(null);
     setActiveCardWidth(null);
@@ -1315,6 +1501,8 @@ function GrillaViewInner() {
             modifiers={[restrictToWindowEdges]}
           >
             <div className="flex-1 bg-white overflow-hidden flex flex-col relative min-h-0">
+
+
               {/* Scrollable area */}
               <div className={clsx("flex-1 overflow-auto relative", activeId && "dragging-active")}>
 
@@ -1404,45 +1592,110 @@ function GrillaViewInner() {
                       {/* Wallet button */}
                       <span className="text-gray-300 select-none">|</span>
                       <button
-                        onClick={() => setWalletModalOpen(true)}
+                        onClick={() => setRechargeModalOpen(true)}
                         className="flex items-center gap-1 px-2.5 py-0.5 rounded border border-[#00726b] bg-white text-[#00726b] hover:bg-[#00726b] hover:text-white text-[10px] font-bold transition-all whitespace-nowrap flex-shrink-0"
                       >
                         <Wallet className="w-3 h-3" />
                         Wallet
                       </button>
 
+                      {/* Bonos button */}
+                      <span className="text-gray-300 select-none">|</span>
+                      <button
+                        onClick={() => setBonusModalOpen(true)}
+                        className="flex items-center gap-1 px-2.5 py-0.5 rounded border border-[#005bc5] bg-white text-[#005bc5] hover:bg-[#005bc5] hover:text-white text-[10px] font-bold transition-all whitespace-nowrap flex-shrink-0"
+                      >
+                        <Gift className="w-3 h-3" />
+                        Bonos
+                      </button>
 
                     </div>
                   </div>
                 )}
 
-                {/* ── Tab bar: Padel / PISTA OCULTA ── */}
-                {hasHiddenCourts && (
-                  <div className="bg-white border-b border-gray-200 px-4 md:px-8 flex items-end gap-0">
+              {/* ── Tab bar: Padel / PISTA OCULTA ── */}
+              {courts.length > 0 && (
+                <div className="bg-white border-b border-gray-200 px-4 md:px-8 flex items-end gap-0 flex-shrink-0">
+                  <button
+                    ref={tabCourtsRef}
+                    onClick={() => setGrillaTab('courts')}
+                    className={clsx(
+                      "px-5 py-2.5 text-xs font-semibold transition-all relative",
+                      grillaTab === 'courts'
+                        ? "text-[#005a4f] border-b-2 border-[#005a4f]"
+                        : "text-gray-400 hover:text-gray-600 border-b-2 border-transparent",
+                      tabHover === 'courts' && "bg-blue-300 text-blue-900 border-b-2 border-blue-700 scale-110 shadow-lg ring-2 ring-blue-400",
+                      highlightedTab === 'courts' && tabHover !== 'courts' && "bg-[#e8f5e9] text-[#005a4f] border-b-2 border-[#005a4f] ring-2 ring-[#005a4f] ring-opacity-50 animate-pulse delay-75"
+                    )}
+                  >
+                    Padel
+                  </button>
+                  <div className="flex items-center">
                     <button
-                      onClick={() => setGrillaTab('courts')}
-                      className={clsx(
-                        "px-4 py-1.5 text-xs font-semibold transition-all relative",
-                        grillaTab === 'courts'
-                          ? "text-[#005a4f] border-b-2 border-[#005a4f]"
-                          : "text-gray-400 hover:text-gray-600 border-b-2 border-transparent"
-                      )}
-                    >
-                      Padel
-                    </button>
-                    <button
+                      ref={tabWaitlistRef}
                       onClick={() => setGrillaTab('waitlist')}
                       className={clsx(
-                        "px-4 py-1.5 text-xs font-semibold transition-all relative uppercase",
+                        "px-5 py-2.5 text-xs font-semibold transition-all relative uppercase",
                         grillaTab === 'waitlist'
                           ? "text-[#005a4f] border-b-2 border-[#005a4f]"
-                          : "text-gray-400 hover:text-gray-600 border-b-2 border-transparent"
+                          : "text-gray-400 hover:text-gray-600 border-b-2 border-transparent",
+                        tabHover === 'waitlist' && "bg-blue-300 text-blue-900 border-b-2 border-blue-700 scale-110 shadow-lg ring-2 ring-blue-400",
+                        highlightedTab === 'waitlist' && tabHover !== 'waitlist' && "bg-[#e8f5e9] text-[#005a4f] border-b-2 border-[#005a4f] ring-2 ring-[#005a4f] ring-opacity-50 animate-pulse delay-75"
                       )}
                     >
                       Pista Oculta
                     </button>
+                    {grillaTab === 'waitlist' && courts.filter(c => c.is_hidden).length < courts.filter(c => !c.is_hidden).length && (
+                      <button
+                        onClick={addHiddenCourt}
+                        title="Crear nueva pista oculta"
+                        disabled={isCreatingCourt}
+                        className={clsx(
+                          "ml-2 w-5 h-5 flex items-center justify-center rounded-full text-white transition-colors shadow-sm mb-1.5",
+                          isCreatingCourt ? "bg-gray-400 cursor-not-allowed" : "bg-[#005a4f] hover:bg-[#00423a]"
+                        )}
+                      >
+                        {isCreatingCourt ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Plus className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    )}
+                    {grillaTab === 'waitlist' && courts.some(c => c.is_hidden) && (
+                      <div className="relative ml-1">
+                        <button
+                          onClick={() => setShowHiddenCourtsMenu(!showHiddenCourtsMenu)}
+                          className="w-5 h-5 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 transition-colors mb-1.5"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
+                        {showHiddenCourtsMenu && (
+                          <div className="absolute top-full left-0 mt-1 w-52 bg-white rounded-md shadow-lg border border-gray-200 z-50 overflow-hidden">
+                            <ul className="py-1">
+                              {courts.filter(c => c.is_hidden).map(court => (
+                                <li key={court.id}>
+                                  <button
+                                    onClick={() => {
+                                      setShowHiddenCourtsMenu(false);
+                                      removeCourt(court.id);
+                                    }}
+                                    className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-600 flex items-center justify-between group"
+                                  >
+                                    <span>{court.name}</span>
+                                    <Trash2 className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-red-500" />
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
+              )}
+
                 {mobileFullView ? (
                   <>
                   <TransformWrapper
@@ -1523,6 +1776,7 @@ function GrillaViewInner() {
                               onHeaderClick={(courtId) => {
                                 setFocusedCourtId(courtId);
                               }}
+                              onHeaderHover={setHoveredCourtId}
                               isFocusedMode={focusedCourtId !== null}
                               isCurrentlyFocused={court.id === focusedCourtId}
                               isCompactView={false}
@@ -1562,7 +1816,7 @@ function GrillaViewInner() {
                       <GridBackground />
                       {visibleCourts.map(court => (
                         <CourtColumn
-                          key={`col-${court.id}-${focusedCourtId}`}
+                          key={`col-${court.id}`}
                           court={court}
                           reservations={reservations.filter(r => r.courtId === court.id)}
                           dragGhost={dragState?.courtId === court.id ? dragState : undefined}
@@ -1578,13 +1832,9 @@ function GrillaViewInner() {
                             }]);
                             setSelectedModalReservationId(newId);
                           }}
-                          onHeaderClick={(courtId) => {
-                            setFocusedCourtId(courtId);
-                          }}
-                          isFocusedMode={focusedCourtId !== null}
-                          isCurrentlyFocused={court.id === focusedCourtId}
                           isCompactView={false}
                           totalCourts={activeCourts.length}
+                          onHeaderHover={setHoveredCourtId}
                           onHoverStart={(res, el) => setHoveredTooltip({ res, el })}
                           onHoverEnd={() => setHoveredTooltip(null)}
                         />
@@ -1600,8 +1850,8 @@ function GrillaViewInner() {
             <DragOverlay dropAnimation={null}>
               {activeReservation ? (
                 <div style={
-                  mobileFullView 
-                    ? { transform: `scale(${activeMobileScaleRef.current})`, transformOrigin: 'top left', width: activeCardWidth || undefined } 
+                  mobileFullView
+                    ? { transform: `scale(${activeMobileScaleRef.current})`, transformOrigin: 'top left', width: activeCardWidth || undefined }
                     : { zoom: scale, width: activeCardWidth || undefined }
                 }>
                   <ReservationCard
@@ -1609,6 +1859,10 @@ function GrillaViewInner() {
                     isOverlay
                     compactPxPerMinute={mobileFullView ? compactPxPerMinute : undefined}
                   />
+                </div>
+              ) : draggingCourt ? (
+                <div className="px-3 py-1.5 bg-[#005a4f] text-white text-xs font-bold rounded-lg shadow-lg whitespace-nowrap">
+                  {draggingCourt.name}
                 </div>
               ) : null}
             </DragOverlay>
@@ -1647,10 +1901,16 @@ function GrillaViewInner() {
           onClose={() => setSelectedSchoolCourseId(null)}
         />
 
-        <WalletModal
+        <BonusManagement
           clubId={clubId}
-          isOpen={walletModalOpen}
-          onClose={() => setWalletModalOpen(false)}
+          isOpen={bonusModalOpen}
+          onClose={() => setBonusModalOpen(false)}
+        />
+
+        <WalletRecharge
+          clubId={clubId}
+          isOpen={rechargeModalOpen}
+          onClose={() => setRechargeModalOpen(false)}
         />
 
         <BadPracticeModal
