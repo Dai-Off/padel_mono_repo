@@ -1,6 +1,13 @@
 import { Request, Response } from 'express';
 import Stripe from 'stripe';
+import { playerMeetsTournamentGender } from '../lib/tournamentGender';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import {
+  cleanupExpiredTournamentInvites,
+  finalizeTournamentPaidJoin,
+  getTournamentSlots,
+  STRIPE_META_TOURNAMENT_PURPOSE,
+} from '../services/tournamentsService';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
@@ -179,6 +186,158 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
     });
   } catch (err) {
     console.error('[payments/create-intent-for-new-match]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/create-intent-for-tournament
+ * Body: { tournament_id }
+ *
+ * Crea PaymentIntent para la inscripción. La inscripción se confirma en webhook / confirm-client.
+ */
+export async function createIntentForTournamentHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const tournament_id = req.body?.tournament_id as string | undefined;
+  if (!tournament_id || typeof tournament_id !== 'string') {
+    res.status(400).json({ ok: false, error: 'tournament_id es obligatorio' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const { data: player } = await supabase
+      .from('players')
+      .select('id, email, stripe_customer_id')
+      .eq('email', user.email.trim().toLowerCase())
+      .maybeSingle();
+
+    if (!player) {
+      res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+      return;
+    }
+
+    const { data: tournament, error: tErr } = await supabase
+      .from('tournaments')
+      .select('id, visibility, status, max_players, gender, registration_mode, price_cents')
+      .eq('id', tournament_id)
+      .maybeSingle();
+
+    if (tErr || !tournament) {
+      res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+      return;
+    }
+
+    if (String((tournament as { visibility?: string }).visibility) !== 'public') {
+      res.status(403).json({ ok: false, error: 'Solo torneos públicos permiten esta inscripción' });
+      return;
+    }
+    if (String((tournament as { status: string }).status) !== 'open') {
+      res.status(400).json({ ok: false, error: 'El torneo no está abierto' });
+      return;
+    }
+    if (String((tournament as { registration_mode: string }).registration_mode) !== 'individual') {
+      res.status(400).json({ ok: false, error: 'Este torneo no admite inscripción individual desde la app' });
+      return;
+    }
+
+    const priceCents = Number((tournament as { price_cents: number }).price_cents ?? 0);
+    if (priceCents < 50) {
+      res.status(400).json({
+        ok: false,
+        error: 'Este torneo no requiere pago con tarjeta o el importe es demasiado bajo',
+      });
+      return;
+    }
+
+    await cleanupExpiredTournamentInvites(tournament_id);
+    const slots = await getTournamentSlots(tournament_id);
+    if (slots.confirmedPlayers >= Number((tournament as { max_players: number }).max_players)) {
+      res.status(409).json({ ok: false, error: 'No hay cupos disponibles' });
+      return;
+    }
+
+    const { data: existingIns } = await supabase
+      .from('tournament_inscriptions')
+      .select('id')
+      .eq('tournament_id', tournament_id)
+      .eq('player_id_1', player.id)
+      .maybeSingle();
+    if (existingIns) {
+      res.status(409).json({ ok: false, error: 'Ya estás inscrito en este torneo' });
+      return;
+    }
+
+    const { data: joinPlayer } = await supabase
+      .from('players')
+      .select('gender')
+      .eq('id', player.id)
+      .maybeSingle();
+    if (
+      !playerMeetsTournamentGender(
+        (tournament as { gender?: string }).gender,
+        (joinPlayer as { gender?: string } | null)?.gender
+      )
+    ) {
+      res.status(403).json({
+        ok: false,
+        error:
+          'Tu género en el perfil no coincide con este torneo. Actualiza tu perfil o elige un torneo mixto.',
+      });
+      return;
+    }
+
+    const stripe = getStripe();
+    const metadata: Record<string, string> = {
+      tournament_id,
+      payer_player_id: player.id,
+      purpose: STRIPE_META_TOURNAMENT_PURPOSE,
+    };
+
+    const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
+      amount: priceCents,
+      currency: 'eur',
+      automatic_payment_methods: { enabled: true },
+      setup_future_usage: 'off_session',
+      metadata,
+    };
+
+    if (player.stripe_customer_id) {
+      paymentIntentParams.customer = player.stripe_customer_id;
+    } else {
+      const customer = await stripe.customers.create({
+        email: player.email,
+        metadata: { player_id: player.id },
+      });
+      paymentIntentParams.customer = customer.id;
+      await supabase
+        .from('players')
+        .update({ stripe_customer_id: customer.id, updated_at: new Date().toISOString() })
+        .eq('id', player.id);
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
+
+    res.json({
+      ok: true,
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      amountCents: priceCents,
+    });
+  } catch (err) {
+    console.error('[payments/create-intent-for-tournament]', err);
     res.status(500).json({ ok: false, error: (err as Error).message });
   }
 }
@@ -367,6 +526,31 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         .maybeSingle();
       if (!existing) {
         await processNewMatchPayment(supabase, pi);
+      }
+      res.json({ received: true });
+      return;
+    }
+
+    // Inscripción torneo (pago)
+    if (
+      meta.purpose === STRIPE_META_TOURNAMENT_PURPOSE &&
+      meta.tournament_id &&
+      meta.payer_player_id
+    ) {
+      const { data: existingPi } = await supabase
+        .from('payment_transactions')
+        .select('id')
+        .eq('stripe_payment_intent_id', pi.id)
+        .maybeSingle();
+      if (!existingPi) {
+        const amountCents =
+          typeof pi.amount_received === 'number' ? pi.amount_received : Number(pi.amount ?? 0);
+        await finalizeTournamentPaidJoin({
+          tournamentId: String(meta.tournament_id),
+          playerId: String(meta.payer_player_id),
+          stripePaymentIntentId: pi.id,
+          amountCents,
+        });
       }
       res.json({ received: true });
       return;
@@ -1481,6 +1665,28 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       });
 
       res.json({ ok: true, match, booking: { id: booking.id } });
+      return;
+    }
+
+    // Inscripción torneo (pago)
+    if (
+      meta.purpose === STRIPE_META_TOURNAMENT_PURPOSE &&
+      meta.tournament_id &&
+      payer_player_id
+    ) {
+      const amountCents =
+        typeof pi.amount_received === 'number' ? pi.amount_received : Number(pi.amount ?? 0);
+      const done = await finalizeTournamentPaidJoin({
+        tournamentId: String(meta.tournament_id),
+        playerId: String(payer_player_id),
+        stripePaymentIntentId: payment_intent_id,
+        amountCents,
+      });
+      if (!done.ok) {
+        res.status(400).json({ ok: false, error: done.error });
+        return;
+      }
+      res.json({ ok: true, tournament_id: String(meta.tournament_id) });
       return;
     }
 

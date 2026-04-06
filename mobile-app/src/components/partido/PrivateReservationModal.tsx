@@ -64,6 +64,7 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
   const { height: screenH } = useWindowDimensions();
   const titleLine = `${data.courtName} - ${data.clubName}`;
   const sheetMaxH = Math.round(screenH * 0.9);
+  const kind = data.confirmationKind ?? 'match';
 
   return (
     <Modal
@@ -113,8 +114,10 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
             <View style={styles.body}>
               <View style={styles.badgeRow}>
                 <View style={styles.badge}>
-                  <Text style={styles.badgeEmoji}>🎾</Text>
-                  <Text style={[styles.badgeText, androidLabel({})]}>Partido</Text>
+                  <Text style={styles.badgeEmoji}>{kind === 'tournament' ? '🏆' : '🎾'}</Text>
+                  <Text style={[styles.badgeText, androidLabel({})]}>
+                    {kind === 'tournament' ? 'Torneo' : 'Partido'}
+                  </Text>
                 </View>
               </View>
 
@@ -124,6 +127,9 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
                 <PrivateInfoRow icon="calendar-outline" label="Fecha y hora" value={data.dateTimeFormatted} />
                 <PrivateInfoRow icon="time-outline" label="Duración" value={data.duration} />
                 <PrivateInfoRow icon="location-outline" label="Club" value={data.clubName} />
+                {data.spotsLine ? (
+                  <PrivateInfoRow icon="people-outline" label="Plazas" value={data.spotsLine} />
+                ) : null}
                 <PrivateInfoRow icon="cash-outline" label="Precio" value={data.priceFormatted} />
               </View>
 
