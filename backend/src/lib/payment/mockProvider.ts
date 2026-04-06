@@ -20,7 +20,7 @@ export class MockPaymentProvider implements IPaymentProvider {
     if (!booking) return { ok: false, error: 'Reserva no encontrada' };
     if (booking.status === 'confirmed') return { ok: true };
 
-    if (booking.status !== 'pending_payment') {
+    if (booking.status !== 'pending_payment' && booking.status !== 'partial_payment') {
       return { ok: false, error: `La reserva no está pendiente de pago (status: ${booking.status})` };
     }
 

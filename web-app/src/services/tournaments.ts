@@ -2,6 +2,7 @@ import { apiFetchWithAuth } from './api';
 
 export type TournamentPrize = { label: string; amount_cents: number };
 
+
 export type TournamentListItem = {
   id: string;
   club_id: string;

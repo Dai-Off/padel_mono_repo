@@ -24,6 +24,8 @@ export const zhHK: TranslationKeys = {
         dateLabel: '日期：',
         prevDay: '前一天',
         nextDay: '後一天',
+        courtsTab: '球場',
+        waitlistTab: '候補名單',
     },
 
     metrics: {
