@@ -540,6 +540,12 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                                 <span className="text-xs font-bold text-gray-700">Total acreditado en Wallet</span>
                                 <span className="text-sm font-bold text-emerald-600">{fmt(totalToWallet)} €</span>
                             </div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs text-gray-600">Importe en caja</span>
+                                <span className={`text-sm font-bold ${priceToPay === 0 ? 'text-amber-700' : 'text-gray-800'}`}>
+                                    {fmt(priceToPay)} €
+                                </span>
+                            </div>
                             {selectedBonus?.physical_item && (
                                 <>
                                     <div className="border-t border-dashed border-gray-200" />
