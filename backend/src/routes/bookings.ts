@@ -8,9 +8,69 @@ const router = Router();
 router.use(attachAuthContext);
 
 const SELECT_LIST =
-  'id, created_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, players!bookings_organizer_player_id_fkey(first_name, last_name)';
+  'id, created_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, players!bookings_organizer_player_id_fkey(first_name, last_name), booking_participants(player_id, role, players!booking_participants_player_id_fkey(first_name, last_name)), payment_transactions(amount_cents, status, stripe_payment_intent_id, payer_player_id)';
+// payment_transactions joined to get per-player payment data (no migration needed)
 const SELECT_ONE =
-  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, email))';
+  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(id, player_id, role, share_amount_cents, payment_status, players!booking_participants_player_id_fkey(id, first_name, last_name, email)), payment_transactions(id, payer_player_id, amount_cents, stripe_payment_intent_id, status)';
+
+// ─── Helpers de pago ─────────────────────────────────────────────────────────
+
+function computeBookingStatus(
+  totalPriceCents: number,
+  participants: Array<{ paid_amount_cents?: number; wallet_amount_cents?: number }>,
+): 'pending_payment' | 'confirmed' {
+  const totalPaid = participants.reduce(
+    (sum, p) => sum + (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0),
+    0,
+  );
+  if (totalPaid >= totalPriceCents && totalPriceCents > 0) return 'confirmed';
+  return 'pending_payment';
+}
+
+/** Maps frontend status values to DB-safe values (partial_payment is not in DB constraint) */
+function toDbStatus(status: string): string {
+  if (status === 'partial_payment') return 'pending_payment';
+  return status;
+}
+
+/** Stores per-player manual payments in payment_transactions (works without migration 015) */
+async function upsertManualPayments(
+  supabase: ReturnType<typeof import('../lib/supabase').getSupabaseServiceRoleClient>,
+  bookingId: string,
+  participants: Array<{ player_id: string; paid_amount_cents?: number; wallet_amount_cents?: number; payment_method?: string | null }>,
+): Promise<void> {
+  // Remove previous manual payments for this booking
+  const { error: delErr } = await supabase
+    .from('payment_transactions')
+    .delete()
+    .eq('booking_id', bookingId)
+    .like('stripe_payment_intent_id', 'manual_%');
+  if (delErr) console.error('[upsertManualPayments] delete error:', delErr.message);
+
+  // Insert one row per player with paid > 0 (cash/card/wallet)
+  // stripe_payment_intent_id must be globally unique — encode booking+player+method
+  for (const p of participants) {
+    const cashCardCents = p.paid_amount_cents ?? 0;
+    const walletCents = p.wallet_amount_cents ?? 0;
+    const totalPaid = cashCardCents + walletCents;
+    if (totalPaid <= 0) continue;
+
+    const method = p.payment_method === 'wallet' ? 'wallet'
+      : p.payment_method === 'card' ? 'card' : 'cash';
+    const uniqueId = `manual_${method}_${bookingId}_${p.player_id}`;
+    const { error: insErr } = await supabase.from('payment_transactions').insert({
+      booking_id: bookingId,
+      payer_player_id: p.player_id,
+      amount_cents: totalPaid,
+      currency: 'EUR',
+      stripe_payment_intent_id: uniqueId,
+      status: 'succeeded',
+    });
+    if (insErr) console.error('[upsertManualPayments] insert error:', insErr.message, { uniqueId, totalPaid });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function canAccessClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
@@ -41,7 +101,8 @@ async function hasCourtConflict(params: {
     .from('bookings')
     .select('id, start_at, end_at, status')
     .eq('court_id', params.courtId)
-    .neq('status', 'cancelled');
+    .neq('status', 'cancelled')
+    .is('deleted_at', null);
   if (params.excludeBookingId) q = q.neq('id', params.excludeBookingId);
   const { data: existingBookings, error: bErr } = await q;
   if (bErr) return { conflict: true, reason: bErr.message };
@@ -148,7 +209,7 @@ router.get('/', async (req: Request, res: Response) => {
       const nextDayStr = nextDay.toISOString().split('T')[0];
       q = q.gte('start_at', `${date}T00:00:00Z`).lt('start_at', `${nextDayStr}T00:00:00Z`);
     }
-    q = q.neq('status', 'cancelled');
+    q = q.neq('status', 'cancelled').is('deleted_at', null);
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, bookings: data ?? [] });
@@ -248,6 +309,7 @@ router.get('/checkin/today', async (req: Request, res: Response) => {
       `)
       .in('court_id', courtIds)
       .neq('status', 'cancelled')
+      .is('deleted_at', null)
       .gte('start_at', startUtc.toISOString())
       .lt('start_at', endUtc.toISOString())
       .order('start_at', { ascending: true });
@@ -395,14 +457,14 @@ router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data, error } = await supabase
+    const { data: bookingData, error: bookingErr } = await supabase
       .from('bookings')
       .select(SELECT_ONE)
       .eq('id', id)
       .maybeSingle();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
-    if (!data) return res.status(404).json({ ok: false, error: 'Booking not found' });
-    return res.json({ ok: true, booking: data });
+    if (bookingErr) return res.status(500).json({ ok: false, error: bookingErr.message });
+    if (!bookingData) return res.status(404).json({ ok: false, error: 'Booking not found' });
+    return res.json({ ok: true, booking: bookingData });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -447,7 +509,7 @@ router.post('/', async (req: Request, res: Response) => {
     const wantConfirmed = status === 'confirmed';
 
     // 1. Insert Booking (siempre como pending; el middleware de pago lo confirma si aplica)
-    const { data: booking, error: bookingError } = await supabase
+    const { data: insertedBooking, error: bookingError } = await supabase
       .from('bookings')
       .insert([
         {
@@ -467,59 +529,107 @@ router.post('/', async (req: Request, res: Response) => {
             : 'web',
         },
       ])
-      .select(SELECT_ONE)
+      .select('id')
       .single();
 
-    if (bookingError) return res.status(500).json({ ok: false, error: bookingError.message });
+    if (bookingError) {
+      console.error('[POST /bookings] Insert error:', bookingError);
+      return res.status(500).json({ ok: false, error: bookingError.message });
+    }
+    const booking = insertedBooking as { id: string };
 
-    // 2. Insert Participants
-    const participantRows = [
-      {
+    // 2. Obtener club_id para wallet transactions
+    const { data: courtData } = await supabase
+      .from('courts').select('club_id').eq('id', court_id).maybeSingle();
+    const clubIdForWallet = (courtData as any)?.club_id as string | undefined;
+
+    // 3. Construir filas de participantes (incluye organizador si viene en el array)
+    const participantRows: any[] = [];
+    const hasPaymentData = Array.isArray(participants) && participants.some(
+      (p: any) => (p.paid_amount_cents ?? 0) > 0 || (p.wallet_amount_cents ?? 0) > 0,
+    );
+
+    if (Array.isArray(participants) && participants.length > 0) {
+      for (const p of participants) {
+        if (!p.player_id) continue;
+        const paidCents = p.paid_amount_cents ?? 0;
+        const walletCents = p.wallet_amount_cents ?? 0;
+        participantRows.push({
+          booking_id: booking.id,
+          player_id: p.player_id,
+          role: p.player_id === organizer_player_id ? 'organizer' : 'guest',
+          share_amount_cents: p.share_amount_cents ?? 0,
+          paid_amount_cents: paidCents,
+          wallet_amount_cents: walletCents,
+          payment_method: p.payment_method ?? null,
+          payment_status: paidCents + walletCents > 0 ? 'paid' : 'pending',
+        });
+      }
+    }
+    // Asegurar que el organizador siempre esté
+    if (!participantRows.find((r) => r.player_id === organizer_player_id)) {
+      participantRows.push({
         booking_id: booking.id,
         player_id: organizer_player_id,
         role: 'organizer',
         share_amount_cents: 0,
+        paid_amount_cents: 0,
+        wallet_amount_cents: 0,
+        payment_method: null,
         payment_status: 'pending',
-      },
-    ];
-
-    if (Array.isArray(participants)) {
-      participants.forEach((p: any) => {
-        if (p.player_id && p.player_id !== organizer_player_id) {
-          participantRows.push({
-            booking_id: booking.id,
-            player_id: p.player_id,
-            role: 'guest',
-            share_amount_cents: 0,
-            payment_status: 'pending',
-          });
-        }
       });
     }
 
     const { error: participantsError } = await supabase
       .from('booking_participants')
       .insert(participantRows);
-
     if (participantsError) {
-      console.error('Error creating participants:', participantsError.message);
+      console.error('[POST /bookings] Participants insert error:', participantsError.message);
+      // Migration 015 not yet applied — retry without payment columns
+      const rowsBase = participantRows.map((r: any) => ({
+        booking_id: r.booking_id,
+        player_id: r.player_id,
+        role: r.role,
+        share_amount_cents: r.share_amount_cents,
+        payment_status: r.payment_status,
+      }));
+      const { error: fallbackErr } = await supabase.from('booking_participants').insert(rowsBase);
+      if (fallbackErr) console.error('[POST /bookings] Fallback participants insert error:', fallbackErr.message);
     }
 
-    // 3. Si el admin indicó "Pagar" → middleware de pago simula el cobro
-    if (wantConfirmed) {
+    // 4. Persistir pagos en payment_transactions y calcular status
+    let finalStatus: string = 'pending_payment';
+    if (hasPaymentData) {
+      await upsertManualPayments(supabase, booking.id, participantRows);
+      finalStatus = computeBookingStatus(Number(total_price_cents), participantRows);
+      await supabase.from('bookings').update({ status: finalStatus }).eq('id', booking.id);
+
+      // 4b. Descontar saldo de wallet para quienes pagaron con wallet
+      if (clubIdForWallet) {
+        for (const p of participantRows) {
+          if (p.payment_method === 'wallet' && p.wallet_amount_cents > 0) {
+            await supabase.from('wallet_transactions').insert({
+              player_id: p.player_id,
+              club_id: clubIdForWallet,
+              amount_cents: -Math.abs(p.wallet_amount_cents),
+              concept: `Pago reserva #${booking.id.slice(0, 8)}`,
+              type: 'debit',
+              booking_id: booking.id,
+              notes: 'Débito automático por pago de reserva',
+            });
+          }
+        }
+      }
+    } else if (wantConfirmed) {
       const payResult = await recordPayment(booking.id);
       if (!payResult.ok) {
         return res.status(500).json({ ok: false, error: payResult.error ?? 'Error al registrar pago' });
       }
-      const { data: updated } = await supabase
-        .from('bookings')
-        .select(SELECT_ONE)
-        .eq('id', booking.id)
-        .single();
-      return res.status(201).json({ ok: true, booking: updated ?? booking });
+      finalStatus = 'confirmed';
     }
 
-    return res.status(201).json({ ok: true, booking });
+    const { data: finalBooking } = await supabase.from('bookings').select(SELECT_ONE).eq('id', booking.id).maybeSingle();
+    return res.status(201).json({ ok: true, booking: finalBooking ?? booking });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -527,9 +637,10 @@ router.post('/', async (req: Request, res: Response) => {
 
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { status, cancelled_by, cancellation_reason, notes, booking_type, participants, court_id, start_at, end_at } = req.body ?? {};
+  console.log(`[PUT /bookings/${id}] body:`, JSON.stringify(req.body, null, 2));
+  const { status, cancelled_by, cancellation_reason, notes, booking_type, participants, court_id, start_at, end_at, total_price_cents } = req.body ?? {};
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
-  if (status !== undefined && status !== 'confirmed') update.status = status;
+  if (status !== undefined && status !== 'confirmed') update.status = toDbStatus(status);
   if (cancelled_by !== undefined) update.cancelled_by = cancelled_by;
   if (cancellation_reason !== undefined) update.cancellation_reason = cancellation_reason;
   if (status === 'cancelled') {
@@ -540,6 +651,9 @@ router.put('/:id', async (req: Request, res: Response) => {
   if (court_id !== undefined) update.court_id = court_id;
   if (start_at !== undefined) update.start_at = start_at;
   if (end_at !== undefined) update.end_at = end_at;
+  if (total_price_cents !== undefined && Number.isFinite(Number(total_price_cents))) {
+    update.total_price_cents = Number(total_price_cents);
+  }
 
   if (Object.keys(update).length === 1 && !Array.isArray(participants) && status !== 'confirmed') {
     return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
@@ -570,17 +684,24 @@ router.put('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    const { data, error } = await supabase
+    let { data, error: updateError } = await supabase
       .from('bookings')
       .update(update)
       .eq('id', id)
       .select(SELECT_ONE)
       .maybeSingle();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (updateError) {
+      console.error(`[PUT /bookings/${id}] Update error:`, updateError.message, 'update obj:', JSON.stringify(update));
+      return res.status(500).json({ ok: false, error: updateError.message });
+    }
     if (!data) return res.status(404).json({ ok: false, error: 'Booking not found' });
 
-    // Si se marca como pagada → middleware de pago
-    if (status === 'confirmed') {
+    // Si se marca como pagada y NO hay participantes con datos de pago → middleware de pago
+    // Cuando hay participantes con datos de pago, la lógica de abajo (hasPaymentData) se encarga
+    const hasParticipantPayments = Array.isArray(participants) && participants.some(
+      (p: any) => (p.paid_amount_cents ?? 0) > 0 || (p.wallet_amount_cents ?? 0) > 0,
+    );
+    if (status === 'confirmed' && !hasParticipantPayments) {
       const payResult = await recordPayment(id);
       if (!payResult.ok) {
         return res.status(500).json({ ok: false, error: payResult.error ?? 'Error al registrar pago' });
@@ -593,38 +714,95 @@ router.put('/:id', async (req: Request, res: Response) => {
       if (refreshed) Object.assign(data, refreshed);
     }
 
-    // Update guest participants if provided
+    // Actualizar participantes si se proporcionaron
     if (Array.isArray(participants)) {
       const organizerPlayerId = (data as any).organizer_player_id;
+      const bookingTotalCents = (data as any).total_price_cents ?? 0;
+      const hasPaymentData = participants.some(
+        (p: any) => (p.paid_amount_cents ?? 0) > 0 || (p.wallet_amount_cents ?? 0) > 0,
+      );
 
-      // Delete existing guest participants
-      await supabase
-        .from('booking_participants')
-        .delete()
-        .eq('booking_id', id)
-        .eq('role', 'guest');
+      // Obtener club_id para wallet
+      const { data: courtRow } = await supabase
+        .from('courts').select('club_id')
+        .eq('id', (data as any).court_id).maybeSingle();
+      const clubIdForWallet = (courtRow as any)?.club_id as string | undefined;
 
-      // Insert new guests (skip if same as organizer)
-      const guestRows = participants
-        .filter((p: any) => p.player_id && p.player_id !== organizerPlayerId)
-        .map((p: any) => ({
+      // Eliminar guests anteriores y upsert organizer
+      await supabase.from('booking_participants').delete()
+        .eq('booking_id', id).eq('role', 'guest');
+
+      const newParticipantRows: any[] = [];
+      for (const p of participants) {
+        if (!p.player_id) continue;
+        const paidCents = p.paid_amount_cents ?? 0;
+        const walletCents = p.wallet_amount_cents ?? 0;
+        const isOrganizer = p.player_id === organizerPlayerId;
+        const row = {
           booking_id: id,
           player_id: p.player_id,
-          role: 'guest',
-          payment_status: 'pending',
-          share_amount_cents: 0,
-        }));
+          role: isOrganizer ? 'organizer' : 'guest',
+          share_amount_cents: p.share_amount_cents ?? 0,
+          paid_amount_cents: paidCents,
+          wallet_amount_cents: walletCents,
+          payment_method: p.payment_method ?? null,
+          payment_status: paidCents + walletCents > 0 ? 'paid' : 'pending',
+        };
+        newParticipantRows.push(row);
+        if (isOrganizer) {
+          // Update organizer using only base columns (always safe)
+          await supabase.from('booking_participants')
+            .update({ share_amount_cents: row.share_amount_cents, payment_status: row.payment_status })
+            .eq('booking_id', id).eq('role', 'organizer');
+        }
+      }
 
+      // Insertar guests nuevos (solo columnas base)
+      const guestRows = newParticipantRows.filter((r) => r.role === 'guest');
       if (guestRows.length > 0) {
-        const { error: pErr } = await supabase
-          .from('booking_participants')
-          .insert(guestRows);
-        if (pErr) console.error('Error updating participants:', pErr.message);
+        const guestRowsBase = guestRows.map((r: any) => ({
+          booking_id: r.booking_id, player_id: r.player_id, role: r.role,
+          share_amount_cents: r.share_amount_cents, payment_status: r.payment_status,
+        }));
+        const { error: gErr } = await supabase.from('booking_participants').insert(guestRowsBase);
+        if (gErr) console.error('[PUT /bookings] Guest insert error:', gErr.message);
+      }
+
+      // Persistir pagos en payment_transactions y recalcular status
+      if (hasPaymentData) {
+        await upsertManualPayments(supabase, id, newParticipantRows);
+        const newStatus = computeBookingStatus(bookingTotalCents, newParticipantRows);
+        await supabase.from('bookings').update({ status: newStatus }).eq('id', id);
+
+        // Descontar saldo de wallet para quienes pagaron con wallet
+        if (clubIdForWallet) {
+          // Primero borrar débitos anteriores de esta reserva para evitar duplicados
+          await supabase.from('wallet_transactions').delete()
+            .eq('booking_id', id).eq('type', 'debit');
+
+          for (const p of newParticipantRows) {
+            if (p.payment_method === 'wallet' && p.wallet_amount_cents > 0) {
+              await supabase.from('wallet_transactions').insert({
+                player_id: p.player_id,
+                club_id: clubIdForWallet,
+                amount_cents: -Math.abs(p.wallet_amount_cents),
+                concept: `Pago reserva #${id.slice(0, 8)}`,
+                type: 'debit',
+                booking_id: id,
+                notes: 'Débito automático por pago de reserva',
+              });
+            }
+          }
+        }
+
+        const { data: refreshed } = await supabase.from('bookings').select(SELECT_ONE).eq('id', id).maybeSingle();
+        if (refreshed) return res.json({ ok: true, booking: refreshed });
       }
     }
 
     return res.json({ ok: true, booking: data });
   } catch (err) {
+    console.error(`[PUT /bookings/${id}] Unhandled error:`, (err as Error).message, (err as Error).stack);
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
@@ -633,16 +811,19 @@ router.delete('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const now = new Date().toISOString();
     const { data, error } = await supabase
       .from('bookings')
       .update({
         status: 'cancelled',
-        updated_at: new Date().toISOString(),
-        cancelled_at: new Date().toISOString(),
-        cancelled_by: 'player',
+        updated_at: now,
+        cancelled_at: now,
+        cancelled_by: 'owner',
+        deleted_at: now,
       })
       .eq('id', id)
-      .select('id, status')
+      .is('deleted_at', null)
+      .select('id, status, deleted_at')
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Booking not found' });

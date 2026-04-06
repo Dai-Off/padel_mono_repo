@@ -8,7 +8,7 @@ const router = Router();
 router.use(attachAuthContext);
 
 const FIELDS =
-  'id, created_at, club_id, name, indoor, glass_type, status, lighting, last_maintenance, display_order';
+  'id, created_at, club_id, name, indoor, glass_type, status, lighting, last_maintenance, display_order, is_hidden';
 
 function canAccessCourtClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
@@ -110,7 +110,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
-  const { club_id, name, indoor, glass_type, lighting, last_maintenance } = req.body ?? {};
+  const { club_id, name, indoor, glass_type, lighting, last_maintenance, is_hidden } = req.body ?? {};
   if (!club_id || !name || !String(name).trim()) {
     return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
   }
@@ -134,6 +134,7 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
     };
     if (lighting !== undefined) row.lighting = Boolean(lighting);
     if (last_maintenance !== undefined) row.last_maintenance = last_maintenance ?? null;
+    if (is_hidden !== undefined) row.is_hidden = Boolean(is_hidden);
     const { data, error } = await supabase
       .from('courts')
       .insert(row)
@@ -162,7 +163,7 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
   } catch {
     return res.status(500).json({ ok: false, error: 'Error al verificar pista' });
   }
-  const { name, indoor, glass_type, status, lighting, last_maintenance } = req.body ?? {};
+  const { name, indoor, glass_type, status, lighting, last_maintenance, is_hidden } = req.body ?? {};
   const update: Record<string, unknown> = {};
   if (name !== undefined) update.name = String(name).trim();
   if (indoor !== undefined) update.indoor = Boolean(indoor);
@@ -170,6 +171,7 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
   if (status !== undefined) update.status = status === 'maintenance' ? 'maintenance' : 'operational';
   if (lighting !== undefined) update.lighting = Boolean(lighting);
   if (last_maintenance !== undefined) update.last_maintenance = last_maintenance ?? null;
+  if (is_hidden !== undefined) update.is_hidden = Boolean(is_hidden);
   if (Object.keys(update).length === 0) {
     return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
   }
