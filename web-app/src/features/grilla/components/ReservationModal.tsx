@@ -429,28 +429,6 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     // Pago por slot: [0]=organizador, [1-3]=jugadores adicionales
     const [slotPayments, setSlotPayments] = useState<SlotPayment[]>([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
 
-    // Track original values to detect changes in edit mode
-    const originalRef = useRef<{
-        notes: string; duration: number; resType: string;
-        startHour: string; startMinute: string; bookingDate: string;
-        organizerId: string | null; guestIds: string[];
-    } | null>(null);
-
-    const hasChanges = isEditMode && originalRef.current !== null && (() => {
-        const o = originalRef.current!;
-        const currentGuestIds = additionalPlayers.filter(Boolean).map(p => p!.id).sort().join(',');
-        return (
-            notes !== o.notes ||
-            duration !== o.duration ||
-            resType !== o.resType ||
-            startHour !== o.startHour ||
-            startMinute !== o.startMinute ||
-            bookingDate !== o.bookingDate ||
-            (organizer?.id ?? null) !== o.organizerId ||
-            currentGuestIds !== o.guestIds.sort().join(',')
-        );
-    })();
-
     // ─── Helpers de pago ─────────────────────────────────────────────────────
     const fetchWalletBalance = useCallback(async (playerId: string, slotIndex: number) => {
         if (!clubId) return;
@@ -465,21 +443,6 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
     const updateSlotPayment = useCallback((slotIndex: number, patch: Partial<SlotPayment>) => {
         setSlotPayments(prev => { const n = [...prev]; n[slotIndex] = { ...n[slotIndex], ...patch }; return n; });
-    }, []);
-
-    const applyWallet = useCallback((slotIndex: number, shareAmountCents: number) => {
-        setSlotPayments(prev => {
-            const n = [...prev];
-            const balance = n[slotIndex].walletBalanceCents ?? 0;
-            if (balance <= 0) return prev;
-            const applied = Math.min(balance, shareAmountCents);
-            n[slotIndex] = { ...n[slotIndex], walletAmountCents: applied, paidAmountCents: Math.max(0, shareAmountCents - applied) };
-            return n;
-        });
-    }, []);
-
-    const removeWallet = useCallback((slotIndex: number, shareAmountCents: number) => {
-        setSlotPayments(prev => { const n = [...prev]; n[slotIndex] = { ...n[slotIndex], walletAmountCents: 0, paidAmountCents: shareAmountCents }; return n; });
     }, []);
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -574,20 +537,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             // Fetch wallet balances for all players in edit mode
             if (bd.organizer_player_id) fetchWalletBalance(bd.organizer_player_id, 0);
             guests.forEach((g: Player, i: number) => { fetchWalletBalance(g.id, i + 1); });
-
-            // Snapshot original values for change detection
-            originalRef.current = {
-                notes: notesVal,
-                duration: dur,
-                resType: resTypeVal,
-                startHour: sh,
-                startMinute: sm,
-                bookingDate: dateVal,
-                organizerId: bd.organizer_player_id || null,
-                guestIds: guests.map((g: Player) => g.id),
-            };
         } else {
-            originalRef.current = null;
             setSlotPayments([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
             // Create mode: reset everything
             setOrganizer(null);
@@ -871,6 +821,16 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             >
                                 {t('reservation.cancel')}
                             </button>
+                            {isEditMode && editingBookingData && onMarkPaid && (
+                                <button
+                                    type="button"
+                                    onClick={handleMarkPaid}
+                                    disabled={isMarkingPaid}
+                                    className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-md hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                                >
+                                    {isMarkingPaid ? t('reservation.markPaidProcessing') : t('reservation.markPaid')}
+                                </button>
+                            )}
                             {isEditMode && editingBookingData && isOnHiddenCourt && onMoveToVisible && (
                                 <button
                                     onClick={async () => {
