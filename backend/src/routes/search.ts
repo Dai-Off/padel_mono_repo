@@ -44,7 +44,8 @@ router.get('/courts', async (req: Request, res: Response) => {
 
     let courtsQuery = supabase
       .from('courts')
-      .select('id, club_id, name, indoor, glass_type');
+      .select('id, club_id, name, indoor, glass_type')
+      .eq('is_hidden', false);
 
     if (indoor === 'true') courtsQuery = courtsQuery.eq('indoor', true);
     else if (indoor === 'false') courtsQuery = courtsQuery.eq('indoor', false);

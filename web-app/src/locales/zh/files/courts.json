@@ -27,5 +27,10 @@
     "glass_panoramic": "全景玻璃",
     "glass_standard": "標準玻璃",
     "glass_wall": "圍牆",
-    "led_pro": "專業 LED"
+    "led_pro": "專業 LED",
+    "is_hidden_court": "公開搜索中隐藏",
+    "is_hidden_court_desc": "仍可在后台与日程中管理（打开“隐藏场地”显示）。",
+    "visibility_windows": "可见时段（JSON，可选）",
+    "visibility_windows_desc": "隐藏场地用：[{\"days_of_week\":[1,2,3],\"start_minutes\":600,\"end_minutes\":840}] — ISO 星期 1=周一…7=周日，从午夜起的分钟。",
+    "visibility_windows_invalid": "可见时段 JSON 无效"
 }

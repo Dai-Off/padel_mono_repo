@@ -5,6 +5,8 @@ export interface Player {
     last_name: string;
     email: string | null;
     phone: string | null;
+    /** URL pública de foto de perfil (p. ej. Storage `player-avatars`). */
+    avatar_url?: string | null;
     elo_rating: number;
     status: 'active' | 'blocked' | 'deleted';
     auth_user_id?: string | null;

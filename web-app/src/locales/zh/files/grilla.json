@@ -22,7 +22,9 @@
     "prevDay": "前一天",
     "nextDay": "后一天",
     "prevDayTitle": "前一天",
-    "nextDayTitle": "后一天"
+    "nextDayTitle": "后一天",
+    "hiddenCourts": "隐藏场地",
+    "hiddenCourtsTitle": "显示或隐藏标记为隐藏的场地列（公开搜索中不显示）"
   },
   "metrics": {
     "occupancy": "使用率",
@@ -100,9 +102,12 @@
     "addExtra": "附加服务",
     "reservationFallback": "预订",
     "clientLabel": "客户:*",
-    "clientSearchPlaceholder": "搜索客户…",
+    "clientSearchPlaceholder": "按姓名或电话搜索…",
+    "inviteModeLabel": "比赛邀请",
+    "inviteMode_single": "单打（1 位嘉宾）",
+    "inviteMode_double": "双打 / 最多 3 位嘉宾",
     "playerLabel": "球员 {{n}}:",
-    "playerSearchPlaceholder": "搜索球员 {{n}}…",
+    "playerSearchPlaceholder": "姓名或电话 — 球员 {{n}}",
     "saveError": "无法保存预订。",
     "markPaidError": "无法标记为已付款。",
     "deleteError": "无法删除预订。",
@@ -144,6 +149,7 @@
     "type_flat_rate": "固定费率",
     "type_tournament": "锦标赛",
     "type_blocked": "管理封场",
+    "openMatchPlayersHint": "公开赛：客户为组织者；下方最多再添加 3 名球员（场上共 4 人）。可见度与 Elo 规则在应用内创建赛事或俱乐部规则中设置。",
     "save": "保存",
     "walletCredit": "余额：{{amount}} €",
     "walletDebt": "欠款：{{amount}} €",
@@ -156,10 +162,15 @@
     "paymentTotal": "总计",
     "paymentCollected": "已收",
     "paymentPending": "待收",
-    "shareAmount": "份额：{{amount}} €"
+    "shareAmount": "份额：{{amount}} €",
+    "duplicatePlayerError": "该球员已在预订中。"
   },
   "playerSearch": {
     "allFieldsRequired": "请填写所有字段。",
+    "coreFieldsRequired": "请填写姓名、姓氏与电话。",
+    "manualAddHint": "电话必填，电邮可选。",
+    "emailOptional": "可选",
+    "noContactLine": "无电邮/电话",
     "manualAddError": "无法登记球员。",
     "noPlayersFound": "未找到球员",
     "manualAddTitle": "手动登记会员",

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Check, XCircle, Copy, Building2, User, MapPin, Mail, Phone, Clock, MailPlus } from 'lucide-react';
 import { adminApplicationsService } from '../../services/adminApplications';
@@ -18,7 +18,8 @@ interface ApplicationDetailModalProps {
     onClose: () => void;
     onApprove: (id: string) => Promise<{ invite_url: string }>;
     onReject: (id: string, reason?: string) => Promise<void>;
-    onDone: () => void;
+    /** Refresca la grilla sin spinner (p. ej. tras aprobar). */
+    onSilentRefresh?: () => void;
 }
 
 export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
@@ -26,7 +27,7 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
     onClose,
     onApprove,
     onReject,
-    onDone,
+    onSilentRefresh,
 }) => {
     const { t } = useTranslation();
     const [loading, setLoading] = useState<'approve' | 'reject' | 'resend' | null>(null);
@@ -34,6 +35,15 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
     const [rejectMode, setRejectMode] = useState(false);
     const [rejectReason, setRejectReason] = useState('');
     const [copied, setCopied] = useState(false);
+
+    useEffect(() => {
+        if (!application) return;
+        setLoading(null);
+        setInviteUrl(null);
+        setRejectMode(false);
+        setRejectReason('');
+        setCopied(false);
+    }, [application?.id]);
 
     if (!application) return null;
 
@@ -46,6 +56,7 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
             const { invite_url } = await onApprove(application.id);
             setInviteUrl(invite_url);
             toast.success(t('admin_approve'));
+            onSilentRefresh?.();
         } catch (e) {
             toast.error(e instanceof Error ? e.message : 'Error');
         } finally {
@@ -59,7 +70,6 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
             await onReject(application.id, rejectReason.trim() || undefined);
             setRejectMode(false);
             setRejectReason('');
-            onDone();
             onClose();
         } catch (e) {
             toast.error(e instanceof Error ? e.message : 'Error');
@@ -101,6 +111,7 @@ export const ApplicationDetailModal: React.FC<ApplicationDetailModalProps> = ({
             >
                 <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
                 <motion.div
+                    key={application.id}
                     className="relative w-full max-w-lg bg-white shadow-2xl overflow-y-auto"
                     initial={{ x: '100%' }}
                     animate={{ x: 0 }}

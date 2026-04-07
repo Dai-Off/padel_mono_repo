@@ -39,6 +39,7 @@ export interface Court {
     name: string;
     locationId?: string; // Optional for backward compatibility but used for tabs
     is_hidden?: boolean;
+    visibility_windows?: unknown;
 }
 
 export interface Reservation {

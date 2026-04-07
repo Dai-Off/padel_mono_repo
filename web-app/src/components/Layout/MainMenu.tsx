@@ -14,7 +14,8 @@ import {
     AlertCircle,
     Star,
     Settings,
-    Shield
+    Shield,
+    UserCircle
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -53,6 +54,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
                 { id: 'checkIn', path: '/checkIn', icon: UserPlus, label: t('menu_checkin'), color: 'rgb(139, 92, 246)', bgColor: 'rgba(139, 92, 246, 0.06)' },
                 { id: 'personal', path: '/personal', icon: Users, label: t('menu_personal'), color: 'rgb(236, 72, 153)', bgColor: 'rgba(236, 72, 153, 0.06)' },
                 { id: 'jugadores', path: '/jugadores', icon: Users, label: t('menu_jugadores'), color: 'rgb(20, 184, 166)', bgColor: 'rgba(20, 184, 166, 0.06)' },
+                { id: 'miPerfil', path: '/mi-perfil', icon: UserCircle, label: t('menu_mi_perfil'), color: 'rgb(14, 165, 233)', bgColor: 'rgba(14, 165, 233, 0.08)' },
                 { id: 'escuela', path: '/escuela', icon: Award, label: t('menu_escuela'), color: 'rgb(249, 115, 22)', bgColor: 'rgba(249, 115, 22, 0.06)' },
                 { id: 'inventario', path: '/inventario', icon: Grid3x3, label: t('menu_inventario'), color: 'rgb(99, 102, 241)', bgColor: 'rgba(99, 102, 241, 0.06)' },
             ]

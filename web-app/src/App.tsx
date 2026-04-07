@@ -80,6 +80,22 @@ function App() {
           }
         />
         <Route
+          path="/mi-perfil"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/ligas"
+          element={
+            <ProtectedRoute>
+              <Navigate to="/torneos?tab=ligas" replace />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/inventario"
           element={
             <ProtectedRoute>
