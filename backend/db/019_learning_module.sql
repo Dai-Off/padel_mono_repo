@@ -1,7 +1,6 @@
 -- Learning module tables
--- Run in Supabase SQL Editor to create all learning tables.
-
 -------------------------
+
 -- learning_questions
 -------------------------
 create table if not exists public.learning_questions (

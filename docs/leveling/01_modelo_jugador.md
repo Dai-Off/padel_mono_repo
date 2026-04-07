@@ -8,7 +8,7 @@ Cada jugador tiene las siguientes variables de nivelación y progresión:
 
 | Variable | Tipo | Visibilidad | Descripción |
 |---|---|---|---|
-| `elo_rating` | float (0–7) | Pública | Nivel visible al usuario. Calculado a partir de mu y sigma |
+| `elo_rating` | float (0–7) | Pública | Nivel visible al usuario. Calculado a partir de mu |
 | `mu` | float | Interna | Estimación real de habilidad (escala OpenSkill, ~25 para un nuevo jugador) |
 | `sigma` | float | Interna | Incertidumbre sobre mu. Se expone como `fiabilidad` (0–100) calculado en backend |
 | `beta` | float | Interna | Inconsistencia propia del jugador. Nunca visible para evitar rechazo social |
@@ -47,13 +47,17 @@ El SP (Season Points) es una moneda de progresión transversal a toda la app. Se
 
 El SP acumulado desbloquea niveles del Season Pass (ver componente 09). Al final de cada temporada se resetea.
 
+### Variable de perfil
+
+| Variable | Tipo | Descripción |
+|---|---|---|
+| `gender` | text (`'male'` \| `'female'`) | Género real del jugador. Necesario para el filtro `'mixed'` del matchmaking (ver componente 06) |
+
 ### Variable de control de onboarding
 
 | Variable | Tipo | Descripción |
 |---|---|---|
 | `initial_rating_completed` | boolean | Indica si el jugador completó el cuestionario de nivelación inicial |
-
-**Decisión tomada:** El nombre del boolean es `initial_rating_completed`.
 
 ---
 
@@ -92,6 +96,7 @@ Añadir columnas desde el dashboard de Supabase (no hay migraciones en el repo):
 
 | Columna | Tipo SQL | Valor por defecto | Nullable |
 |---|---|---|---|
+| `gender` | `text` | — | NO |
 | `mu` | `float8` | `25.0` | NO |
 | `sigma` | `float8` | `8.333` | NO |
 | `beta` | `float8` | `4.167` | NO |
@@ -141,22 +146,47 @@ player_synergies
 
 Restricción: `(player_id_1, player_id_2)` UNIQUE con `player_id_1 < player_id_2` para evitar duplicados.
 
-### 4.2 Función de mapeo `mu/sigma → elo_rating`
+### 4.2 Función de mapeo `mu → elo_rating`
+
+**Decisión tomada:** El elo visible al usuario se calcula mapeando μ directamente a la escala 0–7 con una fórmula lineal. No se usa conservative rating (μ - kσ) porque OpenSkill ya controla la variación por partido a través de σ — usar sigma en el mapeo penalizaría doblemente a jugadores nuevos.
 
 Debe vivir en `backend/src/services/levelingService.ts` (archivo nuevo, ver componente 03).
 
 ```typescript
-// Ejemplo provisional — la fórmula exacta es una decisión pendiente
-export function calcEloRating(mu: number, sigma: number): number {
-  // mu conservador = mu - 2*sigma (límite inferior al 95%)
-  const conservative = mu - 2 * sigma;
-  // Mapear al rango 0–7. Ajustar MIN/MAX con datos reales.
-  const MIN_CONSERVATIVE = 0;   // ← pendiente de calibrar
-  const MAX_CONSERVATIVE = 50;  // ← pendiente de calibrar
-  const clamped = Math.max(MIN_CONSERVATIVE, Math.min(MAX_CONSERVATIVE, conservative));
-  return Math.round((clamped / MAX_CONSERVATIVE) * 7 * 10) / 10;
+export function calcEloRating(mu: number): number {
+  const MU_MIN = 5;    // ← ancla provisional, recalibrar con datos reales
+  const MU_MAX = 47;   // ← ancla provisional
+  const elo = ((mu - MU_MIN) / (MU_MAX - MU_MIN)) * 7;
+  return Math.round(Math.max(0, Math.min(7, elo)) * 100) / 100;
 }
 ```
+
+> **Anclas provisionales:** `MU_MIN = 5` y `MU_MAX = 47` son estimaciones. Se recalibran con datos reales tras los primeros partidos — si nadie llega a 7 o nadie baja de 1, se ajustan los extremos. La arquitectura lo permite cambiando dos constantes.
+
+**Lo que se muestra al usuario:**
+- **elo_rating** (0–7): `clamp((μ - 5) / 42 × 7, 0, 7)`, redondeado a 2 decimales
+- **fiabilidad** (0–100%): `max(0, round((1 - σ / 8.333) × 100))` — empieza en 0%, sube con cada partido
+
+Ambos se calculan en el backend. El frontend solo renderiza.
+
+#### Evolución de σ y su efecto en elo_rating
+
+OpenSkill reduce σ después de cada partido usando inferencia bayesiana. La bajada no es lineal — es decreciente: los primeros partidos reducen σ mucho, los siguientes cada vez menos.
+
+| Partidos jugados | σ aproximada | Fiabilidad % | Variación elo por partido |
+|---|---|---|---|
+| 0 | 8.33 | 0% | ±0.33 |
+| 5 | 6.0 | 28% | ±0.24 |
+| 15 | 4.0 | 52% | ±0.16 |
+| 30 | 2.5 | 70% | ±0.10 |
+| 60 | 1.5 | 82% | ±0.06 |
+| 100 | 0.9 | 89% | ±0.04 |
+| 200+ | ~0.5 | 94% | ±0.02 |
+
+> Estos valores son aproximados — dependen de si los partidos son equilibrados o no. Un partido muy sorprendente (resultado inesperado) baja σ más que uno predecible.
+
+- **σ nunca llega a 0.** El suelo es `MIN_SIGMA = 0.5`, que equivale a ~94% de fiabilidad máxima.
+- **Inactividad:** El parámetro `tau` de OpenSkill hace que σ suba ligeramente si el jugador lleva tiempo sin jugar, lo que baja un poco la fiabilidad y aumenta la variación en el siguiente partido. No hay que implementar lógica extra para esto.
 
 ### 4.3 streak_bonus — decisión tomada (Opción B)
 
@@ -168,11 +198,6 @@ El nivel de pádel (elo_rating) es puro — no se ve afectado por ningún multip
 
 ## 5. Decisiones pendientes
 
-1. **Función concreta `mu/sigma → elo_rating (0–7)`:**
-   - Opción A: `elo = f(mu - 2*sigma)` — escala conservadora
-   - Opción B: `elo = f(mu)` — ignora la incertidumbre para el valor visible
-   - Opción C: fórmula personalizada tras calibración con datos reales
-
-2. **Valores concretos de SP por acción:**
+1. **Valores concretos de SP por acción:**
    - Todos los valores de la tabla de SP están pendientes de definir.
    - _No bloquea el MVP — los contadores de SP se pueden implementar sin los valores finales._

@@ -45,12 +45,13 @@ flowchart TD
     I -->|Sí| J[Actualizar preferencias en pool]
     J --> E
     I -->|No| E
-    F -->|Sí| K[Notificar a los 4 jugadores]
-    K --> L{¿Todos confirman y pagan?}
-    L -->|Sí| M[Reserva automática de pista]
+    F -->|Sí| K[Bloqueo temporal de pista + notificar a los 4]
+    K --> L{¿Todos confirman y pagan antes del deadline?}
+    L -->|Sí| M[Reserva definitiva de pista]
     M --> N["Partido creado (type='matchmaking')"]
-    L -->|Alguien rechaza| O[Penalización de liga + falta al que rechaza]
-    O --> P[Los otros 3 vuelven a la pool]
+    L -->|Alguien rechaza o timeout| O[Se libera la pista bloqueada]
+    O --> P[Penalización de liga + falta al que rechaza]
+    P --> Q[Los otros 3 vuelven a la pool]
 ```
 
 ---
@@ -89,7 +90,7 @@ matchmaking_pool
 ├── club_id          uuid references clubs(id)                ← nullable; preferencia de club
 ├── max_distance_km  int4                                     ← nullable; radio si no hay club
 ├── preferred_side   text                                     ← 'drive' | 'backhand' | 'any'
-├── gender           text NOT NULL default 'any'              ← 'male' | 'female' | 'any'
+├── gender           text NOT NULL default 'any'              ← 'male' | 'female' | 'mixed' | 'any'
 ├── available_from   timestamptz NOT NULL                     ← MVP: un solo intervalo
 ├── available_until  timestamptz NOT NULL                     ← MVP: un solo intervalo
 ├── status           text NOT NULL default 'searching'        ← 'searching' | 'matched' | 'expired'
@@ -131,7 +132,7 @@ Añade al jugador a la pool de búsqueda.
   "club_id": "uuid-del-club",
   "max_distance_km": 10,
   "preferred_side": "drive",        // 'drive' | 'backhand' | 'any'
-  "gender": "any",                  // 'male' | 'female' | 'any'
+  "gender": "any",                  // 'male' | 'female' | 'mixed' | 'any'
   "available_from": "2026-03-25T18:00:00Z",
   "available_until": "2026-03-25T21:00:00Z",
   "paired_with_id": null            // uuid si entra en pareja, null si entra solo
@@ -231,7 +232,7 @@ Se ejecuta periódicamente. El proceso es **exhaustivo**: genera todas las combi
 ##### Proceso paso a paso
 
 1. **Leer pool**: todos los jugadores con `status = 'searching'`.
-2. **Filtrar por compatibilidad**: género, horario superpuesto, club/distancia (ver filtros abajo).
+2. **Filtrar por compatibilidad**: liga (preferente, con ampliación automática a adyacentes), género, horario superpuesto, club/distancia (ver filtros abajo).
 3. **Manejar entradas en pareja**: si `paired_with_id != null`, buscar su pareja en la pool. Si la pareja no está: skip. Si los dos están: tratarlos como unidad.
 4. **Generar todas las combinaciones de 4 jugadores** a partir de los jugadores compatibles entre sí. Si hay N jugadores compatibles, se generan C(N, 4) grupos posibles.
 5. **Para cada grupo de 4**:
@@ -244,8 +245,10 @@ Se ejecuta periódicamente. El proceso es **exhaustivo**: genera todas las combi
 6. **De todos los grupos válidos**: elegir el de mayor `balance_score` (más cercano a 50/50).
 7. **Verificar disponibilidad de pista** en el club/zona compatible (reutilizar `hasCourtConflict` de `bookingService`). Si no hay pista: intentar siguiente mejor grupo.
 8. **Si partido válido encontrado**:
+   - **Bloquear pista temporalmente** (no reserva definitiva — se libera si alguien rechaza o se agota el tiempo)
+   - Calcular deadline de confirmación: `min(tiempo_hasta_partido × 0.5, 24h)`, mínimo 30 min
    - Marcar los 4 jugadores como `status='matched'`
-   - Notificar a los 4 (push notification)
+   - Notificar a los 4 (push notification) con el deadline
    - Guardar `pre_match_win_prob` (se muestra al jugador desde la confirmación, antes de jugar)
 
 ##### Ejemplo con 8 jugadores en pool
@@ -268,9 +271,10 @@ async function runMatchmakingCycle(): Promise<void> {
   //    - Incluir mu, sigma, beta, preferred_side, gender, available_from/until, paired_with_id
 
   // 2. Filtrar por compatibilidad de preferencias:
-  //    a. Filtrar por género (estricto: 'male'/'female'; 'any' acepta cualquier combinación)
-  //    b. Filtrar por horario superpuesto
-  //    c. Filtrar por club/distancia
+  //    a. Filtrar por liga (misma liga preferente; si no hay suficientes tras espera, ampliar a adyacentes automáticamente)
+  //    b. Filtrar por género (ver tabla de compatibilidad; 'mixed' exige 2H+2M con 1+1 por equipo)
+  //    c. Filtrar por horario superpuesto
+  //    d. Filtrar por club/distancia
 
   // 3. Manejar entradas en pareja:
   //    - Si player.paired_with_id != null, buscar su pareja en la pool
@@ -284,7 +288,7 @@ async function runMatchmakingCycle(): Promise<void> {
   //    b. Calcular bestTeamSplit (probar las 3 divisiones de equipo posibles)
   //    c. OpenSkill evalúa win_prob de cada división via predictWinProbability
   //    d. Quedarse con la división más equilibrada (mayor balance_score)
-  //    e. Aplicar umbral dinámico de win_prob según tamaño de pool
+  //    e. Aplicar umbral de win_prob [0.35, 0.65]
   //    f. Ajustar rango según evolución reciente del jugador
 
   // 6. De todos los grupos válidos: elegir el de mayor balance_score
@@ -294,8 +298,10 @@ async function runMatchmakingCycle(): Promise<void> {
   //    Si no hay pista: intentar siguiente mejor grupo
 
   // 8. Si partido válido encontrado:
+  //    - Bloquear pista temporalmente (no reserva definitiva)
+  //    - Calcular deadline: min(tiempo_hasta_partido × 0.5, 24h), mínimo 30 min
   //    - Marcar los 4 jugadores como status='matched'
-  //    - Notificar a los 4 (push notification)
+  //    - Notificar a los 4 (push notification) con el deadline
   //    - Guardar pre_match_win_prob (se muestra al jugador desde la confirmación, antes de jugar)
 }
 ```
@@ -318,20 +324,46 @@ flowchart TD
     L --> M{¿Hay pista?}
     M -->|No| N[Siguiente mejor grupo]
     N --> J
-    M -->|Sí| O[Marcar 4 jugadores como 'matched']
-    O --> P[Notificar y guardar pre_match_win_prob]
+    M -->|Sí| O[Bloquear pista + calcular deadline de confirmación]
+    O --> P[Marcar 4 jugadores como 'matched']
+    P --> Q[Notificar con deadline y guardar pre_match_win_prob]
 ```
 
 #### Filtros de compatibilidad
 
-**Género** — Filtro estricto:
-- `'male'` solo matchea con `'male'` o `'any'`.
-- `'female'` solo matchea con `'female'` o `'any'`.
-- `'any'` acepta cualquier combinación.
+**Género** — Filtro estricto. Compatibilidad entre preferencias de dos jugadores:
+
+| Jugador A \ B | `male` | `female` | `mixed` | `any` |
+|---|---|---|---|---|
+| `male` | ✅ | ❌ | ❌ | ✅ |
+| `female` | ❌ | ✅ | ❌ | ✅ |
+| `mixed` | ❌ | ❌ | ✅ | ✅ |
+| `any` | ✅ | ✅ | ✅ | ✅ |
+
+- `'male'`: solo partidos entre hombres.
+- `'female'`: solo partidos entre mujeres.
+- `'mixed'`: obligatoriamente 1 hombre + 1 mujer por equipo (2H + 2M en total). Requiere conocer el género real del jugador (campo `gender` en tabla `players`).
+- `'any'`: sin restricción de composición — cualquier combinación de géneros es válida.
+
+> **Dependencia:** El filtro `'mixed'` requiere que la tabla `players` tenga un campo `gender` (`'male'` | `'female'`) que indique el género real del jugador. Este campo es distinto de la preferencia de género en la pool (que indica qué tipo de partido busca).
 
 **Horario** — Los intervalos `[available_from, available_until]` de los 4 jugadores deben solaparse lo suficiente para jugar un partido.
 
 **Club/Distancia** — El partido debe ser en un club compatible con las preferencias de los 4 jugadores (mismo club, o dentro del `max_distance_km` de cada uno).
+
+**Liga** — Filtro preferente con ampliación automática:
+
+- El sistema busca primero los 4 jugadores en la **misma liga**.
+- Si tras el tiempo de espera no hay suficientes jugadores compatibles en la misma liga, se amplía **automáticamente** a ligas adyacentes (ej. bronce puede matchear con plata). Esta ampliación **no requiere confirmación del jugador**, a diferencia del resto de criterios.
+- **Nunca se salta más de una liga de distancia** (bronce no matchea con oro).
+- En partidos entre ligas distintas (cross-liga), los LP se ajustan:
+  - Jugador de liga inferior gana → más LP de lo normal
+  - Jugador de liga superior pierde → pierde más LP de lo normal
+  - (Valores exactos pendientes — se definirán en el componente de ligas)
+
+> **Justificación de la ampliación automática:** Fragmentar la pool por liga con pocos usuarios es más dañino para la experiencia que emparejar entre ligas adyacentes. El ajuste de LP en partidos cross-liga compensa la diferencia competitiva. El jugador de liga inferior tiene incentivo extra (más LP si gana) y el de liga superior asume riesgo extra (más LP si pierde).
+
+> **Nota:** La definición de ligas, rangos de LP para ascenso/descenso, y cálculo exacto del ajuste cross-liga se documenta en un componente separado (pendiente de crear).
 
 #### Filtro `max_level_spread` (decisión tomada)
 
@@ -425,33 +457,49 @@ La sinergía mide cuánto rinden dos jugadores cuando juegan juntos como pareja.
 > - Si limitar el peso de sinergía cuando la pareja ha jugado juntos más de N veces recientemente.
 > - Si el margen del partido (ej. 6-0 vs 7-6) debe afectar la magnitud del cambio.
 
-#### Umbral dinámico de win_prob
+#### Umbral de win_prob (decisión tomada)
 
-El rango aceptable de `win_prob` se ajusta según el tamaño de la pool compatible:
+##### Por qué el umbral es necesario además de max_level_spread
 
-| Tamaño de pool | win_prob mínima | win_prob máxima | Criterio |
+Ambos filtros son complementarios. El `max_level_spread` filtra casos obvios rápidamente, pero no tiene en cuenta σ ni β. El mismo spread de 1 punto de elo produce resultados muy distintos según la experiencia de los jugadores:
+
+| Tipo de jugadores | σ | win_prob con diferencia de 12μ (= 1 elo) | balance_score |
 |---|---|---|---|
-| > 20 jugadores | 0.40 | 0.60 | Más exigente |
-| 9–20 jugadores | 0.35 | 0.65 | Normal |
-| ≤ 8 jugadores | 0.30 | 0.70 | Más flexible |
+| Veteranos (σ = 0.5) | Mínima | 97.6% | 0.05 |
+| Nuevos (σ = 8.33) | Máxima | 67.6% | 0.65 |
+
+Sin el umbral de win_prob, el sistema podría proponer partidos donde un equipo tiene un 98% de probabilidades de ganar simplemente porque todos son veteranos con σ baja y hay una diferencia de nivel dentro del rango permitido. El umbral de win_prob es el único mecanismo que captura esta diferencia, porque OpenSkill incorpora σ y β en el cálculo.
+
+##### Umbral fijo para MVP
+
+```
+WIN_PROB_MIN = 0.35
+WIN_PROB_MAX = 0.65
+```
+
+Se rechaza cualquier combinación con win_prob fuera de [0.35, 0.65]. El algoritmo ya optimiza por `balance_score` y elige la combinación más cercana a 50/50, así que el umbral actúa como red de seguridad contra partidos realmente desequilibrados, no como mecanismo de "paciencia".
 
 ```typescript
-// Rango base
-const BASE_WIN_PROB_MIN = 0.35;
-const BASE_WIN_PROB_MAX = 0.65;
+const WIN_PROB_MIN = 0.35;
+const WIN_PROB_MAX = 0.65;
 
-// Ajuste según tamaño de pool compatible
-function getWinProbThreshold(poolSize: number): { min: number; max: number } {
-  if (poolSize > 20) return { min: 0.40, max: 0.60 }; // pool grande → más exigente
-  if (poolSize > 8)  return { min: 0.35, max: 0.65 }; // pool media → normal
-  return { min: 0.30, max: 0.70 };                     // pool pequeña → más flexible
-  // ← todos los umbrales pendientes de calibrar
+function isWinProbAcceptable(winProb: number): boolean {
+  return winProb >= WIN_PROB_MIN && winProb <= WIN_PROB_MAX;
 }
 ```
 
-Es preferible esperar más tiempo y encontrar un partido más equilibrado que proponer uno aceptable demasiado rápido. El tiempo de espera es un parámetro del sistema, no un problema a minimizar agresivamente.
+**Consecuencia:** con umbral fijo el sistema no tiene "paciencia" — si hay una combinación válida dentro del rango, la propone inmediatamente aunque en el siguiente ciclo pudiera haber una mejor. En pools grandes, la mejor combinación será naturalmente cercana a 50/50 sin necesidad de exigirlo con umbrales más estrictos.
 
-> ⚠️ **Pendiente de calibrar:** Todos los umbrales son orientativos y deberán ajustarse con datos reales de uso.
+> ⚠️ **Valores provisionales:** 0.35 y 0.65 son calibrables con datos reales de uso.
+
+##### Mejora post-MVP: umbral dinámico por combinaciones viables
+
+Una mejora futura sería ajustar el umbral según el número de **combinaciones válidas que pasan `max_level_spread`** para ese grupo concreto (no el número de jugadores compatibles, que es un proxy imperfecto). Esto permitiría:
+
+- **Muchas combinaciones viables** → umbral más estricto (ej. 0.45–0.55), forzando al sistema a esperar un partido más equilibrado
+- **Pocas combinaciones viables** → mantener el umbral base (0.35–0.65)
+
+Esto añade "paciencia inteligente": el sistema espera cuando sabe que puede encontrar algo mejor, pero no bloquea a jugadores que solo tienen opciones marginales. No se implementa en MVP porque requiere medir el impacto del umbral fijo primero y calibrar los escalonamientos con datos reales.
 
 #### Ajuste por evolución reciente del jugador
 
@@ -539,13 +587,45 @@ sequenceDiagram
     S->>J3: Devuelto a la pool
 ```
 
+### Tiempo de confirmación dinámico (decisión tomada)
+
+El tiempo que tienen los 4 jugadores para confirmar y pagar **no es fijo** — depende de cuánto falta para la hora del partido:
+
+```
+tiempo_confirmacion = min(tiempo_hasta_partido × 0.5, 24h)
+con un mínimo de 30 minutos
+```
+
+| Partido en… | Tiempo para confirmar |
+|---|---|
+| 1 hora | 30 min (mínimo) |
+| 2 horas | 1 hora |
+| 6 horas | 3 horas |
+| 2 días | 24 horas (techo) |
+| 1 semana | 24 horas (techo) |
+
+**Razón:** el club siempre tiene al menos la otra mitad del tiempo restante para gestionar la pista si el partido se cancela. Los valores exactos (factor 0.5, techo 24h, suelo 30min) son provisionales y calibrables.
+
+### Bloqueo temporal de pista
+
+Cuando el sistema encuentra un grupo válido y una pista disponible:
+
+1. **Se bloquea la pista** temporalmente (no es reserva definitiva aún).
+2. Se notifica a los 4 jugadores con el deadline de confirmación calculado.
+3. La pista permanece bloqueada hasta que ocurra una de estas tres cosas:
+   - **Todos confirman y pagan** → la pista pasa a reserva definitiva.
+   - **Alguien rechaza** → la pista se libera inmediatamente.
+   - **Se agota el tiempo de confirmación** para algún jugador → se trata como rechazo y la pista se libera.
+
+Mientras la pista está bloqueada, no puede ser reservada por otro partido ni por reserva manual.
+
 ### 5.1 Todos confirman (y pagan)
 
 Confirmar implica **pagar la parte proporcional de la pista**. El flujo es:
 
-1. El sistema propone el partido a los 4 jugadores.
-2. Cada jugador confirma **y paga su parte** de la pista.
-3. Cuando los 4 han pagado → se reserva la pista automáticamente.
+1. El sistema propone el partido a los 4 jugadores (pista bloqueada, deadline calculado).
+2. Cada jugador confirma **y paga su parte** de la pista antes del deadline.
+3. Cuando los 4 han pagado → la pista pasa de bloqueada a reserva definitiva.
 4. Se crea el partido con `type = 'matchmaking'`, `competitive = true`.
 5. Se guarda `pre_match_win_prob` en `match_players` para cada jugador.
 
@@ -570,7 +650,7 @@ Cada rechazo suma 1 falta. Las faltas **expiran individualmente** tras un period
 | 2 | Pérdida de lps mayor |
 | 3+ | Bloqueo temporal de matchmaking (ej. 2 días) + pérdida de lps |
 
-> ⚠️ **Pendiente de calibrar:** Cantidad exacta de lps por rechazo, tiempo de expiración de faltas (sugerencia: 1 mes), duración del bloqueo temporal, y tiempo límite para confirmar y pagar.
+> ⚠️ **Pendiente de calibrar:** Cantidad exacta de lps por rechazo, tiempo de expiración de faltas (sugerencia: 1 mes) y duración del bloqueo temporal por faltas acumuladas. El tiempo límite para confirmar y pagar ya está definido (ver "Tiempo de confirmación dinámico" más arriba).
 
 ---
 
@@ -592,12 +672,13 @@ El sistema identifica **qué criterio concreto bloquea** al jugador para complet
 
 Si no hay grupos de 3 que encajen o el jugador los rechaza, se propone ampliar criterios del matchmaking uno a la vez:
 
-1. **Lado:** "No encontramos partido para tu posición preferida. ¿Quieres jugar en el otro lado?"
-2. **Género:** "No hay partidos con tu preferencia de género. ¿Quieres ampliar a mixto?" (solo si el filtro lo permite)
-3. **Distancia:** "No hay partidos cerca. ¿Quieres ampliar la búsqueda +5 km? ¿+10 km?"
+1. **Liga:** ampliación automática a ligas adyacentes (**sin confirmación** — es la excepción al resto de criterios, ver filtro de liga en sección 4).
+2. **Lado:** "No encontramos partido para tu posición preferida. ¿Quieres jugar en el otro lado?"
+3. **Género:** "No hay partidos con tu preferencia de género. ¿Quieres ampliar a mixto?" (solo si el filtro lo permite)
+4. **Distancia:** "No hay partidos cerca. ¿Quieres ampliar la búsqueda +5 km? ¿+10 km?"
 
 **Reglas:**
-- El sistema **nunca** amplía criterios sin confirmación explícita del jugador.
+- El sistema **nunca** amplía criterios sin confirmación explícita del jugador, **excepto la liga** (que se amplía automáticamente a adyacentes).
 - Si el jugador rechaza todas las ampliaciones, permanece en pool como `searching` hasta `expires_at` o hasta que salga con `DELETE /matchmaking/leave`.
 - No se expulsa por rechazar ampliaciones.
 
@@ -612,7 +693,7 @@ Si no hay grupos de 3 que encajen o el jugador los rechaza, se propone ampliar c
 | Aspecto | Matchmaking (ligas) | Abierto competitivo | Abierto amistoso |
 |---|---|---|---|
 | Cómo se forma | Algoritmo automático busca 4 jugadores | Un jugador crea, 3 se unen libremente | Un jugador crea, 3 se unen libremente |
-| Filtro de nivel | `max_level_spread` + OpenSkill + umbral dinámico | ±0.5 elo del creador (automático, no editable) | Rango libre elegido por el creador |
+| Filtro de nivel | `max_level_spread` + OpenSkill + umbral win_prob | ±0.5 elo del creador (automático, no editable) | Rango libre elegido por el creador |
 | Afecta mu/sigma/elo | Sí | Sí | No |
 | Afecta liga (lps) | Sí | No | No |
 | `type` en BD | `'matchmaking'` | `'open'` | `'open'` |
@@ -632,6 +713,7 @@ Si no hay grupos de 3 que encajen o el jugador los rechaza, se propone ampliar c
 | `sigma` | Incertidumbre sobre mu | Incluida automáticamente en la predicción |
 | `beta` | Variabilidad/inconsistencia individual | Incluida automáticamente en la predicción (no es penalización sobre mu) |
 | Sinergía | Historial de rendimiento de una pareja (`player_synergies`) | Se usa en `bestTeamSplit` para ponderar combinaciones |
+| liga | Liga actual del jugador (bronce, plata, oro…) | Filtro preferente de emparejamiento; ajuste de LP en partidos cross-liga |
 | lps | Puntos de liga (league points) | Se restan como penalización al rechazar un partido propuesto |
 
 ---
@@ -648,13 +730,14 @@ Si no hay grupos de 3 que encajen o el jugador los rechaza, se propone ampliar c
 | 6 | Calibración de `STREAK_THRESHOLD` (sugerencia: 4) | Sensibilidad del ajuste por evolución | No |
 | 7 | Límite máximo de ampliación de distancia | UX y expectativas del jugador | No |
 | 8 | Recálculo de rango en partidos abiertos si el creador sube/baja | Coherencia del filtro de nivel | No |
-| 9 | Calibración de umbrales de win_prob por tamaño de pool | Calidad de los emparejamientos | No |
+| ~~9~~ | ~~Calibración de umbrales de win_prob por tamaño de pool~~ | ~~MVP: umbral fijo 0.35–0.65; post-MVP: dinámico por combinaciones viables~~ | ~~Resuelto~~ |
 | 10 | Cantidad exacta de lps restados por rechazo | Severidad de la penalización | Sí |
 | 11 | Tiempo de expiración de faltas (sugerencia: 1 mes) | Comportamiento del sistema de faltas | No |
 | 12 | Duración del bloqueo temporal por faltas acumuladas | Severidad de la penalización escalable | No |
 | 13 | Valor de `MAX_LEVEL_SPREAD` (sugerencia: 1.0) | Amplitud de niveles en un mismo partido | Sí |
 | 14 | Filtro de precio máximo por jugador (`max_price_per_player`) como preferencia en la pool | Evitar proponer pistas que el jugador rechazará por precio | No |
-| 15 | Tiempo límite para confirmar y pagar tras recibir propuesta | Define cuándo un no-pago se convierte en rechazo | Sí |
+| ~~15~~ | ~~Tiempo límite para confirmar y pagar tras recibir propuesta~~ | ~~Define cuándo un no-pago se convierte en rechazo~~ | ~~Resuelto~~ |
+| 16 | Definición de ligas (rangos, ascenso/descenso, ajuste de LP cross-liga) | Filtro de liga en matchmaking, cálculo de LP | Sí |
 
 ---
 

@@ -12,7 +12,7 @@ Cuando un partido competitivo pasa a `score_status = 'confirmed'`, el sistema ej
 4. Calcular `score_margin` (0.5–1.5) basado en diferencia de juegos
 5. Aplicar `score_margin` al delta de `mu`
 6. Actualizar `sigma` — solo la reduce OpenSkill, nunca se escala
-7. Actualizar `beta` mediante ventana deslizante de residuales
+7. Actualizar `beta` mediante ventana deslizante de residuales ajustados por marcador
 8. Actualizar la sinergia de cada pareja que jugó junta
 9. Recalcular `elo_rating` (0–7) y actualizar contadores de partidos
 10. Escribir todos los cambios en Supabase de forma atómica
@@ -82,11 +82,28 @@ Librería TypeScript-native. Usa el modelo Plackett-Luce.
 ### 4.2 `backend/src/services/levelingService.ts` (archivo nuevo)
 
 Responsabilidades:
-- `calcEloRating(mu, sigma)` → float 0–7 (ver componente 01, decisión pendiente)
+- `calcEloRating(mu)` → float 0–7 (ver componente 01)
 - `calcScoreMargin(sets)` → float 0.5–1.5
 - `detectComeback(sets, winnerTeam)` → boolean
 - `determineOutcome(match)` → ranks y resultado por jugador
 - `runLevelingPipeline(matchId)` → void (función principal)
+
+#### Evolución de σ y su efecto en elo_rating
+
+OpenSkill reduce σ después de cada partido. La bajada es decreciente: los primeros partidos la reducen mucho, los siguientes cada vez menos. Esto controla automáticamente cuánto varía el elo por partido — no hace falta lógica adicional.
+
+| Partidos jugados | σ aproximada | Fiabilidad % | Variación elo por partido |
+|---|---|---|---|
+| 0 | 8.33 | 0% | ±0.33 |
+| 5 | 6.0 | 28% | ±0.24 |
+| 15 | 4.0 | 52% | ±0.16 |
+| 30 | 2.5 | 70% | ±0.10 |
+| 60 | 1.5 | 82% | ±0.06 |
+| 100 | 0.9 | 89% | ±0.04 |
+| 200+ | ~0.5 | 94% | ±0.02 |
+
+- **σ nunca llega a 0.** El suelo es `MIN_SIGMA = 0.5` (~94% de fiabilidad máxima).
+- **Inactividad:** `tau` de OpenSkill hace que σ suba ligeramente si el jugador lleva tiempo sin jugar, bajando la fiabilidad y aumentando la variación en el siguiente partido.
 
 ---
 
@@ -179,10 +196,11 @@ const DEFAULT_BETA = 4.167; // 25/6
 
 function updateBeta(
   currentBeta: number,
-  residuals: number[],   // lista acumulada de |residual| del jugador (últimos WINDOW_SIZE)
-  newResidual: number
+  residuals: number[],   // lista acumulada de |residual ajustado| del jugador (últimos WINDOW_SIZE)
+  newResidual: number,
+  scoreMargin: number     // score_margin_final del paso 5 (0.5–1.5+)
 ): { newBeta: number; updatedResiduals: number[] } {
-  const updated = [...residuals, Math.abs(newResidual)];
+  const updated = [...residuals, Math.abs(newResidual * scoreMargin)];
   if (updated.length > WINDOW_SIZE) updated.shift();
 
   if (updated.length < MIN_SAMPLES) {
@@ -195,6 +213,17 @@ function updateBeta(
   return { newBeta, updatedResiduals: updated };
 }
 ```
+
+> **Residual ajustado por marcador:** El residual se pondera por el `score_margin` del partido. Un resultado dominante e inesperado sube β más que un resultado ajustado e inesperado. Un resultado esperado con paliza apenas mueve β. Esto hace que β capture mejor la inconsistencia real del jugador y no reaccione igual ante cualquier sorpresa.
+>
+> Ejemplos con win_prob predicha = 0.70 (modelo favorece equipo A):
+>
+> | Resultado | Marcador | residual_base | score_margin | residual_ajustado |
+> |---|---|---|---|---|
+> | A gana | 6-0, 6-0 | +0.30 | 1.50 | +0.45 |
+> | A gana | 7-6, 7-6 | +0.30 | 0.58 | +0.17 |
+> | B gana | 6-0, 6-0 | -0.70 | 1.50 | -1.05 |
+> | B gana | 7-6, 7-6 | -0.70 | 0.58 | -0.41 |
 
 > **Nota:** La lista de residuales del jugador debe persistirse. Opciones:
 > - Campo `beta_residuals jsonb` en la tabla `players` (array de floats, máx 20 elementos)
@@ -239,9 +268,9 @@ async function runLevelingPipeline(matchId: string): Promise<void> {
   //
   // sigma_i = new_sigma_i  ← OpenSkill ya la reduce, nunca se escala
 
-  // PASO 6 — Actualizar beta
+  // PASO 6 — Actualizar beta (residual ajustado por marcador)
   // - residual_i = actual_outcome_i - pre_win_prob
-  // - { newBeta, updatedResiduals } = updateBeta(old_beta_i, old_residuals_i, residual_i)
+  // - { newBeta, updatedResiduals } = updateBeta(old_beta_i, old_residuals_i, residual_i, score_margin_final)
 
   // PASO 7 — Actualizar sinergía de parejas
   // - pareja_A = (player_a1_id, player_a2_id)
@@ -251,7 +280,9 @@ async function runLevelingPipeline(matchId: string): Promise<void> {
   // - Upsert con matches_count++
 
   // PASO 8 — Recalcular elo_rating
-  // - elo_rating_i = calcEloRating(final_mu_i, sigma_i)
+  // - elo_rating_i = calcEloRating(final_mu_i)
+  //   Fórmula: clamp((μ - 5) / 42 × 7, 0, 7), redondeado a 2 decimales
+  //   Anclas MU_MIN=5 y MU_MAX=47 son provisionales — recalibrar con datos reales
 
   // PASO 9 — Actualizar contadores de partidos
   // - matches_played_competitive++ para todos los jugadores
@@ -285,17 +316,14 @@ return res.json({ ok: true, ... });
 
 ## 5. Decisiones pendientes
 
-1. **Función concreta `calcEloRating(mu, sigma) → 0–7`:**
-   Compartida con componente 01. Sin esta función no se puede completar el paso 8 del pipeline.
-
-2. **COMEBACK_BONUS — valor exacto:**
+1. **COMEBACK_BONUS — valor exacto:**
    Valor provisional: 1.1. Calibrar con datos reales.
 
-3. **Almacenamiento de `beta_residuals`:**
+2. **Almacenamiento de `beta_residuals`:**
    - Opción A: Campo `beta_residuals jsonb` en tabla `players` (recomendado)
    - Opción B: Tabla separada `player_residuals`
 
-4. **Identificación del equipo retirado en `match_end_reason = 'retired'`:**
+3. **Identificación del equipo retirado en `match_end_reason = 'retired'`:**
    Se necesita saber qué equipo se retiró para asignar los ranks correctos. Opciones:
    - Campo `retired_team text` en `matches` ('A' | 'B')
    - Campo `retired_player_ids uuid[]` en `matches`
