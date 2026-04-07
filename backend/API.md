@@ -65,6 +65,8 @@ Crear solicitud y subir imagen son públicos. Listar, detalle, aprobar/rechazar/
 | POST | `/players` | Crear jugador. |
 | PUT | `/players/:id` | Actualizar jugador. |
 | DELETE | `/players/:id` | Borrado lógico (`status=deleted`). |
+| GET | `/players/onboarding/next` | Obtener la siguiente pregunta del cuestionario (Fase 1 o Phase 2 bundle). Query: `?answers=[...]` en formato JSON string. |
+| POST | `/players/onboarding` | Enviar respuestas finales y calcular nivel inicial. Body: `{ answers: [...] }`. |
 
 ## Dueños de club (club_owners)
 
@@ -212,6 +214,18 @@ Requiere auth y permisos de dueño/admin.
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | POST | `/privacy-logs` | Registrar evento GDPR (`action_type`: accept_terms, revoke_marketing, delete_account_request, export_data). |
+
+## Gestión de Cuestionario (onboarding-questions)
+
+Requiere auth y permisos de **Admin** para rutas de modificación (POST/PUT/DELETE).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/onboarding-questions` | Listar preguntas. Filtros opcionales: `phase`, `pool`, `is_active=all`. |
+| GET | `/onboarding-questions/:id` | Detalle de una pregunta. |
+| POST | `/onboarding-questions` | Crear nueva pregunta. (**Admin**) |
+| PUT | `/onboarding-questions/:id` | Editar pregunta. (**Admin**) |
+| DELETE | `/onboarding-questions/:id` | Borrado lógico (Soft Delete, `is_active=false`). (**Admin**) |
 
 ---
 
