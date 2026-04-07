@@ -1,11 +1,21 @@
 import { apiFetchWithAuth } from './api';
+import { getSupabaseClient } from '../lib/supabase';
 
 export type TournamentPrize = { label: string; amount_cents: number };
 
+export type TournamentDivisionRow = {
+  id: string;
+  code: string;
+  label: string;
+  elo_min: number | null;
+  elo_max: number | null;
+  sort_order: number;
+};
 
 export type TournamentListItem = {
   id: string;
   club_id: string;
+  name?: string | null;
   start_at: string;
   end_at: string;
   duration_min: number;
@@ -18,7 +28,7 @@ export type TournamentListItem = {
   elo_min: number | null;
   elo_max: number | null;
   max_players: number;
-  registration_mode: 'individual' | 'pair';
+  registration_mode: 'individual' | 'pair' | 'both';
   registration_closed_at: string | null;
   cancellation_cutoff_at: string | null;
   invite_ttl_minutes: number;
@@ -28,6 +38,8 @@ export type TournamentListItem = {
   gender?: 'male' | 'female' | 'mixed' | null;
   description: string | null;
   normas?: string | null;
+  poster_url?: string | null;
+  level_mode?: 'single_band' | 'multi_division';
   tournament_courts?: { court_id: string }[];
   confirmed_count?: number;
   pending_count?: number;
@@ -40,8 +52,23 @@ export type TournamentInscription = {
   expires_at: string;
   invite_email_1?: string | null;
   invite_email_2?: string | null;
-  players_1?: { id: string; first_name: string; last_name: string; email: string | null } | null;
-  players_2?: { id: string; first_name: string; last_name: string; email: string | null } | null;
+  players_1?: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    email: string | null;
+    avatar_url?: string | null;
+    elo_rating?: number | null;
+  } | null;
+  players_2?: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    email: string | null;
+    avatar_url?: string | null;
+    elo_rating?: number | null;
+  } | null;
+  division_id?: string | null;
 };
 
 type ListResponse = { ok: true; tournaments: TournamentListItem[] };
@@ -49,7 +76,15 @@ type DetailResponse = {
   ok: true;
   tournament: TournamentListItem;
   inscriptions: TournamentInscription[];
+  divisions?: TournamentDivisionRow[];
   counts: { confirmed: number; pending: number };
+};
+type RecurringCreateResponse = {
+  ok: true;
+  created_count: number;
+  skipped_count: number;
+  created: Array<{ id: string; start_at: string }>;
+  skipped: Array<{ start_at: string; reason: string }>;
 };
 
 export type TournamentChatMessage = {
@@ -58,6 +93,62 @@ export type TournamentChatMessage = {
   author_user_id: string;
   author_name: string;
   message: string;
+};
+
+export type CompetitionFormat = 'single_elim' | 'group_playoff' | 'round_robin';
+export type CompetitionSet = { games_a: number; games_b: number };
+export type CompetitionTeam = {
+  id: string;
+  slot_index: number;
+  name: string;
+  status: 'active' | 'eliminated';
+  player_id_1: string;
+  player_id_2: string | null;
+};
+export type CompetitionStage = {
+  id: string;
+  stage_type: 'single_elim' | 'groups' | 'playoff' | 'round_robin';
+  stage_name: string;
+  stage_order: number;
+};
+export type CompetitionGroup = { id: string; stage_id: string; group_code: string };
+export type CompetitionMatch = {
+  id: string;
+  stage_id: string;
+  group_id: string | null;
+  round_number: number;
+  match_number: number;
+  team_a_id: string | null;
+  team_b_id: string | null;
+  source_match_a_id?: string | null;
+  source_match_b_id?: string | null;
+  seed_label_a?: string | null;
+  seed_label_b?: string | null;
+  status: 'scheduled' | 'bye' | 'finished';
+  winner_team_id: string | null;
+  result?: { match_id: string; winner_team_id: string; sets: CompetitionSet[]; submitted_at: string } | null;
+};
+export type CompetitionPodiumRow = { position: number; team_id: string; note?: string | null };
+export type CompetitionView = {
+  tournament: {
+    id: string;
+    competition_format: CompetitionFormat | null;
+    match_rules: {
+      best_of_sets?: number;
+      allow_draws?: boolean;
+      bracket_seed_strategy?: string;
+    } | null;
+    standings_rules: Record<string, unknown> | null;
+    status: string;
+    visibility: 'public' | 'private';
+    prizes?: TournamentPrize[] | null;
+  } | null;
+  teams: CompetitionTeam[];
+  stages: CompetitionStage[];
+  groups: CompetitionGroup[];
+  matches: CompetitionMatch[];
+  standings: Record<string, Array<Record<string, unknown>>>;
+  podium: Array<{ position: number; team_id: string; note: string | null }>;
 };
 
 export const tournamentsService = {
@@ -76,6 +167,13 @@ export const tournamentsService = {
       body: JSON.stringify(payload),
     });
     return res.tournament;
+  },
+
+  async createRecurring(payload: Record<string, unknown>): Promise<RecurringCreateResponse> {
+    return apiFetchWithAuth<RecurringCreateResponse>(`/tournaments/recurring`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   },
 
   async update(id: string, payload: Record<string, unknown>): Promise<TournamentListItem> {
@@ -107,6 +205,53 @@ export const tournamentsService = {
     });
   },
 
+  async addParticipant(tournamentId: string, playerId: string): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/participants`, {
+      method: 'POST',
+      body: JSON.stringify({ player_id: playerId }),
+    });
+  },
+
+  async removeInscription(tournamentId: string, inscriptionId: string): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/inscriptions/${inscriptionId}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async setInscriptionDivision(tournamentId: string, inscriptionId: string, divisionId: string | null): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/inscriptions/${inscriptionId}/division`, {
+      method: 'PUT',
+      body: JSON.stringify({ division_id: divisionId }),
+    });
+  },
+
+  /** Modo individual: intercambia jugadores entre dos inscripciones confirmadas (cambia emparejamientos). */
+  async swapSingles(tournamentId: string, inscriptionIdA: string, inscriptionIdB: string): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/inscriptions/swap-singles`, {
+      method: 'POST',
+      body: JSON.stringify({ inscription_id_a: inscriptionIdA, inscription_id_b: inscriptionIdB }),
+    });
+  },
+
+  /** Modo individual: reasigna qué jugador ocupa cada inscripción (permutación completa del estado actual). */
+  async applySinglesPairing(
+    tournamentId: string,
+    assignments: Array<{ inscription_id: string; player_id: string }>
+  ): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/inscriptions/singles-pairing`, {
+      method: 'PUT',
+      body: JSON.stringify({ assignments }),
+    });
+  },
+
+  /** Modo parejas: asigna el segundo jugador cuando la pareja estaba incompleta. */
+  async assignPartner(tournamentId: string, inscriptionId: string, playerId: string): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/inscriptions/${inscriptionId}/assign-partner`, {
+      method: 'POST',
+      body: JSON.stringify({ player_id: playerId }),
+    });
+  },
+
   async listChat(tournamentId: string): Promise<TournamentChatMessage[]> {
     const res = await apiFetchWithAuth<{ ok: true; messages: TournamentChatMessage[] }>(`/tournaments/${tournamentId}/chat`);
     return res.messages ?? [];
@@ -129,5 +274,86 @@ export const tournamentsService = {
     await apiFetchWithAuth(`/tournaments/${tournamentId}/join`, {
       method: 'POST',
     });
+  },
+
+  async setupCompetition(
+    tournamentId: string,
+    payload: {
+      format: CompetitionFormat;
+      match_rules?: { best_of_sets?: number; allow_draws?: boolean; bracket_seed_strategy?: string };
+      standings_rules?: Record<string, unknown>;
+    }
+  ): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/competition/setup`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async generateCompetition(tournamentId: string): Promise<{ teams_count: number; matches_count: number }> {
+    const res = await apiFetchWithAuth<{ ok: true; teams_count: number; matches_count: number }>(
+      `/tournaments/${tournamentId}/competition/generate`,
+      { method: 'POST' }
+    );
+    return { teams_count: res.teams_count ?? 0, matches_count: res.matches_count ?? 0 };
+  },
+
+  async generateCompetitionManual(
+    tournamentId: string,
+    teamKeys: string[]
+  ): Promise<{ teams_count: number; matches_count: number }> {
+    const res = await apiFetchWithAuth<{ ok: true; teams_count: number; matches_count: number }>(
+      `/tournaments/${tournamentId}/competition/generate-manual`,
+      { method: 'POST', body: JSON.stringify({ team_keys: teamKeys }) }
+    );
+    return { teams_count: res.teams_count ?? 0, matches_count: res.matches_count ?? 0 };
+  },
+
+  async competitionAdminView(tournamentId: string): Promise<CompetitionView> {
+    const res = await apiFetchWithAuth<{ ok: true } & CompetitionView>(`/tournaments/${tournamentId}/competition/admin-view`);
+    return res;
+  },
+
+  async competitionPublicView(tournamentId: string): Promise<CompetitionView> {
+    const res = await apiFetchWithAuth<{ ok: true } & CompetitionView>(`/tournaments/${tournamentId}/competition/public-view`);
+    return res;
+  },
+
+  async saveMatchResult(
+    tournamentId: string,
+    matchId: string,
+    payload: { sets: CompetitionSet[]; override?: boolean }
+  ): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/matches/${matchId}/result`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async savePodium(tournamentId: string, podium: CompetitionPodiumRow[]): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/podium`, {
+      method: 'PUT',
+      body: JSON.stringify({ podium }),
+    });
+  },
+
+  /** Sube a `tournament-posters/{clubId}/{tournamentId}/poster.ext` y devuelve la URL pública. */
+  async uploadPoster(clubId: string, tournamentId: string, file: File): Promise<string> {
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error('Supabase no configurado');
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.user?.id) throw new Error('Inicia sesión');
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const safeExt = ext && ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext) ? ext : 'jpg';
+    const path = `${clubId}/${tournamentId}/poster.${safeExt}`;
+    const { error: upErr } = await supabase.storage.from('tournament-posters').upload(path, file, {
+      upsert: true,
+      contentType: file.type || undefined,
+    });
+    if (upErr) throw new Error(upErr.message);
+    const { data: pub } = supabase.storage.from('tournament-posters').getPublicUrl(path);
+    return `${pub.publicUrl}${pub.publicUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
   },
 };

@@ -17,7 +17,7 @@ import {
     sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
 import { toast } from 'sonner';
-import { Header } from '../Layout/Header';
+import { PortalTealHeader } from '../Layout/PortalTealHeader';
 import { MainMenu } from '../Layout/MainMenu';
 
 // Courts
@@ -30,6 +30,7 @@ import type { Court } from '../../types/court';
 
 // Players
 import { ClubPlayersTab } from '../Players/ClubPlayers';
+import { PlayerProfileTab } from '../Players/PlayerProfileTab';
 // Settings (Editar club / Configuración)
 import { ClubSettingsTab } from '../Settings/ClubSettings';
 
@@ -56,6 +57,7 @@ export const ClubDashboard = () => {
     const isPlayersPage = location.pathname === '/jugadores';
     const isConfigPage = location.pathname === '/configuracion';
     const isPersonalPage = location.pathname === '/personal';
+    const isPlayerProfilePage = location.pathname === '/mi-perfil';
     const isInventoryPage = location.pathname === '/inventario';
     const isSchoolPage = location.pathname === '/escuela';
     const isPaymentsPage = location.pathname === '/pagos';
@@ -127,7 +129,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isTorneosPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isPlayerProfilePage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isTorneosPage) {
             setLoading(false);
             return;
         }
@@ -140,7 +142,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isTorneosPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isPlayerProfilePage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isTorneosPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -214,17 +216,18 @@ export const ClubDashboard = () => {
 
     // Evita spinner doble en pantallas donde el tab ya se encarga del loader (CRM y Reseñas).
     if (!club && loading && !isResenasPage && !isCrmPage) {
-        return <PageSpinner />;
+        return (
+            <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
+                <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
+                <PageSpinner />
+                <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" isAdmin={isAdmin} />
+            </div>
+        );
     }
 
     return (
         <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
-            <Header
-                clubName={club?.name ?? ''}
-                isOnline={true}
-                onToggleMenu={() => setIsMenuOpen(true)}
-                clubLogoUrl={club?.logo_url ?? null}
-            />
+            <PortalTealHeader clubName={club?.name ?? ''} onMenuClick={() => setIsMenuOpen(true)} />
 
             <main className="px-4 sm:px-5 py-5 pb-20">
                 <div className="max-w-7xl mx-auto space-y-6">
@@ -240,6 +243,8 @@ export const ClubDashboard = () => {
                         <ClubSettingsTab initialClub={club} />
                     ) : isPersonalPage ? (
                         <ClubStaffTab clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isPlayerProfilePage ? (
+                        <PlayerProfileTab />
                     ) : isInventoryPage ? (
                         <InventoryControl clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isSchoolPage ? (
