@@ -325,6 +325,21 @@ El **webhook** de Stripe usa body raw y está montado en la app principal (no pa
 | DELETE | `/school-courses/:id` | Eliminar curso. |
 | POST | `/school-courses/:id/enrollments` | Crear inscripción / alumno en el curso. |
 
+## Aprendizaje (`/learning`)
+
+Requiere auth de jugador (`Authorization: Bearer <access_token>`).
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/learning/daily-lesson` | Obtener 5 preguntas seleccionadas para el usuario. Query: `?timezone=Asia/Shanghai`. |
+| POST | `/learning/daily-lesson/complete` | Registrar resultado de la lección diaria. Body: `{ timezone, answers }`. |
+
+## Privacidad (privacy_logs) – solo escritura
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/privacy-logs` | Registrar evento GDPR (`action_type`: accept_terms, revoke_marketing, delete_account_request, export_data). |
+
 ---
 
 ## Torneos (`/tournaments`)
