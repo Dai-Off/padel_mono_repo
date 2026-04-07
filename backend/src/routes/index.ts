@@ -27,6 +27,7 @@ import clubReviewsRouter from './clubReviews';
 import learningRouter from './learning';
 import tournamentsRouter from './tournaments';
 import tournamentInvitesRouter from './tournamentInvites';
+import leaguesRouter from './leagues';
 import walletRouter from './wallet';
 import bonusesRouter from './bonuses';
 
@@ -67,6 +68,7 @@ router.use('/club-reviews', clubReviewsRouter);
 router.use('/learning', learningRouter);
 router.use('/tournaments', tournamentInvitesRouter);
 router.use('/tournaments', tournamentsRouter);
+router.use('/leagues', leaguesRouter);
 router.use('/wallet', walletRouter);
 router.use('/bonuses', bonusesRouter);
 

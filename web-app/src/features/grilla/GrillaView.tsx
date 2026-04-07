@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-
 import { Calendar, Menu, ArrowLeft, X, Globe, Wallet, Gift, Plus, Loader2, MoreVertical, Trash2 } from 'lucide-react';
 import { MainMenu } from '../../components/Layout/MainMenu';
 import { PageSpinner } from '../../components/Layout/PageSpinner';
@@ -35,10 +34,12 @@ import { SchoolCourseModal } from './components/SchoolCourseModal';
 import { BonusManagement } from './components/BonusManagement';
 import { WalletRecharge } from './components/WalletRecharge';
 
+import { GrillaQuickNav } from './components/GrillaQuickNav';
 import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
 import { HoverTooltip } from './components/HoverTooltip';
 import { pixelsToTime, timeToPixels, parseTimeStr, START_HOUR, END_HOUR, PIXELS_PER_MINUTE } from './utils/timeGrid';
+import { courtVisibleInGridForDate } from './courtVisibility';
 import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
 import dropSoundAsset from '../../assets/sounds/sfx2.mp3';
@@ -54,16 +55,26 @@ import './grilla.css';
 
 // In-memory cache for bookings by date (avoids re-fetching when switching dates)
 const bookingsCache: Record<string, { data: any[]; ts: number }> = {};
-const CACHE_TTL = 300_000; // 5 minutes — realtime keeps data in sync
+const CACHE_TTL = 300_000;
+const MAX_BOOKINGS_CACHE_DATES = 50;
 
-// Fechas clave relativas a hoy
+function putBookingsCache(dateKey: string, data: any[]) {
+  bookingsCache[dateKey] = { data, ts: Date.now() };
+  const keys = Object.keys(bookingsCache);
+  if (keys.length <= MAX_BOOKINGS_CACHE_DATES) return;
+  keys.sort((a, b) => bookingsCache[a].ts - bookingsCache[b].ts);
+  for (let i = 0; i < keys.length - MAX_BOOKINGS_CACHE_DATES; i++) {
+    delete bookingsCache[keys[i]];
+  }
+}
+
 const getWindowDates = (): string[] => {
-    const today = new Date();
-    return [-1, 0, 1, 2].map(offset => {
-        const d = new Date(today);
-        d.setDate(d.getDate() + offset);
-        return toDateStr(d);
-    });
+  const today = new Date();
+  return [-1, 0, 1, 2].map((offset) => {
+    const d = new Date(today);
+    d.setDate(d.getDate() + offset);
+    return toDateStr(d);
+  });
 };
 
 const toDateStr = (d: Date | string) =>
@@ -97,7 +108,11 @@ const useClubData = (dateOrStr: Date | string) => {
         if (!clubId) return [];
         let courtsRes = await apiFetchWithAuth<any>(`/courts?club_id=${clubId}`);
         let courtsData: Court[] = (courtsRes.courts || []).map((c: any) => ({
-            id: c.id, name: c.name, locationId: 'sede-central', is_hidden: Boolean(c.is_hidden)
+            id: c.id,
+            name: c.name,
+            locationId: 'sede-central',
+            is_hidden: Boolean(c.is_hidden),
+            visibility_windows: c.visibility_windows ?? null,
         }));
 
         if (courtsData.length === 0) {
@@ -106,7 +121,11 @@ const useClubData = (dateOrStr: Date | string) => {
                 const firstClub = allClubsRes.result[0];
                 courtsRes = await apiFetch<any>(`/courts?club_id=${firstClub.id}`);
                 courtsData = (courtsRes.courts || []).map((c: any) => ({
-                    id: c.id, name: c.name, locationId: 'sede-central'
+                    id: c.id,
+                    name: c.name,
+                    locationId: 'sede-central',
+                    is_hidden: Boolean(c.is_hidden),
+                    visibility_windows: c.visibility_windows ?? null,
                 }));
             }
         }
@@ -149,7 +168,7 @@ const useClubData = (dateOrStr: Date | string) => {
           players: { first_name: 'Curso', last_name: slot.course_name },
         }));
         const merged = [...raw, ...schoolAsBookings];
-        bookingsCache[date] = { data: merged, ts: Date.now() };
+        putBookingsCache(date, merged);
         return mapBookings(merged, courtsData);
     }, [clubId]);
 
@@ -177,7 +196,7 @@ const useClubData = (dateOrStr: Date | string) => {
                     notes: `${slot.course_name}${slot.staff_name ? ` - ${slot.staff_name}` : ''}`,
                     players: { first_name: 'Curso', last_name: slot.course_name },
                 }));
-                bookingsCache[ds] = { data: [...(bRes.bookings || []), ...schoolAsBookings], ts: Date.now() };
+                putBookingsCache(ds, [...(bRes.bookings || []), ...schoolAsBookings]);
             } catch { /* silent */ }
         }
     }, [clubId]);
@@ -505,8 +524,23 @@ const ZoomScrollbars = () => {
 function GrillaViewInner() {
   const navigate = useNavigate();
   const { t, i18n } = useGrillaTranslation();
-  const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [portalClubName, setPortalClubName] = useState('');
+
+  useEffect(() => {
+    authService
+      .getMe()
+      .then((me) => {
+        setIsAdmin(Boolean(me.ok && me.roles?.admin_id));
+        const n = (me.clubs?.[0] as { name?: string } | undefined)?.name;
+        if (typeof n === 'string' && n.trim()) setPortalClubName(n.trim());
+      })
+      .catch(() => {
+        setIsAdmin(false);
+      });
+  }, []);
   const today = new Date(); // Always current date — recomputed each render so chips are never stale
   const [selectedDate, setSelectedDate] = useState<Date>(today);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -526,23 +560,30 @@ function GrillaViewInner() {
   const [grillaTab, setGrillaTab] = useState<'courts' | 'waitlist'>('courts');
   const [showHiddenCourtsMenu, setShowHiddenCourtsMenu] = useState(false);
 
-  // Check if there are hidden courts to show the tab
-  const hasHiddenCourts = useMemo(() => courts.some(c => c.is_hidden), [courts]);
+  const hasHiddenCourts = useMemo(() => courts.some((c) => c.is_hidden), [courts]);
 
-  // Filter courts by the active tab (main courts vs waiting list)
   const activeCourts = useMemo(() => {
     if (grillaTab === 'waitlist') {
-      return courts.filter(c => c.is_hidden);
+      return courts.filter((c) => c.is_hidden);
     }
-    return courts.filter(c => !c.is_hidden);
-  }, [courts, grillaTab]);
+    const dateStr = formatDateForInput(selectedDate);
+    const gridStartMin = START_HOUR * 60;
+    const gridEndMin = END_HOUR * 60 + 30;
+    return courts.filter((c) => {
+      if (c.is_hidden) return false;
+      return courtVisibleInGridForDate(c.visibility_windows, dateStr, gridStartMin, gridEndMin);
+    });
+  }, [courts, grillaTab, selectedDate]);
+
+  const gridCourts = activeCourts;
 
   const [reservations, setReservations] = useState<Reservation[]>([]);
 
   useEffect(() => {
-    setReservations(serverReservations);
+    const allowed = new Set(gridCourts.map((c) => c.id));
+    setReservations(serverReservations.filter((r) => allowed.has(r.courtId)));
     setRecentlyDroppedId(null);
-  }, [serverReservations]);
+  }, [serverReservations, gridCourts]);
 
   // Current time indicator — updates every minute
   const [nowMinutes, setNowMinutes] = useState<number>(() => {
@@ -569,6 +610,12 @@ function GrillaViewInner() {
   const [hoveredTooltip, setHoveredTooltip] = useState<{ res: Reservation, el: HTMLElement } | null>(null);
   const [focusedCourtId, setFocusedCourtId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (focusedCourtId && !gridCourts.some((c) => c.id === focusedCourtId)) {
+      setFocusedCourtId(null);
+    }
+  }, [focusedCourtId, gridCourts]);
+
   // Ref to control the zoom-pan-pinch library programmatically
   const transformComponentRef = useRef<ReactZoomPanPinchRef | null>(null);
   const activeMobileScaleRef = useRef<number>(1);
@@ -585,22 +632,29 @@ function GrillaViewInner() {
       setCompactPxPerMinute(0.30);
     };
 
-    computeCompactPpm();
-    window.addEventListener('resize', () => {
+    const onResize = () => {
       computeCompactPpm();
       setIsMobileDevice(window.innerWidth <= 768);
-    });
-    // Safari iOS uses orientationchange
-    window.addEventListener('orientationchange', () => {
-      setTimeout(() => {
+    };
+
+    let orientationTimer: ReturnType<typeof setTimeout> | null = null;
+    const onOrientationChange = () => {
+      if (orientationTimer) clearTimeout(orientationTimer);
+      orientationTimer = setTimeout(() => {
+        orientationTimer = null;
         computeCompactPpm();
         setIsMobileDevice(window.innerWidth <= 768);
       }, 100);
-    });
+    };
+
+    computeCompactPpm();
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onOrientationChange);
 
     return () => {
-      window.removeEventListener('resize', computeCompactPpm);
-      window.removeEventListener('orientationchange', computeCompactPpm);
+      if (orientationTimer) clearTimeout(orientationTimer);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onOrientationChange);
     };
   }, []);
 
@@ -1298,35 +1352,35 @@ function GrillaViewInner() {
   // Navigation handlers for single court view
   const handleNextCourt = () => {
     if (!focusedCourtId) return;
-    const currentIndex = activeCourts.findIndex(c => c.id === focusedCourtId);
-    if (currentIndex < activeCourts.length - 1) {
-      setFocusedCourtId(activeCourts[currentIndex + 1].id);
+    const currentIndex = gridCourts.findIndex(c => c.id === focusedCourtId);
+    if (currentIndex < gridCourts.length - 1) {
+      setFocusedCourtId(gridCourts[currentIndex + 1].id);
     }
   };
 
   const handlePrevCourt = () => {
     if (!focusedCourtId) return;
-    const currentIndex = activeCourts.findIndex(c => c.id === focusedCourtId);
+    const currentIndex = gridCourts.findIndex(c => c.id === focusedCourtId);
     if (currentIndex > 0) {
-      setFocusedCourtId(activeCourts[currentIndex - 1].id);
+      setFocusedCourtId(gridCourts[currentIndex - 1].id);
     }
   };
 
   const visibleCourts = useMemo(() => {
-    if (!focusedCourtId) return activeCourts;
+    if (!focusedCourtId) return gridCourts;
 
-    const currentIndex = activeCourts.findIndex(c => c.id === focusedCourtId);
+    const currentIndex = gridCourts.findIndex(c => c.id === focusedCourtId);
     let startIndex = Math.max(0, currentIndex - 1);
 
-    if (startIndex + 3 > activeCourts.length) {
-      startIndex = Math.max(0, activeCourts.length - 3);
+    if (startIndex + 3 > gridCourts.length) {
+      startIndex = Math.max(0, gridCourts.length - 3);
     }
 
-    return activeCourts.slice(startIndex, startIndex + 3);
-  }, [focusedCourtId, activeCourts]);
+    return gridCourts.slice(startIndex, startIndex + 3);
+  }, [focusedCourtId, gridCourts]);
 
-  const isFirstCourt = focusedCourtId === activeCourts[0]?.id;
-  const isLastCourt = focusedCourtId === activeCourts[activeCourts.length - 1]?.id;
+  const isFirstCourt = focusedCourtId === gridCourts[0]?.id;
+  const isLastCourt = focusedCourtId === gridCourts[gridCourts.length - 1]?.id;
 
   // Swipe handlers
   const onTouchStart = (e: React.TouchEvent) => {
@@ -1374,7 +1428,6 @@ function GrillaViewInner() {
   return (
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
       <div className="h-[100dvh] flex flex-col bg-gray-100 font-sans overflow-hidden">
-        {/* ── Top Header ── */}
         {!isMobileDevice && (
           <header className="bg-[#00726b] px-4 md:px-6 py-1.5 md:py-2 z-50 flex-shrink-0 flex justify-between items-center border-b border-[#005a4f] gap-3">
             <div className="flex items-center gap-3 md:gap-4">
@@ -1387,14 +1440,13 @@ function GrillaViewInner() {
                 </div>
               </div>
               <div className="flex flex-col">
-                <h1 className="text-[13px] md:text-sm font-bold text-white leading-tight">{t('header.clubName')}</h1>
+                <h1 className="text-[13px] md:text-sm font-bold text-white leading-tight">{portalClubName || t('header.clubName')}</h1>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* Language Selector */}
               <div className="relative">
                 <button
-                  onClick={() => setLangMenuOpen(prev => !prev)}
+                  onClick={() => setLangMenuOpen((prev) => !prev)}
                   className="w-9 h-9 md:w-10 md:h-10 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors"
                   title={t('header.languageLabel')}
                 >
@@ -1441,6 +1493,7 @@ function GrillaViewInner() {
             </div>
           </header>
         )}
+        <GrillaQuickNav isAdmin={isAdmin} />
 
         {/* ── Single Court View Navigation (Conditionally Rendered) ── */}
         {focusedCourtId && (
@@ -1589,7 +1642,6 @@ function GrillaViewInner() {
                         </React.Fragment>
                       ))}
 
-                      {/* Wallet button */}
                       <span className="text-gray-300 select-none">|</span>
                       <button
                         onClick={() => setRechargeModalOpen(true)}
@@ -1599,7 +1651,6 @@ function GrillaViewInner() {
                         Wallet
                       </button>
 
-                      {/* Bonos button */}
                       <span className="text-gray-300 select-none">|</span>
                       <button
                         onClick={() => setBonusModalOpen(true)}
@@ -1780,7 +1831,7 @@ function GrillaViewInner() {
                               isFocusedMode={focusedCourtId !== null}
                               isCurrentlyFocused={court.id === focusedCourtId}
                               isCompactView={false}
-                              totalCourts={activeCourts.length}
+                              totalCourts={gridCourts.length}
                             />
                           ))}
                         </div>
@@ -1833,7 +1884,7 @@ function GrillaViewInner() {
                             setSelectedModalReservationId(newId);
                           }}
                           isCompactView={false}
-                          totalCourts={activeCourts.length}
+                          totalCourts={gridCourts.length}
                           onHeaderHover={setHoveredCourtId}
                           onHoverStart={(res, el) => setHoveredTooltip({ res, el })}
                           onHoverEnd={() => setHoveredTooltip(null)}
@@ -1926,7 +1977,12 @@ function GrillaViewInner() {
         anchorElement={hoveredTooltip?.el || null}
       />
       </div>
-      <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" />
+      <MainMenu
+        isOpen={isMenuOpen}
+        onClose={() => setIsMenuOpen(false)}
+        clubName={portalClubName || t('header.clubName')}
+        isAdmin={isAdmin}
+      />
     </ZoomContext.Provider>
   );
 }
