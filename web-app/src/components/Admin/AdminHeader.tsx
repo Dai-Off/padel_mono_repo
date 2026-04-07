@@ -16,12 +16,12 @@ export const AdminHeader = () => {
   const isQuestionsPage = location.pathname === "/admin/questions";
 
   return (
-    <header className="sticky top-0 z-20 bg-background/95 backdrop-blur-md border-b border-border-subtle">
+    <header className="sticky top-0 z-[55] bg-background/95 backdrop-blur-md border-b border-border-subtle">
       <div className="px-5 py-3.5">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div
-              className="w-9 h-9 rounded-xl overflow-hidden bg-white border border-border-subtle p-1 cursor-pointer"
+              className="w-9 h-9 rounded-xl overflow-hidden bg-white border border-border-subtle p-1 cursor-pointer flex-shrink-0"
               onClick={() => navigate("/admin")}
             >
               <img

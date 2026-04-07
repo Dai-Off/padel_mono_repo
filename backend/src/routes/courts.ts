@@ -3,18 +3,42 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
+import { normalizeStoredVisibilityWindows } from '../lib/courtVisibility';
 
 const router = Router();
 router.use(attachAuthContext);
 
 const FIELDS =
-  'id, created_at, club_id, name, indoor, glass_type, status, lighting, last_maintenance, display_order, is_hidden';
+  'id, created_at, club_id, name, indoor, glass_type, status, lighting, last_maintenance, display_order, is_hidden, visibility_windows';
 
 function canAccessCourtClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
   return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
 }
 
+/**
+ * @openapi
+ * /courts:
+ *   get:
+ *     tags: [Courts]
+ *     summary: Listar pistas
+ *     description: |
+ *       Dueño de club o admin ven todas las pistas del club (incl. `is_hidden`).
+ *       Público y jugadores sin rol de club solo ven pistas con `is_hidden=false`.
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Lista de pistas
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, courts: [] }
+ *       403: { description: club_id no permitido para el dueño autenticado }
+ */
 /** GET /courts — listar pistas. Público (app móvil, reservas). Si hay token y es admin/dueño, se filtra por sus clubs; si no, se devuelven todas (o por club_id si se pasa). */
 router.get('/', async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
@@ -34,6 +58,7 @@ router.get('/', async (req: Request, res: Response) => {
       if (club_id) q = q.eq('club_id', club_id);
     } else {
       if (club_id) q = q.eq('club_id', club_id);
+      q = q.eq('is_hidden', false);
     }
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -91,6 +116,22 @@ router.put('/reorder', requireClubOwnerOrAdmin, async (req: Request, res: Respon
   }
 });
 
+/**
+ * @openapi
+ * /courts/{id}:
+ *   get:
+ *     tags: [Courts]
+ *     summary: Detalle de pista
+ *     description: Pistas ocultas devuelven 404 salvo admin/dueño del club de la pista.
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200: { description: Pista encontrada }
+ *       404: { description: No existe o está oculta sin permisos }
+ */
 /** GET /courts/:id — detalle de una pista. Público (app móvil, reservas). */
 router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -103,18 +144,54 @@ router.get('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Pista no encontrada' });
+    const row = data as { is_hidden?: boolean; club_id: string };
+    if (row.is_hidden && !canAccessCourtClub(req, row.club_id)) {
+      return res.status(404).json({ ok: false, error: 'Pista no encontrada' });
+    }
     return res.json({ ok: true, court: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
+/**
+ * @openapi
+ * /courts:
+ *   post:
+ *     tags: [Courts]
+ *     summary: Crear pista
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_id, name]
+ *             properties:
+ *               club_id: { type: string, format: uuid }
+ *               name: { type: string }
+ *               indoor: { type: boolean }
+ *               glass_type: { type: string, enum: [normal, panoramic] }
+ *               lighting: { type: boolean }
+ *               last_maintenance: { type: string, format: date, nullable: true }
+ *               is_hidden: { type: boolean, description: 'Excluida de búsqueda pública' }
+ *               visibility_windows:
+ *                 type: array
+ *                 nullable: true
+ *                 description: 'Franjas en que la pista se muestra en grilla (día ISO 1–7, minutos 0–1440)'
+ *     responses:
+ *       201: { description: Creada }
+ *       400: { description: visibility_windows inválido }
+ */
 router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
-  const { club_id, name, indoor, glass_type, lighting, last_maintenance, is_hidden } = req.body ?? {};
+  const { club_id, name, indoor, glass_type, lighting, last_maintenance, is_hidden, visibility_windows } = req.body ?? {};
   if (!club_id || !name || !String(name).trim()) {
     return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
   }
   if (!canAccessCourtClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  const winNorm = normalizeStoredVisibilityWindows(visibility_windows);
+  if (!winNorm.ok) return res.status(400).json({ ok: false, error: winNorm.error });
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: lastRow } = await supabase
@@ -135,6 +212,7 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
     if (lighting !== undefined) row.lighting = Boolean(lighting);
     if (last_maintenance !== undefined) row.last_maintenance = last_maintenance ?? null;
     if (is_hidden !== undefined) row.is_hidden = Boolean(is_hidden);
+    if (visibility_windows !== undefined) row.visibility_windows = winNorm.value;
     const { data, error } = await supabase
       .from('courts')
       .insert(row)
@@ -154,6 +232,35 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
   }
 });
 
+/**
+ * @openapi
+ * /courts/{id}:
+ *   put:
+ *     tags: [Courts]
+ *     summary: Actualizar pista
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string }
+ *               indoor: { type: boolean }
+ *               glass_type: { type: string, enum: [normal, panoramic] }
+ *               status: { type: string, enum: [operational, maintenance] }
+ *               lighting: { type: boolean }
+ *               is_hidden: { type: boolean }
+ *               visibility_windows: { type: array, nullable: true }
+ *     responses:
+ *       200: { description: Actualizada }
+ *       400: { description: visibility_windows inválido }
+ */
 router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
@@ -163,7 +270,7 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
   } catch {
     return res.status(500).json({ ok: false, error: 'Error al verificar pista' });
   }
-  const { name, indoor, glass_type, status, lighting, last_maintenance, is_hidden } = req.body ?? {};
+  const { name, indoor, glass_type, status, lighting, last_maintenance, is_hidden, visibility_windows } = req.body ?? {};
   const update: Record<string, unknown> = {};
   if (name !== undefined) update.name = String(name).trim();
   if (indoor !== undefined) update.indoor = Boolean(indoor);
@@ -172,6 +279,11 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
   if (lighting !== undefined) update.lighting = Boolean(lighting);
   if (last_maintenance !== undefined) update.last_maintenance = last_maintenance ?? null;
   if (is_hidden !== undefined) update.is_hidden = Boolean(is_hidden);
+  if (visibility_windows !== undefined) {
+    const winNorm = normalizeStoredVisibilityWindows(visibility_windows);
+    if (!winNorm.ok) return res.status(400).json({ ok: false, error: winNorm.error });
+    update.visibility_windows = winNorm.value;
+  }
   if (Object.keys(update).length === 0) {
     return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
   }
@@ -195,8 +307,17 @@ router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Respons
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data: existing } = await supabase.from('courts').select('club_id').eq('id', id).maybeSingle();
+    const { data: existing } = await supabase.from('courts').select('club_id, is_hidden').eq('id', id).maybeSingle();
     if (!existing || !canAccessCourtClub(req, (existing as { club_id: string }).club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a esta pista' });
+
+    if (!(existing as { is_hidden: boolean }).is_hidden) {
+      return res.status(400).json({ ok: false, error: 'Solo se pueden eliminar físicamente las pistas ocultas.' });
+    }
+
+    // Limpiar dependencias (Pricing rules, Reservations) primero
+    await supabase.from('pricing_rules').delete().eq('court_id', id);
+    await supabase.from('reservations').delete().eq('court_id', id);
+
     const { error } = await supabase.from('courts').delete().eq('id', id);
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, deleted: id });

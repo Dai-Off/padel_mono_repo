@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Header } from '../Layout/Header';
+import { PortalTealHeader } from '../Layout/PortalTealHeader';
 import { MainMenu } from '../Layout/MainMenu';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { authService } from '../../services/auth';
@@ -53,13 +53,19 @@ export function PreciosView() {
   const showClubSwitcher = isAdmin && clubs.length > 1;
 
   if (loading) {
-    return <PageSpinner />;
+    return (
+      <div className="min-h-screen bg-background text-foreground font-sans">
+        <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
+        <PageSpinner />
+        <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" isAdmin={isAdmin} />
+      </div>
+    );
   }
 
   if (clubs.length === 0) {
     return (
       <div className="min-h-screen bg-background text-foreground font-sans">
-        <Header clubName="" isOnline={true} onToggleMenu={() => setIsMenuOpen(true)} clubLogoUrl={null} />
+        <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
         <main className="px-4 sm:px-5 py-12">
           <p className="text-sm text-gray-500 text-center">{t('not_found')}</p>
         </main>
@@ -70,11 +76,9 @@ export function PreciosView() {
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans">
-      <Header
+      <PortalTealHeader
         clubName={selectedClub?.name ?? clubs[0]?.name ?? ''}
-        isOnline={true}
-        onToggleMenu={() => setIsMenuOpen(true)}
-        clubLogoUrl={selectedClub?.logo_url ?? null}
+        onMenuClick={() => setIsMenuOpen(true)}
       />
 
       <main className="px-4 sm:px-5 py-5 pb-20">

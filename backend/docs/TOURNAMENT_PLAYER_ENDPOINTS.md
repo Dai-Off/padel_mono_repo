@@ -3,6 +3,8 @@
 Base URL: `http://localhost:3000`  
 Auth: `Authorization: Bearer <access_token>` cuando aplica.
 
+Invitaciones: `invite_url` apunta al backend (ejemplo: `http://localhost:3000/tournaments/invites/{token}/accept?...`) para aceptar directo desde Postman. Puedes sobreescribir base con `TOURNAMENT_INVITE_BASE_URL` o `BACKEND_PUBLIC_URL`.
+
 ## 1) Listar torneos públicos
 
 - `GET /tournaments/public/list`
@@ -77,7 +79,7 @@ Respuesta:
 {
   "ok": true,
   "status": "pending",
-  "invite_url": "https://frontend/torneos/invite?tournament_id=...&token=..."
+  "invite_url": "http://localhost:3000/tournaments/invites/<token>/accept?tournament_id=..."
 }
 ```
 
