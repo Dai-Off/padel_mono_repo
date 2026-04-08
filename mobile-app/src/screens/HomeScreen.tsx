@@ -33,9 +33,10 @@ type TabId = 'pistas' | 'partidos' | 'torneos';
 type HomeScreenProps = {
   onNavigateToTab?: (tab: TabId) => void;
   onPartidoPress?: (partido: PartidoItem) => void;
+  onStartDailyLesson?: () => void;
 };
 
-export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps) {
+export function HomeScreen({ onNavigateToTab, onPartidoPress, onStartDailyLesson }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { stats, loading: statsLoading } = useHomeStats();
@@ -161,7 +162,7 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps)
           loading={matchesLoading}
           onPartidoPress={onPartidoPress}
         />
-        <DailyLessonCard onPress={() => onNavigateToTab?.('partidos')} />
+        <DailyLessonCard onPress={onStartDailyLesson} />
         <SeasonPassHomeCard />
         <CompetitiveLeagueHomeCard
           onPress={() => onNavigateToTab?.('torneos')}
