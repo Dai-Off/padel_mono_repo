@@ -479,9 +479,9 @@ router.post('/onboarding', async (req: Request, res: Response) => {
     return res.status(409).json({ ok: false, error: 'Nivelación inicial ya completada' });
   }
 
-  // Separar respuestas
-  const phase1Ans = answers.filter(a => a.question_key.startsWith('p'));
-  const phase2Ans = answers.filter(a => !a.question_key.startsWith('p'));
+  // Separar respuestas (solo p1 a p99 son de fase 1)
+  const phase1Ans = answers.filter(a => /^p\d+$/.test(a.question_key));
+  const phase2Ans = answers.filter(a => !/^p\d+$/.test(a.question_key));
 
   // Calculos
   const eloPhase1 = await calcEloPhase1(phase1Ans);

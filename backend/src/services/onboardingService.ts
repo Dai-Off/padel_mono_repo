@@ -178,7 +178,7 @@ function calcEloPhase1FromData(answers: OnboardingAnswer[], questions: Question[
     const ans = getAns(qKey);
     if (ans !== undefined) {
       const q = questions.find(q => q.question_key === qKey);
-      const opt = q?.options.find(o => o.text === ans || o.value === ans || q.options.indexOf(o) === ans);
+      const opt = q?.options.find((o, idx) => o.text === ans || o.value == ans || idx == ans);
       if (opt && opt.corrector) elo += Number(opt.corrector);
     }
   };
