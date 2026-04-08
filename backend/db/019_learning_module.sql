@@ -46,8 +46,6 @@ create table if not exists public.learning_sessions (
   total_count integer not null default 5,
   score integer not null,
   xp_earned integer not null,
-  elo_before numeric not null,
-  elo_after numeric not null,
   timezone text not null default 'UTC',
   completed_at timestamptz not null default now()
 );

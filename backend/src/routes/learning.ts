@@ -92,15 +92,66 @@ function penalizacionRepeticion(history: HistoryEntry[]): number {
   return Math.min(history.length * 8, 60);
 }
 
-function computeWeight(q: QuestionRow, history: HistoryEntry[], eloRating: number, now: Date): number {
+function computeWeight(
+  q: QuestionRow,
+  history: HistoryEntry[],
+  eloRating: number,
+  now: Date,
+  ignoreLevelPenalty: boolean,
+): number {
   return (
     PESO_BASE +
     bonusFallada(history) +
     bonusNovedad(history) +
     bonusTiempo(history, now) -
-    penalizacionNivel(q.level, eloRating) -
+    (ignoreLevelPenalty ? 0 : penalizacionNivel(q.level, eloRating)) -
     penalizacionRepeticion(history)
   );
+}
+
+function shuffleInPlace<T>(arr: T[]): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
+function pickFromScored(scored: ScoredQuestion[]): QuestionRow[] {
+  const selected: QuestionRow[] = [];
+  const used = new Set<string>();
+  const areas = new Set<string>();
+
+  // First slot: prefer test_classic if any candidate has positive weight
+  const firstClassic = scored.find((s) => s.question.type === 'test_classic');
+  if (firstClassic) {
+    selected.push(firstClassic.question);
+    used.add(firstClassic.question.id);
+    areas.add(firstClassic.question.area);
+  }
+
+  while (selected.length < LESSON_SIZE) {
+    const remainingSlots = LESSON_SIZE - selected.length;
+    const last = selected[selected.length - 1];
+    // Force a new area if this is the last slot and we still only have one area
+    const needNewArea = areas.size < 2 && remainingSlots === 1;
+
+    const candidates = scored.filter((s) => !used.has(s.question.id));
+    if (candidates.length === 0) break;
+
+    const findFirst = (predicate: (q: QuestionRow) => boolean) =>
+      candidates.find((c) => predicate(c.question));
+
+    const next: ScoredQuestion =
+      (needNewArea ? findFirst((q) => !areas.has(q.area)) : undefined) ??
+      (last ? findFirst((q) => q.type !== last.type) : undefined) ??
+      candidates[0];
+
+    selected.push(next.question);
+    used.add(next.question.id);
+    areas.add(next.question.area);
+  }
+
+  return selected;
 }
 
 function selectQuestions(
@@ -112,46 +163,26 @@ function selectQuestions(
 
   const now = new Date();
 
-  const scored: ScoredQuestion[] = questions.map((q) => ({
-    question: q,
-    weight: computeWeight(q, historyByQuestion.get(q.id) ?? [], eloRating, now),
-  }));
+  const buildScored = (ignoreLevelPenalty: boolean): ScoredQuestion[] =>
+    questions
+      .map((q) => ({
+        question: q,
+        weight: computeWeight(q, historyByQuestion.get(q.id) ?? [], eloRating, now, ignoreLevelPenalty),
+      }))
+      .sort((a, b) => b.weight - a.weight);
 
-  scored.sort((a, b) => b.weight - a.weight);
+  let selected = pickFromScored(buildScored(false));
 
-  const selected: QuestionRow[] = [];
-  const used = new Set<string>();
-
-  // Rule: first question should be test_classic if available
-  const firstClassic = scored.find((s) => s.question.type === 'test_classic' && !used.has(s.question.id));
-  if (firstClassic) {
-    selected.push(firstClassic.question);
-    used.add(firstClassic.question.id);
+  // Fallback: not enough questions after applying level penalty → retry ignoring it
+  if (selected.length < LESSON_SIZE && questions.length >= LESSON_SIZE) {
+    selected = pickFromScored(buildScored(true));
   }
 
-  // Fill remaining slots respecting variety rules
-  for (const s of scored) {
-    if (selected.length >= LESSON_SIZE) break;
-    if (used.has(s.question.id)) continue;
-
-    // No consecutive same type
-    if (selected.length > 0 && selected[selected.length - 1].type === s.question.type) {
-      // Try to find a different type with decent weight
-      const alt = scored.find(
-        (x) =>
-          !used.has(x.question.id) &&
-          x.question.type !== selected[selected.length - 1].type &&
-          x.weight > 0,
-      );
-      if (alt) {
-        selected.push(alt.question);
-        used.add(alt.question.id);
-        continue;
-      }
-    }
-
-    selected.push(s.question);
-    used.add(s.question.id);
+  // Final shuffle, keeping the first slot fixed (test_classic rule)
+  if (selected.length > 1) {
+    const rest = selected.slice(1);
+    shuffleInPlace(rest);
+    selected = [selected[0], ...rest];
   }
 
   return selected;
@@ -278,92 +309,196 @@ function timePenalty(responseTimeMs: number): number {
   return Math.round(((responseTimeMs - 5000) / 5000) * 30);
 }
 
-function computeEloDelta(ratio: number): number {
-  if (ratio >= 0.8) return 0.1;
-  if (ratio >= 0.6) return 0.05;
-  if (ratio >= 0.4) return 0;
-  return -0.05;
-}
-
 // ---------------------------------------------------------------------------
 // Timezone helper — check if user already completed today
 // ---------------------------------------------------------------------------
 
-function getTodayRange(timezone: string): { start: string; end: string } {
-  // Calculate "today" boundaries in the user's timezone
-  // Use Intl.DateTimeFormat to get the current date in the user's tz
-  const now = new Date();
-  let dateStr: string;
-  try {
-    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' });
-    dateStr = formatter.format(now); // YYYY-MM-DD
-  } catch {
-    // Fallback to UTC if invalid timezone
-    dateStr = now.toISOString().slice(0, 10);
-  }
-
-  // Build start/end of that day in UTC-equivalent for the timezone
-  // We query using the timezone-aware approach: convert the date boundaries to UTC
-  const startLocal = `${dateStr}T00:00:00`;
-  const endLocal = `${dateStr}T23:59:59`;
-
-  // Convert local boundaries to UTC using the timezone offset
-  const startUtc = localToUtc(startLocal, timezone);
-  const endUtc = localToUtc(endLocal, timezone);
-
-  return { start: startUtc, end: endUtc };
+/**
+ * Format a UTC instant as the wall-clock time it represents in `timezone`.
+ * Returns ISO-like string "YYYY-MM-DDTHH:mm:ss" (no offset).
+ */
+function formatInTimeZone(date: Date, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+  // Some runtimes return "24" for midnight; normalize to "00".
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}:${get('second')}`;
 }
 
-function localToUtc(localDateTimeStr: string, timezone: string): string {
-  // Create a date in UTC, then figure out the offset for the given timezone
+/**
+ * Convert a wall-clock time (YYYY-MM-DDTHH:mm:ss) interpreted in `timezone`
+ * into the corresponding UTC instant. Two-pass to handle DST transitions
+ * correctly: each pass measures the drift between the guess (parsed as UTC)
+ * and what that instant actually looks like in the target timezone, then
+ * corrects by that drift.
+ */
+function zonedTimeToUtc(localDateTime: string, timezone: string): Date {
+  const parseAsUtc = (s: string) => new Date(s + 'Z');
+  const targetMs = parseAsUtc(localDateTime).getTime();
+
+  // First pass
+  let guess = new Date(targetMs);
+  let drift = parseAsUtc(formatInTimeZone(guess, timezone)).getTime() - targetMs;
+  guess = new Date(targetMs - drift);
+
+  // Second pass — needed when the first guess crosses a DST boundary
+  drift = parseAsUtc(formatInTimeZone(guess, timezone)).getTime() - targetMs;
+  guess = new Date(guess.getTime() - drift);
+
+  return guess;
+}
+
+/**
+ * Returns the local calendar day ("YYYY-MM-DD") for `date` in `timezone`.
+ * Falls back to UTC date if the timezone string is invalid.
+ */
+function dayKeyInTz(date: Date, timezone: string): string {
   try {
-    // Parse as if it were UTC
-    const utcDate = new Date(localDateTimeStr + 'Z');
-    // Get the timezone offset by comparing formatted dates
-    const formatter = new Intl.DateTimeFormat('en-CA', {
+    return new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-    const utcFormatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'UTC',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    });
-
-    // Use a reference point to calculate the offset
-    const refDate = new Date('2026-01-15T12:00:00Z');
-    const localParts = formatter.formatToParts(refDate);
-    const utcParts = utcFormatter.formatToParts(refDate);
-
-    const getVal = (parts: Intl.DateTimeFormatPart[], type: string) =>
-      Number(parts.find((p) => p.type === type)?.value ?? 0);
-
-    const localHour = getVal(localParts, 'hour');
-    const utcHour = getVal(utcParts, 'hour');
-    const localDay = getVal(localParts, 'day');
-    const utcDay = getVal(utcParts, 'day');
-
-    let offsetHours = localHour - utcHour;
-    if (localDay > utcDay) offsetHours += 24;
-    if (localDay < utcDay) offsetHours -= 24;
-
-    // The local time in UTC = localTime - offset
-    const result = new Date(utcDate.getTime() - offsetHours * 60 * 60 * 1000);
-    return result.toISOString();
+    }).format(date);
   } catch {
-    return localDateTimeStr + 'Z';
+    return date.toISOString().slice(0, 10);
   }
+}
+
+/**
+ * Returns the day key immediately before `dayKey` ("YYYY-MM-DD" → "YYYY-MM-DD").
+ * Date-only arithmetic via UTC is safe (no DST involved).
+ */
+function previousDayKey(dayKey: string): string {
+  const d = new Date(dayKey + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function getTodayRange(timezone: string): { start: string; end: string } {
+  const now = new Date();
+  const dateStr = dayKeyInTz(now, timezone);
+  let timezoneIsValid = true;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(now);
+  } catch {
+    timezoneIsValid = false;
+  }
+  if (!timezoneIsValid) {
+    return { start: `${dateStr}T00:00:00.000Z`, end: `${dateStr}T23:59:59.999Z` };
+  }
+  const start = zonedTimeToUtc(`${dateStr}T00:00:00`, timezone).toISOString();
+  const end = zonedTimeToUtc(`${dateStr}T23:59:59`, timezone).toISOString();
+  return { start, end };
+}
+
+// ---------------------------------------------------------------------------
+// Streak logic
+// ---------------------------------------------------------------------------
+
+/**
+ * Streak → XP/SP multiplier (per spec section 5.7).
+ * Exported so other modules of the backend (matches, Coach IA, Season Pass)
+ * can apply the same multiplier to their own rewards without going through
+ * an HTTP hop. Pair with `getPlayerStreakMultiplier` when you only have a
+ * playerId at hand.
+ */
+export function getMultiplier(currentStreak: number): number {
+  if (currentStreak <= 2) return 0;
+  if (currentStreak <= 7) return 0.5;
+  if (currentStreak <= 20) return 1.0;
+  if (currentStreak <= 45) return 1.5;
+  return 2.0;
+}
+
+interface StreakState {
+  current_streak: number;
+  longest_streak: number;
+  last_lesson_completed_at: string;
+}
+
+/**
+ * Reads the current streak row, evaluates it against today's local day in the
+ * given timezone, increments / resets accordingly, and upserts the result.
+ *
+ * - lastKey === todayKey  → no-op (defensive; complete handler already blocks
+ *   double submission via existingSession check).
+ * - lastKey === yesterday → current_streak += 1.
+ * - else (gap or first ever) → current_streak = 1.
+ */
+async function updateIndividualStreak(
+  playerId: string,
+  timezone: string,
+): Promise<StreakState> {
+  const supabase = getSupabaseServiceRoleClient();
+
+  const { data: existing, error: readErr } = await supabase
+    .from('learning_streaks')
+    .select('current_streak, longest_streak, last_lesson_completed_at')
+    .eq('player_id', playerId)
+    .maybeSingle();
+
+  if (readErr) throw new Error(readErr.message);
+
+  const now = new Date();
+  const todayKey = dayKeyInTz(now, timezone);
+  const yesterdayKey = previousDayKey(todayKey);
+
+  let current = 1;
+  let longest = 0;
+
+  if (existing) {
+    longest = existing.longest_streak ?? 0;
+    if (existing.last_lesson_completed_at) {
+      const lastKey = dayKeyInTz(new Date(existing.last_lesson_completed_at), timezone);
+      if (lastKey === todayKey) {
+        // Already counted today — return as-is.
+        return {
+          current_streak: existing.current_streak,
+          longest_streak: existing.longest_streak,
+          last_lesson_completed_at: existing.last_lesson_completed_at,
+        };
+      }
+      if (lastKey === yesterdayKey) {
+        current = (existing.current_streak ?? 0) + 1;
+      } else {
+        current = 1;
+      }
+    }
+  }
+
+  if (current > longest) longest = current;
+
+  const nowIso = now.toISOString();
+
+  const { error: upsertErr } = await supabase
+    .from('learning_streaks')
+    .upsert(
+      {
+        player_id: playerId,
+        current_streak: current,
+        longest_streak: longest,
+        last_lesson_completed_at: nowIso,
+      },
+      { onConflict: 'player_id' },
+    );
+
+  if (upsertErr) throw new Error(upsertErr.message);
+
+  return {
+    current_streak: current,
+    longest_streak: longest,
+    last_lesson_completed_at: nowIso,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +525,7 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
 
     const { data: todaySession, error: sessionErr } = await supabase
       .from('learning_sessions')
-      .select('id, correct_count, total_count, score, xp_earned, elo_before, elo_after, completed_at')
+      .select('id, correct_count, total_count, score, xp_earned, completed_at')
       .eq('player_id', player.id)
       .gte('completed_at', start)
       .lte('completed_at', end)
@@ -554,47 +689,112 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
       });
     }
 
-    const xpEarned = Math.round(totalScore / 10);
-    const ratio = correctCount / LESSON_SIZE;
-    const eloDelta = computeEloDelta(ratio);
-    const eloBefore = player.elo_rating;
-    const eloAfter = Math.round((eloBefore + eloDelta) * 100) / 100;
+    const baseXp = Math.round(totalScore / 10);
 
-    // Write to DB: log entries, session, elo update
-    const [logRes, sessionRes, eloRes] = await Promise.all([
-      supabase.from('learning_question_log').insert(logRows),
-      supabase
-        .from('learning_sessions')
-        .insert({
-          player_id: player.id,
-          correct_count: correctCount,
-          total_count: LESSON_SIZE,
-          score: totalScore,
-          xp_earned: xpEarned,
-          elo_before: eloBefore,
-          elo_after: eloAfter,
-          timezone: tz,
-        })
-        .select('id, correct_count, total_count, score, xp_earned, elo_before, elo_after, completed_at')
-        .single(),
-      supabase
-        .from('players')
-        .update({ elo_rating: eloAfter, elo_last_updated_at: new Date().toISOString() })
-        .eq('id', player.id),
-    ]);
+    // 1. Write the per-question log
+    const { error: logErr } = await supabase.from('learning_question_log').insert(logRows);
+    if (logErr) return res.status(500).json({ ok: false, error: logErr.message });
 
-    if (logRes.error) return res.status(500).json({ ok: false, error: logRes.error.message });
-    if (sessionRes.error) return res.status(500).json({ ok: false, error: sessionRes.error.message });
-    if (eloRes.error) return res.status(500).json({ ok: false, error: eloRes.error.message });
+    // 2. Update individual streak (post-update value drives the multiplier)
+    const streak = await updateIndividualStreak(player.id, tz);
+    const multiplier = getMultiplier(streak.current_streak);
+    const xpFinal = Math.round(baseXp * (1 + multiplier));
+
+    // 3. Insert the session row with the boosted XP
+    const { data: sessionData, error: sessionErr } = await supabase
+      .from('learning_sessions')
+      .insert({
+        player_id: player.id,
+        correct_count: correctCount,
+        total_count: LESSON_SIZE,
+        score: totalScore,
+        xp_earned: xpFinal,
+        timezone: tz,
+      })
+      .select('id, correct_count, total_count, score, xp_earned, completed_at')
+      .single();
+
+    if (sessionErr) return res.status(500).json({ ok: false, error: sessionErr.message });
 
     return res.json({
       ok: true,
-      session: sessionRes.data,
+      session: sessionData,
+      streak: {
+        current: streak.current_streak,
+        longest: streak.longest_streak,
+        multiplier,
+        xp_base: baseXp,
+        xp_bonus: xpFinal - baseXp,
+      },
       results,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
+
+/**
+ * GET /learning/streak
+ * Returns the authenticated player's individual streak + active multiplier.
+ * Pure read — does not evaluate or reset the streak. The stored current_streak
+ * is the value persisted at the last completed lesson; it only changes when
+ * the next lesson is completed.
+ */
+router.get('/streak', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const player = await getPlayerFromAuth(req.authContext!.userId);
+    if (!player) {
+      return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('learning_streaks')
+      .select('current_streak, longest_streak, last_lesson_completed_at')
+      .eq('player_id', player.id)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    if (!data) {
+      return res.json({
+        ok: true,
+        current_streak: 0,
+        longest_streak: 0,
+        multiplier: 0,
+        last_lesson_completed_at: null,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      current_streak: data.current_streak,
+      longest_streak: data.longest_streak,
+      multiplier: getMultiplier(data.current_streak),
+      last_lesson_completed_at: data.last_lesson_completed_at,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * Internal helper for other backend modules (matches, Coach IA, Season Pass).
+ * Reads the player's current streak and returns the active multiplier.
+ * Returns 0 (no bonus) if the player has no streak row yet.
+ *
+ * Prefer importing this function over making an HTTP call to `/learning/...`
+ * from another router — keeps the call in-process and avoids exposing a
+ * public lookup endpoint by playerId.
+ */
+export async function getPlayerStreakMultiplier(playerId: string): Promise<number> {
+  const supabase = getSupabaseServiceRoleClient();
+  const { data } = await supabase
+    .from('learning_streaks')
+    .select('current_streak')
+    .eq('player_id', playerId)
+    .maybeSingle();
+  return getMultiplier(data?.current_streak ?? 0);
+}
 
 export default router;
