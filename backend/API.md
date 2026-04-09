@@ -334,6 +334,8 @@ Requiere auth de jugador (`Authorization: Bearer <access_token>`).
 | GET | `/learning/daily-lesson` | Obtener 5 preguntas seleccionadas para el usuario. Query: `?timezone=Asia/Shanghai`. |
 | POST | `/learning/daily-lesson/complete` | Registrar resultado de la lección diaria. Body: `{ timezone, answers }`. |
 | GET | `/learning/streak` | Racha individual del usuario + multiplicador activo. |
+| GET | `/learning/shared-streaks` | Rachas compartidas del usuario con info del compañero. |
+| POST | `/learning/shared-streaks` | Crear racha compartida. Body: `{ partner_id }`. |
 
 ## Privacidad (privacy_logs) – solo escritura
 

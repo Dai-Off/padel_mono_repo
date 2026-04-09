@@ -502,6 +502,142 @@ async function updateIndividualStreak(
 }
 
 // ---------------------------------------------------------------------------
+// Shared streak helpers
+// ---------------------------------------------------------------------------
+
+interface SharedStreakRow {
+  id: string;
+  player_id_1: string;
+  player_id_2: string;
+  current_streak: number;
+  longest_streak: number;
+  player1_completed_today: boolean;
+  player2_completed_today: boolean;
+  last_both_completed_at: string | null;
+  timezone: string;
+}
+
+/**
+ * Normaliza el par de UUIDs para que player_id_1 < player_id_2.
+ * Esto garantiza unicidad en la tabla (unique constraint).
+ */
+function normalizePair(a: string, b: string): [string, string] {
+  return a < b ? [a, b] : [b, a];
+}
+
+/**
+ * Reset lazy: evalúa si las flags y la racha necesitan resetearse
+ * comparando last_both_completed_at con la fecha actual en la timezone
+ * de la racha. Muta el objeto in-place y devuelve true si hubo cambios.
+ */
+function lazyResetSharedStreak(row: SharedStreakRow): boolean {
+  const now = new Date();
+  const todayKey = dayKeyInTz(now, row.timezone);
+
+  // Si nunca completaron juntos, no hay referencia temporal para saber si
+  // las flags son de hoy o de otro día. No resetear — el peor caso es que
+  // un flag de un día anterior persista, pero current_streak sigue en 0.
+  if (!row.last_both_completed_at) {
+    return false;
+  }
+
+  const lastKey = dayKeyInTz(new Date(row.last_both_completed_at), row.timezone);
+
+  if (lastKey === todayKey) {
+    // Ambos ya completaron hoy — no tocar nada
+    return false;
+  }
+
+  const yesterdayKey = previousDayKey(todayKey);
+  let changed = false;
+
+  if (lastKey !== yesterdayKey) {
+    // Gap > 1 día → resetear racha y flags
+    row.current_streak = 0;
+    changed = true;
+  }
+
+  // Si estamos en un nuevo día (ayer o más), resetear flags
+  if (row.player1_completed_today || row.player2_completed_today) {
+    row.player1_completed_today = false;
+    row.player2_completed_today = false;
+    changed = true;
+  }
+
+  return changed;
+}
+
+/**
+ * Busca todas las rachas compartidas del jugador, aplica lazy reset,
+ * marca su flag como completada, y si ambos completaron incrementa la racha.
+ * Se llama desde POST /daily-lesson/complete.
+ */
+async function updateSharedStreaks(
+  playerId: string,
+  _timezone: string,
+): Promise<SharedStreakRow[]> {
+  const supabase = getSupabaseServiceRoleClient();
+
+  const { data: rows, error } = await supabase
+    .from('learning_shared_streaks')
+    .select('id, player_id_1, player_id_2, current_streak, longest_streak, player1_completed_today, player2_completed_today, last_both_completed_at, timezone')
+    .or(`player_id_1.eq.${playerId},player_id_2.eq.${playerId}`);
+
+  if (error) throw new Error(error.message);
+  if (!rows || rows.length === 0) return [];
+
+  const updated: SharedStreakRow[] = [];
+
+  for (const row of rows as SharedStreakRow[]) {
+    // 1. Aplicar reset lazy
+    lazyResetSharedStreak(row);
+
+    // 2. Marcar flag del jugador que acaba de completar
+    const isPlayer1 = row.player_id_1 === playerId;
+
+    // Defensa: si el flag ya está marcado, no volver a procesar
+    const alreadyMarked = isPlayer1 ? row.player1_completed_today : row.player2_completed_today;
+    if (alreadyMarked) {
+      updated.push(row);
+      continue;
+    }
+
+    if (isPlayer1) {
+      row.player1_completed_today = true;
+    } else {
+      row.player2_completed_today = true;
+    }
+
+    // 3. Si ambos completaron hoy → incrementar racha
+    if (row.player1_completed_today && row.player2_completed_today) {
+      row.current_streak += 1;
+      if (row.current_streak > row.longest_streak) {
+        row.longest_streak = row.current_streak;
+      }
+      row.last_both_completed_at = new Date().toISOString();
+    }
+
+    // 4. Persistir
+    const { error: updateErr } = await supabase
+      .from('learning_shared_streaks')
+      .update({
+        current_streak: row.current_streak,
+        longest_streak: row.longest_streak,
+        player1_completed_today: row.player1_completed_today,
+        player2_completed_today: row.player2_completed_today,
+        last_both_completed_at: row.last_both_completed_at,
+      })
+      .eq('id', row.id);
+
+    if (updateErr) throw new Error(updateErr.message);
+
+    updated.push(row);
+  }
+
+  return updated;
+}
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
@@ -700,7 +836,10 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
     const multiplier = getMultiplier(streak.current_streak);
     const xpFinal = Math.round(baseXp * (1 + multiplier));
 
-    // 3. Insert the session row with the boosted XP
+    // 3. Actualizar rachas compartidas
+    const sharedStreaks = await updateSharedStreaks(player.id, tz);
+
+    // 4. Insert the session row with the boosted XP
     const { data: sessionData, error: sessionErr } = await supabase
       .from('learning_sessions')
       .insert({
@@ -726,6 +865,13 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
         xp_base: baseXp,
         xp_bonus: xpFinal - baseXp,
       },
+      shared_streaks: sharedStreaks.map((s) => ({
+        id: s.id,
+        partner_id: s.player_id_1 === player.id ? s.player_id_2 : s.player_id_1,
+        current_streak: s.current_streak,
+        longest_streak: s.longest_streak,
+        both_completed_today: s.player1_completed_today && s.player2_completed_today,
+      })),
       results,
     });
   } catch (err) {
@@ -772,6 +918,157 @@ router.get('/streak', requireAuth, async (req: Request, res: Response) => {
       longest_streak: data.longest_streak,
       multiplier: getMultiplier(data.current_streak),
       last_lesson_completed_at: data.last_lesson_completed_at,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * GET /learning/shared-streaks
+ * Devuelve las rachas compartidas del jugador autenticado.
+ * Aplica reset lazy a cada racha antes de devolverla.
+ */
+router.get('/shared-streaks', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const player = await getPlayerFromAuth(req.authContext!.userId);
+    if (!player) {
+      return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+
+    const { data: rows, error } = await supabase
+      .from('learning_shared_streaks')
+      .select('id, player_id_1, player_id_2, current_streak, longest_streak, player1_completed_today, player2_completed_today, last_both_completed_at, timezone')
+      .or(`player_id_1.eq.${player.id},player_id_2.eq.${player.id}`);
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    const streaks = [];
+
+    for (const row of (rows ?? []) as SharedStreakRow[]) {
+      const changed = lazyResetSharedStreak(row);
+      if (changed) {
+        await supabase
+          .from('learning_shared_streaks')
+          .update({
+            current_streak: row.current_streak,
+            longest_streak: row.longest_streak,
+            player1_completed_today: row.player1_completed_today,
+            player2_completed_today: row.player2_completed_today,
+          })
+          .eq('id', row.id);
+      }
+
+      const isPlayer1 = row.player_id_1 === player.id;
+      const partnerId = isPlayer1 ? row.player_id_2 : row.player_id_1;
+
+      // Obtener nombre del compañero
+      const { data: partner } = await supabase
+        .from('players')
+        .select('id, first_name, last_name, avatar_url')
+        .eq('id', partnerId)
+        .maybeSingle();
+
+      streaks.push({
+        id: row.id,
+        partner: partner
+          ? { id: partner.id, first_name: partner.first_name, last_name: partner.last_name, avatar_url: partner.avatar_url }
+          : { id: partnerId, first_name: null, last_name: null, avatar_url: null },
+        current_streak: row.current_streak,
+        longest_streak: row.longest_streak,
+        my_completed_today: isPlayer1 ? row.player1_completed_today : row.player2_completed_today,
+        partner_completed_today: isPlayer1 ? row.player2_completed_today : row.player1_completed_today,
+      });
+    }
+
+    return res.json({ ok: true, shared_streaks: streaks });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /learning/shared-streaks
+ * Crea una racha compartida con otro jugador.
+ * Body: { partner_id: string }
+ */
+router.post('/shared-streaks', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const player = await getPlayerFromAuth(req.authContext!.userId);
+    if (!player) {
+      return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
+    }
+
+    const { partner_id } = req.body ?? {};
+    if (!partner_id || typeof partner_id !== 'string') {
+      return res.status(400).json({ ok: false, error: 'partner_id es obligatorio' });
+    }
+
+    if (partner_id === player.id) {
+      return res.status(400).json({ ok: false, error: 'No puedes crear una racha contigo mismo' });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+
+    // Verificar que el partner existe
+    const { data: partnerData } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, avatar_url')
+      .eq('id', partner_id)
+      .neq('status', 'deleted')
+      .maybeSingle();
+
+    if (!partnerData) {
+      return res.status(404).json({ ok: false, error: 'No se encontró el jugador indicado' });
+    }
+
+    // Normalizar orden para respetar el unique constraint
+    const [pid1, pid2] = normalizePair(player.id, partner_id);
+
+    // Verificar que no exista ya
+    const { data: existing } = await supabase
+      .from('learning_shared_streaks')
+      .select('id')
+      .eq('player_id_1', pid1)
+      .eq('player_id_2', pid2)
+      .maybeSingle();
+
+    if (existing) {
+      return res.status(409).json({ ok: false, error: 'Ya existe una racha compartida con este jugador' });
+    }
+
+    const { data: created, error: insertErr } = await supabase
+      .from('learning_shared_streaks')
+      .insert({
+        player_id_1: pid1,
+        player_id_2: pid2,
+        current_streak: 0,
+        longest_streak: 0,
+        player1_completed_today: false,
+        player2_completed_today: false,
+        timezone: 'UTC',
+      })
+      .select('id, player_id_1, player_id_2, current_streak, longest_streak, created_at')
+      .single();
+
+    if (insertErr) return res.status(500).json({ ok: false, error: insertErr.message });
+
+    return res.status(201).json({
+      ok: true,
+      shared_streak: {
+        id: created.id,
+        partner: {
+          id: partnerData.id,
+          first_name: partnerData.first_name,
+          last_name: partnerData.last_name,
+          avatar_url: partnerData.avatar_url,
+        },
+        current_streak: created.current_streak,
+        longest_streak: created.longest_streak,
+        created_at: created.created_at,
+      },
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
