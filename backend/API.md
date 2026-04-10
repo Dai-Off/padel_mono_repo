@@ -336,6 +336,9 @@ Requiere auth de jugador (`Authorization: Bearer <access_token>`).
 | GET | `/learning/streak` | Racha individual del usuario + multiplicador activo. |
 | GET | `/learning/shared-streaks` | Rachas compartidas del usuario con info del compañero. |
 | POST | `/learning/shared-streaks` | Crear racha compartida. Body: `{ partner_id }`. |
+| GET | `/learning/courses` | Cursos activos con progreso y estado locked según nivel del jugador. |
+| GET | `/learning/courses/:id` | Detalle de curso con lecciones y estado (completed/available/locked). Sin lecciones si locked. |
+| POST | `/learning/courses/:id/complete-lesson` | Marcar lección completada. Body: `{ lesson_id }`. Valida nivel y orden secuencial. |
 
 ## Privacidad (privacy_logs) – solo escritura
 

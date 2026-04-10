@@ -1075,6 +1075,294 @@ router.post('/shared-streaks', requireAuth, async (req: Request, res: Response) 
   }
 });
 
+// ---------------------------------------------------------------------------
+// Cursos — endpoints de jugador
+// ---------------------------------------------------------------------------
+
+function isCourseLocked(elo: number, eloMin: number, eloMax: number): boolean {
+  return elo < eloMin || elo > eloMax;
+}
+
+// GET /learning/courses — lista cursos activos con progreso y locked
+router.get('/courses', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const player = await getPlayerFromAuth(req.authContext!.userId);
+    if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+
+    const supabase = getSupabaseServiceRoleClient();
+
+    // Cursos activos con nombre del club
+    const { data: courses, error: coursesErr } = await supabase
+      .from('learning_courses')
+      .select('id, title, description, banner_url, elo_min, elo_max, clubs(name)')
+      .eq('status', 'active')
+      .order('elo_min', { ascending: true });
+
+    if (coursesErr) return res.status(500).json({ ok: false, error: coursesErr.message });
+    if (!courses || courses.length === 0) return res.json({ ok: true, courses: [] });
+
+    const courseIds = courses.map((c: any) => c.id);
+
+    // Lecciones por curso
+    const { data: lessons, error: lessonsErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id, course_id')
+      .in('course_id', courseIds);
+
+    if (lessonsErr) return res.status(500).json({ ok: false, error: lessonsErr.message });
+
+    // Progreso del jugador
+    const lessonIds = (lessons || []).map((l: any) => l.id);
+    let completedSet = new Set<string>();
+    if (lessonIds.length > 0) {
+      const { data: progress, error: progressErr } = await supabase
+        .from('learning_course_progress')
+        .select('lesson_id')
+        .eq('player_id', player.id)
+        .in('lesson_id', lessonIds);
+
+      if (progressErr) return res.status(500).json({ ok: false, error: progressErr.message });
+      completedSet = new Set((progress || []).map((p: any) => p.lesson_id));
+    }
+
+    // Contar por curso
+    const lessonsByCourse: Record<string, string[]> = {};
+    for (const l of (lessons || [])) {
+      const lid = (l as any).id;
+      const cid = (l as any).course_id;
+      if (!lessonsByCourse[cid]) lessonsByCourse[cid] = [];
+      lessonsByCourse[cid].push(lid);
+    }
+
+    const result = courses.map((c: any) => {
+      const courseLessons = lessonsByCourse[c.id] || [];
+      const completedCount = courseLessons.filter((lid: string) => completedSet.has(lid)).length;
+      const totalLessons = courseLessons.length;
+      return {
+        id: c.id,
+        title: c.title,
+        description: c.description,
+        banner_url: c.banner_url,
+        elo_min: c.elo_min,
+        elo_max: c.elo_max,
+        club_name: c.clubs?.name || null,
+        total_lessons: totalLessons,
+        completed_lessons: completedCount,
+        is_completed: totalLessons > 0 && completedCount === totalLessons,
+        locked: isCourseLocked(player.elo_rating, c.elo_min, c.elo_max),
+      };
+    });
+
+    return res.json({ ok: true, courses: result });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// GET /learning/courses/:id — detalle con lecciones y estados
+router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const player = await getPlayerFromAuth(req.authContext!.userId);
+    if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+
+    const supabase = getSupabaseServiceRoleClient();
+    const courseId = req.params.id;
+
+    const { data: course, error: courseErr } = await supabase
+      .from('learning_courses')
+      .select('id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, clubs(name)')
+      .eq('id', courseId)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (courseErr) return res.status(500).json({ ok: false, error: courseErr.message });
+    if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
+
+    const locked = isCourseLocked(player.elo_rating, course.elo_min, course.elo_max);
+
+    // Si bloqueado, devolver info básica sin lecciones
+    if (locked) {
+      // Contar lecciones totales
+      const { count } = await supabase
+        .from('learning_course_lessons')
+        .select('id', { count: 'exact', head: true })
+        .eq('course_id', courseId);
+
+      return res.json({
+        ok: true,
+        course: {
+          id: course.id,
+          title: course.title,
+          description: course.description,
+          banner_url: course.banner_url,
+          elo_min: course.elo_min,
+          elo_max: course.elo_max,
+          pedagogical_goal: course.pedagogical_goal,
+          club_name: (course as any).clubs?.name || null,
+          locked: true,
+          total_lessons: count || 0,
+        },
+      });
+    }
+
+    // Curso desbloqueado: lecciones + progreso
+    const { data: lessons, error: lessonsErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id, order, title, description, video_url, duration_seconds')
+      .eq('course_id', courseId)
+      .order('order', { ascending: true });
+
+    if (lessonsErr) return res.status(500).json({ ok: false, error: lessonsErr.message });
+
+    const lessonIds = (lessons || []).map((l: any) => l.id);
+    let completedSet = new Set<string>();
+    if (lessonIds.length > 0) {
+      const { data: progress, error: progressErr } = await supabase
+        .from('learning_course_progress')
+        .select('lesson_id')
+        .eq('player_id', player.id)
+        .in('lesson_id', lessonIds);
+
+      if (progressErr) return res.status(500).json({ ok: false, error: progressErr.message });
+      completedSet = new Set((progress || []).map((p: any) => p.lesson_id));
+    }
+
+    // Determinar estado de cada lección
+    const lessonsWithStatus = (lessons || []).map((l: any, i: number) => {
+      let status: string;
+      if (completedSet.has(l.id)) {
+        status = 'completed';
+      } else if (i === 0 || completedSet.has((lessons as any[])[i - 1].id)) {
+        status = 'available';
+      } else {
+        status = 'locked';
+      }
+      return {
+        id: l.id,
+        order: l.order,
+        title: l.title,
+        description: l.description,
+        video_url: l.video_url,
+        duration_seconds: l.duration_seconds,
+        status,
+      };
+    });
+
+    const completedCount = completedSet.size;
+    const totalLessons = (lessons || []).length;
+
+    return res.json({
+      ok: true,
+      course: {
+        id: course.id,
+        title: course.title,
+        description: course.description,
+        banner_url: course.banner_url,
+        elo_min: course.elo_min,
+        elo_max: course.elo_max,
+        pedagogical_goal: course.pedagogical_goal,
+        club_name: (course as any).clubs?.name || null,
+        locked: false,
+        total_lessons: totalLessons,
+        completed_lessons: completedCount,
+        is_completed: totalLessons > 0 && completedCount === totalLessons,
+        lessons: lessonsWithStatus,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// POST /learning/courses/:id/complete-lesson — marcar lección completada
+router.post('/courses/:id/complete-lesson', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const player = await getPlayerFromAuth(req.authContext!.userId);
+    if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+
+    const { lesson_id } = req.body;
+    if (!lesson_id) return res.status(400).json({ ok: false, error: 'lesson_id es requerido' });
+
+    const supabase = getSupabaseServiceRoleClient();
+    const courseId = req.params.id;
+
+    // Obtener curso
+    const { data: course, error: courseErr } = await supabase
+      .from('learning_courses')
+      .select('id, elo_min, elo_max, status')
+      .eq('id', courseId)
+      .maybeSingle();
+
+    if (courseErr) return res.status(500).json({ ok: false, error: courseErr.message });
+    if (!course || course.status !== 'active') return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
+
+    // Validar nivel
+    if (isCourseLocked(player.elo_rating, course.elo_min, course.elo_max)) {
+      return res.status(403).json({ ok: false, error: 'Nivel insuficiente para este curso' });
+    }
+
+    // Validar que la lección pertenece al curso
+    const { data: allLessons, error: lessonsErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id, order')
+      .eq('course_id', courseId)
+      .order('order', { ascending: true });
+
+    if (lessonsErr) return res.status(500).json({ ok: false, error: lessonsErr.message });
+
+    const lessonIndex = (allLessons || []).findIndex((l: any) => l.id === lesson_id);
+    if (lessonIndex === -1) {
+      return res.status(400).json({ ok: false, error: 'La lección no pertenece a este curso' });
+    }
+
+    // Validar que la lección anterior está completada (si no es la primera)
+    if (lessonIndex > 0) {
+      const prevLessonId = (allLessons as any[])[lessonIndex - 1].id;
+      const { data: prevProgress } = await supabase
+        .from('learning_course_progress')
+        .select('id')
+        .eq('player_id', player.id)
+        .eq('lesson_id', prevLessonId)
+        .maybeSingle();
+
+      if (!prevProgress) {
+        return res.status(400).json({ ok: false, error: 'Debes completar la lección anterior primero' });
+      }
+    }
+
+    // Upsert progreso
+    const { error: upsertErr } = await supabase
+      .from('learning_course_progress')
+      .upsert(
+        { player_id: player.id, lesson_id },
+        { onConflict: 'player_id,lesson_id' }
+      );
+
+    if (upsertErr) return res.status(500).json({ ok: false, error: upsertErr.message });
+
+    // Contar progreso actualizado
+    const lessonIds = (allLessons || []).map((l: any) => l.id);
+    const { data: progress } = await supabase
+      .from('learning_course_progress')
+      .select('lesson_id')
+      .eq('player_id', player.id)
+      .in('lesson_id', lessonIds);
+
+    const completedLessons = (progress || []).length;
+    const totalLessons = (allLessons || []).length;
+
+    return res.json({
+      ok: true,
+      lesson_completed: true,
+      course_completed: totalLessons > 0 && completedLessons === totalLessons,
+      completed_lessons: completedLessons,
+      total_lessons: totalLessons,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 /**
  * Internal helper for other backend modules (matches, Coach IA, Season Pass).
  * Reads the player's current streak and returns the active multiplier.
