@@ -35,7 +35,7 @@ interface ReservationModalProps {
 }
 
 // Helper: Player Search Component
-const PlayerSearch: React.FC<{
+export const PlayerSearch: React.FC<{
     label: string;
     placeholder: string;
     onSelect: (player: Player | null) => void;

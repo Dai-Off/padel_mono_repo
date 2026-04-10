@@ -8,10 +8,10 @@ const router = Router();
 router.use(attachAuthContext);
 
 const SELECT_LIST =
-  'id, created_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, players!bookings_organizer_player_id_fkey(first_name, last_name), booking_participants(player_id, role, players!booking_participants_player_id_fkey(first_name, last_name)), payment_transactions(amount_cents, status, stripe_payment_intent_id, payer_player_id)';
+  'id, created_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, elo_rating), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, elo_rating)), payment_transactions(amount_cents, status, stripe_payment_intent_id, payer_player_id)';
 // payment_transactions joined to get per-player payment data (no migration needed)
 const SELECT_ONE =
-  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, players!bookings_organizer_player_id_fkey(id, first_name, last_name, email), booking_participants(id, player_id, role, share_amount_cents, payment_status, players!booking_participants_player_id_fkey(id, first_name, last_name, email)), payment_transactions(id, payer_player_id, amount_cents, stripe_payment_intent_id, status)';
+  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, email, elo_rating), booking_participants(id, player_id, role, share_amount_cents, payment_status, players!booking_participants_player_id_fkey(id, first_name, last_name, email, elo_rating)), payment_transactions(id, payer_player_id, amount_cents, stripe_payment_intent_id, status)';
 
 // ─── Helpers de pago ─────────────────────────────────────────────────────────
 
@@ -827,6 +827,14 @@ router.delete('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Booking not found' });
+
+    // Also cancel any match linked to this booking
+    await supabase
+      .from('matches')
+      .update({ status: 'cancelled' })
+      .eq('booking_id', id)
+      .not('status', 'in', '("cancelled","finished")');
+
     return res.json({ ok: true, booking: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

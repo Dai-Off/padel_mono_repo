@@ -32,6 +32,7 @@ import { ReservationCard } from './components/ReservationCard';
 import { ReservationModal } from './components/ReservationModal';
 import { SchoolCourseModal } from './components/SchoolCourseModal';
 import { BonusManagement } from './components/BonusManagement';
+import { MatchesManagementPanel } from './components/MatchesManagementPanel';
 import { WalletRecharge } from './components/WalletRecharge';
 
 import { GrillaQuickNav } from './components/GrillaQuickNav';
@@ -605,6 +606,7 @@ function GrillaViewInner() {
   const [selectedModalReservationId, setSelectedModalReservationId] = useState<string | null>(null);
   const [selectedSchoolCourseId, setSelectedSchoolCourseId] = useState<string | null>(null);
   const [bonusModalOpen, setBonusModalOpen] = useState(false);
+  const [activeView, setActiveView] = useState<'grid' | 'matches'>('grid');
   const [rechargeModalOpen, setRechargeModalOpen] = useState(false);
   const [editingBookingData, setEditingBookingData] = useState<any | null>(null);
   const [hoveredTooltip, setHoveredTooltip] = useState<{ res: Reservation, el: HTMLElement } | null>(null);
@@ -1545,6 +1547,46 @@ function GrillaViewInner() {
 
         {/* ── Grid Area ── */}
         <main className="flex-1 overflow-hidden flex flex-col min-h-0 relative z-0 bg-white">
+          {activeView === 'matches' ? (
+            <MatchesManagementPanel
+              clubId={clubId}
+              dateStr={toDateStr(selectedDate)}
+              onRefreshGrid={refresh}
+              onEditBooking={async (bookingId: string) => {
+                try {
+                  const data = await apiFetchWithAuth<any>(`/bookings/${bookingId}`);
+                  if (data.ok && data.booking) {
+                    const b = data.booking;
+                    const court = courts.find(c => c.id === b.court_id);
+                    // Ensure the reservation exists in local state so the modal can find it
+                    setReservations(prev => {
+                      const exists = prev.some(r => r.id === bookingId);
+                      if (exists) return prev;
+                      return [...prev, {
+                        id: bookingId,
+                        courtId: b.court_id,
+                        courtName: court?.name ?? 'Pista',
+                        startTime: new Date(b.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+                        durationMinutes: Math.round((new Date(b.end_at).getTime() - new Date(b.start_at).getTime()) / 60000),
+                        playerName: b.players?.first_name ? `${b.players.first_name} ${b.players.last_name || ''}` : '',
+                        status: b.status ?? 'pending_payment',
+                        booking_type: b.reservation_type ?? 'standard',
+                      }];
+                    });
+                    setEditingBookingData({
+                      ...b,
+                      courtName: court?.name ?? 'Pista',
+                    });
+                    setSelectedModalReservationId(bookingId);
+                    // Switch back to grid view so the modal appears over the grid
+                    setActiveView('grid');
+                  }
+                } catch (err) {
+                  console.error('Error fetching booking for edit:', err);
+                }
+              }}
+            />
+          ) : (
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -1659,6 +1701,25 @@ function GrillaViewInner() {
                         <Gift className="w-3 h-3" />
                         Bonos
                       </button>
+
+                      {/* Partidos button */}
+                      <span className="text-gray-300 select-none">|</span>
+                      {(() => {
+                        const isMatchesActive = (activeView as string) === 'matches';
+                        return (
+                          <button
+                            onClick={() => setActiveView(prev => prev === 'matches' ? 'grid' : 'matches')}
+                            className={`flex items-center gap-1 px-2.5 py-0.5 rounded border text-[10px] font-bold transition-all whitespace-nowrap flex-shrink-0 ${
+                              isMatchesActive
+                                ? 'bg-orange-500 text-white border-orange-500'
+                                : 'border-orange-500 bg-white text-orange-500 hover:bg-orange-500 hover:text-white'
+                            }`}
+                          >
+                            <Calendar className="w-3 h-3" />
+                            Partidos
+                          </button>
+                        );
+                      })()}
 
                     </div>
                   </div>
@@ -1918,6 +1979,7 @@ function GrillaViewInner() {
               ) : null}
             </DragOverlay>
           </DndContext>
+          )}
         </main>
 
         <ReservationModal
@@ -1957,6 +2019,8 @@ function GrillaViewInner() {
           isOpen={bonusModalOpen}
           onClose={() => setBonusModalOpen(false)}
         />
+
+
 
         <WalletRecharge
           clubId={clubId}

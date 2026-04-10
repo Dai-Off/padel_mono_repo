@@ -15,6 +15,7 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team,
           ${bookingRel} (
             id, start_at, end_at, total_price_cents, currency, court_id,
+            payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type,
               clubs (id, name, address, city)
@@ -288,6 +289,72 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/** POST /matches/:id/admin-add-player - Administrador añade manualmente un jugador al partido/reserva */
+router.post('/:id/admin-add-player', async (req: Request, res: Response) => {
+  const matchId = req.params.id;
+  const { player_id, team, slot_index, booking_id } = req.body;
+  
+  if (!player_id || !booking_id) {
+    return res.status(400).json({ ok: false, error: 'Faltan player_id o booking_id' });
+  }
+  
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    
+    // 1. Si NO es un match mockeado, insertarlo en match_players
+    if (!matchId.startsWith('mock-match-')) {
+      const { error: errMP } = await supabase.from('match_players').insert([
+        { match_id: matchId, player_id, team: team || 'A', slot_index: slot_index || 0, invite_status: 'accepted' }
+      ]);
+      // Ignoramos error de unicidad por si el dev clickea dos veces
+      if (errMP && errMP.code !== '23505') {
+         console.error('Error insertando en match_players:', errMP);
+      }
+    }
+    
+    // 2. Insertarlo en booking_participants
+    const { data: booking } = await supabase.from('bookings').select('total_price_cents').eq('id', booking_id).single();
+    const shareCents = booking ? Math.ceil((booking.total_price_cents || 0) / 4) : 0;
+    
+    const { error: errBP } = await supabase.from('booking_participants').insert([
+      { booking_id, player_id, role: 'guest', share_amount_cents: shareCents }
+    ]);
+    if (errBP && errBP.code !== '23505') {
+       console.error('Error insertando en booking_participants:', errBP);
+    }
+    
+    return res.status(200).json({ ok: true });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/** POST /matches/:id/admin-remove-player - Administrador remueve manualmente a un jugador */
+router.post('/:id/admin-remove-player', async (req: Request, res: Response) => {
+  const matchId = req.params.id;
+  const { player_id, booking_id } = req.body;
+  
+  if (!player_id || !booking_id) {
+    return res.status(400).json({ ok: false, error: 'Faltan player_id o booking_id' });
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    
+    // 1. Remover de match_players
+    if (!matchId.startsWith('mock-match-')) {
+       await supabase.from('match_players').delete().eq('match_id', matchId).eq('player_id', player_id);
+    }
+    
+    // 2. Remover de booking_participants
+    await supabase.from('booking_participants').delete().eq('booking_id', booking_id).eq('player_id', player_id);
+    
+    return res.status(200).json({ ok: true });
+  } catch (err: any) {
+    return res.status(500).json({ ok: false, error: err.message });
   }
 });
 
