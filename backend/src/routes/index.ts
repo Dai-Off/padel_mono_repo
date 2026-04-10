@@ -24,11 +24,8 @@ import inventoryRouter from './inventory';
 import schoolCoursesRouter from './schoolCourses';
 import clubClientsRouter from './clubClients';
 import clubReviewsRouter from './clubReviews';
-<<<<<<< HEAD
 import clubIncidentsRouter from './clubIncidents';
-=======
 import learningRouter from './learning';
->>>>>>> develop
 import tournamentsRouter from './tournaments';
 import tournamentInvitesRouter from './tournamentInvites';
 import leaguesRouter from './leagues';
@@ -69,11 +66,8 @@ router.use('/inventario', inventoryRouter);
 router.use('/school-courses', schoolCoursesRouter);
 router.use('/club-clients', clubClientsRouter);
 router.use('/club-reviews', clubReviewsRouter);
-<<<<<<< HEAD
 router.use('/club-incidents', clubIncidentsRouter);
-=======
 router.use('/learning', learningRouter);
->>>>>>> develop
 router.use('/tournaments', tournamentInvitesRouter);
 router.use('/tournaments', tournamentsRouter);
 router.use('/leagues', leaguesRouter);

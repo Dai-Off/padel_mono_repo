@@ -590,6 +590,8 @@ function AddIncidentModal({
   const [costEur, setCostEur] = useState('');
   const [saving, setSaving] = useState(false);
 
+  const normalizePhone = useCallback((value: string) => value.replace(/\D/g, ''), []);
+
   useEffect(() => {
     if (!playerQ.trim() || selected) {
       setResults([]);
@@ -600,7 +602,21 @@ function AddIncidentModal({
       void (async () => {
         try {
           const list = await clubClientService.list(clubId, playerQ);
-          setResults(list.slice(0, 20));
+          const qName = playerQ.trim().toLowerCase();
+          const qPhone = normalizePhone(playerQ);
+          const withPhoneFallback =
+            qPhone.length >= 3
+              ? list.filter((p) => normalizePhone(p.phone ?? '').includes(qPhone))
+              : [];
+          const merged = [...list, ...withPhoneFallback];
+          const unique = new Map<string, Player>();
+          for (const p of merged) {
+            const name = `${p.first_name} ${p.last_name}`.toLowerCase();
+            const phone = normalizePhone(p.phone ?? '');
+            if (!name.includes(qName) && !(qPhone && phone.includes(qPhone))) continue;
+            unique.set(p.id, p);
+          }
+          setResults([...unique.values()].slice(0, 20));
         } catch {
           setResults([]);
         } finally {
@@ -609,7 +625,7 @@ function AddIncidentModal({
       })();
     }, 320);
     return () => window.clearTimeout(tmr);
-  }, [playerQ, clubId, selected]);
+  }, [playerQ, clubId, selected, normalizePhone]);
 
   const submit = async () => {
     if (!selected || !incidentType || !description.trim()) {
