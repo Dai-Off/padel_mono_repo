@@ -1,5 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Award, Calendar, Clock3, Copy, DollarSign, Loader2, Plus, Shield, Trash2, TrendingUp, Users, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowDownUp,
+  Award,
+  Calendar,
+  Clock3,
+  Copy,
+  DollarSign,
+  Inbox,
+  Loader2,
+  MessageCircle,
+  MoreVertical,
+  Plus,
+  Search,
+  Shield,
+  Trash2,
+  TrendingUp,
+  Users,
+  X,
+} from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
@@ -17,7 +36,9 @@ import {
   type TournamentListItem,
   type TournamentPrize,
   type TournamentDivisionRow,
+  type TournamentEntryRequest,
 } from '../../services/tournaments';
+import { HttpError } from '../../services/api';
 import { courtService } from '../../services/court';
 import type { Court } from '../../types/court';
 import { clubClientService } from '../../services/clubClients';
@@ -30,7 +51,7 @@ type Props = {
 };
 
 type ManualTeamOption = { id: string; label: string };
-type ManualRoundMatch = { id: string; a: string; b: string };
+type ManualRoundMatch = { id: string; a: string; b: string; courtId: string };
 type BracketRound = { title: string; matches: Array<{ id: string; a: string; b: string }> };
 
 function PlayerAvatarThumb({
@@ -112,10 +133,10 @@ function StatCard({
   );
 }
 
-type PrizeFormRow = { localId: string; label: string; amountCents: string };
+type PrizeFormRow = { localId: string; label: string; amountEuros: string };
 
 function newPrizeRow(label = ''): PrizeFormRow {
-  return { localId: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, label, amountCents: '' };
+  return { localId: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, label, amountEuros: '' };
 }
 
 function prizesToFormRows(prizes: TournamentPrize[] | null | undefined): PrizeFormRow[] {
@@ -123,7 +144,9 @@ function prizesToFormRows(prizes: TournamentPrize[] | null | undefined): PrizeFo
   if (arr.length === 0) return [newPrizeRow('Campeón')];
   return arr.map((p) => {
     const row = newPrizeRow();
-    return { ...row, label: p.label, amountCents: String(p.amount_cents ?? 0) };
+    const cents = Number(p.amount_cents ?? 0);
+    const eur = cents / 100;
+    return { ...row, label: p.label, amountEuros: Number.isInteger(eur) ? String(eur) : eur.toFixed(2) };
   });
 }
 
@@ -131,9 +154,23 @@ function formRowsToPrizePayload(rows: PrizeFormRow[]): { label: string; amount_c
   return rows
     .map((r) => ({
       label: r.label.trim(),
-      amount_cents: Math.max(0, Math.round(Number(String(r.amountCents).replace(',', '.')) || 0)),
+      amount_cents: Math.max(0, Math.round((parseFloat(String(r.amountEuros).replace(',', '.')) || 0) * 100)),
     }))
     .filter((x) => x.label.length > 0);
+}
+
+const HALF_HOUR_TIMES: string[] = [];
+for (let h = 0; h < 24; h++) {
+  HALF_HOUR_TIMES.push(`${String(h).padStart(2, '0')}:00`);
+  HALF_HOUR_TIMES.push(`${String(h).padStart(2, '0')}:30`);
+}
+
+function calcDurationMin(startTime: string, endTime: string): number {
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  let diff = (eh * 60 + em) - (sh * 60 + sm);
+  if (diff <= 0) diff += 24 * 60;
+  return diff;
 }
 
 function tournamentGenderLabel(g: string | null | undefined): string {
@@ -159,6 +196,17 @@ function isHalfHourLocalDateTime(value: string): boolean {
   if (Number.isNaN(d.getTime())) return false;
   const mins = d.getMinutes();
   return mins === 0 || mins === 30;
+}
+
+function normalizeHalfHourLocalDateTime(value: string): string {
+  if (!value) return value;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  const mins = d.getMinutes();
+  const snappedMins = mins < 15 ? 0 : mins < 45 ? 30 : 0;
+  if (mins >= 45) d.setHours(d.getHours() + 1);
+  d.setMinutes(snappedMins, 0, 0);
+  return d.toISOString().slice(0, 16);
 }
 
 function isValidDuration30(value: string): boolean {
@@ -525,7 +573,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [selected, setSelected] = useState<TournamentListItem | null>(null);
   const [detail, setDetail] = useState<TournamentInscription[]>([]);
   const [divisionsDetail, setDivisionsDetail] = useState<TournamentDivisionRow[]>([]);
-  const [tab, setTab] = useState<'general' | 'jugadores' | 'chat' | 'competicion' | 'ajustes'>('general');
+  const [tab, setTab] = useState<'general' | 'jugadores' | 'chat' | 'competicion' | 'ajustes' | 'solicitudes'>('general');
   const [createOpen, setCreateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -533,6 +581,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [posterPreviewUrl, setPosterPreviewUrl] = useState<string | null>(null);
   const posterInputCreateRef = useRef<HTMLInputElement | null>(null);
   const [posterUploading, setPosterUploading] = useState(false);
+  const posterInputSettingsRef = useRef<HTMLInputElement | null>(null);
   const [courts, setCourts] = useState<Court[]>([]);
   const [selectedCourtIds, setSelectedCourtIds] = useState<string[]>([]);
   const [addParticipantOpen, setAddParticipantOpen] = useState(false);
@@ -546,6 +595,22 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [sendingChat, setSendingChat] = useState(false);
   const [chatMessages, setChatMessages] = useState<TournamentChatMessage[]>([]);
   const [chatDraft, setChatDraft] = useState('');
+  const [rowMenuOpenId, setRowMenuOpenId] = useState<string | null>(null);
+  const [chatUnread, setChatUnread] = useState<Record<string, boolean>>({});
+  const [filterStatus, setFilterStatus] = useState<Set<string>>(new Set());
+  const [filterSort, setFilterSort] = useState<'newest' | 'oldest'>('newest');
+  const [filterUnread, setFilterUnread] = useState(false);
+  const [filterHasPlayers, setFilterHasPlayers] = useState(false);
+  const [filterEntryRequests, setFilterEntryRequests] = useState(false);
+  const [filterSearch, setFilterSearch] = useState('');
+  const [entryRequests, setEntryRequests] = useState<TournamentEntryRequest[]>([]);
+  const [entryRequestsLoading, setEntryRequestsLoading] = useState(false);
+  const [entryApproveDivisionId, setEntryApproveDivisionId] = useState('');
+  const [entryRejectOpen, setEntryRejectOpen] = useState(false);
+  const [entryRejectTargetId, setEntryRejectTargetId] = useState<string | null>(null);
+  const [entryRejectMessage, setEntryRejectMessage] = useState('');
+  const [entryFullModalRequestId, setEntryFullModalRequestId] = useState<string | null>(null);
+  const [entryActionLoadingId, setEntryActionLoadingId] = useState<string | null>(null);
   const [competitionLoading, setCompetitionLoading] = useState(false);
   const [competition, setCompetition] = useState<CompetitionView | null>(null);
   const [competitionFormat, setCompetitionFormat] = useState<'single_elim' | 'group_playoff' | 'round_robin'>('single_elim');
@@ -574,16 +639,24 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [manualOpen, setManualOpen] = useState(false);
   const [manualRound1, setManualRound1] = useState<ManualRoundMatch[]>([]);
   const [manualGenerating, setManualGenerating] = useState(false);
+  const [createStep, setCreateStep] = useState(0);
   const [createPrizeRows, setCreatePrizeRows] = useState<PrizeFormRow[]>(() => [newPrizeRow('Campeón')]);
   const [form, setForm] = useState({
     name: '',
+    start_date: '',
+    start_time: '21:30',
+    end_time: '23:00',
     start_at: '',
     recurring_enabled: false,
     recurring_end_date: '',
     recurring_weekdays: [1] as number[],
     recurring_registration_close_hours: '12',
     registration_closed_at: '',
+    reg_close_unit: 'days' as 'days' | 'hours',
+    reg_close_value: '0',
     cancellation_notice_hours: '24',
+    cancel_unit: 'days' as 'days' | 'hours',
+    cancel_value: '1',
     duration_min: '120',
     price_euros: '0',
     max_players: '12',
@@ -600,8 +673,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     name: '',
     start_at: '',
     duration_min: '120',
+    max_players: '12',
     price_euros: '0',
     prizeRows: [] as PrizeFormRow[],
+    court_ids: [] as string[],
     visibility: 'private',
     gender: '',
     elo_min: '',
@@ -670,6 +745,19 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     });
   }, []);
 
+  const loadEntryRequests = useCallback(async (tournamentId: string) => {
+    setEntryRequestsLoading(true);
+    try {
+      const list = await tournamentsService.listEntryRequests(tournamentId);
+      setEntryRequests(list);
+    } catch (e) {
+      toast.error((e as Error).message || 'No se pudieron cargar las solicitudes');
+      setEntryRequests([]);
+    } finally {
+      setEntryRequestsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!clubResolved) return;
     if (!clubId) {
@@ -715,6 +803,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     void refreshDetail(selected.id);
   }, [selected?.id, refreshDetail]);
 
+  useEffect(() => {
+    if (!isDetailRoute || !selected?.id || tab !== 'solicitudes') return;
+    void loadEntryRequests(selected.id);
+  }, [isDetailRoute, selected?.id, tab, loadEntryRequests]);
+
   const lastListPollAtRef = useRef(0);
   useEffect(() => {
     if (!isDetailRoute || !selected?.id) return;
@@ -752,9 +845,13 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   }, [isDetailRoute, selected?.id, refreshDetail, refreshList]);
 
   useEffect(() => {
-    if (createOpen) setCreatePrizeRows([newPrizeRow('Campeón')]);
+    if (createOpen) {
+      setCreatePrizeRows([newPrizeRow('Campeón')]);
+      setCreateStep(0);
+    }
     else {
       setPosterFileCreate(null);
+      setCreateStep(0);
       if (posterInputCreateRef.current) posterInputCreateRef.current.value = '';
     }
   }, [createOpen]);
@@ -775,8 +872,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       name: String(selected.name ?? ''),
       start_at: selected.start_at ? new Date(selected.start_at).toISOString().slice(0, 16) : '',
       duration_min: String(selected.duration_min ?? 120),
+      max_players: String(selected.max_players ?? 12),
       price_euros: centsToEurosInput(selected.price_cents ?? 0),
       prizeRows: prizesToFormRows(selected.prizes),
+      court_ids: Array.isArray(selected.tournament_courts) ? selected.tournament_courts.map((x) => String(x.court_id)) : [],
       visibility: String(selected.visibility ?? 'private'),
       gender:
         selected.gender === 'male' || selected.gender === 'female' || selected.gender === 'mixed'
@@ -844,6 +943,38 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       cancelled = true;
     };
   }, [tab, selected?.id]);
+
+  useEffect(() => {
+    if (tab === 'chat' && selected?.id) {
+      const key = `chat_read_${selected.id}`;
+      localStorage.setItem(key, new Date().toISOString());
+      setChatUnread((prev) => ({ ...prev, [selected.id]: false }));
+    }
+  }, [tab, selected?.id]);
+
+  useEffect(() => {
+    const active = items.filter((t) => t.status === 'open' || t.status === 'closed');
+    if (!active.length) return;
+    let cancelled = false;
+    void (async () => {
+      const unread: Record<string, boolean> = {};
+      await Promise.allSettled(
+        active.map(async (t) => {
+          try {
+            const msgs = await tournamentsService.listChat(t.id);
+            if (cancelled) return;
+            if (msgs.length > 0) {
+              const lastMsg = msgs[msgs.length - 1];
+              const lastRead = localStorage.getItem(`chat_read_${t.id}`);
+              unread[t.id] = !lastRead || new Date(lastMsg.created_at) > new Date(lastRead);
+            }
+          } catch { /* ignore */ }
+        })
+      );
+      if (!cancelled) setChatUnread((prev) => ({ ...prev, ...unread }));
+    })();
+    return () => { cancelled = true; };
+  }, [items]);
 
   const reloadCompetitionView = useCallback(async (tournamentId: string) => {
     const gen = ++competitionFetchGenRef.current;
@@ -949,6 +1080,35 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     return { total, inProgress, totalTeams, totalPrizesLabel };
   }, [items]);
 
+  const filteredItems = useMemo(() => {
+    let result = [...items];
+    if (filterStatus.size > 0) {
+      result = result.filter((t) => filterStatus.has(t.status));
+    }
+    if (filterUnread) {
+      result = result.filter((t) => chatUnread[t.id]);
+    }
+    if (filterHasPlayers) {
+      result = result.filter((t) => (t.confirmed_count ?? 0) + (t.pending_count ?? 0) > 0);
+    }
+    if (filterEntryRequests) {
+      result = result.filter((t) => (t.pending_entry_requests_count ?? 0) > 0);
+    }
+    if (filterSearch.trim()) {
+      const q = filterSearch.trim().toLowerCase();
+      result = result.filter((t) => {
+        const name = (t.name || t.description || '').toLowerCase();
+        return name.includes(q);
+      });
+    }
+    result.sort((a, b) => {
+      const da = new Date(a.start_at).getTime();
+      const db = new Date(b.start_at).getTime();
+      return filterSort === 'newest' ? db - da : da - db;
+    });
+    return result;
+  }, [items, filterStatus, filterSort, filterUnread, filterHasPlayers, filterEntryRequests, filterSearch, chatUnread]);
+
   const manualTeamOptions = useMemo<ManualTeamOption[]>(() => {
     if (competition && Array.isArray(competition.teams) && competition.teams.length > 0) {
       return competition.teams.map((t) => ({ id: t.id, label: t.name }));
@@ -970,7 +1130,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   }, [manualRound1, manualTeamOptions]);
 
   const pairIncompleteRows = useMemo(() => {
-    if (!selected || selected.registration_mode !== 'pair') return [];
+    if (!selected || (selected.registration_mode !== 'pair' && selected.registration_mode !== 'both')) return [];
     return detail.filter(
       (i) => i.players_1 && !i.players_2 && (i.status === 'pending' || i.status === 'confirmed')
     );
@@ -978,7 +1138,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
   const openPairingModal = useCallback(() => {
     if (!selected) return;
-    if (selected.registration_mode === 'individual') {
+    if (selected.registration_mode === 'individual' || selected.registration_mode === 'both') {
       const singles = [...detail]
         .filter((i) => i.status === 'confirmed' && i.players_1 && !i.players_2)
         .sort((a, b) => new Date(a.invited_at).getTime() - new Date(b.invited_at).getTime());
@@ -1039,13 +1199,79 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     return { hasDefined, hasIncomplete };
   }, [singlesPairingOrder, singlesPairingDraft]);
 
+  const recommendedCourtsForSettings = useMemo(() => {
+    const maxPlayers = Math.max(2, Number(settingsForm.max_players) || 0);
+    return Math.max(1, Math.ceil(maxPlayers / 4));
+  }, [settingsForm.max_players]);
+
+  const competitionTypeMeta: Record<'single_elim' | 'group_playoff' | 'round_robin', { title: string; description: string; badges: string[] }> = {
+    round_robin: {
+      title: 'Americano',
+      description:
+        'Los jugadores rotan de pareja y de rivales en cada ronda, de modo que todos juegan con todos. Cada punto cuenta para una clasificación individual, lo que equilibra diversión y competición.',
+      badges: ['Mezcla social', 'Individual y equipos'],
+    },
+    group_playoff: {
+      title: 'Mexicano',
+      description:
+        'Después de cada ronda, los emparejamientos se ajustan según la clasificación del momento, de modo que los jugadores se enfrentan a otros con un nivel similar.',
+      badges: ['Partidos nivelados', 'Individual y equipos'],
+    },
+    single_elim: {
+      title: 'Pozo',
+      description:
+        'Las parejas ganadoras avanzan hacia la pista dominante, mientras que las demás rotan hacia la inferior. Es una dinámica intensa para alcanzar y defender el trono.',
+      badges: ['Organización automática', 'Equipos fijos'],
+    },
+  };
+
   const isGroupPlayoff = competitionFormat === 'group_playoff';
-  const competitionFormatHelp =
-    competitionFormat === 'single_elim'
-      ? 'Eliminación directa: cuadro desde cuartos/semis/final según cantidad de parejas.'
-      : competitionFormat === 'round_robin'
-        ? 'Todos contra todos: cada pareja juega contra todas; luego puedes cargar podio manual.'
-        : 'Grupos + playoffs: define tamaño de grupo y cuántas parejas clasifican por grupo.';
+  const competitionFormatHelp = competitionTypeMeta[competitionFormat].description;
+
+  const validateCreateStep = useCallback((step: number): boolean => {
+    if (step === 0) {
+      if (!form.name.trim()) {
+        toast.error('Completa el nombre del torneo');
+        return false;
+      }
+      if (!form.start_date) {
+        toast.error('Selecciona una fecha de inicio');
+        return false;
+      }
+      if (calcDurationMin(form.start_time, form.end_time) < 30) {
+        toast.error('La duración mínima es 30 minutos');
+        return false;
+      }
+      if (form.recurring_enabled) {
+        if (!form.recurring_end_date) {
+          toast.error('Indica fecha fin de recurrencia');
+          return false;
+        }
+        if (!form.recurring_weekdays.length) {
+          toast.error('Selecciona al menos un día de la semana');
+          return false;
+        }
+        if (form.recurring_end_date < form.start_date) {
+          toast.error('La fecha fin no puede ser anterior al inicio');
+          return false;
+        }
+      }
+    }
+    if (step === 1) {
+      const maxPlayers = Number(form.max_players);
+      if (!Number.isFinite(maxPlayers) || maxPlayers < 2) {
+        toast.error('Indica un máximo de jugadores válido (mínimo 2)');
+        return false;
+      }
+    }
+    if (step === 2) {
+      if (!selectedCourtIds.length) {
+        toast.error('Selecciona al menos una cancha');
+        return false;
+      }
+    }
+    return true;
+  }, [form, selectedCourtIds]);
 
   if (!clubResolved || loading) return <PageSpinner />;
   if (!clubId) return <div className="rounded-2xl border border-amber-100 bg-amber-50/80 p-5 text-sm text-amber-900">No hay club asociado.</div>;
@@ -1106,46 +1332,290 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       )}
 
       {!isDetailRoute && topTab === 'torneos' && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[180px] max-w-xs">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+              <input
+                value={filterSearch}
+                onChange={(e) => setFilterSearch(e.target.value)}
+                placeholder="Buscar torneo…"
+                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-gray-200 text-xs focus:outline-none focus:ring-1 focus:ring-[#E31E24]"
+              />
+            </div>
+            {(['open', 'closed', 'cancelled'] as const).map((s) => {
+              const active = filterStatus.has(s);
+              const label = s === 'open' ? 'Próximo' : s === 'closed' ? 'Cerrado' : 'Cancelado';
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => setFilterStatus((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(s)) next.delete(s); else next.add(s);
+                    return next;
+                  })}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition ${active ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+                >
+                  {label}{active && ' ×'}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => setFilterUnread((p) => !p)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition flex items-center gap-1 ${filterUnread ? 'bg-[#E31E24] text-white border-[#E31E24]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+            >
+              <MessageCircle className="w-3 h-3" /> No leídos{filterUnread && ' ×'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterHasPlayers((p) => !p)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition flex items-center gap-1 ${filterHasPlayers ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+            >
+              <Users className="w-3 h-3" /> Con jugadores{filterHasPlayers && ' ×'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterEntryRequests((p) => !p)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition flex items-center gap-1 ${filterEntryRequests ? 'bg-amber-600 text-white border-amber-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+            >
+              <Inbox className="w-3 h-3" /> Solicitudes{filterEntryRequests && ' ×'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setFilterSort((p) => (p === 'newest' ? 'oldest' : 'newest'))}
+              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 flex items-center gap-1"
+            >
+              <ArrowDownUp className="w-3 h-3" /> {filterSort === 'newest' ? 'Más recientes' : 'Más antiguos'}
+            </button>
+            {(filterStatus.size > 0 || filterUnread || filterHasPlayers || filterEntryRequests || filterSearch) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterStatus(new Set());
+                  setFilterUnread(false);
+                  setFilterHasPlayers(false);
+                  setFilterEntryRequests(false);
+                  setFilterSearch('');
+                }}
+                className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-gray-500 hover:text-gray-700"
+              >
+                Borrar todo
+              </button>
+            )}
+          </div>
+          {filteredItems.length !== items.length && (
+            <p className="text-[11px] text-gray-400">{filteredItems.length} de {items.length} torneos</p>
+          )}
+        </div>
+      )}
+
+      {!isDetailRoute && topTab === 'torneos' && (
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="divide-y divide-gray-100">
-            {items.map((row) => {
+            {filteredItems.map((row) => {
               const confirmed = row.confirmed_count ?? 0;
               const pending = row.pending_count ?? 0;
-              const statusLabel = row.status === 'open' ? 'Próximo' : row.status === 'closed' ? 'Cerrado' : 'Finalizado';
+              const statusLabel = row.status === 'open' ? 'Próximo' : row.status === 'closed' ? 'Cerrado' : 'Cancelado';
               const statusClass =
                 row.status === 'open'
                   ? 'bg-blue-50 text-blue-700 border-blue-100'
                   : row.status === 'closed'
                     ? 'bg-green-50 text-green-700 border-green-100'
-                    : 'bg-gray-100 text-gray-600 border-gray-200';
+                    : 'bg-red-50 text-red-600 border-red-100';
+              const menuOpen = rowMenuOpenId === row.id;
               return (
-                <button
-                  type="button"
-                  key={row.id}
-                  onClick={() => {
-                    setSelected(row);
-                    navigate(`/torneos/${row.id}`);
-                  }}
-                  className="w-full text-left px-4 py-3 hover:bg-gray-50 transition"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-bold text-[#1A1A1A] truncate">{row.name || row.description || 'Torneo sin nombre'}</p>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
-                        <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleDateString()}</span>
-                        <span className="inline-flex items-center gap-1"><Clock3 className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                        <span className="inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {confirmed + pending}/{row.max_players}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-700 font-medium">
-                          {tournamentGenderLabel(row.gender)}
-                        </span>
-                        <span className="inline-flex items-center gap-1"><Award className="w-3.5 h-3.5" /> €{(((row.prize_total_cents ?? 0)) / 100).toFixed(0)}</span>
+                <div key={row.id} className="relative flex items-center px-4 py-3 hover:bg-gray-50 transition">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelected(row);
+                      navigate(`/torneos/${row.id}`);
+                    }}
+                    className="flex-1 min-w-0 text-left"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-[#1A1A1A] truncate">{row.name || row.description || 'Torneo sin nombre'}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                          <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleDateString()}</span>
+                          <span className="inline-flex items-center gap-1"><Clock3 className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span className="inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {confirmed + pending}/{row.max_players}</span>
+                          {(row.pending_entry_requests_count ?? 0) > 0 && (
+                            <span className="inline-flex items-center gap-1 text-amber-800 font-semibold">
+                              <Inbox className="w-3.5 h-3.5" />
+                              {row.pending_entry_requests_count} solicitud{(row.pending_entry_requests_count ?? 0) === 1 ? '' : 'es'}
+                            </span>
+                          )}
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-700 font-medium">
+                            {tournamentGenderLabel(row.gender)}
+                          </span>
+                          {(row.price_cents ?? 0) > 0 && (
+                            <span className="inline-flex items-center gap-1" title="Precio inscripción"><DollarSign className="w-3.5 h-3.5" /> Inscripción €{((row.price_cents ?? 0) / 100).toFixed(0)}</span>
+                          )}
+                          <span className="inline-flex items-center gap-1" title="Premios totales"><Award className="w-3.5 h-3.5" /> Premios €{(((row.prize_total_cents ?? 0)) / 100).toFixed(0)}</span>
+                        </div>
                       </div>
+                      <span className={`shrink-0 text-[10px] px-2.5 py-1 rounded-full border font-semibold ${statusClass}`}>{statusLabel}</span>
                     </div>
-                    <span className={`shrink-0 text-[10px] px-2.5 py-1 rounded-full border font-semibold ${statusClass}`}>{statusLabel}</span>
+                  </button>
+
+                  <div className="shrink-0 flex items-center gap-1 ml-2">
+                    <button
+                      type="button"
+                      title="Chat del torneo"
+                      onClick={() => {
+                        setSelected(row);
+                        navigate(`/torneos/${row.id}`);
+                        setTimeout(() => setTab('chat'), 50);
+                      }}
+                      className="relative p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      {chatUnread[row.id] && (
+                        <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-[#E31E24] rounded-full border-2 border-white" />
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      title="Solicitudes de ingreso"
+                      onClick={() => {
+                        setSelected(row);
+                        navigate(`/torneos/${row.id}`);
+                        setTimeout(() => setTab('solicitudes'), 50);
+                      }}
+                      className="relative p-1.5 rounded-lg text-gray-400 hover:text-amber-800 hover:bg-amber-50"
+                    >
+                      <Inbox className="w-4 h-4" />
+                      {(row.pending_entry_requests_count ?? 0) > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-0.5 bg-amber-600 text-white text-[9px] font-bold rounded-full border-2 border-white flex items-center justify-center">
+                          {(row.pending_entry_requests_count ?? 0) > 9 ? '9+' : row.pending_entry_requests_count}
+                        </span>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      title="Opciones"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRowMenuOpenId(menuOpen ? null : row.id);
+                      }}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
                   </div>
-                </button>
+
+                  {menuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setRowMenuOpenId(null)} />
+                      <div className="absolute right-4 top-10 z-40 w-48 bg-white rounded-xl border border-gray-200 shadow-lg py-1 text-xs">
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
+                          onClick={async () => {
+                            setRowMenuOpenId(null);
+                            try {
+                              const payload = {
+                                club_id: row.club_id,
+                                name: row.name ? `${row.name} (copia)` : null,
+                                start_at: row.start_at,
+                                duration_min: row.duration_min,
+                                price_cents: row.price_cents ?? 0,
+                                max_players: row.max_players,
+                                registration_mode: row.registration_mode,
+                                visibility: row.visibility ?? 'private',
+                                gender: row.gender ?? null,
+                                elo_min: row.elo_min ?? null,
+                                elo_max: row.elo_max ?? null,
+                                prizes: row.prizes ?? [],
+                                normas: row.normas ?? null,
+                              };
+                              await tournamentsService.create(payload);
+                              toast.success('Torneo copiado');
+                              await refreshList();
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : 'Error al copiar');
+                            }
+                          }}
+                        >
+                          <Copy className="w-3.5 h-3.5" /> Copiar torneo
+                        </button>
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
+                          onClick={() => {
+                            setRowMenuOpenId(null);
+                            const url = `${window.location.origin}/torneos/${row.id}`;
+                            navigator.clipboard.writeText(url).then(() => toast.success('Enlace copiado'));
+                          }}
+                        >
+                          <Copy className="w-3.5 h-3.5" /> Copiar enlace
+                        </button>
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
+                          onClick={async () => {
+                            setRowMenuOpenId(null);
+                            try {
+                              const detail = await tournamentsService.detail(row.id);
+                              const inscriptions = detail.inscriptions ?? [];
+                              const lines = ['Nombre,Email,Estado,Fecha inscripción'];
+                              inscriptions.forEach((ins) => {
+                                const p1 = ins.players_1;
+                                const name1 = p1 ? `${p1.first_name ?? ''} ${p1.last_name ?? ''}`.trim() : ins.invite_email_1 ?? '';
+                                const email1 = p1?.email ?? ins.invite_email_1 ?? '';
+                                lines.push(`"${name1}","${email1}","${ins.status}","${ins.invited_at}"`);
+                                const p2 = ins.players_2;
+                                if (p2) {
+                                  const name2 = `${p2.first_name ?? ''} ${p2.last_name ?? ''}`.trim();
+                                  lines.push(`"${name2}","${p2.email ?? ''}","${ins.status}","${ins.invited_at}"`);
+                                }
+                              });
+                              const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+                              const a = document.createElement('a');
+                              a.href = URL.createObjectURL(blob);
+                              a.download = `jugadores_${row.name || 'torneo'}.csv`;
+                              a.click();
+                              URL.revokeObjectURL(a.href);
+                              toast.success('Exportación descargada');
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : 'Error al exportar');
+                            }
+                          }}
+                        >
+                          <Users className="w-3.5 h-3.5" /> Exportar jugadores
+                        </button>
+                        <div className="border-t border-gray-100 my-1" />
+                        <button
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-red-50 flex items-center gap-2 text-red-600"
+                          onClick={async () => {
+                            setRowMenuOpenId(null);
+                            if (!confirm('¿Cancelar este torneo? Esta acción no se puede deshacer.')) return;
+                            try {
+                              await tournamentsService.cancel(row.id, 'Cancelado por organizador');
+                              toast.success('Torneo cancelado');
+                              await refreshList();
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : 'Error al cancelar');
+                            }
+                          }}
+                        >
+                          <X className="w-3.5 h-3.5" /> Cancelar torneo
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               );
             })}
+            {filteredItems.length === 0 && items.length > 0 && (
+              <div className="py-10 text-center text-xs text-gray-400">No hay torneos que coincidan con los filtros.</div>
+            )}
             {items.length === 0 && (
               <div className="py-10 text-center text-xs text-gray-400">No hay torneos creados todavía.</div>
             )}
@@ -1189,10 +1659,37 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   ) : null}
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                {(['general', 'jugadores', 'chat', 'competicion', 'ajustes'] as const).map((x) => (
-                  <button key={x} onClick={() => setTab(x)} className={`px-3 py-1.5 text-[11px] rounded-lg capitalize font-semibold ${tab === x ? 'bg-[#E31E24] text-white' : 'bg-gray-100 text-gray-700'}`}>{x}</button>
-                ))}
+              <div className="flex flex-wrap items-center gap-2">
+                {(
+                  [
+                    ['general', 'General'],
+                    ['jugadores', 'Jugadores'],
+                    ['chat', 'Chat'],
+                    ['solicitudes', 'Solicitudes'],
+                    ['competicion', 'Competición'],
+                    ['ajustes', 'Ajustes'],
+                  ] as const
+                ).map(([id, label]) => {
+                  const pendingEr = selected.pending_entry_requests_count ?? 0;
+                  const showErBadge = id === 'solicitudes' && pendingEr > 0;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setTab(id)}
+                      className={`relative px-3 py-1.5 text-[11px] rounded-lg font-semibold ${
+                        tab === id ? 'bg-[#E31E24] text-white' : 'bg-gray-100 text-gray-700'
+                      }`}
+                    >
+                      {label}
+                      {showErBadge && (
+                        <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 bg-amber-500 text-white text-[9px] font-black rounded-full border border-white flex items-center justify-center">
+                          {pendingEr > 9 ? '9+' : pendingEr}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -1502,16 +1999,175 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
               </div>
             )}
 
+            {tab === 'solicitudes' && (
+              <div className="p-5 space-y-4">
+                <p className="text-xs text-gray-600">
+                  Los jugadores pueden pedir ingreso cuando no cumplen el Elo automático (u otras reglas). Aquí aceptas o rechazas; si al aceptar el torneo ya está lleno, podrás rechazar o dejar la solicitud en visto.
+                </p>
+                {selected.level_mode === 'multi_division' && divisionsDetail.length > 0 && (
+                  <div className="rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-2 space-y-1">
+                    <p className="text-[11px] font-semibold text-amber-900">Categoría al aprobar</p>
+                    <p className="text-[10px] text-amber-800">
+                      Si el Elo del jugador no encaja en ninguna categoría, elige una manualmente antes de aprobar.
+                    </p>
+                    <select
+                      value={entryApproveDivisionId}
+                      onChange={(e) => setEntryApproveDivisionId(e.target.value)}
+                      className="w-full max-w-md rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-xs"
+                    >
+                      <option value="">Automática según Elo del jugador</option>
+                      {divisionsDetail.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.label} ({d.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {entryRequestsLoading && <p className="text-xs text-gray-500">Cargando solicitudes…</p>}
+                {!entryRequestsLoading && entryRequests.length === 0 && (
+                  <p className="text-xs text-gray-500">No hay solicitudes registradas.</p>
+                )}
+                {!entryRequestsLoading &&
+                  entryRequests.map((er) => {
+                    const p = er.request_player;
+                    const name = p ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() : 'Jugador';
+                    const isPending = er.status === 'pending';
+                    return (
+                      <div key={er.id} className="rounded-xl border border-gray-100 p-4 space-y-2">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-bold text-[#1A1A1A]">{name}</p>
+                            {p ? (
+                              <p className="text-[11px] text-gray-500 mt-0.5">
+                                Elo {formatPlayerElo(p.elo_rating)} · {p.email ?? 'sin email'}
+                              </p>
+                            ) : null}
+                            <p className="text-[10px] text-gray-400 mt-1">{new Date(er.created_at).toLocaleString()}</p>
+                          </div>
+                          <span
+                            className={`shrink-0 text-[10px] px-2 py-1 rounded-full font-bold uppercase ${
+                              er.status === 'pending'
+                                ? 'bg-amber-100 text-amber-900'
+                                : er.status === 'approved'
+                                  ? 'bg-green-100 text-green-800'
+                                  : er.status === 'rejected'
+                                    ? 'bg-red-50 text-red-700'
+                                    : 'bg-gray-100 text-gray-600'
+                            }`}
+                          >
+                            {er.status === 'pending'
+                              ? 'Pendiente'
+                              : er.status === 'approved'
+                                ? 'Aprobada'
+                                : er.status === 'rejected'
+                                  ? 'Rechazada'
+                                  : 'En visto'}
+                          </span>
+                        </div>
+                        <div className="rounded-lg bg-gray-50 border border-gray-100 px-3 py-2">
+                          <p className="text-[10px] font-semibold text-gray-500 uppercase">Mensaje</p>
+                          <p className="text-xs text-gray-800 whitespace-pre-wrap mt-0.5">{er.message}</p>
+                        </div>
+                        {er.response_message ? (
+                          <div className="rounded-lg bg-blue-50/80 border border-blue-100 px-3 py-2">
+                            <p className="text-[10px] font-semibold text-blue-800 uppercase">Tu respuesta</p>
+                            <p className="text-xs text-blue-900 whitespace-pre-wrap mt-0.5">{er.response_message}</p>
+                          </div>
+                        ) : null}
+                        {isPending && selected && (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <button
+                              type="button"
+                              disabled={entryActionLoadingId === er.id}
+                              onClick={async () => {
+                                if (!selected) return;
+                                const divPayload =
+                                  selected.level_mode === 'multi_division' && entryApproveDivisionId
+                                    ? { division_id: entryApproveDivisionId }
+                                    : {};
+                                setEntryActionLoadingId(er.id);
+                                try {
+                                  await tournamentsService.approveEntryRequest(selected.id, er.id, divPayload);
+                                  toast.success('Solicitud aprobada; el jugador está inscrito');
+                                  await loadEntryRequests(selected.id);
+                                  await refreshDetail(selected.id);
+                                  await refreshList(selected.id);
+                                } catch (e) {
+                                  if (e instanceof HttpError && e.status === 409 && e.code === 'tournament_full') {
+                                    setEntryFullModalRequestId(er.id);
+                                    toast.message('Torneo lleno', { description: e.message });
+                                  } else {
+                                    toast.error((e as Error).message || 'No se pudo aprobar');
+                                  }
+                                } finally {
+                                  setEntryActionLoadingId(null);
+                                }
+                              }}
+                              className="px-3 py-2 rounded-xl bg-green-600 text-white text-xs font-semibold disabled:opacity-60 inline-flex items-center gap-1.5"
+                            >
+                              {entryActionLoadingId === er.id && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                              Aprobar e inscribir
+                            </button>
+                            <button
+                              type="button"
+                              disabled={entryActionLoadingId === er.id}
+                              onClick={() => {
+                                setEntryRejectTargetId(er.id);
+                                setEntryRejectMessage('');
+                                setEntryRejectOpen(true);
+                              }}
+                              className="px-3 py-2 rounded-xl bg-white border border-red-200 text-red-700 text-xs font-semibold"
+                            >
+                              Rechazar
+                            </button>
+                            <button
+                              type="button"
+                              disabled={entryActionLoadingId === er.id}
+                              onClick={async () => {
+                                if (!selected) return;
+                                setEntryActionLoadingId(er.id);
+                                try {
+                                  await tournamentsService.dismissEntryRequest(selected.id, er.id);
+                                  toast.success('Solicitud dejada en visto');
+                                  await loadEntryRequests(selected.id);
+                                  await refreshList(selected.id);
+                                } catch (err) {
+                                  toast.error((err as Error).message || 'No se pudo actualizar');
+                                } finally {
+                                  setEntryActionLoadingId(null);
+                                }
+                              }}
+                              className="px-3 py-2 rounded-xl bg-gray-100 text-gray-700 text-xs font-semibold"
+                            >
+                              Dejar en visto
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+
             {tab === 'competicion' && (
               <div className="p-5 space-y-4">
                 <div className="rounded-xl border border-gray-200 p-3 bg-gray-50">
                   <p className="text-xs font-semibold text-[#1A1A1A]">Configuración competitiva</p>
+                  <p className="text-[11px] font-semibold text-[#E31E24] mt-1">{competitionTypeMeta[competitionFormat].title}</p>
                   <p className="text-[11px] text-gray-600 mt-1">{competitionFormatHelp}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {competitionTypeMeta[competitionFormat].badges.map((badge) => (
+                      <span key={badge} className="rounded-full border border-gray-200 bg-white px-2 py-1 text-[10px] font-semibold text-gray-700">
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
                   <div className={`grid grid-cols-1 ${isGroupPlayoff ? 'md:grid-cols-4' : 'md:grid-cols-2'} gap-2 mt-2`}>
                     <select value={competitionFormat} onChange={(e) => setCompetitionFormat(e.target.value as any)} className="rounded-xl border border-gray-200 px-3 py-2 text-xs">
-                      <option value="single_elim">Eliminación directa</option>
-                      <option value="group_playoff">Grupos + playoffs</option>
-                      <option value="round_robin">Todos contra todos</option>
+                      <option value="round_robin">Americano</option>
+                      <option value="group_playoff">Mexicano</option>
+                      <option value="single_elim">Pozo</option>
                     </select>
                     <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
                       <p className="text-[10px] uppercase text-gray-500 font-semibold">Sets</p>
@@ -1802,14 +2458,26 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
             )}
 
             {tab === 'ajustes' && (
-              <div className="p-5 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <input value={settingsForm.name} onChange={(e) => setSettingsForm((p) => ({ ...p, name: e.target.value }))} placeholder="Nombre del torneo" className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2" />
-                  <input type="datetime-local" step={1800} value={settingsForm.start_at} onChange={(e) => setSettingsForm((p) => ({ ...p, start_at: e.target.value }))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
-                  <input type="number" min={30} step={30} value={settingsForm.duration_min} onChange={(e) => setSettingsForm((p) => ({ ...p, duration_min: e.target.value }))} placeholder="Duración (min)" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
-                  <input value={settingsForm.price_euros} onChange={(e) => setSettingsForm((p) => ({ ...p, price_euros: e.target.value }))} placeholder="Ej. 25 o 25,50" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+              <div className="p-5 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Nombre del torneo</label>
+                    <input value={settingsForm.name} onChange={(e) => setSettingsForm((p) => ({ ...p, name: e.target.value }))} placeholder="Ej. Copa Primavera 2026" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Fecha y hora de inicio</label>
+                    <input type="datetime-local" step={1800} value={settingsForm.start_at} onChange={(e) => setSettingsForm((p) => ({ ...p, start_at: normalizeHalfHourLocalDateTime(e.target.value) }))} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Duración (minutos)</label>
+                    <input type="number" min={30} step={30} value={settingsForm.duration_min} onChange={(e) => setSettingsForm((p) => ({ ...p, duration_min: e.target.value }))} placeholder="120" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Precio inscripción (€)</label>
+                    <input value={settingsForm.price_euros} onChange={(e) => setSettingsForm((p) => ({ ...p, price_euros: e.target.value }))} placeholder="Ej. 25 o 25,50" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  </div>
                   <div className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2 space-y-2">
-                    <p className="text-[10px] font-semibold text-gray-500 uppercase">Premios por puesto (céntimos)</p>
+                    <p className="text-[10px] font-semibold text-gray-500 uppercase">Premios por puesto (€)</p>
                     {settingsForm.prizeRows.map((row) => (
                       <div key={row.localId} className="flex flex-wrap gap-2 items-center">
                         <input
@@ -1823,17 +2491,20 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                           placeholder="Ej. Subcampeón"
                           className="flex-1 min-w-[120px] rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
                         />
-                        <input
-                          value={row.amountCents}
-                          onChange={(e) =>
-                            setSettingsForm((p) => ({
-                              ...p,
-                              prizeRows: p.prizeRows.map((r) => (r.localId === row.localId ? { ...r, amountCents: e.target.value } : r)),
-                            }))
-                          }
-                          placeholder="Céntimos"
-                          className="w-24 rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
-                        />
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-gray-500 font-medium">€</span>
+                          <input
+                            value={row.amountEuros}
+                            onChange={(e) =>
+                              setSettingsForm((p) => ({
+                                ...p,
+                                prizeRows: p.prizeRows.map((r) => (r.localId === row.localId ? { ...r, amountEuros: e.target.value } : r)),
+                              }))
+                            }
+                            placeholder="150"
+                            className="w-20 rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+                          />
+                        </div>
                         <button
                           type="button"
                           onClick={() =>
@@ -1858,41 +2529,117 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       Añadir premio
                     </button>
                   </div>
-                  <input value={settingsForm.elo_min} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_min: e.target.value }))} placeholder="Elo mínimo" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
-                  <input value={settingsForm.elo_max} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_max: e.target.value }))} placeholder="Elo máximo" className="rounded-xl border border-gray-200 px-3 py-2 text-xs" />
-                  <select value={settingsForm.visibility} onChange={(e) => setSettingsForm((p) => ({ ...p, visibility: e.target.value }))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs">
-                    <option value="private">Privado</option>
-                    <option value="public">Público</option>
-                  </select>
-                  <select
-                    value={settingsForm.gender}
-                    onChange={(e) => setSettingsForm((p) => ({ ...p, gender: e.target.value }))}
-                    className="rounded-xl border border-gray-200 px-3 py-2 text-xs"
-                  >
-                    <option value="">Sin definir (cualquier género, con Elo válido)</option>
-                    <option value="mixed">Mixto (explícito)</option>
-                    <option value="male">Masculino</option>
-                    <option value="female">Femenino</option>
-                  </select>
-                  <input type="datetime-local" step={1800} value={settingsForm.registration_closed_at} onChange={(e) => setSettingsForm((p) => ({ ...p, registration_closed_at: e.target.value }))} className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2" />
-                  <textarea
-                    value={settingsForm.normas}
-                    onChange={(e) => setSettingsForm((p) => ({ ...p, normas: e.target.value }))}
-                    placeholder="Normas del torneo"
-                    className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2"
-                  />
-                  <input
-                    value={settingsForm.poster_url}
-                    onChange={(e) => setSettingsForm((p) => ({ ...p, poster_url: e.target.value }))}
-                    placeholder="URL cartel (https)"
-                    className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2"
-                  />
-                  <div className="md:col-span-2 flex flex-wrap items-center gap-2">
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Elo mínimo</label>
+                    <input value={settingsForm.elo_min} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_min: e.target.value }))} placeholder="Ej. 800" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Elo máximo</label>
+                    <input value={settingsForm.elo_max} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_max: e.target.value }))} placeholder="Ej. 1500" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Visibilidad</label>
+                    <select value={settingsForm.visibility} onChange={(e) => setSettingsForm((p) => ({ ...p, visibility: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs">
+                      <option value="private">Privado</option>
+                      <option value="public">Público</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Género</label>
+                    <select
+                      value={settingsForm.gender}
+                      onChange={(e) => setSettingsForm((p) => ({ ...p, gender: e.target.value }))}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                    >
+                      <option value="">Sin definir (cualquier género)</option>
+                      <option value="mixed">Mixto</option>
+                      <option value="male">Masculino</option>
+                      <option value="female">Femenino</option>
+                    </select>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Cierre de inscripciones</label>
+                    <input type="datetime-local" step={1800} value={settingsForm.registration_closed_at} onChange={(e) => setSettingsForm((p) => ({ ...p, registration_closed_at: normalizeHalfHourLocalDateTime(e.target.value) }))} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Cupos máximos</label>
                     <input
+                      type="number"
+                      min={2}
+                      value={settingsForm.max_players}
+                      onChange={(e) => setSettingsForm((p) => ({ ...p, max_players: e.target.value }))}
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                    />
+                  </div>
+                  <div className="md:col-span-2 rounded-xl border border-gray-200 p-3 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase block">Canchas habilitadas</label>
+                      <span className="text-[10px] text-gray-500">
+                        Recomendadas: {recommendedCourtsForSettings} · Seleccionadas: {settingsForm.court_ids.length}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {courts.map((court) => {
+                        const active = settingsForm.court_ids.includes(court.id);
+                        return (
+                          <button
+                            key={`settings-court-${court.id}`}
+                            type="button"
+                            onClick={() =>
+                              setSettingsForm((p) => ({
+                                ...p,
+                                court_ids: active ? p.court_ids.filter((x) => x !== court.id) : [...p.court_ids, court.id],
+                              }))
+                            }
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] border font-semibold ${
+                              active ? 'bg-[#E31E24] text-white border-[#E31E24]' : 'bg-white text-gray-700 border-gray-300'
+                            }`}
+                          >
+                            {court.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {settingsForm.court_ids.length < recommendedCourtsForSettings && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSettingsForm((p) => {
+                            const next = [...p.court_ids];
+                            const available = courts.find((c) => !next.includes(c.id));
+                            if (available) next.push(available.id);
+                            return { ...p, court_ids: next };
+                          })
+                        }
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#E31E24]"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Agregar 1 cancha más
+                      </button>
+                    )}
+                  </div>
+                  <div className="md:col-span-2 rounded-xl border border-gray-200 p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <label className="text-[10px] font-semibold text-gray-500 uppercase block">Imagen del torneo</label>
+                        <p className="text-[10px] text-gray-400 mt-0.5">Sube un cartel para mostrarlo en la lista y detalle.</p>
+                      </div>
+                      {!settingsForm.poster_url && !posterUploading && (
+                        <button
+                          type="button"
+                          onClick={() => posterInputSettingsRef.current?.click()}
+                          className="shrink-0 px-3 py-1.5 rounded-lg bg-[#E31E24] text-white text-[11px] font-semibold"
+                        >
+                          Agregar imagen
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      ref={posterInputSettingsRef}
                       type="file"
                       accept="image/jpeg,image/png,image/gif,image/webp"
+                      className="hidden"
                       disabled={posterUploading || !selected || !clubId}
-                      className="text-[11px] max-w-full"
                       onChange={async (e) => {
                         const f = e.target.files?.[0];
                         e.target.value = '';
@@ -1912,7 +2659,54 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         }
                       }}
                     />
-                    {posterUploading && <Loader2 className="w-4 h-4 animate-spin text-gray-500" />}
+                    {posterUploading && (
+                      <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                        <Loader2 className="w-4 h-4 animate-spin" /> Subiendo imagen…
+                      </div>
+                    )}
+                    {settingsForm.poster_url && !posterUploading && (
+                      <div className="relative rounded-xl border border-gray-200 bg-gray-50 overflow-hidden">
+                        <img
+                          src={settingsForm.poster_url}
+                          alt="Cartel del torneo"
+                          className="w-full max-h-48 object-contain bg-white"
+                        />
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!selected) return;
+                            setSettingsForm((p) => ({ ...p, poster_url: '' }));
+                            await tournamentsService.update(selected.id, { poster_url: null });
+                            toast.success('Imagen eliminada');
+                            await refreshList(selected.id);
+                            await refreshDetail(selected.id);
+                          }}
+                          className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/55 text-white hover:bg-black/70"
+                          aria-label="Quitar imagen"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                        <div className="flex items-center justify-between border-t border-gray-100 bg-white px-2 py-1.5">
+                          <p className="text-[10px] text-gray-500 truncate flex-1">Imagen actual</p>
+                          <button
+                            type="button"
+                            onClick={() => posterInputSettingsRef.current?.click()}
+                            className="text-[10px] font-semibold text-[#E31E24]"
+                          >
+                            Cambiar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Normas del torneo</label>
+                    <textarea
+                      value={settingsForm.normas}
+                      onChange={(e) => setSettingsForm((p) => ({ ...p, normas: e.target.value }))}
+                      placeholder="Describe las reglas, formato de juego, etc."
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                    />
                   </div>
                 </div>
                 <button
@@ -1928,12 +2722,17 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       toast.error('La duración debe ser múltiplo de 30 (30, 60, 90, 120...)');
                       return;
                     }
+                    if (!settingsForm.court_ids.length) {
+                      toast.error('Selecciona al menos una cancha');
+                      return;
+                    }
                     setSavingSettings(true);
                     try {
                       const updatedTournament = await tournamentsService.update(selected.id, {
                         name: settingsForm.name || null,
                         start_at: settingsForm.start_at ? new Date(settingsForm.start_at).toISOString() : selected.start_at,
                         duration_min: Number(settingsForm.duration_min),
+                        max_players: Math.max(2, Number(settingsForm.max_players) || 2),
                         price_cents: eurosInputToCents(settingsForm.price_euros),
                         prizes: formRowsToPrizePayload(settingsForm.prizeRows),
                         elo_min: settingsForm.elo_min ? Number(settingsForm.elo_min) : null,
@@ -1948,6 +2747,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         normas: settingsForm.normas || null,
                         registration_closed_at: settingsForm.registration_closed_at ? new Date(settingsForm.registration_closed_at).toISOString() : null,
                         poster_url: settingsForm.poster_url.trim() || null,
+                        court_ids: settingsForm.court_ids,
                       });
                       setItems((prev) => prev.map((it) => (it.id === selected.id ? { ...it, ...updatedTournament } : it)));
                       setSelected((prev) => (prev?.id === selected.id ? { ...prev, ...updatedTournament } : prev));
@@ -1970,12 +2770,124 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     await refreshList(selected.id);
                     await refreshDetail(selected.id);
                   }}
-                  className="px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-semibold"
+                  className="ml-2 px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-semibold"
                 >
                   Cancelar torneo
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {entryRejectOpen && selected && entryRejectTargetId && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white border border-gray-100 shadow-xl p-4 space-y-3">
+            <p className="text-sm font-bold text-[#1A1A1A]">Rechazar solicitud</p>
+            <p className="text-xs text-gray-500">Opcional: mensaje para el jugador (por ejemplo, motivo del rechazo).</p>
+            <textarea
+              value={entryRejectMessage}
+              onChange={(e) => setEntryRejectMessage(e.target.value)}
+              rows={4}
+              placeholder="Mensaje opcional…"
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEntryRejectOpen(false);
+                  setEntryRejectTargetId(null);
+                }}
+                className="px-3 py-2 rounded-xl bg-gray-100 text-xs font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={entryActionLoadingId === entryRejectTargetId}
+                onClick={async () => {
+                  if (!selected || !entryRejectTargetId) return;
+                  setEntryActionLoadingId(entryRejectTargetId);
+                  try {
+                    await tournamentsService.rejectEntryRequest(selected.id, entryRejectTargetId, entryRejectMessage.trim() || undefined);
+                    toast.success('Solicitud rechazada');
+                    setEntryRejectOpen(false);
+                    setEntryRejectTargetId(null);
+                    setEntryRejectMessage('');
+                    await loadEntryRequests(selected.id);
+                    await refreshList(selected.id);
+                  } catch (e) {
+                    toast.error((e as Error).message || 'No se pudo rechazar');
+                  } finally {
+                    setEntryActionLoadingId(null);
+                  }
+                }}
+                className="px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-semibold disabled:opacity-60 inline-flex items-center gap-1.5"
+              >
+                {entryActionLoadingId === entryRejectTargetId && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Confirmar rechazo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {entryFullModalRequestId && selected && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white border border-amber-100 shadow-xl p-4 space-y-3">
+            <p className="text-sm font-bold text-amber-900">Torneo lleno</p>
+            <p className="text-xs text-gray-700">
+              Mientras aprobabas, el torneo completó los cupos. Puedes rechazar la solicitud con un mensaje o dejarla en visto para archivarla sin inscribir al jugador.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  const id = entryFullModalRequestId;
+                  setEntryFullModalRequestId(null);
+                  if (id) {
+                    setEntryRejectTargetId(id);
+                    setEntryRejectMessage('');
+                    setEntryRejectOpen(true);
+                  }
+                }}
+                className="px-3 py-2 rounded-xl bg-white border border-red-200 text-red-700 text-xs font-semibold"
+              >
+                Rechazar con mensaje
+              </button>
+              <button
+                type="button"
+                disabled={!entryFullModalRequestId || entryActionLoadingId === entryFullModalRequestId}
+                onClick={async () => {
+                  const rid = entryFullModalRequestId;
+                  if (!selected || !rid) return;
+                  setEntryActionLoadingId(rid);
+                  try {
+                    await tournamentsService.dismissEntryRequest(selected.id, rid);
+                    toast.success('Solicitud dejada en visto');
+                    setEntryFullModalRequestId(null);
+                    await loadEntryRequests(selected.id);
+                    await refreshList(selected.id);
+                  } catch (e) {
+                    toast.error((e as Error).message || 'No se pudo archivar');
+                  } finally {
+                    setEntryActionLoadingId(null);
+                  }
+                }}
+                className="px-3 py-2 rounded-xl bg-amber-600 text-white text-xs font-semibold disabled:opacity-60 inline-flex items-center justify-center gap-1.5"
+              >
+                {entryActionLoadingId === entryFullModalRequestId && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Dejar en visto
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEntryFullModalRequestId(null)}
+              className="w-full px-3 py-2 rounded-xl bg-gray-100 text-xs font-semibold text-gray-700"
+            >
+              Cerrar
+            </button>
           </div>
         </div>
       )}
@@ -1986,10 +2898,32 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
             <div className="px-6 py-5 border-b border-gray-200 bg-[#ED1C24]">
               <p className="text-base font-black text-white">{tx.createTournament}</p>
               <p className="text-xs text-white/90 mt-1">Configura horarios, cupos, Elo y canchas con un formato visual más claro.</p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {['Básico', 'Competición', 'Detalle final'].map((label, idx) => (
+                  <button
+                    key={`create-step-${idx}`}
+                    type="button"
+                    onClick={() => {
+                      if (idx <= createStep) setCreateStep(idx);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold border ${
+                      idx === createStep
+                        ? 'bg-white text-[#ED1C24] border-white'
+                        : idx < createStep
+                          ? 'bg-white/15 text-white border-white/30'
+                          : 'bg-transparent text-white/80 border-white/20'
+                    }`}
+                  >
+                    {idx + 1}. {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="p-6 space-y-5 overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {createStep === 0 && (
+                  <>
                 <div className="rounded-2xl border border-gray-200 bg-white p-3 md:col-span-2">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -2049,39 +2983,103 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     className="mt-1.5 w-full text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5"
                   />
                 </div>
-                <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Inicio</label>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-gray-400" />
-                    <input
-                      type="datetime-local"
-                      step={1800}
-                      value={form.start_at}
-                      onChange={(e) => setForm((p) => ({ ...p, start_at: e.target.value }))}
-                      className="w-full text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5"
-                    />
+                <div className="rounded-2xl border border-gray-200 bg-white p-4 md:col-span-2">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Fecha y hora del torneo</label>
+                  <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="text-[10px] text-gray-500 mb-1 block">Fecha de inicio</label>
+                      <div className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5">
+                        <input
+                          type="date"
+                          value={form.start_date}
+                          onChange={(e) => setForm((p) => ({ ...p, start_date: e.target.value }))}
+                          className="w-full text-sm outline-none bg-transparent"
+                        />
+                        <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 mb-1 block">Fecha de fin</label>
+                      <div className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 bg-gray-50">
+                        <input
+                          type="date"
+                          value={form.start_date}
+                          disabled
+                          className="w-full text-sm outline-none bg-transparent text-gray-500"
+                        />
+                        <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 mb-1 block">Hora de inicio</label>
+                      <div className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5">
+                        <select
+                          value={form.start_time}
+                          onChange={(e) => {
+                            const st = e.target.value;
+                            setForm((p) => {
+                              const dur = calcDurationMin(st, p.end_time);
+                              return { ...p, start_time: st, duration_min: String(dur) };
+                            });
+                          }}
+                          className="w-full text-sm outline-none bg-transparent appearance-none"
+                        >
+                          {HALF_HOUR_TIMES.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <Clock3 className="w-4 h-4 text-gray-400 shrink-0" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 mb-1 block">Hora de fin</label>
+                      <div className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5">
+                        <select
+                          value={form.end_time}
+                          onChange={(e) => {
+                            const et = e.target.value;
+                            setForm((p) => {
+                              const dur = calcDurationMin(p.start_time, et);
+                              return { ...p, end_time: et, duration_min: String(dur) };
+                            });
+                          }}
+                          className="w-full text-sm outline-none bg-transparent appearance-none"
+                        >
+                          {HALF_HOUR_TIMES.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                        <Clock3 className="w-4 h-4 text-gray-400 shrink-0" />
+                      </div>
+                    </div>
                   </div>
+                  <p className="text-[11px] text-gray-400 mt-2">Duración: {form.duration_min} min</p>
                 </div>
 
-                <div className="rounded-2xl border border-gray-200 bg-white p-3">
+                <div className="rounded-2xl border border-gray-200 bg-white p-4 md:col-span-2">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Recurrencia</label>
-                  <label className="mt-1.5 flex items-center gap-2 text-xs text-gray-700">
-                    <input
-                      type="checkbox"
-                      checked={form.recurring_enabled}
-                      onChange={(e) => setForm((p) => ({ ...p, recurring_enabled: e.target.checked }))}
-                    />
-                    Crear torneos semanales automáticamente
-                  </label>
+                  <div className="mt-2">
+                    <label className="text-[10px] text-gray-500 mb-1 block">Repetir</label>
+                    <select
+                      value={form.recurring_enabled ? 'weekly' : 'none'}
+                      onChange={(e) => setForm((p) => ({ ...p, recurring_enabled: e.target.value === 'weekly' }))}
+                      className="rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm outline-none bg-transparent"
+                    >
+                      <option value="none">No se repite</option>
+                      <option value="weekly">Semanal</option>
+                    </select>
+                  </div>
                   {form.recurring_enabled && (
-                    <div className="mt-2 space-y-2">
-                      <input
-                        type="date"
-                        value={form.recurring_end_date}
-                        onChange={(e) => setForm((p) => ({ ...p, recurring_end_date: e.target.value }))}
-                        className="w-full text-xs outline-none rounded-lg border border-black bg-white px-2 py-1.5"
-                      />
-                      <div className="flex flex-wrap gap-1">
+                    <div className="mt-3 space-y-3">
+                      <div>
+                        <label className="text-[10px] text-gray-500 mb-1 block">Fin de la serie semanal</label>
+                        <div className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 w-fit">
+                          <input
+                            type="date"
+                            value={form.recurring_end_date}
+                            onChange={(e) => setForm((p) => ({ ...p, recurring_end_date: e.target.value }))}
+                            className="text-sm outline-none bg-transparent"
+                          />
+                          <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
                         {[
                           { id: 1, label: 'Lun' },
                           { id: 2, label: 'Mar' },
@@ -2104,74 +3102,89 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                                     : [...p.recurring_weekdays, d.id].sort((a, b) => a - b),
                                 }))
                               }
-                              className={`px-2 py-1 rounded-md border text-[11px] ${active ? 'bg-[#E31E24] text-white border-[#E31E24]' : 'bg-white text-gray-700 border-gray-300'}`}
+                              className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium ${active ? 'bg-[#E31E24] text-white border-[#E31E24]' : 'bg-white text-gray-700 border-gray-300'}`}
                             >
                               {d.label}
                             </button>
                           );
                         })}
                       </div>
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={form.recurring_registration_close_hours}
-                        onChange={(e) => setForm((p) => ({ ...p, recurring_registration_close_hours: e.target.value }))}
-                        placeholder="Cierre inscripción (hs antes)"
-                        className="w-full text-xs outline-none rounded-lg border border-black bg-white px-2 py-1.5"
-                      />
-                      <p className="text-[11px] text-gray-500">Usa la hora de inicio como base y crea ocurrencias hasta la fecha indicada.</p>
                     </div>
                   )}
                 </div>
 
-                <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Cierre de inscripción</label>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-gray-400" />
-                    <input
-                      type="datetime-local"
-                      step={1800}
-                      value={form.registration_closed_at}
-                      onChange={(e) => setForm((p) => ({ ...p, registration_closed_at: e.target.value }))}
-                      className="w-full text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5"
-                    />
+                <div className="rounded-2xl border border-gray-200 bg-white p-4 md:col-span-2">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Políticas de registro y cancelación</label>
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] text-gray-500 mb-1 block">Cierre de registro</label>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={form.reg_close_unit}
+                          onChange={(e) => setForm((p) => ({ ...p, reg_close_unit: e.target.value as 'days' | 'hours' }))}
+                          className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm outline-none"
+                        >
+                          <option value="days">Días</option>
+                          <option value="hours">Horas</option>
+                        </select>
+                        <input
+                          type="number"
+                          min={0}
+                          value={form.reg_close_value}
+                          onChange={(e) => setForm((p) => ({ ...p, reg_close_value: e.target.value }))}
+                          className="w-16 text-sm outline-none rounded-lg border border-gray-300 px-2 py-1.5 text-center"
+                        />
+                      </div>
+                      {form.start_date && (
+                        <p className="text-[10px] text-gray-400 mt-1.5">
+                          La inscripción se cerrará el {(() => {
+                            const val = Number(form.reg_close_value) || 0;
+                            const ms = form.reg_close_unit === 'days' ? val * 86400000 : val * 3600000;
+                            const startMs = new Date(`${form.start_date}T${form.start_time}`).getTime();
+                            const d = new Date(startMs - ms);
+                            return d.toLocaleString('es', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                          })()}
+                        </p>
+                      )}
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 mb-1 block">Plazo de cancelación</label>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={form.cancel_unit}
+                          onChange={(e) => setForm((p) => ({ ...p, cancel_unit: e.target.value as 'days' | 'hours' }))}
+                          className="rounded-lg border border-gray-300 px-2 py-1.5 text-sm outline-none"
+                        >
+                          <option value="days">Días</option>
+                          <option value="hours">Horas</option>
+                        </select>
+                        <input
+                          type="number"
+                          min={0}
+                          value={form.cancel_value}
+                          onChange={(e) => setForm((p) => ({ ...p, cancel_value: e.target.value }))}
+                          className="w-16 text-sm outline-none rounded-lg border border-gray-300 px-2 py-1.5 text-center"
+                        />
+                      </div>
+                      {form.start_date && (
+                        <p className="text-[10px] text-gray-400 mt-1.5">
+                          Los participantes pueden cancelar hasta el {(() => {
+                            const val = Number(form.cancel_value) || 0;
+                            const ms = form.cancel_unit === 'days' ? val * 86400000 : val * 3600000;
+                            const startMs = new Date(`${form.start_date}T${form.start_time}`).getTime();
+                            const d = new Date(startMs - ms);
+                            return d.toLocaleString('es', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+                          })()}
+                        </p>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-[11px] text-gray-500 mt-1">El torneo se cierra por cupo completo o por esta fecha/hora.</p>
                 </div>
+                  </>
+                )}
 
-                <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Política de cancelación</label>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-gray-400" />
-                    <input
-                      value={form.cancellation_notice_hours}
-                      onChange={(e) => setForm((p) => ({ ...p, cancellation_notice_hours: e.target.value }))}
-                      placeholder="24"
-                      className="w-16 text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5 text-center font-semibold"
-                    />
-                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">hs antes del inicio</span>
-                  </div>
-                  <p className="text-[11px] text-gray-500 mt-1">Ejemplo: 24 hs antes del partido se puede cancelar la inscripción.</p>
-                </div>
-
-                <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Duración (min)</label>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <Clock3 className="w-4 h-4 text-gray-400" />
-                    <input
-                      type="number"
-                      min={30}
-                      value={form.duration_min}
-                      step={30}
-                      onChange={(e) => setForm((p) => ({ ...p, duration_min: e.target.value }))}
-                      placeholder="120"
-                      className="w-24 text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5 text-center font-semibold"
-                    />
-                    <span className="text-xs px-2 py-1 rounded-md border border-[#ED1C24] bg-[#ED1C24] text-white">min</span>
-                  </div>
-                </div>
-
+                {createStep === 1 && (
+                  <>
                 <div className="rounded-2xl border border-[#ED1C24]/20 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Precio inscripción (€)</label>
                   <div className="mt-1.5 flex items-center gap-2">
@@ -2189,10 +3202,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 <div className="rounded-2xl border border-gray-200 bg-white p-3 md:col-span-2">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-2">
                     <Award className="w-4 h-4 text-gray-400" />
-                    Premios por puesto (céntimos)
+                    Premios por puesto (€)
                   </label>
                   <p className="text-[11px] text-gray-500 mt-1 mb-2">
-                    Una fila por cada puesto con premio (texto libre: Campeón, Subcampeón…). El total es la suma. El podio en Competición es aparte: allí eliges campeón y, si quieres, 2.º y 3.er puesto.
+                    Indica el premio en euros para cada puesto (ej. 150 = €150). El total se calcula automáticamente.
                   </p>
                   <div className="space-y-2">
                     {createPrizeRows.map((row) => (
@@ -2205,14 +3218,17 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                           placeholder="Ej. Campeón"
                           className="flex-1 min-w-[140px] text-sm rounded-lg border border-black bg-white px-2 py-1.5"
                         />
-                        <input
-                          value={row.amountCents}
-                          onChange={(e) =>
-                            setCreatePrizeRows((rows) => rows.map((r) => (r.localId === row.localId ? { ...r, amountCents: e.target.value } : r)))
-                          }
-                          placeholder="Céntimos"
-                          className="w-28 text-sm rounded-lg border border-black bg-white px-2 py-1.5 text-center font-semibold"
-                        />
+                        <div className="flex items-center gap-1">
+                          <span className="text-sm text-gray-500 font-medium">€</span>
+                          <input
+                            value={row.amountEuros}
+                            onChange={(e) =>
+                              setCreatePrizeRows((rows) => rows.map((r) => (r.localId === row.localId ? { ...r, amountEuros: e.target.value } : r)))
+                            }
+                            placeholder="150"
+                            className="w-24 text-sm rounded-lg border border-black bg-white px-2 py-1.5 text-center font-semibold"
+                          />
+                        </div>
                         <button
                           type="button"
                           onClick={() =>
@@ -2327,9 +3343,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1">Si el invitado no acepta en este tiempo, el cupo se libera automáticamente.</p>
                 </div>
-              </div>
+                  </>
+                )}
 
-
+                {createStep === 2 && (
+                  <>
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Descripción</label>
                   <textarea
@@ -2377,22 +3395,35 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
                 {courts.length === 0 && <p className="text-xs text-gray-400">No hay canchas disponibles para este club.</p>}
               </div>
+                  </>
+                )}
             </div>
 
             <div className="px-6 py-4 border-t border-gray-200 bg-white flex justify-end gap-2 shrink-0">
               <button onClick={() => setCreateOpen(false)} className="px-3 py-2 rounded-xl bg-gray-100 text-xs font-semibold">Cerrar</button>
               <button
+                type="button"
+                onClick={() => setCreateStep((s) => Math.max(0, s - 1))}
+                disabled={createStep === 0 || saving}
+                className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-semibold disabled:opacity-50"
+              >
+                Anterior
+              </button>
+              <button
                 disabled={saving}
                 onClick={async () => {
+                  if (createStep < 2) {
+                    if (validateCreateStep(createStep)) {
+                      setCreateStep((s) => Math.min(2, s + 1));
+                    }
+                    return;
+                  }
                   if (!clubId) return;
-                  if (!form.start_at) {
-                    toast.error('Selecciona fecha y hora de inicio');
+                  if (!form.start_date) {
+                    toast.error('Selecciona una fecha de inicio');
                     return;
                   }
-                  if (!isHalfHourLocalDateTime(form.start_at)) {
-                    toast.error('El inicio debe ser en punto o y media (ej: 09:00, 09:30)');
-                    return;
-                  }
+                  const composedStartAt = `${form.start_date}T${form.start_time}`;
                   if (form.recurring_enabled) {
                     if (!form.recurring_end_date) {
                       toast.error('Indica fecha fin de recurrencia');
@@ -2402,32 +3433,32 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       toast.error('Selecciona al menos un día de la semana');
                       return;
                     }
-                    const startDateOnly = form.start_at.slice(0, 10);
-                    if (form.recurring_end_date < startDateOnly) {
+                    if (form.recurring_end_date < form.start_date) {
                       toast.error('La fecha fin no puede ser anterior al inicio');
                       return;
                     }
                   }
-                  if (!isValidDuration30(form.duration_min)) {
-                    toast.error('La duración debe ser múltiplo de 30 (30, 60, 90, 120...)');
+                  const durationMin = calcDurationMin(form.start_time, form.end_time);
+                  if (durationMin < 30) {
+                    toast.error('La duración mínima es 30 minutos');
                     return;
                   }
                   if (!selectedCourtIds.length) {
                     toast.error('Selecciona al menos una cancha');
                     return;
                   }
+                  const startMs = new Date(composedStartAt).getTime();
+                  const regCloseVal = Number(form.reg_close_value) || 0;
+                  const regCloseMs = form.reg_close_unit === 'days' ? regCloseVal * 86400000 : regCloseVal * 3600000;
+                  const cancelVal = Number(form.cancel_value) || 0;
+                  const cancelMs = form.cancel_unit === 'days' ? cancelVal * 86400000 : cancelVal * 3600000;
                   const payload = {
                     club_id: clubId,
                     name: form.name || null,
-                    start_at: new Date(form.start_at).toISOString(),
-                    registration_closed_at: form.registration_closed_at ? new Date(form.registration_closed_at).toISOString() : null,
-                    cancellation_cutoff_at: (() => {
-                      const h = Number(form.cancellation_notice_hours);
-                      if (!Number.isFinite(h) || h < 0) return null;
-                      const startMs = new Date(form.start_at).getTime();
-                      return new Date(startMs - h * 60 * 60 * 1000).toISOString();
-                    })(),
-                    duration_min: Number(form.duration_min),
+                    start_at: new Date(composedStartAt).toISOString(),
+                    registration_closed_at: regCloseVal > 0 ? new Date(startMs - regCloseMs).toISOString() : null,
+                    cancellation_cutoff_at: cancelVal > 0 ? new Date(startMs - cancelMs).toISOString() : null,
+                    duration_min: durationMin,
                     price_cents: eurosInputToCents(form.price_euros),
                     max_players: Number(form.max_players),
                     registration_mode: form.registration_mode,
@@ -2448,15 +3479,18 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   const savingToastId = toast.loading('Guardando torneo...');
                   try {
                     if (form.recurring_enabled) {
-                      const [startDate, startTime] = form.start_at.split('T');
                       const recurringPayload = {
                         ...payload,
-                        start_date: startDate,
+                        start_date: form.start_date,
                         end_date: form.recurring_end_date,
-                        start_time: startTime?.slice(0, 5) ?? '00:00',
+                        start_time: form.start_time,
                         weekdays: form.recurring_weekdays,
-                        registration_close_hours_before_start: Number(form.recurring_registration_close_hours || 0),
-                        cancellation_hours_before_start: Number(form.cancellation_notice_hours || 0),
+                        registration_close_hours_before_start: regCloseVal > 0
+                          ? (form.reg_close_unit === 'days' ? regCloseVal * 24 : regCloseVal)
+                          : 0,
+                        cancellation_hours_before_start: cancelVal > 0
+                          ? (form.cancel_unit === 'days' ? cancelVal * 24 : cancelVal)
+                          : 0,
                       };
                       const result = await tournamentsService.createRecurring(recurringPayload);
                       setCreateOpen(false);
@@ -2464,13 +3498,20 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       setPosterFileCreate(null);
                       setForm({
                         name: '',
+                        start_date: '',
+                        start_time: '21:30',
+                        end_time: '23:00',
                         start_at: '',
                         recurring_enabled: false,
                         recurring_end_date: '',
                         recurring_weekdays: [1],
                         recurring_registration_close_hours: '12',
                         registration_closed_at: '',
+                        reg_close_unit: 'days',
+                        reg_close_value: '0',
                         cancellation_notice_hours: '24',
+                        cancel_unit: 'days',
+                        cancel_value: '1',
                         duration_min: '120',
                         price_euros: '0',
                         max_players: '12',
@@ -2484,7 +3525,15 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         normas: '',
                       });
                       await refreshList();
-                      toast.success(`Serie creada: ${result.created_count} torneo(s), omitidos ${result.skipped_count}`, { id: savingToastId });
+                      if (result.skipped_count > 0) {
+                        const first = result.skipped[0];
+                        toast.error(
+                          `Hay conflictos de turnos/canchas. Creados: ${result.created_count}, omitidos: ${result.skipped_count}. ${first ? `Ejemplo: ${new Date(first.start_at).toLocaleString()} - ${first.reason}` : ''}`,
+                          { id: savingToastId }
+                        );
+                      } else {
+                        toast.success(`Serie creada: ${result.created_count} torneo(s)`, { id: savingToastId });
+                      }
                       return;
                     }
                     const created = await tournamentsService.create(payload);
@@ -2509,18 +3558,25 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     setSelectedCourtIds([]);
                     setForm({
                       name: '',
+                      start_date: '',
+                      start_time: '21:30',
+                      end_time: '23:00',
                       start_at: '',
                       recurring_enabled: false,
                       recurring_end_date: '',
                       recurring_weekdays: [1],
                       recurring_registration_close_hours: '12',
                       registration_closed_at: '',
+                      reg_close_unit: 'days',
+                      reg_close_value: '0',
                       cancellation_notice_hours: '24',
+                      cancel_unit: 'days',
+                      cancel_value: '1',
                       duration_min: '120',
                       price_euros: '0',
                       max_players: '12',
                       registration_mode: 'individual',
-                    visibility: 'private',
+                      visibility: 'private',
                       gender: '',
                       invite_ttl_minutes: '1440',
                       elo_min: '',
@@ -2539,9 +3595,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 }}
                 className="px-3 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-semibold shadow-[0_8px_24px_rgba(227,30,36,0.25)] disabled:opacity-70 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
-                {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                {saving ? 'Guardando...' : 'Guardar'}
+                {saving && createStep === 2 && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {createStep < 2 ? 'Siguiente' : saving ? 'Guardando...' : 'Guardar'}
               </button>
+            </div>
             </div>
           </div>
         </div>
@@ -2554,7 +3611,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
               <div>
                 <p className="text-sm font-bold text-[#1A1A1A]">Generador manual de cruces</p>
                 <p className="text-xs text-gray-500">
-                  Solo eliminación directa: define la primera ronda y confirma para guardar el cuadro en el torneo (partidos y resultados se cargan al instante).
+                  Solo eliminación directa: define la primera ronda, asigna cancha por partido y confirma para guardar el cuadro.
                 </p>
               </div>
               <button
@@ -2568,7 +3625,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-xs font-semibold text-[#1A1A1A] mb-2">Emparejamientos manuales (Ronda 1)</p>
+                <p className="text-xs font-semibold text-[#1A1A1A] mb-2">Ronda inicial: enfrentamientos y cancha</p>
                 <div className="space-y-2">
                   {manualRound1.map((m, idx) => {
                     const usedElsewhere = new Set(
@@ -2581,7 +3638,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     return (
                       <div key={m.id} className="rounded-lg border border-gray-100 p-2">
                         <p className="text-[11px] font-semibold text-gray-600 mb-1">Partido {idx + 1}</p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
                           <select
                             value={m.a}
                             onChange={(e) => setManualRound1((prev) => prev.map((x) => (x.id === m.id ? { ...x, a: e.target.value } : x)))}
@@ -2602,6 +3659,16 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                               <option key={`${m.id}-b-${o.id}`} value={o.id}>{o.label}</option>
                             ))}
                           </select>
+                          <select
+                            value={m.courtId}
+                            onChange={(e) => setManualRound1((prev) => prev.map((x) => (x.id === m.id ? { ...x, courtId: e.target.value } : x)))}
+                            className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+                          >
+                            <option value="">Cancha</option>
+                            {courts.map((c) => (
+                              <option key={`${m.id}-court-${c.id}`} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     );
@@ -2615,6 +3682,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     const incomplete = manualRound1.some((m) => !m.a || !m.b);
                     if (incomplete) {
                       toast.error('Completa los dos equipos en cada partido de la primera ronda.');
+                      return;
+                    }
+                    const missingCourt = manualRound1.some((m) => !m.courtId);
+                    if (missingCourt) {
+                      toast.error('Selecciona una cancha para cada enfrentamiento.');
                       return;
                     }
                     const used = new Set<string>();
@@ -2632,6 +3704,15 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     }
                     setManualGenerating(true);
                     try {
+                      await tournamentsService.setupCompetition(selected.id, {
+                        format: 'single_elim',
+                        match_rules: {
+                          best_of_sets: Number(bestOfSets) || 3,
+                          allow_draws: false,
+                          bracket_seed_strategy: bracketSeedStrategy,
+                          manual_round1_courts: manualRound1.map((m, idx) => ({ match_number: idx + 1, court_id: m.courtId })),
+                        } as Record<string, unknown>,
+                      });
                       const r = await tournamentsService.generateCompetitionManual(selected.id, teamKeys);
                       toast.success(`Cuadro generado: ${r.teams_count} equipos, ${r.matches_count} partidos`);
                       setManualOpen(false);
@@ -2743,10 +3824,14 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   const teamCount = Math.max(2, teams.length);
                   const bracketSize = nextPowerOfTwo(teamCount);
                   const matchCount = Math.max(1, bracketSize / 2);
+                  const availableCourtIds = Array.isArray(freshTournament.tournament_courts)
+                    ? freshTournament.tournament_courts.map((x) => String(x.court_id))
+                    : [];
                   const rows: ManualRoundMatch[] = Array.from({ length: matchCount }, (_, idx) => ({
                     id: `m${idx + 1}`,
                     a: '',
                     b: '',
+                    courtId: availableCourtIds[idx % Math.max(1, availableCourtIds.length)] ?? '',
                   }));
                   setManualRound1(rows);
                   setManualOpen(true);
@@ -2892,11 +3977,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
           <div className="w-full max-w-2xl rounded-2xl bg-white border border-gray-100 shadow-xl p-4 space-y-3 max-h-[90vh] overflow-y-auto">
             <p className="text-sm font-bold text-[#1A1A1A]">{t('tournament_pairing_title')}</p>
             <p className="text-xs text-gray-500">
-              {selected.registration_mode === 'individual'
-                ? t('tournament_pairing_subtitle_individual')
-                : t('tournament_pairing_subtitle_pair')}
+              {selected.registration_mode === 'pair'
+                ? t('tournament_pairing_subtitle_pair')
+                : t('tournament_pairing_subtitle_individual')}
             </p>
-            {selected.registration_mode === 'individual' && singlesPairingOrder.length > 0 && (
+            {(selected.registration_mode === 'individual' || selected.registration_mode === 'both') && singlesPairingOrder.length > 0 && (
               <div className="space-y-4">
                 {pairingSectionFlags.hasDefined && (
                 <div>
@@ -3077,7 +4162,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
               </div>
             )}
-            {selected.registration_mode === 'pair' && (
+            {(selected.registration_mode === 'pair' || selected.registration_mode === 'both') && (
               <div className="space-y-2">
                 {pairIncompleteRows.length === 0 ? (
                   <p className="text-xs text-gray-500">{t('tournament_pairing_pair_none_incomplete')}</p>
@@ -3126,7 +4211,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 )}
               </div>
             )}
-            {selected.registration_mode === 'pair' && (
+            {(selected.registration_mode === 'pair' || selected.registration_mode === 'both') && (
               <button
                 type="button"
                 onClick={() => setPairingManageOpen(false)}

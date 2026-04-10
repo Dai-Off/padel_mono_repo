@@ -9,9 +9,11 @@ export function getApiBase(): string {
 
 export class HttpError extends Error {
     status: number;
-    constructor(message: string, status: number) {
+    code?: string;
+    constructor(message: string, status: number, code?: string) {
         super(message);
         this.status = status;
+        this.code = code;
     }
 }
 
@@ -79,7 +81,15 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
-        throw new HttpError(errorData.error || errorData.message || 'API Request failed', response.status);
+        throw new HttpError(
+            (errorData as { error?: string; message?: string }).error ||
+                (errorData as { message?: string }).message ||
+                'API Request failed',
+            response.status,
+            typeof (errorData as { code?: unknown }).code === 'string'
+                ? (errorData as { code: string }).code
+                : undefined
+        );
     }
 
     return response.json();
@@ -115,7 +125,11 @@ export async function apiFetchWithAuth<T>(path: string, options: RequestInit = {
             window.location.assign('/login');
         }
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
-        throw new HttpError(errorData.error || errorData.message || 'API Request failed', response.status);
+        throw new HttpError(
+            errorData.error || errorData.message || 'API Request failed',
+            response.status,
+            typeof errorData.code === 'string' ? errorData.code : undefined
+        );
     }
     return response.json();
 }
@@ -145,7 +159,11 @@ export async function apiFetchBlobWithAuth(path: string): Promise<Blob> {
             window.location.assign('/login');
         }
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
-        throw new HttpError(errorData.error || errorData.message || 'API Request failed', response.status);
+        throw new HttpError(
+            errorData.error || errorData.message || 'API Request failed',
+            response.status,
+            typeof errorData.code === 'string' ? errorData.code : undefined
+        );
     }
     return response.blob();
 }
