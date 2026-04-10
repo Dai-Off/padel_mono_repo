@@ -715,12 +715,12 @@ POST /learning/courses/:id/submit:
 | 4.2 | `GET /learning/courses/:id` (detalle con lecciones y estado; sin lecciones si locked) | ✅ Hecho |
 | 4.3 | `POST /learning/courses/:id/complete-lesson` (marcar progreso, validación de nivel y orden) | ✅ Hecho |
 
-### Fase 5 — Herramienta de creación (club)
+### Fase 5 — Herramienta de creación (club) ✅ COMPLETADA
 
-| # | Tarea | Detalle |
-|---|-------|---------|
-| 5.1 | CRUD de preguntas | POST, PUT, PATCH deactivate, GET list |
-| 5.2 | CRUD de cursos | POST, PUT, POST lessons, PUT lessons, DELETE lessons, POST submit |
+| # | Tarea | Estado |
+|---|-------|--------|
+| 5.1 | CRUD de preguntas (POST, PUT, PATCH deactivate, GET list con filtros) | ✅ Hecho |
+| 5.2 | CRUD de cursos (POST create draft, PUT update, POST/PUT/DELETE lessons, POST submit a revisión) | ✅ Hecho |
 
 ### Fase 6 — Testing y ajustes
 

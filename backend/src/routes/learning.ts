@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
+import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -1372,6 +1373,562 @@ router.post('/courses/:id/complete-lesson', requireAuth, async (req: Request, re
  * from another router — keeps the call in-process and avoids exposing a
  * public lookup endpoint by playerId.
  */
+// ---------------------------------------------------------------------------
+// Club management helpers
+// ---------------------------------------------------------------------------
+
+const VALID_QUESTION_TYPES = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'] as const;
+const VALID_AREAS = ['technique', 'tactics', 'physical', 'mental_vocabulary'] as const;
+
+function canAccessClub(req: Request, clubId: string): boolean {
+  if (req.authContext?.adminId) return true;
+  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
+}
+
+function validateQuestionContent(type: string, content: unknown): string | null {
+  if (!content || typeof content !== 'object') return 'content es obligatorio y debe ser un objeto';
+  const c = content as Record<string, unknown>;
+
+  switch (type) {
+    case 'test_classic': {
+      if (!c.question || typeof c.question !== 'string') return 'content.question debe ser un string no vacío';
+      if (!Array.isArray(c.options) || c.options.length !== 4 || !c.options.every((o: unknown) => typeof o === 'string' && o.length > 0))
+        return 'content.options debe ser un array de 4 strings no vacíos';
+      if (typeof c.correct_index !== 'number' || !Number.isInteger(c.correct_index) || c.correct_index < 0 || c.correct_index > 3)
+        return 'content.correct_index debe ser un entero entre 0 y 3';
+      return null;
+    }
+    case 'true_false': {
+      if (!c.statement || typeof c.statement !== 'string') return 'content.statement debe ser un string no vacío';
+      if (typeof c.correct_answer !== 'boolean') return 'content.correct_answer debe ser un booleano';
+      return null;
+    }
+    case 'multi_select': {
+      if (!c.question || typeof c.question !== 'string') return 'content.question debe ser un string no vacío';
+      if (!Array.isArray(c.options) || c.options.length !== 4 || !c.options.every((o: unknown) => typeof o === 'string' && o.length > 0))
+        return 'content.options debe ser un array de 4 strings no vacíos';
+      if (!Array.isArray(c.correct_indices) || c.correct_indices.length < 2 || c.correct_indices.length > 3)
+        return 'content.correct_indices debe ser un array de 2 a 3 enteros';
+      const indices = c.correct_indices as number[];
+      if (!indices.every((i: number) => Number.isInteger(i) && i >= 0 && i <= 3))
+        return 'Cada valor en correct_indices debe ser un entero entre 0 y 3';
+      if (new Set(indices).size !== indices.length)
+        return 'correct_indices no puede tener valores duplicados';
+      return null;
+    }
+    case 'match_columns': {
+      if (!Array.isArray(c.pairs) || c.pairs.length < 3 || c.pairs.length > 5)
+        return 'content.pairs debe ser un array de 3 a 5 objetos';
+      for (const pair of c.pairs as Record<string, unknown>[]) {
+        if (!pair || typeof pair.left !== 'string' || !pair.left || typeof pair.right !== 'string' || !pair.right)
+          return 'Cada par debe tener left y right como strings no vacíos';
+      }
+      return null;
+    }
+    case 'order_sequence': {
+      if (!Array.isArray(c.steps) || c.steps.length < 3 || c.steps.length > 6)
+        return 'content.steps debe ser un array de 3 a 6 strings';
+      if (!c.steps.every((s: unknown) => typeof s === 'string' && (s as string).length > 0))
+        return 'Cada step debe ser un string no vacío';
+      return null;
+    }
+    default:
+      return `Tipo de pregunta desconocido: ${type}`;
+  }
+}
+
+async function getCourseForClubEdit(
+  req: Request,
+  courseId: string,
+  requireDraft: boolean,
+): Promise<{ course: any } | { error: string; status: number }> {
+  const supabase = getSupabaseServiceRoleClient();
+  const { data: course, error } = await supabase
+    .from('learning_courses')
+    .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, status, created_at, updated_at')
+    .eq('id', courseId)
+    .maybeSingle();
+
+  if (error) return { error: error.message, status: 500 };
+  if (!course) return { error: 'Curso no encontrado', status: 404 };
+  if (!canAccessClub(req, course.club_id)) {
+    return { error: 'No tienes acceso a este club', status: 403 };
+  }
+  if (requireDraft && course.status !== 'draft') {
+    return { error: 'Solo se puede modificar un curso en estado draft', status: 400 };
+  }
+  return { course };
+}
+
+// ---------------------------------------------------------------------------
+// Preguntas — gestión de club (requireClubOwnerOrAdmin)
+// ---------------------------------------------------------------------------
+
+// POST /learning/questions — crear pregunta
+router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const { club_id, type, level, area, has_video, video_url, content } = req.body ?? {};
+
+    if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+
+    if (!VALID_QUESTION_TYPES.includes(type)) {
+      return res.status(400).json({ ok: false, error: `type debe ser uno de: ${VALID_QUESTION_TYPES.join(', ')}` });
+    }
+    if (!VALID_AREAS.includes(area)) {
+      return res.status(400).json({ ok: false, error: `area debe ser uno de: ${VALID_AREAS.join(', ')}` });
+    }
+    if (level == null || typeof level !== 'number' || level < 0) {
+      return res.status(400).json({ ok: false, error: 'level debe ser un número >= 0' });
+    }
+    if (has_video && (!video_url || typeof video_url !== 'string')) {
+      return res.status(400).json({ ok: false, error: 'video_url es obligatorio cuando has_video es true' });
+    }
+
+    const contentError = validateQuestionContent(type, content);
+    if (contentError) return res.status(400).json({ ok: false, error: contentError });
+
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('learning_questions')
+      .insert({
+        type,
+        level,
+        area,
+        has_video: !!has_video,
+        video_url: has_video ? video_url : null,
+        content,
+        created_by_club: club_id,
+        is_active: true,
+      })
+      .select('*')
+      .single();
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.status(201).json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// PUT /learning/questions/:id — actualizar pregunta
+router.put('/questions/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const questionId = req.params.id;
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('learning_questions')
+      .select('id, created_by_club, type')
+      .eq('id', questionId)
+      .maybeSingle();
+
+    if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
+    if (!canAccessClub(req, existing.created_by_club)) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const { type, level, area, has_video, video_url, content } = req.body ?? {};
+    const updates: Record<string, unknown> = {};
+
+    const effectiveType = type ?? existing.type;
+
+    if (type !== undefined) {
+      if (!VALID_QUESTION_TYPES.includes(type)) {
+        return res.status(400).json({ ok: false, error: `type debe ser uno de: ${VALID_QUESTION_TYPES.join(', ')}` });
+      }
+      updates.type = type;
+    }
+    if (area !== undefined) {
+      if (!VALID_AREAS.includes(area)) {
+        return res.status(400).json({ ok: false, error: `area debe ser uno de: ${VALID_AREAS.join(', ')}` });
+      }
+      updates.area = area;
+    }
+    if (level !== undefined) {
+      if (typeof level !== 'number' || level < 0) {
+        return res.status(400).json({ ok: false, error: 'level debe ser un número >= 0' });
+      }
+      updates.level = level;
+    }
+    if (has_video !== undefined) {
+      updates.has_video = !!has_video;
+      if (has_video && (!video_url && !updates.video_url)) {
+        // Necesita video_url si se activa has_video
+      }
+    }
+    if (video_url !== undefined) {
+      updates.video_url = video_url;
+    }
+    if (content !== undefined) {
+      const contentError = validateQuestionContent(effectiveType, content);
+      if (contentError) return res.status(400).json({ ok: false, error: contentError });
+      updates.content = content;
+    }
+
+    // Validar has_video + video_url combinados
+    const finalHasVideo = updates.has_video !== undefined ? updates.has_video : undefined;
+    if (finalHasVideo === true) {
+      const finalVideoUrl = updates.video_url;
+      if (!finalVideoUrl || typeof finalVideoUrl !== 'string') {
+        return res.status(400).json({ ok: false, error: 'video_url es obligatorio cuando has_video es true' });
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ ok: false, error: 'No se enviaron campos para actualizar' });
+    }
+
+    const { data, error } = await supabase
+      .from('learning_questions')
+      .update(updates)
+      .eq('id', questionId)
+      .select('*')
+      .single();
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// PATCH /learning/questions/:id/deactivate — desactivar pregunta
+router.patch('/questions/:id/deactivate', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const questionId = req.params.id;
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('learning_questions')
+      .select('id, created_by_club')
+      .eq('id', questionId)
+      .maybeSingle();
+
+    if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
+    if (!canAccessClub(req, existing.created_by_club)) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const { error } = await supabase
+      .from('learning_questions')
+      .update({ is_active: false })
+      .eq('id', questionId);
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, data: { id: questionId, is_active: false } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// GET /learning/questions — listar preguntas del club
+router.get('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const clubId = req.query.club_id as string;
+    if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio como query param' });
+    if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+
+    const supabase = getSupabaseServiceRoleClient();
+    let query = supabase
+      .from('learning_questions')
+      .select('*')
+      .eq('created_by_club', clubId)
+      .order('created_at', { ascending: false });
+
+    const { type, area, is_active } = req.query;
+    if (type) query = query.eq('type', type as string);
+    if (area) query = query.eq('area', area as string);
+    // Default: solo activas; si se pasa is_active=false explícitamente, mostrar inactivas
+    if (is_active === 'false') {
+      query = query.eq('is_active', false);
+    } else if (is_active === 'all') {
+      // No filtrar por is_active
+    } else {
+      query = query.eq('is_active', true);
+    }
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, data: data ?? [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Cursos — gestión de club (requireClubOwnerOrAdmin)
+// ---------------------------------------------------------------------------
+
+// POST /learning/courses — crear curso en draft
+router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const { club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal } = req.body ?? {};
+
+    if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!title || typeof title !== 'string' || !title.trim()) {
+      return res.status(400).json({ ok: false, error: 'title es obligatorio' });
+    }
+    if (elo_min != null && elo_max != null && Number(elo_min) > Number(elo_max)) {
+      return res.status(400).json({ ok: false, error: 'elo_min no puede ser mayor que elo_max' });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('learning_courses')
+      .insert({
+        club_id,
+        title: title.trim(),
+        description: description || null,
+        banner_url: banner_url || null,
+        elo_min: elo_min ?? 0,
+        elo_max: elo_max ?? 7,
+        pedagogical_goal: pedagogical_goal || null,
+        status: 'draft',
+      })
+      .select('*')
+      .single();
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.status(201).json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// PUT /learning/courses/:id — actualizar curso (solo en draft)
+router.put('/courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await getCourseForClubEdit(req, req.params.id, true);
+    if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
+
+    const { title, description, banner_url, elo_min, elo_max, pedagogical_goal } = req.body ?? {};
+    const updates: Record<string, unknown> = {};
+
+    if (title !== undefined) {
+      if (typeof title !== 'string' || !title.trim()) {
+        return res.status(400).json({ ok: false, error: 'title no puede estar vacío' });
+      }
+      updates.title = title.trim();
+    }
+    if (description !== undefined) updates.description = description || null;
+    if (banner_url !== undefined) updates.banner_url = banner_url || null;
+    if (elo_min !== undefined) updates.elo_min = elo_min;
+    if (elo_max !== undefined) updates.elo_max = elo_max;
+    if (pedagogical_goal !== undefined) updates.pedagogical_goal = pedagogical_goal || null;
+
+    // Validar rango elo con valores finales
+    const finalMin = updates.elo_min ?? result.course.elo_min;
+    const finalMax = updates.elo_max ?? result.course.elo_max;
+    if (Number(finalMin) > Number(finalMax)) {
+      return res.status(400).json({ ok: false, error: 'elo_min no puede ser mayor que elo_max' });
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ ok: false, error: 'No se enviaron campos para actualizar' });
+    }
+
+    updates.updated_at = new Date().toISOString();
+
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('learning_courses')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select('*')
+      .single();
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// POST /learning/courses/:id/lessons — añadir lección a curso (solo en draft)
+router.post('/courses/:id/lessons', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await getCourseForClubEdit(req, req.params.id, true);
+    if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
+
+    const { title, description, video_url, duration_seconds } = req.body ?? {};
+    if (!title || typeof title !== 'string' || !title.trim()) {
+      return res.status(400).json({ ok: false, error: 'title es obligatorio' });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+
+    // Calcular order
+    const { data: maxRow } = await supabase
+      .from('learning_course_lessons')
+      .select('order')
+      .eq('course_id', req.params.id)
+      .order('order', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextOrder = (maxRow?.order ?? 0) + 1;
+
+    const { data, error } = await supabase
+      .from('learning_course_lessons')
+      .insert({
+        course_id: req.params.id,
+        order: nextOrder,
+        title: title.trim(),
+        description: description || null,
+        video_url: video_url || null,
+        duration_seconds: duration_seconds ?? null,
+      })
+      .select('*')
+      .single();
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.status(201).json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// PUT /learning/courses/:id/lessons/:lessonId — actualizar lección (solo en draft)
+router.put('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await getCourseForClubEdit(req, req.params.id, true);
+    if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
+
+    const supabase = getSupabaseServiceRoleClient();
+    const { lessonId } = req.params;
+
+    // Verificar que la lección pertenece al curso
+    const { data: lesson, error: lessonErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id')
+      .eq('id', lessonId)
+      .eq('course_id', req.params.id)
+      .maybeSingle();
+
+    if (lessonErr) return res.status(500).json({ ok: false, error: lessonErr.message });
+    if (!lesson) return res.status(404).json({ ok: false, error: 'Lección no encontrada en este curso' });
+
+    const { title, description, video_url, duration_seconds } = req.body ?? {};
+    const updates: Record<string, unknown> = {};
+
+    if (title !== undefined) {
+      if (typeof title !== 'string' || !title.trim()) {
+        return res.status(400).json({ ok: false, error: 'title no puede estar vacío' });
+      }
+      updates.title = title.trim();
+    }
+    if (description !== undefined) updates.description = description || null;
+    if (video_url !== undefined) updates.video_url = video_url || null;
+    if (duration_seconds !== undefined) updates.duration_seconds = duration_seconds;
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ ok: false, error: 'No se enviaron campos para actualizar' });
+    }
+
+    const { data, error } = await supabase
+      .from('learning_course_lessons')
+      .update(updates)
+      .eq('id', lessonId)
+      .select('*')
+      .single();
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// DELETE /learning/courses/:id/lessons/:lessonId — eliminar lección (solo en draft)
+router.delete('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await getCourseForClubEdit(req, req.params.id, true);
+    if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
+
+    const supabase = getSupabaseServiceRoleClient();
+    const { lessonId } = req.params;
+
+    // Verificar que la lección pertenece al curso
+    const { data: lesson, error: lessonErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id')
+      .eq('id', lessonId)
+      .eq('course_id', req.params.id)
+      .maybeSingle();
+
+    if (lessonErr) return res.status(500).json({ ok: false, error: lessonErr.message });
+    if (!lesson) return res.status(404).json({ ok: false, error: 'Lección no encontrada en este curso' });
+
+    // Eliminar
+    const { error: deleteErr } = await supabase
+      .from('learning_course_lessons')
+      .delete()
+      .eq('id', lessonId);
+
+    if (deleteErr) return res.status(500).json({ ok: false, error: deleteErr.message });
+
+    // Re-ordenar lecciones restantes
+    const { data: remaining } = await supabase
+      .from('learning_course_lessons')
+      .select('id')
+      .eq('course_id', req.params.id)
+      .order('order', { ascending: true });
+
+    for (let i = 0; i < (remaining || []).length; i++) {
+      await supabase
+        .from('learning_course_lessons')
+        .update({ order: i + 1 })
+        .eq('id', remaining![i].id);
+    }
+
+    return res.json({ ok: true, data: { id: lessonId, deleted: true } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// POST /learning/courses/:id/submit — enviar curso a revisión
+router.post('/courses/:id/submit', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await getCourseForClubEdit(req, req.params.id, true);
+    if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
+
+    const supabase = getSupabaseServiceRoleClient();
+
+    // Contar lecciones
+    const { count, error: countErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id', { count: 'exact', head: true })
+      .eq('course_id', req.params.id);
+
+    if (countErr) return res.status(500).json({ ok: false, error: countErr.message });
+
+    if ((count ?? 0) < 2) {
+      return res.status(400).json({ ok: false, error: 'El curso debe tener al menos 2 lecciones para enviarse a revisión' });
+    }
+
+    const { data, error } = await supabase
+      .from('learning_courses')
+      .update({ status: 'pending_review', updated_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .select('id, status, updated_at')
+      .single();
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Internal helpers for other backend modules
+// ---------------------------------------------------------------------------
+
 export async function getPlayerStreakMultiplier(playerId: string): Promise<number> {
   const supabase = getSupabaseServiceRoleClient();
   const { data } = await supabase

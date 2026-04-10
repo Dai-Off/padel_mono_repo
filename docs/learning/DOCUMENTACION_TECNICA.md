@@ -22,6 +22,7 @@
    - 3.10 [POST /learning/daily-lesson/complete](#310-post-learningdaily-lessoncomplete)
    - 3.13 [Rachas compartidas](#313-rachas-compartidas-fase-35)
    - 3.14 [Cursos — endpoints de jugador](#314-cursos--endpoints-de-jugador-fase-4)
+   - 3.15 [Herramienta de creacion — gestion de club](#315-herramienta-de-creacion--gestion-de-club-fase-5)
 4. [Decisiones tecnicas tomadas](#4-decisiones-tecnicas-tomadas)
 5. [Diferencias entre plan e implementacion](#5-diferencias-entre-plan-e-implementacion)
 6. [Issues conocidos](#6-issues-conocidos)
@@ -960,6 +961,41 @@ Detalle de un curso. Si el jugador no tiene nivel (locked), devuelve info basica
 
 ---
 
+### 3.15 Herramienta de creacion — gestion de club (Fase 5)
+
+Endpoints protegidos con `requireClubOwnerOrAdmin` (middleware existente del proyecto). Todos verifican `canAccessClub(req, clubId)` para asegurar que el usuario solo gestiona contenido de sus propios clubs. Los admins tienen acceso a todos los clubs.
+
+#### Preguntas (CRUD)
+
+| Ruta | Descripcion |
+|------|-------------|
+| `POST /learning/questions` | Crea pregunta. Valida tipo, area, level, y content segun tipo (5 formatos). |
+| `PUT /learning/questions/:id` | Actualiza campos parciales. Re-valida content si se cambia tipo. |
+| `PATCH /learning/questions/:id/deactivate` | Soft-delete (is_active = false). |
+| `GET /learning/questions?club_id=...` | Lista preguntas del club. Filtros opcionales: type, area, is_active. |
+
+**Validacion de content** — funcion `validateQuestionContent(type, content)`:
+- `test_classic`: question (string), options (4 strings), correct_index (0-3)
+- `true_false`: statement (string), correct_answer (boolean)
+- `multi_select`: question (string), options (4 strings), correct_indices (2-3 ints, 0-3, sin duplicados)
+- `match_columns`: pairs (3-5 objetos {left, right})
+- `order_sequence`: steps (3-6 strings)
+
+#### Cursos (CRUD)
+
+| Ruta | Descripcion |
+|------|-------------|
+| `POST /learning/courses` | Crea curso en estado `draft`. |
+| `PUT /learning/courses/:id` | Actualiza curso (solo en draft). |
+| `POST /learning/courses/:id/lessons` | Anade leccion con order auto-incremental. |
+| `PUT /learning/courses/:id/lessons/:lessonId` | Actualiza leccion (solo en draft). |
+| `DELETE /learning/courses/:id/lessons/:lessonId` | Elimina leccion y re-ordena restantes. |
+| `POST /learning/courses/:id/submit` | Envia a revision (minimo 2 lecciones). |
+
+Helper reutilizable `getCourseForClubEdit(req, courseId, requireDraft)` centraliza la verificacion de existencia, acceso al club y estado draft para evitar repeticion en los 5 endpoints que lo necesitan.
+
+---
+
 ## 4. Decisiones tecnicas tomadas
 
 ### Algoritmo de seleccion
@@ -1094,4 +1130,16 @@ Puntos donde el codigo actual difiere del plan (`PLAN_DESARROLLO_MODULO_APRENDIZ
 - `POST /learning/courses/:id/complete-lesson`: marca leccion como completada. Valida nivel (403), pertenencia de leccion al curso (400), y orden secuencial (400). Upsert idempotente.
 - Documentadas rutas en `backend/API.md`.
 - Testeado con curl: 12 tests (lista, detalle desbloqueado/bloqueado, complete-lesson con validaciones, edge cases). 12/12 PASS.
+- Verificado: TypeScript compila sin errores.
+
+### Fase 5 — Herramienta de creacion (gestion de club)
+
+- Import de `requireClubOwnerOrAdmin` y helper `canAccessClub` (patron de `schoolCourses.ts`).
+- Constantes `VALID_QUESTION_TYPES` y `VALID_AREAS` para validacion.
+- Funcion `validateQuestionContent(type, content)` — valida estructura del content segun los 5 tipos de pregunta.
+- Helper `getCourseForClubEdit(req, courseId, requireDraft)` — centraliza verificacion de existencia, acceso al club y estado draft.
+- CRUD de preguntas: POST (crear), PUT (actualizar parcial), PATCH deactivate (soft-delete), GET (listar con filtros type/area/is_active).
+- CRUD de cursos: POST (crear draft), PUT (actualizar en draft), POST/PUT/DELETE lessons (con auto-order y re-ordenamiento), POST submit (a pending_review con minimo 2 lecciones).
+- Documentadas 10 rutas en `backend/API.md`.
+- Testeado con curl: 20+ tests (CRUD preguntas, validaciones de content, CRUD cursos y lecciones, submit, restricciones de estado, 401/403/404). Todos PASS.
 - Verificado: TypeScript compila sin errores.

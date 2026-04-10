@@ -340,6 +340,26 @@ Requiere auth de jugador (`Authorization: Bearer <access_token>`).
 | GET | `/learning/courses/:id` | Detalle de curso con lecciones y estado (completed/available/locked). Sin lecciones si locked. |
 | POST | `/learning/courses/:id/complete-lesson` | Marcar lección completada. Body: `{ lesson_id }`. Valida nivel y orden secuencial. |
 
+### Gestión de preguntas (club owner / admin)
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/learning/questions` | Crear pregunta. Body: `{ club_id, type, level, area, has_video, video_url, content }`. |
+| PUT | `/learning/questions/:id` | Actualizar pregunta. |
+| PATCH | `/learning/questions/:id/deactivate` | Desactivar pregunta (soft delete). |
+| GET | `/learning/questions` | Listar preguntas del club. Query: `?club_id=...&type=...&area=...&is_active=true`. |
+
+### Gestión de cursos (club owner / admin)
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/learning/courses` | Crear curso en draft. Body: `{ club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal }`. |
+| PUT | `/learning/courses/:id` | Actualizar curso (solo en draft). |
+| POST | `/learning/courses/:id/lessons` | Añadir lección a curso (solo en draft). Body: `{ title, description, video_url, duration_seconds }`. |
+| PUT | `/learning/courses/:id/lessons/:lessonId` | Actualizar lección (solo en draft). |
+| DELETE | `/learning/courses/:id/lessons/:lessonId` | Eliminar lección (solo en draft). Re-ordena automáticamente. |
+| POST | `/learning/courses/:id/submit` | Enviar curso a revisión (mínimo 2 lecciones). |
+
 ## Privacidad (privacy_logs) – solo escritura
 
 | Método | Ruta | Descripción |
