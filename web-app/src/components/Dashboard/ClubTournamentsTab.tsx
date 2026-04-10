@@ -2531,11 +2531,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   </div>
                   <div>
                     <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Elo mínimo</label>
-                    <input value={settingsForm.elo_min} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_min: e.target.value }))} placeholder="Ej. 800" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                    <input value={settingsForm.elo_min} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_min: e.target.value }))} placeholder="Ej. 3.0" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   </div>
                   <div>
                     <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Elo máximo</label>
-                    <input value={settingsForm.elo_max} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_max: e.target.value }))} placeholder="Ej. 1500" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                    <input value={settingsForm.elo_max} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_max: e.target.value }))} placeholder="Ej. 5.0" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   </div>
                   <div>
                     <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Visibilidad</label>
@@ -2994,18 +2994,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                           value={form.start_date}
                           onChange={(e) => setForm((p) => ({ ...p, start_date: e.target.value }))}
                           className="w-full text-sm outline-none bg-transparent"
-                        />
-                        <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500 mb-1 block">Fecha de fin</label>
-                      <div className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5 bg-gray-50">
-                        <input
-                          type="date"
-                          value={form.start_date}
-                          disabled
-                          className="w-full text-sm outline-none bg-transparent text-gray-500"
                         />
                         <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
                       </div>
