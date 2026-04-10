@@ -353,7 +353,7 @@ async function resolveOrganizerPlayerId(req: Request, clubId: string): Promise<s
  *   get:
  *     tags: [Tournaments]
  *     summary: Listar torneos de un club
- *     description: Devuelve la grilla principal de torneos con contador X/Y por torneo.
+ *     description: Devuelve la grilla principal de torneos con contador X/Y por torneo y pending_entry_requests_count (solicitudes de ingreso pendientes).
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: query
@@ -397,6 +397,20 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
       slotsMap = aggregateSlotsByTournamentId((insRows ?? []) as any[]);
     }
 
+    const entryReqCounts = new Map<string, number>();
+    if (ids.length) {
+      const { data: erRows, error: erErr } = await supabase
+        .from('tournament_entry_requests')
+        .select('tournament_id')
+        .in('tournament_id', ids)
+        .eq('status', 'pending');
+      if (erErr) return res.status(500).json({ ok: false, error: erErr.message });
+      for (const r of erRows ?? []) {
+        const tid = String((r as { tournament_id: string }).tournament_id);
+        entryReqCounts.set(tid, (entryReqCounts.get(tid) ?? 0) + 1);
+      }
+    }
+
     const out = rows.map((row) => {
       const sid = (row as { id: string }).id;
       const slots = slotsMap.get(sid) ?? { confirmedPlayers: 0, pendingPlayers: 0 };
@@ -404,6 +418,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
         ...row,
         confirmed_count: slots.confirmedPlayers,
         pending_count: slots.pendingPlayers,
+        pending_entry_requests_count: entryReqCounts.get(sid) ?? 0,
       };
     });
     return res.json({ ok: true, tournaments: out });
@@ -2424,6 +2439,482 @@ router.post('/:id/join', async (req: Request, res: Response) => {
 
 /**
  * @openapi
+ * /tournaments/{id}/entry-requests:
+ *   post:
+ *     tags: [Tournaments]
+ *     summary: Enviar solicitud de ingreso (jugador)
+ *     description: |
+ *       Torneo público, abierto y sin precio de inscripción. Sirve cuando no cumples Elo (u otras reglas automáticas)
+ *       y quieres que el organizador decida. Modo `pair` exclusivo no admite este flujo.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [message]
+ *             properties:
+ *               message: { type: string, minLength: 1, maxLength: 2000 }
+ *           examples:
+ *             sample:
+ *               value: { message: "Hola, me falta poco de Elo para el mínimo; ¿me podéis admitir?" }
+ *     responses:
+ *       200:
+ *         description: Solicitud creada
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok: { value: { ok: true, request: { id: "uuid", status: "pending" } } }
+ *       400: { description: Torneo no apto, mensaje vacío o demasiado largo }
+ *       401: { description: Token requerido }
+ *       403: { description: Torneo no público }
+ *       404: { description: Torneo no encontrado }
+ *       409: { description: Ya inscrito o ya hay solicitud pendiente }
+ */
+router.post('/:id/entry-requests', async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  const auth = await getPlayerIdFromBearer(req);
+  if (auth.error || !auth.playerId) return res.status(401).json({ ok: false, error: auth.error ?? 'Token requerido' });
+  const message = String(req.body?.message ?? '').trim();
+  if (!message) return res.status(400).json({ ok: false, error: 'message es obligatorio' });
+  if (message.length > 2000) return res.status(400).json({ ok: false, error: 'El mensaje no puede superar 2000 caracteres' });
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: tournament, error: tErr } = await supabase
+      .from('tournaments')
+      .select('id, visibility, status, price_cents, registration_mode')
+      .eq('id', tournamentId)
+      .maybeSingle();
+    if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
+    if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (Number((tournament as { price_cents?: number }).price_cents ?? 0) > 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Este torneo requiere pago; no admite solicitud de ingreso por este canal.',
+      });
+    }
+    if (String((tournament as { visibility?: string }).visibility) !== 'public') {
+      return res.status(403).json({ ok: false, error: 'Solo en torneos públicos puedes enviar una solicitud' });
+    }
+    if (String((tournament as { status: string }).status) !== 'open') {
+      return res.status(400).json({ ok: false, error: 'El torneo no está abierto' });
+    }
+    const rm = String((tournament as { registration_mode?: string }).registration_mode ?? 'individual');
+    if (rm === 'pair') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Este torneo solo admite inscripción por parejas con invitación',
+      });
+    }
+
+    const { data: existingIns } = await supabase
+      .from('tournament_inscriptions')
+      .select('id')
+      .eq('tournament_id', tournamentId)
+      .or(`player_id_1.eq.${auth.playerId},player_id_2.eq.${auth.playerId}`)
+      .maybeSingle();
+    if (existingIns) return res.status(409).json({ ok: false, error: 'Ya estás inscrito en este torneo' });
+
+    const { data: existingReq } = await supabase
+      .from('tournament_entry_requests')
+      .select('id')
+      .eq('tournament_id', tournamentId)
+      .eq('player_id', auth.playerId)
+      .eq('status', 'pending')
+      .maybeSingle();
+    if (existingReq) return res.status(409).json({ ok: false, error: 'Ya tienes una solicitud pendiente para este torneo' });
+
+    const { data: created, error: insErr } = await supabase
+      .from('tournament_entry_requests')
+      .insert({
+        tournament_id: tournamentId,
+        player_id: auth.playerId,
+        message,
+      })
+      .select('id, status, created_at')
+      .single();
+    if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
+    return res.json({ ok: true, request: created });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/entry-requests:
+ *   get:
+ *     tags: [Tournaments]
+ *     summary: Listar solicitudes de ingreso (organizador)
+ *     description: Incluye jugador embebido. Orden — pendientes primero, luego por fecha.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Lista
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok: { value: { ok: true, requests: [] } }
+ *       403: { description: Sin acceso al club }
+ *       404: { description: Torneo no encontrado }
+ */
+router.get('/:id/entry-requests', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: tournament, error: tErr } = await supabase
+      .from('tournaments')
+      .select('id, club_id')
+      .eq('id', tournamentId)
+      .maybeSingle();
+    if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
+    if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    const { data: rows, error } = await supabase
+      .from('tournament_entry_requests')
+      .select(
+        'id, created_at, updated_at, message, status, response_message, resolved_at, player_id, request_player:players!tournament_entry_requests_player_id_fkey(id, first_name, last_name, email, avatar_url, elo_rating, gender)'
+      )
+      .eq('tournament_id', tournamentId)
+      .order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    const list = [...(rows ?? [])].sort((a: any, b: any) => {
+      const pa = a.status === 'pending' ? 0 : 1;
+      const pb = b.status === 'pending' ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    return res.json({ ok: true, requests: list });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/entry-requests/{requestId}/approve:
+ *   post:
+ *     tags: [Tournaments]
+ *     summary: Aprobar solicitud e inscribir al jugador
+ *     description: |
+ *       Omite validación de Elo (no omite género). Si el torneo está lleno, responde 409 con code `tournament_full`.
+ *       En torneos multi-división puedes enviar `division_id` si el Elo no encaja en ninguna categoría.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: path
+ *         name: requestId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               division_id: { type: string, format: uuid, nullable: true }
+ *     responses:
+ *       200: { description: Jugador inscrito y solicitud aprobada }
+ *       400: { description: Solicitud no pendiente o división inválida }
+ *       403: { description: Sin acceso o género no coincide }
+ *       404: { description: No encontrado }
+ *       409:
+ *         description: Sin cupos (tournament_full) o ya inscrito
+ *         content:
+ *           application/json:
+ *             examples:
+ *               full:
+ *                 value: { ok: false, error: "El torneo ya está lleno…", code: "tournament_full" }
+ */
+router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  const requestId = req.params.requestId;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: tournament, error: tErr } = await supabase
+      .from('tournaments')
+      .select(
+        'id, club_id, status, max_players, invite_ttl_minutes, registration_mode, elo_min, elo_max, gender, level_mode'
+      )
+      .eq('id', tournamentId)
+      .maybeSingle();
+    if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
+    if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    if (String((tournament as { status: string }).status) !== 'open') {
+      return res.status(400).json({ ok: false, error: 'El torneo no está abierto' });
+    }
+    if (!['individual', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode ?? 'individual'))) {
+      return res.status(400).json({ ok: false, error: 'Este torneo no admite alta individual confirmada' });
+    }
+
+    const { data: reqRow, error: rErr } = await supabase
+      .from('tournament_entry_requests')
+      .select('id, status, player_id, message')
+      .eq('id', requestId)
+      .eq('tournament_id', tournamentId)
+      .maybeSingle();
+    if (rErr) return res.status(500).json({ ok: false, error: rErr.message });
+    if (!reqRow) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
+    if (String((reqRow as { status: string }).status) !== 'pending') {
+      return res.status(400).json({ ok: false, error: 'La solicitud ya fue resuelta' });
+    }
+    const playerId = String((reqRow as { player_id: string }).player_id);
+
+    const { data: player, error: pErr } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, elo_rating, gender')
+      .eq('id', playerId)
+      .maybeSingle();
+    if (pErr) return res.status(500).json({ ok: false, error: pErr.message });
+    if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+
+    if (!playerMeetsTournamentGender((tournament as { gender?: string }).gender, (player as { gender?: string }).gender)) {
+      return res.status(403).json({
+        ok: false,
+        error: 'El género del jugador no coincide con la categoría del torneo.',
+      });
+    }
+
+    await cleanupExpiredTournamentInvites(tournamentId);
+    const slots = await getTournamentSlots(tournamentId);
+    if (slots.confirmedPlayers >= Number((tournament as { max_players: number }).max_players)) {
+      return res.status(409).json({
+        ok: false,
+        error: 'El torneo ya está lleno; no hay cupos para aceptar esta solicitud. Puedes rechazar la solicitud o dejarla en visto.',
+        code: 'tournament_full',
+      });
+    }
+
+    const { data: existingIns } = await supabase
+      .from('tournament_inscriptions')
+      .select('id')
+      .eq('tournament_id', tournamentId)
+      .or(`player_id_1.eq.${playerId},player_id_2.eq.${playerId}`)
+      .maybeSingle();
+    if (existingIns) {
+      return res.status(409).json({ ok: false, error: 'El jugador ya está inscrito en este torneo' });
+    }
+
+    const elo = Number((player as { elo_rating?: number }).elo_rating ?? 3.5);
+    const levelModePart = String((tournament as { level_mode?: string }).level_mode ?? 'single_band');
+    let divisionIdPart: string | null = null;
+    if (levelModePart === 'multi_division') {
+      const manualDiv = req.body?.division_id != null ? String(req.body.division_id).trim() : '';
+      if (manualDiv) {
+        const { data: divRow } = await supabase
+          .from('tournament_divisions')
+          .select('id')
+          .eq('id', manualDiv)
+          .eq('tournament_id', tournamentId)
+          .maybeSingle();
+        if (!divRow) return res.status(400).json({ ok: false, error: 'division_id no válido para este torneo' });
+        divisionIdPart = manualDiv;
+      } else {
+        divisionIdPart = await pickDivisionIdForElo(supabase, tournamentId, elo);
+        if (!divisionIdPart) {
+          return res.status(400).json({
+            ok: false,
+            error:
+              'No hay categoría que encaje con el Elo del jugador; reenvía la aprobación indicando division_id en el cuerpo.',
+          });
+        }
+      }
+    }
+
+    const { tokenHash } = generateInviteToken();
+    const nowIso = new Date().toISOString();
+    const expiresAt = new Date(
+      Date.now() + Number((tournament as { invite_ttl_minutes: number }).invite_ttl_minutes) * 60000
+    ).toISOString();
+    const { error: insErr } = await supabase.from('tournament_inscriptions').insert({
+      tournament_id: tournamentId,
+      status: 'confirmed',
+      invited_at: nowIso,
+      expires_at: expiresAt,
+      confirmed_at: nowIso,
+      player_id_1: playerId,
+      token_hash: tokenHash,
+      ...(divisionIdPart ? { division_id: divisionIdPart } : {}),
+    });
+    if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
+
+    const now = new Date().toISOString();
+    const { error: upReqErr } = await supabase
+      .from('tournament_entry_requests')
+      .update({ status: 'approved', resolved_at: now, updated_at: now })
+      .eq('id', requestId)
+      .eq('tournament_id', tournamentId)
+      .eq('status', 'pending');
+    if (upReqErr) return res.status(500).json({ ok: false, error: upReqErr.message });
+
+    const joinedName = `${(player as any).first_name ?? ''} ${(player as any).last_name ?? ''}`.trim() || 'Un jugador';
+    await supabase.from('tournament_chat_messages').insert({
+      tournament_id: tournamentId,
+      author_user_id: '00000000-0000-0000-0000-000000000000',
+      author_name: 'Sistema',
+      message: `${joinedName} se ha unido al torneo (solicitud aprobada).`,
+    });
+    await refreshTournamentStatus(tournamentId, { force: true, skipInviteCleanup: true });
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/entry-requests/{requestId}/reject:
+ *   post:
+ *     tags: [Tournaments]
+ *     summary: Rechazar solicitud de ingreso
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: path
+ *         name: requestId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               message: { type: string, maxLength: 2000, description: Mensaje opcional al jugador }
+ *     responses:
+ *       200: { description: Rechazada }
+ *       400: { description: La solicitud no está pendiente }
+ *       403: { description: Sin acceso }
+ *       404: { description: No encontrado }
+ */
+router.post('/:id/entry-requests/:requestId/reject', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  const requestId = req.params.requestId;
+  const responseMessage = String(req.body?.message ?? '').trim() || null;
+  if (responseMessage && responseMessage.length > 2000) {
+    return res.status(400).json({ ok: false, error: 'El mensaje de respuesta no puede superar 2000 caracteres' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: tournament, error: tErr } = await supabase.from('tournaments').select('id, club_id').eq('id', tournamentId).maybeSingle();
+    if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
+    if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    const { data: reqRow, error: rErr } = await supabase
+      .from('tournament_entry_requests')
+      .select('id, status')
+      .eq('id', requestId)
+      .eq('tournament_id', tournamentId)
+      .maybeSingle();
+    if (rErr) return res.status(500).json({ ok: false, error: rErr.message });
+    if (!reqRow) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
+    if (String((reqRow as { status: string }).status) !== 'pending') {
+      return res.status(400).json({ ok: false, error: 'La solicitud ya fue resuelta' });
+    }
+    const now = new Date().toISOString();
+    const { error: uErr } = await supabase
+      .from('tournament_entry_requests')
+      .update({
+        status: 'rejected',
+        response_message: responseMessage,
+        resolved_at: now,
+        updated_at: now,
+      })
+      .eq('id', requestId)
+      .eq('tournament_id', tournamentId)
+      .eq('status', 'pending');
+    if (uErr) return res.status(500).json({ ok: false, error: uErr.message });
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/entry-requests/{requestId}/dismiss:
+ *   post:
+ *     tags: [Tournaments]
+ *     summary: Marcar solicitud como vista / archivar sin inscribir
+ *     description: Útil si el torneo se llenó y quieres quitarla de la cola pendiente sin rechazarla explícitamente.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: path
+ *         name: requestId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200: { description: Archivada (status dismissed) }
+ *       400: { description: La solicitud no está pendiente }
+ *       403: { description: Sin acceso }
+ *       404: { description: No encontrado }
+ */
+router.post('/:id/entry-requests/:requestId/dismiss', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  const requestId = req.params.requestId;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: tournament, error: tErr } = await supabase.from('tournaments').select('id, club_id').eq('id', tournamentId).maybeSingle();
+    if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
+    if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    const { data: reqRow, error: rErr } = await supabase
+      .from('tournament_entry_requests')
+      .select('id, status')
+      .eq('id', requestId)
+      .eq('tournament_id', tournamentId)
+      .maybeSingle();
+    if (rErr) return res.status(500).json({ ok: false, error: rErr.message });
+    if (!reqRow) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
+    if (String((reqRow as { status: string }).status) !== 'pending') {
+      return res.status(400).json({ ok: false, error: 'La solicitud ya fue resuelta' });
+    }
+    const now = new Date().toISOString();
+    const { error: uErr } = await supabase
+      .from('tournament_entry_requests')
+      .update({ status: 'dismissed', resolved_at: now, updated_at: now })
+      .eq('id', requestId)
+      .eq('tournament_id', tournamentId)
+      .eq('status', 'pending');
+    if (uErr) return res.status(500).json({ ok: false, error: uErr.message });
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
  * /tournaments/{id}/player-detail:
  *   get:
  *     tags: [Tournaments]
@@ -2442,7 +2933,7 @@ router.post('/:id/join', async (req: Request, res: Response) => {
  *           application/json:
  *             examples:
  *               ok:
- *                 value: { ok: true, tournament: {}, counts: { confirmed: 0, pending: 0 }, my_inscription: null }
+ *                 value: { ok: true, tournament: {}, counts: { confirmed: 0, pending: 0 }, my_inscription: null, my_entry_request: null }
  *       401: { description: Token requerido/expirado }
  *       403: { description: Torneo privado sin acceso }
  *       404: { description: Torneo no encontrado }
@@ -2461,11 +2952,21 @@ router.get('/:id/player-detail', async (req: Request, res: Response) => {
     await cleanupExpiredTournamentInvites(tournamentId);
     await refreshTournamentStatus(tournamentId, { force: true, skipInviteCleanup: true });
     const slots = await getTournamentSlots(tournamentId);
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: myEntryRow } = await supabase
+      .from('tournament_entry_requests')
+      .select('id, status, message, response_message, created_at, resolved_at')
+      .eq('tournament_id', tournamentId)
+      .eq('player_id', auth.playerId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
     return res.json({
       ok: true,
       tournament: ctx.tournament,
       counts: { confirmed: slots.confirmedPlayers, pending: slots.pendingPlayers },
       my_inscription: ctx.myInscription,
+      my_entry_request: myEntryRow ?? null,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

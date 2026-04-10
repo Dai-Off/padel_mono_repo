@@ -43,6 +43,30 @@ export type TournamentListItem = {
   tournament_courts?: { court_id: string }[];
   confirmed_count?: number;
   pending_count?: number;
+  /** Solicitudes de ingreso pendientes de revisión (organizador). */
+  pending_entry_requests_count?: number;
+};
+
+export type TournamentEntryRequestPlayer = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string | null;
+  avatar_url?: string | null;
+  elo_rating?: number | null;
+  gender?: string | null;
+};
+
+export type TournamentEntryRequest = {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  message: string;
+  status: 'pending' | 'approved' | 'rejected' | 'dismissed';
+  response_message: string | null;
+  resolved_at: string | null;
+  player_id: string;
+  request_player?: TournamentEntryRequestPlayer | null;
 };
 
 export type TournamentInscription = {
@@ -273,6 +297,46 @@ export const tournamentsService = {
   async joinPublic(tournamentId: string): Promise<void> {
     await apiFetchWithAuth(`/tournaments/${tournamentId}/join`, {
       method: 'POST',
+    });
+  },
+
+  async submitEntryRequest(tournamentId: string, message: string): Promise<{ id: string; status: string }> {
+    const res = await apiFetchWithAuth<{ ok: true; request: { id: string; status: string } }>(
+      `/tournaments/${tournamentId}/entry-requests`,
+      { method: 'POST', body: JSON.stringify({ message }) }
+    );
+    return res.request;
+  },
+
+  async listEntryRequests(tournamentId: string): Promise<TournamentEntryRequest[]> {
+    const res = await apiFetchWithAuth<{ ok: true; requests: TournamentEntryRequest[] }>(
+      `/tournaments/${tournamentId}/entry-requests`
+    );
+    return res.requests ?? [];
+  },
+
+  async approveEntryRequest(
+    tournamentId: string,
+    requestId: string,
+    body?: { division_id?: string | null }
+  ): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/entry-requests/${requestId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    });
+  },
+
+  async rejectEntryRequest(tournamentId: string, requestId: string, message?: string): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/entry-requests/${requestId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ message: message ?? '' }),
+    });
+  },
+
+  async dismissEntryRequest(tournamentId: string, requestId: string): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/entry-requests/${requestId}/dismiss`, {
+      method: 'POST',
+      body: JSON.stringify({}),
     });
   },
 

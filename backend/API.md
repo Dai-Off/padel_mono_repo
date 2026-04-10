@@ -295,6 +295,18 @@ El **webhook** de Stripe usa body raw y está montado en la app principal (no pa
 
 ---
 
+## Incidencias de club (`/club-incidents`)
+
+**Bearer** + **dueño o admin** con acceso al `club_id`.
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| GET | `/club-incidents/summary` | Resumen del mes (UTC), distribución, recientes, jugadores con riesgo. Query: `?club_id=`. |
+| GET | `/club-incidents` | Lista. Query: `?club_id=` obligatorio; opcional `incident_type`, `severity`, `limit`. |
+| POST | `/club-incidents` | Registrar incidencia (`late_cancel`, `no_show`, `damage`, `complaint`). Cuerpo: `club_id`, `subject_player_id`, `incident_type`, `severity`, `description`; opcional `booking_id`, `cost_cents`, `resolution`. |
+
+---
+
 ## Inventario (`/inventario`)
 
 **Bearer** + **dueño o admin**.
