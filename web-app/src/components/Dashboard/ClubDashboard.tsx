@@ -50,6 +50,7 @@ import { ClubCashClosingTab } from '../CashClosing/ClubCashClosing';
 import { ClubDashboardExtensions } from './ClubDashboardExtensions';
 import { ClubReviewsTab } from './ClubReviewsTab';
 import { ClubTournamentsTab } from './ClubTournamentsTab';
+import { ClubIncidentsTab } from './ClubIncidentsTab';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
@@ -66,6 +67,7 @@ export const ClubDashboard = () => {
     const isCashClosingPage = location.pathname === '/cierreCaja';
     const isCrmPage = location.pathname === '/crm';
     const isResenasPage = location.pathname === '/resenas';
+    const isIncidenciasPage = location.pathname === '/incidencias';
 
     const [loading, setLoading] = useState(true);
     const [clubResolved, setClubResolved] = useState(false);
@@ -129,7 +131,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isPlayerProfilePage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isTorneosPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isPlayerProfilePage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage) {
             setLoading(false);
             return;
         }
@@ -142,7 +144,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isPlayerProfilePage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isTorneosPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isPlayerProfilePage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -215,7 +217,7 @@ export const ClubDashboard = () => {
     };
 
     // Evita spinner doble en pantallas donde el tab ya se encarga del loader (CRM y Reseñas).
-    if (!club && loading && !isResenasPage && !isCrmPage) {
+    if (!club && loading && !isResenasPage && !isCrmPage && !isIncidenciasPage) {
         return (
             <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
                 <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
@@ -235,6 +237,8 @@ export const ClubDashboard = () => {
                         <ClubPlayersTab />
                     ) : isResenasPage ? (
                         <ClubReviewsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isIncidenciasPage ? (
+                        <ClubIncidentsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isCrmPage ? (
                         <ClubDashboardExtensions clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isTorneosPage ? (
