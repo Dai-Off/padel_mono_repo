@@ -46,8 +46,6 @@ create table if not exists public.learning_sessions (
   total_count integer not null default 5,
   score integer not null,
   xp_earned integer not null,
-  elo_before numeric not null,
-  elo_after numeric not null,
   timezone text not null default 'UTC',
   completed_at timestamptz not null default now()
 );
@@ -63,7 +61,7 @@ create table if not exists public.learning_courses (
   title text not null,
   description text,
   banner_url text,
-  level_required numeric not null default 0,
+  elo_min numeric not null default 0,
   pedagogical_goal text,
   status text not null default 'draft'
     check (status in ('draft', 'pending_review', 'active', 'inactive')),
@@ -73,7 +71,7 @@ create table if not exists public.learning_courses (
 
 create index if not exists idx_lc_status on public.learning_courses(status);
 create index if not exists idx_lc_club on public.learning_courses(club_id);
-create index if not exists idx_lc_level on public.learning_courses(level_required);
+create index if not exists idx_lc_level on public.learning_courses(elo_min);
 
 -------------------------
 -- learning_course_lessons
@@ -134,3 +132,10 @@ create table if not exists public.learning_shared_streaks (
 
 create index if not exists idx_lss_player1 on public.learning_shared_streaks(player_id_1);
 create index if not exists idx_lss_player2 on public.learning_shared_streaks(player_id_2);
+
+-- Fase 4: rango de elo para cursos
+alter table public.learning_courses
+  rename column level_required to elo_min;
+
+alter table public.learning_courses
+  add column if not exists elo_max numeric not null default 7;
