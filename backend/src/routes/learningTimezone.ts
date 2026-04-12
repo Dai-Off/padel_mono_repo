@@ -85,3 +85,28 @@ export function getTodayRange(timezone: string): { start: string; end: string } 
   const end = zonedTimeToUtc(`${dateStr}T23:59:59`, timezone).toISOString();
   return { start, end };
 }
+
+export function getCurrentWeekRange(timezone: string): { start: string; end: string } {
+  const now = new Date();
+  const dateStr = dayKeyInTz(now, timezone);
+  const localDate = new Date(dateStr + 'T12:00:00Z');
+  
+  let dayOfWeek = localDate.getUTCDay();
+  if (dayOfWeek === 0) dayOfWeek = 7; 
+  
+  const mondaySub = dayOfWeek - 1;
+  const sundayAdd = 7 - dayOfWeek;
+  
+  const monday = new Date(localDate);
+  monday.setUTCDate(monday.getUTCDate() - mondaySub);
+  const mondayStr = monday.toISOString().slice(0, 10);
+  
+  const sunday = new Date(localDate);
+  sunday.setUTCDate(sunday.getUTCDate() + sundayAdd);
+  const sundayStr = sunday.toISOString().slice(0, 10);
+
+  return {
+    start: zonedTimeToUtc(`${mondayStr}T00:00:00`, timezone).toISOString(),
+    end: zonedTimeToUtc(`${sundayStr}T23:59:59`, timezone).toISOString(),
+  };
+}

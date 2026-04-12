@@ -6,11 +6,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { androidReadableText } from '../components/home/inicio/textStyles';
 
 type Props = {
+  videoUrl?: string | null;
+  currentIndex: number;
+  total: number;
   onClose: () => void;
   onNext: () => void; // Para ir a la pregunta
 };
 
-export function DailyLessonVideoScreen({ onClose, onNext }: Props) {
+export function DailyLessonVideoScreen({ videoUrl, currentIndex, total, onClose, onNext }: Props) {
   const insets = useSafeAreaInsets();
   const [showQuestionButton, setShowQuestionButton] = useState(false);
   const buttonOpacity = useRef(new Animated.Value(0)).current;
@@ -55,7 +58,7 @@ export function DailyLessonVideoScreen({ onClose, onNext }: Props) {
         <Pressable onPress={onClose} style={styles.closeButton}>
           <Ionicons name="close" size={20} color="rgba(255,255,255,0.8)" />
         </Pressable>
-        <Text style={styles.stepIndicator}>1/5</Text>
+        <Text style={styles.stepIndicator}>{currentIndex + 1}/{total}</Text>
       </View>
 
       {/* Botón flotante que aparece después de 5 seg */}

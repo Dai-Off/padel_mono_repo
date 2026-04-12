@@ -1,20 +1,27 @@
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { Ionicons } from '@expo/vector-icons';
-import { ACCENT } from './constants';
-import { DASH, dash } from './dash';
-import { androidReadableText } from './textStyles';
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
+import { BlurView } from "expo-blur";
+import { Ionicons } from "@expo/vector-icons";
+import { ACCENT } from "./constants";
+import { DASH, dash } from "./dash";
+import { androidReadableText } from "./textStyles";
 
-const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
+const WEEK_LABELS = ["L", "M", "X", "J", "V", "S", "D"] as const;
 
 type Props = {
   /** Texto bonus (API); sin dato → `-`. */
   bonusText?: string | null;
+  weeklyProgress?: boolean[];
+  alreadyCompleted?: boolean;
   onPress?: () => void;
 };
 
-export function DailyLessonCard({ bonusText, onPress }: Props) {
+export function DailyLessonCard({
+  bonusText,
+  weeklyProgress,
+  alreadyCompleted,
+  onPress,
+}: Props) {
   const bonus = dash(bonusText);
 
   return (
@@ -23,27 +30,32 @@ export function DailyLessonCard({ bonusText, onPress }: Props) {
       style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
     >
       <LinearGradient
-        colors={['rgba(248,113,23,0.12)', 'rgba(223,30,36,0.22)', 'rgba(47,25,15,0.95)']}
+        colors={[
+          "rgba(248,113,23,0.12)",
+          "rgba(223,30,36,0.22)",
+          "rgba(47,25,15,0.95)",
+        ]}
         locations={[0, 0.4, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      {Platform.OS === 'ios' ? (
-        <BlurView intensity={24} tint="dark" style={[StyleSheet.absoluteFill, styles.blur]} />
+      {Platform.OS === "ios" ? (
+        <BlurView
+          intensity={24}
+          tint="dark"
+          style={[StyleSheet.absoluteFill, styles.blur]}
+        />
       ) : null}
       <View style={styles.glassBorder} />
       <View
-        style={[
-          styles.inner,
-          Platform.OS === 'android' && styles.innerAndroid,
-        ]}
+        style={[styles.inner, Platform.OS === "android" && styles.innerAndroid]}
       >
         <View style={styles.topRow}>
           <View style={styles.iconCol}>
             <View style={styles.iconGlow} />
             <LinearGradient
-              colors={['#f97316', ACCENT]}
+              colors={["#f97316", ACCENT]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.iconBox}
@@ -53,34 +65,54 @@ export function DailyLessonCard({ bonusText, onPress }: Props) {
           </View>
           <View style={styles.titleCol}>
             <Text style={styles.title}>Lección diaria</Text>
-            <Text style={styles.bonus}>
-              Bonus: {bonus}
-            </Text>
+            <Text style={styles.bonus}>Bonus: {bonus}</Text>
           </View>
         </View>
 
         <View style={styles.daysRow}>
-          {WEEK_LABELS.map((label) => (
-            <View key={label} style={styles.dayCol}>
-              <Text style={styles.dayLabel}>{label}</Text>
-              <View style={styles.dayCell}>
-                <Text style={styles.dayPlaceholder}>{DASH}</Text>
+          {WEEK_LABELS.map((label, idx) => {
+            const isCompleted = weeklyProgress ? weeklyProgress[idx] : false;
+            return (
+              <View key={label} style={styles.dayCol}>
+                <Text
+                  style={[
+                    styles.dayLabel,
+                    isCompleted && styles.dayLabelCompleted,
+                  ]}
+                >
+                  {label}
+                </Text>
+                <View
+                  style={[
+                    styles.dayCell,
+                    isCompleted && styles.dayCellCompleted,
+                  ]}
+                >
+                  {isCompleted ? (
+                    <Ionicons name="checkmark" size={12} color="#fff" />
+                  ) : (
+                    <Text style={styles.dayPlaceholder}>{DASH}</Text>
+                  )}
+                </View>
               </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
         <View style={styles.footer} collapsable={false}>
           <View style={styles.ctaShell} collapsable={false}>
             <Text
               numberOfLines={1}
-              textBreakStrategy={Platform.OS === 'android' ? 'simple' : undefined}
+              textBreakStrategy={
+                Platform.OS === "android" ? "simple" : undefined
+              }
               style={[
                 styles.cta,
-                Platform.OS === 'android' ? styles.ctaAndroid : null,
+                Platform.OS === "android" ? styles.ctaAndroid : null,
+                alreadyCompleted && styles.ctaCompleted,
               ]}
             >
-              Empezar
+              {alreadyCompleted ? "Repasar" : "Empezar"}
             </Text>
           </View>
           <Ionicons
@@ -98,8 +130,8 @@ export function DailyLessonCard({ bonusText, onPress }: Props) {
 const styles = StyleSheet.create({
   wrap: {
     borderRadius: 24,
-    overflow: 'hidden',
-    width: '100%',
+    overflow: "hidden",
+    width: "100%",
   },
   pressed: { opacity: 0.95 },
   blur: { opacity: 0.85 },
@@ -107,10 +139,10 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.04)",
   },
-  inner: { padding: 20, position: 'relative', zIndex: 2 },
+  inner: { padding: 20, position: "relative", zIndex: 2 },
   /** Más aire a la derecha: el borde redondeado + overflow:hidden recorta el trazo en Android. */
   innerAndroid: {
     paddingRight: 30,
@@ -119,18 +151,18 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   topRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     marginBottom: 16,
   },
-  iconCol: { position: 'relative' },
+  iconCol: { position: "relative" },
   iconGlow: {
-    position: 'absolute',
+    position: "absolute",
     width: 64,
     height: 64,
     borderRadius: 16,
-    backgroundColor: 'rgba(249,115,22,0.45)',
+    backgroundColor: "rgba(249,115,22,0.45)",
     left: -4,
     top: -4,
     opacity: 0.6,
@@ -139,57 +171,57 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
-  titleCol: { flex: 1, marginLeft: 12, justifyContent: 'center', minWidth: 0 },
+  titleCol: { flex: 1, marginLeft: 12, justifyContent: "center", minWidth: 0 },
   title: androidReadableText({
     fontSize: 18,
-    fontWeight: '900',
-    color: '#fff',
+    fontWeight: "900",
+    color: "#fff",
   }),
   bonus: androidReadableText({
     marginTop: 4,
     fontSize: 12,
-    fontWeight: '700',
-    color: '#9ca3af',
+    fontWeight: "700",
+    color: "#9ca3af",
   }),
   daysRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 6,
     marginBottom: 16,
   },
   dayCol: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: "center",
     gap: 4,
   },
   dayLabel: androidReadableText({
     fontSize: 9,
-    fontWeight: '700',
-    color: '#4b5563',
+    fontWeight: "700",
+    color: "#4b5563",
   }),
   dayCell: {
-    width: '100%',
+    width: "100%",
     aspectRatio: 1,
     borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: "rgba(255,255,255,0.03)",
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
   },
   dayPlaceholder: androidReadableText({
     fontSize: 11,
-    fontWeight: '700',
-    color: '#6b7280',
+    fontWeight: "700",
+    color: "#6b7280",
   }),
   footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    alignSelf: 'stretch',
-    width: '100%',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    alignSelf: "stretch",
+    width: "100%",
   },
   /** Sin `gap`: en algunos builds Android el gap + flex-end mide mal el ancho del Text. */
   footerIcon: { marginLeft: 6 },
@@ -199,7 +231,7 @@ const styles = StyleSheet.create({
   },
   cta: androidReadableText({
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: "700",
     color: ACCENT,
   }),
   /**
@@ -212,5 +244,15 @@ const styles = StyleSheet.create({
     paddingRight: 4,
     lineHeight: 20,
     flexShrink: 0,
+  },
+  ctaCompleted: {
+    color: "rgba(255,255,255,0.6)",
+  },
+  dayLabelCompleted: {
+    color: "#f97316",
+  },
+  dayCellCompleted: {
+    backgroundColor: "#f97316",
+    borderColor: "#f97316",
   },
 });

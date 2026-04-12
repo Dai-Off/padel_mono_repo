@@ -12,16 +12,23 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { androidReadableText } from "../components/home/inicio/textStyles";
+import { useAuth } from "../contexts/AuthContext";
+import { fetchDailyLesson, Question } from "../api/learning";
+import { ActivityIndicator } from "react-native";
 
 const { width } = Dimensions.get("window");
 
 type Props = {
   onBack: () => void;
-  onStart: () => void;
+  onStart: (questions: Question[]) => void;
 };
 
 export function DailyLessonIntroScreen({ onBack, onStart }: Props) {
   const insets = useSafeAreaInsets();
+  const { session } = useAuth();
+  const [loading, setLoading] = React.useState(true);
+  const [questions, setQuestions] = React.useState<Question[]>([]);
+  const [alreadyCompleted, setAlreadyCompleted] = React.useState(false);
 
   // Valores de animación
   const iconScale = useRef(new Animated.Value(0)).current;
@@ -34,7 +41,22 @@ export function DailyLessonIntroScreen({ onBack, onStart }: Props) {
   const bottomAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Definimos la secuencia de animaciones
+    async function load() {
+      if (session?.access_token) {
+        const res = await fetchDailyLesson(session.access_token);
+        if (res.ok) {
+          if (res.already_completed) {
+            setAlreadyCompleted(true);
+          } else if (res.questions) {
+            setQuestions(res.questions);
+          }
+        }
+      }
+      setLoading(false);
+    }
+    load();
+
+    // Animaciones
     const createSlideAnim = (value: Animated.Value) => {
       return Animated.timing(value, {
         toValue: 1,
@@ -45,14 +67,12 @@ export function DailyLessonIntroScreen({ onBack, onStart }: Props) {
     };
 
     Animated.sequence([
-      // 1. Icono aparece primero
       Animated.timing(iconScale, {
         toValue: 1,
         duration: 600,
         easing: Easing.out(Easing.back(1.5)),
         useNativeDriver: true,
       }),
-      // 2. Cascada de elementos (Stagger)
       Animated.stagger(150, [
         createSlideAnim(titleAnim),
         createSlideAnim(subtitleAnim),
@@ -63,7 +83,7 @@ export function DailyLessonIntroScreen({ onBack, onStart }: Props) {
         createSlideAnim(bottomAnim),
       ]),
     ]).start();
-  }, []);
+  }, [session?.access_token]);
 
   const getAnimatedStyle = (value: Animated.Value) => ({
     opacity: value,
@@ -127,23 +147,34 @@ export function DailyLessonIntroScreen({ onBack, onStart }: Props) {
         <Animated.View
           style={[styles.bottomBlock, getAnimatedStyle(bottomAnim)]}
         >
-          <Pressable
-            onPress={onStart}
-            style={({ pressed }) => [
-              styles.mainButtonContainer,
-              pressed && styles.pressed,
-            ]}
-          >
-            <LinearGradient
-              colors={["#F18F34", "#C46A20"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.mainButton}
+          {loading ? (
+            <ActivityIndicator size="large" color="#F18F34" />
+          ) : alreadyCompleted ? (
+            <View style={styles.completedContainer}>
+              <Ionicons name="checkmark-circle" size={24} color="#10B981" />
+              <Text style={styles.completedText}>¡Ya completaste la lección de hoy!</Text>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => onStart(questions)}
+              disabled={questions.length === 0}
+              style={({ pressed }) => [
+                styles.mainButtonContainer,
+                pressed && styles.pressed,
+                questions.length === 0 && { opacity: 0.5 }
+              ]}
             >
-              <Ionicons name="play" size={20} color="white" />
-              <Text style={styles.mainButtonText}>Empezar lección</Text>
-            </LinearGradient>
-          </Pressable>
+              <LinearGradient
+                colors={["#F18F34", "#C46A20"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.mainButton}
+              >
+                <Ionicons name="play" size={20} color="white" />
+                <Text style={styles.mainButtonText}>Empezar lección</Text>
+              </LinearGradient>
+            </Pressable>
+          )}
 
           <Pressable onPress={onBack} style={styles.skipButton}>
             <Text style={styles.skipButtonText}>Ahora no</Text>
@@ -286,4 +317,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "500",
   },
+  completedContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  completedText: androidReadableText({
+    color: '#10B981',
+    fontSize: 14,
+    fontWeight: '700',
+  }),
 });

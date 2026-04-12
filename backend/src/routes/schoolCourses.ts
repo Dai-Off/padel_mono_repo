@@ -4,6 +4,99 @@ import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 
 const router = Router();
+
+router.get('/public/list', async (req: Request, res: Response) => {
+  console.log('[DEBUG] GET /school-courses/public/list hit');
+  const sport = String(req.query.sport ?? '').trim();
+  const level = String(req.query.level ?? '').trim();
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    
+    // 1) Fetch active courses with club data
+    let q = supabase
+      .from('club_school_courses')
+      .select(`
+        *,
+        clubs!inner (
+          id, name, address, city, logo_url
+        )
+      `)
+      .eq('is_active', true);
+
+    if (sport && SPORTS.includes(sport as Sport)) q = q.eq('sport', sport);
+    if (level && LEVELS.includes(level as Level)) q = q.eq('level', level);
+
+    const { data: courses, error } = await q.order('created_at', { ascending: false });
+
+    if (error) {
+       console.error('[DEBUG] Supabase error:', error);
+       return res.status(500).json({ ok: false, error: error.message });
+    }
+    if (!courses || courses.length === 0) return res.json({ ok: true, courses: [] });
+
+    const courseIds = courses.map((c: any) => c.id);
+
+    // 2) Fetch days and enrollments in parallel
+    const [daysRes, enrolledRes, staffRes] = await Promise.all([
+      supabase
+        .from('club_school_course_days')
+        .select('*')
+        .in('course_id', courseIds),
+      supabase
+        .from('club_school_course_enrollments')
+        .select('course_id, status')
+        .in('course_id', courseIds)
+        .neq('status', 'cancelled'),
+      supabase
+        .from('club_staff')
+        .select('id, name, avatar_url')
+        .in('id', courses.map((c: any) => c.staff_id).filter(Boolean))
+    ]);
+
+    if (daysRes.error) return res.status(500).json({ ok: false, error: daysRes.error.message });
+    if (enrolledRes.error) return res.status(500).json({ ok: false, error: enrolledRes.error.message });
+
+    const daysByCourse = new Map<string, any[]>();
+    for (const d of daysRes.data ?? []) {
+      const list = daysByCourse.get(d.course_id) ?? [];
+      list.push(d);
+      daysByCourse.set(d.course_id, list);
+    }
+
+    const enrolledCount = new Map<string, number>();
+    for (const e of enrolledRes.data ?? []) {
+        enrolledCount.set(e.course_id, (enrolledCount.get(e.course_id) ?? 0) + 1);
+    }
+
+    const staffMap = new Map((staffRes.data ?? []).map((s: any) => [s.id, s]));
+
+    const result = courses.map((c: any) => ({
+      id: c.id,
+      name: c.name,
+      sport: c.sport,
+      level: c.level,
+      club_id: c.club_id,
+      club_name: c.clubs?.name,
+      club_address: c.clubs?.address,
+      club_city: c.clubs?.city,
+      club_logo_url: c.clubs?.logo_url,
+      price_cents: c.price_cents,
+      capacity: c.capacity,
+      enrolled_count: enrolledCount.get(c.id) ?? 0,
+      days: daysByCourse.get(c.id) ?? [],
+      staff: staffMap.get(c.staff_id) || null,
+      starts_on: c.starts_on,
+      ends_on: c.ends_on,
+    }));
+
+    return res.json({ ok: true, courses: result });
+  } catch (err) {
+    console.error('[DEBUG] Catch error:', err);
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 router.use(attachAuthContext);
 
 type Sport = 'padel' | 'tenis';
@@ -208,6 +301,7 @@ async function ensureCourseRelations(
 
   return null;
 }
+
 
 /**
  * @openapi

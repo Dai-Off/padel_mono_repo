@@ -14,6 +14,7 @@ type Props = {
   /** Pistas / recuentos desde API home. */
   courtsFree?: number | null;
   tournamentsCount?: number | null;
+  onCoursesPress?: () => void;
   loading?: boolean;
 };
 
@@ -34,6 +35,7 @@ export function InicioQuickActions({
   openMatchesCount,
   courtsFree,
   tournamentsCount,
+  onCoursesPress,
   loading,
 }: Props) {
   const buscarSub = countLine(
@@ -85,7 +87,10 @@ export function InicioQuickActions({
             </View>
           </View>
         </Pressable>
-        <Pressable style={({ pressed }) => [styles.halfCard, pressed && styles.pressed]}>
+        <Pressable 
+          onPress={onCoursesPress}
+          style={({ pressed }) => [styles.halfCard, pressed && styles.pressed]}
+        >
           <View style={styles.blobPurple} />
           <View style={styles.rowSm}>
             <View style={styles.iconSm}>

@@ -17,7 +17,7 @@ function isCourseLocked(elo: number, eloMin: number, eloMax: number): boolean {
 // GET /streak
 router.get('/streak', requireAuth, async (req: Request, res: Response) => {
   try {
-    const player = await getPlayerFromAuth(req.authContext!.userId);
+    const player = await getPlayerFromAuth(req);
     if (!player) {
       return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
     }
@@ -56,7 +56,7 @@ router.get('/streak', requireAuth, async (req: Request, res: Response) => {
 // GET /shared-streaks
 router.get('/shared-streaks', requireAuth, async (req: Request, res: Response) => {
   try {
-    const player = await getPlayerFromAuth(req.authContext!.userId);
+    const player = await getPlayerFromAuth(req);
     if (!player) {
       return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
     }
@@ -116,7 +116,7 @@ router.get('/shared-streaks', requireAuth, async (req: Request, res: Response) =
 // POST /shared-streaks
 router.post('/shared-streaks', requireAuth, async (req: Request, res: Response) => {
   try {
-    const player = await getPlayerFromAuth(req.authContext!.userId);
+    const player = await getPlayerFromAuth(req);
     if (!player) {
       return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
     }
@@ -199,14 +199,14 @@ router.post('/shared-streaks', requireAuth, async (req: Request, res: Response) 
 // GET /courses
 router.get('/courses', requireAuth, async (req: Request, res: Response) => {
   try {
-    const player = await getPlayerFromAuth(req.authContext!.userId);
+    const player = await getPlayerFromAuth(req);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
 
     const supabase = getSupabaseServiceRoleClient();
 
     const { data: courses, error: coursesErr } = await supabase
       .from('learning_courses')
-      .select('id, title, description, banner_url, elo_min, elo_max, clubs(name)')
+      .select('id, title, description, banner_url, elo_min, elo_max, coach_name, rating, is_certified, clubs(name)')
       .eq('status', 'active')
       .order('elo_min', { ascending: true });
 
@@ -254,6 +254,9 @@ router.get('/courses', requireAuth, async (req: Request, res: Response) => {
         banner_url: c.banner_url,
         elo_min: c.elo_min,
         elo_max: c.elo_max,
+        coach_name: c.coach_name || null,
+        rating: c.rating || 4.8,
+        is_certified: c.is_certified || false,
         club_name: c.clubs?.name || null,
         total_lessons: totalLessons,
         completed_lessons: completedCount,
@@ -271,7 +274,7 @@ router.get('/courses', requireAuth, async (req: Request, res: Response) => {
 // GET /courses/:id
 router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
   try {
-    const player = await getPlayerFromAuth(req.authContext!.userId);
+    const player = await getPlayerFromAuth(req);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
 
     const supabase = getSupabaseServiceRoleClient();
@@ -279,7 +282,7 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
 
     const { data: course, error: courseErr } = await supabase
       .from('learning_courses')
-      .select('id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, clubs(name)')
+      .select('id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, coach_name, rating, is_certified, clubs(name)')
       .eq('id', courseId)
       .eq('status', 'active')
       .maybeSingle();
@@ -305,6 +308,9 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
           elo_min: course.elo_min,
           elo_max: course.elo_max,
           pedagogical_goal: course.pedagogical_goal,
+          coach_name: course.coach_name || null,
+          rating: course.rating || 4.8,
+          is_certified: course.is_certified || false,
           club_name: (course as any).clubs?.name || null,
           locked: true,
           total_lessons: count || 0,
@@ -366,6 +372,9 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
         elo_min: course.elo_min,
         elo_max: course.elo_max,
         pedagogical_goal: course.pedagogical_goal,
+        coach_name: course.coach_name || null,
+        rating: course.rating || 4.8,
+        is_certified: course.is_certified || false,
         club_name: (course as any).clubs?.name || null,
         locked: false,
         total_lessons: totalLessons,
@@ -382,7 +391,7 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
 // POST /courses/:id/complete-lesson
 router.post('/courses/:id/complete-lesson', requireAuth, async (req: Request, res: Response) => {
   try {
-    const player = await getPlayerFromAuth(req.authContext!.userId);
+    const player = await getPlayerFromAuth(req);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
 
     const { lesson_id } = req.body;

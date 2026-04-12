@@ -9,14 +9,25 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   next();
 }
 
-export async function getPlayerFromAuth(authUserId: string): Promise<{ id: string; elo_rating: number } | null> {
+export async function getPlayerFromAuth(req: Request): Promise<{ id: string; elo_rating: number } | null> {
+  const authHeader = req.headers.authorization ?? req.headers['Authorization'];
+  const raw = typeof authHeader === 'string' ? authHeader : '';
+  const token = raw.startsWith('Bearer ') ? raw.slice(7).trim() : raw.trim() || null;
+
+  if (!token) return null;
+
   const supabase = getSupabaseServiceRoleClient();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  if (authErr || !user?.email) return null;
+
+  const email = String(user.email).trim().toLowerCase();
   const { data } = await supabase
     .from('players')
     .select('id, elo_rating')
-    .eq('auth_user_id', authUserId)
+    .eq('email', email)
     .neq('status', 'deleted')
     .maybeSingle();
+
   return data as { id: string; elo_rating: number } | null;
 }
 

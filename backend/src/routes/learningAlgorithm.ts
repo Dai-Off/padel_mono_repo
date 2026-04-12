@@ -227,19 +227,17 @@ export function checkAnswer(type: string, content: Record<string, unknown>, sele
     }
 
     case 'match_columns': {
-      // Client sends array of right-column indices matching the left-column order
-      // Correct answer is [0, 1, 2, ...] (pairs are stored in correct order)
-      const pairs = (content as { pairs: unknown[] }).pairs;
+      // Client sends array of right-side STRINGS corresponding to each left-side item in original order
+      const pairs = (content as { pairs: { left: string; right: string }[] }).pairs;
       if (!Array.isArray(selectedAnswer) || selectedAnswer.length !== pairs.length) return false;
-      return selectedAnswer.every((val, idx) => val === idx);
+      return selectedAnswer.every((val, idx) => val === pairs[idx].right);
     }
 
     case 'order_sequence': {
-      // Client sends array of step indices in the order they chose
-      // Correct answer is [0, 1, 2, ...] (steps are stored in correct order)
-      const steps = (content as { steps: unknown[] }).steps;
+      // Client sends array of step STRINGS in the order they chose
+      const steps = (content as { steps: string[] }).steps;
       if (!Array.isArray(selectedAnswer) || selectedAnswer.length !== steps.length) return false;
-      return selectedAnswer.every((val, idx) => val === idx);
+      return selectedAnswer.every((val, idx) => val === steps[idx]);
     }
 
     default:
@@ -256,12 +254,12 @@ export function getCorrectAnswer(type: string, content: Record<string, unknown>)
     case 'multi_select':
       return (content as { correct_indices: number[] }).correct_indices;
     case 'match_columns': {
-      const pairs = (content as { pairs: unknown[] }).pairs;
-      return Array.from({ length: pairs.length }, (_, i) => i);
+      const pairs = (content as { pairs: { right: string }[] }).pairs;
+      return pairs.map(p => p.right);
     }
     case 'order_sequence': {
-      const steps = (content as { steps: unknown[] }).steps;
-      return Array.from({ length: steps.length }, (_, i) => i);
+      const steps = (content as { steps: string[] }).steps;
+      return steps;
     }
     default:
       return null;

@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fetchMatches } from '../api/matches';
-import { fetchPublicTournaments } from '../api/tournaments';
-import { fetchMyPlayerProfile } from '../api/players';
-import type { MyPlayerProfile } from '../api/players';
-import { mapMatchToPartido } from '../api/mapMatchToPartido';
-import { fetchMyPlayerId } from '../api/players';
+import { useCallback, useEffect, useState } from "react";
+import { ScrollView, StyleSheet } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { fetchMatches } from "../api/matches";
+import { fetchPublicTournaments } from "../api/tournaments";
+import { fetchMyPlayerProfile } from "../api/players";
+import type { MyPlayerProfile } from "../api/players";
+import { mapMatchToPartido } from "../api/mapMatchToPartido";
+import { fetchMyPlayerId } from "../api/players";
 import {
   CompetitiveLeagueHomeCard,
   DailyLessonCard,
@@ -20,36 +20,64 @@ import {
   MissionsHomeSection,
   ProximosPartidosSection,
   SeasonPassHomeCard,
-} from '../components/home/inicio';
-import { selectMyUpcomingMatches } from '../domain/selectMyUpcomingMatches';
-import { useAuth } from '../contexts/AuthContext';
-import { useHomeStats } from '../hooks/useHomeStats';
-import type { PartidoItem } from './PartidosScreen';
-import { AiMatchModal } from '../components/home/AiMatchModal';
-import { searchAiMatch } from '../api/aiMatch';
+} from "../components/home/inicio";
+import { selectMyUpcomingMatches } from "../domain/selectMyUpcomingMatches";
+import { useAuth } from "../contexts/AuthContext";
+import { useHomeStats } from "../hooks/useHomeStats";
+import type { PartidoItem } from "./PartidosScreen";
+import { AiMatchModal } from "../components/home/AiMatchModal";
+import { searchAiMatch } from "../api/aiMatch";
+import { fetchDailyLesson, type DailyLessonResponse } from "../api/learning";
 
-type TabId = 'pistas' | 'partidos' | 'torneos';
+type TabId = "pistas" | "partidos" | "torneos";
 
 type HomeScreenProps = {
   onNavigateToTab?: (tab: TabId) => void;
   onPartidoPress?: (partido: PartidoItem) => void;
   onStartDailyLesson?: () => void;
+  onCoursesPress?: () => void;
+  dailyLessonRefreshNonce?: number;
 };
 
-export function HomeScreen({ onNavigateToTab, onPartidoPress, onStartDailyLesson }: HomeScreenProps) {
+export function HomeScreen({
+  onNavigateToTab,
+  onPartidoPress,
+  onStartDailyLesson,
+  onCoursesPress,
+  dailyLessonRefreshNonce = 0,
+}: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { stats, loading: statsLoading } = useHomeStats();
-  const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
+  const [publicTournamentsCount, setPublicTournamentsCount] = useState<
+    number | null
+  >(null);
   const [tournamentsLoading, setTournamentsLoading] = useState(true);
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
-  const [misProximosPartidos, setMisProximosPartidos] = useState<PartidoItem[]>([]);
+  const [misProximosPartidos, setMisProximosPartidos] = useState<PartidoItem[]>(
+    [],
+  );
   const [matchesLoading, setMatchesLoading] = useState(true);
-  const [myPlayerProfile, setMyPlayerProfile] = useState<MyPlayerProfile | null>(null);
+  const [myPlayerProfile, setMyPlayerProfile] =
+    useState<MyPlayerProfile | null>(null);
   const [aiModalVisible, setAiModalVisible] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [dailyLessonStatus, setDailyLessonStatus] =
+    useState<DailyLessonResponse | null>(null);
+
+  const loadDailyLesson = useCallback(async () => {
+    if (!session?.access_token) return;
+    const res = await fetchDailyLesson(session.access_token);
+    if (res.ok) {
+      setDailyLessonStatus(res);
+    }
+  }, [session?.access_token, dailyLessonRefreshNonce]);
+
+  useEffect(() => {
+    loadDailyLesson();
+  }, [loadDailyLesson]);
 
   useEffect(() => {
     if (!session?.access_token) {
@@ -70,14 +98,14 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onStartDailyLesson
     const misProximos = mineRaw
       .map(mapMatchToPartido)
       .filter((p): p is PartidoItem => p != null)
-      .filter((p) => p.visibility !== 'private');
+      .filter((p) => p.visibility !== "private");
     setMisProximosPartidos(misProximos);
 
     const all = matches
       .map(mapMatchToPartido)
       .filter((p): p is PartidoItem => p != null)
-      .filter((p) => p.matchPhase !== 'past');
-    setPartidos(all.filter((p) => p.visibility !== 'private'));
+      .filter((p) => p.matchPhase !== "past");
+    setPartidos(all.filter((p) => p.visibility !== "private"));
     setMatchesLoading(false);
   }, [session?.access_token]);
 
@@ -105,43 +133,50 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onStartDailyLesson
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 
-  const handleAiMatchSearch = useCallback(async (prompt: string) => {
-    setAiLoading(true);
-    setAiError(null);
-    setAiResponse(null);
+  const handleAiMatchSearch = useCallback(
+    async (prompt: string) => {
+      setAiLoading(true);
+      setAiError(null);
+      setAiResponse(null);
 
-    const userName =
-      [myPlayerProfile?.firstName, myPlayerProfile?.lastName]
-        .filter(Boolean)
-        .join(' ')
-        .trim() ||
-      session?.user?.user_metadata?.full_name ||
-      session?.user?.email?.split('@')[0] ||
-      'Sin dato';
+      const userName =
+        [myPlayerProfile?.firstName, myPlayerProfile?.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim() ||
+        session?.user?.user_metadata?.full_name ||
+        session?.user?.email?.split("@")[0] ||
+        "Sin dato";
 
-    const enrichedPrompt = [
-      'CONTEXTO JUGADOR LOGUEADO (ANCLA)',
-      `- player_id: ${myPlayerProfile?.id ?? 'Sin dato'}`,
-      `- nombre: ${userName}`,
-      `- email: ${myPlayerProfile?.email ?? session?.user?.email ?? 'Sin dato'}`,
-      `- elo_rating: ${myPlayerProfile?.eloRating ?? 'Sin dato'}`,
-      `- telefono: ${myPlayerProfile?.phone ?? 'Sin dato'}`,
-      '',
-      'SOLICITUD DEL USUARIO',
-      prompt,
-      '',
-      'INSTRUCCION IMPORTANTE',
-      'Usa el jugador logueado como jugador ancla para el matching.',
-    ].join('\n');
+      const enrichedPrompt = [
+        "CONTEXTO JUGADOR LOGUEADO (ANCLA)",
+        `- player_id: ${myPlayerProfile?.id ?? "Sin dato"}`,
+        `- nombre: ${userName}`,
+        `- email: ${myPlayerProfile?.email ?? session?.user?.email ?? "Sin dato"}`,
+        `- elo_rating: ${myPlayerProfile?.eloRating ?? "Sin dato"}`,
+        `- telefono: ${myPlayerProfile?.phone ?? "Sin dato"}`,
+        "",
+        "SOLICITUD DEL USUARIO",
+        prompt,
+        "",
+        "INSTRUCCION IMPORTANTE",
+        "Usa el jugador logueado como jugador ancla para el matching.",
+      ].join("\n");
 
-    const result = await searchAiMatch(enrichedPrompt);
-    if (result.ok && result.text) {
-      setAiResponse(result.text);
-    } else {
-      setAiError(result.error ?? 'No se pudo completar la búsqueda.');
-    }
-    setAiLoading(false);
-  }, [myPlayerProfile, session?.user?.email, session?.user?.user_metadata?.full_name]);
+      const result = await searchAiMatch(enrichedPrompt);
+      if (result.ok && result.text) {
+        setAiResponse(result.text);
+      } else {
+        setAiError(result.error ?? "No se pudo completar la búsqueda.");
+      }
+      setAiLoading(false);
+    },
+    [
+      myPlayerProfile,
+      session?.user?.email,
+      session?.user?.user_metadata?.full_name,
+    ],
+  );
 
   return (
     <>
@@ -162,13 +197,19 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onStartDailyLesson
           loading={matchesLoading}
           onPartidoPress={onPartidoPress}
         />
-        <DailyLessonCard onPress={onStartDailyLesson} />
+        <DailyLessonCard
+          onPress={onStartDailyLesson}
+          bonusText={dailyLessonStatus?.bonus_text}
+          alreadyCompleted={dailyLessonStatus?.already_completed}
+          weeklyProgress={dailyLessonStatus?.weekly_progress}
+        />
         <SeasonPassHomeCard />
         <CompetitiveLeagueHomeCard
-          onPress={() => onNavigateToTab?.('torneos')}
+          onPress={() => onNavigateToTab?.("torneos")}
         />
         <InicioQuickActions
           onNavigateToTab={onNavigateToTab}
+          onCoursesPress={onCoursesPress}
           openMatchesCount={partidos.length}
           courtsFree={stats?.courtsFree}
           tournamentsCount={publicTournamentsCount}
@@ -183,10 +224,10 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onStartDailyLesson
         />
         <MissionsHomeSection />
         <EnDirectoSection
-          partidos={partidos.filter((p) => p.matchPhase === 'live')}
+          partidos={partidos.filter((p) => p.matchPhase === "live")}
           loading={matchesLoading}
           onPartidoPress={onPartidoPress}
-          onOpenPartidos={() => onNavigateToTab?.('partidos')}
+          onOpenPartidos={() => onNavigateToTab?.("partidos")}
         />
       </ScrollView>
 
@@ -205,7 +246,7 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onStartDailyLesson
 const styles = StyleSheet.create({
   scroll: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: "#000",
   },
   content: {
     paddingHorizontal: INICIO_PAD_H,

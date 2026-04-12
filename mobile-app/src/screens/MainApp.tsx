@@ -31,12 +31,28 @@ import { TransaccionesScreen } from "./TransaccionesScreen";
 import { TiendaScreen } from "./TiendaScreen";
 import { DailyLessonIntroScreen } from "./DailyLessonIntroScreen";
 import { DailyLessonVideoScreen } from "./DailyLessonVideoScreen";
+import { DailyLessonInteractionScreen } from "./DailyLessonInteractionScreen";
+import { Question, LessonAnswer, submitDailyLesson } from "../api/learning";
+import { useAuth } from "../contexts/AuthContext";
+import { LessonCompletionResponse } from "../api/learning";
+import { CoursesScreen } from "./CoursesScreen";
 
 export function MainApp() {
   const sidebar = useSidebar(false);
   const [activeTab, setActiveTab] = useState<MainTabId>("inicio");
   const [showDailyLessonIntro, setShowDailyLessonIntro] = useState(false);
   const [showDailyLessonVideo, setShowDailyLessonVideo] = useState(false);
+  const [showDailyLessonInteraction, setShowDailyLessonInteraction] =
+    useState(false);
+  const [dailyLessonQuestions, setDailyLessonQuestions] = useState<Question[]>(
+    [],
+  );
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [lessonAnswers, setLessonAnswers] = useState<LessonAnswer[]>([]);
+  const [lessonResult, setLessonResult] =
+    useState<LessonCompletionResponse | null>(null);
+
+  const { session } = useAuth();
   const [clubDetailCourt, setClubDetailCourt] =
     useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(
@@ -51,29 +67,88 @@ export function MainApp() {
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] =
     useState<BookingConfirmationData | null>(null);
+  const [dailyLessonRefreshNonce, setDailyLessonRefreshNonce] = useState(0);
+  const [showCourses, setShowCourses] = useState(false);
 
   const showClubDetail = activeTab === "pistas" && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
 
   const renderContent = () => {
+    if (showCourses) {
+      return <CoursesScreen onBack={() => setShowCourses(false)} />;
+    }
     if (showDailyLessonIntro) {
       return (
         <DailyLessonIntroScreen
           onBack={() => setShowDailyLessonIntro(false)}
-          onStart={() => {
+          onStart={(questions) => {
+            setDailyLessonQuestions(questions);
+            setCurrentQuestionIndex(0);
+            setLessonAnswers([]);
             setShowDailyLessonIntro(false);
-            setShowDailyLessonVideo(true);
+            if (questions[0].has_video) {
+              setShowDailyLessonVideo(true);
+            } else {
+              setShowDailyLessonInteraction(true);
+            }
           }}
         />
       );
     }
     if (showDailyLessonVideo) {
+      const currentQuestion = dailyLessonQuestions[currentQuestionIndex];
       return (
         <DailyLessonVideoScreen
+          videoUrl={currentQuestion?.video_url}
+          currentIndex={currentQuestionIndex}
+          total={dailyLessonQuestions.length}
           onClose={() => setShowDailyLessonVideo(false)}
           onNext={() => {
-            // Aquí irá la lógica de la pregunta
             setShowDailyLessonVideo(false);
+            setShowDailyLessonInteraction(true);
+          }}
+        />
+      );
+    }
+    if (showDailyLessonInteraction) {
+      const currentQuestion = dailyLessonQuestions[currentQuestionIndex];
+      return (
+        <DailyLessonInteractionScreen
+          question={currentQuestion}
+          currentIndex={currentQuestionIndex}
+          total={dailyLessonQuestions.length}
+          onClose={() => setShowDailyLessonInteraction(false)}
+          onAnswer={(selectedAnswer, timeMs) => {
+            const newAnswer: LessonAnswer = {
+              question_id: currentQuestion.id,
+              selected_answer: selectedAnswer,
+              response_time_ms: timeMs,
+            };
+            const updatedAnswers = [...lessonAnswers, newAnswer];
+            setLessonAnswers(updatedAnswers);
+
+            if (currentQuestionIndex < dailyLessonQuestions.length - 1) {
+              const nextIndex = currentQuestionIndex + 1;
+              setCurrentQuestionIndex(nextIndex);
+              setShowDailyLessonInteraction(false);
+              if (dailyLessonQuestions[nextIndex].has_video) {
+                setShowDailyLessonVideo(true);
+              } else {
+                setShowDailyLessonInteraction(true);
+              }
+            } else {
+              // Finalizar lección
+              if (session?.access_token) {
+                submitDailyLesson(session.access_token, updatedAnswers).then(
+                  (res) => {
+                    setLessonResult(res);
+                    setShowDailyLessonInteraction(false);
+                    setDailyLessonRefreshNonce((n) => n + 1);
+                    // Aquí podrías mostrar una pantalla de resultados
+                  },
+                );
+              }
+            }
           }}
         />
       );
@@ -146,6 +221,8 @@ export function MainApp() {
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onPartidoPress={(p) => setSelectedPartido(p)}
             onStartDailyLesson={() => setShowDailyLessonIntro(true)}
+            onCoursesPress={() => setShowCourses(true)}
+            dailyLessonRefreshNonce={dailyLessonRefreshNonce}
           />
         );
       case "pistas":
@@ -182,7 +259,9 @@ export function MainApp() {
     !showClubDetail &&
     !crearPartidoFlow.open &&
     !showDailyLessonIntro &&
-    !showDailyLessonVideo;
+    !showDailyLessonVideo &&
+    !showDailyLessonInteraction &&
+    !showCourses;
 
   const customHeader =
     bookingSuccessData != null ||
@@ -191,7 +270,9 @@ export function MainApp() {
     showPartidoDetail ||
     crearPartidoFlow.open ||
     showDailyLessonIntro ||
-    showDailyLessonVideo ? undefined : activeTab === "tienda" ? (
+    showDailyLessonVideo ||
+    showDailyLessonInteraction ||
+    showCourses ? undefined : activeTab === "tienda" ? (
       <BackHeader
         title="Tienda"
         tone="dark"
@@ -216,14 +297,17 @@ export function MainApp() {
           ? "#0F0F0F"
           : showDailyLessonVideo
             ? "#000000"
-            : showMainTabs && (activeTab === "inicio" || activeTab === "partidos")
-            ? "#000000"
-            : showMainTabs &&
-                (activeTab === "pistas" ||
-                  activeTab === "tienda" ||
-                  activeTab === "torneos")
+            : showDailyLessonInteraction
               ? "#0F0F0F"
-              : "#ffffff";
+              : showMainTabs &&
+                  (activeTab === "inicio" || activeTab === "partidos")
+                ? "#000000"
+                : showMainTabs &&
+                    (activeTab === "pistas" ||
+                      activeTab === "tienda" ||
+                      activeTab === "torneos")
+                  ? "#0F0F0F"
+                  : "#ffffff";
 
   return (
     <View style={styles.container}>
@@ -244,6 +328,8 @@ export function MainApp() {
               crearPartidoFlow.open ||
               showDailyLessonIntro ||
               showDailyLessonVideo ||
+              showDailyLessonInteraction ||
+              showCourses ||
               (showMainTabs && activeTab === "pistas") ||
               (showMainTabs && activeTab === "torneos")
             }
