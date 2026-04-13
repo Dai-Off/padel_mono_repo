@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Calendar, Menu, ArrowLeft, X, Globe, Wallet, Gift, Plus, Loader2, MoreVertical, Trash2 } from 'lucide-react';
+import { Calendar, Menu, ArrowLeft, X, Globe, Wallet, Gift, Plus, Loader2, MoreVertical, Trash2, Settings, Lock, LockOpen } from 'lucide-react';
 import { MainMenu } from '../../components/Layout/MainMenu';
 import { PageSpinner } from '../../components/Layout/PageSpinner';
 import clsx from 'clsx';
@@ -28,10 +28,12 @@ import type { Court, Reservation } from './types';
 import { TimeAxis } from './components/TimeAxis';
 import { GridBackground } from './components/GridBackground';
 import { CourtColumn } from './components/CourtColumn';
+import { MaintenanceBlockModal } from './components/MaintenanceBlockModal';
 import { ReservationCard } from './components/ReservationCard';
 import { ReservationModal } from './components/ReservationModal';
 import { SchoolCourseModal } from './components/SchoolCourseModal';
 import { BonusManagement } from './components/BonusManagement';
+import { MatchesManagementPanel } from './components/MatchesManagementPanel';
 import { WalletRecharge } from './components/WalletRecharge';
 
 import { GrillaQuickNav } from './components/GrillaQuickNav';
@@ -48,6 +50,7 @@ import { apiFetch, apiFetchWithAuth } from '../../services/api';
 import { schoolCoursesService } from '../../services/schoolCourses';
 import { authService } from '../../services/auth';
 import { getSupabaseClient } from '../../lib/supabase';
+import { listSpecialDates } from '../../services/clubSpecialDates';
 
 import './grilla.css';
 
@@ -274,9 +277,16 @@ const useClubData = (dateOrStr: Date | string) => {
                         if (rawDate !== dateStr) return;
                         const mapped = mapBookings([raw], courtsRef.current)[0];
                         if (!mapped) return;
-                        setReservations(prev =>
-                            prev.some(r => r.id === mapped.id) ? prev : [...prev, mapped]
-                        );
+                        setReservations(prev => {
+                            const existing = prev.find(r => r.id === mapped.id);
+                            if (existing) {
+                                // Already inserted via optimistic update — preserve player data
+                                // since Realtime payloads lack joins.
+                                if (!raw.players && existing.playerName) return prev;
+                                return prev.map(r => r.id === mapped.id ? mapped : r);
+                            }
+                            return [...prev, mapped];
+                        });
                     }
 
                     if (payload.eventType === 'UPDATE') {
@@ -305,7 +315,15 @@ const useClubData = (dateOrStr: Date | string) => {
                         const mapped = mapBookings([raw], courtsRef.current)[0];
                         if (!mapped) return;
                         setReservations(prev =>
-                            prev.map(r => r.id === mapped.id ? mapped : r)
+                            prev.map(r => {
+                                if (r.id !== mapped.id) return r;
+                                // Realtime payloads lack joined tables (players, participants, transactions).
+                                // Preserve fields from the existing reservation when the payload has no player data.
+                                if (!raw.players) {
+                                    return { ...mapped, playerName: r.playerName, matchType: r.matchType, detailedPlayers: r.detailedPlayers, totalPaidCents: r.totalPaidCents };
+                                }
+                                return mapped;
+                            })
                         );
                     }
 
@@ -407,6 +425,7 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
         const start = new Date(b.start_at);
         const organizer = b.players;
         const playerName = organizer ? `${organizer.first_name} ${organizer.last_name}` : '';
+        const isMaintenance = typeof b.notes === 'string' && b.notes.includes('__COURT_MAINTENANCE__');
         return {
             id: b.id,
             courtId: b.court_id,
@@ -414,6 +433,7 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
             startTime: start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
             durationMinutes: (new Date(b.end_at).getTime() - start.getTime()) / 60000,
             playerName,
+            matchType: isMaintenance ? 'MANTENIMIENTO' : undefined,
             status: b.status ?? 'pending_payment',
             booking_type: b.reservation_type ?? b.booking_type ?? 'standard',
             source_channel: b.source_channel ?? 'manual',
@@ -557,6 +577,19 @@ function GrillaViewInner() {
   }, [today, selectedDate]);
   const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt } = useClubData(selectedDate);
 
+  const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
+  useEffect(() => {
+    if (!clubId) return;
+    let cancelled = false;
+    const dateStr = formatDateForInput(selectedDate);
+    const yr = selectedDate.getFullYear();
+    listSpecialDates(clubId, yr).then(res => {
+      if (cancelled) return;
+      setIsNonWorkingDay(res.dates.some(d => d.date === dateStr && d.type === 'non_working'));
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [clubId, selectedDate]);
+
   const [grillaTab, setGrillaTab] = useState<'courts' | 'waitlist'>('courts');
   const [showHiddenCourtsMenu, setShowHiddenCourtsMenu] = useState(false);
 
@@ -605,10 +638,13 @@ function GrillaViewInner() {
   const [selectedModalReservationId, setSelectedModalReservationId] = useState<string | null>(null);
   const [selectedSchoolCourseId, setSelectedSchoolCourseId] = useState<string | null>(null);
   const [bonusModalOpen, setBonusModalOpen] = useState(false);
+  const [activeView, setActiveView] = useState<'grid' | 'matches'>('grid');
   const [rechargeModalOpen, setRechargeModalOpen] = useState(false);
   const [editingBookingData, setEditingBookingData] = useState<any | null>(null);
   const [hoveredTooltip, setHoveredTooltip] = useState<{ res: Reservation, el: HTMLElement } | null>(null);
   const [focusedCourtId, setFocusedCourtId] = useState<string | null>(null);
+  const [maintenanceBlockTarget, setMaintenanceBlockTarget] = useState<{ courtId: string; courtName: string } | null>(null);
+  const [showMaintenanceMenu, setShowMaintenanceMenu] = useState(false);
 
   useEffect(() => {
     if (focusedCourtId && !gridCourts.some((c) => c.id === focusedCourtId)) {
@@ -723,8 +759,8 @@ function GrillaViewInner() {
           });
           if (res.ok) {
               // Optimistic: update local state immediately from response
-              if (res.data) {
-                  const mapped = mapBookings([res.data], courts)[0];
+              if (res.booking) {
+                  const mapped = mapBookings([res.booking], courts)[0];
                   if (mapped) {
                       setReservations(prev => prev.map(r => r.id === bookingId ? mapped : r));
                   }
@@ -903,8 +939,8 @@ function GrillaViewInner() {
 
           if (res.ok) {
               // Optimistic: insert from response immediately
-              if (res.data) {
-                  const mapped = mapBookings([res.data], courts)[0];
+              if (res.booking) {
+                  const mapped = mapBookings([res.booking], courts)[0];
                   if (mapped) {
                       setReservations(prev =>
                           prev.some(r => r.id === mapped.id) ? prev : [...prev, mapped]
@@ -1431,8 +1467,8 @@ function GrillaViewInner() {
         {!isMobileDevice && (
           <header className="bg-[#00726b] px-4 md:px-6 py-1.5 md:py-2 z-50 flex-shrink-0 flex justify-between items-center border-b border-[#005a4f] gap-3">
             <div className="flex items-center gap-3 md:gap-4">
-              <button onClick={() => setIsMenuOpen(true)} className="w-9 h-9 md:w-10 md:h-10 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors">
-                <Menu className="w-5 h-5 md:w-5 md:h-5 text-white" />
+              <button onClick={() => setIsMenuOpen(true)} className="md:hidden w-9 h-9 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors">
+                <Menu className="w-5 h-5 text-white" />
               </button>
               <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">
                 <div className="w-full h-full rounded-full border border-gray-900 bg-white flex items-center justify-center">
@@ -1493,7 +1529,7 @@ function GrillaViewInner() {
             </div>
           </header>
         )}
-        <GrillaQuickNav isAdmin={isAdmin} />
+        <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
 
         {/* ── Single Court View Navigation (Conditionally Rendered) ── */}
         {focusedCourtId && (
@@ -1545,6 +1581,46 @@ function GrillaViewInner() {
 
         {/* ── Grid Area ── */}
         <main className="flex-1 overflow-hidden flex flex-col min-h-0 relative z-0 bg-white">
+          {activeView === 'matches' ? (
+            <MatchesManagementPanel
+              clubId={clubId}
+              dateStr={toDateStr(selectedDate)}
+              onRefreshGrid={refresh}
+              onEditBooking={async (bookingId: string) => {
+                try {
+                  const data = await apiFetchWithAuth<any>(`/bookings/${bookingId}`);
+                  if (data.ok && data.booking) {
+                    const b = data.booking;
+                    const court = courts.find(c => c.id === b.court_id);
+                    // Ensure the reservation exists in local state so the modal can find it
+                    setReservations(prev => {
+                      const exists = prev.some(r => r.id === bookingId);
+                      if (exists) return prev;
+                      return [...prev, {
+                        id: bookingId,
+                        courtId: b.court_id,
+                        courtName: court?.name ?? 'Pista',
+                        startTime: new Date(b.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+                        durationMinutes: Math.round((new Date(b.end_at).getTime() - new Date(b.start_at).getTime()) / 60000),
+                        playerName: b.players?.first_name ? `${b.players.first_name} ${b.players.last_name || ''}` : '',
+                        status: b.status ?? 'pending_payment',
+                        booking_type: b.reservation_type ?? 'standard',
+                      }];
+                    });
+                    setEditingBookingData({
+                      ...b,
+                      courtName: court?.name ?? 'Pista',
+                    });
+                    setSelectedModalReservationId(bookingId);
+                    // Switch back to grid view so the modal appears over the grid
+                    setActiveView('grid');
+                  }
+                } catch (err) {
+                  console.error('Error fetching booking for edit:', err);
+                }
+              }}
+            />
+          ) : (
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
@@ -1573,6 +1649,12 @@ function GrillaViewInner() {
                       {`${t('toolbar.reservationsOf')} ${selectedDate.toLocaleDateString(calendarLocale(i18n.language), { weekday: 'long' })}, ${selectedDate.toLocaleDateString(calendarLocale(i18n.language), { day: 'numeric', month: 'long', year: 'numeric' })}`}
                     </h2>
                     </div>
+                    {isNonWorkingDay && (
+                      <div className="flex items-center gap-2 px-3 py-1.5 mb-1.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
+                        <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                        Día no laborable — Todas las pistas están bloqueadas
+                      </div>
+                    )}
                     {/* Controls row */}
                     <div className="flex flex-wrap items-center gap-1 md:gap-2">
                       <span className="text-[10px] font-medium text-gray-500 flex-shrink-0 mr-1">{t('toolbar.dateLabel')}</span>
@@ -1660,6 +1742,25 @@ function GrillaViewInner() {
                         Bonos
                       </button>
 
+                      {/* Partidos button */}
+                      <span className="text-gray-300 select-none">|</span>
+                      {(() => {
+                        const isMatchesActive = (activeView as string) === 'matches';
+                        return (
+                          <button
+                            onClick={() => setActiveView(prev => prev === 'matches' ? 'grid' : 'matches')}
+                            className={`flex items-center gap-1 px-2.5 py-0.5 rounded border text-[10px] font-bold transition-all whitespace-nowrap flex-shrink-0 ${
+                              isMatchesActive
+                                ? 'bg-orange-500 text-white border-orange-500'
+                                : 'border-orange-500 bg-white text-orange-500 hover:bg-orange-500 hover:text-white'
+                            }`}
+                          >
+                            <Calendar className="w-3 h-3" />
+                            Partidos
+                          </button>
+                        );
+                      })()}
+
                     </div>
                   </div>
                 )}
@@ -1742,6 +1843,62 @@ function GrillaViewInner() {
                           </div>
                         )}
                       </div>
+                    )}
+                  </div>
+
+                  {/* ── Gear: maintenance block / unblock picklist ── */}
+                  <div className="relative ml-auto mb-1">
+                    <button
+                      onClick={() => setShowMaintenanceMenu(prev => !prev)}
+                      title="Bloquear / desbloquear pista por mantenimiento"
+                      className={clsx(
+                        "w-7 h-7 flex items-center justify-center rounded-full transition-colors",
+                        showMaintenanceMenu
+                          ? "bg-gray-200 text-gray-800"
+                          : "text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                      )}
+                    >
+                      <Settings className="w-4 h-4" />
+                    </button>
+                    {showMaintenanceMenu && (
+                      <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowMaintenanceMenu(false)} />
+                      <div className="absolute right-0 top-full mt-1 w-64 bg-white rounded-lg shadow-xl border border-gray-200 z-50 overflow-hidden">
+                        <div className="px-4 py-2.5 border-b border-gray-100">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Mantenimiento de pistas</p>
+                        </div>
+                        <ul className="py-1 max-h-72 overflow-y-auto">
+                          {gridCourts.filter(c => !/virtual/i.test(c.name)).map(court => {
+                            const isBlocked = reservations.some(
+                              r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO'
+                            );
+                            return (
+                              <li key={court.id}>
+                                <button
+                                  onClick={() => {
+                                    setShowMaintenanceMenu(false);
+                                    setMaintenanceBlockTarget({ courtId: court.id, courtName: court.name });
+                                  }}
+                                  className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center justify-between group"
+                                >
+                                  <span className="font-medium">{court.name}</span>
+                                  {isBlocked ? (
+                                    <span className="flex items-center gap-1.5 text-amber-600">
+                                      <Lock className="w-3.5 h-3.5" />
+                                      <span className="text-[10px] font-bold uppercase">Bloqueada</span>
+                                    </span>
+                                  ) : (
+                                    <span className="flex items-center gap-1.5 text-gray-300 group-hover:text-emerald-500 transition-colors">
+                                      <LockOpen className="w-3.5 h-3.5" />
+                                    </span>
+                                  )}
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1828,6 +1985,7 @@ function GrillaViewInner() {
                                 setFocusedCourtId(courtId);
                               }}
                               onHeaderHover={setHoveredCourtId}
+                              isMaintenanceBlocked={isNonWorkingDay || reservations.some(r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO')}
                               isFocusedMode={focusedCourtId !== null}
                               isCurrentlyFocused={court.id === focusedCourtId}
                               isCompactView={false}
@@ -1884,6 +2042,7 @@ function GrillaViewInner() {
                             setSelectedModalReservationId(newId);
                           }}
                           isCompactView={false}
+                          isMaintenanceBlocked={isNonWorkingDay || reservations.some(r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO')}
                           totalCourts={gridCourts.length}
                           onHeaderHover={setHoveredCourtId}
                           onHoverStart={(res, el) => setHoveredTooltip({ res, el })}
@@ -1918,6 +2077,7 @@ function GrillaViewInner() {
               ) : null}
             </DragOverlay>
           </DndContext>
+          )}
         </main>
 
         <ReservationModal
@@ -1958,6 +2118,8 @@ function GrillaViewInner() {
           onClose={() => setBonusModalOpen(false)}
         />
 
+
+
         <WalletRecharge
           clubId={clubId}
           isOpen={rechargeModalOpen}
@@ -1971,6 +2133,26 @@ function GrillaViewInner() {
           onMoveToBetter={handleMoveToBetter}
           warnings={gapWarnings}
         />
+
+        {maintenanceBlockTarget && (() => {
+          const existing = reservations.find(
+            r => r.courtId === maintenanceBlockTarget.courtId
+              && r.booking_type === 'blocked'
+              && r.matchType === 'MANTENIMIENTO'
+          );
+          const existingReason = existing?.notes?.replace('__COURT_MAINTENANCE__:', '').trim();
+          return (
+            <MaintenanceBlockModal
+              courtId={maintenanceBlockTarget.courtId}
+              courtName={maintenanceBlockTarget.courtName}
+              dateStr={formatDateForInput(selectedDate)}
+              existingBlockId={existing?.id}
+              existingReason={existingReason}
+              onClose={() => setMaintenanceBlockTarget(null)}
+              onDone={() => refresh()}
+            />
+          );
+        })()}
       {/* Custom Tooltip */}
       <HoverTooltip
         reservation={hoveredTooltip?.res || null}

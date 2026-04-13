@@ -113,12 +113,14 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   }, [load]);
 
   const filtered = useMemo(() => {
-    return items.filter(
-      (row) =>
-        matchesSearch(row, searchQuery) &&
-        matchesFormatFilter(row, formatFilter) &&
-        matchesLevelFilter(row, levelFilter),
-    );
+    return items
+      .filter((row) => String(row.status ?? '').toLowerCase() !== 'cancelled')
+      .filter(
+        (row) =>
+          matchesSearch(row, searchQuery) &&
+          matchesFormatFilter(row, formatFilter) &&
+          matchesLevelFilter(row, levelFilter),
+      );
   }, [items, searchQuery, formatFilter, levelFilter]);
 
   const formatChipLabel =

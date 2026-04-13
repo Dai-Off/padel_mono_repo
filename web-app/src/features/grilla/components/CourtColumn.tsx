@@ -16,6 +16,7 @@ interface Props {
     onFreeSlotClick?: (courtId: string, courtName: string, timeStr: string, isDisabled: boolean) => void;
     onHeaderClick?: (courtId: string) => void;
     onHeaderHover?: (courtId: string | null) => void;
+    isMaintenanceBlocked?: boolean;
     onHoverStart?: (res: Reservation, el: HTMLElement) => void;
     onHoverEnd?: () => void;
     isFocusedMode?: boolean;
@@ -37,7 +38,7 @@ function parseCourtName(name: string): { main: string; sub?: string } {
     return { main: mainParts, sub };
 }
 
-export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, recentlyDroppedId, onReservationClick, onFreeSlotClick, onHeaderClick, onHeaderHover, onHoverStart, onHoverEnd, isFocusedMode, isCurrentlyFocused, isCompactView, compactPxPerMinute, totalCourts }) => {
+export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, recentlyDroppedId, onReservationClick, onFreeSlotClick, onHeaderClick, onHeaderHover, isMaintenanceBlocked, onHoverStart, onHoverEnd, isFocusedMode, isCurrentlyFocused, isCompactView, compactPxPerMinute, totalCourts }) => {
     const { tData } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
     const isSmallZoom = !isCompactView && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
@@ -110,9 +111,11 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
                     isDragging && "opacity-40",
                     isVirtual
                         ? "text-slate-500 bg-white"
-                        : isCurrentlyFocused
-                            ? "bg-[#e8f5e9] text-[#005a4f] cursor-grab"
-                            : "bg-white text-[#005a4f] cursor-grab hover:bg-[#f0faf0]"
+                        : isMaintenanceBlocked
+                            ? "bg-amber-100 text-amber-800 cursor-grab"
+                            : isCurrentlyFocused
+                                ? "bg-[#e8f5e9] text-[#005a4f] cursor-grab"
+                                : "bg-white text-[#005a4f] cursor-grab hover:bg-[#f0faf0]"
                 )}
             >
                 {isCompactView ? (
@@ -140,53 +143,82 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
                 )}
                 style={{ height }}
             >
-                {/* Render Free Slots */}
-                {freeSlots.map((slot, i) => {
-                    const duration = slot.endMins - slot.startMins;
-                    if (duration < 30) return null;
-
-                    const blocksCount = Math.floor(duration / 30);
-
-                    return Array.from({ length: blocksCount }).map((_, b) => {
-                        const blockStartMins = slot.startMins + (b * 30);
-
+                {/* Render Free Slots — grey when maintenance-blocked or outside operational hours */}
+                {(isMaintenanceBlocked
+                    ? Array.from({ length: Math.floor(((END_HOUR - START_HOUR) * 60) / 30) }).map((_, b) => {
+                        const blockStartMins = START_HOUR * 60 + b * 30;
                         const h = Math.floor(blockStartMins / 60);
                         const m = blockStartMins % 60;
                         const displayH = h >= 24 ? h - 24 : h;
                         const timeStr = `${displayH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-
-                        const isUnavailable = blockStartMins < 8 * 60 || blockStartMins >= 23 * 60; // gray before 8:00 AM and from 23:00
-
                         const manyCourts = totalCourts && totalCourts > 10;
-
                         return (
                             <div
-                                key={`free-${i}-${b}`}
-                                onClick={() => onFreeSlotClick?.(court.id, court.name, timeStr, isUnavailable)}
-                                className={clsx(
-                                    "absolute inset-x-0 border-b z-0 flex items-center justify-center transition-colors",
-                                    isUnavailable
-                                        ? "bg-[#e0e0e0] border-white cursor-pointer hover:bg-[#d0d0d0]"
-                                        : "bg-[#ade88f] border-white cursor-pointer hover:bg-[#93db72]"
-                                )}
+                                key={`maint-${b}`}
+                                className="absolute inset-x-0 border-b z-[5] flex items-center justify-center bg-[#d0d0d0] border-white cursor-not-allowed"
                                 style={{
                                     top: (blockStartMins - START_HOUR * 60) * ppm,
                                     height: 30 * ppm,
                                 }}
                             >
                                 <span className={clsx(
-                                    "font-semibold pointer-events-none",
+                                    "font-semibold pointer-events-none text-[#919191]",
                                     isCompactView
                                         ? (manyCourts ? "text-[7.5px] -ml-0.5 tracking-tighter" : "text-[7px]")
                                         : isSmallZoom ? "text-[13px]" : "text-[8px]",
-                                    isUnavailable ? "text-[#919191]" : "text-[#919191]"
                                 )}>
                                     {timeStr}
                                 </span>
                             </div>
                         );
-                    });
-                })}
+                    })
+                    : freeSlots.map((slot, i) => {
+                        const duration = slot.endMins - slot.startMins;
+                        if (duration < 30) return null;
+
+                        const blocksCount = Math.floor(duration / 30);
+
+                        return Array.from({ length: blocksCount }).map((_, b) => {
+                            const blockStartMins = slot.startMins + (b * 30);
+
+                            const h = Math.floor(blockStartMins / 60);
+                            const m = blockStartMins % 60;
+                            const displayH = h >= 24 ? h - 24 : h;
+                            const timeStr = `${displayH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+
+                            const isUnavailable = blockStartMins < 8 * 60 || blockStartMins >= 23 * 60;
+
+                            const manyCourts = totalCourts && totalCourts > 10;
+
+                            return (
+                                <div
+                                    key={`free-${i}-${b}`}
+                                    onClick={() => onFreeSlotClick?.(court.id, court.name, timeStr, isUnavailable)}
+                                    className={clsx(
+                                        "absolute inset-x-0 border-b z-0 flex items-center justify-center transition-colors",
+                                        isUnavailable
+                                            ? "bg-[#e0e0e0] border-white cursor-pointer hover:bg-[#d0d0d0]"
+                                            : "bg-[#ade88f] border-white cursor-pointer hover:bg-[#93db72]"
+                                    )}
+                                    style={{
+                                        top: (blockStartMins - START_HOUR * 60) * ppm,
+                                        height: 30 * ppm,
+                                    }}
+                                >
+                                    <span className={clsx(
+                                        "font-semibold pointer-events-none",
+                                        isCompactView
+                                            ? (manyCourts ? "text-[7.5px] -ml-0.5 tracking-tighter" : "text-[7px]")
+                                            : isSmallZoom ? "text-[13px]" : "text-[8px]",
+                                        isUnavailable ? "text-[#919191]" : "text-[#919191]"
+                                    )}>
+                                        {timeStr}
+                                    </span>
+                                </div>
+                            );
+                        });
+                    })
+                )}
 
                 {dragGhost && (
                     <div

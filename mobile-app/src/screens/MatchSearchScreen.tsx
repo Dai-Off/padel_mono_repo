@@ -56,13 +56,13 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
   }, [results, searchQuery]);
 
   const clubGroups = useMemo(
-    () => aggregateCourtsByClub(filteredResults),
-    [filteredResults]
+    () => aggregateCourtsByClub(filteredResults, { sortBy: filters.sortBy }),
+    [filteredResults, filters.sortBy]
   );
 
   const clubCountForFilters = useMemo(
-    () => aggregateCourtsByClub(results).length,
-    [results]
+    () => aggregateCourtsByClub(results, { sortBy: filters.sortBy }).length,
+    [results, filters.sortBy]
   );
 
   return (

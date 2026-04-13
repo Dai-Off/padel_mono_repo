@@ -4,6 +4,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Platform,
   Pressable,
   ScrollView,
@@ -31,6 +32,8 @@ import type { BookingConfirmationData } from "./BookingConfirmationScreen";
 import { PrivateReservationModal } from "../components/partido/PrivateReservationModal";
 import type { PartidoItem } from "./PartidosScreen";
 import { theme } from "../theme";
+import { filterSlotsStartingAfterNow } from "../domain/localSlotAvailability";
+import { toDateStringLocal as localCalendarYmd } from "../utils/dateLocal";
 
 const DURATION_MIN = 60;
 
@@ -63,14 +66,6 @@ const MONTHS = [
   "Nov",
   "Dic",
 ];
-
-/** Fecha en YYYY-MM-DD según hora local (evita desfase por toISOString en UTC). */
-function toDateStringLocal(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
 
 function getCerramientoLabel(indoor: boolean): string {
   return indoor ? "Indoor" : "Exterior";
@@ -233,11 +228,12 @@ export function ClubDetailScreen({
   const [selectedDateIndex, setSelectedDateIndex] = useState(1);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [partidosAlertsEnabled, setPartidosAlertsEnabled] = useState(false);
-  const [timeSlotsForDate, setTimeSlotsForDate] = useState<string[]>([]);
-  const [slotsByCourt, setSlotsByCourt] = useState<Record<string, string[]>>(
+  const [rawTimeSlotsUnion, setRawTimeSlotsUnion] = useState<string[]>([]);
+  const [rawSlotsByCourt, setRawSlotsByCourt] = useState<Record<string, string[]>>(
     {},
   );
   const [timeSlotsLoading, setTimeSlotsLoading] = useState(false);
+  const [slotNow, setSlotNow] = useState(() => new Date());
   const [courtPrices, setCourtPrices] = useState<
     Record<string, { minPriceCents: number; minPriceFormatted: string }>
   >({});
@@ -252,11 +248,56 @@ export function ClubDetailScreen({
     return d;
   }, [selectedDateIndex]);
 
+  const dateStrForSlots = useMemo(
+    () => localCalendarYmd(selectedDate),
+    [selectedDate],
+  );
+
+  const timeSlotsForDate = useMemo(
+    () => filterSlotsStartingAfterNow(dateStrForSlots, rawTimeSlotsUnion, slotNow),
+    [dateStrForSlots, rawTimeSlotsUnion, slotNow],
+  );
+
+  const slotsByCourt = useMemo(() => {
+    const o: Record<string, string[]> = {};
+    for (const [id, slots] of Object.entries(rawSlotsByCourt)) {
+      o[id] = filterSlotsStartingAfterNow(dateStrForSlots, slots, slotNow);
+    }
+    return o;
+  }, [dateStrForSlots, rawSlotsByCourt, slotNow]);
+
+  useEffect(() => {
+    if (activeTab !== "Reservar") return;
+    setSlotNow(new Date());
+    const id = setInterval(() => setSlotNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, [activeTab, selectedDateIndex]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active" && activeTab === "Reservar") {
+        setSlotNow(new Date());
+      }
+    });
+    return () => sub.remove();
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (
+      selectedTimeSlot &&
+      !timeSlotsForDate.includes(selectedTimeSlot)
+    ) {
+      setSelectedTimeSlot(null);
+    }
+  }, [timeSlotsForDate, selectedTimeSlot]);
+
   const loadTimeSlotsForDate = useCallback(
     async (date: Date) => {
       setTimeSlotsLoading(true);
+      setRawTimeSlotsUnion([]);
+      setRawSlotsByCourt({});
       try {
-        const dateStr = toDateStringLocal(date);
+        const dateStr = localCalendarYmd(date);
         const slotsPerCourt: Record<string, string[]> = {};
         const results = await fetchSearchCourts({
           dateFrom: dateStr,
@@ -280,13 +321,14 @@ export function ClubDetailScreen({
             };
           }
         }
-        setTimeSlotsForDate([...new Set(allSlots)].sort());
+        setRawTimeSlotsUnion([...new Set(allSlots)].sort());
         setCourtPrices(prices);
-        setSlotsByCourt(slotsPerCourt);
+        setRawSlotsByCourt(slotsPerCourt);
+        setSlotNow(new Date());
       } catch {
-        setTimeSlotsForDate([]);
+        setRawTimeSlotsUnion([]);
         setCourtPrices({});
-        setSlotsByCourt({});
+        setRawSlotsByCourt({});
       } finally {
         setTimeSlotsLoading(false);
       }
@@ -325,6 +367,17 @@ export function ClubDetailScreen({
         );
         return;
       }
+      const slotDateStr = localCalendarYmd(selectedDate);
+      if (
+        filterSlotsStartingAfterNow(slotDateStr, [selectedTimeSlot], new Date())
+          .length === 0
+      ) {
+        Alert.alert(
+          "Horario no disponible",
+          "Esa franja ya pasó o no está disponible. Elige otra hora.",
+        );
+        return;
+      }
       if (!organizerPlayerId || !session?.access_token) {
         Alert.alert("Inicia sesión", "Debes iniciar sesión para reservar.");
         return;
@@ -338,7 +391,7 @@ export function ClubDetailScreen({
       }
 
       setReserving(true);
-      const dateStr = toDateStringLocal(selectedDate);
+      const dateStr = localCalendarYmd(selectedDate);
       // Parse as local time (no Z suffix) so JS converts correctly to UTC when sending to backend
       const startDate = new Date(`${dateStr}T${selectedTimeSlot}:00`);
       const start_at = startDate.toISOString();
@@ -901,37 +954,10 @@ export function ClubDetailScreen({
         ) : activeTab === "Competiciones" ? (
           <>
             <View style={styles.partidosFiltersWrap}>
-              <View style={styles.partidosFilters}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.partidosFilterBtn,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.partidosFilterText}>
-                    Todos los deportes
-                  </Text>
-                  <Ionicons name="chevron-down" size={14} color="#fff" />
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.partidosFilterBtn,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.partidosFilterText}>Cualquier día</Text>
-                  <Ionicons name="chevron-down" size={14} color="#fff" />
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.partidosFilterBtn,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={styles.partidosFilterText}>Mixto</Text>
-                  <Ionicons name="chevron-down" size={14} color="#fff" />
-                </Pressable>
-              </View>
+              <Text style={styles.partidosCompeticionesHint}>
+                Los filtros de torneos están en la pestaña Torneos de la app. Aquí verás
+                competiciones del club cuando estén disponibles.
+              </Text>
             </View>
             <View style={styles.partidosEmptySection}>
               <View style={styles.partidosEmptyState}>
@@ -2012,6 +2038,13 @@ const styles = StyleSheet.create({
   },
   partidosFiltersWrap: {
     marginBottom: theme.spacing.md,
+  },
+  partidosCompeticionesHint: {
+    fontSize: theme.fontSize.xs,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    color: "rgba(255,255,255,0.55)",
+    paddingHorizontal: theme.spacing.sm,
+    ...Platform.select({ android: { includeFontPadding: false } }),
   },
   partidosFilters: {
     flexDirection: "row",

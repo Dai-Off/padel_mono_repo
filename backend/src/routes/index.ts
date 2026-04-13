@@ -32,6 +32,7 @@ import leaguesRouter from "./leagues";
 import walletRouter from "./wallet";
 import onboardingQuestionsRouter from "./onboardingQuestions";
 import bonusesRouter from "./bonuses";
+import clubSpecialDatesRouter from "./clubSpecialDates";
 
 const router = Router();
 
@@ -75,5 +76,6 @@ router.use("/leagues", leaguesRouter);
 router.use("/wallet", walletRouter);
 router.use("/onboarding-questions", onboardingQuestionsRouter);
 router.use("/bonuses", bonusesRouter);
+router.use("/club-special-dates", clubSpecialDatesRouter);
 
 export default router;

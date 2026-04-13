@@ -164,7 +164,7 @@ export function SidebarContent() {
           <SidebarRowItem
             icon="wallet-outline"
             title="Tus pagos"
-            subtitle="Métodos de pago, transacciones, membr..."
+            subtitle="Transacciones, reembolsos y métodos de pago"
             iconVariant="emerald"
             onPress={() => {
               close?.();
