@@ -31,6 +31,7 @@ import tournamentInvitesRouter from './tournamentInvites';
 import leaguesRouter from './leagues';
 import walletRouter from './wallet';
 import bonusesRouter from './bonuses';
+import clubSpecialDatesRouter from './clubSpecialDates';
 
 const router = Router();
 
@@ -73,6 +74,7 @@ router.use('/tournaments', tournamentsRouter);
 router.use('/leagues', leaguesRouter);
 router.use('/wallet', walletRouter);
 router.use('/bonuses', bonusesRouter);
+router.use('/club-special-dates', clubSpecialDatesRouter);
 
 export default router;
 

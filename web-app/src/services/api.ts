@@ -10,10 +10,12 @@ export function getApiBase(): string {
 export class HttpError extends Error {
     status: number;
     code?: string;
-    constructor(message: string, status: number, code?: string) {
+    data?: Record<string, unknown>;
+    constructor(message: string, status: number, code?: string, data?: Record<string, unknown>) {
         super(message);
         this.status = status;
         this.code = code;
+        this.data = data;
     }
 }
 
@@ -88,7 +90,8 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
             response.status,
             typeof (errorData as { code?: unknown }).code === 'string'
                 ? (errorData as { code: string }).code
-                : undefined
+                : undefined,
+            errorData as Record<string, unknown>
         );
     }
 
@@ -128,7 +131,8 @@ export async function apiFetchWithAuth<T>(path: string, options: RequestInit = {
         throw new HttpError(
             errorData.error || errorData.message || 'API Request failed',
             response.status,
-            typeof errorData.code === 'string' ? errorData.code : undefined
+            typeof errorData.code === 'string' ? errorData.code : undefined,
+            errorData
         );
     }
     return response.json();
@@ -162,7 +166,8 @@ export async function apiFetchBlobWithAuth(path: string): Promise<Blob> {
         throw new HttpError(
             errorData.error || errorData.message || 'API Request failed',
             response.status,
-            typeof errorData.code === 'string' ? errorData.code : undefined
+            typeof errorData.code === 'string' ? errorData.code : undefined,
+            errorData
         );
     }
     return response.blob();
