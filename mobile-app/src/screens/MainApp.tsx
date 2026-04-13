@@ -36,6 +36,8 @@ import { Question, LessonAnswer, submitDailyLesson } from "../api/learning";
 import { useAuth } from "../contexts/AuthContext";
 import { LessonCompletionResponse } from "../api/learning";
 import { CoursesScreen } from "./CoursesScreen";
+import { PublicCourseDetailScreen } from "./PublicCourseDetailScreen";
+import type { PublicCourse } from "../api/schoolCourses";
 
 export function MainApp() {
   const sidebar = useSidebar(false);
@@ -68,14 +70,41 @@ export function MainApp() {
   const [bookingSuccessData, setBookingSuccessData] =
     useState<BookingConfirmationData | null>(null);
   const [dailyLessonRefreshNonce, setDailyLessonRefreshNonce] = useState(0);
+  const [coursesRefreshNonce, setCoursesRefreshNonce] = useState(0);
   const [showCourses, setShowCourses] = useState(false);
+  const [selectedPublicCourse, setSelectedPublicCourse] =
+    useState<PublicCourse | null>(null);
+  const [selectedCourseIsReserved, setSelectedCourseIsReserved] =
+    useState(false);
 
   const showClubDetail = activeTab === "pistas" && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
 
   const renderContent = () => {
+    if (selectedPublicCourse) {
+      return (
+        <PublicCourseDetailScreen
+          course={selectedPublicCourse}
+          isReserved={selectedCourseIsReserved}
+          onBack={() => setSelectedPublicCourse(null)}
+          onEnrollSuccess={() => {
+            setCoursesRefreshNonce((n) => n + 1);
+            setSelectedPublicCourse(null);
+          }}
+        />
+      );
+    }
     if (showCourses) {
-      return <CoursesScreen onBack={() => setShowCourses(false)} />;
+      return (
+        <CoursesScreen
+          onBack={() => setShowCourses(false)}
+          onCoursePress={(course, isRes) => {
+            setSelectedCourseIsReserved(isRes);
+            setSelectedPublicCourse(course);
+          }}
+          refreshNonce={coursesRefreshNonce}
+        />
+      );
     }
     if (showDailyLessonIntro) {
       return (
@@ -261,7 +290,8 @@ export function MainApp() {
     !showDailyLessonIntro &&
     !showDailyLessonVideo &&
     !showDailyLessonInteraction &&
-    !showCourses;
+    !showCourses &&
+    !selectedPublicCourse;
 
   const customHeader =
     bookingSuccessData != null ||
@@ -272,7 +302,8 @@ export function MainApp() {
     showDailyLessonIntro ||
     showDailyLessonVideo ||
     showDailyLessonInteraction ||
-    showCourses ? undefined : activeTab === "tienda" ? (
+    showCourses ||
+    !!selectedPublicCourse ? undefined : activeTab === "tienda" ? (
       <BackHeader
         title="Tienda"
         tone="dark"
@@ -309,6 +340,9 @@ export function MainApp() {
                   ? "#0F0F0F"
                   : "#ffffff";
 
+  let finalBgColor = layoutBackgroundColor;
+  if (selectedPublicCourse) finalBgColor = "#0F0F0F";
+
   return (
     <View style={styles.container}>
       <SidebarProvider
@@ -330,10 +364,11 @@ export function MainApp() {
               showDailyLessonVideo ||
               showDailyLessonInteraction ||
               showCourses ||
+              !!selectedPublicCourse ||
               (showMainTabs && activeTab === "pistas") ||
               (showMainTabs && activeTab === "torneos")
             }
-            layoutBackgroundColor={layoutBackgroundColor}
+            layoutBackgroundColor={finalBgColor}
           >
             {renderContent()}
           </ScreenLayout>
@@ -342,7 +377,9 @@ export function MainApp() {
             !showPartidoDetail &&
             !showTusPagos &&
             !showTransacciones &&
-            !crearPartidoFlow.open && (
+            !crearPartidoFlow.open &&
+            !showCourses &&
+            !selectedPublicCourse && (
               <View style={styles.bottomBar}>
                 <BottomNavbar
                   activeTab={activeTab}

@@ -1,9 +1,14 @@
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useEffect, useRef } from "react";
+import {
+  Animated,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
-import { ACCENT } from "./constants";
-import { DASH, dash } from "./dash";
 import { androidReadableText } from "./textStyles";
 
 const WEEK_LABELS = ["L", "M", "X", "J", "V", "S", "D"] as const;
@@ -22,237 +27,268 @@ export function DailyLessonCard({
   alreadyCompleted,
   onPress,
 }: Props) {
-  const bonus = dash(bonusText);
+  // Obtener el índice del día actual (0=Lunes, 6=Domingo)
+  const today = new Date();
+  let todayIdx = today.getDay(); // 0=Domingo, 1=Lunes...
+  todayIdx = todayIdx === 0 ? 6 : todayIdx - 1;
+
+  // Animación tipo Pulse suave
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const pulse = Animated.sequence([
+      Animated.timing(pulseAnim, {
+        toValue: 1.1,
+        duration: 1800,
+        useNativeDriver: true,
+      }),
+      Animated.timing(pulseAnim, {
+        toValue: 1,
+        duration: 1800,
+        useNativeDriver: true,
+      }),
+    ]);
+    Animated.loop(pulse).start();
+  }, [pulseAnim]);
+
+  // Usamos los datos reales que vienen por props
+  const streakCount = weeklyProgress?.filter(Boolean).length ?? 0;
+  const displayStreak = streakCount;
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
     >
+      {/* Capa base oscura */}
       <LinearGradient
-        colors={[
-          "rgba(248,113,23,0.12)",
-          "rgba(223,30,36,0.22)",
-          "rgba(47,25,15,0.95)",
-        ]}
-        locations={[0, 0.4, 1]}
+        colors={["#1A0800", "#261005", "#1A0800"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      {Platform.OS === "ios" ? (
-        <BlurView
-          intensity={24}
-          tint="dark"
-          style={[StyleSheet.absoluteFill, styles.blur]}
-        />
-      ) : null}
-      <View style={styles.glassBorder} />
-      <View
-        style={[styles.inner, Platform.OS === "android" && styles.innerAndroid]}
+
+      {/* Capa de Pulso Naranja (Aumenta el tono y respira) */}
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          {
+            opacity: pulseAnim.interpolate({
+              inputRange: [1, 1.1],
+              outputRange: [0, 0.4],
+            }),
+          },
+        ]}
       >
-        <View style={styles.topRow}>
-          <View style={styles.iconCol}>
-            <View style={styles.iconGlow} />
+        <LinearGradient
+          colors={["#2A1100", "#4A2000", "#2A1100"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
+
+      <View style={styles.glassBorder} />
+
+      <View style={styles.inner}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerLeft}>
             <LinearGradient
-              colors={["#f97316", ACCENT]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+              colors={["#FFB040", "#FF5F00"]}
               style={styles.iconBox}
             >
-              <Ionicons name="flame" size={28} color="#fff" />
+              <Ionicons name="flame" size={20} color="white" />
             </LinearGradient>
+            <View>
+              <Text style={styles.title}>Lección diaria</Text>
+              <Text style={styles.subtitle}>Racha semanal</Text>
+            </View>
           </View>
-          <View style={styles.titleCol}>
-            <Text style={styles.title}>Lección diaria</Text>
-            <Text style={styles.bonus}>Bonus: {bonus}</Text>
+
+          <View style={styles.headerRight}>
+            <Text style={styles.ctaText}>
+              {alreadyCompleted ? "Repasar" : "Empezar"}
+            </Text>
+            <Ionicons name="chevron-forward" size={12} color="#FF8C00" />
           </View>
         </View>
 
+        {/* Streak Info */}
+        <View style={styles.streakInfo}>
+          <View style={styles.streakLabelContainer}>
+            <Ionicons name="flame" size={10} color="#FF7A00" />
+            <Text style={styles.streakText}>{displayStreak} días de racha</Text>
+          </View>
+          <Text style={styles.bonusText}>Bonus {bonusText || "x0.5"}</Text>
+        </View>
+
+        {/* Weekly Progress */}
         <View style={styles.daysRow}>
           {WEEK_LABELS.map((label, idx) => {
-            const isCompleted = weeklyProgress ? weeklyProgress[idx] : false;
+            const isDone = weeklyProgress?.[idx] ?? false;
+            const isToday = idx === todayIdx;
+
             return (
-              <View key={label} style={styles.dayCol}>
+              <View key={idx} style={styles.dayCol}>
                 <Text
                   style={[
                     styles.dayLabel,
-                    isCompleted && styles.dayLabelCompleted,
+                    isToday ? styles.dayLabelActive : null,
                   ]}
                 >
                   {label}
                 </Text>
+
                 <View
                   style={[
                     styles.dayCell,
-                    isCompleted && styles.dayCellCompleted,
+                    isDone && styles.dayCellCompleted,
+                    isToday && styles.dayCellToday,
+                    !isDone && !isToday && styles.dayCellFuture,
                   ]}
                 >
-                  {isCompleted ? (
-                    <Ionicons name="checkmark" size={12} color="#fff" />
+                  {isDone ? (
+                    <Ionicons name="checkmark" size={12} color="white" />
+                  ) : isToday ? (
+                    <Ionicons name="book-outline" size={12} color="#9CA3AF" />
                   ) : (
-                    <Text style={styles.dayPlaceholder}>{DASH}</Text>
+                    <Ionicons name="lock-closed" size={10} color="#374151" />
                   )}
                 </View>
               </View>
             );
           })}
         </View>
-
-        <View style={styles.footer} collapsable={false}>
-          <View style={styles.ctaShell} collapsable={false}>
-            <Text
-              numberOfLines={1}
-              textBreakStrategy={
-                Platform.OS === "android" ? "simple" : undefined
-              }
-              style={[
-                styles.cta,
-                Platform.OS === "android" ? styles.ctaAndroid : null,
-                alreadyCompleted && styles.ctaCompleted,
-              ]}
-            >
-              {alreadyCompleted ? "Repasar" : "Empezar"}
-            </Text>
-          </View>
-          <Ionicons
-            name="chevron-forward"
-            size={18}
-            color={ACCENT}
-            style={styles.footerIcon}
-          />
-        </View>
       </View>
     </Pressable>
   );
 }
 
+
 const styles = StyleSheet.create({
   wrap: {
-    borderRadius: 24,
+    borderRadius: 28,
     overflow: "hidden",
     width: "100%",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.05)",
   },
   pressed: { opacity: 0.95 },
-  blur: { opacity: 0.85 },
   glassBorder: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: 24,
-    borderWidth: 1,
+    borderRadius: 28,
+    borderWidth: 0.5,
     borderColor: "rgba(255,255,255,0.1)",
-    backgroundColor: "rgba(255,255,255,0.04)",
   },
-  inner: { padding: 20, position: "relative", zIndex: 2 },
-  /** Más aire a la derecha: el borde redondeado + overflow:hidden recorta el trazo en Android. */
-  innerAndroid: {
-    paddingRight: 30,
-    paddingLeft: 20,
-    paddingTop: 20,
-    paddingBottom: 20,
+  inner: {
+    padding: 16,
+    paddingTop: 14,
   },
-  topRow: {
+  header: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 10,
   },
-  iconCol: { position: "relative" },
-  iconGlow: {
-    position: "absolute",
-    width: 64,
-    height: 64,
-    borderRadius: 16,
-    backgroundColor: "rgba(249,115,22,0.45)",
-    left: -4,
-    top: -4,
-    opacity: 0.6,
+  headerLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   iconBox: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
+    width: 42,
+    height: 42,
+    borderRadius: 14,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#FF5F00",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
-  titleCol: { flex: 1, marginLeft: 12, justifyContent: "center", minWidth: 0 },
   title: androidReadableText({
-    fontSize: 18,
-    fontWeight: "900",
-    color: "#fff",
+    color: "white",
+    fontSize: 17,
+    fontWeight: "bold",
   }),
-  bonus: androidReadableText({
-    marginTop: 4,
+  subtitle: androidReadableText({
+    color: "#6B7280",
     fontSize: 12,
+    marginTop: -2,
+  }),
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  ctaText: androidReadableText({
+    color: "#FF8C00",
+    fontSize: 13,
     fontWeight: "700",
-    color: "#9ca3af",
+  }),
+  streakInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 14,
+  },
+  streakLabelContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  streakText: androidReadableText({
+    color: "#FF8E00",
+    fontSize: 12,
+    fontWeight: "bold",
+  }),
+  bonusText: androidReadableText({
+    color: "#6B7280",
+    fontSize: 12,
+    fontWeight: "500",
   }),
   daysRow: {
     flexDirection: "row",
-    gap: 6,
-    marginBottom: 16,
+    gap: 4,
   },
   dayCol: {
     flex: 1,
     alignItems: "center",
-    gap: 4,
+    gap: 3,
   },
   dayLabel: androidReadableText({
-    fontSize: 9,
-    fontWeight: "700",
-    color: "#4b5563",
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#4B5563",
+    textTransform: "uppercase",
   }),
+  dayLabelActive: {
+    color: "white",
+    fontWeight: "bold",
+  },
   dayCell: {
     width: "100%",
-    aspectRatio: 1,
-    borderRadius: 8,
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.05)",
+    height: 42, // Más alto en Figma para que sea rectangular ancho
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
-  },
-  dayPlaceholder: androidReadableText({
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#6b7280",
-  }),
-  footer: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    alignSelf: "stretch",
-    width: "100%",
-  },
-  /** Sin `gap`: en algunos builds Android el gap + flex-end mide mal el ancho del Text. */
-  footerIcon: { marginLeft: 6 },
-  ctaShell: {
-    flexShrink: 0,
-    flexGrow: 0,
-  },
-  cta: androidReadableText({
-    fontSize: 14,
-    fontWeight: "700",
-    color: ACCENT,
-  }),
-  /**
-   * Sin paddingVertical extra (androidReadableText): reserva ancho real del glifo.
-   * paddingRight: hueco antes del clip por overflow:hidden del card.
-   */
-  ctaAndroid: {
-    includeFontPadding: false,
-    paddingVertical: 0,
-    paddingRight: 4,
-    lineHeight: 20,
-    flexShrink: 0,
-  },
-  ctaCompleted: {
-    color: "rgba(255,255,255,0.6)",
-  },
-  dayLabelCompleted: {
-    color: "#f97316",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderWidth: 1,
+    borderColor: "transparent",
   },
   dayCellCompleted: {
-    backgroundColor: "#f97316",
-    borderColor: "#f97316",
+    backgroundColor: "#FF5F00",
+    borderColor: "transparent",
+  },
+  dayCellToday: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1.2,
+    borderColor: "rgba(255, 122, 0, 0.4)",
+  },
+  dayCellFuture: {
+    backgroundColor: "rgba(30, 20, 15, 0.3)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.03)",
   },
 });

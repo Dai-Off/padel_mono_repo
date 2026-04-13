@@ -99,6 +99,198 @@ router.get('/public/list', async (req: Request, res: Response) => {
 
 router.use(attachAuthContext);
 
+/**
+ * @openapi
+ * /school-courses/public/my-enrollments:
+ *   get:
+ *     tags: [School Courses]
+ *     summary: List my course enrollments
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: OK }
+ *       401: { description: Unauthorized }
+ */
+router.get('/public/my-enrollments', async (req: Request, res: Response) => {
+  console.log('[DEBUG] GET /school-courses/public/my-enrollments hit');
+  if (!req.authContext) {
+    console.log('[DEBUG] Unauthorized: no authContext');
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  const { userId } = req.authContext;
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user?.email) return res.status(401).json({ ok: false, error: 'Invalid token' });
+
+    // 1. Get player profile by email (more robust)
+    const email = user.email.trim().toLowerCase();
+    const { data: player, error: pErr } = await supabase
+      .from('players')
+      .select('id')
+      .eq('email', email)
+      .neq('status', 'deleted')
+      .maybeSingle();
+
+    if (pErr || !player) {
+      console.log('[DEBUG] Player not found for email:', email);
+      return res.status(404).json({ ok: false, error: 'Player profile not found' });
+    }
+
+    // 2. Get enrollments with course and club info
+    const { data, error } = await supabase
+      .from('club_school_course_enrollments')
+      .select(`
+        *,
+        course:club_school_courses (
+          *,
+          club:clubs (
+            id, name, logo_url
+          )
+        )
+      `)
+      .eq('player_id', player.id)
+      .eq('status', 'active');
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    // 3. Get days for these courses
+    const courseIds = (data ?? []).map(e => e.course_id).filter(Boolean);
+    const { data: daysData, error: daysErr } = await supabase
+      .from('club_school_course_days')
+      .select('*')
+      .in('course_id', courseIds);
+
+    if (daysErr) return res.status(500).json({ ok: false, error: daysErr.message });
+
+    const daysByCourse = new Map<string, any[]>();
+    for (const d of daysData ?? []) {
+      const list = daysByCourse.get(d.course_id) ?? [];
+      list.push(d);
+      daysByCourse.set(d.course_id, list);
+    }
+
+    const enrollments = (data ?? []).map(e => ({
+      ...e,
+      course: e.course ? {
+        ...e.course,
+        days: daysByCourse.get(e.course_id) ?? []
+      } : null
+    }));
+
+    return res.json({ ok: true, enrollments });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /school-courses/public/enroll/{id}:
+ *   post:
+ *     tags: [School Courses]
+ *     summary: Enroll in a course (Public)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       201: { description: Enrolled successfully }
+ *       400: { description: Capacity reached or already enrolled }
+ *       401: { description: Unauthorized }
+ */
+router.post('/public/enroll/:id', async (req: Request, res: Response) => {
+  console.log('[DEBUG] POST /school-courses/public/enroll hit, id:', req.params.id);
+  if (!req.authContext) {
+    console.log('[DEBUG] Unauthorized: no authContext');
+    return res.status(401).json({ ok: false, error: 'Unauthorized' });
+  }
+  const { id } = req.params;
+  const { userId } = req.authContext;
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user?.email) return res.status(401).json({ ok: false, error: 'Invalid token' });
+
+    // 1. Get player profile by email
+    const email = user.email.trim().toLowerCase();
+    const { data: player, error: pErr } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, email, phone')
+      .eq('email', email)
+      .neq('status', 'deleted')
+      .maybeSingle();
+
+    if (pErr || !player) {
+      return res.status(404).json({ ok: false, error: 'Player profile not found' });
+    }
+
+    // 2. Check course exists and capacity
+    const { data: course, error: cErr } = await supabase
+      .from('club_school_courses')
+      .select('id, capacity, is_active')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (cErr || !course) return res.status(404).json({ ok: false, error: 'Course not found' });
+    if (!course.is_active) return res.status(400).json({ ok: false, error: 'Course is not active' });
+
+    // 3. Count current active enrollments
+    const { count, error: countErr } = await supabase
+      .from('club_school_course_enrollments')
+      .select('*', { count: 'exact', head: true })
+      .eq('course_id', id)
+      .eq('status', 'active');
+
+    if (countErr) return res.status(500).json({ ok: false, error: countErr.message });
+    if (count !== null && count >= course.capacity) {
+      return res.status(400).json({ ok: false, error: 'Course capacity reached' });
+    }
+
+    // 4. Check if already enrolled
+    const { data: existing } = await supabase
+      .from('club_school_course_enrollments')
+      .select('id')
+      .eq('course_id', id)
+      .eq('player_id', player.id)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (existing) {
+      return res.status(400).json({ ok: false, error: 'Already enrolled in this course' });
+    }
+
+    // 5. Create enrollment (Mocked payment -> directly active)
+    const { data: enrollment, error: insErr } = await supabase
+      .from('club_school_course_enrollments')
+      .insert({
+        course_id: id,
+        player_id: player.id,
+        student_name: `${player.first_name} ${player.last_name}`,
+        student_email: player.email,
+        student_phone: player.phone,
+        status: 'active'
+      })
+      .select()
+      .single();
+
+    if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
+
+    return res.status(201).json({ ok: true, enrollment });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 type Sport = 'padel' | 'tenis';
 type Level =
   | 'Principiante'

@@ -37,6 +37,30 @@ export interface PublicCoursesResponse {
   error?: string;
 }
 
+export interface CourseEnrollment {
+  id: string;
+  course_id: string;
+  player_id: string;
+  student_name: string;
+  student_email: string;
+  student_phone: string | null;
+  status: "active" | "cancelled";
+  created_at: string;
+  course?: PublicCourse;
+}
+
+export interface MyEnrollmentsResponse {
+  ok: boolean;
+  enrollments: CourseEnrollment[];
+  error?: string;
+}
+
+export interface EnrollResponse {
+  ok: boolean;
+  enrollment?: CourseEnrollment;
+  error?: string;
+}
+
 /**
  * Obtiene el listado de clases públicas disponibles.
  * @param params Filtros opcionales por deporte y nivel.
@@ -62,6 +86,46 @@ export async function fetchPublicCourses(params?: {
     return {
       ok: false,
       courses: [],
+      error: (err as Error).message,
+    };
+  }
+}
+
+/**
+ * Obtiene las inscripciones del jugador actual.
+ */
+export async function fetchMyEnrollments(token: string): Promise<MyEnrollmentsResponse> {
+  try {
+    const res = await fetch(`${API_URL}/school-courses/public/my-enrollments`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return await res.json();
+  } catch (err) {
+    return {
+      ok: false,
+      enrollments: [],
+      error: (err as Error).message,
+    };
+  }
+}
+
+/**
+ * Inscribe al jugador actual en un curso.
+ */
+export async function enrollInCourse(courseId: string, token: string): Promise<EnrollResponse> {
+  try {
+    const res = await fetch(`${API_URL}/school-courses/public/enroll/${courseId}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return await res.json();
+  } catch (err) {
+    return {
+      ok: false,
       error: (err as Error).message,
     };
   }

@@ -14,9 +14,16 @@ import {
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { fetchPublicCourses, PublicCourse } from "../api/schoolCourses";
+import {
+  fetchPublicCourses,
+  PublicCourse,
+  fetchMyEnrollments,
+  CourseEnrollment,
+} from "../api/schoolCourses";
 import { fetchLearningCourses, EducationalCourse } from "../api/learning";
 import { useAuth } from "../contexts/AuthContext";
+import { PublicCourseCard } from "../components/schoolCourses/PublicCourseCard";
+import { BookedCourseCard } from "../components/schoolCourses/BookedCourseCard";
 
 const { width } = Dimensions.get("window");
 
@@ -24,16 +31,24 @@ type TabId = "apuntate" | "cursos" | "tusclases";
 
 interface CoursesScreenProps {
   onBack: () => void;
+  onCoursePress: (course: PublicCourse, isReserved: boolean) => void;
+  refreshNonce?: number;
 }
 
-export function CoursesScreen({ onBack }: CoursesScreenProps) {
+export function CoursesScreen({
+  onBack,
+  onCoursePress,
+  refreshNonce,
+}: CoursesScreenProps) {
   const { session } = useAuth();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabId>("apuntate");
   const [courses, setCourses] = useState<PublicCourse[]>([]);
   const [eduCourses, setEduCourses] = useState<EducationalCourse[]>([]);
+  const [enrollments, setEnrollments] = useState<CourseEnrollment[]>([]);
   const [loading, setLoading] = useState(true);
   const [eduLoading, setEduLoading] = useState(false);
+  const [enrollmentsLoading, setEnrollmentsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -50,7 +65,7 @@ export function CoursesScreen({ onBack }: CoursesScreenProps) {
         sport: selectedSport || undefined,
       });
       if (res.ok) {
-        setCourses(res.courses);
+        setCourses(res.courses || []);
       }
     } catch (error) {
       console.error("Error loading courses:", error);
@@ -66,7 +81,7 @@ export function CoursesScreen({ onBack }: CoursesScreenProps) {
     try {
       const res = await fetchLearningCourses(session.access_token);
       if (res.ok && res.courses) {
-        setEduCourses(res.courses);
+        setEduCourses(res.courses || []);
       }
     } catch (error) {
       console.error("Error loading educational courses:", error);
@@ -76,20 +91,45 @@ export function CoursesScreen({ onBack }: CoursesScreenProps) {
     }
   }, [session]);
 
+  const loadEnrollments = useCallback(async () => {
+    if (!session?.access_token) return;
+    setEnrollmentsLoading(true);
+    try {
+      const res = await fetchMyEnrollments(session.access_token);
+      if (res.ok) {
+        setEnrollments(res.enrollments || []);
+      }
+    } catch (error) {
+      console.error("Error loading enrollments:", error);
+    } finally {
+      setEnrollmentsLoading(false);
+      setRefreshing(false);
+    }
+  }, [session]);
+
+  useEffect(() => {
+    loadCourses();
+    loadEnrollments();
+  }, [refreshNonce, loadCourses, loadEnrollments]);
+
   useEffect(() => {
     if (activeTab === "apuntate") {
       loadCourses();
     } else if (activeTab === "cursos") {
       loadEduCourses();
+    } else if (activeTab === "tusclases") {
+      loadEnrollments();
     }
-  }, [loadCourses, loadEduCourses, activeTab]);
+  }, [loadCourses, loadEduCourses, loadEnrollments, activeTab]);
 
   const onRefresh = () => {
     setRefreshing(true);
     if (activeTab === "apuntate") {
       loadCourses();
-    } else {
+    } else if (activeTab === "cursos") {
       loadEduCourses();
+    } else {
+      loadEnrollments();
     }
   };
 
@@ -265,8 +305,16 @@ export function CoursesScreen({ onBack }: CoursesScreenProps) {
                 </View>
               ) : (
                 <View style={styles.listContainer}>
-                  {filteredCourses.map((course) => (
-                    <ClassCard key={course.id} course={course} />
+                  {(filteredCourses || []).map((course) => (
+                    <PublicCourseCard
+                      key={course.id}
+                      course={course}
+                      isReserved={(enrollments || []).some(e => e.course_id === course.id)}
+                      onPress={() => {
+                        const isRes = (enrollments || []).some(e => e.course_id === course.id);
+                        onCoursePress(course, isRes);
+                      }}
+                    />
                   ))}
                 </View>
               )}
@@ -282,7 +330,7 @@ export function CoursesScreen({ onBack }: CoursesScreenProps) {
                   {/* Para tu nivel */}
                   <EducationalSectionHeader title="Para tu nivel" />
                   <View style={styles.eduGrid}>
-                    {eduCourses
+                    {(eduCourses || [])
                       .filter((c) => !c.locked)
                       .map((course) => (
                         <EducationalCourseCard
@@ -295,7 +343,7 @@ export function CoursesScreen({ onBack }: CoursesScreenProps) {
                   {/* Explora niveles superiores */}
                   <EducationalSectionHeader title="Explora niveles superiores" />
                   <View style={styles.eduGrid}>
-                    {eduCourses
+                    {(eduCourses || [])
                       .filter((c) => c.locked)
                       .map((course) => (
                         <EducationalCourseCard
@@ -305,7 +353,7 @@ export function CoursesScreen({ onBack }: CoursesScreenProps) {
                       ))}
                   </View>
 
-                  {eduCourses.length === 0 && (
+                  {(eduCourses || []).length === 0 && (
                     <View style={styles.emptyState}>
                       <Ionicons
                         name="layers-outline"
@@ -321,30 +369,59 @@ export function CoursesScreen({ onBack }: CoursesScreenProps) {
               )}
             </View>
           ) : (
-            <View style={styles.tusClasesEmptyContainer}>
-              <View style={styles.tusClasesIconWrapper}>
-                <View style={styles.tusClasesIconBackground}>
-                  <Text style={styles.tusClasesEmoji}>🎾</Text>
-                </View>
+            <View style={styles.tusClasesContent}>
+              <View style={styles.tusClasesHeader}>
+                <Text style={styles.sectionTitle}>
+                  Tus clases reservadas ({(enrollments || []).length})
+                </Text>
               </View>
-              <Text style={styles.tusClasesTitle}>No hay clases</Text>
-              <Text style={styles.tusClasesDescription}>
-                No tienes historial de clases planificadas pero siempre puedes
-                buscar una a la que apuntarte.
-              </Text>
-              <Pressable
-                onPress={() => setActiveTab("apuntate")}
-                style={styles.tusClasesButtonShadow}
-              >
-                <LinearGradient
-                  colors={["#F18F34", "#E95F32"]}
-                  style={styles.tusClasesButton}
-                >
-                  <Text style={styles.tusClasesButtonText}>
-                    Buscar clases disponibles
+
+              {enrollmentsLoading && !refreshing ? (
+                <View style={styles.loadingCenter}>
+                  <ActivityIndicator size="large" color="#F18F34" />
+                </View>
+              ) : (enrollments || []).length === 0 ? (
+                <View style={styles.tusClasesEmptyContainer}>
+                  <View style={styles.tusClasesIconWrapper}>
+                    <View style={styles.tusClasesIconBackground}>
+                      <Text style={styles.tusClasesEmoji}>🎾</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.tusClasesTitle}>No hay clases</Text>
+                  <Text style={styles.tusClasesDescription}>
+                    No tienes historial de clases planificadas pero siempre
+                    puedes buscar una a la que apuntarte.
                   </Text>
-                </LinearGradient>
-              </Pressable>
+                  <Pressable
+                    onPress={() => setActiveTab("apuntate")}
+                    style={styles.tusClasesButtonShadow}
+                  >
+                    <LinearGradient
+                      colors={["#F18F34", "#E95F32"]}
+                      style={styles.tusClasesButton}
+                    >
+                      <Text style={styles.tusClasesButtonText}>
+                        Buscar clases disponibles
+                      </Text>
+                    </LinearGradient>
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.listContainer}>
+                  {(enrollments || []).map((enrollment) => (
+                    <BookedCourseCard
+                      key={enrollment.id}
+                      enrollment={enrollment}
+                      onPress={() => {
+                        if (enrollment.course) onCoursePress(enrollment.course, true);
+                      }}
+                      onCancel={() => {
+                        console.log("Cancel enrollment placeholder");
+                      }}
+                    />
+                  ))}
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -450,7 +527,13 @@ function EducationalCourseCard({ course }: { course: EducationalCourse }) {
   );
 }
 
-function ClassCard({ course }: { course: PublicCourse }) {
+function ClassCard({
+  course,
+  onPress,
+}: {
+  course: PublicCourse;
+  onPress: () => void;
+}) {
   const imageUrl =
     course.club_logo_url ||
     "https://images.unsplash.com/photo-1658491830143-72808ca237e3?w=400&h=300&fit=crop";
@@ -458,7 +541,10 @@ function ClassCard({ course }: { course: PublicCourse }) {
   const timeText = firstDay ? `${firstDay.start_time}` : "Horario a confirmar";
 
   return (
-    <Pressable style={styles.cardWrapper}>
+    <Pressable
+      style={({ pressed }) => [styles.cardWrapper, pressed && { opacity: 0.8 }]}
+      onPress={onPress}
+    >
       <LinearGradient
         colors={["rgba(255,255,255,0.07)", "rgba(255,255,255,0.03)"]}
         style={styles.cardGradient}
@@ -958,5 +1044,11 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 15,
     fontWeight: "800",
+  },
+  tusClasesContent: {
+    flex: 1,
+  },
+  tusClasesHeader: {
+    marginBottom: 4,
   },
 });
