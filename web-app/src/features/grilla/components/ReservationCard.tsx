@@ -41,10 +41,12 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
         id: reservation.id,
         data: reservation,
+        disabled: isOverlay,
     });
 
     const source = (reservation.matchType || reservation.playerName || '').trim();
-    const isLoadingName = !source && reservation.status !== 'available' && reservation.status !== 'past';
+    const typesWithoutPlayer = ['blocked', 'tournament'];
+    const isLoadingName = !source && reservation.status !== 'available' && reservation.status !== 'past' && !typesWithoutPlayer.includes(reservation.booking_type);
     const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : (isLoadingName ? null : t('grid.noClient'));
     const isCompact = !!compactPxPerMinute;
     const isSmallZoom = !isCompact && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
@@ -103,10 +105,10 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
     return (
         <div
             id={reservation.id}
-            ref={setNodeRef}
+            ref={isOverlay ? undefined : setNodeRef}
             style={style}
-            {...listeners}
-            {...attributes}
+            {...(isOverlay ? {} : listeners)}
+            {...(isOverlay ? {} : attributes)}
             data-dnd-draggable
             onClick={(e) => {
                 if (!isDragging && onClick) {

@@ -30,12 +30,21 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
     // State for the mini player selection modal and remove modal
     const [addingToSlot, setAddingToSlot] = useState<{ matchId: string, team: string, index: number, bookingId: string } | null>(null);
     const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
+    const [menuAnchor, setMenuAnchor] = useState<{ bottom: boolean; top: number; left: number }>({ bottom: false, top: 0, left: 0 });
     const [removingFromMatch, setRemovingFromMatch] = useState<any | null>(null);
 
     // Estado local de la fecha
     const [currentDate, setCurrentDate] = useState(() => new Date(dateStr + 'T12:00:00'));
     const [isCreateMatchOpen, setIsCreateMatchOpen] = useState(false);
-    
+    const [showFilters, setShowFilters] = useState(false);
+    const [filters, setFilters] = useState({
+        type: '' as string,
+        court: '' as string,
+        payment: '' as string,
+        timeFrom: '' as string,
+        timeTo: '' as string,
+    });
+
     useEffect(() => {
         setCurrentDate(new Date(dateStr + 'T12:00:00'));
     }, [dateStr]);
@@ -54,18 +63,56 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
             const allMatches: any[] = [];
             const processedBookingIds = new Set();
 
+            // Index bookings by ID for enrichment
+            const bookingsById = new Map<string, any>();
+            if (bookingsRes.ok && bookingsRes.bookings) {
+                for (const b of bookingsRes.bookings) {
+                    bookingsById.set(b.id, b);
+                }
+            }
+
             if (matchesRes.ok && matchesRes.matches) {
                 const filteredMatches = matchesRes.matches.filter((m: any) => {
                     const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
                     if (!booking || !booking.courts || !booking.start_at) return false;
                     const bClubId = booking.courts.club_id || booking.courts.clubs?.id;
                     if (bClubId !== clubId) return false;
-                    
+
                     const mDate = new Date(booking.start_at);
                     const mDateStr = `${mDate.getFullYear()}-${String(mDate.getMonth() + 1).padStart(2, '0')}-${String(mDate.getDate()).padStart(2, '0')}`;
                     return mDateStr === currentDateStr;
                 });
                 for (const m of filteredMatches) {
+                    // When match_players is empty, derive players from booking_participants
+                    if ((!m.match_players || m.match_players.length === 0)) {
+                        const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
+                        const fullBooking = booking?.id ? bookingsById.get(booking.id) : null;
+                        if (fullBooking) {
+                            const participants = fullBooking.booking_participants || [];
+                            if (participants.length > 0) {
+                                m.match_players = participants.map((p: any, i: number) => {
+                                    const person = Array.isArray(p.players) ? p.players[0] : p.players;
+                                    return {
+                                        id: p.id,
+                                        team: i % 2 === 0 ? 'A' : 'B',
+                                        players: {
+                                            id: person?.id,
+                                            first_name: person?.first_name,
+                                            last_name: person?.last_name,
+                                            elo_rating: person?.elo_rating
+                                        }
+                                    };
+                                });
+                            } else if (fullBooking.players) {
+                                const org = fullBooking.players;
+                                m.match_players = [{
+                                    id: fullBooking.organizer_player_id,
+                                    team: 'A',
+                                    players: { id: org.id, first_name: org.first_name, last_name: org.last_name, elo_rating: org.elo_rating }
+                                }];
+                            }
+                        }
+                    }
                     allMatches.push(m);
                     const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
                     if (booking?.id) processedBookingIds.add(booking.id);
@@ -80,19 +127,33 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                     // Transform booking participants into mock match players
                     const mockPlayers: any[] = [];
                     const participants = b.booking_participants || [];
-                    for (let i = 0; i < participants.length; i++) {
-                         const p = participants[i];
-                         const person = Array.isArray(p.players) ? p.players[0] : p.players;
-                         mockPlayers.push({
-                             id: p.id,
-                             team: i % 2 === 0 ? 'A' : 'B',
-                             players: {
-                                  id: person?.id,
-                                  first_name: person?.first_name,
-                                  last_name: person?.last_name,
-                                  elo_rating: person?.elo_rating
-                             }
-                         });
+                    if (participants.length > 0) {
+                        for (let i = 0; i < participants.length; i++) {
+                             const p = participants[i];
+                             const person = Array.isArray(p.players) ? p.players[0] : p.players;
+                             mockPlayers.push({
+                                 id: p.id,
+                                 team: i % 2 === 0 ? 'A' : 'B',
+                                 players: {
+                                      id: person?.id,
+                                      first_name: person?.first_name,
+                                      last_name: person?.last_name,
+                                      elo_rating: person?.elo_rating
+                                 }
+                             });
+                        }
+                    } else if (b.players) {
+                        const org = b.players;
+                        mockPlayers.push({
+                            id: b.organizer_player_id,
+                            team: 'A',
+                            players: {
+                                id: org.id,
+                                first_name: org.first_name,
+                                last_name: org.last_name,
+                                elo_rating: org.elo_rating
+                            }
+                        });
                     }
 
                     allMatches.push({
@@ -125,6 +186,50 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
     useEffect(() => {
         fetchMatches();
     }, [fetchMatches]);
+
+    const activeFilterCount = Object.values(filters).filter(v => v !== '').length;
+
+    const courtNames = [...new Set(matches.map(m => {
+        const b = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
+        return b?.courts?.name as string;
+    }).filter(Boolean))].sort();
+
+    const filteredMatches = matches.filter(m => {
+        const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
+        if (!booking) return true;
+
+        if (filters.type) {
+            const matchType = m.type === 'tournament_division' ? 'americano' : (m.competitive ? 'competitivo' : 'amistoso');
+            if (matchType !== filters.type) return false;
+        }
+
+        if (filters.court) {
+            const courtName = booking.courts?.name || '';
+            if (courtName !== filters.court) return false;
+        }
+
+        if (filters.payment) {
+            const totalPrice = booking.total_price_cents ? booking.total_price_cents / 100 : 0;
+            const txs = booking.payment_transactions || [];
+            const totalPaid = txs.reduce((acc: number, pt: any) => pt.status === 'succeeded' ? acc + (pt.amount_cents || 0) : acc, 0) / 100;
+            const isPaid = totalPaid >= totalPrice && totalPrice > 0;
+            if (filters.payment === 'paid' && !isPaid) return false;
+            if (filters.payment === 'pending' && isPaid) return false;
+        }
+
+        if (filters.timeFrom) {
+            const startTime = new Date(booking.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            if (startTime < filters.timeFrom) return false;
+        }
+        if (filters.timeTo) {
+            const startTime = new Date(booking.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+            if (startTime > filters.timeTo) return false;
+        }
+
+        return true;
+    });
+
+    const clearFilters = () => setFilters({ type: '', court: '', payment: '', timeFrom: '', timeTo: '' });
 
     const formatTime = (isoString: string) => {
         const d = new Date(isoString);
@@ -165,11 +270,11 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
         if (!mp || !mp.players || (!mp.players.first_name && !mp.players.last_name && mp.players.elo_rating === null)) {
             return (
                 <div key={`empty-${matchId}-${team}-${index}`} className="flex flex-col items-center">
-                    <div 
+                    <div
                         onClick={() => setAddingToSlot({ matchId, team, index, bookingId: matchBookingId })}
-                        className="w-10 h-10 rounded-full bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-100 hover:text-blue-500 hover:border-blue-300 transition-colors"
+                        className="w-8 h-8 rounded-full bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-100 hover:text-blue-500 hover:border-blue-300 transition-colors"
                     >
-                        <Plus className="w-4 h-4" />
+                        <Plus className="w-3.5 h-3.5" />
                     </div>
                 </div>
             );
@@ -180,10 +285,10 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
         
         return (
             <div key={`player-${matchId}-${team}-${mp.id || index}`} className="relative flex flex-col items-center group cursor-pointer hover:-translate-y-0.5 transition-transform hover:z-50">
-                <div className="w-10 h-10 rounded-full bg-blue-100 border-2 border-white shadow-sm flex items-center justify-center text-blue-700 font-bold overflow-hidden">
-                    {initials || <Users className="w-5 h-5 opacity-50" />}
+                <div className="w-8 h-8 rounded-full bg-blue-100 border-2 border-white shadow-sm flex items-center justify-center text-blue-700 text-[11px] font-bold overflow-hidden">
+                    {initials || <Users className="w-4 h-4 opacity-50" />}
                 </div>
-                <div className="absolute -bottom-2 bg-[#f6ff00] text-gray-900 text-[10px] font-extrabold px-1.5 py-0.5 rounded shadow-sm border border-yellow-200">
+                <div className="absolute -bottom-1.5 bg-[#f6ff00] text-gray-900 text-[8px] font-extrabold px-1 py-0 rounded shadow-sm border border-yellow-200">
                     {elo}
                 </div>
                 {/* Tooltip on hover */}
@@ -195,73 +300,161 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
     };
 
     return (
-        <div className="flex flex-col h-full bg-white">
+        <div className="flex flex-col h-full bg-white max-w-6xl">
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 bg-white border-b z-10 shrink-0">
-                <div className="flex items-center gap-3">
-                    <h2 className="text-2xl font-extrabold text-gray-900 tracking-tight">Partidos</h2>
+            <div className="flex items-center justify-between px-4 py-3 bg-white border-b z-10 shrink-0">
+                <div className="flex items-center gap-2">
+                    <h2 className="text-lg font-extrabold text-gray-900 tracking-tight">Partidos</h2>
                 </div>
-                <div className="flex items-center gap-3">
-                    
+                <div className="flex items-center gap-2">
+
                     <div className="hidden sm:flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
-                        <button onClick={handlePrevDay} className="px-3 py-2 text-gray-400 hover:bg-gray-50 border-r border-gray-200 transition-colors">
-                            <ChevronLeft className="w-5 h-5" />
+                        <button onClick={handlePrevDay} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-r border-gray-200 transition-colors">
+                            <ChevronLeft className="w-4 h-4" />
                         </button>
-                        <div className="px-6 py-2 flex items-center gap-2 text-sm font-semibold text-gray-700 min-w-[120px] justify-center">
-                            {getDisplayDate()} <Calendar className="w-4 h-4 text-gray-400" />
+                        <div className="px-4 py-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-[100px] justify-center">
+                            {getDisplayDate()} <Calendar className="w-3.5 h-3.5 text-gray-400" />
                         </div>
-                        <button onClick={handleNextDay} className="px-3 py-2 text-gray-400 hover:bg-gray-50 border-l border-gray-200 transition-colors">
-                            <ChevronRight className="w-5 h-5" />
+                        <button onClick={handleNextDay} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-l border-gray-200 transition-colors">
+                            <ChevronRight className="w-4 h-4" />
                         </button>
                     </div>
-                    <button className="p-2 border border-gray-200 text-gray-500 hover:bg-gray-50 rounded-lg transition-colors">
-                        <Filter className="w-5 h-5" />
+                    <button
+                        onClick={() => setShowFilters(prev => !prev)}
+                        className={`p-1.5 border rounded-lg transition-colors relative ${
+                            showFilters || activeFilterCount > 0
+                                ? 'border-[#006A6A] text-[#006A6A] bg-[#006A6A]/5'
+                                : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                        }`}
+                    >
+                        <Filter className="w-4 h-4" />
+                        {activeFilterCount > 0 && (
+                            <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[#006A6A] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                                {activeFilterCount}
+                            </span>
+                        )}
                     </button>
-                    <button 
-                        type="button" 
+                    <button
+                        type="button"
                         onClick={() => setIsCreateMatchOpen(true)}
-                        className="px-4 py-2 bg-[#006A6A] hover:bg-[#005151] text-white text-sm font-semibold rounded-lg shadow-sm transition-colors border border-transparent whitespace-nowrap"
+                        className="px-3 py-1.5 bg-[#006A6A] hover:bg-[#005151] text-white text-xs font-semibold rounded-lg shadow-sm transition-colors border border-transparent whitespace-nowrap"
                     >
                         Crear Partido
                     </button>
-                    <button className="p-2 border border-gray-200 text-[#005bc5] bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
-                        <Settings className="w-5 h-5" />
+                    <button className="p-1.5 border border-gray-200 text-[#005bc5] bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
+                        <Settings className="w-4 h-4" />
                     </button>
                 </div>
             </div>
+
+            {/* Filter bar */}
+            {showFilters && (
+                <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex flex-wrap items-end gap-2 shrink-0">
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Tipo</label>
+                        <select
+                            value={filters.type}
+                            onChange={e => setFilters(f => ({ ...f, type: e.target.value }))}
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
+                        >
+                            <option value="">Todos</option>
+                            <option value="amistoso">Amistoso</option>
+                            <option value="competitivo">Competitivo</option>
+                            <option value="americano">Americano</option>
+                        </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Pista</label>
+                        <select
+                            value={filters.court}
+                            onChange={e => setFilters(f => ({ ...f, court: e.target.value }))}
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
+                        >
+                            <option value="">Todas</option>
+                            {courtNames.map(name => (
+                                <option key={name} value={name}>{name}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Pago</label>
+                        <select
+                            value={filters.payment}
+                            onChange={e => setFilters(f => ({ ...f, payment: e.target.value }))}
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
+                        >
+                            <option value="">Todos</option>
+                            <option value="paid">Completado</option>
+                            <option value="pending">Pendiente</option>
+                        </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Hora desde</label>
+                        <input
+                            type="time"
+                            value={filters.timeFrom}
+                            onChange={e => setFilters(f => ({ ...f, timeFrom: e.target.value }))}
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[85px]"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Hora hasta</label>
+                        <input
+                            type="time"
+                            value={filters.timeTo}
+                            onChange={e => setFilters(f => ({ ...f, timeTo: e.target.value }))}
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[85px]"
+                        />
+                    </div>
+                    {activeFilterCount > 0 && (
+                        <button
+                            onClick={clearFilters}
+                            className="px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50 rounded-lg border border-red-200 transition-colors flex items-center gap-1 self-end"
+                        >
+                            <X className="w-3 h-3" />
+                            Limpiar
+                        </button>
+                    )}
+                    <span className="text-[10px] text-gray-400 self-end ml-auto">
+                        {filteredMatches.length} de {matches.length}
+                    </span>
+                </div>
+            )}
 
             {/* Content Table */}
             <div className="flex-1 overflow-auto bg-white">
                 <table className="w-full text-left border-collapse">
                     <thead className="sticky top-0 bg-white z-10 whitespace-nowrap shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
                         <tr>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 tracking-wide border-b">Hora de inicio</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 tracking-wide border-b">Deporte</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 tracking-wide border-b">Duración</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 tracking-wide border-b">Nivel</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 tracking-wide border-b">Jugadores</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 tracking-wide border-b">Tipo de partido</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 tracking-wide border-b">Recaudado</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 tracking-wide border-b">Club</th>
-                            <th className="px-6 py-4 text-xs font-semibold text-gray-500 tracking-wide border-b">Nombre de pista</th>
-                            <th className="px-6 py-4 border-b"></th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Hora</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden xl:table-cell">Deporte</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Duración</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden lg:table-cell">Nivel</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Jugadores</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Tipo</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Recaudado</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden xl:table-cell">Club</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Pista</th>
+                            <th className="px-3 py-2.5 border-b"></th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {loading ? (
                             <tr>
-                                <td colSpan={10} className="px-6 py-16 text-center">
-                                    <div className="w-8 h-8 mx-auto border-3 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+                                <td colSpan={10} className="px-4 py-12 text-center">
+                                    <div className="w-6 h-6 mx-auto border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
                                 </td>
                             </tr>
-                        ) : matches.length === 0 ? (
+                        ) : filteredMatches.length === 0 ? (
                             <tr>
-                                <td colSpan={10} className="px-6 py-16 text-center text-gray-400 font-medium">
-                                    No hay partidos organizados para este día.
+                                <td colSpan={10} className="px-4 py-12 text-center text-gray-400 text-xs font-medium">
+                                    {matches.length > 0 && activeFilterCount > 0
+                                        ? 'No hay partidos que coincidan con los filtros aplicados.'
+                                        : 'No hay partidos organizados para este día.'}
                                 </td>
                             </tr>
                         ) : (
-                            matches.map((match) => {
+                            filteredMatches.map((match) => {
                                 const booking = Array.isArray(match.bookings) ? match.bookings[0] : match.bookings;
                                 const court = booking?.courts;
                                 const club = court?.clubs;
@@ -277,65 +470,78 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
 
                                 return (
                                     <tr key={match.id} className="hover:bg-gray-50/50 transition-colors group">
-                                        <td className="px-6 py-5 whitespace-nowrap">
-                                            <span className="text-[15px] font-bold text-gray-800">{formatTime(startAt)}</span>
+                                        <td className="px-3 py-3 whitespace-nowrap">
+                                            <span className="text-xs font-bold text-gray-800">{formatTime(startAt)}</span>
                                         </td>
-                                        <td className="px-6 py-5 whitespace-nowrap">
-                                            <span className="text-sm font-medium text-gray-600">Pádel</span>
+                                        <td className="px-3 py-3 whitespace-nowrap hidden xl:table-cell">
+                                            <span className="text-[11px] font-medium text-gray-600">Pádel</span>
                                         </td>
-                                        <td className="px-6 py-5 whitespace-nowrap">
-                                            <span className="text-sm font-medium text-gray-600">{getDurationMin(startAt, endAt)} min</span>
+                                        <td className="px-3 py-3 whitespace-nowrap">
+                                            <span className="text-[11px] font-medium text-gray-600">{getDurationMin(startAt, endAt)} min</span>
                                         </td>
-                                        <td className="px-6 py-5 whitespace-nowrap">
-                                            <span className="text-sm font-medium text-gray-600">
+                                        <td className="px-3 py-3 whitespace-nowrap hidden lg:table-cell">
+                                            <span className="text-[11px] font-medium text-gray-600">
                                                 {match.elo_min?.toFixed(2) || '0.00'} - {match.elo_max?.toFixed(2) || '10.00'}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <div className="flex items-center gap-4">
+                                        <td className="px-3 py-2.5 whitespace-nowrap">
+                                            <div className="flex items-center gap-3">
                                                 <div className="flex items-center -space-x-2">
                                                     {renderPlayer(teamA[0], 1, booking?.id, 'A', match.id)}
                                                     {renderPlayer(teamA[1], 2, booking?.id, 'A', match.id)}
                                                 </div>
-                                                <span className="text-[11px] font-bold tracking-wider text-gray-300">VS</span>
+                                                <span className="text-[9px] font-bold tracking-wider text-gray-300">VS</span>
                                                 <div className="flex items-center -space-x-2">
                                                     {renderPlayer(teamB[0], 3, booking?.id, 'B', match.id)}
                                                     {renderPlayer(teamB[1], 4, booking?.id, 'B', match.id)}
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="px-6 py-5 whitespace-nowrap">
-                                            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold leading-tight bg-blue-100/60 text-blue-700 border border-blue-200/50">
+                                        <td className="px-3 py-3 whitespace-nowrap">
+                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold leading-tight bg-blue-100/60 text-blue-700 border border-blue-200/50">
                                                 {match.type === 'tournament_division' ? 'Americano' : (match.competitive ? 'Competitivo' : 'Amistoso')}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-5 whitespace-nowrap">
+                                        <td className="px-3 py-3 whitespace-nowrap">
                                             <div className="flex flex-col">
-                                                <span className="text-sm font-bold text-gray-800">
+                                                <span className="text-[11px] font-bold text-gray-800">
                                                     €{totalPaid.toFixed(2)} <span className="text-gray-400 font-medium">/ €{totalPrice.toFixed(2)}</span>
                                                 </span>
                                                 {totalPaid >= totalPrice && totalPrice > 0 ? (
-                                                    <span className="text-[10px] font-bold text-green-600 uppercase tracking-wide">Completado</span>
+                                                    <span className="text-[9px] font-bold text-green-600 uppercase tracking-wide">Completado</span>
                                                 ) : (
-                                                    <span className="text-[10px] font-bold text-orange-500 uppercase tracking-wide">Pendiente</span>
+                                                    <span className="text-[9px] font-bold text-orange-500 uppercase tracking-wide">Pendiente</span>
                                                 )}
                                             </div>
                                         </td>
-                                        <td className="px-6 py-5 whitespace-nowrap">
-                                            <span className="text-sm font-medium text-gray-600">{club?.name || 'Sede Central'}</span>
+                                        <td className="px-3 py-3 whitespace-nowrap hidden xl:table-cell">
+                                            <span className="text-[11px] font-medium text-gray-600">{club?.name || 'Sede Central'}</span>
                                         </td>
-                                        <td className="px-6 py-5 whitespace-nowrap">
-                                            <span className="text-sm font-medium text-gray-600 uppercase tracking-wide">{court?.name || 'Pista'}</span>
+                                        <td className="px-3 py-3 whitespace-nowrap">
+                                            <span className="text-[11px] font-medium text-gray-600 uppercase tracking-wide">{court?.name || 'Pista'}</span>
                                         </td>
-                                        <td className="px-6 py-5 whitespace-nowrap text-right text-sm font-medium">
+                                        <td className="px-3 py-3 whitespace-nowrap text-right text-[11px] font-medium">
                                             <div className="relative inline-block text-left">
-                                                <button onClick={(e) => { e.stopPropagation(); setMenuOpenFor(menuOpenFor === match.id ? null : match.id); }} className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors">
-                                                    <MoreVertical size={18} />
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        if (menuOpenFor === match.id) {
+                                                            setMenuOpenFor(null);
+                                                            return;
+                                                        }
+                                                        const rect = e.currentTarget.getBoundingClientRect();
+                                                        const spaceBelow = window.innerHeight - rect.bottom;
+                                                        setMenuAnchor({ bottom: spaceBelow < 120, top: rect.bottom, left: rect.left });
+                                                        setMenuOpenFor(match.id);
+                                                    }}
+                                                    className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors"
+                                                >
+                                                    <MoreVertical size={16} />
                                                 </button>
                                                 {menuOpenFor === match.id && (
                                                     <>
                                                         <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setMenuOpenFor(null); }} />
-                                                        <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 shadow-xl rounded-lg z-50 overflow-hidden text-left animate-scale-in origin-top-right">
+                                                        <div className={`absolute right-0 w-44 bg-white border border-gray-200 shadow-xl rounded-lg z-50 overflow-hidden text-left ${menuAnchor.bottom ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
                                                             <button
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
@@ -345,9 +551,9 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                                                         onEditBooking(bookingId);
                                                                     }
                                                                 }}
-                                                                className="w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 font-medium"
+                                                                className="w-full text-left px-3 py-2.5 text-xs text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2 font-medium"
                                                             >
-                                                                <Pencil className="w-4 h-4" />
+                                                                <Pencil className="w-3.5 h-3.5" />
                                                                 Editar partido
                                                             </button>
                                                             <button
@@ -356,9 +562,9 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                                                     setMenuOpenFor(null);
                                                                     setRemovingFromMatch(match);
                                                                 }}
-                                                                className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 font-medium border-t border-gray-100"
+                                                                className="w-full text-left px-3 py-2.5 text-xs text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 font-medium border-t border-gray-100"
                                                             >
-                                                                <Trash2 className="w-4 h-4" />
+                                                                <Trash2 className="w-3.5 h-3.5" />
                                                                 Remover jugador
                                                             </button>
                                                         </div>

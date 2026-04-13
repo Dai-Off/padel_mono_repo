@@ -175,6 +175,9 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
     });
     const [selectedCourtId, setSelectedCourtId] = useState<string>('');
     const [courts, setCourts] = useState<any[]>([]);
+    const [courtsLoading, setCourtsLoading] = useState(false);
+    const [courtsError, setCourtsError] = useState<string | null>(null);
+    const [blockId, setBlockId] = useState<string | null>(null);
 
     const [organizerError, setOrganizerError] = useState(false);
     const [overlapError, setOverlapError] = useState<string | null>(null);
@@ -200,17 +203,97 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
     }, []);
 
     useEffect(() => {
-        if (!isOpen) return;
-        if (clubId) {
-            apiFetchWithAuth<any>(`/courts?club_id=${clubId}`).then(res => {
-                if (res.ok && res.courts?.length) {
-                    setCourts(res.courts);
-                    setSelectedCourtId(res.courts[0].id);
-                }
-            });
-            reservationTypePricesService.getByClub(clubId).then(setPricesByType).catch(() => setPricesByType({}));
-        }
+        if (!isOpen || !clubId) return;
+        reservationTypePricesService.getByClub(clubId).then(setPricesByType).catch(() => setPricesByType({}));
     }, [isOpen, clubId]);
+
+    // Compute current slot ISO range
+    const slotRange = useMemo(() => {
+        const startTotalMin = parseInt(startHour) * 60 + parseInt(startMinute);
+        const endTotalMin = startTotalMin + duration;
+        const endH = String(Math.floor(endTotalMin / 60) % 24).padStart(2, '0');
+        const endM = String(endTotalMin % 60).padStart(2, '0');
+        return {
+            start_at: `${bookingDate}T${startHour}:${startMinute}:00`,
+            end_at: `${bookingDate}T${endH}:${endM}:00`,
+        };
+    }, [bookingDate, startHour, startMinute, duration]);
+
+    // Load available courts whenever the slot or modal-open state changes
+    useEffect(() => {
+        if (!isOpen || !clubId) return;
+        let cancelled = false;
+        setCourtsLoading(true);
+        setCourtsError(null);
+        const qs = new URLSearchParams({ club_id: clubId, start_at: slotRange.start_at, end_at: slotRange.end_at });
+        apiFetchWithAuth<any>(`/courts/available?${qs.toString()}`)
+            .then(res => {
+                if (cancelled) return;
+                if (res.ok) {
+                    setCourts(res.courts ?? []);
+                    setSelectedCourtId(prev => {
+                        if (prev && res.courts.some((c: any) => c.id === prev)) return prev;
+                        return res.courts[0]?.id ?? '';
+                    });
+                } else {
+                    setCourts([]);
+                    setSelectedCourtId('');
+                    setCourtsError(res.error || 'Error cargando pistas disponibles');
+                }
+            })
+            .catch(err => {
+                if (cancelled) return;
+                setCourts([]);
+                setSelectedCourtId('');
+                setCourtsError(err?.message || 'Error cargando pistas disponibles');
+            })
+            .finally(() => { if (!cancelled) setCourtsLoading(false); });
+        return () => { cancelled = true; };
+    }, [isOpen, clubId, slotRange.start_at, slotRange.end_at]);
+
+    // Release helper — used by close, save, and on slot/court change
+    const releaseBlock = useCallback(async (id: string | null) => {
+        if (!id) return;
+        try { await apiFetchWithAuth<any>(`/bookings/block/${id}`, { method: 'DELETE' }); } catch { /* best effort */ }
+    }, []);
+
+    // Whenever the selected court or slot changes, create a fresh soft-lock and release the previous one
+    useEffect(() => {
+        if (!isOpen || !selectedCourtId) return;
+        let cancelled = false;
+        const prevBlockId = blockId;
+        (async () => {
+            try {
+                const res = await apiFetchWithAuth<any>('/bookings/block', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        court_id: selectedCourtId,
+                        start_at: slotRange.start_at,
+                        end_at: slotRange.end_at,
+                    }),
+                });
+                if (cancelled) {
+                    if (res.ok && res.block_id) releaseBlock(res.block_id);
+                    return;
+                }
+                if (res.ok && res.block_id) {
+                    setBlockId(res.block_id);
+                    if (prevBlockId && prevBlockId !== res.block_id) releaseBlock(prevBlockId);
+                }
+            } catch { /* best effort — conflict check will catch on save */ }
+        })();
+        return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, selectedCourtId, slotRange.start_at, slotRange.end_at]);
+
+    // Release the block when the modal closes
+    useEffect(() => {
+        if (isOpen) return;
+        if (blockId) {
+            releaseBlock(blockId);
+            setBlockId(null);
+        }
+    }, [isOpen, blockId, releaseBlock]);
 
     const handlePlayerSelect = (p: Player | null, index: number) => {
         if (index === 0) setOrganizer(p);
@@ -305,6 +388,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
 
         setIsSaving(true);
         try {
+            // Release soft-lock before creating the real booking so it doesn't conflict with itself
+            if (blockId) {
+                await releaseBlock(blockId);
+                setBlockId(null);
+            }
             // Create booking
             const bookingData = {
                 court_id: selectedCourtId,
@@ -433,9 +521,20 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
                                         </div>
                                         <div>
                                             <label className="block text-sm font-bold text-gray-700 mb-1">Pista</label>
-                                            <select value={selectedCourtId} onChange={e => setSelectedCourtId(e.target.value)} className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm">
-                                                {courts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                            <select
+                                                value={selectedCourtId}
+                                                onChange={e => setSelectedCourtId(e.target.value)}
+                                                disabled={courtsLoading || courts.length === 0}
+                                                className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm disabled:opacity-60"
+                                            >
+                                                {courtsLoading && <option value="">Cargando pistas disponibles...</option>}
+                                                {!courtsLoading && courts.length === 0 && <option value="">No hay pistas libres en ese horario</option>}
+                                                {!courtsLoading && courts.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                             </select>
+                                            {courtsError && <p className="text-xs text-red-600 mt-1">{courtsError}</p>}
+                                            {!courtsLoading && !courtsError && courts.length > 0 && (
+                                                <p className="text-xs text-gray-500 mt-1">Solo se muestran pistas libres en el horario seleccionado.</p>
+                                            )}
                                         </div>
                                         <div>
                                             <label className="block text-sm font-bold text-gray-700 mb-1">Género del Partido</label>

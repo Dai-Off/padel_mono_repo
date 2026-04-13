@@ -3,6 +3,8 @@ import { finalizePastMatches, finalizePastMatchesThrottled } from '../lib/finali
 import { getMatchListPhase } from '../lib/matchLifecycle';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hasCourtConflict } from '../lib/courtConflict';
+import { settleOverdueMatchPayments } from '../services/matchDebtService';
+import { playerHasDebt } from '../lib/players/playerDebt';
 
 const router = Router();
 
@@ -180,6 +182,35 @@ router.get('/:id', async (req: Request, res: Response) => {
  *       201: { description: Creado }
  *       409: { description: Conflicto de pista }
  */
+/**
+ * @openapi
+ * /matches/run-debt-settlement:
+ *   post:
+ *     tags: [Matches]
+ *     summary: Procesa matches vencidos y cobra la deuda al organizador (CU-4.1)
+ *     description: Protegido por header `x-cron-secret` igual a env CRON_SECRET (opcional en dev).
+ *     parameters:
+ *       - in: header
+ *         name: x-cron-secret
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: OK }
+ */
+router.post('/run-debt-settlement', async (req: Request, res: Response) => {
+  const secret = process.env.CRON_SECRET;
+  if (secret) {
+    const h = req.headers['x-cron-secret'];
+    if (h !== secret) return res.status(403).json({ ok: false, error: 'No autorizado' });
+  }
+  try {
+    const finished = await finalizePastMatches();
+    const result = await settleOverdueMatchPayments();
+    return res.json({ ok: true, finished, ...result });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: (e as Error).message });
+  }
+});
+
 router.post('/create-with-booking', async (req: Request, res: Response) => {
   const {
     court_id,
@@ -203,6 +234,9 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     });
   }
   try {
+    if (await playerHasDebt(String(organizer_player_id))) {
+      return res.status(403).json({ ok: false, error: 'player_blocked_by_debt' });
+    }
     const conflictReason = await hasCourtConflict(String(court_id), String(start_at), String(end_at));
     if (conflictReason) {
       return res.status(409).json({ ok: false, error: conflictReason });
