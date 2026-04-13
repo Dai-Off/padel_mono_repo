@@ -1,10 +1,16 @@
 import { Router, Request, Response } from 'express';
+import { bookingStartIsTooFarInPast, BOOKING_START_PAST_ERROR } from '../lib/bookingStartNotInPast';
 import { finalizePastMatches, finalizePastMatchesThrottled } from '../lib/finalizePastMatches';
 import { getMatchListPhase } from '../lib/matchLifecycle';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hasCourtConflict } from '../lib/courtConflict';
 import { settleOverdueMatchPayments } from '../services/matchDebtService';
 import { playerHasDebt } from '../lib/players/playerDebt';
+import {
+  refundStripeBookingPaymentForPlayer,
+  refundStripeBookingPaymentTransactions,
+  resolveClubIdForBooking,
+} from '../services/paymentRefundService';
 
 const router = Router();
 
@@ -16,7 +22,7 @@ const SELECT_ONE =
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team,
           ${bookingRel} (
-            id, start_at, end_at, total_price_cents, currency, court_id,
+            id, organizer_player_id, start_at, end_at, total_price_cents, currency, court_id,
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type,
@@ -232,6 +238,9 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
       ok: false,
       error: 'court_id, organizer_player_id, start_at, end_at y total_price_cents son obligatorios',
     });
+  }
+  if (bookingStartIsTooFarInPast(String(start_at))) {
+    return res.status(400).json({ ok: false, error: BOOKING_START_PAST_ERROR });
   }
   try {
     if (await playerHasDebt(String(organizer_player_id))) {
@@ -658,6 +667,226 @@ router.post('/', async (req: Request, res: Response) => {
  *       200: { description: OK }
  *       400: { description: Campos de marcador bloqueados }
  */
+/**
+ * POST /matches/:id/cancel
+ * - Partido **público**: cualquier jugador en el partido. Si es el único → cancela reserva + partido y reembolsa todos los Stripe de la reserva. Si hay más → solo sale él, reembolso Stripe suyo, el partido sigue (reorganiza organizador si hace falta).
+ * - Partido **privado**: solo el organizador; siempre cancelación total (igual que antes).
+ */
+router.post('/:id/cancel', async (req: Request, res: Response) => {
+  const matchId = req.params.id;
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'Token requerido' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user?.email) {
+      return res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+    }
+    const { data: player, error: errPlayer } = await supabase
+      .from('players')
+      .select('id')
+      .eq('email', String(user.email).trim().toLowerCase())
+      .maybeSingle();
+    if (errPlayer) return res.status(500).json({ ok: false, error: errPlayer.message });
+    if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+    const playerId = player.id;
+
+    const { data: match, error: errMatch } = await supabase
+      .from('matches')
+      .select('id, booking_id, status, visibility')
+      .eq('id', matchId)
+      .maybeSingle();
+    if (errMatch) return res.status(500).json({ ok: false, error: errMatch.message });
+    if (!match) return res.status(404).json({ ok: false, error: 'Partido no encontrado' });
+    if (match.status === 'cancelled') {
+      return res.json({
+        ok: true,
+        cancelled_entire_match: true,
+        match: { id: match.id, status: 'cancelled' },
+      });
+    }
+    if (!match.booking_id) {
+      return res.status(400).json({ ok: false, error: 'El partido no tiene reserva asociada' });
+    }
+
+    const { data: booking, error: errBooking } = await supabase
+      .from('bookings')
+      .select('id, organizer_player_id, deleted_at, status')
+      .eq('id', match.booking_id)
+      .maybeSingle();
+    if (errBooking) return res.status(500).json({ ok: false, error: errBooking.message });
+    if (!booking || booking.deleted_at != null || booking.status === 'cancelled') {
+      return res.status(400).json({ ok: false, error: 'La reserva ya no está activa' });
+    }
+
+    const { data: bookingTimes } = await supabase
+      .from('bookings')
+      .select('start_at, end_at')
+      .eq('id', match.booking_id)
+      .maybeSingle();
+    const phase = getMatchListPhase(
+      Date.now(),
+      match.status,
+      bookingTimes?.start_at ?? null,
+      bookingTimes?.end_at ?? null,
+    );
+    if (phase === 'past') {
+      return res.status(400).json({ ok: false, error: 'El partido ya finalizó' });
+    }
+
+    const isPublic = String((match as { visibility?: string }).visibility ?? '') === 'public';
+
+    const clubId = await resolveClubIdForBooking(supabase, booking.id);
+    if (!clubId) {
+      return res.status(500).json({ ok: false, error: 'No se pudo resolver el club de la reserva' });
+    }
+
+    const now = new Date().toISOString();
+
+    if (!isPublic) {
+      if (booking.organizer_player_id !== playerId) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Solo el organizador puede cancelar un partido privado',
+        });
+      }
+      const stripeRef = await refundStripeBookingPaymentTransactions(supabase, booking.id, clubId);
+      if (stripeRef.errors.length > 0) {
+        return res.status(502).json({
+          ok: false,
+          error: 'No se pudieron completar los reembolsos con tarjeta (app). El partido no se canceló.',
+          refund_errors: stripeRef.errors,
+        });
+      }
+      const { error: errUpB } = await supabase
+        .from('bookings')
+        .update({
+          status: 'cancelled',
+          updated_at: now,
+          cancelled_at: now,
+          cancelled_by: 'player',
+          deleted_at: now,
+        })
+        .eq('id', booking.id)
+        .is('deleted_at', null);
+      if (errUpB) return res.status(500).json({ ok: false, error: errUpB.message });
+
+      const { data: matchRow, error: errUpM } = await supabase
+        .from('matches')
+        .update({ status: 'cancelled', updated_at: now })
+        .eq('id', matchId)
+        .select('id, status')
+        .maybeSingle();
+      if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
+
+      return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
+    }
+
+    const { data: mpRows, error: errMp } = await supabase
+      .from('match_players')
+      .select('player_id, slot_index')
+      .eq('match_id', matchId);
+    if (errMp) return res.status(500).json({ ok: false, error: errMp.message });
+
+    const inMatch = (mpRows ?? []).some((r: { player_id: string }) => r.player_id === playerId);
+    if (!inMatch) {
+      return res.status(403).json({ ok: false, error: 'No estás en este partido' });
+    }
+
+    const n = (mpRows ?? []).length;
+    if (n <= 1) {
+      const stripeRef = await refundStripeBookingPaymentTransactions(supabase, booking.id, clubId);
+      if (stripeRef.errors.length > 0) {
+        return res.status(502).json({
+          ok: false,
+          error: 'No se pudieron completar los reembolsos con tarjeta (app).',
+          refund_errors: stripeRef.errors,
+        });
+      }
+      const { error: errUpB } = await supabase
+        .from('bookings')
+        .update({
+          status: 'cancelled',
+          updated_at: now,
+          cancelled_at: now,
+          cancelled_by: 'player',
+          deleted_at: now,
+        })
+        .eq('id', booking.id)
+        .is('deleted_at', null);
+      if (errUpB) return res.status(500).json({ ok: false, error: errUpB.message });
+
+      const { data: matchRow, error: errUpM } = await supabase
+        .from('matches')
+        .update({ status: 'cancelled', updated_at: now })
+        .eq('id', matchId)
+        .select('id, status')
+        .maybeSingle();
+      if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
+
+      return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
+    }
+
+    const stripeSolo = await refundStripeBookingPaymentForPlayer(supabase, booking.id, clubId, playerId);
+    if (stripeSolo.errors.length > 0) {
+      return res.status(502).json({
+        ok: false,
+        error: 'No se pudo reembolsar tu pago con tarjeta. No se aplicó la baja.',
+        refund_errors: stripeSolo.errors,
+      });
+    }
+
+    const { error: delMp } = await supabase
+      .from('match_players')
+      .delete()
+      .eq('match_id', matchId)
+      .eq('player_id', playerId);
+    if (delMp) return res.status(500).json({ ok: false, error: delMp.message });
+
+    const { error: delBp } = await supabase
+      .from('booking_participants')
+      .delete()
+      .eq('booking_id', booking.id)
+      .eq('player_id', playerId);
+    if (delBp) return res.status(500).json({ ok: false, error: delBp.message });
+
+    if (booking.organizer_player_id === playerId) {
+      const sortedRemaining = [...(mpRows ?? [])]
+        .filter((r: { player_id: string }) => r.player_id !== playerId)
+        .sort(
+          (a: { slot_index?: number | null }, b: { slot_index?: number | null }) =>
+            (a.slot_index ?? 999) - (b.slot_index ?? 999),
+        );
+      const newOrg = sortedRemaining[0]?.player_id;
+      if (newOrg) {
+        await supabase
+          .from('bookings')
+          .update({ organizer_player_id: newOrg, updated_at: now })
+          .eq('id', booking.id);
+      }
+    }
+
+    await supabase.from('matches').update({ updated_at: now }).eq('id', matchId);
+
+    const { data: matchRow } = await supabase
+      .from('matches')
+      .select('id, status')
+      .eq('id', matchId)
+      .maybeSingle();
+
+    return res.json({
+      ok: true,
+      cancelled_entire_match: false,
+      match: matchRow ?? { id: matchId, status: match.status },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const body = req.body ?? {};

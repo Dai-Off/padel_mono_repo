@@ -97,6 +97,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   return {
     id: m.id,
     playerIds,
+    organizerPlayerId: b.organizer_player_id ?? null,
     visibility: m.visibility === 'private' ? 'private' : 'public',
     matchPhase,
     dateTime: formatDateTime(b.start_at, b.end_at),
