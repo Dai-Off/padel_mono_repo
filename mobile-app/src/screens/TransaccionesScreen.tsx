@@ -18,9 +18,11 @@ type TransaccionesScreenProps = {
   onBack: () => void;
 };
 
-function formatAmount(cents: number, currency: string): string {
-  const amount = (cents / 100).toFixed(2);
-  return currency === 'EUR' ? `${amount}€` : `${amount} ${currency}`;
+function formatAmount(cents: number, currency: string, opts?: { negative?: boolean }): string {
+  const n = Math.abs(cents) / 100;
+  const amount = n.toFixed(2).replace('.', ',');
+  const core = currency === 'EUR' ? `${amount} €` : `${amount} ${currency}`;
+  return opts?.negative ? `− ${core}` : core;
 }
 
 function formatDate(iso: string): string {
@@ -41,44 +43,59 @@ function formatDate(iso: string): string {
   });
 }
 
-function statusLabel(s: string): string {
-  const map: Record<string, string> = {
-    succeeded: 'Completado',
-    requires_action: 'Pendiente',
-    processing: 'Procesando',
-    failed: 'Fallido',
-    refunded: 'Reembolsado',
-  };
-  return map[s] ?? s;
-}
-
-function statusColor(s: string): string {
-  if (s === 'succeeded') return '#059669';
-  if (s === 'failed' || s === 'refunded') return '#dc2626';
-  return '#6b7280';
-}
-
 function TransactionRow({ t }: { t: Transaction }) {
   const desc =
-    t.club_name && t.court_name
+    t.summary_label?.trim() ||
+    (t.club_name && t.court_name
       ? `${t.club_name} · ${t.court_name}`
-      : t.club_name ?? t.court_name ?? 'Partido';
+      : t.club_name ?? t.court_name ?? (t.tournament_name ? `Torneo: ${t.tournament_name}` : 'Pago en app'));
+
+  const isRefunded = t.status === 'refunded';
+  const isPaid = t.status === 'succeeded';
+  const kindLabel = isRefunded
+    ? 'Reembolso'
+    : isPaid
+      ? 'Pago'
+      : t.status === 'requires_action'
+        ? 'Pendiente'
+        : t.status === 'processing'
+          ? 'Procesando'
+          : t.status === 'failed'
+            ? 'Fallido'
+            : t.status;
+
+  const dateLine = isRefunded
+    ? `${formatDate(t.created_at)} · reembolso ${formatDate(t.updated_at ?? t.created_at)}`
+    : formatDate(t.created_at);
 
   return (
     <View style={styles.row}>
       <View style={styles.rowLeft}>
-        <View style={[styles.statusDot, { backgroundColor: statusColor(t.status) }]} />
-        <View>
-          <Text style={styles.rowDesc} numberOfLines={1}>
+        <Ionicons
+          name={isRefunded ? 'arrow-undo' : isPaid ? 'checkmark-circle' : 'ellipse-outline'}
+          size={18}
+          color={isRefunded ? '#0891b2' : isPaid ? '#16a34a' : '#9ca3af'}
+          style={styles.rowIcon}
+        />
+        <View style={styles.rowTextBlock}>
+          <Text style={styles.rowDesc} numberOfLines={2}>
             {desc}
           </Text>
-          <Text style={styles.rowDate}>{formatDate(t.created_at)}</Text>
-          <Text style={[styles.rowStatus, { color: statusColor(t.status) }]}>
-            {statusLabel(t.status)}
+          <Text style={styles.rowDate}>{dateLine}</Text>
+          <Text
+            style={[
+              styles.rowKind,
+              isRefunded && styles.rowKindRefund,
+              isPaid && styles.rowKindPaid,
+            ]}
+          >
+            {kindLabel}
           </Text>
         </View>
       </View>
-      <Text style={styles.rowAmount}>{formatAmount(t.amount_cents, t.currency)}</Text>
+      <Text style={[styles.rowAmount, isRefunded && styles.rowAmountRefund]}>
+        {formatAmount(t.amount_cents, t.currency, { negative: isRefunded })}
+      </Text>
     </View>
   );
 }
@@ -146,7 +163,7 @@ export function TransaccionesScreen({ onBack }: TransaccionesScreenProps) {
           <View style={styles.center}>
             <Ionicons name="receipt-outline" size={48} color="#9ca3af" />
             <Text style={styles.emptyText}>No hay transacciones</Text>
-            <Text style={styles.emptySub}>Los pagos que hagas aparecerán aquí</Text>
+            <Text style={styles.emptySub}>Pagos y reembolsos de la app aparecerán aquí</Text>
           </View>
         ) : (
           <View style={styles.list}>
@@ -178,8 +195,8 @@ const styles = StyleSheet.create({
   emptySub: { fontSize: theme.fontSize.sm, color: '#9ca3af' },
   list: { gap: 0 },
   rowWrapper: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e5e7eb',
   },
   row: {
     flexDirection: 'row',
@@ -188,10 +205,19 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.md,
     paddingHorizontal: 0,
   },
-  rowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, minWidth: 0, gap: 12 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  rowLeft: { flexDirection: 'row', alignItems: 'flex-start', flex: 1, minWidth: 0, gap: 10 },
+  rowIcon: { marginTop: 2 },
+  rowTextBlock: { flex: 1, minWidth: 0 },
   rowDesc: { fontSize: theme.fontSize.base, fontWeight: '500', color: '#111827' },
   rowDate: { fontSize: theme.fontSize.sm, color: '#6b7280', marginTop: 2 },
-  rowStatus: { fontSize: theme.fontSize.xs, marginTop: 2 },
+  rowKind: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginTop: 4,
+  },
+  rowKindPaid: { color: '#16a34a' },
+  rowKindRefund: { color: '#0891b2' },
   rowAmount: { fontSize: theme.fontSize.base, fontWeight: '600', color: '#111827' },
+  rowAmountRefund: { color: '#0891b2' },
 });

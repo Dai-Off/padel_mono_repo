@@ -5,8 +5,14 @@ export type SearchClubGroup = {
   courtCount: number;
 };
 
+export type AggregateCourtsSortBy = 'distancia' | 'precio';
+
 /** Una fila por club: representante para abrir detalle y número de pistas en el club. */
-export function aggregateCourtsByClub(courts: SearchCourtResult[]): SearchClubGroup[] {
+export function aggregateCourtsByClub(
+  courts: SearchCourtResult[],
+  options?: { sortBy?: AggregateCourtsSortBy },
+): SearchClubGroup[] {
+  const sortBy = options?.sortBy ?? 'distancia';
   const map = new Map<string, SearchCourtResult[]>();
   for (const c of courts) {
     const arr = map.get(c.clubId) ?? [];
@@ -16,11 +22,17 @@ export function aggregateCourtsByClub(courts: SearchCourtResult[]): SearchClubGr
   const groups: SearchClubGroup[] = [];
   for (const [, group] of map) {
     groups.push({
-      representative: pickRepresentativeCourt(group),
+      representative: pickRepresentativeCourt(group, sortBy),
       courtCount: group.length,
     });
   }
   groups.sort((a, b) => {
+    if (sortBy === 'precio') {
+      const pa = a.representative.minPriceCents;
+      const pb = b.representative.minPriceCents;
+      if (pa !== pb) return pa - pb;
+      return a.representative.clubName.localeCompare(b.representative.clubName, 'es');
+    }
     const da = a.representative.distanceKm ?? Infinity;
     const db = b.representative.distanceKm ?? Infinity;
     if (da !== db) return da - db;
@@ -29,8 +41,18 @@ export function aggregateCourtsByClub(courts: SearchCourtResult[]): SearchClubGr
   return groups;
 }
 
-function pickRepresentativeCourt(group: SearchCourtResult[]): SearchCourtResult {
+function pickRepresentativeCourt(
+  group: SearchCourtResult[],
+  sortBy: AggregateCourtsSortBy,
+): SearchCourtResult {
   const sortedByDist = [...group].sort((a, b) => {
+    if (sortBy === 'precio') {
+      if (a.minPriceCents !== b.minPriceCents) return a.minPriceCents - b.minPriceCents;
+      const da = a.distanceKm ?? Infinity;
+      const db = b.distanceKm ?? Infinity;
+      if (da !== db) return da - db;
+      return a.courtName.localeCompare(b.courtName, 'es');
+    }
     const da = a.distanceKm ?? Infinity;
     const db = b.distanceKm ?? Infinity;
     if (da !== db) return da - db;
