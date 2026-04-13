@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { recomputeBookingStatus } from '../lib/bookings/recomputeBookingStatus';
 
 const router = Router();
 
@@ -94,6 +95,13 @@ router.put('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Booking participant not found' });
+    if (payment_status === 'paid' && data.booking_id) {
+      try {
+        await recomputeBookingStatus(data.booking_id);
+      } catch (e) {
+        console.error('[bookingParticipants PATCH recompute]', e);
+      }
+    }
     return res.json({ ok: true, booking_participant: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

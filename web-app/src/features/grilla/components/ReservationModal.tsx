@@ -35,7 +35,7 @@ interface ReservationModalProps {
 }
 
 // Helper: Player Search Component
-const PlayerSearch: React.FC<{
+export const PlayerSearch: React.FC<{
     label: string;
     placeholder: string;
     onSelect: (player: Player | null) => void;
@@ -842,16 +842,6 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             >
                                 {t('reservation.cancel')}
                             </button>
-                            {isEditMode && editingBookingData && onMarkPaid && (
-                                <button
-                                    type="button"
-                                    onClick={handleMarkPaid}
-                                    disabled={isMarkingPaid}
-                                    className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-md hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-                                >
-                                    {isMarkingPaid ? t('reservation.markPaidProcessing') : t('reservation.markPaid')}
-                                </button>
-                            )}
                             {isEditMode && editingBookingData && isOnHiddenCourt && onMoveToVisible && (
                                 <button
                                     onClick={async () => {
@@ -1090,30 +1080,23 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     {/* Resto de jugadores */}
                     <div className="mt-8 pt-6 border-t border-gray-200">
                         <h3 className="text-lg font-bold text-gray-900 mb-3">{t('reservation.otherPlayers')}</h3>
-                        {!isEditMode && (
-                            <div className="mb-4 flex flex-col gap-1.5">
-                                <label className="text-sm font-bold text-gray-700">{t('reservation.inviteModeLabel')}</label>
-                                <select
-                                    className="max-w-md p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
-                                    value={guestInviteMode}
-                                    onChange={(e) => {
-                                        const v = e.target.value === 'single' ? 'single' : 'double';
-                                        setGuestInviteMode(v);
-                                        if (v === 'single') {
-                                            setAdditionalPlayers((prev) => [prev[0] ?? null, null, null]);
-                                        }
-                                    }}
-                                >
-                                    <option value="single">{t('reservation.inviteMode_single')}</option>
-                                    <option value="double">{t('reservation.inviteMode_double')}</option>
-                                </select>
-                            </div>
-                        )}
-                        {isEditMode && (
-                            <p className="text-[11px] text-gray-500 mb-4">
-                                {guestInviteMode === 'single' ? t('reservation.inviteMode_single') : t('reservation.inviteMode_double')}
-                            </p>
-                        )}
+                        <div className="mb-4 flex flex-col gap-1.5">
+                            <label className="text-sm font-bold text-gray-700">{t('reservation.inviteModeLabel')}</label>
+                            <select
+                                className="max-w-md p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
+                                value={guestInviteMode}
+                                onChange={(e) => {
+                                    const v = e.target.value === 'single' ? 'single' : 'double';
+                                    setGuestInviteMode(v);
+                                    if (v === 'single') {
+                                        setAdditionalPlayers((prev) => [prev[0] ?? null, null, null]);
+                                    }
+                                }}
+                            >
+                                <option value="single">{t('reservation.inviteMode_single')}</option>
+                                <option value="double">{t('reservation.inviteMode_double')}</option>
+                            </select>
+                        </div>
                         <div className="space-y-4">
                             {(guestInviteMode === 'single' ? [0] : [0, 1, 2]).map((index) => (
                                 <div key={index}>

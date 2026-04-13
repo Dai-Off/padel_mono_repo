@@ -24,12 +24,14 @@ import inventoryRouter from './inventory';
 import schoolCoursesRouter from './schoolCourses';
 import clubClientsRouter from './clubClients';
 import clubReviewsRouter from './clubReviews';
+import clubIncidentsRouter from './clubIncidents';
 import learningRouter from './learning';
 import tournamentsRouter from './tournaments';
 import tournamentInvitesRouter from './tournamentInvites';
 import leaguesRouter from './leagues';
 import walletRouter from './wallet';
 import bonusesRouter from './bonuses';
+import clubSpecialDatesRouter from './clubSpecialDates';
 
 const router = Router();
 
@@ -65,12 +67,14 @@ router.use('/inventario', inventoryRouter);
 router.use('/school-courses', schoolCoursesRouter);
 router.use('/club-clients', clubClientsRouter);
 router.use('/club-reviews', clubReviewsRouter);
+router.use('/club-incidents', clubIncidentsRouter);
 router.use('/learning', learningRouter);
 router.use('/tournaments', tournamentInvitesRouter);
 router.use('/tournaments', tournamentsRouter);
 router.use('/leagues', leaguesRouter);
 router.use('/wallet', walletRouter);
 router.use('/bonuses', bonusesRouter);
+router.use('/club-special-dates', clubSpecialDatesRouter);
 
 export default router;
 
