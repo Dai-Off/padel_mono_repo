@@ -32,11 +32,12 @@ import { TiendaScreen } from "./TiendaScreen";
 import { DailyLessonIntroScreen } from "./DailyLessonIntroScreen";
 import { DailyLessonVideoScreen } from "./DailyLessonVideoScreen";
 import { DailyLessonInteractionScreen } from "./DailyLessonInteractionScreen";
-import { Question, LessonAnswer, submitDailyLesson } from "../api/learning";
+import { Question, LessonAnswer, submitDailyLesson, EducationalCourse } from "../api/learning";
 import { useAuth } from "../contexts/AuthContext";
 import { LessonCompletionResponse } from "../api/learning";
 import { CoursesScreen } from "./CoursesScreen";
 import { PublicCourseDetailScreen } from "./PublicCourseDetailScreen";
+import { EducationalCourseDetailScreen } from "./EducationalCourseDetailScreen";
 import type { PublicCourse } from "../api/schoolCourses";
 
 export function MainApp() {
@@ -71,6 +72,7 @@ export function MainApp() {
     useState<BookingConfirmationData | null>(null);
   const [dailyLessonRefreshNonce, setDailyLessonRefreshNonce] = useState(0);
   const [coursesRefreshNonce, setCoursesRefreshNonce] = useState(0);
+  const [selectedEducationalCourse, setSelectedEducationalCourse] = useState<EducationalCourse | null>(null);
   const [showCourses, setShowCourses] = useState(false);
   const [selectedPublicCourse, setSelectedPublicCourse] =
     useState<PublicCourse | null>(null);
@@ -81,6 +83,14 @@ export function MainApp() {
   const showPartidoDetail = selectedPartido != null;
 
   const renderContent = () => {
+    if (selectedEducationalCourse) {
+      return (
+        <EducationalCourseDetailScreen
+          course={selectedEducationalCourse}
+          onBack={() => setSelectedEducationalCourse(null)}
+        />
+      );
+    }
     if (selectedPublicCourse) {
       return (
         <PublicCourseDetailScreen
@@ -101,6 +111,9 @@ export function MainApp() {
           onCoursePress={(course, isRes) => {
             setSelectedCourseIsReserved(isRes);
             setSelectedPublicCourse(course);
+          }}
+          onEducationalCoursePress={(course) => {
+            setSelectedEducationalCourse(course);
           }}
           refreshNonce={coursesRefreshNonce}
         />
@@ -131,6 +144,7 @@ export function MainApp() {
           videoUrl={currentQuestion?.video_url}
           currentIndex={currentQuestionIndex}
           total={dailyLessonQuestions.length}
+          area={currentQuestion?.area}
           onClose={() => setShowDailyLessonVideo(false)}
           onNext={() => {
             setShowDailyLessonVideo(false);

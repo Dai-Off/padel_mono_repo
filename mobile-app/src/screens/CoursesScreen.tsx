@@ -32,12 +32,14 @@ type TabId = "apuntate" | "cursos" | "tusclases";
 interface CoursesScreenProps {
   onBack: () => void;
   onCoursePress: (course: PublicCourse, isReserved: boolean) => void;
+  onEducationalCoursePress?: (course: EducationalCourse) => void;
   refreshNonce?: number;
 }
 
 export function CoursesScreen({
   onBack,
   onCoursePress,
+  onEducationalCoursePress,
   refreshNonce,
 }: CoursesScreenProps) {
   const { session } = useAuth();
@@ -336,6 +338,7 @@ export function CoursesScreen({
                         <EducationalCourseCard
                           key={course.id}
                           course={course}
+                          onPress={() => onEducationalCoursePress?.(course)}
                         />
                       ))}
                   </View>
@@ -349,6 +352,7 @@ export function CoursesScreen({
                         <EducationalCourseCard
                           key={course.id}
                           course={course}
+                          onPress={() => onEducationalCoursePress?.(course)}
                         />
                       ))}
                   </View>
@@ -442,14 +446,14 @@ function EducationalSectionHeader({ title }: { title: string }) {
   );
 }
 
-function EducationalCourseCard({ course }: { course: EducationalCourse }) {
+function EducationalCourseCard({ course, onPress }: { course: EducationalCourse; onPress?: () => void }) {
   const imageUrl =
     course.banner_url ||
     "https://images.unsplash.com/photo-1658491830143-72808ca237e3?w=400&h=300&fit=crop";
   const levelText = `Nivel ${course.elo_min.toFixed(0)}-${course.elo_max.toFixed(0)}`;
 
   return (
-    <Pressable style={styles.eduCardWrapper}>
+    <Pressable style={styles.eduCardWrapper} onPress={onPress}>
       <LinearGradient
         colors={["rgba(255,255,255,0.07)", "rgba(255,255,255,0.03)"]}
         style={styles.eduCardGradient}

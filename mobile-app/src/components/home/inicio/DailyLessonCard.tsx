@@ -120,7 +120,9 @@ export function DailyLessonCard({
             <Ionicons name="flame" size={10} color="#FF7A00" />
             <Text style={styles.streakText}>{displayStreak} días de racha</Text>
           </View>
-          <Text style={styles.bonusText}>Bonus {bonusText || "x0.5"}</Text>
+          {bonusText ? (
+            <Text style={styles.bonusText}>Bonus {bonusText}</Text>
+          ) : null}
         </View>
 
         {/* Weekly Progress */}

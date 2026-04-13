@@ -124,23 +124,37 @@ export function DailyLessonIntroScreen({ onBack, onStart }: Props) {
         <Animated.Text
           style={[styles.subtitle, getAnimatedStyle(subtitleAnim)]}
         >
-          5 preguntas · ~3 minutos
+          {questions.length} {questions.length === 1 ? 'pregunta' : 'preguntas'} · ~{Math.ceil(questions.length * 0.5)} {Math.ceil(questions.length * 0.5) === 1 ? 'minuto' : 'minutos'}
         </Animated.Text>
 
         {/* Tags de Categorías Animados Individualmente */}
         <View style={styles.tagGrid}>
-          <Animated.View style={getAnimatedStyle(tag1Anim)}>
-            <LessonTag label="Técnica" color="#3B82F6" />
-          </Animated.View>
-          <Animated.View style={getAnimatedStyle(tag2Anim)}>
-            <LessonTag label="Reglas" color="#10B981" />
-          </Animated.View>
-          <Animated.View style={getAnimatedStyle(tag3Anim)}>
-            <LessonTag label="Táctica" color="#8B5CF6" />
-          </Animated.View>
-          <Animated.View style={getAnimatedStyle(tag4Anim)}>
-            <LessonTag label="Vocabulario" color="#F59E0B" />
-          </Animated.View>
+          {Array.from(new Set(questions.map(q => q.area))).slice(0, 4).map((area, idx) => {
+            const label = area === 'technique' ? 'Técnica' : 
+                         area === 'tactics' ? 'Táctica' :
+                         area === 'physical' ? 'Físico' :
+                         area === 'mental_vocabulary' ? 'Mental' : area;
+            
+            const color = area === 'technique' ? '#3B82F6' :
+                         area === 'tactics' ? '#10B981' :
+                         area === 'physical' ? '#8B5CF6' :
+                         area === 'mental_vocabulary' ? '#F59E0B' : '#6B7280';
+
+            const anim = idx === 0 ? tag1Anim : 
+                        idx === 1 ? tag2Anim :
+                        idx === 2 ? tag3Anim : tag4Anim;
+
+            return (
+              <Animated.View key={area} style={getAnimatedStyle(anim)}>
+                <LessonTag label={label} color={color} />
+              </Animated.View>
+            );
+          })}
+          {questions.length === 0 && !loading && (
+             <Animated.View style={getAnimatedStyle(tag1Anim)}>
+                <LessonTag label="Cargando..." color="#6B7280" />
+             </Animated.View>
+          )}
         </View>
 
         {/* Bloque Inferior Animado */}

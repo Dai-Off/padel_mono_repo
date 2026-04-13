@@ -11,9 +11,10 @@ type Props = {
   total: number;
   onClose: () => void;
   onNext: () => void; // Para ir a la pregunta
+  area?: string;
 };
 
-export function DailyLessonVideoScreen({ videoUrl, currentIndex, total, onClose, onNext }: Props) {
+export function DailyLessonVideoScreen({ videoUrl, currentIndex, total, onClose, onNext, area }: Props) {
   const insets = useSafeAreaInsets();
   const [showQuestionButton, setShowQuestionButton] = useState(false);
   const buttonOpacity = useRef(new Animated.Value(0)).current;
@@ -89,21 +90,24 @@ export function DailyLessonVideoScreen({ videoUrl, currentIndex, total, onClose,
           {/* Nombres */}
           <View style={styles.textStack}>
             <Text style={styles.academyName} numberOfLines={1}>WeMatch Academy</Text>
-            <Text style={styles.coachName} numberOfLines={1}>Coach Carlos Ruiz</Text>
+            <Text style={styles.coachName} numberOfLines={1}>Lección Diaria</Text>
           </View>
         </View>
 
         {/* Tags y Barras de progreso */}
         <View style={styles.progressRow}>
           <View style={styles.tagBadge}>
-            <Text style={styles.tagBadgeText}>TÉCNICA</Text>
+            <Text style={styles.tagBadgeText}>
+                {area === 'technique' ? 'TÉCNICA' :
+                 area === 'tactics' ? 'TÁCTICA' :
+                 area === 'physical' ? 'FÍSICO' :
+                 area === 'mental_vocabulary' ? 'MENTAL' : (area?.toUpperCase() || 'VIDEO')}
+            </Text>
           </View>
           <View style={styles.progressBars}>
-            <View style={styles.barActive} />
-            <View style={styles.barActive} />
-            <View style={styles.barActive} />
-            <View style={styles.barInactive} />
-            <View style={styles.barInactive} />
+            {Array.from({ length: total }).map((_, i) => (
+               <View key={i} style={i <= currentIndex ? styles.barActive : styles.barInactive} />
+            ))}
           </View>
         </View>
       </View>
