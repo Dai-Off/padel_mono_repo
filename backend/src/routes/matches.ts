@@ -164,7 +164,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  *     tags: [Matches]
  *     summary: Crear reserva y partido
  *     description: |
- *       Partido competitivo abierto (`type=open`) fija `elo_min`/`elo_max` en ±1 respecto al organizador.
+ *       Partido competitivo abierto (`type=open`) fija `elo_min`/`elo_max` en ±0.5 respecto al organizador (no editables).
  *     requestBody:
  *       required: true
  *       content:
@@ -219,8 +219,8 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
         .eq('id', organizer_player_id)
         .maybeSingle();
       const elo = Number((orgPl as { elo_rating?: number } | null)?.elo_rating ?? 3.5);
-      eloMinIns = Math.round((elo - 1) * 10) / 10;
-      eloMaxIns = Math.round((elo + 1) * 10) / 10;
+      eloMinIns = Math.round((elo - 0.5) * 10) / 10;
+      eloMaxIns = Math.round((elo + 0.5) * 10) / 10;
     }
 
     const { data: booking, error: errBooking } = await supabase
@@ -515,8 +515,8 @@ router.post('/', async (req: Request, res: Response) => {
       if (orgId) {
         const { data: orgPl } = await supabase.from('players').select('elo_rating').eq('id', orgId).maybeSingle();
         const elo = Number((orgPl as { elo_rating?: number } | null)?.elo_rating ?? 3.5);
-        eloMinIns = Math.round((elo - 1) * 10) / 10;
-        eloMaxIns = Math.round((elo + 1) * 10) / 10;
+        eloMinIns = Math.round((elo - 0.5) * 10) / 10;
+        eloMaxIns = Math.round((elo + 0.5) * 10) / 10;
       }
     }
     const { data, error } = await supabase

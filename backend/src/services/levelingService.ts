@@ -1,5 +1,9 @@
 import { rating, rate, predictWin } from 'openskill';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { computeMatchmakingLeagueUpdates, type MmLeagueRow } from './matchmakingLeagueEconomy';
+import { getActiveMatchmakingSeasonId } from './matchmakingSeasonService';
+import { getMatchmakingLeagueConfigRows } from './matchmakingLeagueConfigService';
+import { higherLigaRank, reconcileLigaWithElo } from './matchmakingLeague';
 
 export const COMEBACK_BONUS = 1.1;
 export const WINDOW_SIZE = 20;
@@ -110,6 +114,11 @@ type DbPlayer = {
   elo_rating: number;
   matches_played_competitive: number;
   matches_played_matchmaking: number;
+  liga?: string | null;
+  lps?: number | null;
+  mm_shield_matches?: number | null;
+  league_season_id?: string | null;
+  mm_peak_liga?: string | null;
 };
 
 type DbMatchPlayer = {
@@ -146,7 +155,7 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
   const { data: match, error: errM } = await supabase
     .from('matches')
     .select(
-      'id, competitive, score_status, type, sets, match_end_reason, retired_team, leveling_applied_at'
+      'id, competitive, score_status, type, sets, match_end_reason, retired_team, leveling_applied_at',
     )
     .eq('id', matchId)
     .maybeSingle();
@@ -160,7 +169,8 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
     .from('match_players')
     .select(
       `id, player_id, team,
-       players (id, mu, sigma, beta, beta_residuals, elo_rating, matches_played_competitive, matches_played_matchmaking)`
+       players (id, mu, sigma, beta, beta_residuals, elo_rating, matches_played_competitive, matches_played_matchmaking,
+         liga, lps, mm_shield_matches, league_season_id, mm_peak_liga)`,
     )
     .eq('match_id', matchId);
 
@@ -181,6 +191,11 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
       elo_rating: Number(p.elo_rating),
       matches_played_competitive: Number(p.matches_played_competitive),
       matches_played_matchmaking: Number(p.matches_played_matchmaking),
+      liga: p.liga ?? undefined,
+      lps: p.lps ?? undefined,
+      mm_shield_matches: p.mm_shield_matches ?? undefined,
+      league_season_id: p.league_season_id ?? undefined,
+      mm_peak_liga: p.mm_peak_liga ?? undefined,
     });
   }
 
@@ -188,6 +203,7 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
   if (byTeam.A.length !== 2 || byTeam.B.length !== 2) throw new Error('Equipos inválidos');
 
   const sets = parseSets(match.sets);
+  const matchIsMm = match.type === 'matchmaking';
   const endReason = (match.match_end_reason ?? 'completed') as 'completed' | 'retired' | 'timeout';
   const retiredTeam = (match.retired_team as 'A' | 'B' | null) ?? null;
   const { ranks, winnerTeam } = determineOutcome(sets, endReason, retiredTeam);
@@ -251,8 +267,7 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
       const { newBeta, updatedResiduals } = updateBeta(pl.beta, oldResiduals, residual);
       const newElo = calcEloRating(finalMu, newR.sigma);
       const mpc = pl.matches_played_competitive + 1;
-      const isMm = match.type === 'matchmaking';
-      const mpm = pl.matches_played_matchmaking + (isMm ? 1 : 0);
+      const mpm = pl.matches_played_matchmaking + (matchIsMm ? 1 : 0);
 
       playerUpdates[pl.id] = {
         oldElo: pl.elo_rating,
@@ -323,11 +338,46 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
     };
   });
 
+  let pLeagueUpdates: ReturnType<typeof computeMatchmakingLeagueUpdates> | null = null;
+  if (matchIsMm) {
+    const seasonId = await getActiveMatchmakingSeasonId(supabase);
+    if (!seasonId) throw new Error('No hay temporada de matchmaking activa');
+    const mmRows: MmLeagueRow[] = mps.map((mp) => {
+      const pl = flatPlayers.find((p) => p.id === mp.player_id)!;
+      const liga = String(pl.liga ?? 'bronce');
+      return {
+        playerId: mp.player_id,
+        team: mp.team as 'A' | 'B',
+        liga,
+        lps: Math.max(0, Math.floor(Number(pl.lps ?? 0))),
+        mm_shield_matches: Math.max(0, Math.floor(Number(pl.mm_shield_matches ?? 0))),
+        mm_peak_liga: String(pl.mm_peak_liga ?? liga),
+        league_season_id: pl.league_season_id ?? null,
+      };
+    });
+    pLeagueUpdates = computeMatchmakingLeagueUpdates(mmRows, winnerTeam, seasonId);
+    const leagueBands = await getMatchmakingLeagueConfigRows(supabase);
+    const bands = leagueBands.map((r) => ({
+      code: r.code,
+      sort_order: r.sort_order,
+      elo_min: r.elo_min,
+      elo_max: r.elo_max,
+    }));
+    for (const row of pLeagueUpdates) {
+      const u = playerUpdates[row.id];
+      if (!u) continue;
+      const nextLiga = reconcileLigaWithElo(row.liga, u.newElo, bands);
+      row.liga = nextLiga;
+      row.mm_peak_liga = higherLigaRank(row.mm_peak_liga, nextLiga);
+    }
+  }
+
   const { error: rpcErr } = await supabase.rpc('apply_leveling_pipeline', {
     p_match_id: matchId,
     p_player_updates: pPlayerUpdates,
     p_match_player_updates: pMatchPlayerUpdates,
     p_synergy_upserts: synergyPayload,
+    p_league_updates: pLeagueUpdates,
   });
 
   if (rpcErr) throw new Error(rpcErr.message);

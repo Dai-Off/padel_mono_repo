@@ -3,6 +3,9 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { calcInitialMu, getNextQuestion, type OnboardingAnswer } from '../services/onboardingService';
 import { calcEloRating } from '../services/levelingService';
+import { ligaFromEloWithBands } from '../services/matchmakingLeague';
+import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
+import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 
 const router = Router();
 
@@ -17,6 +20,11 @@ const PROTECTED_FIELDS = [
   'matches_played_friendly',
   'matches_played_matchmaking',
   'sp',
+  'lps',
+  'liga',
+  'league_season_id',
+  'mm_shield_matches',
+  'mm_peak_liga',
   'initial_rating_completed',
 ];
 
@@ -54,7 +62,7 @@ function toPublicPlayer(row: Row): Row {
 
 const SELECT_PUBLIC_INTERNAL = `
   id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url,
-  mu, sigma, elo_rating, sp,
+  mu, sigma, elo_rating, sp, liga, lps, mm_peak_liga,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents
 `;
@@ -87,7 +95,7 @@ function normalizeAvatarUrl(body: Record<string, unknown>): AvatarNormalize {
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200:
- *         description: Incluye elo 0–7, sp, fiabilidad y contadores de partidos
+ *         description: Incluye elo 0–7, sp, liga/lps (matchmaking), fiabilidad y contadores de partidos
  */
 router.get('/me', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
@@ -328,6 +336,92 @@ router.patch('/me', async (req: Request, res: Response) => {
 
 /**
  * @openapi
+ * /players/me/league-history:
+ *   get:
+ *     tags: [Players]
+ *     summary: Historial de ligas MM por temporada cerrada
+ *     description: |
+ *       Filas de `player_league_history` (doc 10): liga final, LP finales, pico y datos de la temporada.
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok: { type: boolean }
+ *                 entries:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: string, format: uuid }
+ *                       season_id: { type: string, format: uuid }
+ *                       season_name: { type: string }
+ *                       season_starts_at: { type: string, format: date-time }
+ *                       season_ends_at: { type: string, format: date-time }
+ *                       liga: { type: string }
+ *                       final_lps: { type: integer }
+ *                       highest_liga: { type: string }
+ *                       archived_at: { type: string, format: date-time }
+ *       401: { description: No autenticado }
+ */
+router.get('/me/league-history', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: hist, error: hErr } = await supabase
+      .from('player_league_history')
+      .select('id, season_id, liga, final_lps, highest_liga, created_at')
+      .eq('player_id', playerId)
+      .order('created_at', { ascending: false });
+    if (hErr) return res.status(500).json({ ok: false, error: hErr.message });
+
+    const rows = hist ?? [];
+    const seasonIds = [...new Set(rows.map((r: { season_id: string }) => r.season_id))];
+    let seasonById = new Map<string, { name: string; starts_at: string; ends_at: string }>();
+    if (seasonIds.length) {
+      const { data: seasons, error: sErr } = await supabase
+        .from('matchmaking_seasons')
+        .select('id, name, starts_at, ends_at')
+        .in('id', seasonIds);
+      if (sErr) return res.status(500).json({ ok: false, error: sErr.message });
+      seasonById = new Map(
+        (seasons ?? []).map((s: { id: string; name: string; starts_at: string; ends_at: string }) => [
+          s.id,
+          { name: s.name, starts_at: s.starts_at, ends_at: s.ends_at },
+        ]),
+      );
+    }
+
+    const entries = rows.map((r: Record<string, unknown>) => {
+      const sid = String(r.season_id);
+      const s = seasonById.get(sid);
+      return {
+        id: r.id,
+        season_id: sid,
+        season_name: s?.name ?? null,
+        season_starts_at: s?.starts_at ?? null,
+        season_ends_at: s?.ends_at ?? null,
+        liga: r.liga,
+        final_lps: r.final_lps,
+        highest_liga: r.highest_liga,
+        archived_at: r.created_at,
+      };
+    });
+
+    return res.json({ ok: true, entries });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
  * /players/manual:
  *   post:
  *     tags: [Players]
@@ -456,17 +550,28 @@ router.post('/onboarding', async (req: Request, res: Response) => {
   const sigma = 8.333;
   const elo = calcEloRating(mu, sigma);
   const now = new Date().toISOString();
+  const leagueBands = await getMatchmakingLeagueConfigRows(supabase);
+  const assignedLiga = ligaFromEloWithBands(elo, leagueBands);
+  let leagueSeasonId: string | null = null;
+  try {
+    leagueSeasonId = await getActiveMatchmakingSeasonId(supabase);
+  } catch {
+    /* sin tabla de temporadas aún */
+  }
 
-  const { error: e2 } = await supabase
-    .from('players')
-    .update({
-      mu,
-      sigma,
-      elo_rating: elo,
-      initial_rating_completed: true,
-      updated_at: now,
-    })
-    .eq('id', playerId);
+  const updatePayload: Record<string, unknown> = {
+    mu,
+    sigma,
+    elo_rating: elo,
+    liga: assignedLiga,
+    lps: 0,
+    mm_peak_liga: assignedLiga,
+    initial_rating_completed: true,
+    updated_at: now,
+  };
+  if (leagueSeasonId) updatePayload.league_season_id = leagueSeasonId;
+
+  const { error: e2 } = await supabase.from('players').update(updatePayload).eq('id', playerId);
 
   if (e2) return res.status(500).json({ ok: false, error: e2.message });
 
