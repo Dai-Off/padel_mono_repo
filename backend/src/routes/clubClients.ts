@@ -4,6 +4,7 @@ import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 import { getClubClientPlayerIds, invalidateClubClientPlayerIdsCache } from '../lib/clubClientPlayers';
 import { sendClubCrmEmail } from '../lib/mailer';
+import { getPlayerClubDebt } from '../lib/players/playerDebt';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -470,6 +471,142 @@ router.put('/:playerId', requireClubOwnerOrAdmin, async (req: Request, res: Resp
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Player not found' });
     return res.json({ ok: true, player: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /club-clients/{playerId}/debt:
+ *   get:
+ *     tags: [Club CRM]
+ *     summary: Obtener deuda de un jugador en el club (CU-4.3)
+ *     description: |
+ *       Devuelve el saldo neto, la deuda efectiva (max(0, -net)) y los cargos
+ *       `organizer_debt` individuales. Si el jugador tiene saldo positivo que
+ *       cubre los cargos, `debt_cents` es 0 y `has_debt` es false.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: playerId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ */
+router.get('/:playerId/debt', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const playerId = String(req.params.playerId ?? '').trim();
+  const club_id = String(req.query.club_id ?? '').trim();
+  if (!playerId || !club_id) {
+    return res.status(400).json({ ok: false, error: 'playerId y club_id son obligatorios' });
+  }
+  if (!canAccessClub(req, club_id)) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const ids = await getClubClientPlayerIds(supabase, club_id);
+    if (!ids.includes(playerId)) {
+      return res.status(404).json({ ok: false, error: 'Este jugador no está en la cartera de clientes de este club' });
+    }
+    const summary = await getPlayerClubDebt(playerId, club_id);
+    return res.json({ ok: true, ...summary });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /club-clients/{playerId}/debt/settle:
+ *   post:
+ *     tags: [Club CRM]
+ *     summary: Registrar pago de deuda en caja (CU-4.3)
+ *     description: |
+ *       Admin cobra al jugador (cash o card). Admite pagos parciales. El saldo
+ *       pendiente (si lo hay) queda como deuda. El bloqueo se libera
+ *       automáticamente cuando el balance neto ≥ 0.
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_id, amount_cents, method]
+ *             properties:
+ *               club_id: { type: string, format: uuid }
+ *               amount_cents: { type: integer, minimum: 1 }
+ *               method: { type: string, enum: [cash, card] }
+ *               notes: { type: string }
+ */
+router.post('/:playerId/debt/settle', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const playerId = String(req.params.playerId ?? '').trim();
+  const { club_id, amount_cents, method, notes } = req.body ?? {};
+
+  if (!playerId || !club_id) {
+    return res.status(400).json({ ok: false, error: 'playerId y club_id son obligatorios' });
+  }
+  if (!canAccessClub(req, String(club_id))) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  }
+  if (typeof amount_cents !== 'number' || !Number.isInteger(amount_cents) || amount_cents <= 0) {
+    return res.status(400).json({ ok: false, error: 'amount_cents debe ser un entero positivo' });
+  }
+  const VALID_METHODS = ['cash', 'card'];
+  if (!VALID_METHODS.includes(method)) {
+    return res.status(400).json({ ok: false, error: `method debe ser uno de: ${VALID_METHODS.join(', ')}` });
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const ids = await getClubClientPlayerIds(supabase, String(club_id));
+    if (!ids.includes(playerId)) {
+      return res.status(404).json({ ok: false, error: 'Este jugador no está en la cartera de clientes de este club' });
+    }
+
+    const current = await getPlayerClubDebt(playerId, String(club_id));
+    if (current.debt_cents <= 0) {
+      return res.status(409).json({ ok: false, error: 'El jugador no tiene deuda en este club', ...current });
+    }
+    if (amount_cents > current.debt_cents) {
+      return res.status(400).json({
+        ok: false,
+        error: `El monto excede la deuda actual (${current.debt_cents} cents)`,
+        debt_cents: current.debt_cents,
+      });
+    }
+
+    const methodLabel = method === 'cash' ? 'efectivo' : 'tarjeta';
+    const { data: tx, error: txErr } = await supabase
+      .from('wallet_transactions')
+      .insert({
+        player_id: playerId,
+        club_id,
+        amount_cents,
+        type: 'debt_settlement',
+        concept: `Pago de deuda en caja (${methodLabel})`,
+        notes: notes ? `method=${method}; ${notes}` : `method=${method}`,
+        created_by_auth_id: req.authContext?.userId ?? null,
+      })
+      .select()
+      .single();
+
+    if (txErr) return res.status(500).json({ ok: false, error: txErr.message });
+
+    const after = await getPlayerClubDebt(playerId, String(club_id));
+    return res.status(201).json({
+      ok: true,
+      transaction: tx,
+      debt_before_cents: current.debt_cents,
+      debt_after_cents: after.debt_cents,
+      net_balance_cents: after.net_balance_cents,
+      still_has_debt: after.has_debt,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

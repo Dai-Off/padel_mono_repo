@@ -61,7 +61,7 @@ function toPublicPlayer(row: Row): Row {
 }
 
 const SELECT_PUBLIC_INTERNAL = `
-  id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url,
+  id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url, gender,
   mu, sigma, elo_rating, sp, liga, lps, mm_peak_liga,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents
@@ -477,6 +477,7 @@ router.post('/manual', async (req: Request, res: Response) => {
           email: emailStr,
           auth_user_id: null,
           initial_rating_completed: true,
+          gender: req.body?.gender ?? 'male',
         },
       ])
       .select(SELECT_PUBLIC_INTERNAL)
@@ -798,7 +799,7 @@ router.post('/', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'Campo no editable' });
   }
 
-  const { first_name, last_name, email, phone } = body;
+  const { first_name, last_name, email, phone, gender } = body;
 
   if (!first_name || !last_name || !email) {
     return res.status(400).json({
@@ -818,6 +819,7 @@ router.post('/', async (req: Request, res: Response) => {
           last_name,
           email,
           phone: phone ?? null,
+          gender: gender ?? 'male',
           initial_rating_completed: false,
         },
       ])
@@ -850,7 +852,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'Campo no editable' });
   }
 
-  const { first_name, last_name, email, phone, status } = body;
+  const { first_name, last_name, email, phone, status, gender } = body;
 
   const update: Record<string, unknown> = {};
   if (first_name !== undefined) update.first_name = first_name;
@@ -858,6 +860,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   if (email !== undefined) update.email = email;
   if (phone !== undefined) update.phone = phone;
   if (status !== undefined) update.status = status;
+  if (gender !== undefined) update.gender = gender;
   update.updated_at = new Date().toISOString();
 
   if (Object.keys(update).length === 1) {

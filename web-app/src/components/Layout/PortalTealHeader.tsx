@@ -61,10 +61,10 @@ export function PortalTealHeader({ clubName, onMenuClick }: PortalTealHeaderProp
           <button
             type="button"
             onClick={onMenuClick}
-            className="w-9 h-9 md:w-10 md:h-10 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors"
+            className="md:hidden w-9 h-9 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors"
             aria-label={t('menu_principal')}
           >
-            <Menu className="w-5 h-5 md:w-5 md:h-5 text-white" />
+            <Menu className="w-5 h-5 text-white" />
           </button>
         )}
         <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">

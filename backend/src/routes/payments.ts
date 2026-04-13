@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Stripe from 'stripe';
+import { bookingStartIsTooFarInPast, BOOKING_START_PAST_ERROR } from '../lib/bookingStartNotInPast';
 import { playerMeetsTournamentGender } from '../lib/tournamentGender';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import {
@@ -78,6 +79,14 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
 
     const newStart = new Date(start_at).getTime();
     const newEnd = new Date(end_at).getTime();
+    if (!Number.isFinite(newStart) || !Number.isFinite(newEnd) || newEnd <= newStart) {
+      res.status(400).json({ ok: false, error: 'Rango horario inválido' });
+      return;
+    }
+    if (bookingStartIsTooFarInPast(String(start_at))) {
+      res.status(400).json({ ok: false, error: BOOKING_START_PAST_ERROR });
+      return;
+    }
     const { data: playerMatches } = await supabase
       .from('match_players')
       .select('match_id')
@@ -721,11 +730,17 @@ export async function listTransactionsHandler(req: Request, res: Response): Prom
         currency,
         status,
         created_at,
+        updated_at,
         booking_id,
+        tournament_id,
         bookings(
           start_at,
           end_at,
           courts(id, name, clubs(id, name, city))
+        ),
+        tournaments(
+          name,
+          clubs(id, name, city)
         )
       `)
       .eq('payer_player_id', player.id)
@@ -745,18 +760,45 @@ export async function listTransactionsHandler(req: Request, res: Response): Prom
       const court = (Array.isArray(rawCourt) ? rawCourt[0] : rawCourt) as Record<string, unknown> | null;
       const rawClub = court?.clubs;
       const club = (Array.isArray(rawClub) ? rawClub[0] : rawClub) as Record<string, unknown> | null;
+
+      const rawTour = t.tournaments;
+      const tour = (Array.isArray(rawTour) ? rawTour[0] : rawTour) as Record<string, unknown> | null;
+      const rawTourClub = tour?.clubs;
+      const tourClub = (Array.isArray(rawTourClub) ? rawTourClub[0] : rawTourClub) as Record<string, unknown> | null;
+
+      const clubName = (club?.name as string | undefined) ?? (tourClub?.name as string | undefined) ?? null;
+      const courtName = (court?.name as string | undefined) ?? null;
+      const tourName = (tour?.name as string | undefined) ?? null;
+
+      let summary_label: string;
+      if (clubName && courtName) {
+        summary_label = `${clubName} · ${courtName}`;
+      } else if (tourName && clubName) {
+        summary_label = `${clubName} · Torneo: ${tourName}`;
+      } else if (tourName) {
+        summary_label = `Torneo: ${tourName}`;
+      } else if (clubName) {
+        summary_label = clubName;
+      } else {
+        summary_label = 'Pago en app';
+      }
+
       return {
         id: t.id,
         amount_cents: t.amount_cents,
         currency: t.currency,
         status: t.status,
         created_at: t.created_at,
+        updated_at: t.updated_at ?? t.created_at,
         booking_id: t.booking_id,
+        tournament_id: t.tournament_id ?? null,
         start_at: b?.start_at ?? null,
         end_at: b?.end_at ?? null,
-        court_name: court?.name ?? null,
-        club_name: club?.name ?? null,
-        city: club?.city ?? null,
+        court_name: courtName,
+        club_name: clubName,
+        city: (club?.city as string | undefined) ?? (tourClub?.city as string | undefined) ?? null,
+        tournament_name: tourName,
+        summary_label: summary_label,
       };
     });
 

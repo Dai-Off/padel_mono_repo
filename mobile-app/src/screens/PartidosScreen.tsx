@@ -48,6 +48,8 @@ export type PartidoItem = {
   courtType?: string;
   /** upcoming = por jugar, live = en horario, past = ya jugado (no debería aparecer en listados activos). */
   matchPhase?: MatchListPhase;
+  /** Organizador de la reserva (cancelación / gestión). */
+  organizerPlayerId?: string | null;
 };
 
 type PartidosScreenProps = {
