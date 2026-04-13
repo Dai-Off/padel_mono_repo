@@ -1153,7 +1153,18 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
                 {/* Delete section — only in edit mode */}
                 {isEditMode && (
-                    <div className="shrink-0 px-6 py-4 border-t border-gray-200 bg-white">
+                    <div className="shrink-0 px-6 py-4 border-t border-gray-200 bg-white space-y-3">
+                        {onMarkPaid && editingBookingData?.status === 'pending_payment' && (
+                            <button
+                                type="button"
+                                onClick={handleMarkPaid}
+                                disabled={isMarkingPaid}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-[#006A6A] border border-[#006A6A]/40 rounded-md hover:bg-[#006A6A]/5 transition-colors disabled:opacity-50"
+                            >
+                                <Wallet size={15} />
+                                {isMarkingPaid ? t('reservation.markPaidProcessing') : t('reservation.markPaid')}
+                            </button>
+                        )}
                         {!showDeleteConfirm ? (
                             <button
                                 onClick={() => setShowDeleteConfirm(true)}
