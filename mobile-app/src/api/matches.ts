@@ -30,6 +30,7 @@ type MatchPlayerRef = {
 export type MatchEnriched = Match & {
   bookings?: {
     id: string;
+    organizer_player_id?: string | null;
     start_at: string;
     end_at: string;
     total_price_cents: number;
@@ -170,6 +171,51 @@ export async function joinMatch(
     const json = (await res.json()) as JoinMatchResponse;
     if (json.ok) return { ok: true };
     return { ok: false, error: json.error ?? 'No se pudo unir' };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+type CancelMatchResponse = {
+  ok?: boolean;
+  error?: string;
+  refund_errors?: string[];
+  cancelled_entire_match?: boolean;
+  match?: { id: string; status?: string };
+};
+
+/**
+ * Partido público: cualquier jugador. Si quedas solo, se cancela todo; si hay más, solo sales tú.
+ * Partido privado: solo organizador; cancelación total.
+ */
+export async function cancelMatchAsOrganizer(
+  matchId: string,
+  token: string | null | undefined
+): Promise<
+  | { ok: true; cancelledEntireMatch: boolean }
+  | { ok: false; error: string; refund_errors?: string[] }
+> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/matches/${matchId}/cancel`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    const json = (await res.json()) as CancelMatchResponse;
+    if (json.ok) {
+      return {
+        ok: true,
+        cancelledEntireMatch: json.cancelled_entire_match !== false,
+      };
+    }
+    return {
+      ok: false,
+      error: json.error ?? 'No se pudo cancelar el partido',
+      refund_errors: json.refund_errors,
+    };
   } catch {
     return { ok: false, error: 'Error de conexión' };
   }

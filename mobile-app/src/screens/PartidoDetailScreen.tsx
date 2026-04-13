@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -19,7 +20,7 @@ import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStripe } from '@stripe/stripe-react-native';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchMatchById, prepareJoin } from '../api/matches';
+import { cancelMatchAsOrganizer, fetchMatchById, prepareJoin } from '../api/matches';
 import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
 import { fetchMyPlayerId } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
@@ -97,6 +98,11 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome 
   const [joiningSlotIndex, setJoiningSlotIndex] = useState<number | null>(null);
   const [clubInfoVisible, setClubInfoVisible] = useState(false);
   const [evaluationVisible, setEvaluationVisible] = useState(false);
+  /** Overlay mientras el backend cancela / reembolsa (Stripe puede tardar varios segundos). */
+  const [cancelOverlay, setCancelOverlay] = useState<{ open: boolean; message: string }>({
+    open: false,
+    message: '',
+  });
 
   useEffect(() => {
     if (!session?.access_token) {
@@ -110,6 +116,21 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome 
       .catch(() => setCurrentPlayerId(null))
       .finally(() => setPlayerContextResolved(true));
   }, [session?.access_token]);
+
+  useEffect(() => {
+    const token = session?.access_token;
+    if (!token) return;
+    fetchMatchById(partido.id, token).then((m) => {
+      if (!m) return;
+      const updated = mapMatchToPartido(m);
+      if (updated) {
+        setPartido((prev) => ({
+          ...updated,
+          organizerPlayerId: updated.organizerPlayerId ?? prev.organizerPlayerId,
+        }));
+      }
+    });
+  }, [partido.id, session?.access_token]);
 
   const isInMatch = currentPlayerId != null && (partido.playerIds ?? []).includes(currentPlayerId);
   const firstFreeIndex = partido.players.findIndex((p) => p.isFree);
@@ -205,6 +226,7 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome 
   const joinBusy = joiningSlotIndex !== null;
   const matchPhase = partido.matchPhase ?? 'upcoming';
   /** Usuario apuntado y partido aún no cerrado: barra inferior con finalizar + papelera. */
+  const playersFilledCount = partido.players.filter((p) => !p.isFree).length;
   const showFinishBar =
     playerContextResolved && isInMatch && matchPhase !== 'past';
   const bottomReserve = insets.bottom + (showFinishBar ? 100 : 88);
@@ -216,21 +238,54 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome 
     matchPhase !== 'past';
 
   const handleTrashMatch = useCallback(() => {
-    Alert.alert(
-      '¿Eliminar partido?',
-      'Si abandonas, puede afectar a tus compañeros. Esta acción puede no estar disponible aún.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Continuar',
-          style: 'destructive',
-          onPress: () => {
-            Alert.alert('Próximamente', 'La baja del partido estará disponible pronto.');
-          },
+    const token = session?.access_token;
+    if (!token) {
+      Alert.alert('Iniciar sesión', 'Necesitas iniciar sesión para salir o cancelar el partido.');
+      return;
+    }
+    const soloEnPartido = playersFilledCount <= 1;
+    const title = soloEnPartido ? '¿Cancelar el partido?' : '¿Salir del partido?';
+    const message = soloEnPartido
+      ? 'Eres el único jugador: se anulará la reserva y el partido desaparecerá. Si pagaste con tarjeta, se reembolsará.'
+      : 'Dejarás tu plaza; los demás siguen en el partido. Si pagaste tu parte con tarjeta, se reembolsará.';
+
+    Alert.alert(title, message, [
+      { text: 'No', style: 'cancel' },
+      {
+        text: soloEnPartido ? 'Sí, cancelar todo' : 'Sí, salir',
+        style: 'destructive',
+        onPress: async () => {
+          setCancelOverlay({
+            open: true,
+            message: soloEnPartido
+              ? 'Cancelando partido y reembolso…'
+              : 'Saliendo del partido…',
+          });
+          try {
+            const r = await cancelMatchAsOrganizer(partido.id, token);
+            if (r.ok) {
+              if (r.cancelledEntireMatch) {
+                Alert.alert('Listo', 'El partido y la reserva quedaron cancelados.');
+                onBack();
+              } else {
+                setCancelOverlay((o) => ({ ...o, message: 'Actualizando partido…' }));
+                Alert.alert('Listo', 'Saliste del partido. Si pagaste con tarjeta, el reembolso se procesará en breve.');
+                const m = await fetchMatchById(partido.id, token);
+                const updated = m ? mapMatchToPartido(m) : null;
+                if (updated) setPartido(updated);
+              }
+              return;
+            }
+            const extra =
+              r.refund_errors?.length ? `\n\n${r.refund_errors.slice(0, 3).join('\n')}` : '';
+            Alert.alert('No se pudo completar', `${r.error}${extra}`);
+          } finally {
+            setCancelOverlay({ open: false, message: '' });
+          }
         },
-      ]
-    );
-  }, []);
+      },
+    ]);
+  }, [session?.access_token, partido.id, onBack, playersFilledCount]);
 
   return (
     <View style={styles.root}>
@@ -512,14 +567,24 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome 
           <View style={styles.finishBarRow}>
             <Pressable
               onPress={handleTrashMatch}
-              style={({ pressed }) => [styles.finishBarTrash, pressed && styles.pressed]}
-              accessibilityLabel="Eliminar o abandonar partido"
+              disabled={cancelOverlay.open}
+              style={({ pressed }) => [
+                styles.finishBarTrash,
+                pressed && !cancelOverlay.open && styles.pressed,
+                cancelOverlay.open && styles.finishBarBtnDisabled,
+              ]}
+              accessibilityLabel="Salir del partido o cancelar reserva"
             >
-              <Ionicons name="trash-outline" size={22} color="#f87171" />
+              <Ionicons name="exit-outline" size={22} color="#f87171" />
             </Pressable>
             <Pressable
               onPress={() => setEvaluationVisible(true)}
-              style={({ pressed }) => [styles.finishBarCta, pressed && styles.pressed]}
+              disabled={cancelOverlay.open}
+              style={({ pressed }) => [
+                styles.finishBarCta,
+                pressed && !cancelOverlay.open && styles.pressed,
+                cancelOverlay.open && styles.finishBarCtaDisabled,
+              ]}
             >
               <Text style={styles.finishBarCtaText}>Finalizar Partido</Text>
             </Pressable>
@@ -552,6 +617,16 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome 
           </Pressable>
         </View>
       )}
+
+      <Modal visible={cancelOverlay.open} transparent animationType="fade">
+        <View style={styles.cancelModalRoot} accessibilityLiveRegion="polite">
+          <View style={styles.cancelModalCard}>
+            <ActivityIndicator size="large" color={ACCENT} />
+            <Text style={styles.cancelModalText}>{cancelOverlay.message}</Text>
+            <Text style={styles.cancelModalHint}>Puede tardar unos segundos si hay reembolso con tarjeta.</Text>
+          </View>
+        </View>
+      </Modal>
 
       <MatchEvaluationFlow
         visible={evaluationVisible}
@@ -1049,6 +1124,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  finishBarBtnDisabled: {
+    opacity: 0.45,
+  },
+  finishBarCtaDisabled: {
+    opacity: 0.45,
+  },
   finishBarCta: {
     flex: 1,
     minHeight: 56,
@@ -1063,6 +1144,36 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     color: '#fff',
+  },
+  cancelModalRoot: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+  },
+  cancelModalCard: {
+    backgroundColor: 'rgba(28,28,28,0.98)',
+    borderRadius: 20,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    gap: 14,
+    maxWidth: 320,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  cancelModalText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  cancelModalHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.55)',
+    textAlign: 'center',
+    lineHeight: 18,
   },
   bottomBarLoading: {
     minHeight: 56,

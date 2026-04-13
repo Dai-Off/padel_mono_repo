@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react';
 import {
+  addDaysLocal,
   CERRAMIENTO_OPTIONS,
+  dateKeyLocal,
   DURATION_OPTIONS,
   PAREDES_OPTIONS,
+  SPORT_OPTIONS,
+  startOfLocalDay,
+  TIME_RANGE_PRESETS,
+  timeRangePresetMatches,
 } from '../../utils/formatSearch';
 import {
   Dimensions,
@@ -124,6 +130,8 @@ export function SearchFiltersSheet({
     }
   }, [visible, initialFilters]);
 
+  const todayBase = startOfLocalDay(new Date());
+
   const handleClear = () => {
     setFilters(getInitialFilters());
     onClear?.();
@@ -176,6 +184,91 @@ export function SearchFiltersSheet({
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Deporte</Text>
+              <View style={styles.chipRow}>
+                <FilterChip
+                  label="Todos"
+                  selected={filters.sport == null}
+                  onPress={() => setFilters((s) => ({ ...s, sport: null }))}
+                  unselectedVariant="outline"
+                />
+                {SPORT_OPTIONS.map((opt) => (
+                  <FilterChip
+                    key={opt.id}
+                    label={opt.label}
+                    selected={filters.sport === opt.id}
+                    onPress={() =>
+                      setFilters((s) => ({
+                        ...s,
+                        sport: s.sport === opt.id ? null : opt.id,
+                      }))
+                    }
+                    unselectedVariant="outline"
+                  />
+                ))}
+              </View>
+            </View>
+
+            <View style={[styles.section, styles.sectionBorder]}>
+              <Text style={styles.sectionTitle}>Fecha</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.dateStrip}
+                contentContainerStyle={styles.dateStripContent}
+              >
+                {Array.from({ length: 7 }, (_, i) => {
+                  const d = addDaysLocal(todayBase, i);
+                  const label =
+                    i === 0
+                      ? 'Hoy'
+                      : i === 1
+                        ? 'Mañana'
+                        : `${d.toLocaleDateString('es', { weekday: 'short' })} ${d.getDate()}`;
+                  const selected =
+                    i === 0
+                      ? filters.date == null ||
+                        dateKeyLocal(filters.date) === dateKeyLocal(todayBase)
+                      : filters.date != null && dateKeyLocal(filters.date) === dateKeyLocal(d);
+                  return (
+                    <FilterChip
+                      key={dateKeyLocal(d)}
+                      label={label}
+                      selected={selected}
+                      onPress={() =>
+                        setFilters((s) => ({
+                          ...s,
+                          date: i === 0 ? null : d,
+                        }))
+                      }
+                      unselectedVariant="outline"
+                    />
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            <View style={[styles.section, styles.sectionBorder]}>
+              <Text style={styles.sectionTitle}>Franja horaria</Text>
+              <View style={styles.chipRow}>
+                {TIME_RANGE_PRESETS.map((preset) => (
+                  <FilterChip
+                    key={preset.id}
+                    label={preset.label}
+                    selected={timeRangePresetMatches(preset.id, filters.timeRange)}
+                    onPress={() =>
+                      setFilters((s) => ({
+                        ...s,
+                        timeRange: preset.range,
+                      }))
+                    }
+                    unselectedVariant="outline"
+                  />
+                ))}
+              </View>
+            </View>
+
+            <View style={[styles.section, styles.sectionBorder]}>
               <View style={styles.toggleRow}>
                 <Text style={styles.toggleLabel}>Mostrar clubes sin disponibilidad</Text>
                 <Switch
@@ -382,6 +475,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: theme.spacing.xs,
+  },
+  dateStrip: {
+    marginHorizontal: -theme.spacing.lg,
+  },
+  dateStripContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.xs,
+    paddingHorizontal: theme.spacing.lg,
   },
   chip: {
     paddingHorizontal: theme.spacing.lg,

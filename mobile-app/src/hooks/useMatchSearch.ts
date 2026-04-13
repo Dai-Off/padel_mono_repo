@@ -39,17 +39,18 @@ export function useMatchSearch() {
     });
   }, []);
 
-  const sportLabel = filters.sport
-    ? filters.sport === 'padel'
+  const sportLabel =
+    filters.sport === 'padel'
       ? 'Pádel'
       : filters.sport === 'tenis'
         ? 'Tenis'
-        : 'Pickleball'
-    : 'Deporte';
-  const dateLabel = filters.date ? formatDateForChip(filters.date) : 'Fecha';
+        : filters.sport === 'pickleball'
+          ? 'Pickleball'
+          : 'Deporte';
+  const dateLabel = filters.date == null ? 'Hoy' : formatDateForChip(filters.date);
   const timeRangeLabel = filters.timeRange
     ? formatTimeRangeForChip(filters.timeRange.start, filters.timeRange.end)
-    : 'Hora';
+    : 'Todo el día';
 
   return {
     filters,
