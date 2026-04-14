@@ -25,7 +25,7 @@ function NavbarActionButton({
       accessibilityLabel={accessibilityLabel}
     >
       <View style={[styles.iconWrap, opacity < 1 && { opacity }]}>
-        <Ionicons name={icon} size={22} color="#1A1A1A" />
+        <Ionicons name={icon} size={20} color="#fff" />
         {showBadge && <View style={styles.badge} />}
       </View>
     </Pressable>
@@ -44,7 +44,7 @@ export function NavbarActions() {
 
 const styles = StyleSheet.create({
   container: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  button: { padding: 6, alignItems: 'center', justifyContent: 'center' },
+  button: { padding: 4, alignItems: 'center', justifyContent: 'center' },
   pressed: { opacity: 0.8 },
   iconWrap: { position: 'relative' },
   badge: {

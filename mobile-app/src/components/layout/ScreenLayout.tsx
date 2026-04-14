@@ -31,7 +31,7 @@ export function ScreenLayout({
 
   const header = customHeader ?? (
     <AppHeader
-      leftSlot={<HamburgerButton onPress={sidebar.toggle} color="#1A1A1A" size={22} />}
+      leftSlot={<HamburgerButton onPress={sidebar.toggle} color="#fff" size={22} />}
       rightSlot={<NavbarActions />}
     />
   );
