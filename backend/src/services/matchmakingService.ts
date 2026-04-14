@@ -24,7 +24,11 @@ export { exceedsLevelSpread, bestTeamSplitSync, MAX_LEVEL_SPREAD, BASE_WIN_PROB_
 export type { PoolRow, SkillRow } from './matchmakingShared';
 
 const MAX_UNIT_COMBINATIONS = 12000;
-const REJECT_LPS_PENALTY = 5;
+const REJECT_FAULT_EXPIRY_DAYS = 30;
+const MATCHMAKING_BLOCK_DAYS = 2;
+const REJECT_LPS_PENALTY_1 = 5;
+const REJECT_LPS_PENALTY_2 = 10;
+const REJECT_LPS_PENALTY_3_PLUS = 15;
 
 async function buildSynergyMap(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
@@ -359,8 +363,49 @@ export async function runMatchmakingCycle(): Promise<{ formed: number; expired: 
   return { formed: 1, expired, expansion_prompts };
 }
 
-export async function applyMatchmakingRejectPenalty(rejecterPlayerId: string): Promise<void> {
+export async function getMatchmakingBlockUntil(playerId: string): Promise<string | null> {
   const supabase = getSupabaseServiceRoleClient();
+  const nowIso = new Date().toISOString();
+  const { data: row } = await supabase
+    .from('matchmaking_player_blocks')
+    .select('blocked_until')
+    .eq('player_id', playerId)
+    .maybeSingle();
+  const blockedUntil = (row as { blocked_until?: string | null } | null)?.blocked_until ?? null;
+  if (!blockedUntil) return null;
+  if (new Date(blockedUntil).getTime() <= Date.now()) {
+    await supabase.from('matchmaking_player_blocks').delete().eq('player_id', playerId).lte('blocked_until', nowIso);
+    return null;
+  }
+  return blockedUntil;
+}
+
+export async function applyMatchmakingRejectPenalty(
+  rejecterPlayerId: string,
+  matchId?: string,
+): Promise<{ penalty_lps: number; active_faults: number; blocked_until: string | null }> {
+  const supabase = getSupabaseServiceRoleClient();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const expiresAt = new Date(now.getTime() + REJECT_FAULT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+  await supabase.from('matchmaking_reject_faults').delete().eq('player_id', rejecterPlayerId).lte('expires_at', nowIso);
+  await supabase.from('matchmaking_reject_faults').insert({
+    player_id: rejecterPlayerId,
+    match_id: matchId ?? null,
+    expires_at: expiresAt,
+  });
+
+  const { count: activeFaults } = await supabase
+    .from('matchmaking_reject_faults')
+    .select('id', { count: 'exact', head: true })
+    .eq('player_id', rejecterPlayerId)
+    .gt('expires_at', nowIso);
+  const faults = Number(activeFaults ?? 0);
+
+  const penalty =
+    faults <= 1 ? REJECT_LPS_PENALTY_1 : faults === 2 ? REJECT_LPS_PENALTY_2 : REJECT_LPS_PENALTY_3_PLUS;
+
   const { data: pl, error } = await supabase.from('players').select('id, lps').eq('id', rejecterPlayerId).maybeSingle();
   if (error || !pl) throw new Error(error?.message ?? 'Jugador no encontrado');
 
@@ -368,8 +413,8 @@ export async function applyMatchmakingRejectPenalty(rejecterPlayerId: string): P
   await supabase
     .from('players')
     .update({
-      lps: Math.max(0, cur - REJECT_LPS_PENALTY),
-      updated_at: new Date().toISOString(),
+      lps: Math.max(0, cur - penalty),
+      updated_at: nowIso,
     })
     .eq('id', rejecterPlayerId);
 
@@ -381,6 +426,22 @@ export async function applyMatchmakingRejectPenalty(rejecterPlayerId: string): P
   const rc = Number((poolRow as { reject_count?: number } | null)?.reject_count ?? 0);
   await supabase
     .from('matchmaking_pool')
-    .update({ reject_count: rc + 1, updated_at: new Date().toISOString() })
+    .update({ reject_count: rc + 1, updated_at: nowIso })
     .eq('player_id', rejecterPlayerId);
+
+  let blockedUntil: string | null = null;
+  if (faults >= 3) {
+    blockedUntil = new Date(now.getTime() + MATCHMAKING_BLOCK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    await supabase.from('matchmaking_player_blocks').upsert(
+      {
+        player_id: rejecterPlayerId,
+        blocked_until: blockedUntil,
+        updated_at: nowIso,
+      },
+      { onConflict: 'player_id' },
+    );
+    await supabase.from('matchmaking_pool').delete().eq('player_id', rejecterPlayerId);
+  }
+
+  return { penalty_lps: penalty, active_faults: faults, blocked_until: blockedUntil };
 }

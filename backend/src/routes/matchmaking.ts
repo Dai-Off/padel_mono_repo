@@ -7,6 +7,7 @@ import {
 } from '../services/matchmakingExpansion';
 import {
   applyMatchmakingRejectPenalty,
+  getMatchmakingBlockUntil,
   releaseMatchmakingProposal,
   runMatchmakingCycle,
 } from '../services/matchmakingService';
@@ -89,7 +90,7 @@ router.get('/league-config', async (_req: Request, res: Response) => {
  *               search_lng: { type: number }
  *     responses:
  *       200: { description: OK }
- *       403: { description: Onboarding incompleto }
+ *       403: { description: Onboarding incompleto o jugador bloqueado temporalmente }
  *       409: { description: Ya en cola }
  */
 router.post('/join', async (req: Request, res: Response) => {
@@ -124,6 +125,14 @@ router.post('/join', async (req: Request, res: Response) => {
   }
 
   const supabase = getSupabaseServiceRoleClient();
+  const blockedUntil = await getMatchmakingBlockUntil(playerId);
+  if (blockedUntil) {
+    return res.status(403).json({
+      ok: false,
+      error: 'Tenés matchmaking bloqueado temporalmente por rechazos recientes',
+      blocked_until: blockedUntil,
+    });
+  }
   const { data: pl, error: e1 } = await supabase
     .from('players')
     .select('initial_rating_completed')
@@ -204,6 +213,10 @@ router.delete('/leave', async (req: Request, res: Response) => {
 router.get('/status', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const blockedUntil = await getMatchmakingBlockUntil(playerId);
+  if (blockedUntil) {
+    return res.json({ ok: true, status: 'blocked', match_id: null, expansion_offer: null, blocked_until: blockedUntil });
+  }
   const supabase = getSupabaseServiceRoleClient();
   const { data: row } = await supabase
     .from('matchmaking_pool')
@@ -409,7 +422,13 @@ router.get('/proposal', async (req: Request, res: Response) => {
  *             properties:
  *               match_id: { type: string, format: uuid }
  *     responses:
- *       200: { description: OK }
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, penalty_lps: 10, active_faults: 2, blocked_until: null }
  */
 router.post('/reject', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
@@ -433,13 +452,18 @@ router.post('/reject', async (req: Request, res: Response) => {
 
   await releaseMatchmakingProposal(matchId);
 
+  let penaltyResult: { penalty_lps: number; active_faults: number; blocked_until: string | null } = {
+    penalty_lps: 0,
+    active_faults: 0,
+    blocked_until: null,
+  };
   try {
-    await applyMatchmakingRejectPenalty(playerId);
+    penaltyResult = await applyMatchmakingRejectPenalty(playerId, matchId);
   } catch (e) {
     console.error('[matchmaking/reject penalty]', e);
   }
 
-  return res.json({ ok: true });
+  return res.json({ ok: true, ...penaltyResult });
 });
 
 /**
