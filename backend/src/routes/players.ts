@@ -1,11 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
-import { calcInitialMu, getNextQuestion, type OnboardingAnswer } from '../services/onboardingService';
+import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
 import { calcEloRating } from '../services/levelingService';
-import { ligaFromEloWithBands } from '../services/matchmakingLeague';
-import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
-import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 
 const router = Router();
 
@@ -20,11 +17,6 @@ const PROTECTED_FIELDS = [
   'matches_played_friendly',
   'matches_played_matchmaking',
   'sp',
-  'lps',
-  'liga',
-  'league_season_id',
-  'mm_shield_matches',
-  'mm_peak_liga',
   'initial_rating_completed',
 ];
 
@@ -62,7 +54,7 @@ function toPublicPlayer(row: Row): Row {
 
 const SELECT_PUBLIC_INTERNAL = `
   id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url, gender,
-  mu, sigma, elo_rating, sp, liga, lps, mm_peak_liga,
+  mu, sigma, elo_rating, sp,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents
 `;
@@ -95,7 +87,7 @@ function normalizeAvatarUrl(body: Record<string, unknown>): AvatarNormalize {
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200:
- *         description: Incluye elo 0–7, sp, liga/lps (matchmaking), fiabilidad y contadores de partidos
+ *         description: Incluye elo 0–7, sp, fiabilidad y contadores de partidos
  */
 router.get('/me', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
@@ -336,92 +328,6 @@ router.patch('/me', async (req: Request, res: Response) => {
 
 /**
  * @openapi
- * /players/me/league-history:
- *   get:
- *     tags: [Players]
- *     summary: Historial de ligas MM por temporada cerrada
- *     description: |
- *       Filas de `player_league_history` (doc 10): liga final, LP finales, pico y datos de la temporada.
- *     security: [{ bearerAuth: [] }]
- *     responses:
- *       200:
- *         description: OK
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 ok: { type: boolean }
- *                 entries:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id: { type: string, format: uuid }
- *                       season_id: { type: string, format: uuid }
- *                       season_name: { type: string }
- *                       season_starts_at: { type: string, format: date-time }
- *                       season_ends_at: { type: string, format: date-time }
- *                       liga: { type: string }
- *                       final_lps: { type: integer }
- *                       highest_liga: { type: string }
- *                       archived_at: { type: string, format: date-time }
- *       401: { description: No autenticado }
- */
-router.get('/me/league-history', async (req: Request, res: Response) => {
-  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
-  if (authErr) return res.status(401).json({ ok: false, error: authErr });
-
-  try {
-    const supabase = getSupabaseServiceRoleClient();
-    const { data: hist, error: hErr } = await supabase
-      .from('player_league_history')
-      .select('id, season_id, liga, final_lps, highest_liga, created_at')
-      .eq('player_id', playerId)
-      .order('created_at', { ascending: false });
-    if (hErr) return res.status(500).json({ ok: false, error: hErr.message });
-
-    const rows = hist ?? [];
-    const seasonIds = [...new Set(rows.map((r: { season_id: string }) => r.season_id))];
-    let seasonById = new Map<string, { name: string; starts_at: string; ends_at: string }>();
-    if (seasonIds.length) {
-      const { data: seasons, error: sErr } = await supabase
-        .from('matchmaking_seasons')
-        .select('id, name, starts_at, ends_at')
-        .in('id', seasonIds);
-      if (sErr) return res.status(500).json({ ok: false, error: sErr.message });
-      seasonById = new Map(
-        (seasons ?? []).map((s: { id: string; name: string; starts_at: string; ends_at: string }) => [
-          s.id,
-          { name: s.name, starts_at: s.starts_at, ends_at: s.ends_at },
-        ]),
-      );
-    }
-
-    const entries = rows.map((r: Record<string, unknown>) => {
-      const sid = String(r.season_id);
-      const s = seasonById.get(sid);
-      return {
-        id: r.id,
-        season_id: sid,
-        season_name: s?.name ?? null,
-        season_starts_at: s?.starts_at ?? null,
-        season_ends_at: s?.ends_at ?? null,
-        liga: r.liga,
-        final_lps: r.final_lps,
-        highest_liga: r.highest_liga,
-        archived_at: r.created_at,
-      };
-    });
-
-    return res.json({ ok: true, entries });
-  } catch (err) {
-    return res.status(500).json({ ok: false, error: (err as Error).message });
-  }
-});
-
-/**
- * @openapi
  * /players/manual:
  *   post:
  *     tags: [Players]
@@ -499,10 +405,35 @@ router.post('/manual', async (req: Request, res: Response) => {
 
 /**
  * @openapi
+ * /players/onboarding/next:
+ *   get:
+ *     tags: [Players]
+ *     summary: Obtener la siguiente pregunta del cuestionario
+ *     security: [{ bearerAuth: [] }]
+ */
+router.get('/onboarding/next', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  try {
+    let answers: OnboardingAnswer[] = [];
+    if (req.query.answers) {
+      answers = JSON.parse(req.query.answers as string);
+    }
+    const state = await getNextQuestionState(answers);
+    return res.json({ ok: true, state });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ ok: false, error: message });
+  }
+});
+
+/**
+ * @openapi
  * /players/onboarding:
  *   post:
  *     tags: [Players]
- *     summary: Completar cuestionario de nivelación inicial
+ *     summary: Completar cuestionario de nivelación inicial Fase 1 y 2
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -516,7 +447,7 @@ router.post('/manual', async (req: Request, res: Response) => {
  *                 type: array
  *                 items:
  *                   type: object
- *                   required: [question_id, value]
+ *                   required: [question_key, value]
  *     responses:
  *       200: { description: Nivel asignado }
  *       400: { description: Faltan respuestas; puede incluir next_question }
@@ -528,12 +459,13 @@ router.post('/onboarding', async (req: Request, res: Response) => {
 
   const answers = req.body?.answers as OnboardingAnswer[] | undefined;
   if (!Array.isArray(answers)) {
-    return res.status(400).json({ ok: false, error: 'answers debe ser un array' });
+    return res.status(400).json({ ok: false, error: 'answers debe ser un array con question_key y value' });
   }
 
-  const next = getNextQuestion(answers);
-  if (next) {
-    return res.status(400).json({ ok: false, error: 'Cuestionario incompleto', next_question: next });
+  // Verificamos estado (si le falta Fase 2, no debería procesar todo, a menos que P1 < 2)
+  const state = await getNextQuestionState(answers);
+  if (state.type === 'question') {
+    return res.status(400).json({ ok: false, error: 'Cuestionario de Fase 1 incompleto', state });
   }
 
   const supabase = getSupabaseServiceRoleClient();
@@ -542,47 +474,62 @@ router.post('/onboarding', async (req: Request, res: Response) => {
     .select('initial_rating_completed')
     .eq('id', playerId)
     .maybeSingle();
+
   if (e1) return res.status(500).json({ ok: false, error: e1.message });
   if ((pl as { initial_rating_completed?: boolean } | null)?.initial_rating_completed) {
     return res.status(409).json({ ok: false, error: 'Nivelación inicial ya completada' });
   }
 
-  const mu = calcInitialMu(answers);
-  const sigma = 8.333;
-  const elo = calcEloRating(mu, sigma);
-  const now = new Date().toISOString();
-  const leagueBands = await getMatchmakingLeagueConfigRows(supabase);
-  const assignedLiga = ligaFromEloWithBands(elo, leagueBands);
-  let leagueSeasonId: string | null = null;
-  try {
-    leagueSeasonId = await getActiveMatchmakingSeasonId(supabase);
-  } catch {
-    /* sin tabla de temporadas aún */
+  // Separar respuestas (solo p1 a p99 son de fase 1)
+  const phase1Ans = answers.filter(a => /^p\d+$/.test(a.question_key));
+  const phase2Ans = answers.filter(a => !/^p\d+$/.test(a.question_key));
+
+  // Calculos
+  const eloPhase1 = await calcEloPhase1(phase1Ans);
+  const p1Val = phase1Ans.find(a => a.question_key === 'p1')?.value;
+  
+  let finalElo = eloPhase1;
+  let pool = null;
+  let phase2Score = null;
+
+  if (p1Val >= 2) {
+    // Aplica fase 2
+    pool = await getPhase2Pool(eloPhase1);
+    const p2Result = await calcPhase2Result(phase2Ans);
+    finalElo = calcFinalElo(eloPhase1, p2Result.adjustment);
+    phase2Score = p2Result.score;
+  } else {
+    // Floor/Ceil para fase 1 directa sin fase 2
+    finalElo = calcFinalElo(eloPhase1, 0); 
   }
 
-  const updatePayload: Record<string, unknown> = {
-    mu,
-    sigma,
-    elo_rating: elo,
-    liga: assignedLiga,
-    lps: 0,
-    mm_peak_liga: assignedLiga,
-    initial_rating_completed: true,
-    updated_at: now,
-  };
-  if (leagueSeasonId) updatePayload.league_season_id = leagueSeasonId;
+  const muToSave = eloToMu(finalElo);
+  const now = new Date().toISOString();
 
-  const { error: e2 } = await supabase.from('players').update(updatePayload).eq('id', playerId);
+  // Actualizar Player
+  const { error: e2 } = await supabase
+    .from('players')
+    .update({
+      mu: muToSave,
+      elo_rating: finalElo,
+      initial_rating_completed: true,
+      updated_at: now,
+    })
+    .eq('id', playerId);
 
   if (e2) return res.status(500).json({ ok: false, error: e2.message });
 
+  // Guardar respuestas de Onboarding
   await supabase.from('onboarding_answers').insert({
     player_id: playerId,
     answers,
-    mu_assigned: mu,
+    elo_assigned: finalElo,
+    elo_phase1: eloPhase1,
+    pool_assigned: pool,
+    phase2_score: phase2Score,
   });
 
-  return res.json({ ok: true, elo_rating: elo, message: 'Nivel inicial asignado' });
+  return res.json({ ok: true, elo_rating: finalElo, message: 'Nivel inicial asignado' });
 });
 
 /**
