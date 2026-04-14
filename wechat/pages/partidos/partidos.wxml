@@ -1,0 +1,60 @@
+<!-- Alineado a mobile-app PartidosScreen: secciones, listas, skeletons, FAB -->
+<view class="pd-root">
+  <scroll-view class="pd-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="pd-content">
+      <view class="pd-section">
+        <text class="pd-section-title">Para tu nivel</text>
+        <text class="pd-section-sub">Estos partidos reflejan tu búsqueda y nivel</text>
+      </view>
+      <view class="pd-list">
+        <block wx:if="{{loading}}">
+          <view class="pd-card-gap" wx:for="{{skOpen}}" wx:key="*this">
+            <partido-open-card-skeleton />
+          </view>
+        </block>
+        <block wx:elif="{{openItems.length === 0}}">
+          <view class="pd-empty">
+            <text class="pd-empty-txt">No hay partidos abiertos</text>
+          </view>
+        </block>
+        <block wx:else>
+          <view class="pd-card-gap" wx:for="{{openItems}}" wx:key="id">
+            <partido-open-card item="{{item}}" bind:cardtap="onCardTap" />
+          </view>
+        </block>
+      </view>
+
+      <view class="pd-section pd-section-mt-xl">
+        <text class="pd-section-title">Mis partidos</text>
+        <text class="pd-section-sub">Tus reservas privadas</text>
+      </view>
+      <view class="pd-list">
+        <block wx:if="{{loading}}">
+          <view class="pd-card-gap" wx:for="{{skMine}}" wx:key="*this">
+            <partido-open-card-skeleton />
+          </view>
+        </block>
+        <block wx:elif="{{myPrivateItems.length === 0}}">
+          <view class="pd-empty">
+            <text class="pd-empty-txt">No tienes partidos privados</text>
+          </view>
+        </block>
+        <block wx:else>
+          <view class="pd-card-gap" wx:for="{{myPrivateItems}}" wx:key="id">
+            <partido-card item="{{item}}" bind:cardtap="onCardTap" />
+          </view>
+        </block>
+      </view>
+    </view>
+  </scroll-view>
+
+  <view class="pd-fab-anchor">
+    <button
+      class="pd-fab"
+      hover-class="pd-fab-hover"
+      bindtap="onFabTap"
+    >
+      + Comenzar un partido
+    </button>
+  </view>
+</view>

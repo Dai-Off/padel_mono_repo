@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "Club",
+  "usingComponents": {
+    "partido-open-card": "/components/partido-open-card/partido-open-card"
+  }
+}

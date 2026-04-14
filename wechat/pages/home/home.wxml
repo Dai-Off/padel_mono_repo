@@ -1,0 +1,279 @@
+<view class="home-page home-flex-col">
+  <view class="home-header" style="padding-top: {{statusBarHeight}}px;">
+    <view class="home-header-row">
+      <button class="home-icon-btn" hover-class="none" bindtap="onMenuPress">
+        <text class="home-icon-txt">☰</text>
+      </button>
+      <view class="home-header-spacer" />
+      <view class="home-header-actions">
+        <button class="home-icon-btn" hover-class="none" bindtap="onPlaceholderPress" data-kind="msg">
+          <text class="home-icon-txt">💬</text>
+        </button>
+        <button class="home-icon-btn" hover-class="none" bindtap="onPlaceholderPress" data-kind="bell">
+          <text class="home-icon-txt">🔔</text>
+        </button>
+        <button class="home-icon-btn" hover-class="none" bindtap="onPlaceholderPress" data-kind="people">
+          <text class="home-icon-txt">👥</text>
+        </button>
+      </view>
+    </view>
+  </view>
+
+  <scroll-view class="home-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="home-scroll-inner home-stack">
+      <!-- Próximos partidos -->
+      <view wx:if="{{showProximosSection}}" class="prox-section">
+        <view class="prox-header-row">
+          <text class="prox-title">Próximos partidos</text>
+          <text class="prox-sub">{{proximosSubtitle}}</text>
+        </view>
+        <scroll-view wx:if="{{matchesLoading && misProximos.length === 0}}" class="prox-h-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+          <view class="prox-h-inner">
+            <view class="prox-skel" style="width: {{carouselCardWidthRpx}}rpx;">
+              <view class="prox-skel-line-lg" />
+              <view class="prox-skel-line-sm" />
+            </view>
+          </view>
+        </scroll-view>
+        <scroll-view wx:else class="prox-h-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+          <view class="prox-h-inner">
+            <view class="prox-card-wrap" wx:for="{{misProximos}}" wx:key="id" style="width: {{carouselCardWidthRpx}}rpx;">
+              <partido-open-card item="{{item}}" bind:cardtap="onPartidoCardTap" />
+            </view>
+          </view>
+        </scroll-view>
+      </view>
+
+      <!-- Lección diaria -->
+      <view class="daily-wrap" bindtap="onDailyLessonPress">
+        <view class="daily-bg" />
+        <view class="daily-inner">
+          <view class="daily-top">
+            <view class="daily-icon-box">
+              <text class="daily-icon-txt">🔥</text>
+            </view>
+            <view class="daily-title-col">
+              <text class="daily-title">Lección diaria</text>
+              <text class="daily-bonus">Bonus: {{dash}}</text>
+            </view>
+          </view>
+          <view class="daily-days">
+            <view class="daily-day-col" wx:for="{{weekLabels}}" wx:key="*this">
+              <text class="daily-day-lbl">{{item}}</text>
+              <view class="daily-day-cell">
+                <text class="daily-day-ph">{{dash}}</text>
+              </view>
+            </view>
+          </view>
+          <view class="daily-footer">
+            <text class="daily-cta">Empezar</text>
+            <text class="daily-chev">›</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Pase de temporada -->
+      <view class="sp-wrap" bindtap="onSeasonPassPress">
+        <view class="sp-bg" />
+        <view class="sp-orb" />
+        <view class="sp-inner">
+          <view class="sp-top">
+            <view class="sp-left">
+              <view class="sp-flame">
+                <text class="sp-flame-txt">🔥</text>
+              </view>
+              <view class="sp-titles">
+                <text class="sp-lbl">TEMPORADA</text>
+                <text class="sp-name">Pase de temporada</text>
+              </view>
+            </view>
+            <view class="sp-level-col">
+              <text class="sp-level-hint">Nivel</text>
+              <text class="sp-level-num">{{dash}}</text>
+              <text class="sp-level-max">{{dash}}</text>
+            </view>
+          </view>
+          <view class="sp-bar-track">
+            <view class="sp-bar-fill" style="width: {{seasonBarPct}}%;" />
+          </view>
+          <view class="sp-bar-meta">
+            <text class="sp-meta-l">{{dash}}</text>
+            <text class="sp-meta-r">{{dash}}</text>
+          </view>
+          <view class="sp-next-row">
+            <text class="sp-next-lbl">Siguiente:</text>
+            <text class="sp-next-gem">💎</text>
+            <text class="sp-next-name">{{dash}}</text>
+            <text class="sp-chev">›</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Liga competitiva -->
+      <view class="cl-wrap" bindtap="onCompetitivePress">
+        <view class="cl-inner">
+          <view class="cl-head">
+            <view class="cl-left">
+              <view class="cl-medal">
+                <text class="cl-medal-txt">🏅</text>
+              </view>
+              <view class="cl-title-block">
+                <view class="cl-title-line">
+                  <text class="cl-title">Liga Competitiva</text>
+                  <view class="cl-badge">
+                    <text class="cl-badge-txt">2V2</text>
+                  </view>
+                </view>
+                <text class="cl-sub">Partidos rankeados por parejas</text>
+              </view>
+            </view>
+            <text class="cl-chev">›</text>
+          </view>
+          <view class="cl-mid">
+            <view class="cl-mid-col">
+              <text class="cl-cap">Tu división</text>
+              <text class="cl-div">{{dash}}</text>
+            </view>
+            <view class="cl-mid-col-end">
+              <text class="cl-cap">League Points</text>
+              <text class="cl-lp">{{dash}}</text>
+            </view>
+          </view>
+          <view class="cl-bar-track">
+            <view class="cl-bar-fill" style="width: {{leagueBarPct}}%;" />
+          </view>
+          <view class="cl-foot">
+            <view class="cl-stats">
+              <view class="cl-stat">
+                <text class="cl-stat-txt">📈</text>
+                <text class="cl-stat-txt">{{dash}}</text>
+              </view>
+              <view class="cl-stat">
+                <text class="cl-stat-txt">📉</text>
+                <text class="cl-stat-txt">{{dash}}</text>
+              </view>
+            </view>
+            <text class="cl-hint">Toca para jugar ranked</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Acciones rápidas -->
+      <view class="qa-grid">
+        <view class="qa-row-wide" bindtap="onQuickPartidos">
+          <view class="qa-blob-o" />
+          <view class="qa-icon-lg">
+            <text class="qa-ico-txt">👥</text>
+          </view>
+          <view class="qa-text-col">
+            <text class="qa-h3">Buscar Partido</text>
+            <text class="qa-p">Únete a partidos cerca de ti</text>
+            <text class="qa-data">{{buscarSub}}</text>
+          </view>
+          <text class="qa-arrow">↗</text>
+        </view>
+
+        <view class="qa-half-row">
+          <view class="qa-half" bindtap="onQuickPistas">
+            <view class="qa-blob-b" />
+            <view class="qa-row-sm">
+              <view class="qa-icon-sm">
+                <text class="qa-ico-txt">📍</text>
+              </view>
+              <view class="qa-text-sm">
+                <text class="qa-h3sm">Pistas</text>
+                <text class="qa-p">Reserva tu club</text>
+                <text class="qa-data">{{pistasSub}}</text>
+              </view>
+            </view>
+          </view>
+          <view class="qa-half" bindtap="onQuickClases">
+            <view class="qa-blob-p" />
+            <view class="qa-row-sm">
+              <view class="qa-icon-sm">
+                <text class="qa-ico-txt">🎓</text>
+              </view>
+              <view class="qa-text-sm">
+                <text class="qa-h3sm">Clases</text>
+                <text class="qa-p">Mejora tu juego</text>
+                <text class="qa-data">{{dash}}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+
+        <view class="qa-row-wide" bindtap="onQuickTorneos">
+          <view class="qa-blob-a" />
+          <view class="qa-icon-lg">
+            <text class="qa-ico-txt">🏆</text>
+          </view>
+          <view class="qa-text-col">
+            <text class="qa-h3">Torneos</text>
+            <text class="qa-p">Compite y gana premios</text>
+            <text class="qa-data">{{torneosSub}}</text>
+          </view>
+          <text class="qa-arrow">↗</text>
+        </view>
+      </view>
+
+      <!-- IA Afinidad -->
+      <view class="ia-wrap" bindtap="onIAPress">
+        <view class="ia-blob" />
+        <view class="ia-grad" />
+        <view class="ia-inner">
+          <view class="ia-icon">
+            <text class="ia-ico-txt">✨</text>
+          </view>
+          <view class="ia-col">
+            <view class="ia-title-row">
+              <text class="ia-title">IA Afinidad</text>
+              <text class="ia-arrow">↗</text>
+            </view>
+            <text class="ia-desc">Descubre jugadores afines a tu estilo, nivel y disponibilidad</text>
+          </view>
+        </view>
+      </view>
+
+      <!-- Misiones -->
+      <view class="mis-section">
+        <view class="mis-head">
+          <view class="mis-dot" />
+          <text class="mis-h2">Misiones Activas</text>
+        </view>
+        <view class="mis-empty">
+          <text class="mis-empty-ico">📋</text>
+          <text class="mis-empty-title">No hay misiones activas</text>
+          <text class="mis-empty-sub">Cuando tengas misiones, aparecerán aquí.</text>
+        </view>
+      </view>
+
+      <!-- En directo -->
+      <view class="ed-section">
+        <view class="ed-head">
+          <view class="ed-title-row">
+            <view class="ed-ping-wrap">
+              <view class="ed-ping" />
+              <view class="ed-dot" />
+            </view>
+            <text class="ed-h2">En Directo</text>
+          </view>
+          <text class="ed-sub">{{enDirectoSubtitle}}</text>
+        </view>
+        <scroll-view wx:if="{{partidosLive.length > 0}}" class="ed-h-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+          <view class="ed-h-inner">
+            <view class="prox-card-wrap" wx:for="{{partidosLive}}" wx:key="id" style="width: {{carouselCardWidthRpx}}rpx;">
+              <partido-open-card item="{{item}}" bind:cardtap="onPartidoCardTap" />
+            </view>
+          </view>
+        </scroll-view>
+        <view wx:elif="{{matchesLoading}}" class="ed-loading">
+          <text class="ed-loading-txt">Buscando partidos en curso…</text>
+        </view>
+        <view wx:else class="ed-empty-card" bindtap="onOpenPartidosFromEd">
+          <text class="ed-empty-card-title">No hay partidos en directo</text>
+          <text class="ed-empty-card-sub">Toca para ver partidos abiertos</text>
+        </view>
+      </view>
+    </view>
+  </scroll-view>
+</view>

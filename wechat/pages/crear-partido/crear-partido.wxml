@@ -1,0 +1,77 @@
+<view class="cp-root">
+  <view wx:if="{{step === 'list'}}" class="cp-list">
+    <view wx:if="{{clubsLoading}}" class="cp-center">
+      <text class="cp-muted">Cargando clubes…</text>
+    </view>
+    <view wx:elif="{{clubsError}}" class="cp-center">
+      <text class="cp-err">{{clubsError}}</text>
+      <button class="cp-retry" bindtap="loadClubs">Reintentar</button>
+    </view>
+    <scroll-view wx:else class="cp-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view class="cp-hint">Elige club, día y hora (hoy o mañana).</view>
+      <view class="cp-club" wx:for="{{clubs}}" wx:for-index="cidx" wx:key="clubId">
+        <image wx:if="{{item.imageUrl}}" class="cp-club-img" src="{{item.imageUrl}}" mode="aspectFill" />
+        <view wx:else class="cp-club-img cp-club-img--ph" />
+        <view class="cp-club-body">
+          <text class="cp-club-name">{{item.clubName}}</text>
+          <text class="cp-club-loc">{{item.location}}</text>
+        </view>
+        <view class="cp-dates">
+          <block wx:for="{{item.dates}}" wx:for-item="d" wx:for-index="didx" wx:key="dateStr">
+            <text class="cp-date-lbl">{{d.label}}</text>
+            <view class="cp-slots-row">
+              <button
+                class="cp-slot"
+                wx:for="{{d.slots}}"
+                wx:for-item="sl"
+                wx:for-index="sidx"
+                wx:key="time"
+                hover-class="cp-slot-hover"
+                data-cidx="{{cidx}}"
+                data-didx="{{didx}}"
+                data-sidx="{{sidx}}"
+                bindtap="onSlotTap"
+              >
+                {{sl.time}} · {{sl.minPriceFormatted}}
+              </button>
+            </view>
+          </block>
+        </view>
+      </view>
+      <view wx:if="{{clubs.length === 0}}" class="cp-center cp-pad">
+        <text class="cp-muted">No hay huecos disponibles.</text>
+      </view>
+    </scroll-view>
+  </view>
+
+  <view wx:if="{{step === 'config'}}" class="cp-config">
+    <view class="cp-config-card">
+      <text class="cp-config-title">Configurar partido</text>
+      <text class="cp-config-line">{{selectedClubName}}</text>
+      <text class="cp-config-line">{{selectedDateLabel}} · {{selectedTime}}</text>
+      <text class="cp-config-price">{{selectedPriceFmt}}</text>
+
+      <view class="cp-row">
+        <text class="cp-row-lbl">Partido privado</text>
+        <switch checked="{{partidoPrivado}}" bindchange="onPrivateChange" color="#F18F34" />
+      </view>
+      <view class="cp-row">
+        <text class="cp-row-lbl">Competitivo</text>
+        <switch checked="{{competitive}}" bindchange="onCompetitiveChange" color="#F18F34" />
+      </view>
+      <button class="cp-gender-btn" bindtap="onGenderTap">Género: {{genderLabel}}</button>
+
+      <text wx:if="{{createError}}" class="cp-err cp-err-mt">{{createError}}</text>
+
+      <button
+        class="cp-cta"
+        disabled="{{creating}}"
+        loading="{{creating}}"
+        bindtap="onConfirmCreate"
+      >
+        Simular pago y crear
+      </button>
+      <button class="cp-back" bindtap="onBackConfig">Volver</button>
+    </view>
+  </view>
+</view>

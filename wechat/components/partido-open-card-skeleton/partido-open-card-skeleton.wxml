@@ -1,0 +1,17 @@
+<!-- Alineado a mobile-app PartidoOpenCardSkeleton -->
+<view class="pos-card">
+  <view class="pos-row">
+    <view class="pos-thumb" />
+    <view class="pos-body">
+      <view class="pos-line pos-line-w85" />
+      <view class="pos-line pos-line-w70" />
+      <view class="pos-badges">
+        <view class="pos-pill" />
+        <view class="pos-pill pos-pill-wide" />
+      </view>
+      <view class="pos-slots">
+        <view class="pos-slot" wx:for="{{[1,2,3,4]}}" wx:key="*this" />
+      </view>
+    </view>
+  </view>
+</view>

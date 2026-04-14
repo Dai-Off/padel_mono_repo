@@ -1,0 +1,6 @@
+{
+  "navigationStyle": "custom",
+  "usingComponents": {
+    "partido-open-card": "/components/partido-open-card/partido-open-card"
+  }
+}

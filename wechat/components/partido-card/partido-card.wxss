@@ -1,0 +1,217 @@
+/* PartidoCard — surface dark (px→rpx ×2, theme spacing md=16, lg=20) */
+.pc-card {
+  border-radius: 32rpx;
+  border-width: 1px;
+  border-style: solid;
+  padding: 32rpx;
+  box-sizing: border-box;
+}
+
+.pc-card-dark {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.pc-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24rpx;
+}
+
+.pc-datetime-dark {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #ffffff;
+  flex: 1;
+  min-width: 0;
+  padding-right: 16rpx;
+}
+
+.pc-badge-wrap {
+  display: flex;
+  flex-direction: row;
+  flex-shrink: 0;
+}
+
+.pc-badge {
+  padding: 4rpx 16rpx;
+  border-radius: 16rpx;
+}
+
+.pc-badge-muted-dark {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-width: 1px;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.pc-badge-comp-dark {
+  background-color: rgba(227, 30, 36, 0.22);
+  border-width: 1px;
+  border-style: solid;
+  border-color: rgba(227, 30, 36, 0.35);
+}
+
+.pc-badge-txt-comp {
+  font-size: 20rpx;
+  font-weight: 600;
+  color: #e31e24;
+}
+
+.pc-badge-txt-dark-muted {
+  font-size: 20rpx;
+  font-weight: 600;
+  color: #d1d5db;
+}
+
+.pc-meta {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 32rpx;
+}
+
+.pc-meta-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-right: 16rpx;
+}
+
+.pc-people-ico {
+  font-size: 24rpx;
+  margin-right: 8rpx;
+  line-height: 1;
+}
+
+.pc-meta-txt-dark {
+  font-size: 20rpx;
+  color: #9ca3af;
+}
+
+.pc-level-dark {
+  font-size: 20rpx;
+  color: #9ca3af;
+  min-width: 20%;
+}
+
+.pc-private-row-dark {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin-bottom: 32rpx;
+  padding: 16rpx 24rpx;
+  border-radius: 24rpx;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.pc-private-avatar {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 20rpx;
+  background-color: rgba(227, 30, 36, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 20rpx;
+  flex-shrink: 0;
+}
+
+.pc-private-ini-wrap {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 20rpx;
+  background-color: #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pc-private-ini {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.pc-private-check {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #e31e24;
+}
+
+.pc-private-label-dark {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #d1d5db;
+}
+
+.pc-venue-row-dark {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.pc-venue-icon-dark {
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 16rpx;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-width: 1px;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 24rpx;
+  flex-shrink: 0;
+}
+
+.pc-venue-emoji {
+  font-size: 32rpx;
+}
+
+.pc-venue-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.pc-venue-name-dark {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #ffffff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pc-venue-loc-dark {
+  font-size: 20rpx;
+  color: #9ca3af;
+  margin-top: 4rpx;
+}
+
+.pc-venue-price-col {
+  align-items: flex-end;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  margin-left: 16rpx;
+}
+
+.pc-venue-price-dark {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: #fb923c;
+}
+
+.pc-venue-dur-dark {
+  font-size: 20rpx;
+  color: #9ca3af;
+  margin-top: 4rpx;
+}

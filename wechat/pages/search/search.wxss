@@ -1,0 +1,11 @@
+@import '../../styles/search-common.wxss';
+
+.search-placeholder {
+  color: #737373;
+}
+
+.search-body-scroll {
+  flex: 1;
+  min-height: 0;
+  height: 0;
+}

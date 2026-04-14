@@ -1,0 +1,8 @@
+{
+  "navigationBarTitleText": "Partidos",
+  "usingComponents": {
+    "partido-open-card": "/components/partido-open-card/partido-open-card",
+    "partido-open-card-skeleton": "/components/partido-open-card-skeleton/partido-open-card-skeleton",
+    "partido-card": "/components/partido-card/partido-card"
+  }
+}
