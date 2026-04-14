@@ -45,10 +45,13 @@ export function planPromotionRelegation(divisions: DivisionRow[], teams: TeamRow
     const below = i < sortedDivs.length - 1 ? sortedDivs[i + 1] : null;
     const currentTeams = byDivision.get(current.id) ?? [];
 
+    const promotedIds = new Set<string>();
+
     if (above && n(current.promote_count) > 0) {
       const promoteCount = Math.min(n(current.promote_count), currentTeams.length);
       const toPromote = currentTeams.slice(0, promoteCount);
       for (const team of toPromote) {
+        promotedIds.add(team.id);
         planned.push({
           team_id: team.id,
           from_division_id: current.id,
@@ -59,8 +62,9 @@ export function planPromotionRelegation(divisions: DivisionRow[], teams: TeamRow
     }
 
     if (below && n(current.relegate_count) > 0) {
-      const relegateCount = Math.min(n(current.relegate_count), currentTeams.length);
-      const toRelegate = currentTeams.slice(Math.max(0, currentTeams.length - relegateCount));
+      const eligibleForRelegation = currentTeams.filter((t) => !promotedIds.has(t.id));
+      const relegateCount = Math.min(n(current.relegate_count), eligibleForRelegation.length);
+      const toRelegate = eligibleForRelegation.slice(Math.max(0, eligibleForRelegation.length - relegateCount));
       for (const team of toRelegate) {
         planned.push({
           team_id: team.id,

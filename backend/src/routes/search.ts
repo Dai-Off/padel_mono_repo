@@ -97,7 +97,8 @@ router.get('/courts', async (req: Request, res: Response) => {
       .from('bookings')
       .select('id, court_id, start_at, end_at, total_price_cents, status')
       .in('court_id', courtIds)
-      .neq('status', 'cancelled');
+      .neq('status', 'cancelled')
+      .is('deleted_at', null);
 
     // Day-of-week reference:
     // - JS getUTCDay(): 0..6 (Sun=0)

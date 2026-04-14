@@ -2,8 +2,7 @@
 
 ## Estado de este componente
 
-La vision general y la relacion con otros componentes estan definidas. La mayoria de valores concretos (rangos de LP, numero de ligas, mecanica de reset) estan pendientes de definir.
-**NO implementar hasta que las decisiones pendientes esten resueltas.**
+La vision general y la relacion con otros componentes estan definidas. En backend existe una **primera implementacion** (temporadas globales MM, LP por resultado, ascenso/descenso, historial y cierre de temporada) usando **constantes provisionales** donde el texto siguiente las dejaba pendientes. Los valores deben calibrarse en producto.
 
 ---
 
@@ -111,6 +110,9 @@ Solo lo minimo para no bloquear otros componentes que ya referencian ligas y LP.
 |-------|------|-------------|
 | `liga` | text | Liga actual del jugador (ej. `'bronce'`, `'plata'`, `'oro'`, `'elite'`) |
 | `lps` | integer | League Points acumulados en la temporada actual. Default 0 |
+| `league_season_id` | uuid | Temporada MM activa (`matchmaking_seasons`) |
+| `mm_shield_matches` | integer | Partidos MM con proteccion anti-descenso tras ascenso |
+| `mm_peak_liga` | text | Mayor liga alcanzada en la temporada MM actual |
 
 ### Tabla `player_league_history`
 
@@ -118,7 +120,7 @@ Solo lo minimo para no bloquear otros componentes que ya referencian ligas y LP.
 player_league_history
 ├── id          uuid PRIMARY KEY default gen_random_uuid()
 ├── player_id   uuid NOT NULL references players(id)
-├── season_id   uuid NOT NULL references seasons(id)
+├── season_id   uuid NOT NULL references matchmaking_seasons(id)
 ├── liga        text NOT NULL
 ├── final_lps   integer NOT NULL
 ├── highest_liga text NOT NULL
@@ -128,6 +130,10 @@ player_league_history
 Restriccion UNIQUE: `(player_id, season_id)`.
 
 Se crea una fila al finalizar cada temporada para conservar el historial.
+
+### Tabla `matchmaking_leagues` (implementada)
+
+Rangos de elo y etiquetas para MM global. Ver migracion `039_matchmaking_leagues_config.sql`.
 
 ### Tabla `leagues` (opcional — si se quieren definir las ligas en DB)
 
@@ -143,3 +149,29 @@ leagues
 ```
 
 Esta tabla permite configurar ligas sin tocar codigo. Si se decide que las ligas son fijas y pocas, puede ser una constante en el backend en lugar de tabla.
+
+---
+
+## 6. Implementacion backend (valores provisionales alineados al doc)
+
+Tabla de temporadas: `matchmaking_seasons` (paralela a `league_seasons` por club). Historial: `player_league_history` con `UNIQUE (player_id, season_id)` como arriba.
+
+Campos extra en `players`: `league_season_id`, `mm_shield_matches` (proteccion anti-descenso tras ascenso, doc §3.4), `mm_peak_liga` (mayor liga alcanzada en la temporada para `highest_liga` al archivar).
+
+| Tema | Comportamiento |
+|------|----------------|
+| LP por victoria / derrota | Solo partidos `type = matchmaking` con marcador confirmado; `lps` nunca negativos (suelo 0). |
+| Empate (`timeout` / sets iguales) | Sin cambio de `lps` en la economia MM. |
+| Cross-liga (doc §3.5) | Bonus de LP si gana el equipo con **media de indice de liga mas baja**; penalidad extra de LP si pierde el equipo con media mas alta. |
+| Ascenso | Cada vez que `lps >= 100` tras el partido se restan 100 LP y se sube un escalon (bronce→plata→oro→elite). |
+| Descenso | Tras una derrota, si `lps` queda en 0, la liga no es bronce y no hay escudo activo, se baja un escalon y `lps` pasan a 45. |
+| Escudo | Tras ascender, `mm_shield_matches = 5` partidos MM sin posible descenso por regla anterior; cada partido MM consume 1 (salvo que se haya ascendido en ese partido). |
+| Cierre de temporada | `POST /matchmaking/close-season` (mismo criterio de `x-cron-secret` que `run-cycle`): archiva filas en `player_league_history`, pone `lps = 0`, `mm_shield_matches = 0`, `mm_peak_liga = liga` actual, nueva temporada en `matchmaking_seasons`. |
+| Reconciliacion liga vs elo (doc §3.2) | Tras aplicar LP/ascenso/descenso en un partido MM, si la liga resultante y la banda de elo (`matchmaking_leagues`) difieren en **2+** escalones, la liga pasa a la deducida del `elo_rating` nuevo. |
+| API | `GET /matchmaking/league-config` (publico): filas de `matchmaking_leagues`. `GET /players/me/league-history` (JWT): historial con nombre/fechas de temporada. |
+
+Constantes en codigo (`matchmakingLeagueEconomy.ts`): `LP_WIN_BASE = 15`, `LP_LOSS_BASE = 12`, `LP_PROMOTE_THRESHOLD = 100`, `LP_AFTER_DEMOTE = 45`, `MM_SHIELD_MATCHES_AFTER_PROMO = 5`, `CROSS_LIGA_LP_PER_INDEX_GAP = 4`, `CROSS_LIGA_LOSS_EXTRA_PER_INDEX_GAP = 3`.
+
+La aplicacion de LP/liga es **atomica** con el pipeline de nivelacion via RPC `apply_leveling_pipeline` (quinto argumento `p_league_updates`).
+
+Tabla **`matchmaking_leagues`** (migracion `039`): `code`, `sort_order`, `label`, `elo_min`, `elo_max`, `lps_to_promote` (reservado; ascenso por LP sigue usando el umbral global en codigo hasta que se cablee por liga).

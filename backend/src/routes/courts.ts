@@ -4,6 +4,7 @@ import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 import { normalizeStoredVisibilityWindows } from '../lib/courtVisibility';
+import { getAvailableCourtIds } from '../lib/courtConflict';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -111,6 +112,47 @@ router.put('/reorder', requireClubOwnerOrAdmin, async (req: Request, res: Respon
       .order('created_at', { ascending: true });
     if (listErr) return res.status(500).json({ ok: false, error: listErr.message });
     return res.json({ ok: true, courts: updated ?? [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * GET /courts/available?club_id=...&start_at=...&end_at=...
+ * Returns only the courts of the club that are free for the given time slot
+ * (no overlapping bookings, school courses or tournaments). Used by the match
+ * creation modal so admins only see pistas libres.
+ */
+router.get('/available', async (req: Request, res: Response) => {
+  const club_id = req.query.club_id as string | undefined;
+  const start_at = req.query.start_at as string | undefined;
+  const end_at = req.query.end_at as string | undefined;
+  if (!club_id || !start_at || !end_at) {
+    return res.status(400).json({ ok: false, error: 'club_id, start_at y end_at son obligatorios' });
+  }
+  const startMs = new Date(start_at).getTime();
+  const endMs = new Date(end_at).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs - startMs < 30 * 60 * 1000) {
+    return res.status(400).json({ ok: false, error: 'El rango horario debe ser válido y de al menos 30 minutos' });
+  }
+  if (!canAccessCourtClub(req, club_id)) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: clubCourts, error } = await supabase
+      .from('courts')
+      .select(FIELDS)
+      .eq('club_id', club_id)
+      .eq('status', 'operational')
+      .order('display_order', { ascending: true })
+      .order('created_at', { ascending: true });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    const avail = await getAvailableCourtIds(club_id, start_at, end_at);
+    if (!avail.ok) return res.status(500).json({ ok: false, error: avail.error });
+    const freeSet = new Set(avail.courtIds);
+    const courts = (clubCourts ?? []).filter((c: { id: string }) => freeSet.has(c.id));
+    return res.json({ ok: true, courts });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

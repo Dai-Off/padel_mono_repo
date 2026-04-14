@@ -1,8 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
-import { calcInitialMu, getNextQuestion, type OnboardingAnswer } from '../services/onboardingService';
+import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
 import { calcEloRating } from '../services/levelingService';
+import { ligaFromEloWithBands } from '../services/matchmakingLeague';
+import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
+import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 
 const router = Router();
 
@@ -53,7 +56,7 @@ function toPublicPlayer(row: Row): Row {
 }
 
 const SELECT_PUBLIC_INTERNAL = `
-  id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url,
+  id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url, gender,
   mu, sigma, elo_rating, sp,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents
@@ -383,6 +386,7 @@ router.post('/manual', async (req: Request, res: Response) => {
           email: emailStr,
           auth_user_id: null,
           initial_rating_completed: true,
+          gender: req.body?.gender ?? 'male',
         },
       ])
       .select(SELECT_PUBLIC_INTERNAL)
@@ -404,10 +408,35 @@ router.post('/manual', async (req: Request, res: Response) => {
 
 /**
  * @openapi
+ * /players/onboarding/next:
+ *   get:
+ *     tags: [Players]
+ *     summary: Obtener la siguiente pregunta del cuestionario
+ *     security: [{ bearerAuth: [] }]
+ */
+router.get('/onboarding/next', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  try {
+    let answers: OnboardingAnswer[] = [];
+    if (req.query.answers) {
+      answers = JSON.parse(req.query.answers as string);
+    }
+    const state = await getNextQuestionState(answers);
+    return res.json({ ok: true, state });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ ok: false, error: message });
+  }
+});
+
+/**
+ * @openapi
  * /players/onboarding:
  *   post:
  *     tags: [Players]
- *     summary: Completar cuestionario de nivelación inicial
+ *     summary: Completar cuestionario de nivelación inicial Fase 1 y 2
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -421,7 +450,7 @@ router.post('/manual', async (req: Request, res: Response) => {
  *                 type: array
  *                 items:
  *                   type: object
- *                   required: [question_id, value]
+ *                   required: [question_key, value]
  *     responses:
  *       200: { description: Nivel asignado }
  *       400: { description: Faltan respuestas; puede incluir next_question }
@@ -433,12 +462,13 @@ router.post('/onboarding', async (req: Request, res: Response) => {
 
   const answers = req.body?.answers as OnboardingAnswer[] | undefined;
   if (!Array.isArray(answers)) {
-    return res.status(400).json({ ok: false, error: 'answers debe ser un array' });
+    return res.status(400).json({ ok: false, error: 'answers debe ser un array con question_key y value' });
   }
 
-  const next = getNextQuestion(answers);
-  if (next) {
-    return res.status(400).json({ ok: false, error: 'Cuestionario incompleto', next_question: next });
+  // Verificamos estado (si le falta Fase 2, no debería procesar todo, a menos que P1 < 2)
+  const state = await getNextQuestionState(answers);
+  if (state.type === 'question') {
+    return res.status(400).json({ ok: false, error: 'Cuestionario de Fase 1 incompleto', state });
   }
 
   const supabase = getSupabaseServiceRoleClient();
@@ -447,36 +477,72 @@ router.post('/onboarding', async (req: Request, res: Response) => {
     .select('initial_rating_completed')
     .eq('id', playerId)
     .maybeSingle();
+
   if (e1) return res.status(500).json({ ok: false, error: e1.message });
   if ((pl as { initial_rating_completed?: boolean } | null)?.initial_rating_completed) {
     return res.status(409).json({ ok: false, error: 'Nivelación inicial ya completada' });
   }
 
-  const mu = calcInitialMu(answers);
-  const sigma = 8.333;
-  const elo = calcEloRating(mu, sigma);
-  const now = new Date().toISOString();
+  // Separar respuestas (solo p1 a p99 son de fase 1)
+  const phase1Ans = answers.filter(a => /^p\d+$/.test(a.question_key));
+  const phase2Ans = answers.filter(a => !/^p\d+$/.test(a.question_key));
 
-  const { error: e2 } = await supabase
-    .from('players')
-    .update({
-      mu,
-      sigma,
-      elo_rating: elo,
-      initial_rating_completed: true,
-      updated_at: now,
-    })
-    .eq('id', playerId);
+  // Calculos
+  const eloPhase1 = await calcEloPhase1(phase1Ans);
+  const p1Val = phase1Ans.find(a => a.question_key === 'p1')?.value;
+  
+  let finalElo = eloPhase1;
+  let pool = null;
+  let phase2Score = null;
+
+  if (p1Val >= 2) {
+    // Aplica fase 2
+    pool = await getPhase2Pool(eloPhase1);
+    const p2Result = await calcPhase2Result(phase2Ans);
+    finalElo = calcFinalElo(eloPhase1, p2Result.adjustment);
+    phase2Score = p2Result.score;
+  } else {
+    // Floor/Ceil para fase 1 directa sin fase 2
+    finalElo = calcFinalElo(eloPhase1, 0); 
+  }
+
+  const muToSave = eloToMu(finalElo);
+  const now = new Date().toISOString();
+  const leagueBands = await getMatchmakingLeagueConfigRows(supabase);
+  const assignedLiga = ligaFromEloWithBands(finalElo, leagueBands);
+  let leagueSeasonId: string | null = null;
+  try {
+    leagueSeasonId = await getActiveMatchmakingSeasonId(supabase);
+  } catch {
+    /* sin tabla de temporadas aún */
+  }
+
+  const updatePayload: Record<string, unknown> = {
+    mu: muToSave,
+    elo_rating: finalElo,
+    liga: assignedLiga,
+    lps: 0,
+    mm_peak_liga: assignedLiga,
+    initial_rating_completed: true,
+    updated_at: now,
+  };
+  if (leagueSeasonId) updatePayload.league_season_id = leagueSeasonId;
+
+  const { error: e2 } = await supabase.from('players').update(updatePayload).eq('id', playerId);
 
   if (e2) return res.status(500).json({ ok: false, error: e2.message });
 
+  // Guardar respuestas de Onboarding
   await supabase.from('onboarding_answers').insert({
     player_id: playerId,
     answers,
-    mu_assigned: mu,
+    elo_assigned: finalElo,
+    elo_phase1: eloPhase1,
+    pool_assigned: pool,
+    phase2_score: phase2Score,
   });
 
-  return res.json({ ok: true, elo_rating: elo, message: 'Nivel inicial asignado' });
+  return res.json({ ok: true, elo_rating: finalElo, message: 'Nivel inicial asignado' });
 });
 
 /**
@@ -693,7 +759,7 @@ router.post('/', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'Campo no editable' });
   }
 
-  const { first_name, last_name, email, phone } = body;
+  const { first_name, last_name, email, phone, gender } = body;
 
   if (!first_name || !last_name || !email) {
     return res.status(400).json({
@@ -713,6 +779,7 @@ router.post('/', async (req: Request, res: Response) => {
           last_name,
           email,
           phone: phone ?? null,
+          gender: gender ?? 'male',
           initial_rating_completed: false,
         },
       ])
@@ -745,7 +812,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'Campo no editable' });
   }
 
-  const { first_name, last_name, email, phone, status } = body;
+  const { first_name, last_name, email, phone, status, gender } = body;
 
   const update: Record<string, unknown> = {};
   if (first_name !== undefined) update.first_name = first_name;
@@ -753,6 +820,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   if (email !== undefined) update.email = email;
   if (phone !== undefined) update.phone = phone;
   if (status !== undefined) update.status = status;
+  if (gender !== undefined) update.gender = gender;
   update.updated_at = new Date().toISOString();
 
   if (Object.keys(update).length === 1) {

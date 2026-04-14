@@ -10,6 +10,7 @@ export interface Player {
     elo_rating: number;
     status: 'active' | 'blocked' | 'deleted';
     auth_user_id?: string | null;
+    gender?: 'male' | 'female' | 'other' | null;
 }
 
 export interface ClubOwner {

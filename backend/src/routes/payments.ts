@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Stripe from 'stripe';
+import { bookingStartIsTooFarInPast, BOOKING_START_PAST_ERROR } from '../lib/bookingStartNotInPast';
 import { playerMeetsTournamentGender } from '../lib/tournamentGender';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import {
@@ -8,6 +9,7 @@ import {
   getTournamentSlots,
   STRIPE_META_TOURNAMENT_PURPOSE,
 } from '../services/tournamentsService';
+import { refreshBookingStatusAfterParticipantPayment } from '../lib/bookingPaymentSync';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
@@ -77,6 +79,14 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
 
     const newStart = new Date(start_at).getTime();
     const newEnd = new Date(end_at).getTime();
+    if (!Number.isFinite(newStart) || !Number.isFinite(newEnd) || newEnd <= newStart) {
+      res.status(400).json({ ok: false, error: 'Rango horario inválido' });
+      return;
+    }
+    if (bookingStartIsTooFarInPast(String(start_at))) {
+      res.status(400).json({ ok: false, error: BOOKING_START_PAST_ERROR });
+      return;
+    }
     const { data: playerMatches } = await supabase
       .from('match_players')
       .select('match_id')
@@ -582,13 +592,6 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
       .eq('id', participant_id)
       .maybeSingle();
 
-    if (participant?.role === 'organizer') {
-      await supabase
-        .from('bookings')
-        .update({ status: 'confirmed', updated_at: new Date().toISOString() })
-        .eq('id', booking_id);
-    }
-
     if (participant?.role === 'guest') {
       const { data: match } = await supabase
         .from('matches')
@@ -615,6 +618,8 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         }
       }
     }
+
+    await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
 
     res.json({ received: true });
   } catch (err) {
@@ -725,11 +730,17 @@ export async function listTransactionsHandler(req: Request, res: Response): Prom
         currency,
         status,
         created_at,
+        updated_at,
         booking_id,
+        tournament_id,
         bookings(
           start_at,
           end_at,
           courts(id, name, clubs(id, name, city))
+        ),
+        tournaments(
+          name,
+          clubs(id, name, city)
         )
       `)
       .eq('payer_player_id', player.id)
@@ -749,18 +760,45 @@ export async function listTransactionsHandler(req: Request, res: Response): Prom
       const court = (Array.isArray(rawCourt) ? rawCourt[0] : rawCourt) as Record<string, unknown> | null;
       const rawClub = court?.clubs;
       const club = (Array.isArray(rawClub) ? rawClub[0] : rawClub) as Record<string, unknown> | null;
+
+      const rawTour = t.tournaments;
+      const tour = (Array.isArray(rawTour) ? rawTour[0] : rawTour) as Record<string, unknown> | null;
+      const rawTourClub = tour?.clubs;
+      const tourClub = (Array.isArray(rawTourClub) ? rawTourClub[0] : rawTourClub) as Record<string, unknown> | null;
+
+      const clubName = (club?.name as string | undefined) ?? (tourClub?.name as string | undefined) ?? null;
+      const courtName = (court?.name as string | undefined) ?? null;
+      const tourName = (tour?.name as string | undefined) ?? null;
+
+      let summary_label: string;
+      if (clubName && courtName) {
+        summary_label = `${clubName} · ${courtName}`;
+      } else if (tourName && clubName) {
+        summary_label = `${clubName} · Torneo: ${tourName}`;
+      } else if (tourName) {
+        summary_label = `Torneo: ${tourName}`;
+      } else if (clubName) {
+        summary_label = clubName;
+      } else {
+        summary_label = 'Pago en app';
+      }
+
       return {
         id: t.id,
         amount_cents: t.amount_cents,
         currency: t.currency,
         status: t.status,
         created_at: t.created_at,
+        updated_at: t.updated_at ?? t.created_at,
         booking_id: t.booking_id,
+        tournament_id: t.tournament_id ?? null,
         start_at: b?.start_at ?? null,
         end_at: b?.end_at ?? null,
-        court_name: court?.name ?? null,
-        club_name: club?.name ?? null,
-        city: club?.city ?? null,
+        court_name: courtName,
+        club_name: clubName,
+        city: (club?.city as string | undefined) ?? (tourClub?.city as string | undefined) ?? null,
+        tournament_name: tourName,
+        summary_label: summary_label,
       };
     });
 
@@ -1008,7 +1046,28 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data: rows, error } = await supabase
+    let lastClosedAtIso: string | null = null;
+    const { data: lastClosing, error: lastClosingErr } = await supabase
+      .from('club_cash_closings')
+      .select('closed_at')
+      .eq('club_id', clubId)
+      .eq('for_date', dateStr)
+      .order('closed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastClosingErr) {
+      const isMissingTable =
+        lastClosingErr.message.includes('relation') && lastClosingErr.message.includes('does not exist');
+      if (!isMissingTable) {
+        console.error('[payments/cash-closing/expected:last-closing]', lastClosingErr);
+        res.status(500).json({ ok: false, error: lastClosingErr.message });
+        return;
+      }
+    } else if (lastClosing?.closed_at) {
+      lastClosedAtIso = String(lastClosing.closed_at);
+    }
+
+    let txQuery = supabase
       .from('payment_transactions')
       .select(`
         id,
@@ -1036,6 +1095,10 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       .gte('bookings.start_at', startUtc.toISOString())
       .lt('bookings.start_at', endUtc.toISOString())
       .limit(limit);
+    if (lastClosedAtIso) {
+      txQuery = txQuery.gt('created_at', lastClosedAtIso);
+    }
+    const { data: rows, error } = await txQuery;
 
     if (error) {
       console.error('[payments/cash-closing/expected]', error);
@@ -1713,13 +1776,6 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       .eq('id', participant_id)
       .maybeSingle();
 
-    if (participant?.role === 'organizer') {
-      await supabase
-        .from('bookings')
-        .update({ status: 'confirmed', updated_at: new Date().toISOString() })
-        .eq('id', booking_id);
-    }
-
     // Si es guest (join): añadir a match_players tras el pago
     if (participant?.role === 'guest') {
       const { data: match } = await supabase
@@ -1768,6 +1824,8 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         }
       }
     }
+
+    await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
 
     res.json({ ok: true });
   } catch (err) {
@@ -2025,7 +2083,6 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
       await supabase
         .from('bookings')
         .update({
-          status: 'confirmed',
           source_channel: nextSourceChannel,
           updated_at: new Date().toISOString(),
         })
@@ -2058,6 +2115,8 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
         }
       }
     }
+
+    await refreshBookingStatusAfterParticipantPayment(supabase, booking.id);
 
     res.json({
       ok: true,

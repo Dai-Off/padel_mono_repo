@@ -7,6 +7,7 @@ import { clubService, type Club } from '../../services/club';
 import { Building2, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { PreciosForm } from './PreciosForm';
+import { GrillaQuickNav } from '../../features/grilla/components/GrillaQuickNav';
 
 export function PreciosView() {
   const { t } = useTranslation();
@@ -56,6 +57,7 @@ export function PreciosView() {
     return (
       <div className="min-h-screen bg-background text-foreground font-sans">
         <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
+        <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
         <PageSpinner />
         <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" isAdmin={isAdmin} />
       </div>
@@ -66,6 +68,7 @@ export function PreciosView() {
     return (
       <div className="min-h-screen bg-background text-foreground font-sans">
         <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
+        <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
         <main className="px-4 sm:px-5 py-12">
           <p className="text-sm text-gray-500 text-center">{t('not_found')}</p>
         </main>
@@ -80,6 +83,7 @@ export function PreciosView() {
         clubName={selectedClub?.name ?? clubs[0]?.name ?? ''}
         onMenuClick={() => setIsMenuOpen(true)}
       />
+      <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
 
       <main className="px-4 sm:px-5 py-5 pb-20">
         <div className="max-w-2xl mx-auto">

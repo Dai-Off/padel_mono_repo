@@ -84,12 +84,18 @@ export type Transaction = {
   currency: string;
   status: string;
   created_at: string;
-  booking_id: string;
+  /** Fecha de última actualización (útil para mostrar cuándo se reembolsó). */
+  updated_at?: string;
+  booking_id: string | null;
+  tournament_id?: string | null;
+  tournament_name?: string | null;
   start_at: string | null;
   end_at: string | null;
   court_name: string | null;
   club_name: string | null;
   city: string | null;
+  /** Título ya resuelto en backend (reserva o torneo). */
+  summary_label?: string | null;
 };
 
 export type FetchTransactionsResponse = {

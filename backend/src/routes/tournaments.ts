@@ -28,6 +28,10 @@ import {
   setupTournamentCompetition,
   type CompetitionFormat,
 } from '../services/tournamentCompetitionService';
+import {
+  refundStripeTournamentPaymentForPlayer,
+  refundStripeTournamentPaymentTransactions,
+} from '../services/paymentRefundService';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -231,15 +235,15 @@ async function getTournamentForPlayer(
   return { tournament, myInscription };
 }
 
-async function cancelLinkedTournamentBookings(tournamentId: string): Promise<void> {
+async function cancelLinkedTournamentBookings(tournamentId: string): Promise<{ error?: string }> {
   const supabase = getSupabaseServiceRoleClient();
   const { data: links } = await supabase
     .from('tournament_booking_links')
     .select('booking_id')
     .eq('tournament_id', tournamentId);
   const bookingIds = (links ?? []).map((x: any) => x.booking_id).filter(Boolean);
-  if (!bookingIds.length) return;
-  await supabase
+  if (!bookingIds.length) return {};
+  const { error: upErr } = await supabase
     .from('bookings')
     .update({
       status: 'cancelled',
@@ -249,6 +253,8 @@ async function cancelLinkedTournamentBookings(tournamentId: string): Promise<voi
       cancellation_reason: 'Torneo actualizado/cancelado',
     })
     .in('id', bookingIds);
+  if (upErr) return { error: upErr.message };
+  return {};
 }
 
 async function syncTournamentBookings(params: {
@@ -260,7 +266,8 @@ async function syncTournamentBookings(params: {
   notes?: string | null;
 }): Promise<void> {
   const supabase = getSupabaseServiceRoleClient();
-  await cancelLinkedTournamentBookings(params.tournamentId);
+  const cancelLinks = await cancelLinkedTournamentBookings(params.tournamentId);
+  if (cancelLinks.error) throw new Error(cancelLinks.error);
   await supabase.from('tournament_booking_links').delete().eq('tournament_id', params.tournamentId);
   if (!params.courtIds.length) return;
 
@@ -1138,6 +1145,28 @@ router.post('/:id/cancel', requireClubOwnerOrAdmin, async (req: Request, res: Re
       return res.json({ ok: true, tournament, email_sent: 0, email_failed: 0 });
     }
 
+    const clubIdForTournament = String((tournament as { club_id: string }).club_id);
+
+    const linkedCancel = await cancelLinkedTournamentBookings(id);
+    if (linkedCancel.error) {
+      console.error(`[POST /tournaments/${id}/cancel] linked bookings:`, linkedCancel.error);
+      return res.status(502).json({
+        ok: false,
+        error: 'No se pudieron reembolsar o cancelar las reservas de pista vinculadas al torneo.',
+        refund_errors: [linkedCancel.error],
+      });
+    }
+
+    const entryRef = await refundStripeTournamentPaymentTransactions(supabase, id, clubIdForTournament);
+    if (entryRef.errors.length > 0) {
+      console.error(`[POST /tournaments/${id}/cancel] entry refund errors:`, entryRef.errors);
+      return res.status(502).json({
+        ok: false,
+        error: 'No se pudieron reembolsar todas las inscripciones pagadas. Revisa Stripe o inténtalo de nuevo.',
+        refund_errors: entryRef.errors,
+      });
+    }
+
     const { error: upErr } = await supabase
       .from('tournaments')
       .update({
@@ -1148,8 +1177,6 @@ router.post('/:id/cancel', requireClubOwnerOrAdmin, async (req: Request, res: Re
       })
       .eq('id', id);
     if (upErr) return res.status(500).json({ ok: false, error: upErr.message });
-
-    await cancelLinkedTournamentBookings(id);
 
     const { data: inscriptions } = await supabase
       .from('tournament_inscriptions')
@@ -3147,6 +3174,22 @@ router.post('/:id/leave', async (req: Request, res: Response) => {
     }
     if (startAt && nowMs >= new Date(startAt).getTime()) {
       return res.status(403).json({ ok: false, error: 'El torneo ya comenzó y no permite baja' });
+    }
+
+    const clubIdForTournament = String((ctx.tournament as { club_id: string }).club_id);
+    const playerRefund = await refundStripeTournamentPaymentForPlayer(
+      supabase,
+      tournamentId,
+      clubIdForTournament,
+      auth.playerId,
+    );
+    if (playerRefund.errors.length > 0) {
+      console.error(`[POST /tournaments/${tournamentId}/leave] refund:`, playerRefund.errors);
+      return res.status(502).json({
+        ok: false,
+        error: 'No se pudo procesar el reembolso del pago de inscripción. Inténtalo más tarde o contacta con el club.',
+        refund_errors: playerRefund.errors,
+      });
     }
 
     const { error: upErr } = await supabase

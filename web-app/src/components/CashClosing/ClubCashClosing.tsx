@@ -171,7 +171,11 @@ export function ClubCashClosingTab({
         system_card_cents: Math.round(systemCardTotal * 100),
         observations: observations.trim() || undefined,
       });
+      const refreshedExpected = await paymentsService.getCashClosingExpected(clubId, saved.for_date);
       setHistoryRecords((prev) => [mapSavedToLocal(saved), ...prev]);
+      setExpectedBookings(refreshedExpected.bookings ?? []);
+      setSystemCashTotal(refreshedExpected.systemCashTotal_eur ?? 0);
+      setSystemCardTotal(refreshedExpected.systemCardTotal_eur ?? 0);
       setCashBreakdown(emptyBreakdown);
       setCardTotal('');
       setEmployeeId('');

@@ -392,39 +392,17 @@ export function CrearPartidoLocationSheet({
               style={styles.clubsFiltersScroll}
               contentContainerStyle={styles.clubsFiltersRow}
             >
-              <Pressable
-                style={({ pressed }) => [styles.clubsFilterIconBtn, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Filtros"
-              >
-                <Ionicons name="filter" size={16} color={theme.auth.text} />
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.clubsFilterChip, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Deporte"
-              >
-                <Text style={styles.clubsFilterChipText}>Padel</Text>
-                <Ionicons name="chevron-down" size={14} color={theme.auth.text} />
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.clubsFilterChip, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Clubes"
-              >
+              <View style={styles.clubsFilterIconBtn}>
+                <Ionicons name="location-outline" size={16} color={theme.auth.textMuted} />
+              </View>
+              <View style={styles.clubsFilterChipStatic} accessibilityRole="text">
+                <Text style={styles.clubsFilterChipText}>Pádel</Text>
+              </View>
+              <View style={styles.clubsFilterChipStatic} accessibilityRole="text">
                 <Text style={styles.clubsFilterChipText}>
-                  {clubsLoading ? 'Clubes' : `${clubs.length} Clubs`}
+                  {clubsLoading ? 'Clubes' : `${clubs.length} club${clubs.length === 1 ? '' : 'es'}`}
                 </Text>
-                <Ionicons name="chevron-down" size={14} color={theme.auth.text} />
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [styles.clubsFilterChip, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Días"
-              >
-                <Text style={styles.clubsFilterChipText}>Jue-Vie-Sab</Text>
-                <Ionicons name="chevron-down" size={14} color={theme.auth.text} />
-              </Pressable>
+              </View>
             </ScrollView>
           )}
 
@@ -1008,6 +986,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     backgroundColor: theme.auth.accent,
+    borderRadius: 12,
+    flexShrink: 0,
+  },
+  /** Chips informativos (no son filtros interactivos). */
+  clubsFilterChipStatic: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
     borderRadius: 12,
     flexShrink: 0,
   },

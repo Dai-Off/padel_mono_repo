@@ -51,6 +51,8 @@ import { ClubDashboardExtensions } from './ClubDashboardExtensions';
 import { ClubReviewsTab } from './ClubReviewsTab';
 import { ClubTournamentsTab } from './ClubTournamentsTab';
 import { ClubIncidentsTab } from './ClubIncidentsTab';
+import { ClubSpecialDatesTab } from './ClubSpecialDatesTab';
+import { GrillaQuickNav } from '../../features/grilla/components/GrillaQuickNav';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
@@ -68,6 +70,7 @@ export const ClubDashboard = () => {
     const isCrmPage = location.pathname === '/crm';
     const isResenasPage = location.pathname === '/resenas';
     const isIncidenciasPage = location.pathname === '/incidencias';
+    const isFechasEspecialesPage = location.pathname === '/fechas-especiales';
 
     const [loading, setLoading] = useState(true);
     const [clubResolved, setClubResolved] = useState(false);
@@ -131,7 +134,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isPlayerProfilePage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isPlayerProfilePage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
             setLoading(false);
             return;
         }
@@ -144,7 +147,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isPlayerProfilePage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isPlayerProfilePage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -217,10 +220,11 @@ export const ClubDashboard = () => {
     };
 
     // Evita spinner doble en pantallas donde el tab ya se encarga del loader (CRM y Reseñas).
-    if (!club && loading && !isResenasPage && !isCrmPage && !isIncidenciasPage) {
+    if (!club && loading && !isResenasPage && !isCrmPage && !isIncidenciasPage && !isFechasEspecialesPage) {
         return (
             <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
                 <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
+                <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
                 <PageSpinner />
                 <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" isAdmin={isAdmin} />
             </div>
@@ -230,6 +234,7 @@ export const ClubDashboard = () => {
     return (
         <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
             <PortalTealHeader clubName={club?.name ?? ''} onMenuClick={() => setIsMenuOpen(true)} />
+            <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
 
             <main className="px-4 sm:px-5 py-5 pb-20">
                 <div className="max-w-7xl mx-auto space-y-6">
@@ -259,6 +264,8 @@ export const ClubDashboard = () => {
                         <ClubCheckinTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isCashClosingPage ? (
                         <ClubCashClosingTab clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isFechasEspecialesPage ? (
+                        <ClubSpecialDatesTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : (
                         <>
                             <div className="flex items-center justify-between gap-3">

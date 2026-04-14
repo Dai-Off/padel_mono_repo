@@ -1,3 +1,5 @@
+import { filterSlotsStartingAfterNow } from '../domain/localSlotAvailability';
+import { toDateStringLocal } from '../utils/dateLocal';
 import { fetchSearchCourts } from './search';
 import type { SearchCourtResult } from './search';
 
@@ -42,8 +44,8 @@ function formatDateLabel(dateStr: string): string {
   const today = new Date();
   const tomorrow = new Date(today);
   tomorrow.setDate(tomorrow.getDate() + 1);
-  if (dateStr === today.toISOString().slice(0, 10)) return 'Hoy';
-  if (dateStr === tomorrow.toISOString().slice(0, 10)) return 'Mañana';
+  if (dateStr === toDateStringLocal(today)) return 'Hoy';
+  if (dateStr === toDateStringLocal(tomorrow)) return 'Mañana';
   const day = DAY_LABELS[d.getDay()] ?? 'día';
   const num = d.getDate();
   const month = MONTHS[d.getMonth()];
@@ -51,7 +53,9 @@ function formatDateLabel(dateStr: string): string {
 }
 
 function toSlots(r: SearchCourtResult, dateStr: string, dateLabel: string): SlotForCreate[] {
-  return (r.timeSlots ?? []).map((time) => ({
+  const now = new Date();
+  const times = filterSlotsStartingAfterNow(dateStr, r.timeSlots ?? [], now);
+  return times.map((time) => ({
     time,
     duration: '90min',
     courtId: r.id,
@@ -98,8 +102,11 @@ function mergeByClub(todayResults: SearchCourtResult[], tomorrowResults: SearchC
     }
   };
 
-  const today = new Date().toISOString().slice(0, 10);
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const now = new Date();
+  const today = toDateStringLocal(now);
+  const tomorrowD = new Date(now);
+  tomorrowD.setDate(tomorrowD.getDate() + 1);
+  const tomorrow = toDateStringLocal(tomorrowD);
   const tomorrowLabel = formatDateLabel(tomorrow);
 
   todayResults.forEach((r) => processResult(r, today, 'Hoy'));
@@ -109,8 +116,11 @@ function mergeByClub(todayResults: SearchCourtResult[], tomorrowResults: SearchC
 }
 
 export async function fetchClubAvailabilityForCreate(): Promise<ClubDisplay[]> {
-  const today = new Date().toISOString().slice(0, 10);
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const now = new Date();
+  const today = toDateStringLocal(now);
+  const tomorrowD = new Date(now);
+  tomorrowD.setDate(tomorrowD.getDate() + 1);
+  const tomorrow = toDateStringLocal(tomorrowD);
 
   const [todayResults, tomorrowResults] = await Promise.all([
     fetchSearchCourts({ dateFrom: today }),
