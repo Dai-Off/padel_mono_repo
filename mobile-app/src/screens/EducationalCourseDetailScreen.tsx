@@ -9,8 +9,6 @@ import {
   Dimensions,
   Animated,
   LayoutAnimation,
-  Platform,
-  UIManager,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -18,9 +16,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EducationalCourse } from "../api/learning";
 import { androidReadableText } from "../components/home/inicio/textStyles";
 
-if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 const { width } = Dimensions.get("window");
 
