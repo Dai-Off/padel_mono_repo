@@ -580,7 +580,7 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
         <View style={styles.menuContainer}>
           <View style={styles.menuCard}>
             {[
-              { title: 'Preferencias', icon: 'target-outline' },
+              { title: 'Preferencias', icon: 'locate-outline' },
               { title: 'Configuración', icon: 'settings-outline' },
               { title: 'Ayuda y soporte', icon: 'people-outline' },
               { title: 'Términos y condiciones', icon: 'document-text-outline' },
