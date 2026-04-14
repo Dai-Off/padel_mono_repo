@@ -87,6 +87,20 @@ export async function sendClubCrmEmail(
   return invokeEdgeFunction('send-email', { to, subject, html });
 }
 
+export async function sendMatchmakingExpansionNudge(params: {
+  playerId: string;
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+}): Promise<{ sent: boolean; error?: string }> {
+  return invokeEdgeFunction('send-matchmaking-expansion', {
+    player_id: params.playerId,
+    title: params.title,
+    body: params.body,
+    data: params.data ?? {},
+  });
+}
+
 export async function sendStaffAccountEmail(
   to: string,
   staffName: string,
