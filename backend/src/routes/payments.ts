@@ -9,6 +9,7 @@ import {
   getTournamentSlots,
   STRIPE_META_TOURNAMENT_PURPOSE,
 } from '../services/tournamentsService';
+import { refreshBookingStatusAfterParticipantPayment } from '../lib/bookingPaymentSync';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
@@ -591,13 +592,6 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
       .eq('id', participant_id)
       .maybeSingle();
 
-    if (participant?.role === 'organizer') {
-      await supabase
-        .from('bookings')
-        .update({ status: 'confirmed', updated_at: new Date().toISOString() })
-        .eq('id', booking_id);
-    }
-
     if (participant?.role === 'guest') {
       const { data: match } = await supabase
         .from('matches')
@@ -624,6 +618,8 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         }
       }
     }
+
+    await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
 
     res.json({ received: true });
   } catch (err) {
@@ -1050,7 +1046,28 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data: rows, error } = await supabase
+    let lastClosedAtIso: string | null = null;
+    const { data: lastClosing, error: lastClosingErr } = await supabase
+      .from('club_cash_closings')
+      .select('closed_at')
+      .eq('club_id', clubId)
+      .eq('for_date', dateStr)
+      .order('closed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastClosingErr) {
+      const isMissingTable =
+        lastClosingErr.message.includes('relation') && lastClosingErr.message.includes('does not exist');
+      if (!isMissingTable) {
+        console.error('[payments/cash-closing/expected:last-closing]', lastClosingErr);
+        res.status(500).json({ ok: false, error: lastClosingErr.message });
+        return;
+      }
+    } else if (lastClosing?.closed_at) {
+      lastClosedAtIso = String(lastClosing.closed_at);
+    }
+
+    let txQuery = supabase
       .from('payment_transactions')
       .select(`
         id,
@@ -1078,6 +1095,10 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       .gte('bookings.start_at', startUtc.toISOString())
       .lt('bookings.start_at', endUtc.toISOString())
       .limit(limit);
+    if (lastClosedAtIso) {
+      txQuery = txQuery.gt('created_at', lastClosedAtIso);
+    }
+    const { data: rows, error } = await txQuery;
 
     if (error) {
       console.error('[payments/cash-closing/expected]', error);
@@ -1755,13 +1776,6 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       .eq('id', participant_id)
       .maybeSingle();
 
-    if (participant?.role === 'organizer') {
-      await supabase
-        .from('bookings')
-        .update({ status: 'confirmed', updated_at: new Date().toISOString() })
-        .eq('id', booking_id);
-    }
-
     // Si es guest (join): añadir a match_players tras el pago
     if (participant?.role === 'guest') {
       const { data: match } = await supabase
@@ -1810,6 +1824,8 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         }
       }
     }
+
+    await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
 
     res.json({ ok: true });
   } catch (err) {
@@ -2067,7 +2083,6 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
       await supabase
         .from('bookings')
         .update({
-          status: 'confirmed',
           source_channel: nextSourceChannel,
           updated_at: new Date().toISOString(),
         })
@@ -2100,6 +2115,8 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
         }
       }
     }
+
+    await refreshBookingStatusAfterParticipantPayment(supabase, booking.id);
 
     res.json({
       ok: true,

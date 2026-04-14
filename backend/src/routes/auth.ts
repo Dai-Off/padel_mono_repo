@@ -4,6 +4,7 @@ import { hashInviteToken } from '../lib/inviteToken';
 import { sendPasswordResetEmail } from '../lib/mailer';
 import { getFrontendUrl } from '../lib/env';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
+import { assignActiveMatchmakingSeasonIfNull } from '../services/matchmakingSeasonService';
 
 const router = Router();
 
@@ -90,8 +91,9 @@ router.post('/register', async (req: Request, res: Response) => {
         })
         .eq('id', existingPlayer.id);
       if (updateErr) console.error('Error vinculando player en registro:', updateErr.message);
+      else await assignActiveMatchmakingSeasonIfNull(supabase, existingPlayer.id);
     } else {
-      const { error: playerError } = await supabase
+      const { data: createdPlayer, error: playerError } = await supabase
         .from('players')
         .insert([
           {
@@ -101,9 +103,13 @@ router.post('/register', async (req: Request, res: Response) => {
             status: 'active',
             auth_user_id: authUserId,
           },
-        ]);
+        ])
+        .select('id')
+        .maybeSingle();
       if (playerError && playerError.code !== '23505') {
         console.error('Error creando player en registro:', playerError.message);
+      } else if (createdPlayer?.id) {
+        await assignActiveMatchmakingSeasonIfNull(supabase, createdPlayer.id as string);
       }
     }
 

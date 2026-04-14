@@ -3,6 +3,9 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
 import { calcEloRating } from '../services/levelingService';
+import { ligaFromEloWithBands } from '../services/matchmakingLeague';
+import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
+import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 
 const router = Router();
 
@@ -505,17 +508,27 @@ router.post('/onboarding', async (req: Request, res: Response) => {
 
   const muToSave = eloToMu(finalElo);
   const now = new Date().toISOString();
+  const leagueBands = await getMatchmakingLeagueConfigRows(supabase);
+  const assignedLiga = ligaFromEloWithBands(finalElo, leagueBands);
+  let leagueSeasonId: string | null = null;
+  try {
+    leagueSeasonId = await getActiveMatchmakingSeasonId(supabase);
+  } catch {
+    /* sin tabla de temporadas aún */
+  }
 
-  // Actualizar Player
-  const { error: e2 } = await supabase
-    .from('players')
-    .update({
-      mu: muToSave,
-      elo_rating: finalElo,
-      initial_rating_completed: true,
-      updated_at: now,
-    })
-    .eq('id', playerId);
+  const updatePayload: Record<string, unknown> = {
+    mu: muToSave,
+    elo_rating: finalElo,
+    liga: assignedLiga,
+    lps: 0,
+    mm_peak_liga: assignedLiga,
+    initial_rating_completed: true,
+    updated_at: now,
+  };
+  if (leagueSeasonId) updatePayload.league_season_id = leagueSeasonId;
+
+  const { error: e2 } = await supabase.from('players').update(updatePayload).eq('id', playerId);
 
   if (e2) return res.status(500).json({ ok: false, error: e2.message });
 
