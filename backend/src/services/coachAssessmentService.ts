@@ -17,6 +17,12 @@ export interface CoachAssessmentResult {
   strengths: string[];
   improvements: string[];
   recommendation: string;
+  stats?: {
+    matchCount: number;
+    completedObjectives: number;
+    totalObjectives: number;
+    improvementPercentage: number;
+  };
 }
 
 // Weights for each question (from the implementation plan)
@@ -145,6 +151,35 @@ export function calculateAssessment(answers: CoachAnswer[]): CoachAssessmentResu
   };
 }
 
+/**
+ * Obtiene estadísticas reales del jugador para la sección de Coach
+ */
+async function getPlayerStats(playerId: string) {
+  const supabase = getSupabaseServiceRoleClient();
+  
+  // 1. Contar partidos reales
+  const { count: matchCount } = await supabase
+    .from('match_players')
+    .select('*', { count: 'exact', head: true })
+    .eq('player_id', playerId);
+
+  // 2. Contar objetivos (sesiones de aprendizaje completadas)
+  const { count: completedObjectives } = await supabase
+    .from('learning_sessions')
+    .select('*', { count: 'exact', head: true })
+    .eq('player_id', playerId);
+
+  // 3. Proporción de mejora (Placeholder por ahora, 0% en el primer test)
+  const improvementPercentage = 0;
+
+  return {
+    matchCount: matchCount || 0,
+    completedObjectives: completedObjectives || 0,
+    totalObjectives: 10, // Meta semanal por defecto
+    improvementPercentage,
+  };
+}
+
 export async function saveAssessment(playerId: string, answers: CoachAnswer[], result: CoachAssessmentResult) {
   const supabase = getSupabaseServiceRoleClient();
   
@@ -164,7 +199,9 @@ export async function saveAssessment(playerId: string, answers: CoachAnswer[], r
     .single();
 
   if (error) throw error;
-  return data;
+  
+  const stats = await getPlayerStats(playerId);
+  return { ...data, stats };
 }
 
 export async function getPlayerAssessment(playerId: string) {
@@ -177,5 +214,8 @@ export async function getPlayerAssessment(playerId: string) {
     .maybeSingle();
 
   if (error) throw error;
-  return data;
+  if (!data) return null;
+
+  const stats = await getPlayerStats(playerId);
+  return { ...data, stats };
 }

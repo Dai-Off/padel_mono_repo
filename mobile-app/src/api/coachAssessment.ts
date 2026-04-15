@@ -13,6 +13,12 @@ export type CoachAssessment = {
   strengths: string[];
   improvements: string[];
   recommendation: string | null;
+  stats?: {
+    matchCount: number;
+    completedObjectives: number;
+    totalObjectives: number;
+    improvementPercentage: number;
+  };
   created_at: string;
 };
 

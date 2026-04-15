@@ -31,21 +31,27 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment }) =>
             <View style={styles.statIconWrapper}>
               <Ionicons name="trending-up-outline" size={16} color="#F18F34" />
             </View>
-            <Text style={styles.statValue}>+15%</Text>
+            <Text style={styles.statValue}>
+              +{assessment.stats?.improvementPercentage ?? 0}%
+            </Text>
             <Text style={styles.statLabel}>Mejora</Text>
           </View>
           <View style={styles.statBox}>
             <View style={styles.statIconWrapper}>
               <Ionicons name="locate-outline" size={16} color="#F18F34" />
             </View>
-            <Text style={styles.statValue}>3/10</Text>
+            <Text style={styles.statValue}>
+              {assessment.stats?.completedObjectives ?? 0}/{assessment.stats?.totalObjectives ?? 10}
+            </Text>
             <Text style={styles.statLabel}>Objetivos</Text>
           </View>
           <View style={styles.statBox}>
             <View style={styles.statIconWrapper}>
               <Ionicons name="flame-outline" size={16} color="#F18F34" />
             </View>
-            <Text style={styles.statValue}>12</Text>
+            <Text style={styles.statValue}>
+              {assessment.stats?.matchCount ?? 0}
+            </Text>
             <Text style={styles.statLabel}>Partidos</Text>
           </View>
         </View>
