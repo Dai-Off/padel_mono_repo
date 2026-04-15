@@ -11,10 +11,10 @@ const router = Router();
 router.use(attachAuthContext);
 
 const SELECT_LIST =
-  'id, created_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, elo_rating), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, elo_rating)), payment_transactions(amount_cents, status, stripe_payment_intent_id, payer_player_id)';
+  'id, created_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, status, reservation_type, source_channel, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, elo_rating), booking_participants(player_id, role, players!booking_participants_player_id_fkey(id, first_name, last_name, elo_rating)), payment_transactions(amount_cents, status, stripe_payment_intent_id, payer_player_id), tournament_booking_links(tournament_id, court_id, tournaments(id, name))';
 // payment_transactions joined to get per-player payment data (no migration needed)
 const SELECT_ONE =
-  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, email, elo_rating), booking_participants(id, player_id, role, share_amount_cents, payment_status, players!booking_participants_player_id_fkey(id, first_name, last_name, email, elo_rating)), payment_transactions(id, payer_player_id, amount_cents, stripe_payment_intent_id, status)';
+  'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, email, elo_rating), booking_participants(id, player_id, role, share_amount_cents, payment_status, players!booking_participants_player_id_fkey(id, first_name, last_name, email, elo_rating)), payment_transactions(id, payer_player_id, amount_cents, stripe_payment_intent_id, status), tournament_booking_links(tournament_id, court_id, tournaments(id, name))';
 
 // ─── Helpers de pago ─────────────────────────────────────────────────────────
 
@@ -105,6 +105,80 @@ async function checkWalletBalances(
 function canAccessClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
   return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
+}
+
+/** When a grilla booking linked to a tournament changes time/court, align torneo + hermanas en pista. */
+async function propagateTournamentFromBookingUpdate(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  bookingId: string,
+  bookingRow: { start_at: string; end_at: string },
+): Promise<void> {
+  const { data: link } = await supabase
+    .from('tournament_booking_links')
+    .select('tournament_id')
+    .eq('booking_id', bookingId)
+    .maybeSingle();
+  if (!link?.tournament_id) return;
+
+  const tid = String(link.tournament_id);
+  const startAt = String(bookingRow.start_at);
+  const endAt = String(bookingRow.end_at);
+  const durationMin = Math.round(
+    (new Date(endAt).getTime() - new Date(startAt).getTime()) / 60000,
+  );
+
+  await supabase
+    .from('tournaments')
+    .update({
+      start_at: startAt,
+      end_at: endAt,
+      duration_min: durationMin,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', tid);
+
+  const { data: allLinks } = await supabase
+    .from('tournament_booking_links')
+    .select('booking_id')
+    .eq('tournament_id', tid);
+  const bookingIds = (allLinks ?? []).map((x: { booking_id: string }) => x.booking_id);
+
+  for (const bid of bookingIds) {
+    const { data: row } = await supabase.from('bookings').select('status').eq('id', bid).maybeSingle();
+    if ((row as { status?: string } | null)?.status === 'cancelled') continue;
+    await supabase
+      .from('bookings')
+      .update({
+        start_at: startAt,
+        end_at: endAt,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', bid);
+  }
+
+  const { data: courtRows } = await supabase
+    .from('bookings')
+    .select('id, court_id, status')
+    .in('id', bookingIds);
+  for (const r of courtRows ?? []) {
+    if ((r as { status?: string }).status === 'cancelled') continue;
+    await supabase
+      .from('tournament_booking_links')
+      .update({ court_id: (r as { court_id: string }).court_id })
+      .eq('booking_id', (r as { id: string }).id);
+  }
+
+  const activeCourts = (courtRows ?? [])
+    .filter((r: { status?: string }) => r.status !== 'cancelled')
+    .map((r: { court_id: string }) => r.court_id);
+  const distinctCourts = [...new Set(activeCourts)];
+
+  await supabase.from('tournament_courts').delete().eq('tournament_id', tid);
+  if (distinctCourts.length) {
+    await supabase
+      .from('tournament_courts')
+      .insert(distinctCourts.map((court_id) => ({ tournament_id: tid, court_id })));
+  }
 }
 
 function dateToWeekday(d: Date): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
@@ -945,6 +1019,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const scheduleTouched = court_id !== undefined || start_at !== undefined || end_at !== undefined;
 
     if (court_id !== undefined || start_at !== undefined || end_at !== undefined) {
       const { data: existingBooking, error: exErr } = await supabase
@@ -1101,11 +1176,33 @@ router.put('/:id', async (req: Request, res: Response) => {
         }
 
         const { data: refreshed } = await supabase.from('bookings').select(SELECT_ONE).eq('id', id).maybeSingle();
-        if (refreshed) return res.json({ ok: true, booking: refreshed });
+        if (refreshed) {
+          let bookingOut = refreshed;
+          if (scheduleTouched) {
+            try {
+              await propagateTournamentFromBookingUpdate(supabase, id, refreshed as { start_at: string; end_at: string });
+              const { data: again } = await supabase.from('bookings').select(SELECT_ONE).eq('id', id).maybeSingle();
+              if (again) bookingOut = again;
+            } catch (e) {
+              console.error('[PUT /bookings] propagate tournament:', e);
+            }
+          }
+          return res.json({ ok: true, booking: bookingOut });
+        }
       }
     }
 
-    return res.json({ ok: true, booking: data });
+    let bookingOut = data;
+    if (scheduleTouched) {
+      try {
+        await propagateTournamentFromBookingUpdate(supabase, id, data as { start_at: string; end_at: string });
+        const { data: again } = await supabase.from('bookings').select(SELECT_ONE).eq('id', id).maybeSingle();
+        if (again) bookingOut = again;
+      } catch (e) {
+        console.error('[PUT /bookings] propagate tournament:', e);
+      }
+    }
+    return res.json({ ok: true, booking: bookingOut });
   } catch (err) {
     console.error(`[PUT /bookings/${id}] Unhandled error:`, (err as Error).message, (err as Error).stack);
     return res.status(500).json({ ok: false, error: (err as Error).message });

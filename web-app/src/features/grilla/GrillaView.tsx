@@ -58,6 +58,8 @@ import './grilla.css';
 
 // In-memory cache for bookings by date (avoids re-fetching when switching dates)
 const bookingsCache: Record<string, { data: any[]; ts: number }> = {};
+const pendingTournamentStartById: Record<string, string | undefined> = {};
+const pendingTournamentStartClearTimerById: Record<string, ReturnType<typeof setTimeout> | undefined> = {};
 const CACHE_TTL = 300_000;
 const MAX_BOOKINGS_CACHE_DATES = 50;
 
@@ -317,10 +319,21 @@ const useClubData = (dateOrStr: Date | string) => {
                         setReservations(prev =>
                             prev.map(r => {
                                 if (r.id !== mapped.id) return r;
+                                const pendingStart = r.tournamentId ? pendingTournamentStartById[r.tournamentId] : undefined;
+                                if (pendingStart && mapped.startTime !== pendingStart) {
+                                    return r;
+                                }
                                 // Realtime payloads lack joined tables (players, participants, transactions).
                                 // Preserve fields from the existing reservation when the payload has no player data.
                                 if (!raw.players) {
-                                    return { ...mapped, playerName: r.playerName, matchType: r.matchType, detailedPlayers: r.detailedPlayers, totalPaidCents: r.totalPaidCents };
+                                    return {
+                                      ...mapped,
+                                      playerName: r.playerName,
+                                      matchType: r.matchType,
+                                      detailedPlayers: r.detailedPlayers,
+                                      totalPaidCents: r.totalPaidCents,
+                                      tournamentId: r.tournamentId ?? mapped.tournamentId,
+                                    };
                                 }
                                 return mapped;
                             })
@@ -418,24 +431,66 @@ const useClubData = (dateOrStr: Date | string) => {
     return { courts, reservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt };
 };
 
+function linkedTournamentDisplayName(b: any): string | null {
+    const raw = b.tournament_booking_links;
+    const links = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    if (links.length === 0) return null;
+    const t = links[0]?.tournaments;
+    const tour = Array.isArray(t) ? t[0] : t;
+    const n = tour?.name;
+    return n != null && String(n).trim() ? String(n).trim() : null;
+}
+
+function linkedTournamentId(b: any): string | null {
+    const raw = b.tournament_booking_links;
+    const links = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    const tid = links[0]?.tournament_id;
+    return tid ? String(tid) : null;
+}
+
+function formatUtcTimeHHmm(value: string | Date): string {
+    const d = value instanceof Date ? value : new Date(value);
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+}
+
+function schedulePendingTournamentStartClear(tournamentId: string, expectedSeq: number, seqRef: React.MutableRefObject<Record<string, number>>) {
+    const prevTimer = pendingTournamentStartClearTimerById[tournamentId];
+    if (prevTimer) clearTimeout(prevTimer);
+    pendingTournamentStartClearTimerById[tournamentId] = setTimeout(() => {
+        if (seqRef.current[tournamentId] !== expectedSeq) return;
+        delete pendingTournamentStartById[tournamentId];
+        delete pendingTournamentStartClearTimerById[tournamentId];
+    }, 2500);
+}
+
 // Pure mapping function — no network calls
 function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
     const courtMap = new Map(courtsData.map(c => [c.id, c.name]));
     return rawBookings.map((b: any) => {
         const start = new Date(b.start_at);
         const organizer = b.players;
-        const playerName = organizer ? `${organizer.first_name} ${organizer.last_name}` : '';
+        const bookingType = b.reservation_type ?? b.booking_type ?? 'standard';
+        const tournName = linkedTournamentDisplayName(b);
+        const tournamentId = linkedTournamentId(b);
+        const playerName =
+            bookingType === 'tournament'
+                ? (tournName || 'Torneo')
+                : organizer
+                    ? `${organizer.first_name} ${organizer.last_name}`
+                    : '';
         const isMaintenance = typeof b.notes === 'string' && b.notes.includes('__COURT_MAINTENANCE__');
         return {
             id: b.id,
             courtId: b.court_id,
             courtName: courtMap.get(b.court_id) || b.court_id,
-            startTime: start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+            startTime: formatUtcTimeHHmm(start),
             durationMinutes: (new Date(b.end_at).getTime() - start.getTime()) / 60000,
             playerName,
             matchType: isMaintenance ? 'MANTENIMIENTO' : undefined,
             status: b.status ?? 'pending_payment',
-            booking_type: b.reservation_type ?? b.booking_type ?? 'standard',
+            booking_type: bookingType,
             source_channel: b.source_channel ?? 'manual',
             notes: b.notes ?? undefined,
             locationId: 'sede-central',
@@ -467,6 +522,7 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
                     return { name, isMember: false, level: 0, paidAmount: (tx?.amount ?? 0) / 100, paymentMethod: (tx?.method ?? null) as any };
                 });
             })(),
+            tournamentId: bookingType === 'tournament' ? (tournamentId ?? undefined) : undefined,
         };
     });
 }
@@ -614,7 +670,21 @@ function GrillaViewInner() {
 
   useEffect(() => {
     const allowed = new Set(gridCourts.map((c) => c.id));
-    setReservations(serverReservations.filter((r) => allowed.has(r.courtId)));
+    const incoming = serverReservations.filter((r) => allowed.has(r.courtId));
+    setReservations((prev) => {
+      const pendingTournamentIds = new Set(
+        Object.keys(pendingTournamentStartById).filter(
+          (tid) => pendingTournamentStartById[tid] != null,
+        ),
+      );
+      if (pendingTournamentIds.size === 0) return incoming;
+
+      const prevById = new Map(prev.map((r) => [r.id, r]));
+      return incoming.map((r) => {
+        if (!r.tournamentId || !pendingTournamentIds.has(r.tournamentId)) return r;
+        return prevById.get(r.id) ?? r;
+      });
+    });
     setRecentlyDroppedId(null);
   }, [serverReservations, gridCourts]);
 
@@ -641,6 +711,7 @@ function GrillaViewInner() {
   const [activeView, setActiveView] = useState<'grid' | 'matches'>('grid');
   const [rechargeModalOpen, setRechargeModalOpen] = useState(false);
   const [editingBookingData, setEditingBookingData] = useState<any | null>(null);
+  const [isLoadingBookingData, setIsLoadingBookingData] = useState(false);
   const [hoveredTooltip, setHoveredTooltip] = useState<{ res: Reservation, el: HTMLElement } | null>(null);
   const [focusedCourtId, setFocusedCourtId] = useState<string | null>(null);
   const [maintenanceBlockTarget, setMaintenanceBlockTarget] = useState<{ courtId: string; courtName: string } | null>(null);
@@ -655,6 +726,7 @@ function GrillaViewInner() {
   // Ref to control the zoom-pan-pinch library programmatically
   const transformComponentRef = useRef<ReactZoomPanPinchRef | null>(null);
   const activeMobileScaleRef = useRef<number>(1);
+  const tournamentDropRequestSeqRef = useRef<Record<string, number>>({});
 
   // Auto-detect mobile devices for the compact full view grid (<= 768px)
   const [isMobileDevice, setIsMobileDevice] = useState<boolean>(window.innerWidth <= 768);
@@ -731,8 +803,10 @@ function GrillaViewInner() {
       }
 
       setSelectedSchoolCourseId(null);
-      setSelectedModalReservationId(res.id);
       if (!res.id.startsWith('new-')) {
+          setSelectedModalReservationId(res.id);
+          setEditingBookingData(null);
+          setIsLoadingBookingData(true);
           try {
               const data = await apiFetchWithAuth<any>(`/bookings/${res.id}`);
               if (data.ok) {
@@ -745,8 +819,12 @@ function GrillaViewInner() {
               }
           } catch (err) {
               console.error('Error fetching booking details:', err);
+          } finally {
+              setIsLoadingBookingData(false);
           }
       } else {
+          setIsLoadingBookingData(false);
+          setSelectedModalReservationId(res.id);
           setEditingBookingData(null);
       }
   };
@@ -1228,12 +1306,17 @@ function GrillaViewInner() {
   const applyDrop = (reservationId: string, courtId: string, startTime: string, status: string) => {
     // Capture duration before state mutation (closure captures current reservations)
     const existing = reservations.find(r => r.id === reservationId);
+    const isTournament = existing?.booking_type === 'tournament' && !!existing?.tournamentId;
+    const tournamentId = existing?.tournamentId ?? null;
+    const didTimeChange = !!existing && existing.startTime !== startTime;
 
     setReservations(prev =>
       prev.map(r =>
         r.id === reservationId
           ? { ...r, courtId, startTime, status: status as Reservation['status'] }
-          : r
+          : (isTournament && didTimeChange && tournamentId && r.tournamentId === tournamentId)
+              ? { ...r, startTime }
+              : r
       )
     );
 
@@ -1252,9 +1335,43 @@ function GrillaViewInner() {
     if (reservationId.startsWith('new-')) return;
 
     const durationMinutes = existing?.durationMinutes ?? 90;
-    const baseDate = formatDateForInput(selectedDate); // local-time to avoid UTC offset bug
-    const startAt = new Date(`${baseDate}T${startTime}`).toISOString();
+    const baseDate = formatDateForInput(selectedDate);
+    const startAt = `${baseDate}T${startTime}:00.000Z`;
     const endAt = new Date(new Date(startAt).getTime() + durationMinutes * 60000).toISOString();
+
+    if (isTournament && tournamentId) {
+      const nextSeq = (tournamentDropRequestSeqRef.current[tournamentId] ?? 0) + 1;
+      tournamentDropRequestSeqRef.current[tournamentId] = nextSeq;
+      pendingTournamentStartById[tournamentId] = startTime;
+      const afterDrop = reservations.map((r) =>
+        r.id === reservationId
+          ? { ...r, courtId, startTime }
+          : (didTimeChange && r.tournamentId === tournamentId ? { ...r, startTime } : r)
+      );
+      const tournamentRows = afterDrop.filter((r) => r.tournamentId === tournamentId);
+      const courtIds = [...new Set(tournamentRows.map((r) => r.courtId))];
+      const tournamentPayload: Record<string, unknown> = { court_ids: courtIds };
+      if (didTimeChange) {
+        tournamentPayload.start_at = startAt;
+        tournamentPayload.duration_min = durationMinutes;
+      }
+      apiFetchWithAuth<any>(`/tournaments/${tournamentId}`, {
+        method: 'PUT',
+        body: JSON.stringify(tournamentPayload),
+      })
+        .then(() => {
+          if (tournamentDropRequestSeqRef.current[tournamentId] !== nextSeq) return;
+          schedulePendingTournamentStartClear(tournamentId, nextSeq, tournamentDropRequestSeqRef);
+          refresh();
+        })
+        .catch((err) => {
+          console.error('Error persisting tournament drop:', err);
+          if (tournamentDropRequestSeqRef.current[tournamentId] !== nextSeq) return;
+          schedulePendingTournamentStartClear(tournamentId, nextSeq, tournamentDropRequestSeqRef);
+          refresh();
+        });
+      return;
+    }
 
     apiFetch<any>(`/bookings/${reservationId}`, {
       method: 'PUT',
@@ -1600,7 +1717,7 @@ function GrillaViewInner() {
                         id: bookingId,
                         courtId: b.court_id,
                         courtName: court?.name ?? 'Pista',
-                        startTime: new Date(b.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }),
+                        startTime: formatUtcTimeHHmm(b.start_at),
                         durationMinutes: Math.round((new Date(b.end_at).getTime() - new Date(b.start_at).getTime()) / 60000),
                         playerName: b.players?.first_name ? `${b.players.first_name} ${b.players.last_name || ''}` : '',
                         status: b.status ?? 'pending_payment',
@@ -2083,6 +2200,7 @@ function GrillaViewInner() {
         <ReservationModal
           clubId={clubId}
           isOpen={selectedModalReservationId !== null}
+          onGridRefresh={refresh}
           onClose={() => {
             // If the reservation was never saved (temp id), remove it from state
             if (selectedModalReservationId?.startsWith('new-')) {
@@ -2090,10 +2208,12 @@ function GrillaViewInner() {
             }
             setSelectedModalReservationId(null);
             setEditingBookingData(null);
+            setIsLoadingBookingData(false);
           }}
           reservation={reservations.find(r => r.id === selectedModalReservationId) || null}
           onSave={handleCreateBooking}
           editingBookingData={editingBookingData}
+          isLoadingBookingData={isLoadingBookingData}
           onUpdate={handleUpdateBooking}
           onDelete={handleDeleteBooking}
           onMarkPaid={handleMarkPaid}
