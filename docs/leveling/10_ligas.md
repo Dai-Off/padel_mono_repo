@@ -2,8 +2,9 @@
 
 ## Estado de este componente
 
-La vision general y la relacion con otros componentes estan definidas. La mayoria de valores concretos (rangos de LP, numero de ligas, mecanica de reset) estan pendientes de definir.
-**NO implementar hasta que las decisiones pendientes esten resueltas.**
+> Ultima verificacion: 2026-04-14
+
+La vision general y la relacion con otros componentes estan definidas. En backend existe una **primera implementacion** (temporadas globales MM, LP por resultado, ascenso/descenso, historial y cierre de temporada) usando **constantes provisionales** donde el texto siguiente las dejaba pendientes. Los valores deben calibrarse en producto.
 
 ---
 

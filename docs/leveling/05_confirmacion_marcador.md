@@ -44,27 +44,36 @@ Aplica a todos los tipos de partido (`open` y `matchmaking`) y tanto competitivo
 
 ## 2. Estado actual
 
-**Archivo:** `backend/src/routes/matches.ts`
+> Ultima verificacion: 2026-04-14
 
-El campo `score_status` no existe en la tabla `matches` (ver componente 02). No hay ninguna lógica de confirmación de marcador.
+**Implementado:**
+- `backend/src/routes/matchScores.ts` con endpoints: `POST /:id/score` (proponer), `POST /:id/score/confirm` (confirmar), `POST /:id/score/dispute` (contra-propuesta), `POST /:id/score/resolve` (resolver).
+- Maquina de estados de `score_status` completa (pending → pending_confirmation → confirmed | disputed_pending → ...).
+- `score_confirmed_at` y `score_first_proposer_team` en tabla matches.
+- Al confirmar, devuelve `request_feedback: true` para disparar el formulario de feedback (componente 08).
+- Al confirmar partido competitivo, dispara `runLevelingPipeline()` (componente 03) y `runFraudCheck()` (componente 07).
+- `MAX_DISPUTE_ROUNDS` y `FEEDBACK_WINDOW_HOURS` definidos en `levelingConstants.ts`.
 
-El campo `sets` tampoco existe todavía.
-
-**Archivo:** `backend/src/routes/matchPlayers.ts`
-
-El campo `result` existe (línea 7) pero no tiene uso ni tipo definido. El campo `rating_change` se puede actualizar manualmente (línea 84) sin ningún flujo de confirmación.
-
-**No existen** rutas para introducir, confirmar o disputar un marcador.
+**Pendiente:**
+- **Auto-confirmacion a 24h**: No existe job/cron que confirme automaticamente si el rival no responde. La logica esta documentada pero no implementada.
+- **Timeout de 48h para introducir marcador**: No existe job que pase a `no_result` si nadie introduce marcador.
 
 ---
 
-## 3. Qué hay que cambiar
+## 3. Que falta por implementar
 
-### 3.1 Tabla `matches` en Supabase
-Los campos `score_status`, `sets` y `match_end_reason` deben existir (ver componente 02). Sin ellos no se puede implementar este componente.
+### 3.1 Auto-confirmacion a 24h
 
-### 3.2 `backend/src/routes/matchPlayers.ts` (línea 77)
-Eliminar la posibilidad de actualizar `rating_change` directamente desde `PUT /match-players/:id`. El valor lo escribe exclusivamente el algoritmo de nivelación (componente 03).
+Implementar un job (cron o endpoint protegido) que:
+1. Busque partidos con `score_status = 'pending_confirmation'` donde `updated_at < now() - 24h`
+2. Los pase a `confirmed` automaticamente
+3. Dispare el pipeline de nivelacion
+
+### 3.2 Timeout de 48h sin marcador
+
+Implementar un job que:
+1. Busque partidos con `status = 'finished'` y `score_status = 'pending'` donde el partido termino hace mas de 48h
+2. Los pase a `no_result`
 
 ---
 

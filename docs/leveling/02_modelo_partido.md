@@ -32,62 +32,40 @@ Los tres valores de `match_end_reason` ejecutan el pipeline de nivelación compl
 
 ## 2. Estado actual
 
-**Archivo:** `backend/src/routes/matches.ts`
+> Ultima verificacion: 2026-04-14
 
-Las constantes de SELECT en líneas 6–9:
-```typescript
-const SELECT_LIST = 'id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status';
-const SELECT_ONE  = 'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status';
-```
+**Todo lo descrito en la seccion 1 esta implementado.** Migracion `backend/db/014_leveling_matchmaking.sql`.
 
-Campos relevantes que ya existen en la tabla `matches`:
-- `competitive` (boolean) — por defecto `true` (línea 220: `competitive: competitive !== false`)
-- `gender` ('any' | …)
-- `status` ('pending', 'cancelled', …)
-- `elo_min`, `elo_max` — para filtrar por nivel en partidos abiertos
-- `visibility` ('public' | 'private')
+### Tabla `matches` — campos de nivelacion
 
-**No existen:**
-- `type` — no se distingue si el partido es abierto o de matchmaking
-- `score_status` — no hay estado de confirmación de marcador
-- `sets` — no hay campo para almacenar el marcador
-- `match_end_reason` — no hay campo para el motivo de fin de partido
+| Campo | Estado | Valores |
+|---|---|---|
+| `type` | ✅ Implementado | `'open'`, `'matchmaking'`, `'penalty'` |
+| `competitive` | ✅ Implementado | boolean, default true |
+| `score_status` | ✅ Implementado | `'pending'`, `'pending_confirmation'`, `'disputed_pending'`, `'confirmed'`, `'disputed'`, `'no_result'` |
+| `sets` | ✅ Implementado | jsonb `[{ a, b }, ...]` |
+| `match_end_reason` | ✅ Implementado | `'completed'`, `'retired'`, `'timeout'` |
+| `visibility` | ✅ Implementado | `'private'`, `'public'` |
+| `score_confirmed_at` | ✅ Implementado | timestamptz |
+| `score_first_proposer_team` | ✅ Implementado | text |
+| `leveling_applied_at` | ✅ Implementado | timestamptz (idempotencia del pipeline) |
+| `retired_team` | ✅ Implementado | text |
 
-**Archivo:** `backend/src/routes/matchPlayers.ts`
+### Tabla `match_players`
 
-La tabla `match_players` ya tiene:
-- `team` ('A' | 'B') — asignación de equipo (línea 7)
-- `result` — campo genérico sin tipo definido, sin uso actual
-- `rating_change` (numeric) — delta de elo, se actualiza manualmente (línea 84)
-- `invite_status` ('accepted', 'pending', …)
-- `slot_index` (0–3) — posición dentro del equipo
-
----
-
-## 3. Qué hay que cambiar
-
-### 3.1 Tabla `matches` en Supabase
-Añadir columnas desde el dashboard:
-
-| Columna | Tipo SQL | Valor por defecto | Nullable | Valores posibles |
-|---|---|---|---|---|
-| `type` | `text` | `'open'` | NO | `'open'`, `'matchmaking'` |
-| `score_status` | `text` | `'pending'` | NO | ver tabla de estados abajo |
-| `sets` | `jsonb` | `null` | SÍ | ver estructura abajo |
-| `match_end_reason` | `text` | `null` | SÍ | `'completed'`, `'retired'`, `'timeout'` |
-
-### 3.2 Estados de `score_status`
-
-| Estado | Descripción |
+| Campo | Estado |
 |---|---|
-| `pending` | Partido terminado, nadie ha introducido marcador aún |
-| `pending_confirmation` | Un equipo introdujo marcador, esperando confirmación del rival |
-| `disputed_pending` | El rival propuso un contra-marcador, esperando respuesta del equipo original |
-| `confirmed` | Marcador acordado — dispara el algoritmo si competitive=true |
-| `disputed` | Sin acuerdo tras el proceso completo — pendiente de resolución |
-| `no_result` | El partido no tiene resultado válido (disputa sin resolver, timeout sin marcador, etc.) |
+| `team` ('A'/'B') | ✅ Implementado |
+| `result` | ✅ Existe |
+| `rating_change` | ✅ Implementado |
+| `invite_status` | ✅ Implementado |
+| `slot_index` | ✅ Implementado |
 
-### 3.3 Estructura del campo `sets`
+### Endpoints
+
+Los SELECTs en `matches.ts` ya incluyen `type`, `score_status`, `sets`, `match_end_reason`. La transicion de `score_status` se gestiona desde `matchScores.ts` (componente 05), no desde el PUT generico.
+
+### Estructura de `sets`
 
 ```json
 [
@@ -97,41 +75,11 @@ Añadir columnas desde el dashboard:
 ]
 ```
 
-Cada elemento es un set. `a` = juegos del equipo A, `b` = juegos del equipo B.
-Máximo 3 sets. El tercer set puede ser tie-break (valores como 10–8 o 7–5).
-Se guardan juegos por set (no solo sets ganados) porque el algoritmo de actualización necesita `|juegos_a - juegos_b| / total_juegos` para calcular el `score_margin`.
-
-### 3.4 Flujo de `match_end_reason` (decisión tomada)
-
-El campo `match_end_reason` no se elige en un paso separado. El flujo es:
-
-1. El usuario introduce el marcador al terminar el partido
-2. Si el marcador tiene un ganador claro → `match_end_reason = 'completed'` automáticamente
-3. Si el partido no se completó con normalidad → el usuario ve una pantalla de incidencia con dos opciones:
-   - **Timeout:** el partido se da como empate. `match_end_reason = 'timeout'`
-   - **Retired:** la pareja que no se retiró gana. `match_end_reason = 'retired'`
-
-### 3.5 `backend/src/routes/matches.ts`
-
-**Constantes SELECT_LIST y SELECT_ONE (líneas 6–9):**
-Añadir `type, score_status, sets, match_end_reason` a ambas constantes.
-
-**Endpoint `POST /matches/create-with-booking` (línea 161):**
-Añadir extracción de `type` del body y pasarlo al INSERT (línea 213–221). `match_end_reason` empieza como null.
-
-**Endpoint `POST /matches` (línea 404):**
-Añadir `type` al body y al INSERT.
-
-**Endpoint `PUT /matches/:id` (línea 432):**
-`score_status`, `sets` y `match_end_reason` NO se actualizan desde aquí — se actualizan exclusivamente desde las rutas de confirmación de marcador (componente 05). No añadir estos campos al PUT genérico.
-
 ---
 
-## 4. Qué hay que crear nuevo
+## 3. Nada pendiente de implementar
 
-No se crea ninguna tabla nueva en este componente. Las tablas nuevas del sistema de nivelación se crean en el componente 01 (`player_synergies`) y el componente 06 (pool de matchmaking).
-
-La lógica de transición de `score_status` se implementa en el componente 05.
+Todo el modelo del partido esta completo. No hay cambios pendientes en este componente.
 
 ---
 
