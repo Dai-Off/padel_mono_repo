@@ -20,6 +20,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { theme } from '../theme';
+import { AICoachSection } from '../components/profile/AICoachSection';
+import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
+import { fetchMyCoachAssessment, submitCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -147,7 +150,10 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
   const [coachAnswers, setCoachAnswers] = useState<(string | null)[]>(
     () => Array.from({ length: COACH_QUESTIONS.length }, () => null),
   );
+  const [assessment, setAssessment] = useState<CoachAssessment | null>(null);
+  const [isSubmittingCoach, setIsSubmittingCoach] = useState(false);
   const coachTranslateY = React.useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const coachProgressAnim = React.useRef(new Animated.Value(0)).current;
   const shineTranslateX = React.useRef(new Animated.Value(-1)).current;
   const particleLoopsRef = React.useRef<Animated.CompositeAnimation[]>([]);
   const particles = React.useRef(
@@ -174,6 +180,7 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
   useEffect(() => {
     if (session?.access_token) {
       fetchMyPlayerProfile(session.access_token).then(setProfile);
+      fetchMyCoachAssessment(session.access_token).then(setAssessment);
     }
   }, [session?.access_token]);
 
@@ -206,7 +213,9 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
       easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished) setShowCoachModal(false);
+      if (finished) {
+        setShowCoachModal(false);
+      }
     });
   };
 
@@ -223,15 +232,43 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
     });
   };
 
-  const goNextCoachStep = () => {
+  const goNextCoachStep = async () => {
     if (coachCurrentAnswer == null) return;
     const last = coachStepIdx === COACH_QUESTIONS.length - 1;
     if (last) {
-      setCoachPhase('results');
+      try {
+        setIsSubmittingCoach(true);
+        const answersForApi = coachAnswers.map((ans, idx) => ({
+          question_index: idx,
+          selected_option: COACH_QUESTIONS[idx].options.indexOf(ans!)
+        }));
+        
+        const result = await submitCoachAssessment(session?.access_token, answersForApi);
+        if (result) {
+          setAssessment(result);
+          setCoachPhase('results');
+        }
+      } catch (err) {
+        Alert.alert('Error', 'No se pudo guardar la evaluación. Por favor intenta de nuevo.');
+      } finally {
+        setIsSubmittingCoach(false);
+      }
       return;
     }
     setCoachStepIdx((i) => Math.min(i + 1, COACH_QUESTIONS.length - 1));
   };
+  
+  useEffect(() => {
+    if (showCoachModal && coachPhase === 'questions') {
+      const target = (coachStepIdx + 1) / COACH_QUESTIONS.length;
+      Animated.timing(coachProgressAnim, {
+        toValue: target,
+        duration: 350,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [coachStepIdx, showCoachModal, coachPhase]);
 
   useEffect(() => {
     if (!showCoachModal || coachPhase !== 'results') return;
@@ -463,118 +500,126 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
           </View>
         </View>
 
-        {/* Virtual Coach Card */}
-        <View style={styles.coachCardContainer}>
-          <View style={styles.coachCard}>
-            <View style={styles.coachGlow} />
-            <View style={styles.coachContent}>
-              <View style={styles.brainIconContainer}>
-                <LinearGradient 
-                  colors={['#F18F34', '#E95F32']} 
-                  style={styles.brainIconGradient}
-                >
-                  <Ionicons name="bulb-outline" size={28} color="#fff" />
-                </LinearGradient>
+        {/* Virtual Coach Card / Analysis */}
+        {!assessment ? (
+          <View style={styles.coachCardContainer}>
+            <View style={styles.coachCard}>
+              <View style={styles.coachGlow} />
+              <View style={styles.coachContent}>
+                <View style={styles.brainIconContainer}>
+                  <LinearGradient 
+                    colors={['#F18F34', '#E95F32']} 
+                    style={styles.brainIconGradient}
+                  >
+                    <Ionicons name="bulb-outline" size={28} color="#fff" />
+                  </LinearGradient>
+                </View>
+                <Text style={styles.coachTitle}>Coach Virtual IA</Text>
+                <Text style={styles.coachDesc}>
+                  Mide tu nivel de Pádel para desbloquear análisis personalizados y recomendaciones del Coach IA
+                </Text>
+                <Pressable style={styles.coachCtaBtn} onPress={openCoachModal}>
+                  <Ionicons name="locate-outline" size={16} color="#fff" />
+                  <Text style={styles.coachCtaText}>Medir mi nivel de Pádel</Text>
+                </Pressable>
               </View>
-              <Text style={styles.coachTitle}>Coach Virtual IA</Text>
-              <Text style={styles.coachDesc}>
-                Mide tu nivel de Pádel para desbloquear análisis personalizados y recomendaciones del Coach IA
-              </Text>
-              <Pressable style={styles.coachCtaBtn} onPress={openCoachModal}>
-                <Ionicons name="locate-outline" size={16} color="#fff" />
-                <Text style={styles.coachCtaText}>Medir mi nivel de Pádel</Text>
-              </Pressable>
             </View>
           </View>
-        </View>
+        ) : (
+          <AICoachSection assessment={assessment} />
+        )}
 
         {/* Achievements Section */}
-        <View style={styles.achievementsContainer}>
-          <View style={styles.achievementsCard}>
-            <View style={styles.achievementsHeader}>
-              <View style={styles.achievementsTitleWrap}>
-                <LinearGradient 
-                  colors={['#F18F34', '#E95F32']} 
-                  style={styles.achievementTrophyIcon}
-                >
-                  <Ionicons name="trophy-outline" size={16} color="#fff" />
-                </LinearGradient>
-                <View>
-                  <Text style={styles.achievementsTitle}>Vitrina de Logros</Text>
-                  <Text style={styles.achievementsCount}>10 logros conseguidos</Text>
+        {assessment ? (
+          <TrophyShowcaseSection />
+        ) : (
+          <View style={styles.achievementsContainer}>
+            <View style={styles.achievementsCard}>
+              <View style={styles.achievementsHeader}>
+                <View style={styles.achievementsTitleWrap}>
+                  <LinearGradient 
+                    colors={['#F18F34', '#E95F32']} 
+                    style={styles.achievementTrophyIcon}
+                  >
+                    <Ionicons name="trophy-outline" size={16} color="#fff" />
+                  </LinearGradient>
+                  <View>
+                    <Text style={styles.achievementsTitle}>Vitrina de Logros</Text>
+                    <Text style={styles.achievementsCount}>10 logros conseguidos</Text>
+                  </View>
+                </View>
+                <View style={styles.publicBadge}>
+                  <Ionicons name="eye-outline" size={12} color="#F18F34" />
+                  <Text style={styles.publicBadgeText}>8 públicos</Text>
                 </View>
               </View>
-              <View style={styles.publicBadge}>
-                <Ionicons name="eye-outline" size={12} color="#F18F34" />
-                <Text style={styles.publicBadgeText}>8 públicos</Text>
-              </View>
-            </View>
 
-            {/* Achievement Mini Stats */}
-            <View style={styles.achStatsRow}>
-              <View style={styles.achStatItem}>
-                <Text style={styles.achStatEmoji}>🏆</Text>
-                <Text style={styles.achStatVal}>5</Text>
-                <Text style={styles.achStatLab}>Trofeos</Text>
+              {/* Achievement Mini Stats */}
+              <View style={styles.achStatsRow}>
+                <View style={styles.achStatItem}>
+                  <Text style={styles.achStatEmoji}>🏆</Text>
+                  <Text style={styles.achStatVal}>5</Text>
+                  <Text style={styles.achStatLab}>Trofeos</Text>
+                </View>
+                <View style={styles.achStatItem}>
+                  <Text style={styles.achStatEmoji}>🎖️</Text>
+                  <Text style={styles.achStatVal}>2</Text>
+                  <Text style={styles.achStatLab}>Insignias</Text>
+                </View>
+                <View style={styles.achStatItem}>
+                  <Text style={styles.achStatEmoji}>📚</Text>
+                  <Text style={styles.achStatVal}>3</Text>
+                  <Text style={styles.achStatLab}>Cursos</Text>
+                </View>
               </View>
-              <View style={styles.achStatItem}>
-                <Text style={styles.achStatEmoji}>🎖️</Text>
-                <Text style={styles.achStatVal}>2</Text>
-                <Text style={styles.achStatLab}>Insignias</Text>
+
+              {/* Achievement Categories */}
+              <View style={styles.achTabsRow}>
+                <View style={styles.achTabsInner}>
+                  {['Todos', 'Trofeos', 'Insignias', 'Cursos'].map(tab => (
+                    <Pressable 
+                      key={tab} 
+                      onPress={() => setActiveLogroTab(tab)}
+                      style={[styles.achTab, activeLogroTab === tab && styles.achTabActive]}
+                    >
+                      <Ionicons 
+                        name={
+                          tab === 'Todos' ? 'star' : 
+                          tab === 'Trofeos' ? 'trophy' : 
+                          tab === 'Insignias' ? 'medal' : 'school'
+                        } 
+                        size={14} 
+                        color={activeLogroTab === tab ? '#F18F34' : '#6B7280'} 
+                      />
+                      <Text style={[styles.achTabText, activeLogroTab === tab ? styles.achTabTextActive : styles.achTabTextInactive]}>
+                        {tab}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
               </View>
-              <View style={styles.achStatItem}>
-                <Text style={styles.achStatEmoji}>📚</Text>
-                <Text style={styles.achStatVal}>3</Text>
-                <Text style={styles.achStatLab}>Cursos</Text>
+
+              {/* Achievement List */}
+              <View style={styles.achList}>
+                {ACHIEVEMENTS.map(renderAchievementItem)}
               </View>
-            </View>
 
-            {/* Achievement Categories */}
-            <View style={styles.achTabsRow}>
-              <View style={styles.achTabsInner}>
-                {['Todos', 'Trofeos', 'Insignias', 'Cursos'].map(tab => (
-                  <Pressable 
-                    key={tab} 
-                    onPress={() => setActiveLogroTab(tab)}
-                    style={[styles.achTab, activeLogroTab === tab && styles.achTabActive]}
-                  >
-                    <Ionicons 
-                      name={
-                        tab === 'Todos' ? 'star' : 
-                        tab === 'Trofeos' ? 'trophy' : 
-                        tab === 'Insignias' ? 'medal' : 'school'
-                      } 
-                      size={14} 
-                      color={activeLogroTab === tab ? '#F18F34' : '#6B7280'} 
-                    />
-                    <Text style={[styles.achTabText, activeLogroTab === tab ? styles.achTabTextActive : styles.achTabTextInactive]}>
-                      {tab}
-                    </Text>
-                  </Pressable>
-                ))}
+              {/* View All Button */}
+              <Pressable style={styles.viewAllBtn}>
+                <Text style={styles.viewAllText}>Ver todos (10)</Text>
+                <Ionicons name="chevron-down" size={14} color="#9CA3AF" />
+              </Pressable>
+
+              {/* Visibility Disclaimer */}
+              <View style={styles.publicDisclaimer}>
+                <Ionicons name="lock-closed" size={12} color="#4B5563" />
+                <Text style={styles.disclaimerText}>
+                  Los logros marcados como <Text style={styles.disclaimerHighlight}>públicos</Text> serán visibles para otros jugadores en tu perfil.
+                </Text>
               </View>
-            </View>
-
-            {/* Achievement List */}
-            <View style={styles.achList}>
-              {ACHIEVEMENTS.map(renderAchievementItem)}
-            </View>
-
-            {/* View All Button */}
-            <Pressable style={styles.viewAllBtn}>
-              <Text style={styles.viewAllText}>Ver todos (10)</Text>
-              <Ionicons name="chevron-down" size={14} color="#9CA3AF" />
-            </Pressable>
-
-            {/* Visibility Disclaimer */}
-            <View style={styles.publicDisclaimer}>
-              <Ionicons name="lock-closed" size={12} color="#4B5563" />
-              <Text style={styles.disclaimerText}>
-                Los logros marcados como <Text style={styles.disclaimerHighlight}>públicos</Text> serán visibles para otros jugadores en tu perfil.
-              </Text>
             </View>
           </View>
-        </View>
+        )}
 
         {/* Bottom Menu Actions */}
         <View style={styles.menuContainer}>
@@ -626,11 +671,17 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
                     </Pressable>
                   </View>
                   <View style={styles.coachProgressTrack}>
-                    <LinearGradient
-                      colors={['#F18F34', '#FFB347']}
-                      start={{ x: 0, y: 0.5 }}
-                      end={{ x: 1, y: 0.5 }}
-                      style={[styles.coachProgressFill, { flex: coachProgressRatio }]}
+                    <Animated.View
+                      style={[
+                        styles.coachProgressFill,
+                        {
+                          width: coachProgressAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: ['0%', '100%'],
+                          }),
+                          backgroundColor: '#F18F34',
+                        },
+                      ]}
                     />
                   </View>
                 </View>
@@ -688,7 +739,7 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
                         style={styles.coachNextBtnGradient}
                       >
                         <Text style={styles.coachNextBtnText}>
-                          {coachStepIdx === COACH_QUESTIONS.length - 1 ? 'Finalizar' : 'Siguiente'}
+                          {isSubmittingCoach ? 'Guardando...' : (coachStepIdx === COACH_QUESTIONS.length - 1 ? 'Finalizar' : 'Siguiente')}
                         </Text>
                         <Ionicons name="arrow-forward" size={16} color="#fff" />
                       </LinearGradient>
@@ -776,10 +827,12 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
                     </Animated.View>
 
                     <View style={styles.coachResultsCardContent}>
-                      <Text style={styles.coachResultsLevelNumber}>3</Text>
-                      <Text style={styles.coachResultsLevelName}>Profesional</Text>
+                      <Text style={styles.coachResultsLevelNumber}>{assessment?.level_number || '?'}</Text>
+                      <Text style={styles.coachResultsLevelName}>
+                        {assessment?.level_name || 'Nivel'}
+                      </Text>
                       <Text style={styles.coachResultsLevelDesc}>
-                        Profesional - Nivel de competición
+                        {assessment?.level_name || 'Nivel'} - {assessment?.recommendation?.split('.')[0] || 'Análisis completado'}
                       </Text>
                     </View>
                   </View>

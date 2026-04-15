@@ -195,10 +195,15 @@ export function MainApp() {
           : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
             ? '#000000'
             : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
-              ? '#0F0F0F'
-              : showProfile
                 ? '#0F0F0F'
-                : '#ffffff';
+                : showProfile
+                  ? '#0F0F0F'
+                  : '#ffffff';
+
+  const handleTabChange = (tab: MainTabId) => {
+    setActiveTab(tab);
+    setShowProfile(false);
+  };
 
   return (
     <View style={styles.container}>
@@ -231,10 +236,9 @@ export function MainApp() {
             !showPartidoDetail &&
             !showTusPagos &&
             !showTransacciones &&
-            !showProfile &&
             !crearPartidoFlow.open && (
             <View style={styles.bottomBar}>
-              <BottomNavbar activeTab={activeTab} onTabChange={setActiveTab} />
+              <BottomNavbar activeTab={showProfile ? null : activeTab} onTabChange={handleTabChange} />
             </View>
           )}
         </View>
