@@ -10,6 +10,7 @@ import {
   STRIPE_META_TOURNAMENT_PURPOSE,
 } from '../services/tournamentsService';
 import { refreshBookingStatusAfterParticipantPayment } from '../lib/bookingPaymentSync';
+import { zonedTimeToUtc } from './learningTimezone';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
@@ -991,6 +992,11 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
  *         schema: { type: string, example: "2026-03-25" }
  *         description: Fecha en formato YYYY-MM-DD (por defecto: hoy)
  *       - in: query
+ *         name: timezone
+ *         required: false
+ *         schema: { type: string, example: "Europe/Madrid" }
+ *         description: Zona horaria usada para interpretar el día operativo
+ *       - in: query
  *         name: limit
  *         required: false
  *         schema: { type: integer, default: 500, maximum: 5000 }
@@ -1033,19 +1039,53 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
   }
 
   const dateStr = String(req.query.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  const timezone = String(req.query.timezone ?? 'Europe/Madrid').trim() || 'Europe/Madrid';
   const limit = Math.min(parseInt(req.query.limit as string) || 500, 5000);
 
-  // Interpretación simple en UTC para evitar dependencias externas.
-  const startUtc = new Date(`${dateStr}T00:00:00.000Z`);
+  let startUtc: Date;
+  let endUtc: Date;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
+    startUtc = zonedTimeToUtc(`${dateStr}T00:00:00`, timezone);
+    endUtc = new Date(zonedTimeToUtc(`${dateStr}T23:59:59`, timezone).getTime() + 999);
+  } catch {
+    startUtc = new Date(`${dateStr}T00:00:00.000Z`);
+    endUtc = new Date(`${dateStr}T23:59:59.999Z`);
+  }
   if (Number.isNaN(startUtc.getTime())) {
     res.status(400).json({ ok: false, error: 'date inválida. Usa YYYY-MM-DD.' });
     return;
   }
-  const endUtc = new Date(startUtc);
-  endUtc.setUTCDate(endUtc.getUTCDate() + 1);
 
   try {
     const supabase = getSupabaseServiceRoleClient();
+    let openingCashCents = 0;
+    let openingRecord: Record<string, unknown> | null = null;
+
+    const { data: openingRow, error: openingErr } = await supabase
+      .from('club_cash_openings')
+      .select('id, club_id, staff_id, employee_name, opened_by_name, opened_at, for_date, opening_cash_cents, notes')
+      .eq('club_id', clubId)
+      .eq('for_date', dateStr)
+      .order('opened_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (openingErr) {
+      const isMissingTable = openingErr.message.includes('relation') && openingErr.message.includes('does not exist');
+      if (!isMissingTable) {
+        console.error('[payments/cash-closing/expected:opening]', openingErr);
+        res.status(500).json({ ok: false, error: openingErr.message });
+        return;
+      }
+    } else if (openingRow) {
+      const rowRecord = openingRow as Record<string, unknown>;
+      openingRecord = {
+        ...rowRecord,
+        employee_name: rowRecord.employee_name ?? rowRecord.opened_by_name ?? null,
+      };
+      openingCashCents = Math.max(0, Math.trunc(Number(openingRow.opening_cash_cents ?? 0)));
+    }
+
     let lastClosedAtIso: string | null = null;
     const { data: lastClosing, error: lastClosingErr } = await supabase
       .from('club_cash_closings')
@@ -1071,6 +1111,7 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       .from('payment_transactions')
       .select(`
         id,
+        created_at,
         amount_cents,
         currency,
         status,
@@ -1092,12 +1133,9 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       `)
       .eq('status', 'succeeded')
       .eq('bookings.courts.club_id', clubId)
-      .gte('bookings.start_at', startUtc.toISOString())
-      .lt('bookings.start_at', endUtc.toISOString())
+      .gte('created_at', startUtc.toISOString())
+      .lt('created_at', endUtc.toISOString())
       .limit(limit);
-    if (lastClosedAtIso) {
-      txQuery = txQuery.gt('created_at', lastClosedAtIso);
-    }
     const { data: rows, error } = await txQuery;
 
     if (error) {
@@ -1120,7 +1158,17 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
     let systemCashTotalCents = 0;
     let systemCardTotalCents = 0;
 
-    for (const r of (rows ?? []) as Record<string, unknown>[]) {
+    const closingCutoffMs = lastClosedAtIso ? new Date(lastClosedAtIso).getTime() : null;
+    const filteredRows = ((rows ?? []) as Record<string, unknown>[]).filter((row) => {
+      if (closingCutoffMs == null) return true;
+      const createdAt = row.created_at;
+      if (typeof createdAt !== 'string') return true;
+      const createdMs = new Date(createdAt).getTime();
+      if (!Number.isFinite(createdMs)) return true;
+      return createdMs > closingCutoffMs;
+    });
+
+    for (const r of filteredRows) {
       const rawBooking = (r as any).bookings;
       const b = (Array.isArray(rawBooking) ? rawBooking[0] : rawBooking) as Record<string, unknown> | null;
       if (!b) continue;
@@ -1159,16 +1207,32 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       systemCardTotalCents += b.card_paid_cents;
     }
 
+    const openingOpenedAtMs = openingRecord?.opened_at
+      ? new Date(String(openingRecord.opened_at)).getTime()
+      : NaN;
+    const shouldIncludeOpening =
+      openingCashCents > 0 &&
+      (
+        !lastClosedAtIso ||
+        !Number.isFinite(openingOpenedAtMs) ||
+        openingOpenedAtMs > (closingCutoffMs ?? -Infinity)
+      );
+    const effectiveOpeningCashCents = shouldIncludeOpening ? openingCashCents : 0;
+
     const systemCashTotalEur = Math.round((systemCashTotalCents / 100) * 100) / 100;
     const systemCardTotalEur = Math.round((systemCardTotalCents / 100) * 100) / 100;
+    const openingCashEur = Math.round((effectiveOpeningCashCents / 100) * 100) / 100;
 
     res.json({
       ok: true,
       date: dateStr,
-      systemCashTotal_cents: systemCashTotalCents,
+      systemCashTotal_cents: systemCashTotalCents + effectiveOpeningCashCents,
       systemCardTotal_cents: systemCardTotalCents,
-      systemCashTotal_eur: systemCashTotalEur,
+      systemCashTotal_eur: systemCashTotalEur + openingCashEur,
       systemCardTotal_eur: systemCardTotalEur,
+      openingCashTotal_cents: effectiveOpeningCashCents,
+      openingCashTotal_eur: openingCashEur,
+      opening: openingRecord,
       bookings: Array.from(byBooking.values()).sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? '')),
     });
   } catch (err) {
@@ -1182,6 +1246,281 @@ type CashClosingStatus = 'perfect' | 'surplus' | 'deficit';
 function cashClosingStatusFromDiffCents(diffCents: number): CashClosingStatus {
   if (Math.abs(diffCents) < 1) return 'perfect';
   return diffCents > 0 ? 'surplus' : 'deficit';
+}
+
+/**
+ * GET /payments/cash-opening/today
+ * Devuelve la apertura de caja registrada para el día del club.
+ *
+ * @openapi
+ * /payments/cash-opening/today:
+ *   get:
+ *     tags: [Cash opening]
+ *     summary: Obtener apertura de caja del día
+ *     description: |
+ *       Busca la última apertura para `club_id` y `date` (o hoy por defecto).
+ *       Se usa para exigir apertura diaria antes de operar el módulo de cierre de caja.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *         description: ID del club
+ *       - in: query
+ *         name: date
+ *         required: false
+ *         schema: { type: string, example: "2026-04-14" }
+ *         description: Fecha en formato YYYY-MM-DD (por defecto hoy)
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             examples:
+ *               withOpening:
+ *                 value:
+ *                   ok: true
+ *                   date: "2026-04-14"
+ *                   opening:
+ *                     id: "uuid"
+ *                     club_id: "uuid"
+ *                     staff_id: "uuid"
+ *                     employee_name: "Martina"
+ *                     opened_at: "2026-04-14T07:59:00.000Z"
+ *                     for_date: "2026-04-14"
+ *                     opening_cash_cents: 25000
+ *                     notes: "Caja inicial"
+ *               withoutOpening:
+ *                 value:
+ *                   ok: true
+ *                   date: "2026-04-14"
+ *                   opening: null
+ *       400: { description: Falta club_id o date inválida }
+ *       401: { description: Sin token o sesión inválida }
+ *       403: { description: Sin acceso al club }
+ *       500: { description: Error de base de datos }
+ *       503: { description: Tabla no migrada }
+ */
+export async function getCashOpeningForDayHandler(req: Request, res: Response): Promise<void> {
+  const clubId = String(req.query.club_id ?? '').trim();
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+
+  const dateStr = String(req.query.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    res.status(400).json({ ok: false, error: 'date inválida. Usa YYYY-MM-DD.' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('club_cash_openings')
+      .select('id, club_id, staff_id, employee_name, opened_by_name, opened_at, for_date, opening_cash_cents, notes')
+      .eq('club_id', clubId)
+      .eq('for_date', dateStr)
+      .order('opened_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      if (error.message.includes('relation') && error.message.includes('does not exist')) {
+        res.status(503).json({
+          ok: false,
+          error: 'Tabla club_cash_openings no existe. Aplica la migración 013 en base de datos.',
+        });
+        return;
+      }
+      res.status(500).json({ ok: false, error: error.message });
+      return;
+    }
+
+    const opening = data
+      ? {
+          ...(data as Record<string, unknown>),
+          employee_name: (data as Record<string, unknown>).employee_name ?? (data as Record<string, unknown>).opened_by_name ?? null,
+        }
+      : null;
+    res.json({ ok: true, date: dateStr, opening });
+  } catch (err) {
+    console.error('[payments/cash-opening/today]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/cash-opening/records
+ * Guarda apertura de caja del día para el club.
+ *
+ * @openapi
+ * /payments/cash-opening/records:
+ *   post:
+ *     tags: [Cash opening]
+ *     summary: Registrar apertura de caja diaria
+ *     description: |
+ *       Persiste el saldo inicial de caja para `for_date`, con empleado responsable.
+ *       Solo permite una apertura por día y club (si ya existe devuelve 409).
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_id, staff_id, opening_cash_cents]
+ *             properties:
+ *               club_id: { type: string, format: uuid, description: Club al que pertenece la caja }
+ *               staff_id: { type: string, format: uuid, description: Empleado responsable de la apertura }
+ *               for_date: { type: string, example: "2026-04-14", description: Día de operación (YYYY-MM-DD) }
+ *               opening_cash_cents: { type: integer, minimum: 0, description: Saldo inicial en céntimos }
+ *               notes: { type: string, description: Observaciones opcionales de apertura }
+ *           example:
+ *             club_id: "uuid"
+ *             staff_id: "uuid"
+ *             for_date: "2026-04-14"
+ *             opening_cash_cents: 25000
+ *             notes: "Apertura turno mañana"
+ *     responses:
+ *       201:
+ *         description: Creado
+ *         content:
+ *           application/json:
+ *             example:
+ *               ok: true
+ *               record:
+ *                 id: "uuid"
+ *                 club_id: "uuid"
+ *                 staff_id: "uuid"
+ *                 employee_name: "Martina"
+ *                 opened_at: "2026-04-14T07:59:00.000Z"
+ *                 for_date: "2026-04-14"
+ *                 opening_cash_cents: 25000
+ *                 notes: "Apertura turno mañana"
+ *       400: { description: Validación de datos }
+ *       401: { description: Sin token }
+ *       403: { description: Sin acceso o staff inválido }
+ *       409: { description: Ya existe apertura para ese día }
+ *       500: { description: Error de base de datos }
+ *       503: { description: Tabla no migrada }
+ */
+export async function createCashOpeningRecordHandler(req: Request, res: Response): Promise<void> {
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const { club_id: bodyClubId, staff_id, for_date, opening_cash_cents, notes } = req.body ?? {};
+  const clubId = typeof bodyClubId === 'string' ? bodyClubId.trim() : '';
+  const staffId = typeof staff_id === 'string' ? staff_id.trim() : '';
+  if (!clubId || !staffId) {
+    res.status(400).json({ ok: false, error: 'club_id y staff_id son obligatorios' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+
+  const openingCashCents = Math.trunc(Number(opening_cash_cents));
+  if (!Number.isFinite(openingCashCents) || openingCashCents < 0) {
+    res.status(400).json({ ok: false, error: 'opening_cash_cents debe ser un entero >= 0' });
+    return;
+  }
+  const forDateStr =
+    typeof for_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(for_date.trim())
+      ? for_date.trim()
+      : new Date().toISOString().slice(0, 10);
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: staffRow, error: staffErr } = await supabase
+      .from('club_staff')
+      .select('id, club_id, name, status')
+      .eq('id', staffId)
+      .maybeSingle();
+
+    if (staffErr) {
+      res.status(500).json({ ok: false, error: staffErr.message });
+      return;
+    }
+    if (!staffRow || staffRow.club_id !== clubId) {
+      res.status(403).json({ ok: false, error: 'El empleado no pertenece a este club' });
+      return;
+    }
+    if (staffRow.status !== 'active') {
+      res.status(400).json({ ok: false, error: 'El empleado no está activo' });
+      return;
+    }
+
+    const { data: existing, error: existingErr } = await supabase
+      .from('club_cash_openings')
+      .select('id')
+      .eq('club_id', clubId)
+      .eq('for_date', forDateStr)
+      .limit(1)
+      .maybeSingle();
+    if (existingErr && !(existingErr.message.includes('relation') && existingErr.message.includes('does not exist'))) {
+      res.status(500).json({ ok: false, error: existingErr.message });
+      return;
+    }
+    if (existing?.id) {
+      res.status(409).json({ ok: false, error: 'Ya existe una apertura de caja para este día' });
+      return;
+    }
+
+    const employeeName = String(staffRow.name ?? '').trim() || 'Empleado';
+    const { data: inserted, error: insErr } = await supabase
+      .from('club_cash_openings')
+      .insert({
+        club_id: clubId,
+        staff_id: staffId,
+        employee_name: employeeName,
+        opened_by_name: employeeName,
+        for_date: forDateStr,
+        opening_cash_cents: openingCashCents,
+        notes: typeof notes === 'string' ? notes.trim().slice(0, 2000) : null,
+      })
+      .select('id, club_id, staff_id, employee_name, opened_by_name, opened_at, for_date, opening_cash_cents, notes')
+      .maybeSingle();
+
+    if (insErr) {
+      if (insErr.message.includes('relation') && insErr.message.includes('does not exist')) {
+        res.status(503).json({
+          ok: false,
+          error: 'Tabla club_cash_openings no existe. Aplica la migración 013 en base de datos.',
+        });
+        return;
+      }
+      console.error('[payments/cash-opening/records POST]', insErr);
+      res.status(500).json({ ok: false, error: insErr.message });
+      return;
+    }
+
+    const record = inserted
+      ? {
+          ...(inserted as Record<string, unknown>),
+          employee_name:
+            (inserted as Record<string, unknown>).employee_name ??
+            (inserted as Record<string, unknown>).opened_by_name ??
+            null,
+        }
+      : null;
+    res.status(201).json({ ok: true, record });
+  } catch (err) {
+    console.error('[payments/cash-opening/records POST]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
 }
 
 /**
@@ -1200,6 +1539,11 @@ function cashClosingStatusFromDiffCents(diffCents: number): CashClosingStatus {
  *         name: club_id
  *         required: true
  *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: date
+ *         required: false
+ *         schema: { type: string, example: "2026-04-14" }
+ *         description: Filtra por día operativo (`for_date`)
  *       - in: query
  *         name: limit
  *         schema: { type: integer, default: 50, maximum: 200 }
@@ -1237,10 +1581,15 @@ export async function listCashClosingRecordsHandler(req: Request, res: Response)
     return;
   }
   const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+  const dateStr = String(req.query.date ?? '').trim();
+  if (dateStr && !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    res.status(400).json({ ok: false, error: 'date inválida. Usa YYYY-MM-DD.' });
+    return;
+  }
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from('club_cash_closings')
       .select(
         'id, club_id, staff_id, employee_name, closed_at, for_date, real_cash_cents, real_card_cents, system_cash_cents, system_card_cents, difference_cents, observations, status'
@@ -1248,6 +1597,8 @@ export async function listCashClosingRecordsHandler(req: Request, res: Response)
       .eq('club_id', clubId)
       .order('closed_at', { ascending: false })
       .limit(limit);
+    if (dateStr) query = query.eq('for_date', dateStr);
+    const { data, error } = await query;
 
     if (error) {
       if (error.message.includes('relation') && error.message.includes('does not exist')) {

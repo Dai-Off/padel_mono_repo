@@ -67,5 +67,6 @@ export interface Reservation {
     flatRateAgreementId?: string;    // flat_rate bookings
     pozoEventId?: string;            // pozo bookings
     parentBookingId?: string;        // fixed_recurring instances
+    tournamentId?: string;
     notes?: string;
 }
