@@ -26,6 +26,7 @@ import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
+import { DailyLessonScreen } from './DailyLessonScreen';
 
 export function MainApp() {
   const sidebar = useSidebar(false);
@@ -34,6 +35,7 @@ export function MainApp() {
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [showTusPagos, setShowTusPagos] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
+  const [showDailyLesson, setShowDailyLesson] = useState(false);
   const [crearPartidoFlow, setCrearPartidoFlow] = useState<{
     open: boolean;
     organizerId: string | null;
@@ -45,6 +47,14 @@ export function MainApp() {
   const showPartidoDetail = selectedPartido != null;
 
   const renderContent = () => {
+    if (showDailyLesson) {
+      return (
+        <DailyLessonScreen
+          onBack={() => setShowDailyLesson(false)}
+          onComplete={() => setShowDailyLesson(false)}
+        />
+      );
+    }
     if (crearPartidoFlow.open) {
       const bumpPartidos = () => setPartidosRefreshNonce((n) => n + 1);
       const closeFlow = () => {
@@ -114,6 +124,7 @@ export function MainApp() {
           <HomeScreen
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onPartidoPress={(p) => setSelectedPartido(p)}
+            onDailyLessonPress={() => setShowDailyLesson(true)}
           />
         );
       case 'pistas':
@@ -148,14 +159,16 @@ export function MainApp() {
     !showTransacciones &&
     !showPartidoDetail &&
     !showClubDetail &&
-    !crearPartidoFlow.open;
+    !crearPartidoFlow.open &&
+    !showDailyLesson;
 
   const customHeader =
     bookingSuccessData != null ||
     showTusPagos ||
     showTransacciones ||
     showPartidoDetail ||
-    crearPartidoFlow.open
+    crearPartidoFlow.open ||
+    showDailyLesson
       ? undefined
       : activeTab === 'tienda'
           ? <BackHeader title="Tienda" tone="dark" onBack={() => setActiveTab('inicio')} />
@@ -176,15 +189,17 @@ export function MainApp() {
   const layoutBackgroundColor =
     bookingSuccessData != null
       ? '#000000'
-      : showPartidoDetail
+      : showDailyLesson
         ? '#0F0F0F'
-        : crearPartidoFlow.open
+        : showPartidoDetail
           ? '#0F0F0F'
-          : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
-            ? '#000000'
-            : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
-              ? '#0F0F0F'
-              : '#ffffff';
+          : crearPartidoFlow.open
+            ? '#0F0F0F'
+            : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
+              ? '#000000'
+              : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
+                ? '#0F0F0F'
+                : '#ffffff';
 
   return (
     <View style={styles.container}>
@@ -200,6 +215,7 @@ export function MainApp() {
               showTusPagos ||
               showTransacciones ||
               crearPartidoFlow.open ||
+              showDailyLesson ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos')
             }
@@ -212,7 +228,8 @@ export function MainApp() {
             !showPartidoDetail &&
             !showTusPagos &&
             !showTransacciones &&
-            !crearPartidoFlow.open && (
+            !crearPartidoFlow.open &&
+            !showDailyLesson && (
             <View style={styles.bottomBar}>
               <BottomNavbar activeTab={activeTab} onTabChange={setActiveTab} />
             </View>

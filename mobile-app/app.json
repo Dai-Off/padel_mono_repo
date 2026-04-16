@@ -5,6 +5,7 @@
     "scheme": "padelapp",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "../wechat/images/wematch-logo.png",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
@@ -18,7 +19,8 @@
           "enableGooglePay": false
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-video"
     ],
     "ios": {
       "supportsTablet": true,
@@ -31,6 +33,10 @@
       }
     },
     "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "../wechat/images/wematch-logo.png",
+        "backgroundColor": "#0F0F0F"
+      },
       "softwareKeyboardLayoutMode": "pan",
       "package": "com.anonymous.padelapp",
       "runtimeVersion": "1.0.0"
