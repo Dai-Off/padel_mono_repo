@@ -41,7 +41,7 @@ const EDGE_GLOW = ['transparent', 'rgba(255,255,255,0.06)'] as const;
 const BAR_TOP_RADIUS = 24;
 
 type BottomNavbarProps = {
-  activeTab: MainTabId;
+  activeTab: MainTabId | null;
   onTabChange: (tab: MainTabId) => void;
 };
 

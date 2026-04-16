@@ -28,6 +28,7 @@ import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
+import { ProfileScreen } from './ProfileScreen';
 
 export function MainApp() {
   const sidebar = useSidebar(false);
@@ -42,6 +43,7 @@ export function MainApp() {
   }>({ open: false, organizerId: null });
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
@@ -65,6 +67,14 @@ export function MainApp() {
             bumpPartidos();
             setBookingSuccessData(data);
           }}
+        />
+      );
+    }
+    if (showProfile) {
+      return (
+        <ProfileScreen
+          onBack={() => setShowProfile(false)}
+          onMenuPress={sidebar.toggle}
         />
       );
     }
@@ -148,6 +158,7 @@ export function MainApp() {
     bookingSuccessData == null &&
     !showTusPagos &&
     !showTransacciones &&
+    !showProfile &&
     !showPartidoDetail &&
     !showClubDetail &&
     !crearPartidoFlow.open;
@@ -156,6 +167,7 @@ export function MainApp() {
     bookingSuccessData != null ||
     showTusPagos ||
     showTransacciones ||
+    showProfile ||
     showPartidoDetail ||
     crearPartidoFlow.open
       ? undefined
@@ -223,18 +235,30 @@ export function MainApp() {
           : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
             ? '#000000'
             : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
-              ? '#0F0F0F'
-              : '#ffffff';
+                ? '#0F0F0F'
+                : showProfile
+                  ? '#0F0F0F'
+                  : '#ffffff';
+
+  const handleTabChange = (tab: MainTabId) => {
+    setActiveTab(tab);
+    setShowProfile(false);
+  };
 
   return (
     <View style={styles.container}>
-      <SidebarProvider close={sidebar.close} onNavigateToTusPagos={() => setShowTusPagos(true)}>
+      <SidebarProvider
+        close={sidebar.close}
+        onNavigateToTusPagos={() => setShowTusPagos(true)}
+        onProfilePress={() => setShowProfile(true)}
+      >
         <View style={styles.mainColumn}>
           <ScreenLayout
             sidebar={sidebar}
             customHeader={customHeader}
             hideHeader={
               bookingSuccessData != null ||
+                showProfile ||
               showClubDetail ||
               showPartidoDetail ||
               showTusPagos ||
@@ -254,7 +278,7 @@ export function MainApp() {
             !showTransacciones &&
             !crearPartidoFlow.open && (
             <View style={styles.bottomBar}>
-              <BottomNavbar activeTab={activeTab} onTabChange={setActiveTab} />
+              <BottomNavbar activeTab={showProfile ? null : activeTab} onTabChange={handleTabChange} />
             </View>
           )}
         </View>
