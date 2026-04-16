@@ -18,6 +18,7 @@ import { reservationTypePricesService } from '../../../services/reservationTypeP
 import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { calendarLocale } from '../i18n/calendarLocale';
+import { TournamentGridBookingEditor } from './TournamentGridBookingEditor';
 
 interface ReservationModalProps {
     clubId?: string | null;
@@ -32,6 +33,8 @@ interface ReservationModalProps {
     onMoveToHidden?: (bookingId: string) => Promise<void>;
     onMoveToVisible?: (bookingId: string) => Promise<void>;
     isOnHiddenCourt?: boolean;
+    onGridRefresh?: () => void;
+    isLoadingBookingData?: boolean;
 }
 
 // Helper: Player Search Component
@@ -418,11 +421,17 @@ const PaymentSlot: React.FC<{
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData,
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
     const { t, i18n } = useGrillaTranslation();
     const isEditMode = !!editingBookingData;
+    const tournamentIdFromBooking = useMemo(() => {
+        const raw = editingBookingData?.tournament_booking_links;
+        const links = Array.isArray(raw) ? raw : raw ? [raw] : [];
+        const tid = links[0]?.tournament_id;
+        return tid ? String(tid) : null;
+    }, [editingBookingData]);
 
     // Form States
     const [organizer, setOrganizer] = useState<Player | null>(null);
@@ -622,7 +631,59 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             : 'pending_payment';
     // ─────────────────────────────────────────────────────────────────────────
 
-    if (!isOpen || !reservation) return null;
+    if (!isOpen) return null;
+
+    if (isLoadingBookingData && reservation && !reservation.id.startsWith('new-')) {
+        return (
+            <div style={vvStyle} className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
+                <div className="absolute inset-0" onClick={onClose} />
+                <div className="relative flex flex-col w-full h-[90vh] bg-gray-50 rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[520px] sm:rounded-2xl overflow-hidden">
+                    <div className="flex items-start justify-between px-6 py-4 bg-white border-b border-gray-100 shrink-0">
+                        <h2 className="text-xl font-bold text-gray-900">{t('reservation.modalTitleEdit')}</h2>
+                        <button
+                            onClick={onClose}
+                            className="p-2 text-gray-400 transition-colors bg-gray-100 rounded-full hover:bg-gray-200 hover:text-gray-600 flex-shrink-0"
+                        >
+                            <X size={20} />
+                        </button>
+                    </div>
+                    <div className="flex-1 flex items-center justify-center p-8">
+                        <div className="flex items-center gap-2 text-sm font-medium text-gray-600">
+                            <div className="w-4 h-4 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
+                            Cargando datos de la reserva...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    const isTournamentGridEdit =
+        isEditMode &&
+        editingBookingData?.reservation_type === 'tournament' &&
+        tournamentIdFromBooking;
+
+    if (isTournamentGridEdit && editingBookingData && tournamentIdFromBooking) {
+        return (
+            <TournamentGridBookingEditor
+                isOpen={isOpen}
+                onClose={onClose}
+                tournamentId={tournamentIdFromBooking}
+                bookingId={editingBookingData.id}
+                courtDisplayName={
+                    editingBookingData.courtName || reservation?.courtName || reservation?.courtId || ''
+                }
+                editingBookingData={editingBookingData}
+                onGridRefresh={onGridRefresh}
+                onMoveToHidden={onMoveToHidden}
+                onMoveToVisible={onMoveToVisible}
+                isOnHiddenCourt={isOnHiddenCourt}
+                vvStyle={vvStyle}
+            />
+        );
+    }
+
+    if (!reservation) return null;
 
     // Construye el array de participantes con datos de pago
     const buildParticipants = () => {

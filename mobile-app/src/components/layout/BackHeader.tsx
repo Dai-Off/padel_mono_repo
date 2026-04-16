@@ -53,7 +53,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   containerDark: {
-    backgroundColor: '#000000',
+    backgroundColor: '#0F0F0F',
   },
   backButton: {
     width: 40,
@@ -83,8 +83,12 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   rightSlot: {
-    width: 40,
-    alignItems: 'flex-end',
+    flexShrink: 0,
+    minWidth: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
   },
   placeholder: {
     width: 40,
