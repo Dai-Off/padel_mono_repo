@@ -1,0 +1,7 @@
+@import './styles/theme.wxss';
+
+page {
+  background-color: var(--auth-bg);
+  color: var(--auth-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, sans-serif;
+}

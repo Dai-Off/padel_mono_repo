@@ -1,0 +1,4 @@
+<view class="launch-root">
+  <view class="launch-spinner" />
+  <text class="launch-text">WeMatch</text>
+</view>

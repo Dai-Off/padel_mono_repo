@@ -1,0 +1,55 @@
+@import '../../styles/auth-common.wxss';
+
+.auth-scroll {
+  height: 100vh;
+  background-color: var(--auth-bg);
+}
+
+.confirm-page {
+  min-height: 100vh;
+  background-color: var(--auth-bg);
+  padding: var(--space-xl);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.confirm-icon-wrap {
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: 80rpx;
+  background-color: rgba(241, 143, 52, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-lg);
+}
+
+.confirm-icon {
+  font-size: 72rpx;
+}
+
+.confirm-title {
+  font-size: var(--font-xxl);
+  font-weight: 700;
+  color: var(--auth-text);
+  margin-bottom: var(--space-md);
+  text-align: center;
+}
+
+.confirm-text {
+  font-size: var(--font-base);
+  color: var(--auth-text-muted);
+  line-height: 48rpx;
+  margin-bottom: var(--space-sm);
+  text-align: center;
+}
+
+.confirm-hint {
+  font-size: var(--font-sm);
+  color: var(--auth-text-secondary);
+  margin-bottom: var(--space-xl);
+  text-align: center;
+}
