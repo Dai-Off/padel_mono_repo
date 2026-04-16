@@ -1,0 +1,45 @@
+<view class="poc-card" bindtap="onTap">
+  <view class="poc-card-border" />
+  <view class="poc-inner">
+    <view class="poc-row">
+      <view class="poc-thumb-wrap">
+        <image class="poc-thumb" src="{{item.cardImage}}" mode="aspectFill" />
+        <view class="poc-thumb-scrim" />
+        <view class="poc-price-tag">
+          <text class="poc-price-main">{{item.price}}</text>
+          <text class="poc-price-sub">/{{item.durationLabel}}</text>
+        </view>
+      </view>
+      <view class="poc-body">
+        <text class="poc-title">{{item.venue}}</text>
+        <view class="poc-time-row">
+          <text class="poc-time-ico">⌚</text>
+          <text class="poc-date-txt">{{item.datePart}}</text>
+          <text wx:if="{{item.timePart}}" class="poc-dot">•</text>
+          <text wx:if="{{item.timePart}}" class="poc-time-txt">{{item.timePart}}</text>
+        </view>
+        <view class="poc-badges-row">
+          <view class="poc-badge">
+            <text class="poc-badge-txt">{{item.typeLabel}}</text>
+          </view>
+          <view class="poc-badge">
+            <text class="poc-badge-txt">📊 {{item.levelRangeDisplay || item.levelRange}}</text>
+          </view>
+        </view>
+        <scroll-view class="poc-slots-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+          <view class="poc-slots-row">
+            <block wx:for="{{item.players}}" wx:for-item="pl" wx:key="index">
+              <view wx:if="{{pl.isFree}}" class="poc-slot-free">
+                <text class="poc-slot-plus">+</text>
+              </view>
+              <view wx:else class="poc-slot-fill">
+                <text class="poc-slot-ini">{{pl.initial}}</text>
+              </view>
+            </block>
+            <text wx:if="{{item.libres > 0}}" class="poc-libres">{{item.libres}} libres</text>
+          </view>
+        </scroll-view>
+      </view>
+    </view>
+  </view>
+</view>

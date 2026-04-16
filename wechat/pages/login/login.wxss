@@ -1,0 +1,6 @@
+@import '../../styles/auth-common.wxss';
+
+.auth-scroll {
+  height: 100vh;
+  background-color: var(--auth-bg);
+}

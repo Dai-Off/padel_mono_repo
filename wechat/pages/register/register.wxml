@@ -1,0 +1,117 @@
+<scroll-view wx:if="{{!showConfirm}}" class="auth-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+  <view class="auth-page">
+    <view class="auth-brand-section">
+      <image class="auth-logo" src="/images/wematch-logo.png" mode="aspectFit" />
+    </view>
+
+    <view wx:if="{{error}}" class="error-banner">
+      <text class="error-dot">!</text>
+      <text class="error-banner__text">{{error}}</text>
+    </view>
+
+    <view class="auth-input-wrap-outer">
+      <text class="auth-input-label">Nombre (opcional)</text>
+      <view class="auth-input-shell">
+        <text class="auth-input-icon">👤</text>
+        <input
+          class="auth-input-field"
+          type="text"
+          placeholder="Tu nombre"
+          placeholder-class="auth-input-placeholder"
+          value="{{name}}"
+          bindinput="onNameInput"
+          disabled="{{loading}}"
+        />
+      </view>
+    </view>
+
+    <view class="auth-input-wrap-outer">
+      <text class="auth-input-label">Correo Electrónico</text>
+      <view class="auth-input-shell">
+        <text class="auth-input-icon">✉</text>
+        <input
+          class="auth-input-field"
+          type="text"
+          placeholder="tu@email.com"
+          placeholder-class="auth-input-placeholder"
+          value="{{email}}"
+          bindinput="onEmailInput"
+          disabled="{{loading}}"
+        />
+      </view>
+    </view>
+
+    <view class="auth-input-wrap-outer">
+      <text class="auth-input-label">Contraseña</text>
+      <view class="auth-input-shell">
+        <text class="auth-input-icon">🔒</text>
+        <input
+          class="auth-input-field"
+          password="{{true}}"
+          placeholder="Mín. 6 caracteres"
+          placeholder-class="auth-input-placeholder"
+          value="{{password}}"
+          bindinput="onPasswordInput"
+          disabled="{{loading}}"
+        />
+      </view>
+    </view>
+
+    <view class="auth-input-wrap-outer">
+      <text class="auth-input-label">Confirmar contraseña</text>
+      <view class="auth-input-shell">
+        <text class="auth-input-icon">🔒</text>
+        <input
+          class="auth-input-field"
+          password="{{true}}"
+          placeholder="••••••••"
+          placeholder-class="auth-input-placeholder"
+          value="{{confirmPassword}}"
+          bindinput="onConfirmInput"
+          disabled="{{loading}}"
+        />
+      </view>
+    </view>
+
+    <button
+      class="auth-button {{loading ? 'auth-button--disabled' : ''}}"
+      bindtap="onSubmit"
+      loading="{{loading}}"
+      disabled="{{loading}}"
+    >
+      <view wx:if="{{!loading}}" class="auth-button-inner">
+        <view class="auth-button-content">
+          <text class="auth-button-text">Registrarse</text>
+          <text class="auth-button-icon">+</text>
+        </view>
+      </view>
+    </button>
+
+    <view class="auth-form-link-wrap">
+      <text class="auth-form-link-prompt">¿Ya tienes cuenta?</text>
+      <text class="auth-form-link-action" bindtap="onGoToLogin">Inicia sesión</text>
+    </view>
+
+    <view class="auth-footer-wrap">
+      <text class="auth-footer-text">© {{year}} WeMatch. Todos los derechos reservados.</text>
+    </view>
+  </view>
+</scroll-view>
+
+<view wx:if="{{showConfirm}}" class="confirm-page">
+  <view class="confirm-icon-wrap">
+    <text class="confirm-icon">✉</text>
+  </view>
+  <text class="confirm-title">¡Revisa tu email!</text>
+  <text class="confirm-text">
+    Te hemos enviado un enlace para confirmar tu cuenta. Haz clic en el enlace del correo y vuelve aquí para iniciar sesión.
+  </text>
+  <text class="confirm-hint">¿No lo ves? Revisa la carpeta de spam.</text>
+  <button class="auth-button" bindtap="onConfirmGoLogin">
+    <view class="auth-button-inner">
+      <view class="auth-button-content">
+        <text class="auth-button-text">Ir a iniciar sesión</text>
+      </view>
+    </view>
+  </button>
+</view>

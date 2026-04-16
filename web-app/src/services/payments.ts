@@ -34,7 +34,21 @@ export type CashClosingExpected = {
   systemCardTotal_cents: number;
   systemCashTotal_eur: number;
   systemCardTotal_eur: number;
+  openingCashTotal_cents?: number;
+  openingCashTotal_eur?: number;
+  opening?: CashOpeningSavedRecord | null;
   bookings: CashClosingBookingExpected[];
+};
+
+export type CashOpeningSavedRecord = {
+  id: string;
+  club_id: string;
+  staff_id: string | null;
+  employee_name: string;
+  opened_at: string;
+  for_date: string;
+  opening_cash_cents: number;
+  notes: string | null;
 };
 
 export type CashClosingSavedRecord = {
@@ -68,15 +82,37 @@ export const paymentsService = {
     return res.transactions ?? [];
   },
 
-  getCashClosingExpected: async (clubId: string, date?: string): Promise<CashClosingExpected> => {
+  getCashClosingExpected: async (clubId: string, date?: string, timezone?: string): Promise<CashClosingExpected> => {
     const q = new URLSearchParams({ club_id: clubId });
     if (date) q.set('date', date);
+    if (timezone) q.set('timezone', timezone);
     const res = await apiFetchWithAuth<CashClosingExpected>(`/payments/cash-closing/expected?${q}`);
     return res;
   },
 
-  listCashClosingRecords: async (clubId: string, limit = 50): Promise<CashClosingSavedRecord[]> => {
+  getCashOpeningForDay: async (clubId: string, date?: string): Promise<{ ok: true; date: string; opening: CashOpeningSavedRecord | null }> => {
+    const q = new URLSearchParams({ club_id: clubId });
+    if (date) q.set('date', date);
+    return apiFetchWithAuth<{ ok: true; date: string; opening: CashOpeningSavedRecord | null }>(`/payments/cash-opening/today?${q}`);
+  },
+
+  createCashOpeningRecord: async (body: {
+    club_id: string;
+    staff_id: string;
+    for_date?: string;
+    opening_cash_cents: number;
+    notes?: string;
+  }): Promise<CashOpeningSavedRecord> => {
+    const res = await apiFetchWithAuth<{ ok: true; record: CashOpeningSavedRecord }>(
+      '/payments/cash-opening/records',
+      { method: 'POST', body: JSON.stringify(body) }
+    );
+    return res.record;
+  },
+
+  listCashClosingRecords: async (clubId: string, limit = 50, date?: string): Promise<CashClosingSavedRecord[]> => {
     const q = new URLSearchParams({ club_id: clubId, limit: String(limit) });
+    if (date) q.set('date', date);
     const res = await apiFetchWithAuth<{ ok: true; records: CashClosingSavedRecord[] }>(
       `/payments/cash-closing/records?${q}`
     );

@@ -1,0 +1,77 @@
+<view wx:if="{{loading}}" class="cd-loading">
+  <text class="cd-loading-text">Cargando…</text>
+</view>
+
+<view wx:else class="cd-root">
+  <view class="cd-hero-wrap">
+    <image wx:if="{{heroImage}}" class="cd-hero" src="{{heroImage}}" mode="aspectFill" />
+    <view wx:else class="cd-hero cd-hero--ph" />
+    <view class="cd-hero-scrim" />
+    <text class="cd-hero-title">{{clubName}}</text>
+  </view>
+
+  <view class="cd-tabs">
+    <button
+      class="cd-tab {{activeTab === 'reservar' ? 'cd-tab--on' : ''}}"
+      data-tab="reservar"
+      bindtap="onTabTap"
+    >
+      Reservar
+    </button>
+    <button
+      class="cd-tab {{activeTab === 'partidos' ? 'cd-tab--on' : ''}}"
+      data-tab="partidos"
+      bindtap="onTabTap"
+    >
+      Partidos abiertos
+    </button>
+  </view>
+
+  <view wx:if="{{activeTab === 'reservar'}}" class="cd-body">
+    <text class="cd-section-title">Elegir pista y horario</text>
+    <text wx:if="{{clubAddress}}" class="cd-address">{{clubAddress}}</text>
+
+    <view class="cd-court" wx:for="{{courts}}" wx:key="id">
+      <view class="cd-court-head">
+        <text class="cd-court-name">{{item.name}}</text>
+        <view class="cd-tags">
+          <text class="cd-tag">{{item.indoor ? 'Indoor' : 'Exterior'}}</text>
+          <text class="cd-tag">{{item.glass_type === 'panoramic' ? 'Cristal' : 'Muro'}}</text>
+        </view>
+      </view>
+      <view wx:if="{{item.timeSlots.length === 0}}" class="cd-no-slots">Sin huecos para esta fecha</view>
+      <scroll-view wx:else class="cd-slots-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+        <view class="cd-slots-inner">
+          <button
+            class="cd-slot-btn"
+            wx:for="{{item.timeSlots}}"
+            wx:for-item="slot"
+            wx:key="*this"
+            hover-class="cd-slot-btn--hover"
+            data-court-id="{{item.id}}"
+            data-court-name="{{item.name}}"
+            data-slot="{{slot}}"
+            data-price="{{item.minPriceFormatted}}"
+            bindtap="onSlotTap"
+          >
+            {{slot}}
+          </button>
+        </view>
+      </scroll-view>
+    </view>
+  </view>
+
+  <scroll-view wx:else class="cd-partidos-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="cd-body cd-body--flat">
+      <text class="cd-section-title">Partidos en este club</text>
+      <text class="cd-address">Fecha de búsqueda: {{dateStr}}</text>
+      <view wx:if="{{matchesLoading}}" class="cd-matches-hint">Cargando…</view>
+      <view wx:elif="{{openMatchCards.length === 0}}" class="cd-no-slots">No hay partidos abiertos</view>
+      <view wx:else class="cd-match-list">
+        <view class="cd-match-gap" wx:for="{{openMatchCards}}" wx:key="id">
+          <partido-open-card item="{{item}}" bind:cardtap="onPartidoCardTap" />
+        </view>
+      </view>
+    </view>
+  </scroll-view>
+</view>

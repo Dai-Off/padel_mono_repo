@@ -1,0 +1,270 @@
+@import '../../styles/theme.wxss';
+
+
+
+.bk-root {
+
+  min-height: 100vh;
+
+  background-color: #000000;
+
+  box-sizing: border-box;
+
+}
+
+
+
+.bk-empty {
+
+  padding: 120rpx 48rpx 48rpx;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+
+}
+
+
+
+.bk-empty-title {
+
+  display: block;
+
+  font-size: 34rpx;
+
+  font-weight: 700;
+
+  color: #ffffff;
+
+  margin-bottom: 12rpx;
+
+  text-align: center;
+
+}
+
+
+
+.bk-empty-sub {
+
+  display: block;
+
+  font-size: 26rpx;
+
+  color: #6b7280;
+
+  text-align: center;
+
+  margin-bottom: 40rpx;
+
+  line-height: 36rpx;
+
+  padding: 0 24rpx;
+
+}
+
+
+
+.bk-btn {
+
+  padding: 0 48rpx;
+
+  height: 88rpx;
+
+  line-height: 88rpx;
+
+  border-radius: 32rpx;
+
+  background-color: #f18f34;
+
+  color: #ffffff;
+
+  font-size: 28rpx;
+
+  font-weight: 700;
+
+  border: none;
+
+}
+
+
+
+.bk-btn::after {
+
+  border: none;
+
+}
+
+
+
+.bk-scroll {
+
+  height: 100vh;
+
+  box-sizing: border-box;
+
+}
+
+
+
+.bk-list-pad {
+
+  padding: 32rpx 32rpx 48rpx;
+
+  box-sizing: border-box;
+
+}
+
+
+
+.bk-item {
+
+  padding: 32rpx 28rpx;
+
+  border-radius: 24rpx;
+
+  background-color: rgba(255, 255, 255, 0.05);
+
+  border-width: 1px;
+
+  border-style: solid;
+
+  border-color: rgba(255, 255, 255, 0.08);
+
+  margin-bottom: 24rpx;
+
+  box-sizing: border-box;
+
+}
+
+
+
+.bk-item-head {
+
+  display: flex;
+
+  flex-direction: row;
+
+  align-items: flex-start;
+
+  justify-content: space-between;
+
+  margin-bottom: 20rpx;
+
+  gap: 24rpx;
+
+}
+
+
+
+.bk-item-title {
+
+  flex: 1;
+
+  min-width: 0;
+
+  font-size: 30rpx;
+
+  font-weight: 700;
+
+  color: #ffffff;
+
+  line-height: 40rpx;
+
+}
+
+
+
+.bk-item-date {
+
+  flex-shrink: 0;
+
+  font-size: 24rpx;
+
+  font-weight: 600;
+
+  color: #6b7280;
+
+  line-height: 40rpx;
+
+  padding-top: 2rpx;
+
+}
+
+
+
+.bk-item-meta {
+
+  display: flex;
+
+  flex-direction: row;
+
+  flex-wrap: wrap;
+
+  align-items: center;
+
+  row-gap: 16rpx;
+
+  column-gap: 16rpx;
+
+}
+
+
+
+.bk-meta-time,
+
+.bk-meta-price {
+
+  font-size: 26rpx;
+
+  color: #9ca3af;
+
+  line-height: 36rpx;
+
+}
+
+
+
+.bk-meta-sep {
+
+  font-size: 26rpx;
+
+  color: #4b5563;
+
+  line-height: 36rpx;
+
+}
+
+
+
+.bk-badge {
+
+  padding: 8rpx 20rpx;
+
+  border-radius: 999rpx;
+
+  background-color: rgba(241, 143, 52, 0.15);
+
+  border-width: 1px;
+
+  border-style: solid;
+
+  border-color: rgba(241, 143, 52, 0.35);
+
+}
+
+
+
+.bk-badge-txt {
+
+  font-size: 22rpx;
+
+  color: #f18f34;
+
+  font-weight: 600;
+
+  line-height: 32rpx;
+
+}
+

@@ -1,0 +1,52 @@
+<view class="bk-root">
+
+  <view wx:if="{{list.length === 0}}" class="bk-empty">
+
+    <text class="bk-empty-title">Sin reservas</text>
+
+    <text class="bk-empty-sub">Cuando completes un pago simulado desde una pista, aparecerán aquí.</text>
+
+    <button class="bk-btn" bindtap="onGoSearch">Buscar pistas</button>
+
+  </view>
+
+
+
+  <scroll-view wx:else class="bk-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+
+    <view class="bk-list-pad">
+
+      <view class="bk-item" wx:for="{{list}}" wx:key="id">
+
+        <view class="bk-item-head">
+
+          <text class="bk-item-title">{{item.clubName}} · {{item.courtName}}</text>
+
+          <text class="bk-item-date">{{item.dateDisplay}}</text>
+
+        </view>
+
+        <view class="bk-item-meta">
+
+          <text class="bk-meta-time">{{item.slot}}</text>
+
+          <text class="bk-meta-sep">·</text>
+
+          <text class="bk-meta-price">{{item.priceText}}</text>
+
+          <view class="bk-badge">
+
+            <text class="bk-badge-txt">{{item.statusLabel}}</text>
+
+          </view>
+
+        </view>
+
+      </view>
+
+    </view>
+
+  </scroll-view>
+
+</view>
+

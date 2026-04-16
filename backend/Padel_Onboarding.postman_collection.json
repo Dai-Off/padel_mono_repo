@@ -1,0 +1,271 @@
+{
+	"info": {
+		"_postman_id": "8430adde-3b04-42c9-8dba-c13893a9f5ed",
+		"name": "Padel App - Onboarding CRUD",
+		"description": "Colección para probar el nuevo sistema de cuestionario inicial y la gestión administrativa de preguntas.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Administración (CRUD)",
+			"item": [
+				{
+					"name": "Listar Preguntas",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/onboarding-questions?phase=1&is_active=all",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"onboarding-questions"
+							],
+							"query": [
+								{
+									"key": "phase",
+									"value": "1"
+								},
+								{
+									"key": "is_active",
+									"value": "all",
+									"description": "Muestra activas e inactivas"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Crear Pregunta (Fase 2)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{adminToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"question_key\": \"p2_beg_test_01\",\n    \"phase\": 2,\n    \"pool\": \"beginner\",\n    \"text\": \"¿Qué es un globo en pádel?\",\n    \"type\": \"single\",\n    \"options\": {\n        \"options\": [\"Un golpe alto\", \"Un golpe bajo\", \"Un tipo de raqueta\"],\n        \"correct_index\": 0\n    },\n    \"display_order\": 1\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/onboarding-questions",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"onboarding-questions"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Editar Pregunta",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{adminToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"text\": \"¿Qué es un GLOBO en pádel? (Editado)\",\n    \"is_active\": true\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/onboarding-questions/:id",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"onboarding-questions",
+								":id"
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "ID_DE_LA_PREGUNTA"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Desactivar Pregunta (Soft Delete)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{adminToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/onboarding-questions/:id",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"onboarding-questions",
+								":id"
+							],
+							"variable": [
+								{
+									"key": "id",
+									"value": "ID_DE_LA_PREGUNTA"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Flujo Jugador (Onboarding)",
+			"item": [
+				{
+					"name": "Obtener Siguiente Pregunta",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{playerToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/players/onboarding/next?answers=[]",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"players",
+								"onboarding",
+								"next"
+							],
+							"query": [
+								{
+									"key": "answers",
+									"value": "[]",
+									"description": "Array de respuestas parciales en JSON stringified"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Completar Cuestionario (Final)",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{playerToken}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"answers\": [\n        {\"question_key\": \"p1\", \"value\": 3},\n        {\"question_key\": \"p2\", \"value\": \"C\"},\n        {\"question_key\": \"p3\", \"value\": \"Entre 2 y 5 años\"},\n        {\"question_key\": \"p4\", \"value\": \"3-4 veces por semana\"},\n        {\"question_key\": \"p5\", \"value\": \"Entrenamiento regular en algún momento\"},\n        {\"question_key\": \"p6\", \"value\": [\"Torneos competitivos de club o ranking\"]},\n        {\"question_key\": \"p7\", \"value\": \"no\"}\n    ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/players/onboarding",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"players",
+								"onboarding"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "adminToken",
+			"value": "PONER_AQUÍ_TOKEN_ADMIN",
+			"type": "string"
+		},
+		{
+			"key": "playerToken",
+			"value": "PONER_AQUÍ_TOKEN_JUGADOR",
+			"type": "string"
+		}
+	]
+}

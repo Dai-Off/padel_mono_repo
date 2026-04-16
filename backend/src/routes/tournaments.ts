@@ -257,6 +257,56 @@ async function cancelLinkedTournamentBookings(tournamentId: string): Promise<{ e
   return {};
 }
 
+/** Actualiza reservas existentes si el set de pistas coincide; evita cancelar/recrear en cada PUT. */
+async function alignTournamentBookings(params: {
+  tournamentId: string;
+  courtIds: string[];
+  startAt: string;
+  endAt: string;
+  organizerPlayerId: string;
+  /** undefined = no tocar notes en bookings */
+  notes?: string | null;
+}): Promise<void> {
+  const supabase = getSupabaseServiceRoleClient();
+  const { data: links, error: lErr } = await supabase
+    .from('tournament_booking_links')
+    .select('booking_id, court_id')
+    .eq('tournament_id', params.tournamentId);
+  if (lErr) throw new Error(lErr.message);
+  const existing = links ?? [];
+
+  const targetCourtSet = new Set(params.courtIds.map(String));
+  const linkedCourtSet = new Set(existing.map((r: { court_id: string }) => String(r.court_id)));
+  const sameCourts =
+    targetCourtSet.size === linkedCourtSet.size &&
+    targetCourtSet.size > 0 &&
+    [...targetCourtSet].every((c) => linkedCourtSet.has(c));
+
+  if (existing.length === 0 || !sameCourts) {
+    await syncTournamentBookings({
+      tournamentId: params.tournamentId,
+      courtIds: params.courtIds,
+      startAt: params.startAt,
+      endAt: params.endAt,
+      organizerPlayerId: params.organizerPlayerId,
+      notes: params.notes !== undefined ? params.notes : null,
+    });
+    return;
+  }
+
+  for (const row of existing) {
+    const patch: Record<string, unknown> = {
+      start_at: params.startAt,
+      end_at: params.endAt,
+      organizer_player_id: params.organizerPlayerId,
+      updated_at: new Date().toISOString(),
+    };
+    if (params.notes !== undefined) patch.notes = params.notes;
+    const { error: uErr } = await supabase.from('bookings').update(patch).eq('id', row.booking_id);
+    if (uErr) throw new Error(uErr.message);
+  }
+}
+
 async function syncTournamentBookings(params: {
   tournamentId: string;
   courtIds: string[];
@@ -1086,13 +1136,15 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
       }
     }
 
-    await syncTournamentBookings({
+    const notesForBookings =
+      body.description !== undefined ? (body.description != null ? String(body.description) : null) : undefined;
+    await alignTournamentBookings({
       tournamentId: id,
       courtIds,
       startAt,
       endAt,
       organizerPlayerId,
-      notes: body.description !== undefined ? (body.description != null ? String(body.description) : null) : null,
+      notes: notesForBookings,
     });
 
     await refreshTournamentStatus(id, { force: true });
