@@ -20,12 +20,21 @@ import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStripe } from '../stripe';
 import { useAuth } from '../contexts/AuthContext';
-import { cancelMatchAsOrganizer, fetchMatchById, prepareJoin } from '../api/matches';
+import {
+  cancelMatchAsOrganizer,
+  fetchMatchById,
+  prepareJoin,
+  submitMatchFeedback,
+  type SubmitMatchFeedbackBody,
+} from '../api/matches';
 import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
 import { fetchMyPlayerId } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
-import { MatchEvaluationFlow } from '../components/partido/MatchEvaluationFlow';
+import {
+  MatchEvaluationFlow,
+  type MatchEvaluationPayload,
+} from '../components/partido/MatchEvaluationFlow';
 import type { PartidoItem, PartidoPlayer } from './PartidosScreen';
 
 const BG = '#0F0F0F';
@@ -83,7 +92,11 @@ function PulseDot() {
   );
 }
 
-export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome }: PartidoDetailScreenProps) {
+export function PartidoDetailScreen({
+  partido: initialPartido,
+  onBack,
+  onGoHome,
+}: PartidoDetailScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -225,6 +238,46 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome 
 
   const joinBusy = joiningSlotIndex !== null;
   const matchPhase = partido.matchPhase ?? 'upcoming';
+  const handleSubmitEvaluation = useCallback(
+    async (payload: MatchEvaluationPayload) => {
+      const token = session?.access_token;
+      if (!token) return { ok: false as const, error: 'Necesitas iniciar sesión para guardar el feedback.' };
+
+      const levelRatings: SubmitMatchFeedbackBody['level_ratings'] = [];
+      for (const rating of payload.teammateRatings) {
+        const playerId =
+          partido.playerIdsBySlot?.[rating.playerIndex] ??
+          partido.playerIds?.[rating.playerIndex] ??
+          null;
+        if (!playerId) continue;
+        levelRatings.push({
+          player_id: playerId,
+          perceived: rating.level === 'above' ? 1 : rating.level === 'below' ? -1 : 0,
+          comment: rating.note?.trim() ? rating.note.trim() : null,
+        });
+      }
+
+      if (levelRatings.length !== payload.teammateRatings.length || levelRatings.length === 0) {
+        return {
+          ok: false as const,
+          error: 'No se pudo mapear a todos los jugadores para enviar el feedback.',
+        };
+      }
+
+      const res = await submitMatchFeedback(
+        partido.id,
+        {
+          level_ratings: levelRatings,
+          comment: payload.feedbackText || null,
+        },
+        token
+      );
+
+      if (!res.ok) return res;
+      return { ok: true as const };
+    },
+    [partido.id, partido.playerIds, partido.playerIdsBySlot, session?.access_token]
+  );
   /** Usuario apuntado y partido aún no cerrado: barra inferior con finalizar + papelera. */
   const playersFilledCount = partido.players.filter((p) => !p.isFree).length;
   const showFinishBar =
@@ -633,6 +686,7 @@ export function PartidoDetailScreen({ partido: initialPartido, onBack, onGoHome 
         partido={partido}
         currentPlayerId={currentPlayerId}
         onClose={() => setEvaluationVisible(false)}
+        onComplete={handleSubmitEvaluation}
         onGoHome={onGoHome}
       />
 
