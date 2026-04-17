@@ -276,8 +276,7 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const player = await getPlayerFromAuth(req.authContext!.userId);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
-    const onboardingErr = requireOnboarding(player);
-    if (onboardingErr) return res.status(403).json({ ok: false, error: onboardingErr, requires_onboarding: true });
+    const needsOnboarding = !player.onboarding_completed;
 
     const supabase = getSupabaseServiceRoleClient();
     const courseId = req.params.id;
@@ -292,13 +291,19 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
     if (courseErr) return res.status(500).json({ ok: false, error: courseErr.message });
     if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
 
-    const locked = isCourseLocked(player.elo_rating, course.elo_min, course.elo_max);
+    const locked = needsOnboarding || isCourseLocked(player.elo_rating, course.elo_min, course.elo_max);
 
     if (locked) {
-      const { count } = await supabase
+      const { data: lockedLessons } = await supabase
         .from('learning_course_lessons')
-        .select('id', { count: 'exact', head: true })
-        .eq('course_id', courseId);
+        .select('id, order, title, description, video_url, duration_seconds')
+        .eq('course_id', courseId)
+        .order('order', { ascending: true });
+
+      const lockedList = (lockedLessons || []).map((l: any) => ({
+        id: l.id, order: l.order, title: l.title, description: l.description,
+        video_url: l.video_url, duration_seconds: l.duration_seconds, status: 'locked',
+      }));
 
       return res.json({
         ok: true,
@@ -314,7 +319,10 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
           is_certified: (course as any).is_certified ?? false,
           club_name: (course as any).clubs?.name || null,
           locked: true,
-          total_lessons: count || 0,
+          total_lessons: lockedList.length,
+          completed_lessons: 0,
+          is_completed: false,
+          lessons: lockedList,
         },
       });
     }

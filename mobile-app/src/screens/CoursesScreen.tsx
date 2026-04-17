@@ -508,7 +508,7 @@ function EducationalCourseCard({ course, onPress }: { course: EducationalCourse;
                 style={styles.eduCoachAvatar}
               />
               <Text style={styles.eduCoachName} numberOfLines={1}>
-                {course.coach_name || "Matias Venditto"}
+                {course.coach_name || "Coach"}
               </Text>
             </View>
             <View style={styles.eduRating}>
@@ -529,7 +529,7 @@ function EducationalCourseCard({ course, onPress }: { course: EducationalCourse;
             <View style={styles.eduDetailItem}>
               <Ionicons name="location-outline" size={12} color="#6B7280" />
               <Text style={styles.eduDetailText} numberOfLines={1}>
-                {course.club_name || "Padel House"}
+                {course.club_name || "Club"}
               </Text>
             </View>
           </View>
