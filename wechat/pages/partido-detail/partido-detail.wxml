@@ -1,0 +1,180 @@
+<view class="pd-root">
+  <view wx:if="{{loading}}" class="pd-loading">
+    <text class="pd-loading-txt">Cargando…</text>
+  </view>
+  <view wx:elif="{{error}}" class="pd-err">
+    <text class="pd-err-txt">{{error}}</text>
+  </view>
+
+  <!-- Partido privado -->
+  <scroll-view wx:elif="{{isPrivate}}" class="pd-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="pd-priv-card pd-priv-card--top">
+      <view class="pd-priv-top">
+        <text class="pd-priv-emoji">🎾</text>
+        <view>
+          <text class="pd-priv-sport">PÁDEL</text>
+          <text class="pd-priv-dt">{{item.dateTime}}</text>
+        </view>
+      </view>
+      <view class="pd-priv-grid">
+        <view class="pd-priv-cell">
+          <text class="pd-priv-cap">GÉNERO</text>
+          <text class="pd-priv-val">{{item.typeLabel}}</text>
+        </view>
+        <view class="pd-priv-cell">
+          <text class="pd-priv-cap">NIVEL</text>
+          <text class="pd-priv-val">{{item.levelRangeDisplay}}</text>
+        </view>
+        <view class="pd-priv-cell">
+          <text class="pd-priv-cap">PRECIO</text>
+          <text class="pd-priv-val">{{item.price}}</text>
+        </view>
+      </view>
+    </view>
+    <view class="pd-priv-badge">
+      <text class="pd-priv-dot" />
+      <text class="pd-priv-badge-txt">Partido privado</text>
+    </view>
+    <text class="pd-priv-hint">Solo visible para jugadores invitados. Sin unirse público.</text>
+  </scroll-view>
+
+  <!-- Partido público -->
+  <view wx:else class="pd-public-wrap">
+    <scroll-view class="pd-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+      <view class="pd-hero-wrap">
+        <image class="pd-hero-img" src="{{heroUri}}" mode="aspectFill" />
+        <view class="pd-hero-scrim" />
+        <view class="pd-hero-bottom">
+          <view class="pd-badges">
+            <text class="pd-badge-o">Automático</text>
+            <text class="pd-badge-p">Pádel</text>
+          </view>
+          <text class="pd-hero-title">{{item.venue}}</text>
+          <text class="pd-hero-loc">📍 {{locationLine}}</text>
+        </view>
+      </view>
+
+      <view class="pd-tabs">
+        <button class="pd-tab {{activeTab === 'info' ? 'pd-tab--on' : ''}}" data-tab="info" bindtap="onTabTap">Información</button>
+        <button class="pd-tab {{activeTab === 'players' ? 'pd-tab--on' : ''}}" data-tab="players" bindtap="onTabTap">Jugadores</button>
+        <button class="pd-tab {{activeTab === 'club' ? 'pd-tab--on' : ''}}" data-tab="club" bindtap="onTabTap">Club</button>
+      </view>
+
+      <view wx:if="{{activeTab === 'info'}}" class="pd-section">
+        <view class="pd-card">
+          <text class="pd-card-title">Detalles del partido</text>
+          <view class="pd-grid3">
+            <view class="pd-gcell">
+              <text class="pd-gcap">Género</text>
+              <text class="pd-gval">{{item.typeLabel}}</text>
+            </view>
+            <view class="pd-gcell">
+              <text class="pd-gcap">Nivel</text>
+              <text class="pd-gval">{{item.levelRangeDisplay}}</text>
+            </view>
+            <view class="pd-gcell">
+              <text class="pd-gcap">Precio</text>
+              <text class="pd-gval">{{item.price}}</text>
+            </view>
+          </view>
+          <view class="pd-detail-row">
+            <text class="pd-dlbl">Fecha</text>
+            <text class="pd-dval">{{item.dateTime}}</text>
+          </view>
+          <view class="pd-detail-row">
+            <text class="pd-dlbl">Duración</text>
+            <text class="pd-dval">{{item.durationLabel}}</text>
+          </view>
+          <view class="pd-detail-row">
+            <text class="pd-dlbl">Pista</text>
+            <text class="pd-dval">{{courtLine}}</text>
+          </view>
+          <view class="pd-actions">
+            <button class="pd-act-btn" bindtap="onOpenMaps">Cómo llegar</button>
+          </view>
+          <view class="pd-open-pill">
+            <view class="pd-pulse" />
+            <text class="pd-open-txt">Partido abierto</text>
+          </view>
+        </view>
+      </view>
+
+      <view wx:if="{{activeTab === 'players'}}" class="pd-section">
+        <view class="pd-card">
+          <text class="pd-card-title">Jugadores</text>
+          <view class="pd-teams">
+            <view class="pd-team">
+              <block wx:for="{{teamA}}" wx:key="idx">
+                <view class="pd-slot">
+                  <button
+                    wx:if="{{item.isFree}}"
+                    class="pd-free {{item.joining ? 'pd-free--busy' : ''}}"
+                    disabled="{{!item.canJoin}}"
+                    data-slot="{{item.idx}}"
+                    bindtap="onJoinTap"
+                  >
+                    {{item.joining ? '…' : '+'}}
+                  </button>
+                  <view wx:else class="pd-filled">
+                    <text class="pd-ini">{{item.initial}}</text>
+                  </view>
+                  <text class="pd-pname">{{item.isFree ? (item.canJoin ? 'Unirse' : 'Libre') : item.name}}</text>
+                  <text wx:if="{{!item.isFree}}" class="pd-plvl">{{item.level}}</text>
+                </view>
+              </block>
+            </view>
+            <text class="pd-vs">VS</text>
+            <view class="pd-team">
+              <block wx:for="{{teamB}}" wx:key="idx">
+                <view class="pd-slot">
+                  <button
+                    wx:if="{{item.isFree}}"
+                    class="pd-free {{item.joining ? 'pd-free--busy' : ''}}"
+                    disabled="{{!item.canJoin}}"
+                    data-slot="{{item.idx}}"
+                    bindtap="onJoinTap"
+                  >
+                    {{item.joining ? '…' : '+'}}
+                  </button>
+                  <view wx:else class="pd-filled">
+                    <text class="pd-ini">{{item.initial}}</text>
+                  </view>
+                  <text class="pd-pname">{{item.isFree ? (item.canJoin ? 'Unirse' : 'Libre') : item.name}}</text>
+                  <text wx:if="{{!item.isFree}}" class="pd-plvl">{{item.level}}</text>
+                </view>
+              </block>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view wx:if="{{activeTab === 'club'}}" class="pd-section">
+        <button class="pd-club-row" bindtap="onOpenMaps">
+          <image class="pd-club-thumb" src="{{heroUri}}" mode="aspectFill" />
+          <view class="pd-club-txt">
+            <text class="pd-club-name">{{item.venue}}</text>
+            <text class="pd-club-sub">{{venueAddress}}</text>
+          </view>
+          <text class="pd-club-pin">📍</text>
+        </button>
+      </view>
+
+      <view class="pd-scroll-pad" />
+    </scroll-view>
+
+    <view class="pd-bottom">
+      <view wx:if="{{!playerContextResolved}}" class="pd-bottom-load">
+        <text class="pd-muted">Comprobando sesión…</text>
+      </view>
+      <button
+        wx:else
+        class="pd-cta {{ctaDisabled ? 'pd-cta--off' : ''}}"
+        disabled="{{ctaDisabled}}"
+        loading="{{joiningBusy}}"
+        bindtap="onBottomCta"
+      >
+        {{ctaLabel}}
+      </button>
+    </view>
+  </view>
+</view>

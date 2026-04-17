@@ -9,6 +9,8 @@ import {
   listTransactionsHandler,
   listClubTransactionsHandler,
   cashClosingExpectedHandler,
+  getCashOpeningForDayHandler,
+  createCashOpeningRecordHandler,
   listCashClosingRecordsHandler,
   createCashClosingRecordHandler,
   customerPortalHandler,
@@ -21,6 +23,8 @@ router.use(attachAuthContext);
 router.get('/transactions', listTransactionsHandler);
 router.get('/club-transactions', requireClubOwnerOrAdmin, listClubTransactionsHandler);
 router.get('/cash-closing/expected', requireClubOwnerOrAdmin, cashClosingExpectedHandler);
+router.get('/cash-opening/today', requireClubOwnerOrAdmin, getCashOpeningForDayHandler);
+router.post('/cash-opening/records', requireClubOwnerOrAdmin, createCashOpeningRecordHandler);
 router.get('/cash-closing/records', requireClubOwnerOrAdmin, listCashClosingRecordsHandler);
 router.post('/cash-closing/records', requireClubOwnerOrAdmin, createCashClosingRecordHandler);
 router.post('/customer-portal', customerPortalHandler);

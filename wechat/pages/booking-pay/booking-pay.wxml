@@ -1,0 +1,16 @@
+<view class="bp-root">
+  <view class="bp-card">
+    <text class="bp-title">Confirmar reserva</text>
+    <text class="bp-line"><text class="bp-muted">Club: </text>{{clubName}}</text>
+    <text class="bp-line"><text class="bp-muted">Pista: </text>{{courtName}}</text>
+    <text class="bp-line"><text class="bp-muted">Fecha: </text>{{dateLabel}}</text>
+    <text class="bp-line"><text class="bp-muted">Hora: </text>{{slot}}</text>
+    <view class="bp-divider" />
+    <text class="bp-amount">{{priceDisplay}}</text>
+    <text class="bp-hint">MVP: pago simulado en el dispositivo. WeChat Pay se integrará después.</text>
+  </view>
+
+  <button class="bp-pay-btn" loading="{{paying}}" disabled="{{paying}}" bindtap="onPay">
+    {{paying ? 'Procesando…' : 'Confirmar pago (simulado)'}}
+  </button>
+</view>

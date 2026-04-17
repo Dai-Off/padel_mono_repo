@@ -1,0 +1,46 @@
+<!-- Alineado a mobile-app PartidoCard surface="dark", visibility private -->
+<view class="pc-card pc-card-dark" bindtap="onTap">
+  <view class="pc-header">
+    <text class="pc-datetime-dark">{{item.dateTime}}</text>
+    <view class="pc-badge-wrap">
+      <view wx:if="{{item.mode === 'competitivo'}}" class="pc-badge pc-badge-comp-dark">
+        <text class="pc-badge-txt-comp">Competitivo</text>
+      </view>
+      <view wx:else class="pc-badge pc-badge-muted-dark">
+        <text class="pc-badge-txt-dark-muted">Amistoso</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="pc-meta">
+    <view class="pc-meta-row">
+      <text class="pc-people-ico">👥</text>
+      <text class="pc-meta-txt-dark">{{item.typeLabel}}</text>
+    </view>
+    <text class="pc-level-dark">📊 {{item.levelRange}}</text>
+  </view>
+
+  <view wx:if="{{item.visibility === 'private'}}" class="pc-private-row-dark">
+    <view class="pc-private-avatar">
+      <view wx:if="{{item.showOrganizerAvatar}}" class="pc-private-ini-wrap">
+        <text class="pc-private-ini">{{item.organizerInitial}}</text>
+      </view>
+      <text wx:else class="pc-private-check">✓</text>
+    </view>
+    <text class="pc-private-label-dark">Tu reserva</text>
+  </view>
+
+  <view class="pc-venue-row-dark">
+    <view class="pc-venue-icon-dark">
+      <text class="pc-venue-emoji">🏢</text>
+    </view>
+    <view class="pc-venue-body">
+      <text class="pc-venue-name-dark">{{item.venue}}</text>
+      <text class="pc-venue-loc-dark">{{item.location}}</text>
+    </view>
+    <view class="pc-venue-price-col">
+      <text class="pc-venue-price-dark">{{item.price}}</text>
+      <text class="pc-venue-dur-dark">{{item.duration}}</text>
+    </view>
+  </view>
+</view>

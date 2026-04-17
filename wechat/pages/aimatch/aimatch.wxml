@@ -1,0 +1,22 @@
+<scroll-view class="ai-root" scroll-y enhanced show-scrollbar="{{false}}">
+  <view class="ai-inner">
+    <text class="ai-desc">Describe qué buscas (horario, nivel, zona…) y usaremos tu perfil como ancla.</text>
+    <textarea
+      class="ai-input"
+      placeholder="Ej.: Busco partido de pádel mañana por la tarde, nivel medio…"
+      placeholder-class="ai-ph"
+      value="{{prompt}}"
+      bindinput="onInput"
+      maxlength="{{2000}}"
+      disabled="{{loading}}"
+    />
+    <button class="ai-btn" bindtap="onSubmit" loading="{{loading}}" disabled="{{loading}}">
+      Buscar con IA
+    </button>
+    <view wx:if="{{error}}" class="ai-err">{{error}}</view>
+    <view wx:if="{{result}}" class="ai-result">
+      <text class="ai-result-title">Resultado</text>
+      <text class="ai-result-body">{{result}}</text>
+    </view>
+  </view>
+</scroll-view>

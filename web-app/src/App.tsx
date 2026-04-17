@@ -8,6 +8,7 @@ import { RegistroClubInvite } from './components/Registration/RegistroClubInvite
 import { ClubDashboard } from './components/Dashboard/ClubDashboard';
 import { ManagerOnboarding } from './components/Onboarding/ManagerOnboarding';
 import { AdminPanel } from './components/Admin/AdminPanel';
+import { QuestionsListView } from './components/Admin/OnboardingQuestions/QuestionsListView';
 import { GrillaView } from './features/grilla';
 import { PreciosView } from './components/Precios/PreciosView';
 import { authService } from './services/auth';
@@ -36,6 +37,14 @@ function App() {
           element={
             <ProtectedRoute>
               <AdminPanel />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/questions"
+          element={
+            <ProtectedRoute>
+              <QuestionsListView />
             </ProtectedRoute>
           }
         />

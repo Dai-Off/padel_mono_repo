@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { Pressable, View, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { SearchCourtResult } from '../api/search';
 import { BackHeader } from '../components/layout/BackHeader';
 import { BottomNavbar, type MainTabId } from '../components/layout/BottomNavbar';
@@ -26,6 +28,7 @@ import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
+import { ProfileScreen } from './ProfileScreen';
 
 export function MainApp() {
   const sidebar = useSidebar(false);
@@ -40,6 +43,7 @@ export function MainApp() {
   }>({ open: false, organizerId: null });
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
+  const [showProfile, setShowProfile] = useState(false);
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
@@ -63,6 +67,14 @@ export function MainApp() {
             bumpPartidos();
             setBookingSuccessData(data);
           }}
+        />
+      );
+    }
+    if (showProfile) {
+      return (
+        <ProfileScreen
+          onBack={() => setShowProfile(false)}
+          onMenuPress={sidebar.toggle}
         />
       );
     }
@@ -146,6 +158,7 @@ export function MainApp() {
     bookingSuccessData == null &&
     !showTusPagos &&
     !showTransacciones &&
+    !showProfile &&
     !showPartidoDetail &&
     !showClubDetail &&
     !crearPartidoFlow.open;
@@ -154,11 +167,50 @@ export function MainApp() {
     bookingSuccessData != null ||
     showTusPagos ||
     showTransacciones ||
+    showProfile ||
     showPartidoDetail ||
     crearPartidoFlow.open
       ? undefined
       : activeTab === 'tienda'
-          ? <BackHeader title="Tienda" tone="dark" onBack={() => setActiveTab('inicio')} />
+          ? (
+              <BackHeader
+                title="Tienda"
+                tone="dark"
+                onBack={() => setActiveTab('inicio')}
+                rightSlot={(
+                  <View style={styles.tiendaHeaderRight}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Asistente de compras"
+                      hitSlop={8}
+                      style={({ pressed }) => [
+                        styles.tiendaHeaderIconBase,
+                        pressed && { opacity: 0.85 },
+                      ]}
+                    >
+                      <LinearGradient
+                        colors={['#F18F34', '#FFB347']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                      <Ionicons name="sparkles" size={18} color="#fff" style={styles.tiendaHeaderIconFg} />
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Carrito"
+                      hitSlop={8}
+                      style={({ pressed }) => [
+                        styles.tiendaHeaderCart,
+                        pressed && { opacity: 0.85 },
+                      ]}
+                    >
+                      <Ionicons name="cart-outline" size={18} color="#fff" />
+                    </Pressable>
+                  </View>
+                )}
+              />
+            )
           : activeTab === 'partidos'
               ? (
                   <BackHeader
@@ -183,18 +235,30 @@ export function MainApp() {
           : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
             ? '#000000'
             : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
-              ? '#0F0F0F'
-              : '#ffffff';
+                ? '#0F0F0F'
+                : showProfile
+                  ? '#0F0F0F'
+                  : '#ffffff';
+
+  const handleTabChange = (tab: MainTabId) => {
+    setActiveTab(tab);
+    setShowProfile(false);
+  };
 
   return (
     <View style={styles.container}>
-      <SidebarProvider close={sidebar.close} onNavigateToTusPagos={() => setShowTusPagos(true)}>
+      <SidebarProvider
+        close={sidebar.close}
+        onNavigateToTusPagos={() => setShowTusPagos(true)}
+        onProfilePress={() => setShowProfile(true)}
+      >
         <View style={styles.mainColumn}>
           <ScreenLayout
             sidebar={sidebar}
             customHeader={customHeader}
             hideHeader={
               bookingSuccessData != null ||
+                showProfile ||
               showClubDetail ||
               showPartidoDetail ||
               showTusPagos ||
@@ -214,7 +278,7 @@ export function MainApp() {
             !showTransacciones &&
             !crearPartidoFlow.open && (
             <View style={styles.bottomBar}>
-              <BottomNavbar activeTab={activeTab} onTabChange={setActiveTab} />
+              <BottomNavbar activeTab={showProfile ? null : activeTab} onTabChange={handleTabChange} />
             </View>
           )}
         </View>
@@ -243,6 +307,32 @@ export function MainApp() {
 }
 
 const styles = StyleSheet.create({
+  tiendaHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  tiendaHeaderIconBase: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tiendaHeaderIconFg: {
+    zIndex: 1,
+  },
+  tiendaHeaderCart: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
   container: {
     flex: 1,
     backgroundColor: '#000',

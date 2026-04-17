@@ -1,0 +1,57 @@
+.tr-root {
+  min-height: 100vh;
+  background-color: #0f0f0f;
+  padding: 32rpx;
+  box-sizing: border-box;
+}
+
+.tr-seg {
+  display: flex;
+  flex-direction: row;
+  background-color: rgba(255, 255, 255, 0.06);
+  border-radius: 24rpx;
+  padding: 8rpx;
+  margin-bottom: 48rpx;
+}
+
+.tr-seg-btn {
+  flex: 1;
+  padding: 20rpx 16rpx;
+  border-radius: 20rpx;
+  align-items: center;
+  justify-content: center;
+  display: flex;
+}
+
+.tr-seg-btn--on {
+  background-color: rgba(241, 143, 52, 0.2);
+}
+
+.tr-seg-txt {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #e5e7eb;
+}
+
+.tr-seg-btn--on .tr-seg-txt {
+  color: #f18f34;
+}
+
+.tr-empty {
+  padding: 80rpx 24rpx;
+  align-items: center;
+}
+
+.tr-empty-title {
+  font-size: 34rpx;
+  font-weight: 800;
+  color: #ffffff;
+  display: block;
+  margin-bottom: 16rpx;
+}
+
+.tr-empty-sub {
+  font-size: 26rpx;
+  color: #6b7280;
+  line-height: 40rpx;
+}

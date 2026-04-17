@@ -1,0 +1,85 @@
+<scroll-view class="auth-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+  <view class="auth-page">
+    <view class="auth-brand-section">
+      <image class="auth-logo" src="/images/wematch-logo.png" mode="aspectFit" />
+    </view>
+
+    <view class="auth-form-section">
+      <view wx:if="{{error}}" class="error-banner">
+        <text class="error-dot">!</text>
+        <text class="error-banner__text">{{error}}</text>
+      </view>
+
+      <view class="auth-input-wrap-outer">
+        <text class="auth-input-label">Correo Electrónico</text>
+        <view class="auth-input-shell">
+          <text class="auth-input-icon">✉</text>
+          <input
+            class="auth-input-field"
+            type="text"
+            placeholder="tu@email.com"
+            placeholder-class="auth-input-placeholder"
+            value="{{email}}"
+            bindinput="onEmailInput"
+            disabled="{{loading}}"
+          />
+        </view>
+      </view>
+
+      <view class="auth-input-wrap-outer">
+        <text class="auth-input-label">Contraseña</text>
+        <view class="auth-input-shell">
+          <text class="auth-input-icon">🔒</text>
+          <input
+            class="auth-input-field"
+            password="{{true}}"
+            placeholder="••••••••"
+            placeholder-class="auth-input-placeholder"
+            value="{{password}}"
+            bindinput="onPasswordInput"
+            disabled="{{loading}}"
+          />
+        </view>
+      </view>
+
+      <view class="login-extras-row">
+        <view class="login-extras-col-left">
+          <view class="checkbox-inner" bindtap="onToggleRemember">
+            <view class="checkbox {{rememberMe ? 'checkbox--checked' : ''}}">
+              <text wx:if="{{rememberMe}}" class="checkbox-check">✓</text>
+            </view>
+            <text class="checkbox-label">Recordarme</text>
+          </view>
+        </view>
+        <view class="login-extras-col-right">
+          <view class="forgot-pressable" bindtap="onForgotPassword">
+            <text class="login-forgot-label">¿Olvidaste tu contraseña?</text>
+          </view>
+        </view>
+      </view>
+
+      <button
+        class="auth-button {{loading ? 'auth-button--disabled' : ''}}"
+        bindtap="onSubmit"
+        loading="{{loading}}"
+        disabled="{{loading}}"
+      >
+        <view wx:if="{{!loading}}" class="auth-button-inner">
+          <view class="auth-button-content">
+            <text class="auth-button-text">Iniciar Sesión</text>
+            <text class="auth-button-icon">→</text>
+          </view>
+        </view>
+      </button>
+
+      <view class="auth-form-link-wrap">
+        <text class="auth-form-link-prompt">¿No tienes cuenta?</text>
+        <text class="auth-form-link-action" bindtap="onGoToRegister">Regístrate gratis</text>
+      </view>
+    </view>
+
+    <view class="auth-footer-wrap">
+      <text class="auth-footer-text">© {{year}} WeMatch. Todos los derechos reservados.</text>
+    </view>
+  </view>
+</scroll-view>

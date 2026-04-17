@@ -1,0 +1,113 @@
+<view class="search-root">
+  <view class="search-sticky">
+    <view class="search-top-row">
+      <button class="search-icon-btn" hover-class="none" bindtap="onBackHome">
+        <text class="search-icon-btn-text">←</text>
+      </button>
+      <view class="search-shell">
+        <text class="search-shell-icon">⌕</text>
+        <input
+          class="search-input"
+          placeholder="Buscar club o zona..."
+          placeholder-class="search-placeholder"
+          value="{{searchQuery}}"
+          bindinput="onSearchInput"
+          confirm-type="search"
+        />
+      </view>
+      <button class="search-icon-btn" hover-class="none" bindtap="onOpenFilters">
+        <text class="search-icon-btn-text">⚙</text>
+      </button>
+    </view>
+
+    <scroll-view class="filter-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="filter-inner">
+        <view class="filter-chip" bindtap="onSportPress">
+          <text class="filter-chip-text">{{sportLabel}}</text>
+          <text class="filter-chip-chev">⌄</text>
+        </view>
+        <picker mode="date" value="{{dateStr}}" bindchange="onDateChange">
+          <view class="filter-chip">
+            <text class="filter-chip-text">{{dateLabel}}</text>
+            <text class="filter-chip-chev">⌄</text>
+          </view>
+        </picker>
+        <view class="filter-chip" bindtap="onTimePress">
+          <text class="filter-chip-text">{{timeLabel}}</text>
+          <text class="filter-chip-chev">⌄</text>
+        </view>
+        <view class="cerca-badge">
+          <text class="cerca-text">↗</text>
+          <text class="cerca-text">Cerca</text>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+
+  <scroll-view class="search-body-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+    <view class="search-body">
+      <view wx:if="{{loading}}" class="result-count">Buscando clubes…</view>
+      <view wx:if="{{!loading}}" class="result-count">
+        {{clubGroups.length}} {{clubGroups.length === 1 ? 'club encontrado' : 'clubes encontrados'}}
+      </view>
+
+      <block wx:if="{{loading}}">
+        <view class="skeleton-card" wx:for="{{skeletonPlaceholders}}" wx:key="*this" />
+      </block>
+
+      <block wx:if="{{!loading}}">
+        <view
+          class="club-card-outer"
+          wx:for="{{clubGroups}}"
+          wx:key="clubId"
+          data-club-id="{{item.clubId}}"
+          bindtap="onClubTap"
+        >
+          <view class="club-card-inner">
+            <view class="club-fav" catchtap="onFavoriteTap">
+              <text class="club-fav-text">♡</text>
+            </view>
+            <view class="club-row">
+              <view class="club-image-col">
+                <image
+                  wx:if="{{item.imageUrl}}"
+                  class="club-image"
+                  src="{{item.imageUrl}}"
+                  mode="aspectFill"
+                />
+                <view wx:else class="club-image-ph" />
+                <view class="club-price-badge">
+                  <text class="club-price-main">{{item.minPriceFormatted}}</text>
+                  <text class="club-price-sub">/h</text>
+                </view>
+              </view>
+              <view class="club-body">
+                <text class="club-title">{{item.clubName}}</text>
+                <view class="club-meta">
+                  <text class="club-meta-icon">⌖</text>
+                  <text wx:if="{{item.distanceLabel}}" class="club-meta-dist">{{item.distanceLabel}}</text>
+                  <text wx:if="{{item.distanceLabel && item.locationLine}}" class="club-meta-dot">•</text>
+                  <text wx:if="{{item.locationLine}}" class="club-meta-city">{{item.locationLine}}</text>
+                </view>
+                <view class="tags-row">
+                  <view class="tag">
+                    <text class="tag-text">{{item.cerramientoLabel}}</text>
+                  </view>
+                  <view class="tag">
+                    <text class="tag-text">{{item.paredesLabel}}</text>
+                  </view>
+                </view>
+                <view class="slots-row">
+                  <view class="slot-pill" wx:for="{{item.visibleSlots}}" wx:for-item="slot" wx:key="*this">
+                    <text class="slot-pill-text">{{slot}}</text>
+                  </view>
+                  <text wx:if="{{item.extraSlots > 0}}" class="slot-more">+{{item.extraSlots}}</text>
+                </view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </block>
+    </view>
+  </scroll-view>
+</view>

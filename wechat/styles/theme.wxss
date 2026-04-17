@@ -1,0 +1,41 @@
+/**
+ * Tokens alineados a mobile-app/src/theme.ts (auth + búsqueda).
+ * 1px de diseño RN ≈ 2rpx en ancho 375 (750rpx).
+ */
+page {
+  --auth-bg: #0f0f0f;
+  --auth-input-bg: #1a1a1a;
+  --auth-input-border: rgba(255, 255, 255, 0.1);
+  --auth-accent: #f18f34;
+  --auth-accent-shadow: rgba(241, 143, 52, 0.4);
+  --auth-text: #ffffff;
+  --auth-text-muted: #9ca3af;
+  --auth-text-secondary: #6b7280;
+  --auth-label: #9ca3af;
+  --auth-error: #e31e24;
+  --auth-error-bg: rgba(227, 30, 36, 0.1);
+  --auth-info: #2563eb;
+  --auth-info-bg: rgba(37, 99, 235, 0.1);
+
+  --space-xs: 16rpx;
+  --space-sm: 24rpx;
+  --space-md: 32rpx;
+  --space-lg: 40rpx;
+  --space-xl: 48rpx;
+  --space-xxl: 64rpx;
+
+  --font-xs: 24rpx;
+  --font-sm: 28rpx;
+  --font-base: 32rpx;
+  --font-lg: 36rpx;
+  --font-xl: 40rpx;
+  --font-xxl: 56rpx;
+
+  --radius-input: 32rpx;
+  --radius-chip: 24rpx;
+  --radius-card: 24rpx;
+  --radius-banner: 24rpx;
+
+  --search-bg: #0f0f0f;
+  --search-muted: #737373;
+}

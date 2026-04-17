@@ -1,0 +1,14 @@
+<scroll-view class="tr-root" scroll-y enhanced show-scrollbar="{{false}}">
+  <view class="tr-seg">
+    <view class="tr-seg-btn {{activeTab === 'disponibles' ? 'tr-seg-btn--on' : ''}}" bindtap="onTab" data-tab="disponibles">
+      <text class="tr-seg-txt">Disponibles</text>
+    </view>
+    <view class="tr-seg-btn {{activeTab === 'inscritas' ? 'tr-seg-btn--on' : ''}}" bindtap="onTab" data-tab="inscritas">
+      <text class="tr-seg-txt">Mis inscripciones</text>
+    </view>
+  </view>
+  <view class="tr-empty">
+    <text class="tr-empty-title">Próximamente</text>
+    <text class="tr-empty-sub">Los torneos aparecerán aquí cuando estén disponibles.</text>
+  </view>
+</scroll-view>

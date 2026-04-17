@@ -1,0 +1,51 @@
+{
+  "pages": [
+    "pages/launch/launch",
+    "pages/login/login",
+    "pages/register/register",
+    "pages/home/home",
+    "pages/search/search",
+    "pages/bookings/bookings",
+    "pages/partidos/partidos",
+    "pages/aimatch/aimatch",
+    "pages/partido-detail/partido-detail",
+    "pages/club-detail/club-detail",
+    "pages/crear-partido/crear-partido",
+    "pages/booking-pay/booking-pay"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#0F0F0F",
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "WeMatch",
+    "backgroundColor": "#0F0F0F",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "color": "#6b7280",
+    "selectedColor": "#F18F34",
+    "backgroundColor": "#0F0F0F",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/home",
+        "text": "Inicio",
+        "iconPath": "images/tab/tab_normal.png",
+        "selectedIconPath": "images/tab/tab_selected.png"
+      },
+      {
+        "pagePath": "pages/search/search",
+        "text": "Pistas",
+        "iconPath": "images/tab/tab_normal.png",
+        "selectedIconPath": "images/tab/tab_selected.png"
+      },
+      {
+        "pagePath": "pages/bookings/bookings",
+        "text": "Reservas",
+        "iconPath": "images/tab/tab_normal.png",
+        "selectedIconPath": "images/tab/tab_selected.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

@@ -1,0 +1,84 @@
+.ai-root {
+  min-height: 100vh;
+  background-color: #0f0f0f;
+}
+
+.ai-inner {
+  padding: 40rpx 48rpx 80rpx;
+  box-sizing: border-box;
+}
+
+.ai-desc {
+  font-size: 28rpx;
+  color: #9ca3af;
+  line-height: 44rpx;
+  margin-bottom: 32rpx;
+}
+
+.ai-input {
+  width: 100%;
+  min-height: 240rpx;
+  padding: 24rpx;
+  box-sizing: border-box;
+  border-radius: 24rpx;
+  background-color: #1a1a1a;
+  border-width: 1px;
+  border-style: solid;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+  font-size: 28rpx;
+  margin-bottom: 32rpx;
+}
+
+.ai-ph {
+  color: #6b7280;
+}
+
+.ai-btn {
+  width: 100%;
+  padding: 28rpx;
+  border-radius: 24rpx;
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 700;
+  border: none;
+}
+
+.ai-btn::after {
+  border: none;
+}
+
+.ai-err {
+  margin-top: 32rpx;
+  padding: 24rpx;
+  border-radius: 16rpx;
+  background-color: rgba(227, 30, 36, 0.12);
+  color: #fca5a5;
+  font-size: 26rpx;
+}
+
+.ai-result {
+  margin-top: 40rpx;
+  padding: 28rpx;
+  border-radius: 24rpx;
+  background-color: rgba(255, 255, 255, 0.05);
+  border-width: 1px;
+  border-style: solid;
+  border-color: rgba(168, 85, 247, 0.35);
+}
+
+.ai-result-title {
+  font-size: 28rpx;
+  font-weight: 800;
+  color: #ffffff;
+  display: block;
+  margin-bottom: 16rpx;
+}
+
+.ai-result-body {
+  font-size: 26rpx;
+  color: #d1d5db;
+  line-height: 40rpx;
+  white-space: pre-wrap;
+}
