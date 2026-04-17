@@ -61,6 +61,8 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
   const introOpacity = useRef(new Animated.Value(0)).current;
   const resultsScale = useRef(new Animated.Value(0.95)).current;
   const resultsOpacity = useRef(new Animated.Value(0)).current;
+  const glowScale = useRef(new Animated.Value(1)).current;
+  const glowOpacity = useRef(new Animated.Value(0.15)).current;
 
   // Cleanup de timers al desmontar
   useEffect(() => {
@@ -69,7 +71,7 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     };
   }, []);
 
-  // Animacion de entrada en intro
+  // Animacion de entrada en intro + breathe glow
   useEffect(() => {
     if (phase === 'intro') {
       introOpacity.setValue(0);
@@ -78,6 +80,22 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
         Animated.timing(introOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
         Animated.spring(introScale, { toValue: 1, friction: 8, tension: 60, useNativeDriver: true }),
       ]).start();
+
+      // Breathe glow animation
+      const breathe = Animated.loop(
+        Animated.parallel([
+          Animated.sequence([
+            Animated.timing(glowScale, { toValue: 1.3, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            Animated.timing(glowScale, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          ]),
+          Animated.sequence([
+            Animated.timing(glowOpacity, { toValue: 0.25, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            Animated.timing(glowOpacity, { toValue: 0.1, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          ]),
+        ]),
+      );
+      breathe.start();
+      return () => breathe.stop();
     }
   }, [phase]);
 
@@ -131,6 +149,21 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
   // ---------------------------------------------------------------------------
 
   const doSubmit = useCallback(async (answersToSend: AnswerPayload[]) => {
+    // Si ya completó hoy, mostrar resultados locales sin llamar al backend
+    if (alreadyCompleted) {
+      const correctCount = answersToSend.filter((_, i) => !failedIndices.includes(i)).length;
+      const totalScore = correctCount * 100;
+      setResults({
+        ok: true,
+        session: { id: 'repeat', correct_count: correctCount, total_count: answersToSend.length, score: totalScore, xp_earned: 0, completed_at: new Date().toISOString() },
+        streak: { current: 0, longest: 0, multiplier: 0, xp_base: 0, xp_bonus: 0 },
+        shared_streaks: [],
+        results: answersToSend.map((a, i) => ({ question_id: a.question_id, correct: !failedIndices.includes(i), correct_answer: null, points: failedIndices.includes(i) ? 0 : 100 })),
+      });
+      setPhase('results');
+      return;
+    }
+
     setSubmitting(true);
     setSubmitError(null);
     const res = await submitDailyLesson(session?.access_token, TIMEZONE, answersToSend);
@@ -142,7 +175,7 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
       setPhase('results');
     }
     setSubmitting(false);
-  }, [session?.access_token]);
+  }, [session?.access_token, alreadyCompleted, failedIndices]);
 
   const handleQuestionAnswered = useCallback((correct: boolean, selectedAnswer: unknown) => {
     const elapsed = Date.now() - questionStartTime.current;
@@ -174,14 +207,8 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           startQuestionOrVideo(nextIndex);
         });
       } else {
-        // Fin de preguntas
-        if (updatedFailed.length > 0) {
-          setPhase('review');
-          setReviewIndex(0);
-          animateProgressTo(0);
-        } else {
-          doSubmit(updatedAnswers);
-        }
+        // Fin de preguntas — siempre ir a results
+        doSubmit(updatedAnswers);
       }
     }, 2200);
   }, [currentIndex, questions, answers, failedIndices, showFlash, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo]);
@@ -214,9 +241,12 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
   }, [questions]);
 
   const handleVideoEnd = useCallback(() => {
-    setShowingVideo(false);
-    questionStartTime.current = Date.now();
-  }, []);
+    setTimeout(() => {
+      contentOpacity.setValue(1);
+      setShowingVideo(false);
+      questionStartTime.current = Date.now();
+    }, 50);
+  }, [contentOpacity]);
 
   const handleStart = () => {
     setPhase('questions');
@@ -280,6 +310,14 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           style={{ opacity: introOpacity, transform: [{ scale: introScale }] }}
         >
           <View style={styles.introIconWrap}>
+            <Animated.View style={[
+              styles.introGlow,
+              {
+                backgroundColor: alreadyCompleted ? '#10B981' : '#F18F34',
+                opacity: glowOpacity,
+                transform: [{ scale: glowScale }],
+              },
+            ]} />
             <LinearGradient
               colors={alreadyCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#FFB347']}
               style={styles.introIcon}
@@ -375,6 +413,8 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
             videoUrl={question.video_url}
             area={question.area}
             counter={counter}
+            clubName={question.club_name}
+            clubCity={question.club_city}
             isReview={isReview}
             onVideoEnd={handleVideoEnd}
             onSkip={handleVideoEnd}
@@ -403,19 +443,22 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           </View>
         </View>
 
-        {/* Question con fade */}
-        <Animated.View style={{ flex: 1, opacity: contentOpacity }}>
-          <ScrollView
-            contentContainerStyle={[styles.questionContent, { paddingBottom: insets.bottom + 32 }]}
-            showsVerticalScrollIndicator={false}
-          >
-            <QuestionCard
-              key={`${qIndex}-${isReview ? 'r' : 'q'}`}
-              question={question}
-              onAnswered={isReview ? handleReviewAnswered : handleQuestionAnswered}
-            />
-          </ScrollView>
-        </Animated.View>
+        {/* Question con fade — oculta mientras se muestra video */}
+        {!showingVideo && (
+          <Animated.View style={{ flex: 1, opacity: contentOpacity }}>
+            <ScrollView
+              contentContainerStyle={[styles.questionContent, { paddingBottom: insets.bottom + 32 }]}
+              showsVerticalScrollIndicator={false}
+            >
+              <QuestionCard
+                key={`${qIndex}-${isReview ? 'r' : 'q'}`}
+                question={question}
+                onAnswered={isReview ? handleReviewAnswered : handleQuestionAnswered}
+                onReplayVideo={question.has_video && question.video_url ? () => setShowingVideo(true) : undefined}
+              />
+            </ScrollView>
+          </Animated.View>
+        )}
 
         {submitting && (
           <View style={styles.submittingOverlay}>
@@ -510,6 +553,24 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
             ))}
           </View>
 
+          {/* Boton repasar fallos */}
+          {failedIndices.length > 0 && (
+            <Pressable
+              onPress={() => {
+                setReviewIndex(0);
+                setPhase('review');
+                animateProgressTo(0);
+                startQuestionOrVideo(failedIndices[0]);
+              }}
+              style={styles.continueButton}
+            >
+              <View style={styles.reviewButton}>
+                <Ionicons name="reload" size={18} color="#F18F34" />
+                <Text style={styles.reviewButtonText}>Repasar fallos ({failedIndices.length})</Text>
+              </View>
+            </Pressable>
+          )}
+
           <Pressable onPress={onComplete} style={styles.continueButton}>
             <LinearGradient
               colors={['#F18F34', '#C46A20']}
@@ -542,7 +603,19 @@ const styles = StyleSheet.create({
 
   // Intro
   introContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 32 },
-  introIconWrap: { marginBottom: 24 },
+  introIconWrap: { marginBottom: 24, alignItems: 'center', justifyContent: 'center' },
+  introGlow: {
+    position: 'absolute',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    // Simular glow con shadow en iOS y elevation en Android
+    shadowColor: '#F18F34',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 60,
+    elevation: 30,
+  },
   introIcon: { width: 96, height: 96, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   completedBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
@@ -626,7 +699,13 @@ const styles = StyleSheet.create({
   summaryIconIncorrect: { backgroundColor: 'rgba(239,68,68,0.2)' },
   summaryText: { flex: 1, color: '#9CA3AF', fontSize: 12 },
   summaryPoints: { color: '#6B7280', fontSize: 12, fontWeight: '600' },
-  continueButton: { width: '100%' },
+  reviewButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    paddingVertical: 16, borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(241,143,52,0.2)',
+  },
+  reviewButtonText: { color: '#F18F34', fontWeight: '700', fontSize: 16 },
+  continueButton: { width: '100%', marginBottom: 12 },
   continueGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 16, gap: 8 },
   continueText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
 });

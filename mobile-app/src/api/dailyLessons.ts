@@ -20,6 +20,8 @@ export type DailyLessonQuestion = {
   has_video: boolean;
   video_url: string | null;
   content: Record<string, unknown>;
+  club_name: string | null;
+  club_city: string | null;
 };
 
 export type DailyLessonResponse = {

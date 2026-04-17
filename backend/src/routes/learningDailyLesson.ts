@@ -38,15 +38,11 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
 
     if (sessionErr) return res.status(500).json({ ok: false, error: sessionErr.message });
 
-    if (todaySession) {
-      return res.json({ ok: true, already_completed: true, session: todaySession });
-    }
-
-    // Fetch all active questions and user history in parallel
+    // Fetch all active questions and user history in parallel (also needed for repeat)
     const [questionsRes, historyRes] = await Promise.all([
       supabase
         .from('learning_questions')
-        .select('id, type, level, area, has_video, video_url, content')
+        .select('id, type, level, area, has_video, video_url, content, created_by_club, clubs:created_by_club(name, city)')
         .eq('is_active', true),
       supabase
         .from('learning_question_log')
@@ -76,16 +72,27 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     const selected = selectQuestions(questions, historyByQuestion, player.elo_rating);
 
     // Sanitize content — remove correct answers
-    const clientQuestions = selected.map((q) => ({
-      id: q.id,
-      type: q.type,
-      area: q.area,
-      has_video: q.has_video,
-      video_url: q.video_url,
-      content: sanitizeContent(q.type, q.content),
-    }));
+    const clientQuestions = selected.map((q) => {
+      const raw = q as unknown as Record<string, unknown>;
+      const club = raw.clubs as { name?: string; city?: string } | null;
+      return {
+        id: q.id,
+        type: q.type,
+        area: q.area,
+        has_video: q.has_video,
+        video_url: q.video_url,
+        content: sanitizeContent(q.type, q.content),
+        club_name: club?.name ?? null,
+        club_city: club?.city ?? null,
+      };
+    });
 
-    return res.json({ ok: true, already_completed: false, questions: clientQuestions });
+    return res.json({
+      ok: true,
+      already_completed: !!todaySession,
+      session: todaySession ?? undefined,
+      questions: clientQuestions,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

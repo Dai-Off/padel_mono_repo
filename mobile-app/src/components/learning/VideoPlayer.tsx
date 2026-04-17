@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +10,8 @@ type Props = {
   videoUrl: string;
   area: string;
   counter: string;
+  clubName?: string | null;
+  clubCity?: string | null;
   isReview?: boolean;
   onVideoEnd: () => void;
   onSkip: () => void;
@@ -22,7 +25,7 @@ const AREA_BADGE: Record<string, { label: string; color: string; bg: string; bor
   mental_vocabulary: { label: 'VOCABULARIO', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.25)' },
 };
 
-export function VideoPlayer({ videoUrl, area, counter, isReview, onVideoEnd, onSkip, onClose }: Props) {
+export function VideoPlayer({ videoUrl, area, counter, clubName, clubCity, isReview, onVideoEnd, onSkip, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const [ended, setEnded] = useState(false);
   const fadeIn = useRef(new Animated.Value(0)).current;
@@ -40,8 +43,13 @@ export function VideoPlayer({ videoUrl, area, counter, isReview, onVideoEnd, onS
     }).start();
   }, [fadeIn]);
 
+  const dismissed = useRef(false);
+
   useEffect(() => {
+    dismissed.current = false;
     const sub = player.addListener('playToEnd', () => {
+      if (dismissed.current) return;
+      dismissed.current = true;
       setEnded(true);
       onVideoEnd();
     });
@@ -59,7 +67,6 @@ export function VideoPlayer({ videoUrl, area, counter, isReview, onVideoEnd, onS
         contentFit="cover"
       />
 
-      {/* Gradientes overlay */}
       <LinearGradient
         colors={['rgba(0,0,0,0.5)', 'transparent', 'rgba(0,0,0,0.7)']}
         locations={[0, 0.4, 1]}
@@ -85,6 +92,25 @@ export function VideoPlayer({ videoUrl, area, counter, isReview, onVideoEnd, onS
 
         {/* Bottom info */}
         <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 16 }]}>
+          {/* Club info */}
+          {clubName && (
+            <View style={styles.clubRow}>
+              <View style={styles.clubAvatar}>
+                <LinearGradient
+                  colors={['#F18F34', '#FFB347']}
+                  style={styles.clubAvatarGradient}
+                >
+                  <Ionicons name="shield" size={18} color="#fff" />
+                </LinearGradient>
+              </View>
+              <View style={styles.clubInfo}>
+                <Text style={styles.clubName} numberOfLines={1}>{clubName}</Text>
+                {clubCity && <Text style={styles.clubCity} numberOfLines={1}>{clubCity}</Text>}
+              </View>
+            </View>
+          )}
+
+          {/* Area badge */}
           {badge && (
             <View style={[styles.areaBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
               <Text style={[styles.areaBadgeText, { color: badge.color }]}>{badge.label}</Text>
@@ -93,7 +119,12 @@ export function VideoPlayer({ videoUrl, area, counter, isReview, onVideoEnd, onS
 
           {/* Skip / Continuar */}
           <Pressable
-            onPress={ended ? onVideoEnd : onSkip}
+            onPress={() => {
+              if (dismissed.current) return;
+              dismissed.current = true;
+              if (ended) onVideoEnd();
+              else onSkip();
+            }}
             hitSlop={8}
             style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
           >
@@ -165,6 +196,36 @@ const styles = StyleSheet.create({
   bottomBar: {
     paddingHorizontal: 20,
     gap: 12,
+  },
+  clubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  clubAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  clubAvatarGradient: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clubInfo: {
+    flex: 1,
+  },
+  clubName: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  clubCity: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginTop: 1,
   },
   areaBadge: {
     alignSelf: 'flex-start',
