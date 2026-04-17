@@ -32,6 +32,7 @@ import leaguesRouter from './leagues';
 import walletRouter from './wallet';
 import bonusesRouter from './bonuses';
 import clubSpecialDatesRouter from './clubSpecialDates';
+import tariffsRouter from './tariffs';
 
 const router = Router();
 
@@ -75,6 +76,7 @@ router.use('/leagues', leaguesRouter);
 router.use('/wallet', walletRouter);
 router.use('/bonuses', bonusesRouter);
 router.use('/club-special-dates', clubSpecialDatesRouter);
+router.use('/tariffs', tariffsRouter);
 
 export default router;
 

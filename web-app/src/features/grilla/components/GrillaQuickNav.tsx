@@ -63,6 +63,7 @@ function buildSections(isAdmin: boolean): NavSection[] {
       icon: DollarSign,
       children: [
         { id: 'precios', path: '/precios', label: 'Precios por reserva' },
+        { id: 'tarifas', path: '/tarifas', label: 'Tarifas del club' },
         { id: 'pagos', path: '/pagos', label: 'Pagos' },
         { id: 'cierreCaja', path: '/cierreCaja', label: 'Cierre de caja' },
       ],
