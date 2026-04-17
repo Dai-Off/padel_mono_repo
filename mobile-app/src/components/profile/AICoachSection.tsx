@@ -447,15 +447,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   recTitle: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 2,
   },
   recText: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    lineHeight: 16,
+    fontSize: 13,
+    color: '#D1D5DB',
+    lineHeight: 18,
   },
   listsGrid: {
     flexDirection: 'row',
@@ -550,19 +550,19 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   recDate: {
-    fontSize: 9,
+    fontSize: 10,
     color: '#6B7280',
     fontWeight: '500',
   },
   peerCountText: {
-    fontSize: 9,
+    fontSize: 10,
     fontStyle: 'italic',
     color: '#F18F34',
-    marginTop: 4,
+    marginTop: 6,
     fontWeight: '500',
   },
   emptyText: {
-    fontSize: 10,
+    fontSize: 11,
     color: '#6B7280',
     fontStyle: 'italic',
     marginTop: 4,
