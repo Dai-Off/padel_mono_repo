@@ -206,7 +206,7 @@ router.get('/courses', requireAuth, async (req: Request, res: Response) => {
 
     const { data: courses, error: coursesErr } = await supabase
       .from('learning_courses')
-      .select('id, title, description, banner_url, elo_min, elo_max, clubs(name)')
+      .select('id, title, description, banner_url, elo_min, elo_max, coach_name, is_certified, clubs(name)')
       .eq('status', 'active')
       .order('elo_min', { ascending: true });
 
@@ -254,6 +254,8 @@ router.get('/courses', requireAuth, async (req: Request, res: Response) => {
         banner_url: c.banner_url,
         elo_min: c.elo_min,
         elo_max: c.elo_max,
+        coach_name: c.coach_name || null,
+        is_certified: c.is_certified ?? false,
         club_name: c.clubs?.name || null,
         total_lessons: totalLessons,
         completed_lessons: completedCount,
@@ -279,7 +281,7 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
 
     const { data: course, error: courseErr } = await supabase
       .from('learning_courses')
-      .select('id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, clubs(name)')
+      .select('id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, coach_name, is_certified, clubs(name)')
       .eq('id', courseId)
       .eq('status', 'active')
       .maybeSingle();
@@ -305,6 +307,8 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
           elo_min: course.elo_min,
           elo_max: course.elo_max,
           pedagogical_goal: course.pedagogical_goal,
+          coach_name: (course as any).coach_name || null,
+          is_certified: (course as any).is_certified ?? false,
           club_name: (course as any).clubs?.name || null,
           locked: true,
           total_lessons: count || 0,
@@ -366,6 +370,8 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
         elo_min: course.elo_min,
         elo_max: course.elo_max,
         pedagogical_goal: course.pedagogical_goal,
+        coach_name: (course as any).coach_name || null,
+        is_certified: (course as any).is_certified ?? false,
         club_name: (course as any).clubs?.name || null,
         locked: false,
         total_lessons: totalLessons,

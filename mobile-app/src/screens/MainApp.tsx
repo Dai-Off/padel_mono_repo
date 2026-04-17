@@ -27,6 +27,11 @@ import { TusPagosScreen } from './TusPagosScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
 import { DailyLessonScreen } from './DailyLessonScreen';
+import { CoursesScreen } from './CoursesScreen';
+import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
+import { PublicCourseDetailScreen } from './PublicCourseDetailScreen';
+import type { EducationalCourse } from '../api/dailyLessons';
+import type { PublicCourse } from '../api/schoolCourses';
 
 export function MainApp() {
   const sidebar = useSidebar(false);
@@ -36,6 +41,10 @@ export function MainApp() {
   const [showTusPagos, setShowTusPagos] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
   const [showDailyLesson, setShowDailyLesson] = useState(false);
+  const [showCourses, setShowCourses] = useState(false);
+  const [selectedEducationalCourse, setSelectedEducationalCourse] = useState<EducationalCourse | null>(null);
+  const [selectedPublicCourse, setSelectedPublicCourse] = useState<{ course: PublicCourse; isReserved: boolean } | null>(null);
+  const [coursesTab, setCoursesTab] = useState<'apuntate' | 'cursos' | 'tusclases'>('apuntate');
   const [crearPartidoFlow, setCrearPartidoFlow] = useState<{
     open: boolean;
     organizerId: string | null;
@@ -47,6 +56,38 @@ export function MainApp() {
   const showPartidoDetail = selectedPartido != null;
 
   const renderContent = () => {
+    if (selectedEducationalCourse) {
+      return (
+        <EducationalCourseDetailScreen
+          course={selectedEducationalCourse}
+          onBack={() => setSelectedEducationalCourse(null)}
+        />
+      );
+    }
+    if (selectedPublicCourse) {
+      return (
+        <PublicCourseDetailScreen
+          course={selectedPublicCourse.course}
+          onBack={() => setSelectedPublicCourse(null)}
+        />
+      );
+    }
+    if (showCourses) {
+      return (
+        <CoursesScreen
+          onBack={() => setShowCourses(false)}
+          initialTab={coursesTab}
+          onCoursePress={(course, isReserved) => {
+            setCoursesTab('apuntate');
+            setSelectedPublicCourse({ course, isReserved });
+          }}
+          onEducationalCoursePress={(course) => {
+            setCoursesTab('cursos');
+            setSelectedEducationalCourse(course);
+          }}
+        />
+      );
+    }
     if (showDailyLesson) {
       return (
         <DailyLessonScreen
@@ -125,6 +166,7 @@ export function MainApp() {
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onPartidoPress={(p) => setSelectedPartido(p)}
             onDailyLessonPress={() => setShowDailyLesson(true)}
+            onCoursesPress={() => setShowCourses(true)}
           />
         );
       case 'pistas':
@@ -160,7 +202,10 @@ export function MainApp() {
     !showPartidoDetail &&
     !showClubDetail &&
     !crearPartidoFlow.open &&
-    !showDailyLesson;
+    !showDailyLesson &&
+    !showCourses &&
+    !selectedEducationalCourse &&
+    !selectedPublicCourse;
 
   const customHeader =
     bookingSuccessData != null ||
@@ -168,7 +213,10 @@ export function MainApp() {
     showTransacciones ||
     showPartidoDetail ||
     crearPartidoFlow.open ||
-    showDailyLesson
+    showDailyLesson ||
+    showCourses ||
+    selectedEducationalCourse != null ||
+    selectedPublicCourse != null
       ? undefined
       : activeTab === 'tienda'
           ? <BackHeader title="Tienda" tone="dark" onBack={() => setActiveTab('inicio')} />
@@ -216,6 +264,9 @@ export function MainApp() {
               showTransacciones ||
               crearPartidoFlow.open ||
               showDailyLesson ||
+              showCourses ||
+              selectedEducationalCourse != null ||
+              selectedPublicCourse != null ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos')
             }
@@ -229,7 +280,10 @@ export function MainApp() {
             !showTusPagos &&
             !showTransacciones &&
             !crearPartidoFlow.open &&
-            !showDailyLesson && (
+            !showDailyLesson &&
+            !showCourses &&
+            !selectedEducationalCourse &&
+            !selectedPublicCourse && (
             <View style={styles.bottomBar}>
               <BottomNavbar activeTab={activeTab} onTabChange={setActiveTab} />
             </View>

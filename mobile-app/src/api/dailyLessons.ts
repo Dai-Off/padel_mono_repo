@@ -135,6 +135,107 @@ export async function submitDailyLesson(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Cursos educativos (learning courses)
+// ---------------------------------------------------------------------------
+
+export type EducationalCourse = {
+  id: string;
+  title: string;
+  description: string;
+  banner_url: string | null;
+  elo_min: number;
+  elo_max: number;
+  coach_name: string | null;
+  is_certified: boolean;
+  club_name: string | null;
+  total_lessons: number;
+  completed_lessons: number;
+  is_completed: boolean;
+  locked: boolean;
+};
+
+export async function fetchLearningCourses(
+  token: string | null | undefined,
+): Promise<{ ok: boolean; courses?: EducationalCourse[]; error?: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/learning/courses`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    const json = await res.json();
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al obtener cursos' };
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+export type CourseLesson = {
+  id: string;
+  order: number;
+  title: string;
+  description: string | null;
+  video_url: string | null;
+  duration_seconds: number | null;
+  status: 'completed' | 'available' | 'locked';
+};
+
+export type CourseDetail = EducationalCourse & {
+  pedagogical_goal: string | null;
+  lessons: CourseLesson[];
+};
+
+export async function fetchCourseDetail(
+  token: string | null | undefined,
+  courseId: string,
+): Promise<{ ok: boolean; course?: CourseDetail; error?: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/learning/courses/${courseId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    const json = await res.json();
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al obtener curso' };
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+export async function completeCourseLesson(
+  token: string | null | undefined,
+  courseId: string,
+  lessonId: string,
+): Promise<{ ok: boolean; lesson_completed?: boolean; course_completed?: boolean; completed_lessons?: number; total_lessons?: number; error?: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/learning/courses/${courseId}/complete-lesson`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ lesson_id: lessonId }),
+    });
+    const json = await res.json();
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al completar lección' };
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Racha
+// ---------------------------------------------------------------------------
+
 export async function fetchStreak(
   token: string | null | undefined,
 ): Promise<StreakInfo | { ok: false; error: string }> {
