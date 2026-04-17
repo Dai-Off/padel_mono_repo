@@ -23,6 +23,7 @@ import {
   generateTournamentFixtures,
   generateTournamentFixturesManual,
   getCompetitionView,
+  resetTournamentCompetition,
   saveManualPodium,
   saveMatchResult,
   setupTournamentCompetition,
@@ -77,6 +78,29 @@ const TOURNAMENT_PUBLIC_DETAIL_SELECT = `${TOURNAMENT_PUBLIC_LIST_SELECT}, cance
 function canAccessClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
   return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
+}
+
+async function findCourtConflict(params: {
+  clubId: string;
+  courtId: string;
+  startAt: string;
+  endAt: string;
+  excludeBookingId?: string;
+}): Promise<boolean> {
+  const supabase = getSupabaseServiceRoleClient();
+  let query = supabase
+    .from('bookings')
+    .select('id')
+    .eq('club_id', params.clubId)
+    .eq('court_id', params.courtId)
+    .neq('status', 'cancelled')
+    .lt('start_at', params.endAt)
+    .gt('end_at', params.startAt)
+    .limit(1);
+  if (params.excludeBookingId) query = query.neq('id', params.excludeBookingId);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) && data.length > 0;
 }
 
 type DivisionInputRow = {
@@ -227,12 +251,84 @@ async function getTournamentForPlayer(
     .from('tournament_inscriptions')
     .select('id, status, invited_at, expires_at, confirmed_at, cancelled_at, cancelled_reason, player_id_1, player_id_2, created_at')
     .eq('tournament_id', tournamentId)
+    .in('status', ['pending', 'confirmed'])
     .or(`player_id_1.eq.${playerId},player_id_2.eq.${playerId}`)
     .order('created_at', { ascending: false })
     .limit(1);
   if (insErr) return { tournament, myInscription: null, error: insErr.message };
   const myInscription = insRows?.[0] ?? null;
   return { tournament, myInscription };
+}
+
+type TournamentCourtBookingSlot = {
+  booking_id: string;
+  court_id: string;
+  court_name: string | null;
+  start_at: string;
+  end_at: string;
+  status: string;
+  organizer_player_id: string | null;
+  i_am_organizer: boolean;
+  i_am_participant: boolean;
+};
+
+async function getTournamentAgendaForPlayer(
+  tournamentId: string,
+  playerId: string,
+  tournamentRow: { start_at?: string | null; end_at?: string | null; duration_min?: number | null },
+): Promise<{
+  tournament_window: { start_at: string; end_at: string; duration_min: number | null };
+  court_bookings: TournamentCourtBookingSlot[];
+}> {
+  const supabase = getSupabaseServiceRoleClient();
+  const tournament_window = {
+    start_at: String(tournamentRow.start_at ?? ''),
+    end_at: String(tournamentRow.end_at ?? ''),
+    duration_min: tournamentRow.duration_min != null ? Number(tournamentRow.duration_min) : null,
+  };
+  const { data: links, error: lErr } = await supabase
+    .from('tournament_booking_links')
+    .select('booking_id, court_id')
+    .eq('tournament_id', tournamentId);
+  if (lErr) throw new Error(lErr.message);
+  const bookingIds = (links ?? []).map((x: { booking_id: string }) => x.booking_id).filter(Boolean);
+  if (!bookingIds.length) {
+    return { tournament_window, court_bookings: [] };
+  }
+  const { data: bookings, error: bErr } = await supabase
+    .from('bookings')
+    .select('id, court_id, organizer_player_id, start_at, end_at, status, courts(name)')
+    .in('id', bookingIds);
+  if (bErr) throw new Error(bErr.message);
+  const { data: parts } = await supabase
+    .from('booking_participants')
+    .select('booking_id')
+    .eq('player_id', playerId)
+    .in('booking_id', bookingIds);
+  const partSet = new Set((parts ?? []).map((p: { booking_id: string }) => p.booking_id));
+  const byId = new Map((bookings ?? []).map((b: any) => [String(b.id), b]));
+  const court_bookings: TournamentCourtBookingSlot[] = [];
+  for (const link of links ?? []) {
+    const b = byId.get(String((link as { booking_id: string }).booking_id));
+    if (!b) continue;
+    const org = (b as { organizer_player_id?: string | null }).organizer_player_id ?? null;
+    const cid = String((b as { court_id: string }).court_id ?? (link as { court_id: string }).court_id);
+    const c = (b as { courts?: { name?: string } | { name?: string }[] }).courts;
+    const courtOne = Array.isArray(c) ? c[0] : c;
+    court_bookings.push({
+      booking_id: String((b as { id: string }).id),
+      court_id: cid,
+      court_name: courtOne?.name != null ? String(courtOne.name) : null,
+      start_at: String((b as { start_at: string }).start_at),
+      end_at: String((b as { end_at: string }).end_at),
+      status: String((b as { status: string }).status),
+      organizer_player_id: org,
+      i_am_organizer: org === playerId,
+      i_am_participant: partSet.has(String((b as { id: string }).id)),
+    });
+  }
+  court_bookings.sort((a, b) => a.start_at.localeCompare(b.start_at));
+  return { tournament_window, court_bookings };
 }
 
 async function cancelLinkedTournamentBookings(tournamentId: string): Promise<{ error?: string }> {
@@ -1156,6 +1252,98 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
 
 /**
  * @openapi
+ * /tournaments/{id}/poster/upload:
+ *   post:
+ *     tags: [Tournaments]
+ *     summary: Subir o reemplazar imagen de torneo
+ *     description: |
+ *       Sube la imagen al bucket `tournament-posters` usando permisos de backend y devuelve `poster_url`.
+ *       Evita depender de credenciales de Supabase en el frontend.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_id, file_name, content_type, data_base64]
+ *             properties:
+ *               club_id: { type: string, format: uuid }
+ *               file_name: { type: string, example: "poster.png" }
+ *               content_type: { type: string, example: "image/png" }
+ *               data_base64:
+ *                 type: string
+ *                 description: Contenido binario en base64 (sin prefijo data URL)
+ *           examples:
+ *             sample:
+ *               value:
+ *                 club_id: "11111111-1111-1111-1111-111111111111"
+ *                 file_name: "poster.png"
+ *                 content_type: "image/png"
+ *                 data_base64: "iVBORw0KGgoAAAANSUhEUgAA..."
+ *     responses:
+ *       200:
+ *         description: Imagen subida
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, poster_url: "https://.../tournament-posters/club/tournament/poster.png?v=1710000000000" }
+ *       400: { description: Payload inválido o imagen no soportada }
+ *       403: { description: Sin permisos }
+ *       404: { description: Torneo no encontrado }
+ */
+router.post('/:id/poster/upload', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: tournament } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
+    if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((tournament as any).club_id))) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const clubId = String(req.body?.club_id ?? '').trim();
+    if (!clubId || clubId !== String((tournament as any).club_id)) {
+      return res.status(400).json({ ok: false, error: 'club_id inválido' });
+    }
+    const fileName = String(req.body?.file_name ?? '').trim();
+    const contentType = String(req.body?.content_type ?? '').trim().toLowerCase();
+    const dataBase64 = String(req.body?.data_base64 ?? '').trim();
+    if (!fileName || !contentType || !dataBase64) {
+      return res.status(400).json({ ok: false, error: 'club_id, file_name, content_type y data_base64 son obligatorios' });
+    }
+    if (!contentType.startsWith('image/')) {
+      return res.status(400).json({ ok: false, error: 'Solo se permiten imágenes' });
+    }
+    const extRaw = fileName.includes('.') ? fileName.split('.').pop() ?? '' : '';
+    const ext = String(extRaw).toLowerCase();
+    const safeExt = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext) ? ext : 'jpg';
+    const path = `${clubId}/${tournamentId}/poster.${safeExt}`;
+    const buffer = Buffer.from(dataBase64, 'base64');
+    if (!buffer.length) return res.status(400).json({ ok: false, error: 'Imagen vacía o inválida' });
+
+    const { error: upErr } = await supabase.storage.from('tournament-posters').upload(path, buffer, {
+      upsert: true,
+      contentType,
+    });
+    if (upErr) return res.status(400).json({ ok: false, error: upErr.message });
+
+    const { data: pub } = supabase.storage.from('tournament-posters').getPublicUrl(path);
+    const posterUrl = `${pub.publicUrl}${pub.publicUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
+    return res.json({ ok: true, poster_url: posterUrl });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
  * /tournaments/{id}/cancel:
  *   post:
  *     tags: [Tournaments]
@@ -1645,7 +1833,7 @@ router.delete('/:id/inscriptions/:inscriptionId', requireClubOwnerOrAdmin, async
     const { data: inscription, error: iErr } = await supabase
       .from('tournament_inscriptions')
       .select(
-        'id, tournament_id, status, invite_email_1, invite_email_2, players_1:players!tournament_inscriptions_player_id_1_fkey(first_name,last_name,email), players_2:players!tournament_inscriptions_player_id_2_fkey(first_name,last_name,email)'
+        'id, tournament_id, status, player_id_1, player_id_2, invite_email_1, invite_email_2, players_1:players!tournament_inscriptions_player_id_1_fkey(first_name,last_name,email), players_2:players!tournament_inscriptions_player_id_2_fkey(first_name,last_name,email)'
       )
       .eq('id', inscriptionId)
       .eq('tournament_id', tournamentId)
@@ -1655,6 +1843,23 @@ router.delete('/:id/inscriptions/:inscriptionId', requireClubOwnerOrAdmin, async
 
     const { error: delErr } = await supabase.from('tournament_inscriptions').delete().eq('id', inscriptionId).eq('tournament_id', tournamentId);
     if (delErr) return res.status(500).json({ ok: false, error: delErr.message });
+
+    const removedPlayerIds = [String((inscription as any).player_id_1 ?? ''), String((inscription as any).player_id_2 ?? '')].filter(Boolean);
+    if (removedPlayerIds.length) {
+      const now = new Date().toISOString();
+      const { error: reqErr } = await supabase
+        .from('tournament_entry_requests')
+        .update({
+          status: 'dismissed',
+          response_message: 'Solicitud reiniciada porque el organizador removió la inscripción previa. Debes enviar una nueva solicitud para volver a ingresar.',
+          resolved_at: now,
+          updated_at: now,
+        })
+        .eq('tournament_id', tournamentId)
+        .in('player_id', removedPlayerIds)
+        .eq('status', 'approved');
+      if (reqErr) return res.status(500).json({ ok: false, error: reqErr.message });
+    }
 
     const p1 = (inscription as any).players_1;
     const p2 = (inscription as any).players_2;
@@ -2380,6 +2585,62 @@ router.get('/player/me-list', async (req: Request, res: Response) => {
 
 /**
  * @openapi
+ * /tournaments/player/my-entry-requests:
+ *   get:
+ *     tags: [Tournaments]
+ *     summary: Listar mis solicitudes de ingreso a torneos
+ *     description: Devuelve las solicitudes creadas por el jugador autenticado junto al torneo asociado, ordenadas por actualización más reciente.
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Solicitudes listadas
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   requests:
+ *                     - id: "11111111-1111-1111-1111-111111111111"
+ *                       tournament_id: "22222222-2222-2222-2222-222222222222"
+ *                       status: "pending"
+ *                       message: "Me gustaría participar"
+ *                       response_message: null
+ *                       created_at: "2026-04-17T10:00:00.000Z"
+ *                       updated_at: "2026-04-17T10:00:00.000Z"
+ *                       resolved_at: null
+ *                       tournament:
+ *                         id: "22222222-2222-2222-2222-222222222222"
+ *                         name: "Torneo Primavera"
+ *                         start_at: "2026-04-20T18:00:00.000Z"
+ *                         status: "open"
+ *                         price_cents: 1300
+ *       401: { description: Token requerido/expirado }
+ *       500: { description: Error interno }
+ */
+router.get('/player/my-entry-requests', async (req: Request, res: Response) => {
+  const auth = await getPlayerIdFromBearer(req);
+  if (auth.error || !auth.playerId) {
+    return res.status(401).json({ ok: false, error: auth.error ?? 'Token requerido' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('tournament_entry_requests')
+      .select(
+        'id,tournament_id,status,message,response_message,created_at,updated_at,resolved_at,tournament:tournaments!tournament_entry_requests_tournament_id_fkey(id,name,start_at,status,price_cents,registration_mode,visibility,elo_min,elo_max)'
+      )
+      .eq('player_id', auth.playerId)
+      .order('updated_at', { ascending: false });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, requests: data ?? [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
  * /tournaments/{id}/join:
  *   post:
  *     tags: [Tournaments]
@@ -2423,7 +2684,7 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament, error } = await supabase
       .from('tournaments')
-      .select('id, visibility, status, max_players, invite_ttl_minutes, gender, price_cents, elo_min, elo_max, level_mode')
+      .select('id, visibility, status, max_players, invite_ttl_minutes, registration_mode, gender, price_cents, elo_min, elo_max, level_mode')
       .eq('id', tournamentId)
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -2439,6 +2700,12 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     }
     if (String((tournament as any).status) !== 'open') {
       return res.status(400).json({ ok: false, error: 'El torneo no está abierto' });
+    }
+    if (!['individual', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode ?? 'individual'))) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Este torneo solo admite inscripción en pareja. Usa invitación o la opción de inscripción en pareja.',
+      });
     }
 
     await cleanupExpiredTournamentInvites(tournamentId);
@@ -2567,17 +2834,11 @@ router.post('/:id/entry-requests', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament, error: tErr } = await supabase
       .from('tournaments')
-      .select('id, visibility, status, price_cents, registration_mode')
+      .select('id, visibility, status, registration_mode')
       .eq('id', tournamentId)
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (Number((tournament as { price_cents?: number }).price_cents ?? 0) > 0) {
-      return res.status(400).json({
-        ok: false,
-        error: 'Este torneo requiere pago; no admite solicitud de ingreso por este canal.',
-      });
-    }
     if (String((tournament as { visibility?: string }).visibility) !== 'public') {
       return res.status(403).json({ ok: false, error: 'Solo en torneos públicos puedes enviar una solicitud' });
     }
@@ -2729,7 +2990,7 @@ router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdmin, a
     const { data: tournament, error: tErr } = await supabase
       .from('tournaments')
       .select(
-        'id, club_id, status, max_players, invite_ttl_minutes, registration_mode, elo_min, elo_max, gender, level_mode'
+        'id, club_id, status, max_players, invite_ttl_minutes, registration_mode, elo_min, elo_max, gender, level_mode, price_cents'
       )
       .eq('id', tournamentId)
       .maybeSingle();
@@ -2819,6 +3080,27 @@ router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdmin, a
       }
     }
 
+    const now = new Date().toISOString();
+    const { error: upReqErr } = await supabase
+      .from('tournament_entry_requests')
+      .update({ status: 'approved', resolved_at: now, updated_at: now })
+      .eq('id', requestId)
+      .eq('tournament_id', tournamentId)
+      .eq('status', 'pending');
+    if (upReqErr) return res.status(500).json({ ok: false, error: upReqErr.message });
+
+    const joinedName = `${(player as any).first_name ?? ''} ${(player as any).last_name ?? ''}`.trim() || 'Un jugador';
+    const isPaidTournament = Number((tournament as { price_cents?: number }).price_cents ?? 0) > 0;
+    if (isPaidTournament) {
+      await supabase.from('tournament_chat_messages').insert({
+        tournament_id: tournamentId,
+        author_user_id: '00000000-0000-0000-0000-000000000000',
+        author_name: 'Sistema',
+        message: `${joinedName}: solicitud aprobada. Debe completar pago para confirmar su inscripción.`,
+      });
+      return res.json({ ok: true, requires_payment: true });
+    }
+
     const { tokenHash } = generateInviteToken();
     const nowIso = new Date().toISOString();
     const expiresAt = new Date(
@@ -2836,16 +3118,6 @@ router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdmin, a
     });
     if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
 
-    const now = new Date().toISOString();
-    const { error: upReqErr } = await supabase
-      .from('tournament_entry_requests')
-      .update({ status: 'approved', resolved_at: now, updated_at: now })
-      .eq('id', requestId)
-      .eq('tournament_id', tournamentId)
-      .eq('status', 'pending');
-    if (upReqErr) return res.status(500).json({ ok: false, error: upReqErr.message });
-
-    const joinedName = `${(player as any).first_name ?? ''} ${(player as any).last_name ?? ''}`.trim() || 'Un jugador';
     await supabase.from('tournament_chat_messages').insert({
       tournament_id: tournamentId,
       author_user_id: '00000000-0000-0000-0000-000000000000',
@@ -3040,12 +3312,91 @@ router.get('/:id/player-detail', async (req: Request, res: Response) => {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+    const { data: participantRows } = await supabase
+      .from('tournament_inscriptions')
+      .select(
+        'id,status,players_1:players!tournament_inscriptions_player_id_1_fkey(id,first_name,last_name,avatar_url,elo_rating),players_2:players!tournament_inscriptions_player_id_2_fkey(id,first_name,last_name,avatar_url,elo_rating)'
+      )
+      .eq('tournament_id', tournamentId)
+      .in('status', ['confirmed', 'pending']);
+    const participants = (participantRows ?? [])
+      .flatMap((row: any) => {
+        const players = [row.players_1, row.players_2].filter(Boolean);
+        return players.map((p: any) => ({
+          id: String(p.id),
+          first_name: String(p.first_name ?? ''),
+          last_name: String(p.last_name ?? ''),
+          avatar_url: p.avatar_url != null ? String(p.avatar_url) : null,
+          elo_rating: p.elo_rating != null ? Number(p.elo_rating) : null,
+          inscription_status: String(row.status ?? ''),
+        }));
+      })
+      .filter((p: any, idx: number, arr: any[]) => arr.findIndex((x) => x.id === p.id) === idx);
     return res.json({
       ok: true,
       tournament: ctx.tournament,
       counts: { confirmed: slots.confirmedPlayers, pending: slots.pendingPlayers },
       my_inscription: ctx.myInscription,
       my_entry_request: myEntryRow ?? null,
+      participants,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/player/agenda:
+ *   get:
+ *     tags: [Tournaments]
+ *     summary: Agenda de grilla del torneo para el jugador
+ *     description: |
+ *       Devuelve la ventana horaria del torneo, todas las reservas de pista vinculadas (`tournament_booking_links`)
+ *       y el subconjunto en el que el jugador es organizador o participante.
+ *       Torneos privados: solo si el jugador está inscrito.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Agenda
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   tournament_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+ *                   tournament_window: { start_at: "2026-04-20T10:00:00.000Z", end_at: "2026-04-20T14:00:00.000Z", duration_min: 240 }
+ *                   court_bookings: []
+ *                   my_court_bookings: []
+ *       401: { description: Token requerido/expirado }
+ *       403: { description: Torneo privado sin acceso }
+ *       404: { description: Torneo no encontrado }
+ */
+router.get('/:id/player/agenda', async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  const auth = await getPlayerIdFromBearer(req);
+  if (auth.error || !auth.playerId) return res.status(401).json({ ok: false, error: auth.error ?? 'Token requerido' });
+  try {
+    const ctx = await getTournamentForPlayer(tournamentId, auth.playerId);
+    if (ctx.error) return res.status(ctx.error === 'Torneo no encontrado' ? 404 : 500).json({ ok: false, error: ctx.error });
+    const visibility = String((ctx.tournament as { visibility?: string }).visibility ?? 'private');
+    if (visibility !== 'public' && !ctx.myInscription) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a la agenda de este torneo' });
+    }
+    const agenda = await getTournamentAgendaForPlayer(tournamentId, auth.playerId, ctx.tournament as any);
+    const my_court_bookings = agenda.court_bookings.filter((r) => r.i_am_organizer || r.i_am_participant);
+    return res.json({
+      ok: true,
+      tournament_id: tournamentId,
+      tournament_window: agenda.tournament_window,
+      court_bookings: agenda.court_bookings,
+      my_court_bookings,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -3254,6 +3605,9 @@ router.post('/:id/leave', async (req: Request, res: Response) => {
       })
       .eq('id', ctx.myInscription.id);
     if (upErr) return res.status(500).json({ ok: false, error: upErr.message });
+
+    // Si ya existía cuadro generado, se limpia para evitar mostrar parejas/equipos desactualizados.
+    await resetTournamentCompetition(tournamentId);
 
     const name = await getPlayerDisplayName(auth.playerId);
     await supabase.from('tournament_chat_messages').insert({
@@ -3547,6 +3901,210 @@ router.post('/:id/competition/generate-manual', requireClubOwnerOrAdmin, async (
 
 /**
  * @openapi
+ * /tournaments/{id}/competition/reset:
+ *   post:
+ *     tags: [TournamentsCompetition]
+ *     summary: Deshacer cruces actuales de competencia
+ *     description: |
+ *       Elimina equipos, fases, grupos, cruces, resultados y podio del torneo para poder regenerar el cuadro nuevamente.
+ *       No modifica inscripciones ni configuración base del torneo.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Cruces eliminados
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true }
+ *       403: { description: Sin permisos }
+ *       404: { description: Torneo no encontrado }
+ */
+router.post('/:id/competition/reset', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
+    if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    await resetTournamentCompetition(tournamentId);
+    return res.json({ ok: true });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/competition/schedule-round1:
+ *   put:
+ *     tags: [TournamentsCompetition]
+ *     summary: Asignar cancha y horario a cruces de primera ronda
+ *     description: |
+ *       Crea/actualiza reservas (`bookings`) para cada partido de primera ronda del cuadro de eliminación directa
+ *       y vincula cada partido mediante `booking_id`.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [matches]
+ *             properties:
+ *               matches:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [match_number, court_id, start_at]
+ *                   properties:
+ *                     match_number: { type: integer, minimum: 1, example: 1 }
+ *                     court_id: { type: string, format: uuid, example: "22222222-2222-2222-2222-222222222222" }
+ *                     start_at: { type: string, format: date-time, example: "2026-04-20T18:00:00.000Z" }
+ *           examples:
+ *             sample:
+ *               value:
+ *                 matches:
+ *                   - match_number: 1
+ *                     court_id: "22222222-2222-2222-2222-222222222222"
+ *                     start_at: "2026-04-20T18:00:00.000Z"
+ *                   - match_number: 2
+ *                     court_id: "33333333-3333-3333-3333-333333333333"
+ *                     start_at: "2026-04-20T19:30:00.000Z"
+ *     responses:
+ *       200:
+ *         description: Programación guardada
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, updated: 2 }
+ *       400: { description: Datos inválidos o formato no compatible }
+ *       403: { description: Sin permisos }
+ *       404: { description: Torneo no encontrado }
+ *       409: { description: Conflicto de horario/cancha }
+ */
+router.put('/:id/competition/schedule-round1', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: t } = await supabase
+      .from('tournaments')
+      .select('id,club_id,duration_min,competition_format')
+      .eq('id', tournamentId)
+      .maybeSingle();
+    if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (String((t as any).competition_format ?? '') !== 'single_elim') {
+      return res.status(400).json({ ok: false, error: 'Solo disponible para eliminación directa' });
+    }
+
+    const rows = Array.isArray(req.body?.matches) ? req.body.matches : [];
+    if (!rows.length) return res.status(400).json({ ok: false, error: 'matches es obligatorio' });
+    const durationMin = Math.max(30, Number((t as any).duration_min ?? 90));
+    const organizerPlayerId = await resolveOrganizerPlayerId(req, String((t as any).club_id));
+    const nowIso = new Date().toISOString();
+
+    for (const raw of rows) {
+      const matchNumber = Number((raw as any)?.match_number);
+      const courtId = String((raw as any)?.court_id ?? '').trim();
+      const startAt = String((raw as any)?.start_at ?? '').trim();
+      if (!Number.isInteger(matchNumber) || matchNumber < 1 || !courtId || !startAt) {
+        return res.status(400).json({ ok: false, error: 'Cada item requiere match_number, court_id y start_at válidos' });
+      }
+      const startDate = new Date(startAt);
+      if (Number.isNaN(startDate.getTime())) {
+        return res.status(400).json({ ok: false, error: 'start_at inválido' });
+      }
+      const endDate = new Date(startDate.getTime() + durationMin * 60_000);
+      const startIso = startDate.toISOString();
+      const endIso = endDate.toISOString();
+      const { data: match } = await supabase
+        .from('tournament_stage_matches')
+        .select('id,booking_id')
+        .eq('tournament_id', tournamentId)
+        .eq('round_number', 1)
+        .eq('match_number', matchNumber)
+        .maybeSingle();
+      if (!match?.id) {
+        return res.status(400).json({ ok: false, error: `No existe partido de ronda 1 para match_number=${matchNumber}` });
+      }
+
+      const conflict = await findCourtConflict({
+        clubId: String((t as any).club_id),
+        courtId,
+        startAt: startIso,
+        endAt: endIso,
+        excludeBookingId: (match as any).booking_id ? String((match as any).booking_id) : undefined,
+      });
+      if (conflict) {
+        return res.status(409).json({ ok: false, error: `Conflicto de cancha en partido ${matchNumber}` });
+      }
+
+      let bookingId = (match as any).booking_id ? String((match as any).booking_id) : '';
+      if (bookingId) {
+        const { error: upErr } = await supabase
+          .from('bookings')
+          .update({
+            court_id: courtId,
+            start_at: startIso,
+            end_at: endIso,
+            organizer_player_id: organizerPlayerId,
+            status: 'confirmed',
+            reservation_type: 'tournament',
+            source_channel: 'manual',
+            notes: `Cruce torneo ${tournamentId} - R1 M${matchNumber}`,
+            updated_at: nowIso,
+          })
+          .eq('id', bookingId);
+        if (upErr) throw new Error(upErr.message);
+      } else {
+        const { data: created, error: cErr } = await supabase
+          .from('bookings')
+          .insert({
+            court_id: courtId,
+            organizer_player_id: organizerPlayerId,
+            start_at: startIso,
+            end_at: endIso,
+            timezone: 'Europe/Madrid',
+            total_price_cents: 0,
+            currency: 'EUR',
+            status: 'confirmed',
+            reservation_type: 'tournament',
+            source_channel: 'manual',
+            notes: `Cruce torneo ${tournamentId} - R1 M${matchNumber}`,
+          })
+          .select('id')
+          .single();
+        if (cErr) throw new Error(cErr.message);
+        bookingId = String((created as any).id);
+      }
+
+      const { error: mErr } = await supabase
+        .from('tournament_stage_matches')
+        .update({ booking_id: bookingId, updated_at: nowIso })
+        .eq('id', String((match as any).id));
+      if (mErr) throw new Error(mErr.message);
+    }
+
+    return res.json({ ok: true, updated: rows.length });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
  * /tournaments/{id}/competition/admin-view:
  *   get:
  *     tags: [TournamentsCompetition]
@@ -3710,6 +4268,91 @@ router.put('/:id/podium', requireClubOwnerOrAdmin, async (req: Request, res: Res
     return res.json({ ok: true });
   } catch (err) {
     return res.status(400).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/competition/player-view:
+ *   get:
+ *     tags: [TournamentsCompetition]
+ *     summary: Vista de competencia del jugador autenticado
+ *     description: |
+ *       Devuelve la vista de competencia del torneo junto con los equipos y partidos del jugador autenticado.
+ *       Incluye ventana horaria del torneo, reservas de pista vinculadas (`tournament_booking_links`) y, en cada cruce,
+ *       `schedule_booking` si existe `booking_id` en el cruce (migración 041 + reserva asignada).
+ *       Si el torneo es privado, solo permite acceso a jugadores inscritos.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Vista de competencia + contexto del jugador
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   my_player_ids: ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]
+ *                   my_team_ids: ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
+ *                   my_matches: []
+ *                   tournament_window: { start_at: "2026-04-20T10:00:00.000Z", end_at: "2026-04-20T14:00:00.000Z", duration_min: 240 }
+ *                   court_bookings: []
+ *                   teams: []
+ *                   stages: []
+ *                   groups: []
+ *                   matches: []
+ *                   standings: {}
+ *                   podium: []
+ *       401: { description: Token requerido/expirado }
+ *       403: { description: Torneo privado sin acceso }
+ *       404: { description: Torneo no encontrado }
+ */
+router.get('/:id/competition/player-view', async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  const auth = await getPlayerIdFromBearer(req);
+  if (auth.error || !auth.playerId) return res.status(401).json({ ok: false, error: auth.error ?? 'Token requerido' });
+  try {
+    const ctx = await getTournamentForPlayer(tournamentId, auth.playerId);
+    if (ctx.error) return res.status(ctx.error === 'Torneo no encontrado' ? 404 : 500).json({ ok: false, error: ctx.error });
+    const visibility = String((ctx.tournament as { visibility?: string }).visibility ?? 'private');
+    if (visibility !== 'public' && !ctx.myInscription) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a la competencia de este torneo' });
+    }
+    const view = await getCompetitionView(tournamentId);
+    const agenda = await getTournamentAgendaForPlayer(tournamentId, auth.playerId, ctx.tournament as any);
+    const playerIds = [
+      String((ctx.myInscription as { player_id_1?: string | null } | null)?.player_id_1 ?? ''),
+      String((ctx.myInscription as { player_id_2?: string | null } | null)?.player_id_2 ?? ''),
+    ].filter(Boolean);
+    const myTeamIds = (Array.isArray(view.teams) ? view.teams : [])
+      .filter((team: any) => playerIds.includes(String(team?.player_id_1 ?? '')) || playerIds.includes(String(team?.player_id_2 ?? '')))
+      .map((team: any) => String(team.id))
+      .filter(Boolean);
+    const teamSet = new Set(myTeamIds);
+    const myMatches = (Array.isArray(view.matches) ? view.matches : [])
+      .filter((m: any) => teamSet.has(String(m?.team_a_id ?? '')) || teamSet.has(String(m?.team_b_id ?? '')))
+      .sort((a: any, b: any) => {
+        const ra = Number(a?.round_number ?? 0);
+        const rb = Number(b?.round_number ?? 0);
+        if (ra !== rb) return ra - rb;
+        return Number(a?.match_number ?? 0) - Number(b?.match_number ?? 0);
+      });
+    return res.json({
+      ok: true,
+      ...view,
+      my_player_ids: playerIds,
+      my_team_ids: myTeamIds,
+      my_matches: myMatches,
+      tournament_window: agenda.tournament_window,
+      court_bookings: agenda.court_bookings,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 

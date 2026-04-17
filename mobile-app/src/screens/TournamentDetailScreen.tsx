@@ -12,20 +12,37 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   type ViewStyle,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ExpoLinking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useStripe } from '@stripe/stripe-react-native';
+import { useStripe } from '../stripe';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import type { PublicTournamentRow } from '../api/tournaments';
+import type {
+  PublicTournamentRow,
+  TournamentChatMessage,
+  TournamentCompetitionMatch,
+  TournamentCompetitionPlayerView,
+  TournamentParticipantRow,
+  TournamentCompetitionTeam,
+  TournamentCourtBookingSlot,
+  TournamentPlayerAgenda,
+} from '../api/tournaments';
+import { fetchMyPlayerProfile } from '../api/players';
 import {
+  fetchTournamentCompetitionPlayerView,
+  fetchTournamentChatMessages,
+  fetchTournamentPlayerAgenda,
   fetchTournamentDetailForScreen,
   joinPublicTournament,
   leaveTournament,
+  sendTournamentChatMessage,
+  submitTournamentEntryRequest,
 } from '../api/tournaments';
 import { confirmPaymentFromClient, createIntentForTournament } from '../api/payments';
 import { PrivateReservationModal } from '../components/partido/PrivateReservationModal';
@@ -56,7 +73,7 @@ const CTA_LEAVE_START = '#B91C1C';
 const CTA_LEAVE_END = '#7F1D1D';
 const HERO_H = 224;
 
-type DetailTab = 'info' | 'equipos' | 'cuadro';
+type DetailTab = 'info' | 'equipos' | 'cuadro' | 'chat' | 'partidos';
 
 type Props = {
   tournamentId: string;
@@ -170,6 +187,49 @@ function BracketCuadroEmpty() {
   );
 }
 
+function stageNameById(stages: TournamentCompetitionPlayerView['stages'], stageId: string | null): string {
+  if (!stageId) return 'Partido';
+  const s = stages.find((x) => x.id === stageId);
+  return s?.stage_name?.trim() || 'Partido';
+}
+
+function teamNameById(teams: TournamentCompetitionTeam[], teamId: string | null): string {
+  if (!teamId) return 'Por definir';
+  const t = teams.find((x: TournamentCompetitionTeam) => x.id === teamId);
+  return t?.name?.trim() || 'Por definir';
+}
+
+function prettyMatchStatus(raw: string | null | undefined): string {
+  const s = String(raw ?? '').trim().toLowerCase();
+  if (s === 'finished') return 'Finalizado';
+  if (s === 'scheduled') return 'Programado';
+  if (s === 'in_progress') return 'En juego';
+  if (s === 'bye') return 'Pase';
+  return s || 'Pendiente';
+}
+
+function matchSetsLabel(m: TournamentCompetitionMatch): string | null {
+  const sets = m.result?.sets;
+  if (!Array.isArray(sets) || sets.length === 0) return null;
+  return sets.map((s) => `${s.games_a}-${s.games_b}`).join('  ');
+}
+
+function matchScheduleLine(m: TournamentCompetitionMatch): string | null {
+  const sb = m.schedule_booking;
+  if (!sb) return null;
+  const a = formatIsoDateTimeEs(sb.start_at) ?? sb.start_at;
+  const b = formatIsoDateTimeEs(sb.end_at) ?? sb.end_at;
+  const court = sb.court_name?.trim() ? ` · ${sb.court_name.trim()}` : '';
+  return `${a} – ${b}${court}`;
+}
+
+function slotLine(slot: TournamentCourtBookingSlot): string {
+  const a = formatIsoDateTimeEs(slot.start_at) ?? slot.start_at;
+  const b = formatIsoDateTimeEs(slot.end_at) ?? slot.end_at;
+  const court = slot.court_name?.trim() ? slot.court_name.trim() : 'Pista';
+  return `${court}: ${a} – ${b}`;
+}
+
 function TournamentDetailLoadingSkeleton({
   onClose,
   insetsTop,
@@ -259,12 +319,34 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
     pending: 0,
   });
   const [myStatus, setMyStatus] = useState<string | null>(null);
+  const [myElo, setMyElo] = useState<number | null>(null);
+  const [myEntryRequest, setMyEntryRequest] = useState<{
+    id?: string;
+    status?: 'pending' | 'approved' | 'rejected' | 'dismissed' | string;
+    message?: string;
+    response_message?: string | null;
+    created_at?: string;
+    resolved_at?: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<DetailTab>('info');
+  const [competition, setCompetition] = useState<TournamentCompetitionPlayerView | null>(null);
+  const [participants, setParticipants] = useState<TournamentParticipantRow[]>([]);
+  const [chatMessages, setChatMessages] = useState<TournamentChatMessage[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatDraft, setChatDraft] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const [competitionError, setCompetitionError] = useState<string | null>(null);
+  const [agenda, setAgenda] = useState<TournamentPlayerAgenda | null>(null);
+  const [agendaError, setAgendaError] = useState<string | null>(null);
   const [confirmationModalData, setConfirmationModalData] =
     useState<BookingConfirmationData | null>(null);
+  const [entryRequestMessage, setEntryRequestMessage] = useState('');
+  const prevMyStatusRef = useRef<string | null>(null);
+  const prevEntryStatusRef = useRef<string | null>(null);
+  const shownApprovedEntryRequestRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(
     async (opts?: { silent?: boolean }) => {
@@ -292,6 +374,78 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
         setRow(detail.tournament);
         setCounts(detail.counts);
         setMyStatus(detail.my_inscription?.status ?? null);
+        setMyEntryRequest(detail.my_entry_request ?? null);
+        setParticipants(detail.participants ?? []);
+        const nextMyStatus = detail.my_inscription?.status ?? null;
+        const nextEntryStatus = detail.my_entry_request?.status ?? null;
+        const hasActiveInscription = nextMyStatus === 'confirmed' || nextMyStatus === 'pending';
+        if (
+          prevMyStatusRef.current != null &&
+          prevMyStatusRef.current !== 'confirmed' &&
+          nextMyStatus === 'confirmed' &&
+          (prevEntryStatusRef.current === 'pending' || nextEntryStatus === 'approved')
+        ) {
+          Alert.alert('Inscripción aprobada', 'El organizador aprobó tu solicitud y ya estás inscrito en el torneo.');
+        }
+        const requestId = String(detail.my_entry_request?.id ?? '');
+        if (hasActiveInscription && requestId) {
+          shownApprovedEntryRequestRef.current.add(requestId);
+          await AsyncStorage.setItem(`@tournament_entry_approved_seen_${requestId}`, '1');
+        }
+        if (
+          prevEntryStatusRef.current === 'pending' &&
+          nextEntryStatus === 'approved' &&
+          !hasActiveInscription
+        ) {
+          if (requestId && !shownApprovedEntryRequestRef.current.has(requestId)) {
+            const storageKey = `@tournament_entry_approved_seen_${requestId}`;
+            const alreadySeen = await AsyncStorage.getItem(storageKey);
+            if (!alreadySeen) {
+              Alert.alert(
+                'Solicitud aprobada',
+                'El organizador aprobó tu solicitud. Ya puedes tocar "Inscribirme" para completar el pago y confirmar tu plaza.',
+              );
+              await AsyncStorage.setItem(storageKey, '1');
+            }
+            shownApprovedEntryRequestRef.current.add(requestId);
+          }
+        }
+        prevMyStatusRef.current = nextMyStatus;
+        prevEntryStatusRef.current = nextEntryStatus;
+        if (session?.access_token) {
+          const me = await fetchMyPlayerProfile(session.access_token);
+          setMyElo(me?.eloRating ?? null);
+        } else {
+          setMyElo(null);
+        }
+        if (session?.access_token) {
+          const [competitionRes, agendaRes] = await Promise.all([
+            fetchTournamentCompetitionPlayerView(tournamentId, session.access_token),
+            fetchTournamentPlayerAgenda(tournamentId, session.access_token),
+          ]);
+          if (gen !== loadGenerationRef.current) {
+            return;
+          }
+          if (competitionRes.ok) {
+            setCompetition(competitionRes.data);
+            setCompetitionError(null);
+          } else {
+            setCompetition(null);
+            setCompetitionError(competitionRes.error);
+          }
+          if (agendaRes.ok) {
+            setAgenda(agendaRes.data);
+            setAgendaError(null);
+          } else {
+            setAgenda(null);
+            setAgendaError(agendaRes.error);
+          }
+        } else {
+          setCompetition(null);
+          setCompetitionError(null);
+          setAgenda(null);
+          setAgendaError(null);
+        }
       } finally {
         if (showLoader && gen === loadGenerationRef.current) {
           setLoading(false);
@@ -305,6 +459,27 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
     if (authBooting) return;
     void load();
   }, [load, authBooting]);
+
+  const loadChat = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!session?.access_token) return;
+    if (!opts?.silent) setChatLoading(true);
+    try {
+      const res = await fetchTournamentChatMessages(tournamentId, session.access_token);
+      if (res.ok) setChatMessages(res.messages);
+      else setChatMessages([]);
+    } finally {
+      if (!opts?.silent) setChatLoading(false);
+    }
+  }, [session?.access_token, tournamentId]);
+
+  useEffect(() => {
+    if (tab !== 'chat' || !session?.access_token) return;
+    void loadChat();
+    const timer = setInterval(() => {
+      void loadChat({ silent: true });
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [tab, session?.access_token, loadChat]);
 
   const title = row ? tournamentTitle(row) : '';
   const heroUri = useMemo(() => {
@@ -326,6 +501,16 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
   const remaining = Math.max(0, maxP - confirmed - pending);
 
   const prizesList = useMemo(() => (row ? parsePrizesFromRow(row) : []), [row]);
+  const eloMin = row?.elo_min != null ? Number(row.elo_min) : null;
+  const eloMax = row?.elo_max != null ? Number(row.elo_max) : null;
+  const eloMismatchReason = useMemo(() => {
+    if (!row || myElo == null || Number.isNaN(Number(myElo))) return null;
+    const elo = Number(myElo);
+    if (eloMin != null && elo < eloMin) return `No cumples el Elo mínimo (${eloMin}). Tu Elo actual es ${Math.round(elo)}.`;
+    if (eloMax != null && elo > eloMax) return `Superas el Elo máximo (${eloMax}). Tu Elo actual es ${Math.round(elo)}.`;
+    return null;
+  }, [row, myElo, eloMin, eloMax]);
+  const requestStatus = String(myEntryRequest?.status ?? '').toLowerCase();
 
   const handleShare = async () => {
     if (!row) return;
@@ -359,6 +544,41 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
   };
 
   const handleJoin = async () => {
+    const trySubmitEntryRequest = async (reasonError: string) => {
+      if (!session?.access_token) return;
+      if (myEntryRequest?.status === 'pending') {
+        Alert.alert('Solicitud pendiente', 'Ya tienes una solicitud pendiente para este torneo.');
+        return;
+      }
+      const canRequestByRule = /elo|género|genero|categor/i.test(reasonError.toLowerCase());
+      if (!canRequestByRule) return;
+      Alert.alert(
+        'No cumples requisitos',
+        `${reasonError}\n\n¿Quieres enviar una solicitud al organizador para que revise tu inscripción?`,
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: 'Enviar solicitud',
+            onPress: () => {
+              void (async () => {
+                const fallbackMessage =
+                  entryRequestMessage.trim() ||
+                  'Hola! Me gustaría participar en este torneo aunque no cumpla el requisito automático. ¿Podrían revisar mi solicitud?';
+                const req = await submitTournamentEntryRequest(row.id, fallbackMessage, session.access_token);
+                if (!req.ok) {
+                  Alert.alert('Solicitud', req.error);
+                  return;
+                }
+                Alert.alert('Solicitud enviada', 'El organizador verá tu solicitud en su panel.');
+                setEntryRequestMessage('');
+                await load({ silent: true });
+              })();
+            },
+          },
+        ],
+      );
+    };
+
     if (!row) return;
     if (!session?.access_token) {
       Alert.alert('Inicia sesión', 'Necesitas una cuenta para inscribirte en el torneo.');
@@ -366,13 +586,6 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
     }
     if (!isTournamentStatusOpen(row.status)) {
       Alert.alert('Torneo', 'Las inscripciones no están abiertas.');
-      return;
-    }
-    if (row.registration_mode === 'pair') {
-      Alert.alert(
-        'Modo parejas',
-        'Este torneo solo admite inscripción en pareja. Completa el proceso desde la web del club o el enlace de invitación que te envíe el organizador.',
-      );
       return;
     }
     if (remaining <= 0 && myStatus !== 'confirmed') {
@@ -395,6 +608,7 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
           await load({ silent: true });
         } else {
           Alert.alert('No se pudo inscribir', r.error);
+          await trySubmitEntryRequest(r.error);
         }
       } catch (e) {
         Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo completar la inscripción.');
@@ -411,6 +625,7 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
       if (!intentRes.ok || !intentRes.clientSecret) {
         const errMsg = intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.';
         Alert.alert('Error', errMsg);
+        await trySubmitEntryRequest(errMsg);
         return;
       }
 
@@ -505,6 +720,40 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
       handleLeave();
       return;
     }
+    const blockedByElo = Boolean(eloMismatchReason) && requestStatus !== 'approved';
+    if (blockedByElo || requestStatus === 'rejected') {
+      if (!session?.access_token) {
+        Alert.alert('Inicia sesión', 'Necesitas una cuenta para enviar una solicitud.');
+        return;
+      }
+      if (!isTournamentStatusOpen(row.status) || remaining <= 0) {
+        Alert.alert('Torneo', 'No hay cupo disponible o las inscripciones están cerradas.');
+        return;
+      }
+      if (requestStatus === 'pending') {
+        Alert.alert('Solicitud pendiente', 'Ya enviaste una solicitud al organizador.');
+        return;
+      }
+      const msg =
+        entryRequestMessage.trim() ||
+        'Hola! Me gustaría participar en este torneo aunque no cumpla el requisito automático. ¿Podrían revisar mi solicitud?';
+      void (async () => {
+        setJoining(true);
+        try {
+          const req = await submitTournamentEntryRequest(row.id, msg, session.access_token);
+          if (!req.ok) {
+            Alert.alert('Solicitud', req.error);
+            return;
+          }
+          Alert.alert('Solicitud enviada', 'Tu solicitud fue enviada al organizador.');
+          setEntryRequestMessage('');
+          await load({ silent: true });
+        } finally {
+          setJoining(false);
+        }
+      })();
+      return;
+    }
     void handleJoin();
   };
 
@@ -512,8 +761,12 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
     if (!row) return 'Inscribirme';
     const price = formatTournamentInscriptionPrice(row.price_cents, row.currency ?? 'EUR');
     if (myStatus === 'confirmed' || myStatus === 'pending') return 'Cancelar inscripción';
+    if (requestStatus === 'pending') return 'Solicitud pendiente';
+    if (requestStatus === 'rejected') return 'Solicitud rechazada';
+    if (requestStatus === 'approved' && (row.price_cents ?? 0) > 0) return `Inscribirme — ${price}`;
+    if (eloMismatchReason) return 'Enviar solicitud';
     return `Inscribirme — ${price}`;
-  }, [row, myStatus]);
+  }, [row, myStatus, requestStatus, eloMismatchReason]);
 
   const hasActiveInscription = myStatus === 'confirmed' || myStatus === 'pending';
   const ctaGradientColors = useMemo((): [string, string] => {
@@ -522,7 +775,8 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
   }, [hasActiveInscription]);
   const ctaDisabled =
     !row ||
-    (!hasActiveInscription && (!isTournamentStatusOpen(row.status) || remaining <= 0));
+    (!hasActiveInscription &&
+      (!isTournamentStatusOpen(row.status) || remaining <= 0 || requestStatus === 'pending'));
 
   if (loading) {
     return (
@@ -551,6 +805,29 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
   const equiposTitle = teamsIsPair
     ? `Equipos inscritos (${teamsFilled}/${maxTeams})`
     : `Participantes inscritos (${teamsFilled}/${maxTeams})`;
+  const competitionTeams = competition?.teams ?? [];
+  const participantRows = [...participants].sort((a, b) => {
+    const na = `${a.first_name ?? ''} ${a.last_name ?? ''}`.trim().toLowerCase();
+    const nb = `${b.first_name ?? ''} ${b.last_name ?? ''}`.trim().toLowerCase();
+    return na.localeCompare(nb);
+  });
+  const competitionStages = competition?.stages ?? [];
+  const competitionMatches = competition?.matches ?? [];
+  const myCompetitionMatches = competition?.my_matches ?? [];
+  const gridSlots = agenda?.court_bookings?.length
+    ? agenda.court_bookings
+    : competition?.court_bookings ?? [];
+  const myGridSlots =
+    agenda && agenda.my_court_bookings.length > 0
+      ? agenda.my_court_bookings
+      : gridSlots.filter((s) => s.i_am_organizer || s.i_am_participant);
+  const tournamentWindow = agenda?.tournament_window ?? competition?.tournament_window;
+  const tournamentWindowLine =
+    tournamentWindow?.start_at && tournamentWindow?.end_at
+      ? `${formatIsoDateTimeEs(tournamentWindow.start_at) ?? tournamentWindow.start_at} — ${
+          formatIsoDateTimeEs(tournamentWindow.end_at) ?? tournamentWindow.end_at
+        }`
+      : `${formatShortDateEs(row.start_at)} — ${formatShortDateEs(row.end_at)}`;
 
   return (
     <View style={styles.root}>
@@ -563,6 +840,45 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
         nestedScrollEnabled
         keyboardShouldPersistTaps="handled"
       >
+        {!!row && !!eloMismatchReason && requestStatus !== 'approved' && myStatus !== 'confirmed' ? (
+          <View style={[styles.card, { marginHorizontal: 20, marginTop: 10 }]}>
+            <Text style={styles.cardTitleSm}>No cumples los requisitos</Text>
+            <Text style={styles.normasEmpty}>{eloMismatchReason}</Text>
+            <Text style={[styles.teamSub, { marginTop: 6 }]}>
+              Puedes enviar una solicitud al organizador para que la revise.
+            </Text>
+            <TextInput
+              value={entryRequestMessage}
+              onChangeText={setEntryRequestMessage}
+              placeholder="Mensaje para el organizador (opcional)"
+              placeholderTextColor="rgba(255,255,255,0.45)"
+              style={[styles.chatInput, { marginTop: 10 }]}
+              multiline
+            />
+          </View>
+        ) : null}
+        {!!row && requestStatus === 'approved' && myStatus !== 'confirmed' ? (
+          <View style={[styles.card, { marginHorizontal: 20, marginTop: 10 }]}>
+            <Text style={styles.cardTitleSm}>Solicitud aprobada</Text>
+            <Text style={styles.normasEmpty}>
+              Ya puedes inscribirte al torneo{(row.price_cents ?? 0) > 0 ? ' y completar el pago' : ''}.
+            </Text>
+          </View>
+        ) : null}
+        {!!row && requestStatus === 'pending' && myStatus !== 'confirmed' ? (
+          <View style={[styles.card, { marginHorizontal: 20, marginTop: 10 }]}>
+            <Text style={styles.cardTitleSm}>Solicitud pendiente</Text>
+            <Text style={styles.normasEmpty}>Tu solicitud está en revisión por el organizador.</Text>
+          </View>
+        ) : null}
+        {!!row && requestStatus === 'rejected' && myStatus !== 'confirmed' ? (
+          <View style={[styles.card, { marginHorizontal: 20, marginTop: 10 }]}>
+            <Text style={styles.cardTitleSm}>Solicitud rechazada</Text>
+            <Text style={styles.normasEmpty}>
+              {myEntryRequest?.response_message?.trim() || 'El organizador rechazó tu solicitud. Puedes enviar una nueva solicitud.'}
+            </Text>
+          </View>
+        ) : null}
         <View style={styles.hero}>
           <Image source={{ uri: heroUri }} style={styles.heroImg} resizeMode="cover" />
           <LinearGradient
@@ -620,6 +936,8 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
               { id: 'info' as const, label: 'Información' },
               { id: 'equipos' as const, label: 'Equipos' },
               { id: 'cuadro' as const, label: 'Cuadro' },
+              { id: 'chat' as const, label: 'Chat' },
+              { id: 'partidos' as const, label: 'Mis partidos' },
             ]
           ).map((t) => (
             <Pressable
@@ -678,7 +996,13 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
                 <DetailRow
                   icon="people-outline"
                   cap="Inscripción"
-                  text={row.registration_mode === 'pair' ? 'Parejas' : 'Individual'}
+                  text={
+                    row.registration_mode === 'pair'
+                      ? 'Parejas'
+                      : row.registration_mode === 'both'
+                        ? 'Individual o parejas'
+                        : 'Individual'
+                  }
                 />
                 {row.registration_closed_at ? (
                   <DetailRow
@@ -815,29 +1139,254 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
         ) : tab === 'equipos' ? (
           <View style={styles.body}>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>{equiposTitle}</Text>
-              <View style={styles.teamList}>
-                {Array.from({ length: teamsFilled }, (_, i) => (
-                  <TeamRowBlock
-                    key={`t-${row.id}-${i + 1}`}
-                    index={i + 1}
-                    isPair={teamsIsPair}
-                    showElo={teamsIsPair}
-                  />
-                ))}
-                {slotsFree > 0 ? <TeamSlotAvailableRow /> : null}
-              </View>
-              <Text style={styles.apiNote}>
-                Vista según cupos del torneo. Los nombres públicos de equipos o jugadores pueden mostrarse
-                cuando el club los publique.
+              <Text style={styles.cardTitle}>
+                {competitionTeams.length > 0
+                  ? `Equipos inscritos (${competitionTeams.length})`
+                  : equiposTitle}
               </Text>
+              <View style={styles.teamList}>
+                {competitionTeams.length > 0
+                  ? competitionTeams.map((team, i) => (
+                      <View key={team.id} style={styles.teamRow}>
+                        <View style={styles.teamAvatar}>
+                          <Text style={styles.teamAvatarText} numberOfLines={1}>
+                            E{i + 1}
+                          </Text>
+                        </View>
+                        <View style={styles.teamRowText}>
+                          <Text style={styles.teamName}>{team.name || `Equipo ${i + 1}`}</Text>
+                          <Text style={styles.teamSub}>Slot #{team.slot_index}</Text>
+                        </View>
+                      </View>
+                    ))
+                  : participantRows.map((p) => {
+                      const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
+                      const initials = fullName
+                        .split(' ')
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((part) => part[0]?.toUpperCase() ?? '')
+                        .join('');
+                      return (
+                        <View key={p.id} style={styles.teamRow}>
+                          {p.avatar_url ? (
+                            <Image source={{ uri: p.avatar_url }} style={styles.participantAvatarImage} />
+                          ) : (
+                            <View style={styles.teamAvatar}>
+                              <Text style={styles.teamAvatarText} numberOfLines={1}>
+                                {initials || 'J'}
+                              </Text>
+                            </View>
+                          )}
+                          <View style={styles.teamRowText}>
+                            <Text style={styles.teamName}>{fullName}</Text>
+                            <Text style={styles.teamSub}>
+                              Elo {p.elo_rating != null ? Math.round(Number(p.elo_rating)) : '—'}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    })}
+                {competitionTeams.length === 0 && slotsFree > 0 ? <TeamSlotAvailableRow /> : null}
+              </View>
+              {competitionError ? <Text style={styles.apiNote}>{competitionError}</Text> : null}
+            </View>
+          </View>
+        ) : tab === 'cuadro' ? (
+          <View style={styles.body}>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Cuadro del torneo</Text>
+              {competitionMatches.length === 0 ? (
+                <BracketCuadroEmpty />
+              ) : (
+                <View style={{ gap: 10 }}>
+                  {competitionMatches.map((m) => (
+                    <View key={m.id} style={styles.teamRow}>
+                      <View style={styles.teamRowText}>
+                        <Text style={styles.teamName}>
+                          {stageNameById(competitionStages, m.stage_id)} · R{m.round_number ?? '-'} M
+                          {m.match_number ?? '-'}
+                        </Text>
+                        <Text style={styles.teamSub}>
+                          {teamNameById(competitionTeams, m.team_a_id)} vs{' '}
+                          {teamNameById(competitionTeams, m.team_b_id)}
+                        </Text>
+                        <Text style={styles.teamSub}>{prettyMatchStatus(m.status)}</Text>
+                        {matchScheduleLine(m) ? (
+                          <Text style={styles.teamSub}>{matchScheduleLine(m)}</Text>
+                        ) : null}
+                        {matchSetsLabel(m) ? (
+                          <Text style={styles.teamSub}>Resultado: {matchSetsLabel(m)}</Text>
+                        ) : null}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
+              <Text style={styles.apiNote}>
+                Si un cruce tiene reserva de pista vinculada, verás fecha y pista. Si no, el club asignará
+                horario dentro del marco del torneo.
+              </Text>
+            </View>
+          </View>
+        ) : tab === 'chat' ? (
+          <View style={styles.body}>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Chat del torneo</Text>
+              {!session?.access_token ? (
+                <Text style={styles.normasEmpty}>Inicia sesión para ver y escribir en el chat.</Text>
+              ) : (
+                <>
+                  {chatLoading ? (
+                    <View style={styles.chatLoadingWrap}>
+                      <ActivityIndicator color={ACCENT} />
+                    </View>
+                  ) : (
+                    <ScrollView
+                      style={styles.chatListWrap}
+                      contentContainerStyle={styles.chatListContent}
+                      nestedScrollEnabled
+                      keyboardShouldPersistTaps="handled"
+                    >
+                      {chatMessages.length === 0 ? (
+                        <Text style={styles.normasEmpty}>Aún no hay mensajes. Sé el primero en escribir.</Text>
+                      ) : (
+                        chatMessages.map((m) => (
+                          <View key={m.id} style={styles.chatMessageBubble}>
+                            <Text style={styles.chatAuthor}>{m.author_name || 'Jugador'}</Text>
+                            <Text style={styles.chatMessageText}>{m.message}</Text>
+                            <Text style={styles.chatDate}>
+                              {formatIsoDateTimeEs(m.created_at) ?? formatShortDateEs(m.created_at)}
+                            </Text>
+                          </View>
+                        ))
+                      )}
+                    </ScrollView>
+                  )}
+                  <View style={styles.chatInputRow}>
+                    <TextInput
+                      value={chatDraft}
+                      onChangeText={setChatDraft}
+                      placeholder="Escribe un mensaje…"
+                      placeholderTextColor="rgba(255,255,255,0.45)"
+                      style={styles.chatInput}
+                      editable={!chatSending}
+                    />
+                    <Pressable
+                      onPress={async () => {
+                        if (!session?.access_token || chatSending) return;
+                        const msg = chatDraft.trim();
+                        if (!msg) return;
+                        setChatSending(true);
+                        try {
+                          const res = await sendTournamentChatMessage(tournamentId, msg, session.access_token);
+                          if (!res.ok) {
+                            Alert.alert('Chat', res.error);
+                            return;
+                          }
+                          setChatDraft('');
+                          await loadChat();
+                        } finally {
+                          setChatSending(false);
+                        }
+                      }}
+                      style={({ pressed }) => [
+                        styles.chatSendBtn,
+                        pressed && styles.pressed,
+                        (chatSending || !chatDraft.trim()) && { opacity: 0.5 },
+                      ]}
+                      disabled={chatSending || !chatDraft.trim()}
+                    >
+                      {chatSending ? (
+                        <ActivityIndicator color="#fff" size="small" />
+                      ) : (
+                        <Ionicons name="send" size={16} color="#fff" />
+                      )}
+                    </Pressable>
+                  </View>
+                </>
+              )}
             </View>
           </View>
         ) : (
           <View style={styles.body}>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Cuadro del torneo</Text>
-              <BracketCuadroEmpty />
+              <Text style={styles.cardTitle}>Marco del torneo</Text>
+              {!session?.access_token ? (
+                <Text style={styles.normasEmpty}>Inicia sesión para ver reservas y cruces con horario.</Text>
+              ) : (
+                <>
+                  <Text style={styles.teamSub}>{tournamentWindowLine}</Text>
+                  {tournamentWindow?.duration_min != null ? (
+                    <Text style={styles.teamSub}>Duración prevista: {tournamentWindow.duration_min} min</Text>
+                  ) : null}
+                  {agendaError ? <Text style={styles.apiNote}>{agendaError}</Text> : null}
+                </>
+              )}
+            </View>
+
+            {session?.access_token && myGridSlots.length > 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Tus reservas en la grilla</Text>
+                <View style={{ gap: 8 }}>
+                  {myGridSlots.map((s) => (
+                    <Text key={s.booking_id} style={styles.teamSub}>
+                      {slotLine(s)}
+                    </Text>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+            {session?.access_token && gridSlots.length > 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Pistas reservadas para el torneo</Text>
+                <View style={{ gap: 8 }}>
+                  {gridSlots.map((s) => (
+                    <Text key={s.booking_id} style={styles.teamSub}>
+                      {slotLine(s)}
+                    </Text>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Mis cruces</Text>
+              {!session?.access_token ? (
+                <Text style={styles.normasEmpty}>Inicia sesión para ver tus partidos del torneo.</Text>
+              ) : myCompetitionMatches.length === 0 ? (
+                <Text style={styles.normasEmpty}>
+                  Aún no tienes cruces asignados o el cuadro todavía no está generado.
+                </Text>
+              ) : (
+                <View style={{ gap: 10 }}>
+                  {myCompetitionMatches.map((m) => (
+                    <View key={m.id} style={styles.teamRow}>
+                      <View style={styles.teamRowText}>
+                        <Text style={styles.teamName}>
+                          {stageNameById(competitionStages, m.stage_id)} · R{m.round_number ?? '-'} M
+                          {m.match_number ?? '-'}
+                        </Text>
+                        <Text style={styles.teamSub}>
+                          {teamNameById(competitionTeams, m.team_a_id)} vs{' '}
+                          {teamNameById(competitionTeams, m.team_b_id)}
+                        </Text>
+                        <Text style={styles.teamSub}>{prettyMatchStatus(m.status)}</Text>
+                        <Text style={styles.teamSub}>
+                          {matchScheduleLine(m) ??
+                            (gridSlots.length > 0
+                              ? 'Hora del cruce: consulta las reservas de pista arriba o espera asignación.'
+                              : 'Hora: pendiente de asignación por el club')}
+                        </Text>
+                        {matchSetsLabel(m) ? (
+                          <Text style={styles.teamSub}>Resultado: {matchSetsLabel(m)}</Text>
+                        ) : null}
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              )}
             </View>
           </View>
         )}
@@ -1112,6 +1661,66 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.45)',
     lineHeight: 16,
   },
+  chatLoadingWrap: {
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chatListWrap: {
+    maxHeight: 320,
+  },
+  chatListContent: {
+    gap: 8,
+    paddingBottom: 4,
+  },
+  chatMessageBubble: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  chatAuthor: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  chatMessageText: {
+    fontSize: theme.fontSize.xs,
+    color: '#e5e7eb',
+  },
+  chatDate: {
+    marginTop: 4,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.55)',
+  },
+  chatInputRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  chatInput: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    color: '#fff',
+    paddingHorizontal: 10,
+    fontSize: theme.fontSize.xs,
+  },
+  chatSendBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   progressHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1199,6 +1808,14 @@ const styles = StyleSheet.create({
     backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  participantAvatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   teamAvatarText: {
     fontSize: 10,

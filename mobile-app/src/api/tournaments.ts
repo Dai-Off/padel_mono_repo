@@ -38,7 +38,7 @@ export type PublicTournamentRow = {
   normas?: string | null;
   elo_min: number | null;
   elo_max: number | null;
-  registration_mode: 'individual' | 'pair';
+  registration_mode: 'individual' | 'pair' | 'both';
   registration_closed_at?: string | null;
   cancellation_cutoff_at?: string | null;
   invite_ttl_minutes?: number;
@@ -158,7 +158,136 @@ type PlayerDetailJson = {
   tournament?: PublicTournamentRow;
   counts?: { confirmed: number; pending: number };
   my_inscription?: { status?: string } | null;
+  my_entry_request?: {
+    id?: string;
+    status?: 'pending' | 'approved' | 'rejected' | 'dismissed' | string;
+    message?: string;
+    response_message?: string | null;
+    created_at?: string;
+    resolved_at?: string | null;
+  } | null;
+  participants?: TournamentParticipantRow[];
   error?: string;
+};
+
+export type TournamentParticipantRow = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  avatar_url?: string | null;
+  elo_rating?: number | null;
+  inscription_status?: string;
+};
+
+export type TournamentChatMessage = {
+  id: string;
+  created_at: string;
+  author_user_id: string;
+  author_name: string;
+  message: string;
+};
+
+export type MyTournamentEntryRequest = {
+  id: string;
+  tournament_id: string;
+  status: 'pending' | 'approved' | 'rejected' | 'dismissed' | string;
+  message: string;
+  response_message?: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at?: string | null;
+  tournament?: {
+    id: string;
+    name?: string | null;
+    start_at?: string;
+    status?: string;
+    price_cents?: number;
+    registration_mode?: 'individual' | 'pair' | 'both' | string;
+    visibility?: string;
+    elo_min?: number | null;
+    elo_max?: number | null;
+  } | null;
+};
+
+export type TournamentCompetitionTeam = {
+  id: string;
+  slot_index: number;
+  name: string;
+  status?: string;
+  player_id_1?: string | null;
+  player_id_2?: string | null;
+};
+
+export type TournamentCompetitionStage = {
+  id: string;
+  stage_type: string;
+  stage_name: string;
+  stage_order: number;
+};
+
+export type ScheduleBooking = {
+  booking_id: string;
+  start_at: string;
+  end_at: string;
+  status: string;
+  court_id: string;
+  court_name: string | null;
+};
+
+export type TournamentCompetitionMatch = {
+  id: string;
+  stage_id: string | null;
+  group_id: string | null;
+  round_number: number | null;
+  match_number: number | null;
+  team_a_id: string | null;
+  team_b_id: string | null;
+  seed_label_a?: string | null;
+  seed_label_b?: string | null;
+  status?: string;
+  winner_team_id?: string | null;
+  booking_id?: string | null;
+  schedule_booking?: ScheduleBooking | null;
+  result?: {
+    winner_team_id?: string | null;
+    sets?: Array<{ games_a: number; games_b: number }>;
+    submitted_at?: string | null;
+  } | null;
+};
+
+export type TournamentTournamentWindow = {
+  start_at: string;
+  end_at: string;
+  duration_min: number | null;
+};
+
+export type TournamentCourtBookingSlot = {
+  booking_id: string;
+  court_id: string;
+  court_name: string | null;
+  start_at: string;
+  end_at: string;
+  status: string;
+  organizer_player_id: string | null;
+  i_am_organizer: boolean;
+  i_am_participant: boolean;
+};
+
+export type TournamentPlayerAgenda = {
+  tournament_id: string;
+  tournament_window: TournamentTournamentWindow;
+  court_bookings: TournamentCourtBookingSlot[];
+  my_court_bookings: TournamentCourtBookingSlot[];
+};
+
+export type TournamentCompetitionPlayerView = {
+  teams: TournamentCompetitionTeam[];
+  stages: TournamentCompetitionStage[];
+  matches: TournamentCompetitionMatch[];
+  my_team_ids: string[];
+  my_matches: TournamentCompetitionMatch[];
+  tournament_window?: TournamentTournamentWindow;
+  court_bookings?: TournamentCourtBookingSlot[];
 };
 
 /** Detalle con inscripción del jugador (requiere sesión). */
@@ -169,6 +298,15 @@ export async function fetchTournamentPlayerDetail(
   tournament: PublicTournamentRow;
   counts: { confirmed: number; pending: number };
   my_inscription: { status?: string } | null;
+  my_entry_request: {
+    id?: string;
+    status?: 'pending' | 'approved' | 'rejected' | 'dismissed' | string;
+    message?: string;
+    response_message?: string | null;
+    created_at?: string;
+    resolved_at?: string | null;
+  } | null;
+  participants: TournamentParticipantRow[];
 } | null> {
   if (!token) return null;
   try {
@@ -182,6 +320,8 @@ export async function fetchTournamentPlayerDetail(
       tournament: json.tournament,
       counts: json.counts ?? { confirmed: 0, pending: 0 },
       my_inscription: json.my_inscription ?? null,
+      my_entry_request: json.my_entry_request ?? null,
+      participants: json.participants ?? [],
     };
   } catch {
     return null;
@@ -202,6 +342,15 @@ export async function fetchTournamentDetailForScreen(
       tournament: PublicTournamentRow;
       counts: { confirmed: number; pending: number };
       my_inscription: { status?: string } | null;
+      my_entry_request: {
+        id?: string;
+        status?: 'pending' | 'approved' | 'rejected' | 'dismissed' | string;
+        message?: string;
+        response_message?: string | null;
+        created_at?: string;
+        resolved_at?: string | null;
+      } | null;
+      participants: TournamentParticipantRow[];
     }
   | { ok: false; error: string }
 > {
@@ -219,6 +368,8 @@ export async function fetchTournamentDetailForScreen(
           tournament: json.tournament,
           counts: json.counts ?? { confirmed: 0, pending: 0 },
           my_inscription: json.my_inscription ?? null,
+          my_entry_request: json.my_entry_request ?? null,
+          participants: json.participants ?? [],
         };
       }
       /** Nunca sustituir por detalle público con `my_inscription: null`: el usuario vería «Inscribirme» aunque esté inscrito. */
@@ -237,7 +388,168 @@ export async function fetchTournamentDetailForScreen(
           tournament: p.tournament,
           counts: p.counts,
           my_inscription: null,
+          my_entry_request: null,
+          participants: [],
         }
       : { ok: false, error: p.error },
   );
+}
+
+export async function submitTournamentEntryRequest(
+  tournamentId: string,
+  message: string,
+  token: string | null | undefined,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Inicia sesión para enviar solicitud' };
+  try {
+    const res = await fetch(`${API_URL}/tournaments/${encodeURIComponent(tournamentId)}/entry-requests`, {
+      method: 'POST',
+      headers: headers(token),
+      body: JSON.stringify({ message }),
+    });
+    const json = (await res.json()) as { ok?: boolean; error?: string };
+    if (!res.ok || !json.ok) return { ok: false, error: json.error ?? 'No se pudo enviar la solicitud' };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+export async function fetchTournamentChatMessages(
+  tournamentId: string,
+  token: string | null | undefined,
+): Promise<{ ok: true; messages: TournamentChatMessage[] } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Inicia sesión para ver el chat del torneo' };
+  try {
+    const res = await fetch(`${API_URL}/tournaments/${encodeURIComponent(tournamentId)}/chat/player`, {
+      headers: headers(token),
+    });
+    const json = (await res.json()) as { ok?: boolean; messages?: TournamentChatMessage[]; error?: string };
+    if (!res.ok || !json.ok) {
+      return { ok: false, error: json.error ?? 'No se pudo cargar el chat del torneo' };
+    }
+    return { ok: true, messages: json.messages ?? [] };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+export async function sendTournamentChatMessage(
+  tournamentId: string,
+  message: string,
+  token: string | null | undefined,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Inicia sesión para escribir en el chat del torneo' };
+  try {
+    const res = await fetch(`${API_URL}/tournaments/${encodeURIComponent(tournamentId)}/chat/player`, {
+      method: 'POST',
+      headers: headers(token),
+      body: JSON.stringify({ message }),
+    });
+    const json = (await res.json()) as { ok?: boolean; error?: string };
+    if (!res.ok || !json.ok) return { ok: false, error: json.error ?? 'No se pudo enviar el mensaje' };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+export async function fetchMyTournamentEntryRequests(
+  token: string | null | undefined,
+): Promise<{ ok: true; requests: MyTournamentEntryRequest[] } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Inicia sesión para ver tus solicitudes' };
+  try {
+    const res = await fetch(`${API_URL}/tournaments/player/my-entry-requests`, {
+      headers: headers(token),
+    });
+    const json = (await res.json()) as { ok?: boolean; requests?: MyTournamentEntryRequest[]; error?: string };
+    if (!res.ok || !json.ok) return { ok: false, error: json.error ?? 'No se pudieron cargar tus solicitudes' };
+    return { ok: true, requests: json.requests ?? [] };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+type CompetitionPlayerViewResponse = {
+  ok?: boolean;
+  teams?: TournamentCompetitionTeam[];
+  stages?: TournamentCompetitionStage[];
+  matches?: TournamentCompetitionMatch[];
+  my_team_ids?: string[];
+  my_matches?: TournamentCompetitionMatch[];
+  tournament_window?: TournamentTournamentWindow;
+  court_bookings?: TournamentCourtBookingSlot[];
+  error?: string;
+};
+
+export async function fetchTournamentCompetitionPlayerView(
+  tournamentId: string,
+  token: string | null | undefined,
+): Promise<{ ok: true; data: TournamentCompetitionPlayerView } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Inicia sesión para ver el cuadro y tus partidos' };
+  try {
+    const res = await fetch(
+      `${API_URL}/tournaments/${encodeURIComponent(tournamentId)}/competition/player-view`,
+      { headers: headers(token) },
+    );
+    const json = (await res.json()) as CompetitionPlayerViewResponse;
+    if (!res.ok || !json.ok) {
+      return { ok: false, error: json.error ?? 'No se pudo cargar la competencia del torneo' };
+    }
+    return {
+      ok: true,
+      data: {
+        teams: json.teams ?? [],
+        stages: json.stages ?? [],
+        matches: json.matches ?? [],
+        my_team_ids: json.my_team_ids ?? [],
+        my_matches: json.my_matches ?? [],
+        tournament_window: json.tournament_window,
+        court_bookings: json.court_bookings ?? [],
+      },
+    };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+type PlayerAgendaJson = {
+  ok?: boolean;
+  tournament_id?: string;
+  tournament_window?: TournamentTournamentWindow;
+  court_bookings?: TournamentCourtBookingSlot[];
+  my_court_bookings?: TournamentCourtBookingSlot[];
+  error?: string;
+};
+
+export async function fetchTournamentPlayerAgenda(
+  tournamentId: string,
+  token: string | null | undefined,
+): Promise<{ ok: true; data: TournamentPlayerAgenda } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Inicia sesión para ver la agenda del torneo' };
+  try {
+    const res = await fetch(
+      `${API_URL}/tournaments/${encodeURIComponent(tournamentId)}/player/agenda`,
+      { headers: headers(token) },
+    );
+    const json = (await res.json()) as PlayerAgendaJson;
+    if (!res.ok || !json.ok || !json.tournament_id) {
+      return { ok: false, error: json.error ?? 'No se pudo cargar la agenda del torneo' };
+    }
+    return {
+      ok: true,
+      data: {
+        tournament_id: json.tournament_id,
+        tournament_window: json.tournament_window ?? {
+          start_at: '',
+          end_at: '',
+          duration_min: null,
+        },
+        court_bookings: json.court_bookings ?? [],
+        my_court_bookings: json.my_court_bookings ?? [],
+      },
+    };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
 }

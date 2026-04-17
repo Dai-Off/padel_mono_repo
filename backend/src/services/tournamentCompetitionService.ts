@@ -234,6 +234,10 @@ async function clearTournamentCompetitionTables(tournamentId: string): Promise<v
   await supabase.from('tournament_teams').delete().eq('tournament_id', tournamentId);
 }
 
+export async function resetTournamentCompetition(tournamentId: string): Promise<void> {
+  await clearTournamentCompetitionTables(tournamentId);
+}
+
 async function resolveManualTeamPayload(
   tournamentId: string,
   registrationMode: 'individual' | 'pair' | 'both',
@@ -850,9 +854,42 @@ export async function computeStandings(tournamentId: string): Promise<Record<str
   return out;
 }
 
+function courtNameFromBookingRow(b: any): string | null {
+  const c = b?.courts;
+  if (!c) return null;
+  const one = Array.isArray(c) ? c[0] : c;
+  return one?.name != null ? String(one.name) : null;
+}
+
+const STAGE_MATCH_BASE_SELECT =
+  'id,stage_id,group_id,round_number,match_number,team_a_id,team_b_id,source_match_a_id,source_match_b_id,seed_label_a,seed_label_b,status,winner_team_id';
+
+async function fetchTournamentStageMatches(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  tournamentId: string
+): Promise<any[]> {
+  const withBooking = await supabase
+    .from('tournament_stage_matches')
+    .select(`${STAGE_MATCH_BASE_SELECT},booking_id`)
+    .eq('tournament_id', tournamentId)
+    .order('round_number')
+    .order('match_number');
+  if (!withBooking.error) return (withBooking.data ?? []) as any[];
+  const msg = String(withBooking.error.message ?? '');
+  if (!/booking_id|column/i.test(msg)) throw new Error(withBooking.error.message);
+  const legacy = await supabase
+    .from('tournament_stage_matches')
+    .select(STAGE_MATCH_BASE_SELECT)
+    .eq('tournament_id', tournamentId)
+    .order('round_number')
+    .order('match_number');
+  if (legacy.error) throw new Error(legacy.error.message);
+  return (legacy.data ?? []) as any[];
+}
+
 export async function getCompetitionView(tournamentId: string): Promise<any> {
   const supabase = getSupabaseServiceRoleClient();
-  const [{ data: tournament }, { data: teams }, { data: stages }, { data: groups }, { data: matches }, { data: podium }] = await Promise.all([
+  const [{ data: tournament }, { data: teams }, { data: stages }, { data: groups }, { data: podium }] = await Promise.all([
     supabase
       .from('tournaments')
       .select('id,club_id,visibility,competition_format,match_rules,standings_rules,status,prizes')
@@ -864,14 +901,9 @@ export async function getCompetitionView(tournamentId: string): Promise<any> {
       .from('tournament_stage_groups')
       .select('id,stage_id,group_code')
       .in('stage_id', (await supabase.from('tournament_stages').select('id').eq('tournament_id', tournamentId)).data?.map((x: any) => x.id) ?? ['00000000-0000-0000-0000-000000000000']),
-    supabase
-      .from('tournament_stage_matches')
-      .select('id,stage_id,group_id,round_number,match_number,team_a_id,team_b_id,source_match_a_id,source_match_b_id,seed_label_a,seed_label_b,status,winner_team_id')
-      .eq('tournament_id', tournamentId)
-      .order('round_number')
-      .order('match_number'),
     supabase.from('tournament_podium').select('position,team_id,note').eq('tournament_id', tournamentId).order('position'),
   ]);
+  const matches = await fetchTournamentStageMatches(supabase, tournamentId);
   const standings = await computeStandings(tournamentId);
   const { data: results } = await supabase
     .from('tournament_match_results')
@@ -879,12 +911,40 @@ export async function getCompetitionView(tournamentId: string): Promise<any> {
     .in('match_id', (matches ?? []).map((m: any) => m.id));
   const resultByMatch = new Map((results ?? []).map((r: any) => [r.match_id, r]));
   const matchesWithResults = (matches ?? []).map((m: any) => ({ ...m, result: resultByMatch.get(m.id) ?? null }));
+
+  const bookingIds = [...new Set(matchesWithResults.map((m: any) => m.booking_id).filter(Boolean))] as string[];
+  let bookingById = new Map<string, any>();
+  if (bookingIds.length) {
+    const { data: bookRows, error: bookErr } = await supabase
+      .from('bookings')
+      .select('id, start_at, end_at, status, court_id, courts(name)')
+      .in('id', bookingIds);
+    if (bookErr) throw new Error(bookErr.message);
+    bookingById = new Map((bookRows ?? []).map((b: any) => [String(b.id), b]));
+  }
+
+  const matchesWithSchedule = matchesWithResults.map((m: any) => {
+    const bid = m.booking_id ? String(m.booking_id) : '';
+    const b = bid ? bookingById.get(bid) : null;
+    const schedule_booking = b
+      ? {
+          booking_id: String(b.id),
+          start_at: String(b.start_at),
+          end_at: String(b.end_at),
+          status: String(b.status),
+          court_id: String(b.court_id),
+          court_name: courtNameFromBookingRow(b),
+        }
+      : null;
+    return { ...m, schedule_booking };
+  });
+
   return {
     tournament: tournament ?? null,
     teams: teams ?? [],
     stages: stages ?? [],
     groups: groups ?? [],
-    matches: matchesWithResults,
+    matches: matchesWithSchedule,
     standings,
     podium: podium ?? [],
   };
