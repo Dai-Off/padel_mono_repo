@@ -38,7 +38,7 @@ export async function fetchMyPlayerId(token: string | null | undefined): Promise
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = (await res.json()) as MeResponse;
-    if (json.ok && json.player) return json.player.id;
+    if (res.ok && json.ok && json.player) return json.player.id;
     return null;
   } catch {
     return null;
@@ -55,14 +55,21 @@ export async function fetchMyPlayerProfile(
       headers: { Authorization: `Bearer ${token}` },
     });
     const json = (await res.json()) as MeResponse;
-    if (!json.ok || !json.player) return null;
+    if (!res.ok || !json.ok || !json.player) return null;
+    const rawElo = json.player.elo_rating as number | string | null | undefined;
+    const eloNum =
+      rawElo == null || rawElo === ''
+        ? null
+        : typeof rawElo === 'number'
+          ? rawElo
+          : Number(String(rawElo).trim());
     return {
       id: json.player.id,
       firstName: json.player.first_name ?? null,
       lastName: json.player.last_name ?? null,
       email: json.player.email ?? null,
       phone: json.player.phone ?? null,
-      eloRating: json.player.elo_rating ?? null,
+      eloRating: eloNum != null && !Number.isNaN(eloNum) ? eloNum : null,
       status: json.player.status ?? null,
     };
   } catch {
