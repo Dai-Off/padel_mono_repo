@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Modal,
@@ -62,7 +63,9 @@ type Props = {
   partido: PartidoItem;
   currentPlayerId: string | null;
   onClose: () => void;
-  onComplete?: (payload: MatchEvaluationPayload) => void;
+  onComplete?: (
+    payload: MatchEvaluationPayload
+  ) => Promise<{ ok: true } | { ok: false; error?: string }> | { ok: true } | { ok: false; error?: string } | void;
   /** Tras la pantalla de agradecimiento, p. ej. tab inicio + cerrar detalle. */
   onGoHome?: () => void;
 };
@@ -110,6 +113,7 @@ export function MatchEvaluationFlow({
     { us: '', them: '' },
   ]);
   const [feedbackText, setFeedbackText] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
   const reset = useCallback(() => {
     setShowSuccess(false);
@@ -122,6 +126,7 @@ export function MatchEvaluationFlow({
       { us: '', them: '' },
     ]);
     setFeedbackText('');
+    setSubmitting(false);
   }, []);
 
   useEffect(() => {
@@ -173,7 +178,8 @@ export function MatchEvaluationFlow({
     }
   };
 
-  const finish = () => {
+  const finish = async () => {
+    if (submitting) return;
     const teammateRatings = teammates.map((t) => {
       const p = partido.players[t.playerIndex];
       const r = ratings[t.playerIndex];
@@ -198,7 +204,13 @@ export function MatchEvaluationFlow({
       sets: setsParsed,
       feedbackText: feedbackText.trim(),
     };
-    onComplete?.(payload);
+    setSubmitting(true);
+    const submitResult = await onComplete?.(payload);
+    setSubmitting(false);
+    if (submitResult && typeof submitResult === 'object' && submitResult.ok === false) {
+      Alert.alert('No se pudo guardar', submitResult.error ?? 'Intenta de nuevo en unos segundos.');
+      return;
+    }
     setShowSuccess(true);
   };
 
@@ -366,16 +378,24 @@ export function MatchEvaluationFlow({
             <View style={styles.feedbackActions}>
               <Pressable
                 onPress={finish}
+                disabled={submitting}
                 style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
               >
                 <Text style={styles.secondaryBtnText}>Omitir</Text>
               </Pressable>
               <Pressable
                 onPress={finish}
+                disabled={submitting}
                 style={({ pressed }) => [styles.finalBtn, pressed && styles.pressed]}
               >
-                <Text style={styles.finalBtnText}>Finalizar</Text>
-                <Ionicons name="chevron-forward" size={20} color="#fff" />
+                {submitting ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Text style={styles.finalBtnText}>Finalizar</Text>
+                    <Ionicons name="chevron-forward" size={20} color="#fff" />
+                  </>
+                )}
               </Pressable>
             </View>
           </View>
@@ -591,14 +611,6 @@ function FeedbackStepContent({
         textAlignVertical="top"
       />
       <Text style={styles.charCount}>{text.length} caracteres</Text>
-
-      <Pressable
-        onPress={() => Alert.alert('Próximamente', 'La respuesta por audio estará disponible pronto.')}
-        style={({ pressed }) => [styles.audioBtn, pressed && styles.pressed]}
-      >
-        <Ionicons name="mic" size={22} color="#fff" />
-        <Text style={styles.audioBtnText}>Responder con audio</Text>
-      </Pressable>
     </View>
   );
 }
@@ -813,18 +825,6 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   charCount: { textAlign: 'right', fontSize: 12, color: 'rgba(255,255,255,0.3)' },
-  audioBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    paddingVertical: 16,
-    borderRadius: 16,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  audioBtnText: { fontSize: 16, fontWeight: '800', color: '#fff' },
   primaryBtn: {
     flexDirection: 'row',
     alignItems: 'center',
