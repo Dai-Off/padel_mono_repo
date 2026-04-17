@@ -20,7 +20,7 @@ const PROTECTED_FIELDS = [
   'matches_played_friendly',
   'matches_played_matchmaking',
   'sp',
-  'initial_rating_completed',
+  'onboarding_completed',
 ];
 
 function hasProtectedKeys(body: Record<string, unknown>): boolean {
@@ -385,7 +385,7 @@ router.post('/manual', async (req: Request, res: Response) => {
           phone: phoneStr,
           email: emailStr,
           auth_user_id: null,
-          initial_rating_completed: true,
+          onboarding_completed: true,
           gender: req.body?.gender ?? 'male',
         },
       ])
@@ -474,12 +474,12 @@ router.post('/onboarding', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
   const { data: pl, error: e1 } = await supabase
     .from('players')
-    .select('initial_rating_completed')
+    .select('onboarding_completed')
     .eq('id', playerId)
     .maybeSingle();
 
   if (e1) return res.status(500).json({ ok: false, error: e1.message });
-  if ((pl as { initial_rating_completed?: boolean } | null)?.initial_rating_completed) {
+  if ((pl as { onboarding_completed?: boolean } | null)?.onboarding_completed) {
     return res.status(409).json({ ok: false, error: 'Nivelación inicial ya completada' });
   }
 
@@ -523,7 +523,7 @@ router.post('/onboarding', async (req: Request, res: Response) => {
     liga: assignedLiga,
     lps: 0,
     mm_peak_liga: assignedLiga,
-    initial_rating_completed: true,
+    onboarding_completed: true,
     updated_at: now,
   };
   if (leagueSeasonId) updatePayload.league_season_id = leagueSeasonId;
@@ -780,7 +780,7 @@ router.post('/', async (req: Request, res: Response) => {
           email,
           phone: phone ?? null,
           gender: gender ?? 'male',
-          initial_rating_completed: false,
+          onboarding_completed: false,
         },
       ])
       .select(SELECT_PUBLIC_INTERNAL)

@@ -96,7 +96,7 @@ async function main() {
         .update({
           elo_rating: elo,
           gender: gPlayer,
-          initial_rating_completed: true,
+          onboarding_completed: true,
           updated_at: now,
         })
         .eq('id', existing.id);
@@ -113,7 +113,7 @@ async function main() {
           status: 'active',
           elo_rating: elo,
           gender: gPlayer,
-          initial_rating_completed: true,
+          onboarding_completed: true,
         })
         .select('id')
         .single();

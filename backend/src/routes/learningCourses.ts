@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
-import { requireAuth, getPlayerFromAuth } from './learningHelpers';
+import { requireAuth, getPlayerFromAuth, requireOnboarding } from './learningHelpers';
 import { getMultiplier } from './learningStreaks';
 import { SharedStreakRow, lazyResetSharedStreak, normalizePair } from './learningStreaks';
 
@@ -201,6 +201,7 @@ router.get('/courses', requireAuth, async (req: Request, res: Response) => {
   try {
     const player = await getPlayerFromAuth(req.authContext!.userId);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+    const needsOnboarding = !player.onboarding_completed;
 
     const supabase = getSupabaseServiceRoleClient();
 
@@ -260,11 +261,11 @@ router.get('/courses', requireAuth, async (req: Request, res: Response) => {
         total_lessons: totalLessons,
         completed_lessons: completedCount,
         is_completed: totalLessons > 0 && completedCount === totalLessons,
-        locked: isCourseLocked(player.elo_rating, c.elo_min, c.elo_max),
+        locked: needsOnboarding || isCourseLocked(player.elo_rating, c.elo_min, c.elo_max),
       };
     });
 
-    return res.json({ ok: true, courses: result });
+    return res.json({ ok: true, courses: result, requires_onboarding: needsOnboarding });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -275,6 +276,8 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const player = await getPlayerFromAuth(req.authContext!.userId);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+    const onboardingErr = requireOnboarding(player);
+    if (onboardingErr) return res.status(403).json({ ok: false, error: onboardingErr, requires_onboarding: true });
 
     const supabase = getSupabaseServiceRoleClient();
     const courseId = req.params.id;
@@ -390,6 +393,8 @@ router.post('/courses/:id/complete-lesson', requireAuth, async (req: Request, re
   try {
     const player = await getPlayerFromAuth(req.authContext!.userId);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+    const onboardingErr = requireOnboarding(player);
+    if (onboardingErr) return res.status(403).json({ ok: false, error: onboardingErr, requires_onboarding: true });
 
     const { lesson_id } = req.body;
     if (!lesson_id) return res.status(400).json({ ok: false, error: 'lesson_id es requerido' });

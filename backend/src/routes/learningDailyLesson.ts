@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
-import { requireAuth, getPlayerFromAuth } from './learningHelpers';
+import { requireAuth, getPlayerFromAuth, requireOnboarding } from './learningHelpers';
 import {
   QuestionRow, HistoryEntry, LESSON_SIZE,
   selectQuestions, sanitizeContent, checkAnswer, getCorrectAnswer, timePenalty,
@@ -19,6 +19,8 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     if (!player) {
       return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
     }
+    const onboardingError = requireOnboarding(player);
+    if (onboardingError) return res.status(403).json({ ok: false, error: onboardingError, requires_onboarding: true });
 
     const timezone = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
 
@@ -105,6 +107,8 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
     if (!player) {
       return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
     }
+    const onboardingError = requireOnboarding(player);
+    if (onboardingError) return res.status(403).json({ ok: false, error: onboardingError, requires_onboarding: true });
 
     const { timezone, answers } = req.body ?? {};
     const tz = String(timezone ?? 'UTC').trim() || 'UTC';

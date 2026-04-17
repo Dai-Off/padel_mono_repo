@@ -61,14 +61,14 @@ begin
     end;
 
     insert into public.players (
-      first_name, last_name, email, status, elo_rating, gender, initial_rating_completed
+      first_name, last_name, email, status, elo_rating, gender, onboarding_completed
     ) values (
       'Test', 'WebPadel ' || i, emails[i], 'active', v_elo, v_player_gender, true
     )
     on conflict (email) do update set
       elo_rating = excluded.elo_rating,
       gender = excluded.gender,
-      initial_rating_completed = true,
+      onboarding_completed = true,
       updated_at = v_now;
   end loop;
 

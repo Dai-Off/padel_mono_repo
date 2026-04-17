@@ -12,7 +12,7 @@ alter table public.players
   add column if not exists matches_played_friendly integer,
   add column if not exists matches_played_matchmaking integer,
   add column if not exists sp integer,
-  add column if not exists initial_rating_completed boolean;
+  add column if not exists onboarding_completed boolean;
 
 update public.players set
   mu = coalesce(mu, 25.0),
@@ -25,7 +25,7 @@ update public.players set
   matches_played_matchmaking = coalesce(matches_played_matchmaking, 0),
   sp = coalesce(sp, 0);
 
-update public.players set initial_rating_completed = true where initial_rating_completed is null;
+update public.players set onboarding_completed = true where onboarding_completed is null;
 
 alter table public.players alter column mu set default 25.0;
 alter table public.players alter column mu set not null;
@@ -53,8 +53,8 @@ alter table public.players alter column matches_played_matchmaking set not null;
 alter table public.players alter column sp set default 0;
 alter table public.players alter column sp set not null;
 
-alter table public.players alter column initial_rating_completed set default false;
-alter table public.players alter column initial_rating_completed set not null;
+alter table public.players alter column onboarding_completed set default false;
+alter table public.players alter column onboarding_completed set not null;
 
 -- Migrate legacy integer Elo (~1200) to 0–7 scale
 alter table public.players alter column elo_rating drop default;

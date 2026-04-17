@@ -54,6 +54,7 @@ export function CoursesScreen({
   const [eduLoading, setEduLoading] = useState(false);
   const [enrollmentsLoading, setEnrollmentsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
   // Filtros
@@ -83,9 +84,10 @@ export function CoursesScreen({
     if (!session?.access_token) return;
     setEduLoading(true);
     try {
-      const res = await fetchLearningCourses(session.access_token);
+      const res = await fetchLearningCourses(session.access_token) as { ok: boolean; courses?: EducationalCourse[]; requires_onboarding?: boolean };
       if (res.ok && res.courses) {
         setEduCourses(res.courses);
+        setNeedsOnboarding(res.requires_onboarding ?? false);
       }
     } catch (error) {
       console.error("Error loading educational courses:", error);
@@ -333,6 +335,15 @@ export function CoursesScreen({
                 </View>
               ) : (
                 <>
+                  {/* Banner onboarding */}
+                  {needsOnboarding && (
+                    <View style={styles.onboardingBanner}>
+                      <Ionicons name="school-outline" size={20} color="#F18F34" />
+                      <Text style={styles.onboardingText}>
+                        Completa el cuestionario de nivelacion para desbloquear los cursos
+                      </Text>
+                    </View>
+                  )}
                   {/* Para tu nivel */}
                   <EducationalSectionHeader title="Para tu nivel" />
                   <View style={styles.eduGrid}>
@@ -454,7 +465,8 @@ function EducationalCourseCard({ course, onPress }: { course: EducationalCourse;
   const imageUrl =
     course.banner_url ||
     "https://images.unsplash.com/photo-1658491830143-72808ca237e3?w=400&h=300&fit=crop";
-  const levelText = `Nivel ${(course.elo_min ?? 0).toFixed(0)}-${(course.elo_max ?? 7).toFixed(0)}`;
+  const fmtLevel = (n: number) => n % 1 === 0 ? n.toFixed(0) : n.toFixed(1);
+  const levelText = `Nivel ${fmtLevel(course.elo_min ?? 0)}-${fmtLevel(course.elo_max ?? 7)}`;
 
   return (
     <Pressable style={styles.eduCardWrapper} onPress={onPress}>
@@ -838,6 +850,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   // Estilos Educación
+  onboardingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+    marginBottom: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(241,143,52,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.2)',
+  },
+  onboardingText: {
+    flex: 1,
+    color: '#FB923C',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
   eduContainer: {
     flex: 1,
     marginTop: 8,

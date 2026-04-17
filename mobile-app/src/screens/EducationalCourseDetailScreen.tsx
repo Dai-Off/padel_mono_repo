@@ -98,7 +98,7 @@ export function EducationalCourseDetailScreen({ course, onBack }: Props) {
                 <Text style={styles.tagText}>Curso</Text>
               </View>
               <View style={styles.levelTag}>
-                <Text style={styles.levelTagText}>Nivel {course.elo_min.toFixed(0)}-{course.elo_max.toFixed(0)}</Text>
+                <Text style={styles.levelTagText}>Nivel {course.elo_min % 1 === 0 ? course.elo_min.toFixed(0) : course.elo_min.toFixed(1)}-{course.elo_max % 1 === 0 ? course.elo_max.toFixed(0) : course.elo_max.toFixed(1)}</Text>
               </View>
             </View>
             <Text style={styles.title}>{course.title}</Text>
@@ -110,7 +110,7 @@ export function EducationalCourseDetailScreen({ course, onBack }: Props) {
           {/* Stats Grid */}
           <View style={styles.statsGrid}>
             <View style={styles.statBox}>
-              <Text style={styles.statValue}>{course.elo_min.toFixed(0)}-{course.elo_max.toFixed(0)}</Text>
+              <Text style={styles.statValue}>{course.elo_min % 1 === 0 ? course.elo_min.toFixed(0) : course.elo_min.toFixed(1)}-{course.elo_max % 1 === 0 ? course.elo_max.toFixed(0) : course.elo_max.toFixed(1)}</Text>
               <Text style={styles.statLabel}>NIVEL</Text>
             </View>
             <View style={styles.statBox}>
