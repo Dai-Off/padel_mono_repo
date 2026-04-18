@@ -36,6 +36,70 @@ async function getCourseForClubEdit(
 // Course endpoints
 // ---------------------------------------------------------------------------
 
+// GET /club-courses?club_id=...
+router.get('/club-courses', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const club_id = req.query.club_id as string | undefined;
+    if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+
+    const supabase = getSupabaseServiceRoleClient();
+
+    const { data: courses, error } = await supabase
+      .from('learning_courses')
+      .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, status, created_at, updated_at')
+      .eq('club_id', club_id)
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!courses || courses.length === 0) return res.json({ ok: true, data: [] });
+
+    // Obtener count de lecciones por curso
+    const courseIds = courses.map((c: any) => c.id);
+    const { data: lessons, error: lessonsErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id, course_id')
+      .in('course_id', courseIds);
+
+    if (lessonsErr) return res.status(500).json({ ok: false, error: lessonsErr.message });
+
+    const lessonCountMap: Record<string, number> = {};
+    for (const l of lessons || []) {
+      lessonCountMap[l.course_id] = (lessonCountMap[l.course_id] || 0) + 1;
+    }
+
+    const result = courses.map((c: any) => ({
+      ...c,
+      lesson_count: lessonCountMap[c.id] || 0,
+    }));
+
+    return res.json({ ok: true, data: result });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// GET /club-courses/:id — detalle de curso con lecciones
+router.get('/club-courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await getCourseForClubEdit(req, req.params.id, false);
+    if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
+
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: lessons, error: lessonsErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id, course_id, order, title, description, video_url, duration_seconds')
+      .eq('course_id', req.params.id)
+      .order('order', { ascending: true });
+
+    if (lessonsErr) return res.status(500).json({ ok: false, error: lessonsErr.message });
+
+    return res.json({ ok: true, data: { ...result.course, lessons: lessons || [] } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // POST /courses
 router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   try {

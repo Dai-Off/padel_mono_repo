@@ -11,6 +11,7 @@ import { AdminPanel } from './components/Admin/AdminPanel';
 import { QuestionsListView } from './components/Admin/OnboardingQuestions/QuestionsListView';
 import { GrillaView } from './features/grilla';
 import { PreciosView } from './components/Precios/PreciosView';
+import { LearningContentView } from './components/Learning/LearningContentView';
 import { authService } from './services/auth';
 import { Toaster } from 'sonner';
 
@@ -213,6 +214,14 @@ function App() {
           element={
             <ProtectedRoute>
               <PreciosView />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/contenido-aprendizaje"
+          element={
+            <ProtectedRoute>
+              <LearningContentView />
             </ProtectedRoute>
           }
         />
