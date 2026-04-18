@@ -14,12 +14,47 @@ type ApiOk<T> = T & { ok: true };
 
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'avi', 'mkv'];
 
+// Límites por tipo de contenido
+const LIMITS = {
+  question: { maxSizeMB: 30, maxDurationSec: 15 },
+  course:   { maxSizeMB: 300, maxDurationSec: 420 }, // 7 minutos
+};
+
+/** Obtiene la duración de un video en segundos */
+function getVideoDuration(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    const url = URL.createObjectURL(file);
+    video.src = url;
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(url);
+      resolve(video.duration);
+    };
+    video.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('No se pudo leer el video'));
+    };
+  });
+}
+
 /**
- * Sube un video a Supabase Storage y devuelve la URL pública.
- * @param bucket - 'learning-daily-lessons' para preguntas, 'learning-courses' para cursos/lecciones
- * @param folder - carpeta dentro del bucket (ej: clubId o clubId/courseId)
- * @param file - archivo de video
+ * Valida tamaño y duración de un video antes de subirlo.
  */
+async function validateVideo(file: File, limits: { maxSizeMB: number; maxDurationSec: number }): Promise<void> {
+  const sizeMB = file.size / (1024 * 1024);
+  if (sizeMB > limits.maxSizeMB) {
+    throw new Error(`El video supera el límite de ${limits.maxSizeMB}MB (${sizeMB.toFixed(1)}MB)`);
+  }
+  const duration = await getVideoDuration(file);
+  if (duration > limits.maxDurationSec) {
+    const maxLabel = limits.maxDurationSec >= 60
+      ? `${Math.floor(limits.maxDurationSec / 60)} min`
+      : `${limits.maxDurationSec}s`;
+    throw new Error(`El video supera el límite de ${maxLabel} (${Math.ceil(duration)}s)`);
+  }
+}
+
 async function uploadVideo(bucket: string, folder: string, file: File): Promise<string> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase no configurado');
@@ -46,13 +81,15 @@ export const learningContentService = {
   // Upload de videos
   // ---------------------------------------------------------------------------
 
-  /** Sube video para una pregunta de lección diaria */
+  /** Sube video para una pregunta de lección diaria (máx 30MB, 15s) */
   async uploadQuestionVideo(clubId: string, file: File): Promise<string> {
+    await validateVideo(file, LIMITS.question);
     return uploadVideo('learning-daily-lessons', `${clubId}/questions`, file);
   },
 
-  /** Sube video para una lección de curso */
+  /** Sube video para una lección de curso (máx 300MB, 7min) */
   async uploadCourseVideo(clubId: string, courseId: string, file: File): Promise<string> {
+    await validateVideo(file, LIMITS.course);
     return uploadVideo('learning-courses', `${clubId}/${courseId}`, file);
   },
 
