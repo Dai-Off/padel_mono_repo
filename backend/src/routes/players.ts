@@ -6,6 +6,7 @@ import { calcEloRating } from '../services/levelingService';
 import { ligaFromEloWithBands } from '../services/matchmakingLeague';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
+import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
 
 const router = Router();
 
@@ -108,13 +109,25 @@ router.get('/me', async (req: Request, res: Response) => {
       return res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
     }
     const email = String(user.email).trim().toLowerCase();
-    const { data: player, error: errPlayer } = await supabase
+    let { data: player, error: errPlayer } = await supabase
       .from('players')
       .select(SELECT_PUBLIC_INTERNAL)
       .eq('email', email)
       .maybeSingle();
     if (errPlayer) return res.status(500).json({ ok: false, error: errPlayer.message });
-    if (!player) return res.status(404).json({ ok: false, error: 'No existe jugador con tu email' });
+    /** Fallback: cuenta auth vs fila `players.email` pueden desalinearse; `auth_user_id` es la ancla estable. */
+    if (!player && user.id) {
+      const byAuth = await supabase
+        .from('players')
+        .select(SELECT_PUBLIC_INTERNAL)
+        .eq('auth_user_id', user.id)
+        .maybeSingle();
+      if (byAuth.error) return res.status(500).json({ ok: false, error: byAuth.error.message });
+      player = byAuth.data;
+    }
+    if (!player) {
+      return res.status(404).json({ ok: false, error: 'No existe jugador asociado a esta cuenta' });
+    }
     return res.json({ ok: true, player: toPublicPlayer(player as Row) });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -645,6 +658,38 @@ router.get('/:id/feedback-summary', async (req: Request, res: Response) => {
     perceived_elo_estimate: perceivedEloEstimate,
     difference: Math.round((perceivedEloEstimate - elo) * 10) / 10,
   });
+});
+
+/**
+ * @openapi
+ * /players/{id}/last-peer-feedback-insight:
+ *   get:
+ *     tags: [Players]
+ *     summary: Tarjeta perfil — insight desde el último feedback de un compañero
+ *     description: |
+ *       Toma el **último partido** (por fecha de feedback) en el que compañeros (`reviewer_id` ≠ jugador)
+ *       enviaron `match_feedback` con una entrada en `level_ratings` para ese jugador.
+ *       Agrupa **hasta 3 valoraciones distintas** (una por compañero) del mismo `match_id` y genera
+ *       la tarjeta: «Recomendación IA», fortalezas y a mejorar (OpenAI si `OPENAI_API_KEY` está configurada;
+ *       si no hay clave o falla la API, plantillas locales). `insight_source` indica `openai` o `template`.
+ *       Solo el propio jugador autenticado puede consultar su `id` (privacidad).
+ *     security: [{ bearerAuth: [] }]
+ */
+router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const { id } = req.params;
+  if (id !== playerId) {
+    return res.status(403).json({ ok: false, error: 'Solo puedes consultar el insight de tu propio perfil' });
+  }
+
+  const supabase = getSupabaseServiceRoleClient();
+  const { data: exists, error: e0 } = await supabase.from('players').select('id').eq('id', id).maybeSingle();
+  if (e0) return res.status(500).json({ ok: false, error: e0.message });
+  if (!exists) return res.status(404).json({ ok: false, error: 'Player not found' });
+
+  const insight = await getLastPeerFeedbackInsightForPlayer(supabase, id);
+  return res.json(insight);
 });
 
 /**

@@ -73,6 +73,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     { name: '', level: '', isFree: true },
   ];
   const playerIds: string[] = [];
+  const playerIdsBySlot: Array<string | null> = [null, null, null, null];
   mps.forEach((mp, i) => {
     const idx = hasSlotIndex && mp.slot_index != null && mp.slot_index >= 0 && mp.slot_index <= 3
       ? mp.slot_index
@@ -80,6 +81,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     if (idx >= 4) return;
     const p = mp.players;
     if (!p) return;
+    if (p.id) playerIdsBySlot[idx] = p.id;
     if (p.id) playerIds.push(p.id);
     const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
     const parts = fullName.split(/\s+/).filter(Boolean);
@@ -97,6 +99,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   return {
     id: m.id,
     playerIds,
+    playerIdsBySlot,
     organizerPlayerId: b.organizer_player_id ?? null,
     visibility: m.visibility === 'private' ? 'private' : 'public',
     matchPhase,
