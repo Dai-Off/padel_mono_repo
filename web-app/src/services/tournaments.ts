@@ -14,6 +14,8 @@ export type TournamentDivisionRow = {
 export type TournamentListItem = {
   id: string;
   club_id: string;
+  /** Presente en listado/detalle cuando el backend lo envía; útil para re-sincronizar formularios. */
+  updated_at?: string;
   name?: string | null;
   start_at: string;
   end_at: string;
