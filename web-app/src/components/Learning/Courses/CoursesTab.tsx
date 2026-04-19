@@ -128,7 +128,7 @@ export function CoursesTab({ clubId }: { clubId: string }) {
               {/* Meta */}
               <div className="flex items-center gap-3 text-[10px] text-gray-400 flex-wrap">
                 <span>{course.lesson_count} {course.lesson_count === 1 ? t('learning_lessons_count').replace('{{count}}', '1') : t('learning_lessons_count_plural').replace('{{count}}', String(course.lesson_count))}</span>
-                <span>ELO {course.elo_min}–{course.elo_max}</span>
+                <span>Nv. {course.elo_min}–{course.elo_max}</span>
                 {course.staff_id && staffMap[course.staff_id] && (
                   <span>{staffMap[course.staff_id]}</span>
                 )}

@@ -113,6 +113,9 @@ router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Respo
     if (elo_min != null && elo_max != null && Number(elo_min) > Number(elo_max)) {
       return res.status(400).json({ ok: false, error: 'elo_min no puede ser mayor que elo_max' });
     }
+    if (elo_min != null && elo_max != null && Number(elo_max) - Number(elo_min) > 3) {
+      return res.status(400).json({ ok: false, error: 'El rango ELO no puede superar 3 puntos' });
+    }
 
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
@@ -164,6 +167,9 @@ router.put('/courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Re
     const finalMax = updates.elo_max ?? result.course.elo_max;
     if (Number(finalMin) > Number(finalMax)) {
       return res.status(400).json({ ok: false, error: 'elo_min no puede ser mayor que elo_max' });
+    }
+    if (Number(finalMax) - Number(finalMin) > 3) {
+      return res.status(400).json({ ok: false, error: 'El rango ELO no puede superar 3 puntos' });
     }
 
     if (Object.keys(updates).length === 0) {

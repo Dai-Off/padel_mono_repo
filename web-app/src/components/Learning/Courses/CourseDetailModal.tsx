@@ -109,7 +109,7 @@ export function CourseDetailModal({ course, clubId, staffName, onClose, onUpdate
                 <p className="text-xs text-gray-600">{detail.description}</p>
               )}
               <div className="flex items-center gap-4 text-[10px] text-gray-400 flex-wrap">
-                <span>ELO {detail.elo_min}–{detail.elo_max}</span>
+                <span>Nv. {detail.elo_min}–{detail.elo_max}</span>
                 {staffName && <span>{t('learning_field_coach')}: {staffName}</span>}
                 {detail.pedagogical_goal && <span>{detail.pedagogical_goal}</span>}
               </div>

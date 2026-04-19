@@ -38,7 +38,8 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return toast.error(t('learning_field_title'));
-    if (eloMin > eloMax) return toast.error('ELO min > max');
+    if (eloMin > eloMax) return toast.error(t('learning_field_elo_min') + ' > ' + t('learning_field_elo_max'));
+    if (eloMax - eloMin > 3) return toast.error(t('learning_level_range_max'));
 
     setSaving(true);
     try {
@@ -121,7 +122,7 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
             />
           </div>
 
-          {/* Rango ELO */}
+          {/* Rango de nivel */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_elo_min')}</label>
