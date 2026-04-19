@@ -683,7 +683,8 @@
     "learning_area_technique": "技术",
     "learning_area_tactics": "战术",
     "learning_area_physical": "体能",
-    "learning_area_mental_vocabulary": "心理 / 词汇",
+    "learning_area_mental": "心理",
+    "learning_area_rules": "规则",
 
     "learning_add_question": "新建题目",
     "learning_edit_question": "编辑题目",

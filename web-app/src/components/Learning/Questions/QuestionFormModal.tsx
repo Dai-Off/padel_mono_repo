@@ -17,7 +17,7 @@ import type {
 } from '../../../types/learningContent';
 
 const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'];
-const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'mental_vocabulary'];
+const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'mental', 'rules'];
 
 // Estado por defecto del contenido según tipo
 function defaultContent(type: QuestionType): QuestionContent {

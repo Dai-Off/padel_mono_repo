@@ -8,7 +8,7 @@ import { QuestionFormModal } from './QuestionFormModal';
 import type { Question, QuestionType, QuestionArea } from '../../../types/learningContent';
 
 const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'];
-const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'mental_vocabulary'];
+const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'mental', 'rules'];
 
 // Extraer texto legible del contenido de la pregunta
 function extractPreview(q: Question): string {

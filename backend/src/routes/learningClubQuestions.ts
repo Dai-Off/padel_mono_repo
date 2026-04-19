@@ -10,7 +10,7 @@ const router = Router();
 // ---------------------------------------------------------------------------
 
 const VALID_QUESTION_TYPES = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'] as const;
-const VALID_AREAS = ['technique', 'tactics', 'physical', 'mental_vocabulary'] as const;
+const VALID_AREAS = ['technique', 'tactics', 'physical', 'mental', 'rules'] as const;
 
 function validateQuestionContent(type: string, content: unknown): string | null {
   if (!content || typeof content !== 'object') return 'content es obligatorio y debe ser un objeto';

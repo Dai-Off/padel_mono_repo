@@ -683,7 +683,8 @@
     "learning_area_technique": "Technique",
     "learning_area_tactics": "Tactics",
     "learning_area_physical": "Physical",
-    "learning_area_mental_vocabulary": "Mental / Vocabulary",
+    "learning_area_mental": "Mental",
+    "learning_area_rules": "Rules",
 
     "learning_add_question": "New question",
     "learning_edit_question": "Edit question",

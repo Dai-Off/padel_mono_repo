@@ -711,7 +711,8 @@
     "learning_area_technique": "Técnica",
     "learning_area_tactics": "Táctica",
     "learning_area_physical": "Físico",
-    "learning_area_mental_vocabulary": "Mental / Vocabulario",
+    "learning_area_mental": "Mental",
+    "learning_area_rules": "Reglamento",
 
     "learning_add_question": "Nueva pregunta",
     "learning_edit_question": "Editar pregunta",

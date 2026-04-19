@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 export type QuestionType = 'test_classic' | 'true_false' | 'multi_select' | 'match_columns' | 'order_sequence';
-export type QuestionArea = 'technique' | 'tactics' | 'physical' | 'mental_vocabulary';
+export type QuestionArea = 'technique' | 'tactics' | 'physical' | 'mental' | 'rules';
 
 export interface TestClassicContent {
   question: string;
