@@ -10,12 +10,13 @@ import type { QuestionType, QuestionArea, CourseStatus } from '../../../types/le
 
 const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'];
 const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'mental', 'rules'];
-const COURSE_STATUSES: CourseStatus[] = ['draft', 'pending_review', 'active'];
+const COURSE_STATUSES: CourseStatus[] = ['draft', 'pending_review', 'active', 'inactive'];
 
 const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
   draft: { bg: 'bg-gray-100', text: 'text-gray-600' },
   pending_review: { bg: 'bg-amber-50', text: 'text-amber-600' },
   active: { bg: 'bg-emerald-50', text: 'text-emerald-600' },
+  inactive: { bg: 'bg-red-50', text: 'text-red-600' },
 };
 
 type SubTab = 'questions' | 'courses';
@@ -317,7 +318,7 @@ function CoursesModeration() {
               <p className="text-[10px] text-gray-500">{course.club_name}</p>
               <div className="flex items-center gap-3 text-[10px] text-gray-400">
                 <span>{course.lesson_count} {course.lesson_count === 1 ? t('learning_lessons_count').replace('{{count}}', '1') : t('learning_lessons_count_plural').replace('{{count}}', String(course.lesson_count))}</span>
-                <span>Nv. {course.elo_min}–{course.elo_max}</span>
+                <span>{t('learning_level_short')} {course.elo_min}–{course.elo_max}</span>
               </div>
             </motion.button>
           ))}

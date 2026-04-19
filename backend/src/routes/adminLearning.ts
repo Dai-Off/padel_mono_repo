@@ -306,37 +306,26 @@ router.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
 
-    // Preguntas
-    const { count: totalQuestions } = await supabase
-      .from('learning_questions')
-      .select('id', { count: 'exact', head: true });
+    // Ejecutar todas las queries en paralelo
+    const [
+      { count: totalQuestions },
+      { count: activeQuestions },
+      { count: totalCourses },
+      { count: activeCourses },
+      { count: pendingCourses },
+      { data: questionsByClub },
+      { data: coursesByClub },
+    ] = await Promise.all([
+      supabase.from('learning_questions').select('id', { count: 'exact', head: true }),
+      supabase.from('learning_questions').select('id', { count: 'exact', head: true }).eq('is_active', true),
+      supabase.from('learning_courses').select('id', { count: 'exact', head: true }),
+      supabase.from('learning_courses').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+      supabase.from('learning_courses').select('id', { count: 'exact', head: true }).eq('status', 'pending_review'),
+      supabase.from('learning_questions').select('created_by_club, clubs:created_by_club(name)').eq('is_active', true),
+      supabase.from('learning_courses').select('club_id, clubs(name)').eq('status', 'active'),
+    ]);
 
-    const { count: activeQuestions } = await supabase
-      .from('learning_questions')
-      .select('id', { count: 'exact', head: true })
-      .eq('is_active', true);
-
-    // Cursos
-    const { count: totalCourses } = await supabase
-      .from('learning_courses')
-      .select('id', { count: 'exact', head: true });
-
-    const { count: activeCourses } = await supabase
-      .from('learning_courses')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'active');
-
-    const { count: pendingCourses } = await supabase
-      .from('learning_courses')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending_review');
-
-    // Top clubes por preguntas
-    const { data: questionsByClub } = await supabase
-      .from('learning_questions')
-      .select('created_by_club, clubs:created_by_club(name)')
-      .eq('is_active', true);
-
+    // Agrupar preguntas por club
     const qByClub: Record<string, { club_name: string; count: number }> = {};
     for (const q of questionsByClub || []) {
       const cid = (q as any).created_by_club;
@@ -346,12 +335,7 @@ router.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
       qByClub[cid].count++;
     }
 
-    // Top clubes por cursos
-    const { data: coursesByClub } = await supabase
-      .from('learning_courses')
-      .select('club_id, clubs(name)')
-      .eq('status', 'active');
-
+    // Agrupar cursos por club
     const cByClub: Record<string, { club_name: string; count: number }> = {};
     for (const c of coursesByClub || []) {
       const cid = (c as any).club_id;

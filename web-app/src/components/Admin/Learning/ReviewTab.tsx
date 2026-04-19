@@ -76,7 +76,7 @@ export function ReviewTab({ onPendingCountChange }: Props) {
 
             <div className="flex items-center gap-3 text-[10px] text-gray-400">
               <span>{course.lesson_count} {course.lesson_count === 1 ? t('learning_lessons_count').replace('{{count}}', '1') : t('learning_lessons_count_plural').replace('{{count}}', String(course.lesson_count))}</span>
-              <span>Nv. {course.elo_min}–{course.elo_max}</span>
+              <span>{t('learning_level_short')} {course.elo_min}–{course.elo_max}</span>
               <span className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
                 {new Date(course.updated_at).toLocaleDateString()}

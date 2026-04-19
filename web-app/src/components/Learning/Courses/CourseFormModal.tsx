@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { X } from 'lucide-react';
+import { X, Upload, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
@@ -19,6 +19,7 @@ interface Props {
 export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Props) {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [staff, setStaff] = useState<ClubStaffMember[]>([]);
 
   const [title, setTitle] = useState(course?.title ?? '');
@@ -27,6 +28,10 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
   const [eloMax, setEloMax] = useState(course?.elo_max ?? 7);
   const [pedagogicalGoal, setPedagogicalGoal] = useState(course?.pedagogical_goal ?? '');
   const [staffId, setStaffId] = useState(course?.staff_id ?? '');
+  const [bannerUrl, setBannerUrl] = useState(course?.banner_url ?? '');
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
 
   // Cargar staff del club
   useEffect(() => {
@@ -34,6 +39,37 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
       setStaff(list.filter((s) => s.status === 'active'));
     }).catch(() => {});
   }, [clubId]);
+
+  const handleBannerSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size / (1024 * 1024) > 5) {
+      toast.error(t('learning_banner_too_large'));
+      return;
+    }
+    setBannerFile(file);
+    setBannerUrl(URL.createObjectURL(file));
+  };
+
+  const handleBannerDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('image/')) {
+      if (file.size / (1024 * 1024) > 5) {
+        toast.error(t('learning_banner_too_large'));
+        return;
+      }
+      setBannerFile(file);
+      setBannerUrl(URL.createObjectURL(file));
+    }
+  };
+
+  const removeBanner = () => {
+    setBannerFile(null);
+    setBannerUrl('');
+    if (bannerInputRef.current) bannerInputRef.current.value = '';
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,10 +79,18 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
 
     setSaving(true);
     try {
+      let finalBannerUrl = bannerUrl;
+      if (bannerFile) {
+        setUploading(true);
+        finalBannerUrl = await learningContentService.uploadCourseBanner(clubId, bannerFile);
+        setUploading(false);
+      }
+
       const body = {
         club_id: clubId,
         title: title.trim(),
         description: description.trim() || null,
+        banner_url: finalBannerUrl || null,
         elo_min: eloMin,
         elo_max: eloMax,
         pedagogical_goal: pedagogicalGoal.trim() || null,
@@ -64,6 +108,7 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
       toast.error((e as Error).message || t('learning_save_error'));
     } finally {
       setSaving(false);
+      setUploading(false);
     }
   };
 
@@ -96,6 +141,53 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
             />
           </div>
 
+          {/* Banner */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">
+              {t('learning_field_banner')}
+              <span className="text-gray-300 font-normal ml-1">(máx 5MB)</span>
+            </label>
+            {bannerUrl ? (
+              <div className="relative rounded-xl overflow-hidden border border-gray-200">
+                <img
+                  src={bannerUrl}
+                  alt="Banner"
+                  className="w-full h-28 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={removeBanner}
+                  className="absolute top-2 right-2 p-1.5 bg-white/90 rounded-lg text-red-400 hover:text-red-600 shadow-sm"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div
+                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(false); }}
+                onDrop={handleBannerDrop}
+                onClick={() => bannerInputRef.current?.click()}
+                className={`w-full flex items-center justify-center gap-2 py-5 rounded-xl border-2 border-dashed text-xs font-bold cursor-pointer transition-all ${
+                  dragging
+                    ? 'border-indigo-400 bg-indigo-50 text-indigo-500'
+                    : 'border-gray-200 text-gray-400 hover:border-indigo-300 hover:text-indigo-500'
+                }`}
+              >
+                <Upload className="w-4 h-4" />
+                {t('learning_banner_dropzone')}
+              </div>
+            )}
+            <input
+              ref={bannerInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleBannerSelect}
+              className="hidden"
+            />
+          </div>
+
           {/* Coach */}
           <div>
             <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_coach')}</label>
@@ -123,37 +215,45 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
           </div>
 
           {/* Rango de nivel */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_elo_min')}</label>
-              <input
-                type="number"
-                min={0}
-                max={7}
-                step={0.5}
-                value={eloMin}
-                onChange={(e) => {
-                  const val = Math.round(Number(e.target.value) * 2) / 2;
-                  setEloMin(Math.max(0, Math.min(7, val)));
-                }}
-                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-              />
+          <div className="space-y-1">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_elo_min')}</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={7}
+                  step={0.5}
+                  value={eloMin}
+                  onChange={(e) => {
+                    const val = Math.round(Number(e.target.value) * 2) / 2;
+                    setEloMin(Math.max(0, Math.min(7, val)));
+                  }}
+                  className={`w-full rounded-xl border px-3 py-2 text-sm ${eloMax - eloMin > 3 || eloMin > eloMax ? 'border-red-300' : 'border-gray-200'}`}
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_elo_max')}</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={7}
+                  step={0.5}
+                  value={eloMax}
+                  onChange={(e) => {
+                    const val = Math.round(Number(e.target.value) * 2) / 2;
+                    setEloMax(Math.max(0, Math.min(7, val)));
+                  }}
+                  className={`w-full rounded-xl border px-3 py-2 text-sm ${eloMax - eloMin > 3 || eloMin > eloMax ? 'border-red-300' : 'border-gray-200'}`}
+                />
+              </div>
             </div>
-            <div>
-              <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_elo_max')}</label>
-              <input
-                type="number"
-                min={0}
-                max={7}
-                step={0.5}
-                value={eloMax}
-                onChange={(e) => {
-                  const val = Math.round(Number(e.target.value) * 2) / 2;
-                  setEloMax(Math.max(0, Math.min(7, val)));
-                }}
-                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-              />
-            </div>
+            {eloMin > eloMax && (
+              <p className="text-[10px] text-red-500">{t('learning_field_elo_min')} {'>'} {t('learning_field_elo_max')}</p>
+            )}
+            {eloMax - eloMin > 3 && eloMin <= eloMax && (
+              <p className="text-[10px] text-red-500">{t('learning_level_range_max')}</p>
+            )}
           </div>
 
           {/* Objetivo pedagógico */}
@@ -178,10 +278,10 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
             </button>
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || uploading}
               className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-[#E31E24] hover:opacity-90 transition-all disabled:opacity-50"
             >
-              {saving ? '...' : t('save')}
+              {uploading ? `${t('learning_field_banner')}...` : saving ? '...' : t('save')}
             </button>
           </div>
         </form>

@@ -17,7 +17,7 @@ async function getCourseForClubEdit(
   const supabase = getSupabaseServiceRoleClient();
   const { data: course, error } = await supabase
     .from('learning_courses')
-    .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, created_at, updated_at')
+    .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, review_notes, created_at, updated_at')
     .eq('id', courseId)
     .maybeSingle();
 
@@ -47,7 +47,7 @@ router.get('/club-courses', requireClubOwnerOrAdmin, async (req: Request, res: R
 
     const { data: courses, error } = await supabase
       .from('learning_courses')
-      .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, created_at, updated_at')
+      .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, review_notes, created_at, updated_at')
       .eq('club_id', club_id)
       .order('created_at', { ascending: false });
 
@@ -316,18 +316,19 @@ router.delete('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdmin, async (
 
     if (deleteErr) return res.status(500).json({ ok: false, error: deleteErr.message });
 
-    // Re-ordenar lecciones restantes
+    // Re-ordenar lecciones restantes en paralelo
     const { data: remaining } = await supabase
       .from('learning_course_lessons')
       .select('id')
       .eq('course_id', req.params.id)
       .order('order', { ascending: true });
 
-    for (let i = 0; i < (remaining || []).length; i++) {
-      await supabase
-        .from('learning_course_lessons')
-        .update({ order: i + 1 })
-        .eq('id', remaining![i].id);
+    if (remaining?.length) {
+      await Promise.all(
+        remaining.map((r, i) =>
+          supabase.from('learning_course_lessons').update({ order: i + 1 }).eq('id', r.id),
+        ),
+      );
     }
 
     return res.json({ ok: true, data: { id: lessonId, deleted: true } });

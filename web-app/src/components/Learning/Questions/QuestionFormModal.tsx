@@ -119,7 +119,7 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
       case 'multi_select': {
         if (!c.question || !(c.question as string).trim()) return t('learning_field_question');
         if (Array.isArray(c.options) && (c.options as string[]).some((o) => !o.trim())) return t('learning_field_options');
-        if (!Array.isArray(c.correct_indices) || (c.correct_indices as number[]).length < 2) return t('learning_field_correct_answer');
+        if (!Array.isArray(c.correct_indices) || (c.correct_indices as number[]).length < 2 || (c.correct_indices as number[]).length > 3) return t('learning_field_correct_answer');
         return null;
       }
       case 'match_columns': {
@@ -144,7 +144,6 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
     try {
       // Si hay un archivo nuevo, subirlo primero
       let finalVideoUrl = videoUrl;
-      const hasVideo = !!(videoFile || videoUrl);
 
       if (videoFile) {
         setUploading(true);
@@ -157,8 +156,7 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
         type,
         level,
         area,
-        has_video: hasVideo,
-        video_url: hasVideo ? finalVideoUrl : undefined,
+        video_url: finalVideoUrl || null,
         content,
       };
 
@@ -445,7 +443,9 @@ function MultiSelectFields({ content, onChange, t }: { content: MultiSelectConte
   const toggleIndex = (i: number) => {
     const indices = content.correct_indices.includes(i)
       ? content.correct_indices.filter((x) => x !== i)
-      : [...content.correct_indices, i];
+      : content.correct_indices.length >= 3
+        ? content.correct_indices
+        : [...content.correct_indices, i];
     onChange({ ...content, correct_indices: indices });
   };
 

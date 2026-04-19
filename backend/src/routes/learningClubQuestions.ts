@@ -71,7 +71,7 @@ function validateQuestionContent(type: string, content: unknown): string | null 
 // POST /questions
 router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   try {
-    const { club_id, type, level, area, has_video, video_url, content } = req.body ?? {};
+    const { club_id, type, level, area, video_url, content } = req.body ?? {};
 
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
     if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -85,13 +85,11 @@ router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Res
     if (level == null || typeof level !== 'number' || level < 0) {
       return res.status(400).json({ ok: false, error: 'level debe ser un número >= 0' });
     }
-    if (has_video && (!video_url || typeof video_url !== 'string')) {
-      return res.status(400).json({ ok: false, error: 'video_url es obligatorio cuando has_video es true' });
-    }
 
     const contentError = validateQuestionContent(type, content);
     if (contentError) return res.status(400).json({ ok: false, error: contentError });
 
+    const hasVideo = !!video_url && typeof video_url === 'string';
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
       .from('learning_questions')
@@ -99,8 +97,8 @@ router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Res
         type,
         level,
         area,
-        has_video: !!has_video,
-        video_url: has_video ? video_url : null,
+        has_video: hasVideo,
+        video_url: hasVideo ? video_url : null,
         content,
         created_by_club: club_id,
         is_active: true,
@@ -133,7 +131,7 @@ router.put('/questions/:id', requireClubOwnerOrAdmin, async (req: Request, res: 
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
-    const { type, level, area, has_video, video_url, content } = req.body ?? {};
+    const { type, level, area, video_url, content } = req.body ?? {};
     const updates: Record<string, unknown> = {};
 
     const effectiveType = type ?? existing.type;
@@ -156,25 +154,14 @@ router.put('/questions/:id', requireClubOwnerOrAdmin, async (req: Request, res: 
       }
       updates.level = level;
     }
-    if (has_video !== undefined) {
-      updates.has_video = !!has_video;
-    }
     if (video_url !== undefined) {
-      updates.video_url = video_url;
+      updates.video_url = video_url || null;
+      updates.has_video = !!video_url;
     }
     if (content !== undefined) {
       const contentError = validateQuestionContent(effectiveType, content);
       if (contentError) return res.status(400).json({ ok: false, error: contentError });
       updates.content = content;
-    }
-
-    // Validar has_video + video_url combinados
-    const finalHasVideo = updates.has_video !== undefined ? updates.has_video : undefined;
-    if (finalHasVideo === true) {
-      const finalVideoUrl = updates.video_url;
-      if (!finalVideoUrl || typeof finalVideoUrl !== 'string') {
-        return res.status(400).json({ ok: false, error: 'video_url es obligatorio cuando has_video es true' });
-      }
     }
 
     if (Object.keys(updates).length === 0) {

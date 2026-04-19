@@ -14,6 +14,7 @@ const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
   draft: { bg: 'bg-gray-100', text: 'text-gray-600' },
   pending_review: { bg: 'bg-amber-50', text: 'text-amber-600' },
   active: { bg: 'bg-emerald-50', text: 'text-emerald-600' },
+  inactive: { bg: 'bg-red-50', text: 'text-red-600' },
 };
 
 export function CoursesTab({ clubId }: { clubId: string }) {
@@ -128,7 +129,7 @@ export function CoursesTab({ clubId }: { clubId: string }) {
               {/* Meta */}
               <div className="flex items-center gap-3 text-[10px] text-gray-400 flex-wrap">
                 <span>{course.lesson_count} {course.lesson_count === 1 ? t('learning_lessons_count').replace('{{count}}', '1') : t('learning_lessons_count_plural').replace('{{count}}', String(course.lesson_count))}</span>
-                <span>Nv. {course.elo_min}–{course.elo_max}</span>
+                <span>{t('learning_level_short')} {course.elo_min}–{course.elo_max}</span>
                 {course.staff_id && staffMap[course.staff_id] && (
                   <span>{staffMap[course.staff_id]}</span>
                 )}

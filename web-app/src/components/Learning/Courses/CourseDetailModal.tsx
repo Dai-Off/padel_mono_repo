@@ -12,6 +12,7 @@ const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
   draft: { bg: 'bg-gray-100', text: 'text-gray-600' },
   pending_review: { bg: 'bg-amber-50', text: 'text-amber-600' },
   active: { bg: 'bg-emerald-50', text: 'text-emerald-600' },
+  inactive: { bg: 'bg-red-50', text: 'text-red-600' },
 };
 
 interface Props {
@@ -73,8 +74,9 @@ export function CourseDetailModal({ course, clubId, staffName, onClose, onUpdate
 
   const formatDuration = (seconds: number | null) => {
     if (!seconds) return '';
-    const min = Math.round(seconds / 60);
-    return `${min} min`;
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return s > 0 ? `${m}m ${s}s` : `${m}m`;
   };
 
   return (
@@ -109,7 +111,7 @@ export function CourseDetailModal({ course, clubId, staffName, onClose, onUpdate
                 <p className="text-xs text-gray-600">{detail.description}</p>
               )}
               <div className="flex items-center gap-4 text-[10px] text-gray-400 flex-wrap">
-                <span>Nv. {detail.elo_min}–{detail.elo_max}</span>
+                <span>{t('learning_level_short')} {detail.elo_min}–{detail.elo_max}</span>
                 {staffName && <span>{t('learning_field_coach')}: {staffName}</span>}
                 {detail.pedagogical_goal && <span>{detail.pedagogical_goal}</span>}
               </div>
@@ -124,6 +126,14 @@ export function CourseDetailModal({ course, clubId, staffName, onClose, onUpdate
                 </button>
               )}
             </div>
+
+            {/* Notas del revisor */}
+            {detail.review_notes && (
+              <div className="px-3 py-2.5 rounded-xl bg-blue-50 text-blue-700 text-xs space-y-1">
+                <span className="font-bold text-[10px] uppercase text-blue-500">{t('learning_review_notes')}</span>
+                <p>{detail.review_notes}</p>
+              </div>
+            )}
 
             {/* No editable */}
             {!isDraft && (

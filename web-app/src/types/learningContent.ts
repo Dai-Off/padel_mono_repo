@@ -54,7 +54,7 @@ export interface Question {
 // Tipos de cursos
 // ---------------------------------------------------------------------------
 
-export type CourseStatus = 'draft' | 'pending_review' | 'active';
+export type CourseStatus = 'draft' | 'pending_review' | 'active' | 'inactive';
 
 export interface Course {
   id: string;
@@ -67,6 +67,7 @@ export interface Course {
   pedagogical_goal: string | null;
   staff_id: string | null;
   status: CourseStatus;
+  review_notes: string | null;
   lesson_count: number;
   created_at: string;
   updated_at: string;

@@ -2,7 +2,6 @@ import type { Course, CourseLesson, Question } from './learningContent';
 
 export interface AdminCourse extends Course {
   club_name: string;
-  review_notes: string | null;
 }
 
 export interface AdminCourseWithLessons extends AdminCourse {

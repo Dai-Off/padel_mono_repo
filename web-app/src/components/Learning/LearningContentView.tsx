@@ -101,11 +101,8 @@ export function LearningContentView() {
         <div className="max-w-5xl mx-auto space-y-5">
           {/* Título */}
           <div className="flex items-center gap-2.5">
-            <div
-              className="w-9 h-9 rounded-xl flex items-center justify-center"
-              style={{ backgroundColor: 'rgba(99, 102, 241, 0.1)' }}
-            >
-              <BookOpen className="w-5 h-5" style={{ color: 'rgb(99, 102, 241)' }} />
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-indigo-50">
+              <BookOpen className="w-5 h-5 text-indigo-500" />
             </div>
             <h1 className="text-lg font-bold text-[#1A1A1A]">{t('menu_learning_content')}</h1>
           </div>

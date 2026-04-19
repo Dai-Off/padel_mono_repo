@@ -11,6 +11,7 @@ const STATUS_STYLES: Record<CourseStatus, string> = {
   draft: 'bg-gray-100 text-gray-600',
   pending_review: 'bg-amber-100 text-amber-800',
   active: 'bg-green-100 text-green-800',
+  inactive: 'bg-red-100 text-red-700',
 };
 
 interface Props {
@@ -77,7 +78,9 @@ export function ReviewDetailModal({ course, onClose, onActionDone, readOnly = fa
 
   const formatDuration = (seconds: number | null) => {
     if (!seconds) return '';
-    return `${Math.round(seconds / 60)} min`;
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return s > 0 ? `${m}m ${s}s` : `${m}m`;
   };
 
   return (
@@ -134,7 +137,7 @@ export function ReviewDetailModal({ course, onClose, onActionDone, readOnly = fa
               )}
 
               <div className="flex gap-4 text-sm text-gray-600">
-                <span>Nv. {detail.elo_min}–{detail.elo_max}</span>
+                <span>{t('learning_level_short')} {detail.elo_min}–{detail.elo_max}</span>
                 {detail.pedagogical_goal && <span>{detail.pedagogical_goal}</span>}
               </div>
 

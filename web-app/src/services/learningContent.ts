@@ -13,6 +13,8 @@ import type {
 type ApiOk<T> = T & { ok: true };
 
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'avi', 'mkv'];
+const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'webp'];
+const BANNER_MAX_SIZE_MB = 5;
 
 // Límites por tipo de contenido
 export const VIDEO_LIMITS = {
@@ -21,7 +23,7 @@ export const VIDEO_LIMITS = {
 };
 
 /** Obtiene la duración de un video en segundos */
-function getVideoDuration(file: File): Promise<number> {
+export function getVideoDuration(file: File): Promise<number> {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.preload = 'metadata';
@@ -93,6 +95,32 @@ export const learningContentService = {
     return uploadVideo('learning-courses', `${clubId}/${courseId}`, file);
   },
 
+  /** Sube imagen de banner para un curso (máx 5MB) */
+  async uploadCourseBanner(clubId: string, file: File): Promise<string> {
+    const sizeMB = file.size / (1024 * 1024);
+    if (sizeMB > BANNER_MAX_SIZE_MB) {
+      throw new Error(`La imagen supera el límite de ${BANNER_MAX_SIZE_MB}MB (${sizeMB.toFixed(1)}MB)`);
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error('Supabase no configurado');
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user?.id) throw new Error('Inicia sesión para subir archivos');
+
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const safeExt = ext && IMAGE_EXTENSIONS.includes(ext) ? ext : 'jpg';
+    const fileName = `${Date.now()}.${safeExt}`;
+    const path = `${clubId}/banners/${fileName}`;
+
+    const { error: upErr } = await supabase.storage.from('learning-courses').upload(path, file, {
+      upsert: false,
+      contentType: file.type || undefined,
+    });
+    if (upErr) throw new Error(upErr.message);
+
+    const { data: pub } = supabase.storage.from('learning-courses').getPublicUrl(path);
+    return pub.publicUrl;
+  },
+
   // ---------------------------------------------------------------------------
   // Preguntas
   // ---------------------------------------------------------------------------
@@ -114,8 +142,7 @@ export const learningContentService = {
     type: QuestionType;
     level: number;
     area: QuestionArea;
-    has_video: boolean;
-    video_url?: string;
+    video_url?: string | null;
     content: QuestionContent;
   }): Promise<Question> {
     const res = await apiFetchWithAuth<ApiOk<{ data: Question }>>('/learning/questions', {
@@ -131,8 +158,7 @@ export const learningContentService = {
       type: QuestionType;
       level: number;
       area: QuestionArea;
-      has_video: boolean;
-      video_url: string;
+      video_url: string | null;
       content: QuestionContent;
     }>,
   ): Promise<Question> {

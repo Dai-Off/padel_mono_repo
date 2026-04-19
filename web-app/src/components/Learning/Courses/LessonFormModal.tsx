@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { X, Upload, Video, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { learningContentService, validateVideo, VIDEO_LIMITS } from '../../../services/learningContent';
+import { learningContentService, validateVideo, getVideoDuration, VIDEO_LIMITS } from '../../../services/learningContent';
 import type { CourseLesson } from '../../../types/learningContent';
 
 interface Props {
@@ -22,9 +22,7 @@ export function LessonFormModal({ mode, lesson, courseId, clubId, onClose, onSav
 
   const [title, setTitle] = useState(lesson?.title ?? '');
   const [description, setDescription] = useState(lesson?.description ?? '');
-  const [durationMin, setDurationMin] = useState(
-    lesson?.duration_seconds ? Math.round(lesson.duration_seconds / 60) : 0,
-  );
+  const [durationSec, setDurationSec] = useState<number | null>(lesson?.duration_seconds ?? null);
   const [videoUrl, setVideoUrl] = useState(lesson?.video_url ?? '');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -36,6 +34,8 @@ export function LessonFormModal({ mode, lesson, courseId, clubId, onClose, onSav
     setValidating(true);
     try {
       await validateVideo(file, VIDEO_LIMITS.course);
+      const duration = await getVideoDuration(file);
+      setDurationSec(Math.round(duration));
       setVideoFile(file);
       setVideoUrl(file.name);
     } catch (e) {
@@ -61,6 +61,7 @@ export function LessonFormModal({ mode, lesson, courseId, clubId, onClose, onSav
   const removeVideo = () => {
     setVideoFile(null);
     setVideoUrl('');
+    setDurationSec(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -81,7 +82,7 @@ export function LessonFormModal({ mode, lesson, courseId, clubId, onClose, onSav
         title: title.trim(),
         description: description.trim() || null,
         video_url: finalVideoUrl || null,
-        duration_seconds: durationMin > 0 ? durationMin * 60 : null,
+        duration_seconds: durationSec,
       };
 
       if (mode === 'create') {
@@ -136,19 +137,6 @@ export function LessonFormModal({ mode, lesson, courseId, clubId, onClose, onSav
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
               className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-none"
-            />
-          </div>
-
-          {/* Duración */}
-          <div>
-            <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_duration')}</label>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={durationMin}
-              onChange={(e) => setDurationMin(Math.max(0, Math.round(Number(e.target.value))))}
-              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
             />
           </div>
 
