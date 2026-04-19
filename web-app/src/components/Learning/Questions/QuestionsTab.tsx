@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Edit, ToggleLeft, ToggleRight, HelpCircle } from 'lucide-react';
+import { Plus, Edit, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
@@ -53,11 +53,15 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
     return { total, active };
   }, [questions]);
 
-  const handleDeactivate = async (q: Question) => {
-    if (!confirm(t('learning_deactivate_confirm'))) return;
+  const handleToggleActive = async (q: Question) => {
     try {
-      await learningContentService.deactivateQuestion(q.id);
-      toast.success(t('learning_deactivate_success'));
+      if (q.is_active) {
+        await learningContentService.deactivateQuestion(q.id);
+        toast.success(t('learning_deactivate_success'));
+      } else {
+        await learningContentService.activateQuestion(q.id);
+        toast.success(t('learning_save_success'));
+      }
       load();
     } catch (e) {
       toast.error((e as Error).message || t('learning_save_error'));
@@ -205,20 +209,19 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
                   <Edit className="w-3 h-3" />
                   {t('learning_edit_question')}
                 </button>
-                {q.is_active && (
-                  <button
-                    type="button"
-                    onClick={() => handleDeactivate(q)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-50 text-red-500 text-[10px] font-bold hover:bg-red-50 transition-all"
-                  >
-                    <ToggleLeft className="w-3 h-3" />
-                  </button>
-                )}
-                {!q.is_active && (
-                  <span className="flex items-center gap-1 px-3 py-1.5 text-gray-400 text-[10px]">
-                    <ToggleRight className="w-3 h-3" />
-                  </span>
-                )}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={q.is_active}
+                  onClick={() => handleToggleActive(q)}
+                  className="relative w-9 h-5 rounded-full transition-colors shrink-0"
+                  style={{ backgroundColor: q.is_active ? '#22C55E' : '#D1D5DB' }}
+                >
+                  <span
+                    className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
+                    style={{ transform: q.is_active ? 'translateX(16px)' : 'translateX(0)' }}
+                  />
+                </button>
               </div>
             </motion.div>
           ))}

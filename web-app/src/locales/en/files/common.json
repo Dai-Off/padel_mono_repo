@@ -736,6 +736,8 @@
     "learning_field_elo_min": "Min ELO",
     "learning_field_elo_max": "Max ELO",
     "learning_field_pedagogical_goal": "Pedagogical goal",
+    "learning_field_coach": "Coach",
+    "learning_field_coach_none": "No coach assigned",
     "learning_field_duration": "Duration (minutes)",
     "learning_field_add_pair": "Add pair",
     "learning_field_add_step": "Add step",
@@ -747,6 +749,9 @@
     "learning_lessons_count_plural": "{{count}} lessons",
     "learning_course_detail": "Course detail",
     "learning_course_lessons": "Lessons",
+    "learning_video_dropzone": "Drag or click to select video",
+    "learning_validating_video": "Validating video...",
+    "learning_video_read_error": "Could not read the video",
     "learning_empty_lessons": "No lessons in this course",
     "learning_course_not_editable": "This course can no longer be edited"
 }

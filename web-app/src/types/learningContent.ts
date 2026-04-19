@@ -65,6 +65,7 @@ export interface Course {
   elo_min: number;
   elo_max: number;
   pedagogical_goal: string | null;
+  staff_id: string | null;
   status: CourseStatus;
   lesson_count: number;
   created_at: string;

@@ -15,7 +15,7 @@ type ApiOk<T> = T & { ok: true };
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'webm', 'avi', 'mkv'];
 
 // Límites por tipo de contenido
-const LIMITS = {
+export const VIDEO_LIMITS = {
   question: { maxSizeMB: 30, maxDurationSec: 15 },
   course:   { maxSizeMB: 300, maxDurationSec: 420 }, // 7 minutos
 };
@@ -39,9 +39,9 @@ function getVideoDuration(file: File): Promise<number> {
 }
 
 /**
- * Valida tamaño y duración de un video antes de subirlo.
+ * Valida tamaño y duración de un video. Lanza error si excede los límites.
  */
-async function validateVideo(file: File, limits: { maxSizeMB: number; maxDurationSec: number }): Promise<void> {
+export async function validateVideo(file: File, limits: { maxSizeMB: number; maxDurationSec: number }): Promise<void> {
   const sizeMB = file.size / (1024 * 1024);
   if (sizeMB > limits.maxSizeMB) {
     throw new Error(`El video supera el límite de ${limits.maxSizeMB}MB (${sizeMB.toFixed(1)}MB)`);
@@ -83,13 +83,13 @@ export const learningContentService = {
 
   /** Sube video para una pregunta de lección diaria (máx 30MB, 15s) */
   async uploadQuestionVideo(clubId: string, file: File): Promise<string> {
-    await validateVideo(file, LIMITS.question);
+    await validateVideo(file, VIDEO_LIMITS.question);
     return uploadVideo('learning-daily-lessons', `${clubId}/questions`, file);
   },
 
   /** Sube video para una lección de curso (máx 300MB, 7min) */
   async uploadCourseVideo(clubId: string, courseId: string, file: File): Promise<string> {
-    await validateVideo(file, LIMITS.course);
+    await validateVideo(file, VIDEO_LIMITS.course);
     return uploadVideo('learning-courses', `${clubId}/${courseId}`, file);
   },
 
@@ -147,6 +147,10 @@ export const learningContentService = {
     await apiFetchWithAuth(`/learning/questions/${id}/deactivate`, { method: 'PATCH' });
   },
 
+  async activateQuestion(id: string): Promise<void> {
+    await apiFetchWithAuth(`/learning/questions/${id}/activate`, { method: 'PATCH' });
+  },
+
   // ---------------------------------------------------------------------------
   // Cursos
   // ---------------------------------------------------------------------------
@@ -169,6 +173,7 @@ export const learningContentService = {
     elo_min?: number;
     elo_max?: number;
     pedagogical_goal?: string | null;
+    staff_id?: string | null;
   }): Promise<Course> {
     const res = await apiFetchWithAuth<ApiOk<{ data: Course }>>('/learning/courses', {
       method: 'POST',
@@ -186,6 +191,7 @@ export const learningContentService = {
       elo_min: number;
       elo_max: number;
       pedagogical_goal: string | null;
+      staff_id: string | null;
     }>,
   ): Promise<Course> {
     const res = await apiFetchWithAuth<ApiOk<{ data: Course }>>(`/learning/courses/${id}`, {

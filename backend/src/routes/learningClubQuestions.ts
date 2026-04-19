@@ -225,6 +225,36 @@ router.patch('/questions/:id/deactivate', requireClubOwnerOrAdmin, async (req: R
   }
 });
 
+// PATCH /questions/:id/activate
+router.patch('/questions/:id/activate', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const questionId = req.params.id;
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('learning_questions')
+      .select('id, created_by_club')
+      .eq('id', questionId)
+      .maybeSingle();
+
+    if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
+    if (!canAccessClub(req, existing.created_by_club)) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const { error } = await supabase
+      .from('learning_questions')
+      .update({ is_active: true })
+      .eq('id', questionId);
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, data: { id: questionId, is_active: true } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // GET /questions
 router.get('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   try {

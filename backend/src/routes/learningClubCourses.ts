@@ -17,7 +17,7 @@ async function getCourseForClubEdit(
   const supabase = getSupabaseServiceRoleClient();
   const { data: course, error } = await supabase
     .from('learning_courses')
-    .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, status, created_at, updated_at')
+    .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, created_at, updated_at')
     .eq('id', courseId)
     .maybeSingle();
 
@@ -47,7 +47,7 @@ router.get('/club-courses', requireClubOwnerOrAdmin, async (req: Request, res: R
 
     const { data: courses, error } = await supabase
       .from('learning_courses')
-      .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, status, created_at, updated_at')
+      .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, created_at, updated_at')
       .eq('club_id', club_id)
       .order('created_at', { ascending: false });
 
@@ -103,7 +103,7 @@ router.get('/club-courses/:id', requireClubOwnerOrAdmin, async (req: Request, re
 // POST /courses
 router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   try {
-    const { club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal } = req.body ?? {};
+    const { club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id } = req.body ?? {};
 
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
     if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -125,6 +125,7 @@ router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Respo
         elo_min: elo_min ?? 0,
         elo_max: elo_max ?? 7,
         pedagogical_goal: pedagogical_goal || null,
+        staff_id: staff_id || null,
         status: 'draft',
       })
       .select('*')
@@ -143,7 +144,7 @@ router.put('/courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Re
     const result = await getCourseForClubEdit(req, req.params.id, true);
     if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
 
-    const { title, description, banner_url, elo_min, elo_max, pedagogical_goal } = req.body ?? {};
+    const { title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id } = req.body ?? {};
     const updates: Record<string, unknown> = {};
 
     if (title !== undefined) {
@@ -157,6 +158,7 @@ router.put('/courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Re
     if (elo_min !== undefined) updates.elo_min = elo_min;
     if (elo_max !== undefined) updates.elo_max = elo_max;
     if (pedagogical_goal !== undefined) updates.pedagogical_goal = pedagogical_goal || null;
+    if (staff_id !== undefined) updates.staff_id = staff_id || null;
 
     const finalMin = updates.elo_min ?? result.course.elo_min;
     const finalMax = updates.elo_max ?? result.course.elo_max;

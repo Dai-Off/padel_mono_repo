@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { X, Plus, Trash2, Upload, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { learningContentService } from '../../../services/learningContent';
+import { learningContentService, validateVideo, VIDEO_LIMITS } from '../../../services/learningContent';
 import type {
   Question,
   QuestionType,
@@ -62,18 +62,39 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
   );
 
   const handleTypeChange = (newType: QuestionType) => {
+    if (newType === type) return;
     setType(newType);
-    if (mode === 'create') {
-      setContent(defaultContent(newType));
+    // Siempre resetear contenido al cambiar tipo (el contenido anterior no es compatible)
+    setContent(defaultContent(newType));
+  };
+
+  const [dragging, setDragging] = useState(false);
+  const [validating, setValidating] = useState(false);
+
+  const processVideoFile = async (file: File) => {
+    setValidating(true);
+    try {
+      await validateVideo(file, VIDEO_LIMITS.question);
+      setVideoFile(file);
+      setVideoUrl(file.name);
+    } catch (e) {
+      toast.error((e as Error).message);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    } finally {
+      setValidating(false);
     }
   };
 
   const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    setVideoFile(file);
-    // Preview local del nombre
-    setVideoUrl(file.name);
+    if (file) processVideoFile(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith('video/')) processVideoFile(file);
   };
 
   const removeVideo = () => {
@@ -82,8 +103,43 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // Validación del contenido según tipo
+  const validateContent = (): string | null => {
+    const c = content as Record<string, unknown>;
+    switch (type) {
+      case 'test_classic': {
+        if (!c.question || !(c.question as string).trim()) return t('learning_field_question');
+        if (Array.isArray(c.options) && (c.options as string[]).some((o) => !o.trim())) return t('learning_field_options');
+        return null;
+      }
+      case 'true_false': {
+        if (!c.statement || !(c.statement as string).trim()) return t('learning_field_statement');
+        return null;
+      }
+      case 'multi_select': {
+        if (!c.question || !(c.question as string).trim()) return t('learning_field_question');
+        if (Array.isArray(c.options) && (c.options as string[]).some((o) => !o.trim())) return t('learning_field_options');
+        if (!Array.isArray(c.correct_indices) || (c.correct_indices as number[]).length < 2) return t('learning_field_correct_answer');
+        return null;
+      }
+      case 'match_columns': {
+        if (Array.isArray(c.pairs) && (c.pairs as { left: string; right: string }[]).some((p) => !p.left.trim() || !p.right.trim()))
+          return `${t('learning_field_pair_left')} / ${t('learning_field_pair_right')}`;
+        return null;
+      }
+      case 'order_sequence': {
+        if (Array.isArray(c.steps) && (c.steps as string[]).some((s) => !s.trim())) return t('learning_field_step');
+        return null;
+      }
+    }
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const contentError = validateContent();
+    if (contentError) return toast.error(contentError);
+
     setSaving(true);
     try {
       // Si hay un archivo nuevo, subirlo primero
@@ -173,8 +229,14 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
                 type="number"
                 min={0}
                 max={7}
+                step={0.5}
                 value={level}
-                onChange={(e) => setLevel(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  // Solo permitir incrementos de 0.5
+                  const rounded = Math.round(val * 2) / 2;
+                  setLevel(Math.max(0, Math.min(7, rounded)));
+                }}
                 className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
               />
             </div>
@@ -182,8 +244,18 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
 
           {/* Video */}
           <div className="space-y-2">
-            <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_video')}</label>
-            {videoUrl ? (
+            <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">
+              {t('learning_field_video')}
+              <span className="text-gray-300 font-normal ml-1">
+                (máx {VIDEO_LIMITS.question.maxSizeMB}MB, {VIDEO_LIMITS.question.maxDurationSec}s)
+              </span>
+            </label>
+            {validating ? (
+              <div className="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-indigo-200 text-xs font-bold text-indigo-400">
+                <div className="w-4 h-4 border-2 border-indigo-300 border-t-transparent rounded-full animate-spin" />
+                {t('learning_validating_video')}
+              </div>
+            ) : videoUrl ? (
               <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2.5">
                 <Video className="w-4 h-4 text-indigo-500 shrink-0" />
                 <span className="text-xs text-[#1A1A1A] truncate flex-1">
@@ -198,14 +270,21 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
                 </button>
               </div>
             ) : (
-              <button
-                type="button"
+              <div
+                onDragEnter={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragging(false); }}
+                onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-gray-200 text-xs font-bold text-gray-400 hover:border-indigo-300 hover:text-indigo-500 transition-all"
+                className={`w-full flex items-center justify-center gap-2 py-5 rounded-xl border-2 border-dashed text-xs font-bold cursor-pointer transition-all ${
+                  dragging
+                    ? 'border-indigo-400 bg-indigo-50 text-indigo-500'
+                    : 'border-gray-200 text-gray-400 hover:border-indigo-300 hover:text-indigo-500'
+                }`}
               >
                 <Upload className="w-4 h-4" />
-                {t('learning_field_video')}
-              </button>
+                {t('learning_video_dropzone')}
+              </div>
             )}
             <input
               ref={fileInputRef}

@@ -4,9 +4,11 @@ import { Plus, BookOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
+import { clubStaffService } from '../../../services/clubStaff';
 import { CourseFormModal } from './CourseFormModal';
 import { CourseDetailModal } from './CourseDetailModal';
 import type { Course, CourseStatus } from '../../../types/learningContent';
+import type { ClubStaffMember } from '../../../types/clubStaff';
 
 const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
   draft: { bg: 'bg-gray-100', text: 'text-gray-600' },
@@ -17,6 +19,7 @@ const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
 export function CoursesTab({ clubId }: { clubId: string }) {
   const { t } = useTranslation();
   const [courses, setCourses] = useState<Course[]>([]);
+  const [staff, setStaff] = useState<ClubStaffMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [createModal, setCreateModal] = useState(false);
   const [detailCourse, setDetailCourse] = useState<Course | null>(null);
@@ -24,14 +27,24 @@ export function CoursesTab({ clubId }: { clubId: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await learningContentService.listCourses(clubId);
+      const [list, staffList] = await Promise.all([
+        learningContentService.listCourses(clubId),
+        clubStaffService.list(clubId),
+      ]);
       setCourses(list);
+      setStaff(staffList);
     } catch (e) {
       toast.error((e as Error).message || t('learning_save_error'));
     } finally {
       setLoading(false);
     }
   }, [clubId, t]);
+
+  const staffMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const s of staff) map[s.id] = s.name;
+    return map;
+  }, [staff]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -113,9 +126,12 @@ export function CoursesTab({ clubId }: { clubId: string }) {
               )}
 
               {/* Meta */}
-              <div className="flex items-center gap-3 text-[10px] text-gray-400">
+              <div className="flex items-center gap-3 text-[10px] text-gray-400 flex-wrap">
                 <span>{course.lesson_count} {course.lesson_count === 1 ? t('learning_lessons_count').replace('{{count}}', '1') : t('learning_lessons_count_plural').replace('{{count}}', String(course.lesson_count))}</span>
                 <span>ELO {course.elo_min}–{course.elo_max}</span>
+                {course.staff_id && staffMap[course.staff_id] && (
+                  <span>{staffMap[course.staff_id]}</span>
+                )}
               </div>
             </motion.button>
           ))}
@@ -137,6 +153,7 @@ export function CoursesTab({ clubId }: { clubId: string }) {
         <CourseDetailModal
           course={detailCourse}
           clubId={clubId}
+          staffName={detailCourse.staff_id ? staffMap[detailCourse.staff_id] : undefined}
           onClose={() => setDetailCourse(null)}
           onUpdated={() => { setDetailCourse(null); load(); }}
         />

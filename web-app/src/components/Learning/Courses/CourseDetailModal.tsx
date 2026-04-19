@@ -17,11 +17,12 @@ const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
 interface Props {
   course: Course;
   clubId: string;
+  staffName?: string;
   onClose: () => void;
   onUpdated: () => void;
 }
 
-export function CourseDetailModal({ course, clubId, onClose, onUpdated }: Props) {
+export function CourseDetailModal({ course, clubId, staffName, onClose, onUpdated }: Props) {
   const { t } = useTranslation();
   const [detail, setDetail] = useState<CourseWithLessons | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,8 +108,9 @@ export function CourseDetailModal({ course, clubId, onClose, onUpdated }: Props)
               {detail.description && (
                 <p className="text-xs text-gray-600">{detail.description}</p>
               )}
-              <div className="flex items-center gap-4 text-[10px] text-gray-400">
+              <div className="flex items-center gap-4 text-[10px] text-gray-400 flex-wrap">
                 <span>ELO {detail.elo_min}–{detail.elo_max}</span>
+                {staffName && <span>{t('learning_field_coach')}: {staffName}</span>}
                 {detail.pedagogical_goal && <span>{detail.pedagogical_goal}</span>}
               </div>
               {isDraft && (

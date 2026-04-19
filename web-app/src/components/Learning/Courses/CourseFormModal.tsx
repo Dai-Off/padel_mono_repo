@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
+import { clubStaffService } from '../../../services/clubStaff';
 import type { Course } from '../../../types/learningContent';
+import type { ClubStaffMember } from '../../../types/clubStaff';
 
 interface Props {
   mode: 'create' | 'edit';
@@ -17,12 +19,21 @@ interface Props {
 export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Props) {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
+  const [staff, setStaff] = useState<ClubStaffMember[]>([]);
 
   const [title, setTitle] = useState(course?.title ?? '');
   const [description, setDescription] = useState(course?.description ?? '');
   const [eloMin, setEloMin] = useState(course?.elo_min ?? 0);
   const [eloMax, setEloMax] = useState(course?.elo_max ?? 7);
   const [pedagogicalGoal, setPedagogicalGoal] = useState(course?.pedagogical_goal ?? '');
+  const [staffId, setStaffId] = useState(course?.staff_id ?? '');
+
+  // Cargar staff del club
+  useEffect(() => {
+    clubStaffService.list(clubId).then((list) => {
+      setStaff(list.filter((s) => s.status === 'active'));
+    }).catch(() => {});
+  }, [clubId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +49,7 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
         elo_min: eloMin,
         elo_max: eloMax,
         pedagogical_goal: pedagogicalGoal.trim() || null,
+        staff_id: staffId || null,
       };
 
       if (mode === 'create') {
@@ -83,6 +95,21 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
             />
           </div>
 
+          {/* Coach */}
+          <div>
+            <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_coach')}</label>
+            <select
+              value={staffId}
+              onChange={(e) => setStaffId(e.target.value)}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+            >
+              <option value="">{t('learning_field_coach_none')}</option>
+              {staff.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}{s.role ? ` — ${s.role}` : ''}</option>
+              ))}
+            </select>
+          </div>
+
           {/* Descripción */}
           <div>
             <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_description')}</label>
@@ -98,27 +125,33 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_elo_min')}</label>
-              <select
+              <input
+                type="number"
+                min={0}
+                max={7}
+                step={0.5}
                 value={eloMin}
-                onChange={(e) => setEloMin(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Math.round(Number(e.target.value) * 2) / 2;
+                  setEloMin(Math.max(0, Math.min(7, val)));
+                }}
                 className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-              >
-                {Array.from({ length: 8 }, (_, i) => (
-                  <option key={i} value={i}>{i}</option>
-                ))}
-              </select>
+              />
             </div>
             <div>
               <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_elo_max')}</label>
-              <select
+              <input
+                type="number"
+                min={0}
+                max={7}
+                step={0.5}
                 value={eloMax}
-                onChange={(e) => setEloMax(Number(e.target.value))}
+                onChange={(e) => {
+                  const val = Math.round(Number(e.target.value) * 2) / 2;
+                  setEloMax(Math.max(0, Math.min(7, val)));
+                }}
                 className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-              >
-                {Array.from({ length: 8 }, (_, i) => (
-                  <option key={i} value={i}>{i}</option>
-                ))}
-              </select>
+              />
             </div>
           </div>
 
