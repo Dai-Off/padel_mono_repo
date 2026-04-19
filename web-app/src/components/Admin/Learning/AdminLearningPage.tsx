@@ -5,8 +5,11 @@ import { useTranslation } from 'react-i18next';
 import { AdminHeader } from '../AdminHeader';
 import { PageSpinner } from '../../Layout/PageSpinner';
 import { authService } from '../../../services/auth';
-import { adminLearningService } from '../../../services/adminLearning';
 import { HttpError } from '../../../services/api';
+import { ReviewTab } from './ReviewTab';
+import { WeMatchTab } from './WeMatchTab';
+import { ModerationTab } from './ModerationTab';
+import { StatsTab } from './StatsTab';
 
 type Tab = 'review' | 'wematch' | 'moderation' | 'stats';
 
@@ -24,10 +27,6 @@ export const AdminLearningPage = () => {
       if (!token) { navigate('/login'); return; }
       const me = await authService.getMe();
       if (!me.ok || !me.roles?.admin_id) { navigate('/'); return; }
-
-      // Cargar count de pendientes para el badge
-      const pending = await adminLearningService.getPendingCourses();
-      setPendingCount(pending.length);
     } catch (e) {
       if (e instanceof HttpError) {
         if (e.status === 401) { authService.logout(); navigate('/login'); return; }
@@ -88,27 +87,11 @@ export const AdminLearningPage = () => {
             ))}
           </div>
 
-          {/* Contenido del tab activo — placeholders por ahora */}
-          {activeTab === 'review' && (
-            <div className="text-center py-12 text-gray-400 text-sm">
-              {t('admin_learning_no_pending')}
-            </div>
-          )}
-          {activeTab === 'wematch' && (
-            <div className="text-center py-12 text-gray-400 text-sm">
-              {t('admin_learning_wematch')}
-            </div>
-          )}
-          {activeTab === 'moderation' && (
-            <div className="text-center py-12 text-gray-400 text-sm">
-              {t('admin_learning_moderation')}
-            </div>
-          )}
-          {activeTab === 'stats' && (
-            <div className="text-center py-12 text-gray-400 text-sm">
-              {t('admin_learning_stats')}
-            </div>
-          )}
+          {/* Contenido del tab activo */}
+          {activeTab === 'review' && <ReviewTab onPendingCountChange={setPendingCount} />}
+          {activeTab === 'wematch' && <WeMatchTab />}
+          {activeTab === 'moderation' && <ModerationTab />}
+          {activeTab === 'stats' && <StatsTab />}
         </div>
       </main>
     </div>
