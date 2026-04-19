@@ -84,6 +84,7 @@ router.get('/courses/:id', requireAdmin, async (req: Request, res: Response) => 
         ...course,
         club_name: (course.clubs as any)?.name ?? null,
         clubs: undefined,
+        lesson_count: (lessons || []).length,
         lessons: lessons || [],
       },
     });
