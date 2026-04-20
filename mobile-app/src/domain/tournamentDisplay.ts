@@ -186,6 +186,8 @@ export function matchesFormatFilter(row: PublicTournamentRow, filter: Tournament
 }
 
 export function tournamentTitle(row: PublicTournamentRow): string {
+  const n = String(row.name ?? '').trim();
+  if (n.length > 0) return n;
   const d = (row.description ?? '').trim();
   if (d.length > 0) {
     const first = d.split('\n')[0]?.trim();

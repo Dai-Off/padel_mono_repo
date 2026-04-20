@@ -39,6 +39,8 @@ type TabId = 'pistas' | 'partidos' | 'torneos';
 type HomeScreenProps = {
   onNavigateToTab?: (tab: TabId) => void;
   onPartidoPress?: (partido: PartidoItem) => void;
+  onDailyLessonPress?: () => void;
+  onCoursesPress?: () => void;
 };
 
 function computeAvailabilityWindow(input: MatchmakingSearchInput): {
@@ -87,7 +89,12 @@ function computeAvailabilityWindow(input: MatchmakingSearchInput): {
   };
 }
 
-export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps) {
+export function HomeScreen({
+  onNavigateToTab,
+  onPartidoPress,
+  onDailyLessonPress,
+  onCoursesPress,
+}: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { stats, loading: statsLoading } = useHomeStats();
@@ -260,13 +267,14 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress }: HomeScreenProps)
           loading={matchesLoading}
           onPartidoPress={onPartidoPress}
         />
-        <DailyLessonCard onPress={() => onNavigateToTab?.('partidos')} />
+        <DailyLessonCard onPress={() => onDailyLessonPress?.()} />
         <SeasonPassHomeCard />
         <CompetitiveLeagueHomeCard
           onPress={() => onNavigateToTab?.('torneos')}
         />
         <InicioQuickActions
           onNavigateToTab={onNavigateToTab}
+          onCoursesPress={onCoursesPress}
           openMatchesCount={partidos.length}
           courtsFree={stats?.courtsFree}
           tournamentsCount={publicTournamentsCount}

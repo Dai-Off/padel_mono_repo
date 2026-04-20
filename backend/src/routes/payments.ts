@@ -242,7 +242,7 @@ export async function createIntentForTournamentHandler(req: Request, res: Respon
 
     const { data: tournament, error: tErr } = await supabase
       .from('tournaments')
-      .select('id, visibility, status, max_players, gender, registration_mode, price_cents')
+      .select('id, visibility, status, max_players, gender, registration_mode, price_cents, elo_min, elo_max')
       .eq('id', tournament_id)
       .maybeSingle();
 
@@ -259,7 +259,8 @@ export async function createIntentForTournamentHandler(req: Request, res: Respon
       res.status(400).json({ ok: false, error: 'El torneo no está abierto' });
       return;
     }
-    if (String((tournament as { registration_mode: string }).registration_mode) !== 'individual') {
+    const registrationMode = String((tournament as { registration_mode?: string }).registration_mode ?? 'individual');
+    if (!['individual', 'both'].includes(registrationMode)) {
       res.status(400).json({ ok: false, error: 'Este torneo no admite inscripción individual desde la app' });
       return;
     }
@@ -293,19 +294,38 @@ export async function createIntentForTournamentHandler(req: Request, res: Respon
 
     const { data: joinPlayer } = await supabase
       .from('players')
-      .select('gender')
+      .select('gender, elo_rating')
       .eq('id', player.id)
       .maybeSingle();
-    if (
-      !playerMeetsTournamentGender(
-        (tournament as { gender?: string }).gender,
-        (joinPlayer as { gender?: string } | null)?.gender
-      )
-    ) {
+    const playerGenderOk = playerMeetsTournamentGender(
+      (tournament as { gender?: string }).gender,
+      (joinPlayer as { gender?: string } | null)?.gender
+    );
+    const playerElo = Number((joinPlayer as { elo_rating?: number } | null)?.elo_rating ?? 0);
+    const eloMin = (tournament as { elo_min?: number | null }).elo_min;
+    const eloMax = (tournament as { elo_max?: number | null }).elo_max;
+    const playerEloOk =
+      (eloMin == null || playerElo >= Number(eloMin)) &&
+      (eloMax == null || playerElo <= Number(eloMax));
+    const meetsAutoRequirements = playerGenderOk && playerEloOk;
+    let hasApprovedEntryRequest = false;
+    if (!meetsAutoRequirements) {
+      const { data: approvedReq } = await supabase
+        .from('tournament_entry_requests')
+        .select('id')
+        .eq('tournament_id', tournament_id)
+        .eq('player_id', player.id)
+        .eq('status', 'approved')
+        .order('resolved_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      hasApprovedEntryRequest = Boolean(approvedReq?.id);
+    }
+    if (!meetsAutoRequirements && !hasApprovedEntryRequest) {
       res.status(403).json({
         ok: false,
         error:
-          'Tu género en el perfil no coincide con este torneo. Actualiza tu perfil o elige un torneo mixto.',
+          'No cumples los requisitos automáticos del torneo (Elo/género). Envía una solicitud al organizador y completa el pago cuando te la aprueben.',
       });
       return;
     }
@@ -2097,6 +2117,13 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         amountCents,
       });
       if (!done.ok) {
+        console.warn('[payments/confirm-client] finalizeTournamentPaidJoin rejected', {
+          payment_intent_id,
+          tournament_id: String(meta.tournament_id),
+          payer_player_id: String(payer_player_id),
+          amountCents,
+          error: done.error,
+        });
         res.status(400).json({ ok: false, error: done.error });
         return;
       }
@@ -2137,12 +2164,12 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       if (match) {
         const { data: joinPlayer } = await supabase
           .from('players')
-          .select('elo_rating, initial_rating_completed')
+          .select('elo_rating, onboarding_completed')
           .eq('id', participant.player_id)
           .maybeSingle();
         const mCompetitive = !!(match as { competitive?: boolean }).competitive;
         const mType = String((match as { type?: string }).type ?? 'open');
-        if (mCompetitive && !(joinPlayer as { initial_rating_completed?: boolean })?.initial_rating_completed) {
+        if (mCompetitive && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
           res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
           return;
         }

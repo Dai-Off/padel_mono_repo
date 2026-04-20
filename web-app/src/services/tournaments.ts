@@ -1,5 +1,4 @@
 import { apiFetchWithAuth } from './api';
-import { getSupabaseClient } from '../lib/supabase';
 
 export type TournamentPrize = { label: string; amount_cents: number };
 
@@ -12,9 +11,18 @@ export type TournamentDivisionRow = {
   sort_order: number;
 };
 
+export type TournamentMatchRules = {
+  best_of_sets?: number;
+  allow_draws?: boolean;
+  results_entry?: 'organizer' | 'players';
+  bracket_seed_strategy?: string;
+};
+
 export type TournamentListItem = {
   id: string;
   club_id: string;
+  /** Presente en listado/detalle cuando el backend lo envía; útil para re-sincronizar formularios. */
+  updated_at?: string;
   name?: string | null;
   start_at: string;
   end_at: string;
@@ -40,6 +48,9 @@ export type TournamentListItem = {
   normas?: string | null;
   poster_url?: string | null;
   level_mode?: 'single_band' | 'multi_division';
+  competition_format?: string | null;
+  match_rules?: TournamentMatchRules | null;
+  standings_rules?: Record<string, unknown> | null;
   tournament_courts?: { court_id: string }[];
   confirmed_count?: number;
   pending_count?: number;
@@ -121,6 +132,11 @@ export type TournamentChatMessage = {
 
 export type CompetitionFormat = 'single_elim' | 'group_playoff' | 'round_robin';
 export type CompetitionSet = { games_a: number; games_b: number };
+export type CompetitionRound1ScheduleItem = {
+  match_number: number;
+  court_id: string;
+  start_at: string;
+};
 export type CompetitionTeam = {
   id: string;
   slot_index: number;
@@ -151,6 +167,14 @@ export type CompetitionMatch = {
   status: 'scheduled' | 'bye' | 'finished';
   winner_team_id: string | null;
   result?: { match_id: string; winner_team_id: string; sets: CompetitionSet[]; submitted_at: string } | null;
+  schedule_booking?: {
+    booking_id: string;
+    start_at: string;
+    end_at: string;
+    status: string;
+    court_id: string;
+    court_name: string | null;
+  } | null;
 };
 export type CompetitionPodiumRow = { position: number; team_id: string; note?: string | null };
 export type CompetitionView = {
@@ -161,6 +185,7 @@ export type CompetitionView = {
       best_of_sets?: number;
       allow_draws?: boolean;
       bracket_seed_strategy?: string;
+      results_entry?: 'organizer' | 'players';
     } | null;
     standings_rules: Record<string, unknown> | null;
     status: string;
@@ -344,7 +369,12 @@ export const tournamentsService = {
     tournamentId: string,
     payload: {
       format: CompetitionFormat;
-      match_rules?: { best_of_sets?: number; allow_draws?: boolean; bracket_seed_strategy?: string };
+      match_rules?: {
+        best_of_sets?: number;
+        allow_draws?: boolean;
+        bracket_seed_strategy?: string;
+        results_entry?: 'organizer' | 'players';
+      };
       standings_rules?: Record<string, unknown>;
     }
   ): Promise<void> {
@@ -373,6 +403,19 @@ export const tournamentsService = {
     return { teams_count: res.teams_count ?? 0, matches_count: res.matches_count ?? 0 };
   },
 
+  async resetCompetition(tournamentId: string): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/competition/reset`, {
+      method: 'POST',
+    });
+  },
+
+  async scheduleCompetitionRound1(tournamentId: string, items: CompetitionRound1ScheduleItem[]): Promise<void> {
+    await apiFetchWithAuth(`/tournaments/${tournamentId}/competition/schedule-round1`, {
+      method: 'PUT',
+      body: JSON.stringify({ matches: items }),
+    });
+  },
+
   async competitionAdminView(tournamentId: string): Promise<CompetitionView> {
     const res = await apiFetchWithAuth<{ ok: true } & CompetitionView>(`/tournaments/${tournamentId}/competition/admin-view`);
     return res;
@@ -394,6 +437,16 @@ export const tournamentsService = {
     });
   },
 
+  async pairingTiebreakStats(
+    tournamentId: string
+  ): Promise<Record<string, { wins: number; losses: number }>> {
+    const res = await apiFetchWithAuth<{
+      ok: true;
+      stats: Record<string, { wins: number; losses: number }>;
+    }>(`/tournaments/${tournamentId}/pairing-tiebreak-stats`);
+    return res.stats ?? {};
+  },
+
   async savePodium(tournamentId: string, podium: CompetitionPodiumRow[]): Promise<void> {
     await apiFetchWithAuth(`/tournaments/${tournamentId}/podium`, {
       method: 'PUT',
@@ -401,23 +454,22 @@ export const tournamentsService = {
     });
   },
 
-  /** Sube a `tournament-posters/{clubId}/{tournamentId}/poster.ext` y devuelve la URL pública. */
+  /** Sube poster vía backend y devuelve URL pública cache-busted. */
   async uploadPoster(clubId: string, tournamentId: string, file: File): Promise<string> {
-    const supabase = getSupabaseClient();
-    if (!supabase) throw new Error('Supabase no configurado');
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    if (!session?.user?.id) throw new Error('Inicia sesión');
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    const safeExt = ext && ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext) ? ext : 'jpg';
-    const path = `${clubId}/${tournamentId}/poster.${safeExt}`;
-    const { error: upErr } = await supabase.storage.from('tournament-posters').upload(path, file, {
-      upsert: true,
-      contentType: file.type || undefined,
+    const fileBuffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(fileBuffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+    const dataBase64 = btoa(binary);
+    const res = await apiFetchWithAuth<{ ok: true; poster_url: string }>(`/tournaments/${tournamentId}/poster/upload`, {
+      method: 'POST',
+      body: JSON.stringify({
+        club_id: clubId,
+        file_name: file.name,
+        content_type: file.type || 'image/jpeg',
+        data_base64: dataBase64,
+      }),
     });
-    if (upErr) throw new Error(upErr.message);
-    const { data: pub } = supabase.storage.from('tournament-posters').getPublicUrl(path);
-    return `${pub.publicUrl}${pub.publicUrl.includes('?') ? '&' : '?'}v=${Date.now()}`;
+    return res.poster_url;
   },
 };

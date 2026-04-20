@@ -162,50 +162,11 @@ export function selectQuestions(
 // Content sanitization — remove correct answers before sending to client
 // ---------------------------------------------------------------------------
 
-export function sanitizeContent(type: string, content: Record<string, unknown>): Record<string, unknown> {
-  const clean = { ...content };
-  switch (type) {
-    case 'test_classic':
-      delete clean.correct_index;
-      break;
-    case 'true_false':
-      delete clean.correct_answer;
-      break;
-    case 'multi_select':
-      delete clean.correct_indices;
-      break;
-    // match_columns and order_sequence: the correct order IS the stored order,
-    // so we shuffle before sending
-    case 'match_columns': {
-      const pairs = clean.pairs as { left: string; right: string }[];
-      if (Array.isArray(pairs)) {
-        const rights = pairs.map((p) => p.right);
-        // Fisher-Yates shuffle for the right column
-        for (let i = rights.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [rights[i], rights[j]] = [rights[j], rights[i]];
-        }
-        clean.lefts = pairs.map((p) => p.left);
-        clean.rights_shuffled = rights;
-        delete clean.pairs;
-      }
-      break;
-    }
-    case 'order_sequence': {
-      const steps = clean.steps as string[];
-      if (Array.isArray(steps)) {
-        const shuffled = [...steps];
-        for (let i = shuffled.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-        }
-        clean.steps_shuffled = shuffled;
-        delete clean.steps;
-      }
-      break;
-    }
-  }
-  return clean;
+export function sanitizeContent(_type: string, content: Record<string, unknown>): Record<string, unknown> {
+  // Se envía el contenido completo al cliente (incluye respuestas correctas y explanation).
+  // El frontend corrige localmente y muestra feedback inmediato tras cada respuesta.
+  // El POST /complete sigue validando server-side para calcular score/XP.
+  return { ...content };
 }
 
 // ---------------------------------------------------------------------------

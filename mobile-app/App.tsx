@@ -1,15 +1,17 @@
-import { useContext, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
-import { StripeProvider } from '@stripe/stripe-react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
+import { StripeProvider } from './src/stripe';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
 import { SplashScreen } from './src/components/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { MainApp } from './src/screens/MainApp';
 import { RegisterScreen } from './src/screens/RegisterScreen';
+import { RequireAuth } from './src/components/auth';
 import { STRIPE_PUBLISHABLE_KEY } from './src/config';
 import { theme } from './src/theme';
 
@@ -47,7 +49,9 @@ function AppContent() {
     return (
       <>
         <StatusBar style="dark" />
-        <MainApp />
+        <RequireAuth>
+          <MainApp />
+        </RequireAuth>
       </>
     );
   }
@@ -61,6 +65,10 @@ function AppContent() {
 }
 
 export default function App() {
+  useEffect(() => {
+    ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+  }, []);
+
   const urlScheme =
     Constants.appOwnership === 'expo' ? Linking.createURL('/--/') : Linking.createURL('');
 
