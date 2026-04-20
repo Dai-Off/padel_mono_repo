@@ -1,5 +1,27 @@
 import { API_URL } from '../config';
 
+export type MatchmakingLeagueConfigRow = {
+  code: string;
+  sort_order: number;
+  label: string;
+  elo_min: number;
+  elo_max: number;
+  lps_to_promote: number | null;
+};
+
+/** Público: etiquetas y umbrales LP por liga (doc. matchmaking leagues). */
+export async function fetchMatchmakingLeagueConfig(): Promise<MatchmakingLeagueConfigRow[] | null> {
+  try {
+    const res = await fetch(`${API_URL}/matchmaking/league-config`);
+    if (!res.ok) return null;
+    const json = (await res.json()) as { ok?: boolean; leagues?: MatchmakingLeagueConfigRow[] };
+    if (!json.ok || !Array.isArray(json.leagues)) return null;
+    return json.leagues;
+  } catch {
+    return null;
+  }
+}
+
 export type MatchmakingJoinPayload = {
   available_from: string;
   available_until: string;
@@ -52,10 +74,14 @@ async function parseErrorMessage(res: Response): Promise<string> {
   }
 }
 
+export type JoinMatchmakingResult =
+  | { ok: true }
+  | { ok: false; error: string; alreadyInQueue?: boolean };
+
 export async function joinMatchmaking(
   body: MatchmakingJoinPayload,
   token: string | null | undefined
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<JoinMatchmakingResult> {
   if (!token) return { ok: false, error: 'Token requerido' };
 
   try {
@@ -68,10 +94,22 @@ export async function joinMatchmaking(
       body: JSON.stringify(body),
     });
 
-    if (!res.ok) {
-      return { ok: false, error: await parseErrorMessage(res) };
+    let json: ApiError = {};
+    try {
+      json = (await res.json()) as ApiError;
+    } catch {
+      // body vacío / no JSON
     }
-    return { ok: true };
+
+    if (res.ok) return { ok: true };
+    if (res.status === 409) {
+      return {
+        ok: false,
+        error: json.error ?? 'Ya estás en la cola de matchmaking',
+        alreadyInQueue: true,
+      };
+    }
+    return { ok: false, error: json.error ?? 'No se pudo completar la operación' };
   } catch {
     return { ok: false, error: 'Error de conexión' };
   }
@@ -127,6 +165,29 @@ export async function fetchMatchmakingProposal(
     return json;
   } catch {
     return null;
+  }
+}
+
+export async function rejectMatchmakingProposal(
+  matchId: string,
+  token: string | null | undefined
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/matchmaking/reject`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ match_id: matchId }),
+    });
+    if (!res.ok) {
+      return { ok: false, error: await parseErrorMessage(res) };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
   }
 }
 

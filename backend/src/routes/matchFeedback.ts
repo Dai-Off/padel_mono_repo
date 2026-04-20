@@ -21,7 +21,8 @@ const REPEAT_REASONS = new Set([
  *     tags: [Matches — feedback]
  *     summary: Enviar feedback post-partido
  *     description: |
- *       Ventana de 24h desde la confirmación del marcador.
+ *       Ventana de 24h desde `score_confirmed_at` (marcador confirmado) o, si aún va en
+ *       `pending_confirmation`, desde `updated_at` (último cambio del marcador).
  *       `level_ratings` debe incluir exactamente a los otros 3 jugadores del partido.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -65,7 +66,7 @@ const REPEAT_REASONS = new Set([
  *             examples:
  *               ok: { value: { ok: true } }
  *       400: { description: Validación fallida }
- *       403: { description: No participante o marcador no confirmado }
+ *       403: { description: No participante o marcador no disponible para feedback }
  *       410: { description: Fuera de ventana }
  */
 router.post('/:id/feedback', async (req: Request, res: Response) => {
@@ -85,14 +86,37 @@ router.post('/:id/feedback', async (req: Request, res: Response) => {
 
   const { data: match } = await supabase
     .from('matches')
-    .select('score_status, score_confirmed_at, updated_at')
+    .select('score_status, score_confirmed_at, updated_at, sets')
     .eq('id', matchId)
     .maybeSingle();
-  if (!match || match.score_status !== 'confirmed') {
-    return res.status(403).json({ ok: false, error: 'El marcador no está confirmado' });
+  if (!match) {
+    return res.status(404).json({ ok: false, error: 'Partido no encontrado' });
   }
 
-  const confirmedAt = (match.score_confirmed_at as string | null) ?? (match.updated_at as string);
+  const st = String(match.score_status ?? '');
+  const hasSets = Array.isArray(match.sets) && (match.sets as unknown[]).length > 0;
+  if (['disputed', 'disputed_pending', 'no_result'].includes(st)) {
+    return res.status(403).json({
+      ok: false,
+      error: 'El marcador está en disputa o sin resultado; no se puede enviar feedback todavía.',
+    });
+  }
+  const feedbackAllowed =
+    st === 'confirmed' || st === 'pending_confirmation' || (st === 'pending' && hasSets);
+  if (!feedbackAllowed) {
+    return res.status(403).json({
+      ok: false,
+      error:
+        st === 'pending'
+          ? 'Primero debe registrarse el marcador del partido.'
+          : 'El marcador no está disponible para enviar feedback en este estado.',
+    });
+  }
+
+  const confirmedAt =
+    (match.score_confirmed_at as string | null) ??
+    (st === 'pending_confirmation' || st === 'pending' ? (match.updated_at as string) : null) ??
+    (match.updated_at as string);
   const deadline = new Date(confirmedAt).getTime() + FEEDBACK_WINDOW_HOURS * 3600 * 1000;
   if (Date.now() > deadline) {
     return res.status(410).json({ ok: false, error: 'Ventana de feedback cerrada' });

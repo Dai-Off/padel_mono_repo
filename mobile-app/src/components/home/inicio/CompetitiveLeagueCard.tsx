@@ -14,6 +14,8 @@ type Props = {
   ladderProgressPercent?: number | null;
   winsLabel?: string | null;
   lossesLabel?: string | null;
+  /** Elo, fiabilidad, PJ MM (debajo de división / LP). */
+  eloFiabCaption?: string | null;
   modeLabel?: string | null;
   onPress?: () => void;
 };
@@ -24,6 +26,7 @@ export function CompetitiveLeagueHomeCard({
   ladderProgressPercent,
   winsLabel,
   lossesLabel,
+  eloFiabCaption,
   modeLabel,
   onPress,
 }: Props) {
@@ -36,8 +39,9 @@ export function CompetitiveLeagueHomeCard({
 
   return (
     <Pressable
+      disabled={!onPress}
       onPress={onPress}
-      style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.wrap, pressed && onPress && styles.pressed]}
     >
       <View style={styles.radial} />
       <View style={styles.inner}>
@@ -60,7 +64,7 @@ export function CompetitiveLeagueHomeCard({
                   </Text>
                 </View>
               </View>
-              <Text style={styles.sub}>Partidos rankeados por parejas</Text>
+              <Text style={styles.sub}>Búsqueda individual; partidos rankeados 2v2</Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={22} color="#6b7280" />
@@ -68,16 +72,22 @@ export function CompetitiveLeagueHomeCard({
 
         <View style={styles.midRow}>
           <View>
-            <Text style={styles.smallCap}>Tu división</Text>
+            <Text style={styles.smallCap}>Mi división</Text>
             <Text style={[styles.division, { color: AMBER }]}>
               {dash(divisionName)}
             </Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.smallCap}>League Points</Text>
+            <Text style={styles.smallCap}>League points (LP)</Text>
             <Text style={styles.lp}>{dash(leaguePoints)}</Text>
           </View>
         </View>
+
+        {eloFiabCaption != null && String(eloFiabCaption).trim() !== '' ? (
+          <Text style={styles.eloFiabLine} numberOfLines={2}>
+            {eloFiabCaption}
+          </Text>
+        ) : null}
 
         <View style={styles.barTrack}>
           <LinearGradient
@@ -120,7 +130,7 @@ export function CompetitiveLeagueHomeCard({
                 Platform.OS === 'ios' ? styles.footerHint : styles.footerHintAndroid,
               ]}
             >
-              Toca para jugar ranked
+              Toca para buscar partido 2v2 (matchmaking rankeado)
             </Text>
           </View>
         </View>
@@ -202,6 +212,12 @@ const styles = StyleSheet.create({
   }),
   division: androidReadableText({ fontSize: 18, fontWeight: '900' }),
   lp: androidReadableText({ fontSize: 18, fontWeight: '900', color: '#fff' }),
+  eloFiabLine: androidReadableText({
+    fontSize: 11,
+    lineHeight: 15,
+    color: '#9ca3af',
+    marginBottom: 10,
+  }),
   barTrack: {
     height: 8,
     borderRadius: 999,

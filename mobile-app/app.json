@@ -20,7 +20,13 @@
         }
       ],
       "expo-font",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "WeMatch usa tu ubicación para buscar partidos de liga competitiva en un radio a tu alrededor."
+        }
+      ]
     ],
     "ios": {
       "supportsTablet": true,

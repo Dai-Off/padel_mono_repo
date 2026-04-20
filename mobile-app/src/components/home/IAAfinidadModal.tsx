@@ -1,35 +1,32 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
-import type { MatchmakingProposalResponse, MatchmakingStatusResponse } from '../../api/matchmaking';
 
 type Option = { id: string; label: string };
-type OptionGroupId = 'day' | 'time' | 'preferred_side' | 'gender' | 'search_area';
 type OptionGroup = {
-  id: OptionGroupId;
+  id: 'sport' | 'day' | 'time' | 'style';
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
   options: Option[];
 };
 
-/** Criterios alineados con `POST /matchmaking/join` (doc 06_matchmaking.md). */
 const GROUPS: OptionGroup[] = [
   {
+    id: 'sport',
+    title: '¿Qué deporte?',
+    icon: 'trophy-outline',
+    options: [
+      { id: 'padel', label: 'Pádel' },
+      { id: 'tenis', label: 'Tenis' },
+      { id: 'pickleball', label: 'Pickleball' },
+    ],
+  },
+  {
     id: 'day',
-    title: '¿Cuándo podés jugar?',
+    title: '¿Cuándo quieres jugar?',
     icon: 'calendar-outline',
     options: [
       { id: 'hoy', label: 'Hoy' },
@@ -40,7 +37,7 @@ const GROUPS: OptionGroup[] = [
   },
   {
     id: 'time',
-    title: '¿Franja horaria?',
+    title: '¿A qué hora?',
     icon: 'time-outline',
     options: [
       { id: 'manana', label: 'Mañana' },
@@ -49,71 +46,111 @@ const GROUPS: OptionGroup[] = [
     ],
   },
   {
-    id: 'preferred_side',
-    title: '¿Lado preferido en la pista?',
-    icon: 'swap-horizontal-outline',
+    id: 'style',
+    title: 'Estilo de juego',
+    icon: 'locate-outline',
     options: [
-      { id: 'drive', label: 'Drive' },
-      { id: 'backhand', label: 'Revés' },
-      { id: 'any', label: 'Cualquiera' },
-    ],
-  },
-  {
-    id: 'gender',
-    title: '¿Tipo de partido (género)?',
-    icon: 'people-outline',
-    options: [
-      { id: 'male', label: 'Solo hombres' },
-      { id: 'female', label: 'Solo mujeres' },
-      { id: 'mixed', label: 'Mixto' },
-      { id: 'any', label: 'Sin preferencia' },
-    ],
-  },
-  {
-    id: 'search_area',
-    title: '¿Dónde buscar partido?',
-    icon: 'navigate-outline',
-    options: [
-      { id: 'club', label: 'Club WeMatch (asignado)' },
-      { id: 'km5', label: 'Radio 5 km desde mi ubicación' },
-      { id: 'km10', label: 'Radio 10 km desde mi ubicación' },
-      { id: 'km25', label: 'Radio 25 km desde mi ubicación' },
+      { id: 'competitivo', label: 'Competitivo' },
+      { id: 'social', label: 'Social' },
+      { id: 'aprendizaje', label: 'Aprendizaje' },
+      { id: 'cualquiera', label: 'Cualquiera' },
     ],
   },
 ];
 
-type Selections = Record<OptionGroupId, string>;
+type Selections = Record<OptionGroup['id'], string>;
 const DEFAULT_SELECTIONS: Selections = {
+  sport: 'padel',
   day: '',
   time: '',
-  preferred_side: '',
-  gender: '',
-  search_area: '',
+  style: '',
 };
 
-export type MatchmakingSearchInput = {
-  day: string;
-  time: string;
-  preferred_side: 'drive' | 'backhand' | 'any';
-  gender: 'male' | 'female' | 'mixed' | 'any';
-  /** `club` → club_id; `km*` → max_distance_km + GPS (ver HomeScreen). */
-  search_area: 'club' | 'km5' | 'km10' | 'km25';
+type MatchCandidate = {
+  id: string;
+  name: string;
+  matchPercent: number;
+  level: string;
+  stats: { matches: number; wins: string; distance: string };
+  tags: string[];
+  reason: string;
 };
 
-type AiMatchModalProps = {
+function parseCandidatesFromResponse(text: string): MatchCandidate[] {
+  // 1) Prefer structured JSON when available.
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (parsed && typeof parsed === 'object') {
+      const record = parsed as Record<string, unknown>;
+      const list = (record.candidates ?? record.jugadores ?? record.players) as unknown;
+      if (Array.isArray(list)) {
+        const normalized = list
+          .map((item, index) => {
+            if (!item || typeof item !== 'object') return null;
+            const p = item as Record<string, unknown>;
+            const name = String(p.name ?? p.nombre ?? '').trim();
+            if (!name) return null;
+            return {
+              id: String(index + 1),
+              name,
+              matchPercent: Number(p.matchPercent ?? p.compatibility ?? 90),
+              level: String(p.level ?? p.nivel ?? 'Nivel compatible'),
+              stats: {
+                matches: Number(p.matches ?? p.partidos ?? 0),
+                wins: String(p.wins ?? p.victorias ?? '-'),
+                distance: String(p.distance ?? p.distancia ?? '-'),
+              },
+              tags: Array.isArray(p.tags) ? (p.tags as string[]) : ['Pádel'],
+              reason: String(p.reason ?? p.razon ?? 'Recomendado por la IA.'),
+            } satisfies MatchCandidate;
+          })
+          .filter((x): x is MatchCandidate => x != null)
+          .slice(0, 5);
+        if (normalized.length > 0) return normalized;
+      }
+    }
+  } catch {
+    // Non-JSON content: continue with text parsing.
+  }
+
+  // 2) Parse free text responses.
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const nameMatches: string[] = [];
+  for (const line of lines) {
+    const nameCandidate =
+      line.match(/^\d+[\).\-\s]+([A-ZÁÉÍÓÚÑ][\p{L}\s.'-]{2,})$/u)?.[1] ??
+      line.match(/^[-*]\s*([A-ZÁÉÍÓÚÑ][\p{L}\s.'-]{2,})$/u)?.[1] ??
+      line.match(/(?:jugador|jugadora|candidato|candidata)(?:\s+seleccionado)?\s*[:\-]\s*([A-ZÁÉÍÓÚÑ][\p{L}\s.'-]{2,})/iu)?.[1] ??
+      line.match(/(?:propuesto|propuesta)\s*[:\-]\s*([A-ZÁÉÍÓÚÑ][\p{L}\s.'-]{2,})/iu)?.[1];
+
+    if (nameCandidate) {
+      const clean = nameCandidate.trim();
+      if (!nameMatches.includes(clean)) nameMatches.push(clean);
+    }
+  }
+
+  return nameMatches.slice(0, 5).map((name, index) => ({
+    id: `${index + 1}`,
+    name,
+    matchPercent: Math.max(80, 98 - index * 3),
+    level: 'Nivel compatible',
+    stats: { matches: 0, wins: '-', distance: '-' },
+    tags: ['Pádel'],
+    reason: 'Recomendado por la IA según afinidad de nivel y disponibilidad.',
+  }));
+}
+
+type IAAfinidadModalProps = {
   visible: boolean;
   loading: boolean;
-  status: MatchmakingStatusResponse | null;
-  proposal: MatchmakingProposalResponse | null;
+  responseText: string | null;
   errorText: string | null;
-  /** Mientras se carga el partido para abrir el detalle. */
-  openingProposal?: boolean;
   onClose: () => void;
-  onSubmit: (input: MatchmakingSearchInput) => void;
-  onLeaveQueue: () => void;
-  onRespondExpansion: (accept: boolean) => void;
-  /** Abre el detalle del partido (pago de plaza matchmaking). */
-  onOpenProposal?: () => void;
+  onSubmit: (prompt: string) => void;
 };
 
 function OptionSection({
@@ -153,24 +190,14 @@ function OptionSection({
   );
 }
 
-function ProposalCard({
-  proposal,
-  openingProposal,
-  onOpenProposal,
-}: {
-  proposal: MatchmakingProposalResponse;
-  openingProposal?: boolean;
-  onOpenProposal?: () => void;
-}) {
-  const paid = proposal.your_payment_status === 'paid';
-  const ctaLabel = paid ? 'Ver partido' : 'Ver partido y pagar';
+function CandidateCard({ candidate }: { candidate: MatchCandidate }) {
   return (
     <View style={styles.candidateCard}>
       <View style={styles.candidateHeader}>
         <View style={styles.avatarWrap}>
           <View style={styles.avatarGlow} />
           <View style={styles.avatar}>
-            <Text style={styles.avatarInitial}>M</Text>
+            <Text style={styles.avatarInitial}>{candidate.name.charAt(0)}</Text>
           </View>
           <View style={styles.onlineDot}>
             <View style={styles.onlineInnerDot} />
@@ -178,89 +205,70 @@ function ProposalCard({
         </View>
         <View style={styles.candidateHeaderContent}>
           <View style={styles.candidateTitleRow}>
-            <Text style={styles.candidateName} numberOfLines={1}>Partido encontrado</Text>
+            <Text style={styles.candidateName} numberOfLines={1}>{candidate.name}</Text>
             <View style={styles.percentPill}>
               <Ionicons name="sparkles" size={12} color="#F18F34" />
-              <Text style={styles.percentText}>
-                {proposal.pre_match_win_prob != null ? `${Math.round(proposal.pre_match_win_prob * 100)}%` : 'MM'}
-              </Text>
+              <Text style={styles.percentText}>{candidate.matchPercent}%</Text>
             </View>
           </View>
-          <Text style={styles.candidateLevel}>Compatibilidad detectada</Text>
+          <Text style={styles.candidateLevel}>{candidate.level}</Text>
         </View>
       </View>
 
       <View style={styles.statGrid}>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>PARTIDOS</Text>
-          <Text style={styles.statValue}>{proposal.booking_id ? 'OK' : '-'}</Text>
+          <Text style={styles.statValue}>{candidate.stats.matches}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>TU PARTE</Text>
-          <Text style={styles.statValue}>
-            {proposal.your_share_cents != null ? `€${(proposal.your_share_cents / 100).toFixed(2)}` : '-'}
-          </Text>
+          <Text style={styles.statLabel}>VICTORIAS</Text>
+          <Text style={styles.statValue}>{candidate.stats.wins}</Text>
         </View>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>DISTANCIA</Text>
-          <Text style={styles.statValue}>{proposal.your_payment_status ?? 'pending'}</Text>
+          <Text style={styles.statValue}>{candidate.stats.distance}</Text>
         </View>
       </View>
 
       <View style={styles.tagsWrap}>
-        <View style={styles.tagPill}>
-          <Text style={styles.tagText}>Matchmaking</Text>
-        </View>
-        <View style={styles.tagPill}>
-          <Text style={styles.tagText}>Pádel</Text>
-        </View>
+        {candidate.tags.map((tag) => (
+          <View key={`${candidate.id}-${tag}`} style={styles.tagPill}>
+            <Text style={styles.tagText}>{tag}</Text>
+          </View>
+        ))}
       </View>
 
       <View style={styles.reasonBox}>
         <Ionicons name="star" size={14} color="#F18F34" style={{ marginTop: 1 }} />
-          <Text style={styles.reasonText}>
-            <Text style={styles.reasonStrong}>Siguiente paso:</Text> abrí el detalle y completá el pago de tu plaza.
-          </Text>
+        <Text style={styles.reasonText}>
+          <Text style={styles.reasonStrong}>Razón del match:</Text> {candidate.reason}
+        </Text>
       </View>
 
-      <Pressable
-        style={[styles.messageBtn, (openingProposal || !onOpenProposal) && styles.messageBtnDisabled]}
-        disabled={openingProposal || !onOpenProposal}
-        onPress={onOpenProposal}
-      >
+      <Pressable style={styles.messageBtn}>
         <LinearGradient
           colors={['#F18F34', '#E95F32']}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
           style={styles.messageBtnGradient}
         >
-          {openingProposal ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Ionicons name="arrow-forward-circle-outline" size={18} color="#fff" />
-          )}
-          <Text style={styles.messageBtnText}>{ctaLabel}</Text>
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
+          <Text style={styles.messageBtnText}>Enviar mensaje</Text>
         </LinearGradient>
       </Pressable>
     </View>
   );
 }
 
-export function AiMatchModal({
+export function IAAfinidadModal({
   visible,
   loading,
-  status,
-  proposal,
+  responseText,
   errorText,
-  openingProposal = false,
   onClose,
   onSubmit,
-  onLeaveQueue,
-  onRespondExpansion,
-  onOpenProposal,
-}: AiMatchModalProps) {
+}: IAAfinidadModalProps) {
   const insets = useSafeAreaInsets();
-  const sheetTitle = 'Liga competitiva 2v2';
   const [selections, setSelections] = useState<Selections>(DEFAULT_SELECTIONS);
 
   const completedSteps = useMemo(
@@ -270,10 +278,11 @@ export function AiMatchModal({
   const progressPercent = Math.round((completedSteps / GROUPS.length) * 100);
   const isFormComplete = completedSteps === GROUPS.length;
   const [showResults, setShowResults] = useState(false);
-  const hasProposal = proposal?.has_proposal === true;
-  const isSearching = status?.status === 'searching';
-  const isBlocked = status?.status === 'blocked';
-  const isFormView = !loading && !isSearching && !hasProposal && !isBlocked && !showResults;
+  const isFormView = !loading && !showResults;
+  const parsedCandidates = useMemo(
+    () => (responseText ? parseCandidatesFromResponse(responseText) : []),
+    [responseText]
+  );
   const ringA = useRef(new Animated.Value(0)).current;
   const ringB = useRef(new Animated.Value(0)).current;
   const ringC = useRef(new Animated.Value(0)).current;
@@ -363,14 +372,34 @@ export function AiMatchModal({
   }, [loading, dotA, dotB, dotC, ringA, ringB, ringC, spark, spin]);
 
   useEffect(() => {
-    setShowResults(hasProposal);
-  }, [hasProposal]);
+    if (loading) {
+      setShowResults(false);
+      return;
+    }
+    if (responseText) {
+      setShowResults(true);
+    }
+  }, [loading, responseText]);
 
   useEffect(() => {
     if (!visible) return;
     setSelections(DEFAULT_SELECTIONS);
     setShowResults(false);
   }, [visible]);
+
+  const prompt = useMemo(() => {
+    const getLabel = (groupId: OptionGroup['id'], selectedId: string): string => {
+      const group = GROUPS.find((g) => g.id === groupId);
+      return group?.options.find((o) => o.id === selectedId)?.label ?? '';
+    };
+
+    const sport = getLabel('sport', selections.sport);
+    const day = getLabel('day', selections.day);
+    const time = getLabel('time', selections.time);
+    const style = getLabel('style', selections.style);
+
+    return `Quiero buscar un partido de ${sport}. Disponibilidad: ${day} por la ${time}. Estilo preferido: ${style}. Dame los mejores jugadores compatibles para completar el partido.`;
+  }, [selections]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -396,19 +425,13 @@ export function AiMatchModal({
                     end={{ x: 1, y: 1 }}
                     style={styles.headerIconWrap}
                   >
-                    <Ionicons name="trophy" size={20} color="#fff" />
+                    <Ionicons name="sparkles" size={20} color="#fff" />
                   </LinearGradient>
                 </View>
                 <View>
-                  <Text style={styles.headerTitle}>{sheetTitle}</Text>
+                  <Text style={styles.headerTitle}>Buscar Partido con IA</Text>
                   <Text style={styles.headerSubtitle}>
-                    {loading || isSearching
-                      ? 'Buscando...'
-                      : isFormView
-                        ? `${completedSteps}/${GROUPS.length} seleccionados`
-                        : hasProposal
-                          ? 'Propuesta encontrada'
-                          : 'Estado'}
+                    {loading ? 'Buscando...' : isFormView ? `${completedSteps}/4 seleccionados` : 'Resultados IA'}
                   </Text>
                 </View>
               </View>
@@ -499,10 +522,8 @@ export function AiMatchModal({
                     </Animated.View>
                   </View>
                 </View>
-                <Text style={styles.loaderTitle}>Buscando partido 2v2…</Text>
-                <Text style={styles.loaderSubtitle}>
-                  Buscamos rivales compatibles según tu disponibilidad, género, lado y club o distancia.
-                </Text>
+                <Text style={styles.loaderTitle}>Buscando partidos...</Text>
+                <Text style={styles.loaderSubtitle}>Generando recomendaciones...</Text>
                 <View style={styles.loaderDots}>
                   {[dotA, dotB, dotC].map((dot, idx) => (
                     <Animated.View
@@ -530,34 +551,6 @@ export function AiMatchModal({
                   ))}
                 </View>
               </View>
-            ) : isSearching ? (
-              <View style={styles.emptyCandidatesCard}>
-                <Text style={styles.emptyCandidatesText}>
-                  Seguimos buscando jugadores compatibles. Te avisamos acá cuando haya propuesta.
-                  {'\n\n'}
-                  Para cambiar criterios, salí de la cola y volvé a buscar. El motor necesita 4 jugadores con
-                  ventana de tiempo compatible y los filtros de nivel, género y club o distancia que definiste.
-                </Text>
-                <Pressable style={styles.searchAgainBtn} onPress={onLeaveQueue}>
-                  <Ionicons name="exit-outline" size={18} color="#d1d5db" />
-                  <Text style={styles.searchAgainText}>Salir de la cola</Text>
-                </Pressable>
-                {!!status?.expansion_offer && (
-                  <View style={styles.errorCard}>
-                    <Text style={styles.errorText}>
-                      Hay una ampliación sugerida para encontrar partido más rápido.
-                    </Text>
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                      <Pressable style={styles.submitBtn} onPress={() => onRespondExpansion(true)}>
-                        <Text style={styles.submitText}>Aceptar</Text>
-                      </Pressable>
-                      <Pressable style={styles.submitBtnDisabled} onPress={() => onRespondExpansion(false)}>
-                        <Text style={styles.submitTextDisabled}>Rechazar</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                )}
-              </View>
             ) : showResults ? (
               <>
                 <View style={styles.resultHead}>
@@ -565,20 +558,18 @@ export function AiMatchModal({
                     <Ionicons name="checkmark" size={42} color="#fff" />
                   </View>
                   <Text style={styles.resultTitle}>
-                    {hasProposal ? 'Partido encontrado!' : 'No se encontraron partidos'}
+                    {parsedCandidates.length > 0 ? `${parsedCandidates.length} partidos encontrados!` : 'No se encontraron partidos'}
                   </Text>
                   <Text style={styles.resultSubtitle}>
-                    {hasProposal ? 'Ya tienes una propuesta lista para confirmar.' : 'Prueba ajustando filtros para ampliar opciones.'}
+                    {parsedCandidates.length > 0 ? 'Partidos perfectos para ti' : 'Prueba ajustando filtros para ampliar opciones.'}
                   </Text>
                 </View>
 
                 <View style={styles.resultsList}>
-                  {hasProposal && proposal ? (
-                    <ProposalCard
-                      proposal={proposal}
-                      openingProposal={openingProposal}
-                      onOpenProposal={onOpenProposal}
-                    />
+                  {parsedCandidates.length > 0 ? (
+                    parsedCandidates.map((candidate) => (
+                      <CandidateCard key={candidate.id} candidate={candidate} />
+                    ))
                   ) : (
                     <View style={styles.emptyCandidatesCard}>
                       <Text style={styles.emptyCandidatesText}>
@@ -615,15 +606,7 @@ export function AiMatchModal({
                     styles.submitBtn,
                     (loading || !isFormComplete) && styles.submitBtnDisabled,
                   ]}
-                  onPress={() =>
-                    onSubmit({
-                      day: selections.day,
-                      time: selections.time,
-                      preferred_side: selections.preferred_side as MatchmakingSearchInput['preferred_side'],
-                      gender: selections.gender as MatchmakingSearchInput['gender'],
-                      search_area: selections.search_area as MatchmakingSearchInput['search_area'],
-                    })
-                  }
+                  onPress={() => onSubmit(prompt)}
                   disabled={loading || !isFormComplete}
                 >
                   <Ionicons
@@ -637,20 +620,13 @@ export function AiMatchModal({
                       (loading || !isFormComplete) && styles.submitTextDisabled,
                     ]}
                   >
-                    Unirme a la cola
+                    Buscar Partidos
                   </Text>
                 </Pressable>
 
                 {!!errorText && (
                   <View style={styles.errorCard}>
                     <Text style={styles.errorText}>{errorText}</Text>
-                  </View>
-                )}
-                {isBlocked && (
-                  <View style={styles.errorCard}>
-                    <Text style={styles.errorText}>
-                      Tu usuario está bloqueado temporalmente para matchmaking. Revisa más tarde.
-                    </Text>
                   </View>
                 )}
               </>
@@ -1091,9 +1067,6 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 3 },
     overflow: 'hidden',
-  },
-  messageBtnDisabled: {
-    opacity: 0.55,
   },
   messageBtnGradient: {
     width: '100%',
