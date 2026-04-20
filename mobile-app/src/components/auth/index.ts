@@ -1,3 +1,4 @@
+export { RequireAuth } from './RequireAuth';
 export { AuthLayout } from './AuthLayout';
 export { AuthBrand } from './AuthBrand';
 export { AuthInput } from './AuthInput';

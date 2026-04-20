@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Alert,
@@ -15,11 +16,12 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import type { PublicTournamentRow } from '../api/tournaments';
-import { fetchMyTournaments, fetchPublicTournaments } from '../api/tournaments';
+import type { MyTournamentEntryRequest, PublicTournamentRow } from '../api/tournaments';
+import { fetchMyTournamentEntryRequests, fetchMyTournaments, fetchPublicTournaments } from '../api/tournaments';
 import { TournamentListCard } from '../components/competiciones/TournamentListCard';
 import { TournamentDetailScreen } from './TournamentDetailScreen';
 import { useAuth } from '../contexts/AuthContext';
+import { fetchMyPlayerProfile } from '../api/players';
 import {
   formatFormatLabel,
   matchesFormatFilter,
@@ -28,11 +30,12 @@ import {
   type TournamentFormatFilter,
   type TournamentLevelFilter,
 } from '../domain/tournamentDisplay';
+import { tournamentTitle } from '../domain/tournamentDisplay';
 import { theme } from '../theme';
 
 const BG = '#0F0F0F';
 
-type CompeticionTab = 'disponibles' | 'inscritas';
+type CompeticionTab = 'disponibles' | 'inscritas' | 'solicitudes';
 
 type CompeticionesScreenProps = {
   onBack?: () => void;
@@ -67,7 +70,11 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [formatFilter, setFormatFilter] = useState<TournamentFormatFilter>('all');
   const [levelFilter, setLevelFilter] = useState<TournamentLevelFilter>('all');
+  const [joinableOnly, setJoinableOnly] = useState(true);
+  const [myElo, setMyElo] = useState<number | null>(null);
   const [items, setItems] = useState<PublicTournamentRow[]>([]);
+  const [requestItems, setRequestItems] = useState<MyTournamentEntryRequest[]>([]);
+  const [requestUnreadCount, setRequestUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +83,15 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
 
   const load = useCallback(async () => {
     setError(null);
+    if (activeTab === 'solicitudes') {
+      const r = await fetchMyTournamentEntryRequests(session?.access_token ?? null);
+      if (r.ok) setRequestItems(r.requests);
+      else {
+        setRequestItems([]);
+        setError(r.error);
+      }
+      return;
+    }
     if (activeTab === 'disponibles') {
       const r = await fetchPublicTournaments(session?.access_token ?? null);
       if (r.ok) setItems(r.tournaments);
@@ -94,6 +110,55 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   }, [activeTab, session?.access_token]);
 
   useEffect(() => {
+    if (!session?.access_token || requestItems.length === 0) {
+      setRequestUnreadCount(0);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      let unread = 0;
+      for (const req of requestItems) {
+        const status = String(req.status ?? '').toLowerCase();
+        if (status === 'pending') continue;
+        const stamp = req.updated_at || req.resolved_at || req.created_at;
+        const seen = await AsyncStorage.getItem(`@entry_request_seen_${req.id}`);
+        if (!seen || new Date(stamp).getTime() > new Date(seen).getTime()) unread += 1;
+      }
+      if (!cancelled) setRequestUnreadCount(unread);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestItems, session?.access_token]);
+
+  useEffect(() => {
+    if (activeTab !== 'solicitudes' || requestItems.length === 0) return;
+    void (async () => {
+      const writes = requestItems
+        .filter((r) => String(r.status ?? '').toLowerCase() !== 'pending')
+        .map((r) =>
+          AsyncStorage.setItem(
+            `@entry_request_seen_${r.id}`,
+            r.updated_at || r.resolved_at || r.created_at,
+          ),
+        );
+      await Promise.allSettled(writes);
+      setRequestUnreadCount(0);
+    })();
+  }, [activeTab, requestItems]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const p = await fetchMyPlayerProfile(session?.access_token ?? null);
+      if (!cancelled) setMyElo(p?.eloRating ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -106,6 +171,28 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
     };
   }, [load]);
 
+  const canJoinTournament = useCallback(
+    (row: PublicTournamentRow) => {
+      const statusOk = String(row.status ?? '').toLowerCase() === 'open';
+      if (!statusOk) return false;
+      const startAtMs = new Date(String(row.start_at ?? '')).getTime();
+      if (Number.isFinite(startAtMs) && Date.now() >= startAtMs) return false;
+      const confirmed = Number(row.confirmed_count ?? 0);
+      const pending = Number(row.pending_count ?? 0);
+      if (confirmed + pending >= Number(row.max_players ?? 0)) return false;
+      const mode = String(row.registration_mode ?? 'individual');
+      if (!['individual', 'both'].includes(mode)) return false;
+      const eloMin = row.elo_min != null ? Number(row.elo_min) : null;
+      const eloMax = row.elo_max != null ? Number(row.elo_max) : null;
+      if (eloMin == null && eloMax == null) return true;
+      if (myElo == null) return false;
+      if (eloMin != null && myElo < eloMin) return false;
+      if (eloMax != null && myElo > eloMax) return false;
+      return true;
+    },
+    [myElo],
+  );
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await load();
@@ -113,15 +200,31 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   }, [load]);
 
   const filtered = useMemo(() => {
+    if (activeTab === 'solicitudes') return [];
+    const now = Date.now();
     return items
       .filter((row) => String(row.status ?? '').toLowerCase() !== 'cancelled')
+      .filter((row) => {
+        const endMs = new Date(String(row.end_at ?? '')).getTime();
+        if (!Number.isFinite(endMs)) return true;
+        return endMs >= now;
+      })
       .filter(
         (row) =>
           matchesSearch(row, searchQuery) &&
           matchesFormatFilter(row, formatFilter) &&
-          matchesLevelFilter(row, levelFilter),
-      );
-  }, [items, searchQuery, formatFilter, levelFilter]);
+          matchesLevelFilter(row, levelFilter) &&
+          (!joinableOnly || canJoinTournament(row)),
+      )
+      .sort((a, b) => {
+        const da = new Date(String(a.start_at ?? '')).getTime();
+        const db = new Date(String(b.start_at ?? '')).getTime();
+        if (!Number.isFinite(da) && !Number.isFinite(db)) return 0;
+        if (!Number.isFinite(da)) return 1;
+        if (!Number.isFinite(db)) return -1;
+        return da - db;
+      });
+  }, [activeTab, items, searchQuery, formatFilter, levelFilter, joinableOnly, canJoinTournament]);
 
   const formatChipLabel =
     formatFilter === 'all' ? 'Formato' : formatFormatLabel(formatFilter);
@@ -133,14 +236,25 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
         : levelFilter === 'medio'
           ? 'Medio'
           : 'Avanzado';
+  const joinableChipLabel = joinableOnly ? 'Solo me puedo unir' : 'Mostrar todas';
 
   const listHeader = (
     <View style={styles.sectionHead}>
       <Text style={styles.sectionTitle}>
-        {activeTab === 'disponibles' ? 'Torneos disponibles' : 'Mis torneos'}
+        {activeTab === 'disponibles'
+          ? 'Torneos disponibles'
+          : activeTab === 'inscritas'
+            ? 'Mis torneos'
+            : 'Mis solicitudes'}
       </Text>
       <Text style={styles.sectionSub}>
-        {filtered.length === 1 ? '1 torneo' : `${filtered.length} torneos`}
+        {activeTab === 'solicitudes'
+          ? requestItems.length === 1
+            ? '1 solicitud'
+            : `${requestItems.length} solicitudes`
+          : filtered.length === 1
+            ? '1 torneo'
+            : `${filtered.length} torneos`}
         {activeTab === 'inscritas' && !session?.access_token
           ? ' · inicia sesión para ver inscripciones'
           : ''}
@@ -210,6 +324,7 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
           />
           <FilterChipButton label={formatChipLabel} onPress={() => setFilterModalVisible(true)} />
           <FilterChipButton label={levelChipLabel} onPress={() => setFilterModalVisible(true)} />
+          <FilterChipButton label={joinableChipLabel} onPress={() => setJoinableOnly((v) => !v)} />
         </ScrollView>
 
         <View style={styles.segmented}>
@@ -247,6 +362,30 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
               Inscritas
             </Text>
           </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.segmentedBtn,
+              activeTab === 'solicitudes' && styles.segmentedBtnActive,
+              pressed && styles.pressed,
+            ]}
+            onPress={() => setActiveTab('solicitudes')}
+          >
+            <View style={styles.segmentedReqWrap}>
+              <Text
+                style={[
+                  styles.segmentedText,
+                  activeTab === 'solicitudes' && styles.segmentedTextActive,
+                ]}
+              >
+                Solicitudes
+              </Text>
+              {requestUnreadCount > 0 ? (
+                <View style={styles.segmentedBadge}>
+                  <Text style={styles.segmentedBadgeText}>{requestUnreadCount}</Text>
+                </View>
+              ) : null}
+            </View>
+          </Pressable>
         </View>
       </View>
 
@@ -272,8 +411,8 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
         </View>
       ) : (
         <FlatList
-          data={filtered}
-          keyExtractor={(item) => item.id}
+          data={activeTab === 'solicitudes' ? requestItems : filtered}
+          keyExtractor={(item) => String((item as any).id)}
           ListHeaderComponent={listHeader}
           contentContainerStyle={[
             styles.listContent,
@@ -287,21 +426,61 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
               colors={[theme.auth.accent]}
             />
           }
-          renderItem={({ item }) => (
-            <TournamentListCard
-              row={item}
-              onPress={() => setDetailOpen({ id: item.id })}
-            />
-          )}
+          renderItem={({ item }) =>
+            activeTab === 'solicitudes' ? (
+              <Pressable
+                onPress={() => {
+                  const tid = (item as MyTournamentEntryRequest).tournament_id;
+                  if (tid) setDetailOpen({ id: tid });
+                }}
+                style={({ pressed }) => [styles.requestCard, pressed && styles.pressed]}
+              >
+                <Text style={styles.requestTitle}>
+                  {tournamentTitle({
+                    id: String((item as MyTournamentEntryRequest).tournament?.id ?? (item as MyTournamentEntryRequest).tournament_id),
+                    club_id: '',
+                    start_at: String((item as MyTournamentEntryRequest).tournament?.start_at ?? ''),
+                    end_at: String((item as MyTournamentEntryRequest).tournament?.start_at ?? ''),
+                    duration_min: 0,
+                    price_cents: Number((item as MyTournamentEntryRequest).tournament?.price_cents ?? 0),
+                    currency: 'EUR',
+                    max_players: 0,
+                    status: String((item as MyTournamentEntryRequest).tournament?.status ?? ''),
+                    description: String((item as MyTournamentEntryRequest).tournament?.name ?? ''),
+                    elo_min: (item as MyTournamentEntryRequest).tournament?.elo_min ?? null,
+                    elo_max: (item as MyTournamentEntryRequest).tournament?.elo_max ?? null,
+                    registration_mode: ((item as MyTournamentEntryRequest).tournament?.registration_mode as any) ?? 'individual',
+                  } as PublicTournamentRow)}
+                </Text>
+                <Text style={styles.requestStatus}>
+                  Estado: {String((item as MyTournamentEntryRequest).status ?? '').toUpperCase()}
+                </Text>
+                <Text style={styles.requestMessage} numberOfLines={2}>
+                  {(item as MyTournamentEntryRequest).response_message?.trim() ||
+                    (item as MyTournamentEntryRequest).message ||
+                    'Sin mensaje'}
+                </Text>
+              </Pressable>
+            ) : (
+              <TournamentListCard
+                row={item as PublicTournamentRow}
+                onPress={() => setDetailOpen({ id: (item as PublicTournamentRow).id })}
+              />
+            )
+          }
           ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
           ListEmptyComponent={
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyText}>
                 {activeTab === 'inscritas' && !session?.access_token
                   ? 'Inicia sesión para ver tus torneos inscritos.'
+                  : activeTab === 'solicitudes' && !session?.access_token
+                    ? 'Inicia sesión para ver tus solicitudes.'
                   : error
                     ? error
-                    : 'No hay torneos que coincidan con tu búsqueda.'}
+                    : activeTab === 'solicitudes'
+                      ? 'No tienes solicitudes todavía.'
+                      : 'No hay torneos que coincidan con tu búsqueda.'}
               </Text>
             </View>
           }
@@ -388,6 +567,29 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
                 ),
               )}
             </ScrollView>
+            <Text style={styles.modalSectionLabel}>Disponibilidad</Text>
+            <Pressable
+              style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
+              onPress={() => setJoinableOnly(true)}
+            >
+              <Text style={[styles.modalRowText, joinableOnly && styles.modalRowTextActive]}>
+                Solo torneos a los que me puedo unir
+              </Text>
+              {joinableOnly ? (
+                <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
+              ) : null}
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
+              onPress={() => setJoinableOnly(false)}
+            >
+              <Text style={[styles.modalRowText, !joinableOnly && styles.modalRowTextActive]}>
+                Mostrar todos (incluye no cumplo requisitos)
+              </Text>
+              {!joinableOnly ? (
+                <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
+              ) : null}
+            </Pressable>
             <Pressable
               style={styles.modalClose}
               onPress={() => setFilterModalVisible(false)}
@@ -510,6 +712,25 @@ const styles = StyleSheet.create({
   segmentedTextActive: {
     color: '#ffffff',
   },
+  segmentedReqWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  segmentedBadge: {
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentedBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+  },
   sectionHead: {
     marginBottom: 12,
   },
@@ -566,6 +787,28 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.sm,
     color: '#9ca3af',
     textAlign: 'center',
+  },
+  requestCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    padding: 12,
+    gap: 6,
+  },
+  requestTitle: {
+    color: '#fff',
+    fontSize: theme.fontSize.sm,
+    fontWeight: '700',
+  },
+  requestStatus: {
+    color: '#f59e0b',
+    fontSize: theme.fontSize.xs,
+    fontWeight: '700',
+  },
+  requestMessage: {
+    color: '#9ca3af',
+    fontSize: theme.fontSize.xs,
   },
   pressed: { opacity: 0.85 },
   modalOverlay: {
