@@ -23,6 +23,7 @@ import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
 import { fetchMyCoachAssessment, submitCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
+import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -151,6 +152,7 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
     () => Array.from({ length: COACH_QUESTIONS.length }, () => null),
   );
   const [assessment, setAssessment] = useState<CoachAssessment | null>(null);
+  const [peerInsight, setPeerInsight] = useState<PeerFeedbackInsight | null>(null);
   const [isSubmittingCoach, setIsSubmittingCoach] = useState(false);
   const coachTranslateY = React.useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const coachProgressAnim = React.useRef(new Animated.Value(0)).current;
@@ -179,7 +181,12 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
 
   useEffect(() => {
     if (session?.access_token) {
-      fetchMyPlayerProfile(session.access_token).then(setProfile);
+      fetchMyPlayerProfile(session.access_token).then((p) => {
+        setProfile(p);
+        if (p?.id) {
+          fetchMyPeerFeedbackInsight(session.access_token, p.id).then(setPeerInsight);
+        }
+      });
       fetchMyCoachAssessment(session.access_token).then(setAssessment);
     }
   }, [session?.access_token]);
@@ -526,7 +533,7 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
             </View>
           </View>
         ) : (
-          <AICoachSection assessment={assessment} />
+          <AICoachSection assessment={assessment} peerInsight={peerInsight} />
         )}
 
         {/* Achievements Section */}
