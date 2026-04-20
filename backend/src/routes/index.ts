@@ -34,6 +34,7 @@ import onboardingQuestionsRouter from "./onboardingQuestions";
 import bonusesRouter from "./bonuses";
 import clubSpecialDatesRouter from "./clubSpecialDates";
 import coachAssessmentRouter from "./coachAssessment";
+import communityRouter from "./community";
 import adminLearningRouter from "./adminLearning";
 
 
@@ -81,6 +82,7 @@ router.use("/onboarding-questions", onboardingQuestionsRouter);
 router.use("/bonuses", bonusesRouter);
 router.use("/club-special-dates", clubSpecialDatesRouter);
 router.use("/coach-assessment", coachAssessmentRouter);
+router.use("/community", communityRouter);
 router.use("/admin/learning", adminLearningRouter);
 
 

@@ -28,7 +28,14 @@ import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
+import { DailyLessonScreen } from './DailyLessonScreen';
+import { CoursesScreen } from './CoursesScreen';
+import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
+import { PublicCourseDetailScreen } from './PublicCourseDetailScreen';
 import { ProfileScreen } from './ProfileScreen';
+import { CommunityScreen } from './CommunityScreen';
+import type { EducationalCourse } from '../api/dailyLessons';
+import type { PublicCourse } from '../api/schoolCourses';
 
 export function MainApp() {
   const sidebar = useSidebar(false);
@@ -37,6 +44,11 @@ export function MainApp() {
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [showTusPagos, setShowTusPagos] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
+  const [showDailyLesson, setShowDailyLesson] = useState(false);
+  const [showCourses, setShowCourses] = useState(false);
+  const [selectedEducationalCourse, setSelectedEducationalCourse] = useState<EducationalCourse | null>(null);
+  const [selectedPublicCourse, setSelectedPublicCourse] = useState<{ course: PublicCourse; isReserved: boolean } | null>(null);
+  const [coursesTab, setCoursesTab] = useState<'apuntate' | 'cursos' | 'tusclases'>('apuntate');
   const [crearPartidoFlow, setCrearPartidoFlow] = useState<{
     open: boolean;
     organizerId: string | null;
@@ -44,11 +56,52 @@ export function MainApp() {
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showCommunity, setShowCommunity] = useState(false);
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
 
   const renderContent = () => {
+    if (selectedEducationalCourse) {
+      return (
+        <EducationalCourseDetailScreen
+          course={selectedEducationalCourse}
+          onBack={() => setSelectedEducationalCourse(null)}
+        />
+      );
+    }
+    if (selectedPublicCourse) {
+      return (
+        <PublicCourseDetailScreen
+          course={selectedPublicCourse.course}
+          onBack={() => setSelectedPublicCourse(null)}
+        />
+      );
+    }
+    if (showCourses) {
+      return (
+        <CoursesScreen
+          onBack={() => setShowCourses(false)}
+          initialTab={coursesTab}
+          onCoursePress={(course, isReserved) => {
+            setCoursesTab('apuntate');
+            setSelectedPublicCourse({ course, isReserved });
+          }}
+          onEducationalCoursePress={(course) => {
+            setCoursesTab('cursos');
+            setSelectedEducationalCourse(course);
+          }}
+        />
+      );
+    }
+    if (showDailyLesson) {
+      return (
+        <DailyLessonScreen
+          onBack={() => setShowDailyLesson(false)}
+          onComplete={() => setShowDailyLesson(false)}
+        />
+      );
+    }
     if (crearPartidoFlow.open) {
       const bumpPartidos = () => setPartidosRefreshNonce((n) => n + 1);
       const closeFlow = () => {
@@ -76,6 +129,11 @@ export function MainApp() {
           onBack={() => setShowProfile(false)}
           onMenuPress={sidebar.toggle}
         />
+      );
+    }
+    if (showCommunity) {
+      return (
+        <CommunityScreen onBack={() => setShowCommunity(false)} />
       );
     }
     if (showTransacciones) {
@@ -126,6 +184,8 @@ export function MainApp() {
           <HomeScreen
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onPartidoPress={(p) => setSelectedPartido(p)}
+            onDailyLessonPress={() => setShowDailyLesson(true)}
+            onCoursesPress={() => setShowCourses(true)}
           />
         );
       case 'pistas':
@@ -161,7 +221,11 @@ export function MainApp() {
     !showProfile &&
     !showPartidoDetail &&
     !showClubDetail &&
-    !crearPartidoFlow.open;
+    !crearPartidoFlow.open &&
+    !showDailyLesson &&
+    !showCourses &&
+    !selectedEducationalCourse &&
+    !selectedPublicCourse;
 
   const customHeader =
     bookingSuccessData != null ||
@@ -169,7 +233,11 @@ export function MainApp() {
     showTransacciones ||
     showProfile ||
     showPartidoDetail ||
-    crearPartidoFlow.open
+    crearPartidoFlow.open ||
+    showDailyLesson ||
+    showCourses ||
+    selectedEducationalCourse != null ||
+    selectedPublicCourse != null
       ? undefined
       : activeTab === 'tienda'
           ? (
@@ -221,22 +289,27 @@ export function MainApp() {
                 )
               : activeTab === 'inicio'
                 ? (
-                    <HomeHeader onMenuPress={sidebar.toggle} />
+                    <HomeHeader 
+                      onMenuPress={sidebar.toggle} 
+                      onGroupsPress={() => setShowCommunity(true)}
+                    />
                   )
                 : undefined;
 
   const layoutBackgroundColor =
     bookingSuccessData != null
       ? '#000000'
-      : showPartidoDetail
+      : showDailyLesson
         ? '#0F0F0F'
-        : crearPartidoFlow.open
+        : showPartidoDetail
           ? '#0F0F0F'
-          : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
-            ? '#000000'
-            : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
-                ? '#0F0F0F'
-                : showProfile
+          : crearPartidoFlow.open
+            ? '#0F0F0F'
+            : showProfile
+              ? '#0F0F0F'
+              : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
+                ? '#000000'
+                : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
                   ? '#0F0F0F'
                   : '#ffffff';
 
@@ -264,6 +337,10 @@ export function MainApp() {
               showTusPagos ||
               showTransacciones ||
               crearPartidoFlow.open ||
+              showDailyLesson ||
+              showCourses ||
+              selectedEducationalCourse != null ||
+              selectedPublicCourse != null ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos')
             }
@@ -276,7 +353,11 @@ export function MainApp() {
             !showPartidoDetail &&
             !showTusPagos &&
             !showTransacciones &&
-            !crearPartidoFlow.open && (
+            !crearPartidoFlow.open &&
+            !showDailyLesson &&
+            !showCourses &&
+            !selectedEducationalCourse &&
+            !selectedPublicCourse && (
             <View style={styles.bottomBar}>
               <BottomNavbar activeTab={showProfile ? null : activeTab} onTabChange={handleTabChange} />
             </View>
