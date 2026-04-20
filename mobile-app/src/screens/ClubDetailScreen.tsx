@@ -13,7 +13,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { useStripe } from "@stripe/stripe-react-native";
+import { useStripe } from "../stripe";
 import { Ionicons } from "@expo/vector-icons";
 import type { SearchCourtResult } from "../api/search";
 import { fetchSearchCourts } from "../api/search";
