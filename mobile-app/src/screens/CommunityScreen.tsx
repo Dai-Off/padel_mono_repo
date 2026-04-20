@@ -24,6 +24,8 @@ import {
   StoryGroup 
 } from '../api/community';
 import { StoryViewer } from '../components/community/StoryViewer';
+import { FeedSkeleton } from '../components/community/FeedSkeleton';
+import { ComingSoon } from '../components/community/ComingSoon';
 
 interface CommunityScreenProps {
   onBack: () => void;
@@ -124,12 +126,10 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack }) => {
       </View>
       
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#F18F34" />
-        </View>
-      ) : (
+        <FeedSkeleton />
+      ) : activeTab === 'feed' ? (
         <FlatList
-          data={activeTab === 'feed' ? posts : []} // Placeholder for other tabs
+          data={posts}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <PostCard 
@@ -138,6 +138,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack }) => {
             />
           )}
           ListHeaderComponent={renderHeader}
+          contentContainerStyle={posts.length === 0 ? { flex: 1 } : null}
+          ListEmptyComponent={() => (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="images-outline" size={48} color="rgba(255,255,255,0.1)" />
+              <Text style={styles.emptyText}>No hay publicaciones aún</Text>
+            </View>
+          )}
           refreshControl={
             <RefreshControl 
               refreshing={refreshing} 
@@ -153,6 +160,14 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack }) => {
             ) : null
           }
         />
+      ) : (
+        <View style={{ flex: 1 }}>
+          {renderHeader()}
+          <ComingSoon 
+            title={activeTab === 'reels' ? 'Próximamente Reels' : 'Próximamente Noticias'} 
+            icon={activeTab === 'reels' ? 'play-circle-outline' : 'newspaper-outline'}
+          />
+        </View>
       )}
 
       <CommentSheet
@@ -228,5 +243,17 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 100,
+  },
+  emptyText: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 16,
+    fontFamily: 'Outfit_400Regular',
+    marginTop: 12,
   },
 });
