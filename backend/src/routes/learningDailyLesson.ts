@@ -200,7 +200,7 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
     const xpFinal = Math.round(baseXp * (1 + multiplier));
 
     // 3. Actualizar rachas compartidas
-    const sharedStreaks = await updateSharedStreaks(player.id, tz);
+    const sharedStreaks = await updateSharedStreaks(player.id);
 
     // 4. Insert the session row with the boosted XP
     const { data: sessionData, error: sessionErr } = await supabase

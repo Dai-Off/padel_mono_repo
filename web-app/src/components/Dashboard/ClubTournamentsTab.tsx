@@ -51,7 +51,7 @@ type Props = {
 };
 
 type ManualTeamOption = { id: string; label: string };
-type ManualRoundMatch = { id: string; a: string; b: string; courtId: string };
+type ManualRoundMatch = { id: string; a: string; b: string; courtId: string; startAt: string };
 type BracketRound = { title: string; matches: Array<{ id: string; a: string; b: string }> };
 
 function PlayerAvatarThumb({
@@ -324,6 +324,38 @@ function removePlayerFromSlot(
   return next;
 }
 
+function autoBuildBalancedPairsByElo(
+  playerIds: string[],
+  eloByPlayerId: Record<string, number>,
+  tiebreak?: Record<string, { wins: number; losses: number }>
+): string[] {
+  const sorted = [...playerIds].sort((a, b) => {
+    const ea = Number.isFinite(eloByPlayerId[a]) ? eloByPlayerId[a] : -1;
+    const eb = Number.isFinite(eloByPlayerId[b]) ? eloByPlayerId[b] : -1;
+    if (ea !== eb) return eb - ea;
+    const wa = tiebreak?.[a]?.wins ?? 0;
+    const wb = tiebreak?.[b]?.wins ?? 0;
+    if (wa !== wb) return wb - wa;
+    const la = tiebreak?.[a]?.losses ?? 0;
+    const lb = tiebreak?.[b]?.losses ?? 0;
+    if (la !== lb) return la - lb;
+    return a.localeCompare(b);
+  });
+  const out: string[] = [];
+  let lo = 0;
+  let hi = sorted.length - 1;
+  while (lo <= hi) {
+    if (lo === hi) {
+      out.push(sorted[lo]);
+      break;
+    }
+    out.push(sorted[lo], sorted[hi]);
+    lo += 1;
+    hi -= 1;
+  }
+  return out;
+}
+
 function ensureOddBestOf(n: number): number {
   const x = Math.max(1, Math.round(Number(n)));
   return x % 2 === 0 ? x + 1 : x;
@@ -346,6 +378,15 @@ function evalWinnerSideFromSets(sets: CompetitionSet[], bestOf: number): 'A' | '
 function formatSetsForDisplay(sets: CompetitionSet[] | undefined): string {
   if (!sets?.length) return '';
   return sets.map((s) => `${s.games_a}-${s.games_b}`).join(' · ');
+}
+
+function formatMatchScheduleLabel(m: CompetitionMatch): string {
+  const b = m.schedule_booking;
+  if (!b?.start_at) return '';
+  const date = new Date(b.start_at);
+  if (Number.isNaN(date.getTime())) return '';
+  const court = b.court_name?.trim() || 'Cancha';
+  return `${court} · ${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 function MatchResultEditor({
@@ -451,6 +492,9 @@ function MatchResultEditor({
           <p className="text-[11px] font-semibold text-gray-600">
             {t('tournament_match_round', { r: m.round_number, n: m.match_number })}
           </p>
+          {formatMatchScheduleLabel(m) ? (
+            <p className="mt-1 text-[11px] text-sky-700 font-medium">{formatMatchScheduleLabel(m)}</p>
+          ) : null}
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm font-bold text-[#1A1A1A]">
             <span className="rounded-lg bg-gray-50 px-2 py-1 max-w-[160px] truncate" title={teamALabel}>
               {teamALabel}
@@ -616,6 +660,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<'single_elim' | 'group_playoff' | 'round_robin'>('single_elim');
   const [bestOfSets, setBestOfSets] = useState('3');
   const [bracketSeedStrategy, setBracketSeedStrategy] = useState('registration_order');
+  const [competitionResultsEntry, setCompetitionResultsEntry] = useState<'organizer' | 'players'>('organizer');
   const [groupSize, setGroupSize] = useState('4');
   const [qualifiersPerGroup, setQualifiersPerGroup] = useState('2');
   const [podiumDraftByPos, setPodiumDraftByPos] = useState<Record<number, string>>({});
@@ -627,7 +672,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [singlesPairingDraft, setSinglesPairingDraft] = useState<Record<string, string | undefined>>({});
   const [singlesPairingInitial, setSinglesPairingInitial] = useState<Record<string, string>>({});
   const [singlesPairingOrder, setSinglesPairingOrder] = useState<string[]>([]);
+  const [singlesPairingAvailablePlayerIds, setSinglesPairingAvailablePlayerIds] = useState<string[]>([]);
+  const [pairingPlayerElos, setPairingPlayerElos] = useState<Record<string, number>>({});
   const [pairingPlayerLabels, setPairingPlayerLabels] = useState<Record<string, string>>({});
+  const [pairingTiebreakStats, setPairingTiebreakStats] = useState<Record<string, { wins: number; losses: number }>>({});
   const [pairingConfirmOpen, setPairingConfirmOpen] = useState(false);
   const [pairingSaving, setPairingSaving] = useState(false);
   const [assignPartnerOpen, setAssignPartnerOpen] = useState(false);
@@ -640,6 +688,8 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [manualRound1, setManualRound1] = useState<ManualRoundMatch[]>([]);
   const [manualGenerating, setManualGenerating] = useState(false);
   const [createStep, setCreateStep] = useState(0);
+  const [createTemplateTournamentId, setCreateTemplateTournamentId] = useState('');
+  const [createTemplateLoading, setCreateTemplateLoading] = useState(false);
   const [createPrizeRows, setCreatePrizeRows] = useState<PrizeFormRow[]>(() => [newPrizeRow('Campeón')]);
   const [form, setForm] = useState({
     name: '',
@@ -668,6 +718,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     elo_max: '',
     description: '',
     normas: '',
+    results_entry: 'organizer' as 'organizer' | 'players',
   });
   const [settingsForm, setSettingsForm] = useState({
     name: '',
@@ -684,6 +735,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     registration_closed_at: '',
     normas: '',
     poster_url: '',
+    results_entry: 'organizer' as 'organizer' | 'players',
   });
   const routeId = location.pathname.startsWith('/torneos/') ? location.pathname.split('/')[2] : null;
   const isDetailRoute = Boolean(routeId);
@@ -711,6 +763,118 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
   const detailFetchGenRef = useRef(0);
   const competitionFetchGenRef = useRef(0);
+
+  const resetCreateForm = useCallback(() => {
+    setCreateStep(0);
+    setCreateTemplateTournamentId('');
+    setSelectedCourtIds([]);
+    setPosterFileCreate(null);
+    setCreatePrizeRows([newPrizeRow('Campeón')]);
+    setForm({
+      name: '',
+      start_date: '',
+      start_time: '21:30',
+      end_time: '23:00',
+      start_at: '',
+      recurring_enabled: false,
+      recurring_end_date: '',
+      recurring_weekdays: [1],
+      recurring_registration_close_hours: '12',
+      registration_closed_at: '',
+      reg_close_unit: 'days',
+      reg_close_value: '0',
+      cancellation_notice_hours: '24',
+      cancel_unit: 'days',
+      cancel_value: '1',
+      duration_min: '120',
+      price_euros: '0',
+      max_players: '12',
+      registration_mode: 'individual',
+      visibility: 'private',
+      gender: '',
+      invite_ttl_minutes: '1440',
+      elo_min: '',
+      elo_max: '',
+      description: '',
+      normas: '',
+      results_entry: 'organizer',
+    });
+  }, []);
+
+  const applyCreateTemplateFromTournament = useCallback((t: TournamentListItem) => {
+    const start = new Date(String(t.start_at ?? ''));
+    const duration = Math.max(30, Number(t.duration_min ?? 120));
+    const end = Number.isFinite(start.getTime()) ? new Date(start.getTime() + duration * 60_000) : null;
+    const pad2 = (n: number) => String(n).padStart(2, '0');
+    const localDate = Number.isFinite(start.getTime())
+      ? `${start.getFullYear()}-${pad2(start.getMonth() + 1)}-${pad2(start.getDate())}`
+      : '';
+    const localStartTime = Number.isFinite(start.getTime()) ? `${pad2(start.getHours())}:${pad2(start.getMinutes())}` : '21:30';
+    const localEndTime =
+      end && Number.isFinite(end.getTime()) ? `${pad2(end.getHours())}:${pad2(end.getMinutes())}` : '23:00';
+    const regCloseMs =
+      t.registration_closed_at && Number.isFinite(start.getTime())
+        ? Math.max(0, start.getTime() - new Date(t.registration_closed_at).getTime())
+        : 0;
+    const cancelMs =
+      t.cancellation_cutoff_at && Number.isFinite(start.getTime())
+        ? Math.max(0, start.getTime() - new Date(t.cancellation_cutoff_at).getTime())
+        : 0;
+    const regCloseHours = Math.round(regCloseMs / 3_600_000);
+    const cancelHours = Math.round(cancelMs / 3_600_000);
+    setForm((prev) => ({
+      ...prev,
+      name: String(t.name ?? ''),
+      start_date: localDate,
+      start_time: localStartTime,
+      end_time: localEndTime,
+      duration_min: String(duration),
+      recurring_enabled: false,
+      recurring_end_date: '',
+      recurring_weekdays: [1],
+      reg_close_unit: regCloseHours % 24 === 0 ? 'days' : 'hours',
+      reg_close_value: String(regCloseHours % 24 === 0 ? regCloseHours / 24 : regCloseHours),
+      cancel_unit: cancelHours % 24 === 0 ? 'days' : 'hours',
+      cancel_value: String(cancelHours % 24 === 0 ? cancelHours / 24 : cancelHours),
+      price_euros: ((Number(t.price_cents ?? 0) / 100).toString().replace('.', ',')),
+      max_players: String(Math.max(2, Number(t.max_players ?? 12))),
+      registration_mode: String(t.registration_mode ?? 'individual'),
+      visibility: String(t.visibility ?? 'private'),
+      gender:
+        String(t.gender ?? '') === 'male' || String(t.gender ?? '') === 'female' || String(t.gender ?? '') === 'mixed'
+          ? String(t.gender)
+          : '',
+      invite_ttl_minutes: String(Math.max(30, Number(t.invite_ttl_minutes ?? 1440))),
+      elo_min: t.elo_min != null ? String(t.elo_min) : '',
+      elo_max: t.elo_max != null ? String(t.elo_max) : '',
+      description: String(t.description ?? ''),
+      normas: String(t.normas ?? ''),
+      results_entry: t.match_rules?.results_entry === 'players' ? 'players' : 'organizer',
+    }));
+    setCreatePrizeRows(prizesToFormRows(t.prizes ?? null));
+    setSelectedCourtIds(Array.isArray(t.tournament_courts) ? t.tournament_courts.map((x) => String(x.court_id)).filter(Boolean) : []);
+  }, []);
+
+  const loadCreateTemplateById = useCallback(
+    async (rawId: string) => {
+      const id = rawId.trim();
+      if (!id) {
+        toast.error('Pega un ID de torneo válido.');
+        return;
+      }
+      setCreateTemplateLoading(true);
+      try {
+        const d = await tournamentsService.detail(id);
+        applyCreateTemplateFromTournament(d.tournament);
+        toast.success('Configuración copiada. Ahora puedes ajustar pantalla por pantalla.');
+      } catch (err) {
+        toast.error((err as Error).message || 'No se pudo cargar el torneo de origen');
+      } finally {
+        setCreateTemplateLoading(false);
+      }
+    },
+    [applyCreateTemplateFromTournament]
+  );
 
   const refreshList = useCallback(
     async (selectId?: string) => {
@@ -866,6 +1030,15 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     return () => URL.revokeObjectURL(url);
   }, [posterFileCreate]);
 
+  const selectedCourtIdsKey = useMemo(() => {
+    if (!Array.isArray(selected?.tournament_courts)) return '';
+    return selected.tournament_courts
+      .map((x) => String(x.court_id))
+      .filter(Boolean)
+      .sort()
+      .join('|');
+  }, [selected?.tournament_courts]);
+
   useEffect(() => {
     if (!selected) return;
     setSettingsForm({
@@ -886,8 +1059,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       registration_closed_at: selected.registration_closed_at ? new Date(selected.registration_closed_at).toISOString().slice(0, 16) : '',
       normas: String(selected.normas ?? ''),
       poster_url: String(selected.poster_url ?? ''),
+      results_entry: selected.match_rules?.results_entry === 'players' ? 'players' : 'organizer',
     });
-  }, [selected?.id]);
+  }, [selected?.id, selected?.updated_at, selectedCourtIdsKey]);
 
   useEffect(() => {
     if (!addParticipantOpen || !clubId) return;
@@ -953,13 +1127,15 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   }, [tab, selected?.id]);
 
   useEffect(() => {
-    const active = items.filter((t) => t.status === 'open' || t.status === 'closed');
+    if (isDetailRoute) return;
+    const active = items.filter((t) => t.status === 'open');
     if (!active.length) return;
+    const sample = active.slice(0, 6);
     let cancelled = false;
     void (async () => {
       const unread: Record<string, boolean> = {};
       await Promise.allSettled(
-        active.map(async (t) => {
+        sample.map(async (t) => {
           try {
             const msgs = await tournamentsService.listChat(t.id);
             if (cancelled) return;
@@ -974,7 +1150,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       if (!cancelled) setChatUnread((prev) => ({ ...prev, ...unread }));
     })();
     return () => { cancelled = true; };
-  }, [items]);
+  }, [items, isDetailRoute]);
 
   const reloadCompetitionView = useCallback(async (tournamentId: string) => {
     const gen = ++competitionFetchGenRef.current;
@@ -986,6 +1162,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       if (view.tournament?.competition_format) setCompetitionFormat(view.tournament.competition_format);
       setBestOfSets(String(view.tournament?.match_rules?.best_of_sets ?? 3));
       setBracketSeedStrategy(String(view.tournament?.match_rules?.bracket_seed_strategy ?? 'registration_order'));
+      setCompetitionResultsEntry(view.tournament?.match_rules?.results_entry === 'players' ? 'players' : 'organizer');
       setGroupSize(String((view.tournament?.standings_rules?.group_size as number | undefined) ?? 4));
       setQualifiersPerGroup(String((view.tournament?.standings_rules?.qualifiers_per_group as number | undefined) ?? 2));
       const maxFromPodium = (view.podium ?? []).reduce((m, r) => Math.max(m, r.position), 0);
@@ -1018,6 +1195,16 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     await tournamentsService.generateCompetition(tournamentId);
     return true;
   }, []);
+
+  const resetCompetitionBracket = useCallback(
+    async (tournamentId: string) => {
+      await tournamentsService.resetCompetition(tournamentId);
+      await reloadCompetitionView(tournamentId);
+      await refreshDetail(tournamentId);
+      await refreshList(tournamentId);
+    },
+    [reloadCompetitionView, refreshDetail, refreshList]
+  );
 
   useEffect(() => {
     if (tab !== 'competicion' || !selected?.id) return;
@@ -1138,6 +1325,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
   const openPairingModal = useCallback(() => {
     if (!selected) return;
+    setPairingTiebreakStats({});
     if (selected.registration_mode === 'individual' || selected.registration_mode === 'both') {
       const singles = [...detail]
         .filter((i) => i.status === 'confirmed' && i.players_1 && !i.players_2)
@@ -1146,33 +1334,52 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
         toast.error(t('tournament_pairing_no_players'));
         return;
       }
+      // Precarga las parejas ya definidas según el estado actual del torneo.
       const draft: Record<string, string> = {};
       const labels: Record<string, string> = {};
+      const elos: Record<string, number> = {};
+      const availablePlayerIds: string[] = [];
       for (const ins of singles) {
         if (ins.players_1) {
-          draft[ins.id] = ins.players_1.id;
-          labels[ins.players_1.id] = `${ins.players_1.first_name} ${ins.players_1.last_name}`.trim();
+          const pid = ins.players_1.id;
+          const fullName = `${ins.players_1.first_name} ${ins.players_1.last_name}`.trim();
+          labels[pid] = `${fullName} · Elo ${formatPlayerElo(ins.players_1.elo_rating)}`;
+          elos[pid] = Number(ins.players_1.elo_rating ?? 0);
+          availablePlayerIds.push(pid);
+          draft[ins.id] = pid;
         }
       }
       setSinglesPairingDraft(draft);
-      setSinglesPairingInitial({ ...draft });
+      setSinglesPairingInitial(draft);
       setSinglesPairingOrder(singles.map((s) => s.id));
+      setSinglesPairingAvailablePlayerIds(availablePlayerIds);
+      setPairingPlayerElos(elos);
       setPairingPlayerLabels(labels);
       setPairingConfirmOpen(false);
+      void (async () => {
+        try {
+          const stats = await tournamentsService.pairingTiebreakStats(selected.id);
+          setPairingTiebreakStats(stats);
+        } catch {
+          setPairingTiebreakStats({});
+        }
+      })();
     } else {
       setSinglesPairingOrder([]);
       setSinglesPairingDraft({});
       setSinglesPairingInitial({});
+      setSinglesPairingAvailablePlayerIds([]);
+      setPairingPlayerElos({});
       setPairingPlayerLabels({});
     }
     setPairingManageOpen(true);
   }, [selected, detail, t]);
 
   const singlesPairingPool = useMemo(() => {
-    const initial = new Set(Object.values(singlesPairingInitial));
+    const initial = new Set(singlesPairingAvailablePlayerIds);
     const assigned = new Set(Object.values(singlesPairingDraft).filter(Boolean) as string[]);
     return [...initial].filter((pid) => !assigned.has(pid));
-  }, [singlesPairingInitial, singlesPairingDraft]);
+  }, [singlesPairingAvailablePlayerIds, singlesPairingDraft]);
 
   const pairingIsDirty = useMemo(() => {
     const keys = new Set([...Object.keys(singlesPairingInitial), ...Object.keys(singlesPairingDraft)]);
@@ -1198,6 +1405,24 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     }
     return { hasDefined, hasIncomplete };
   }, [singlesPairingOrder, singlesPairingDraft]);
+
+  const visiblePairIncompleteRows = useMemo(() => {
+    if (!selected) return pairIncompleteRows;
+    if (selected.registration_mode !== 'both') return pairIncompleteRows;
+    const pairedInscriptionIds = new Set<string>();
+    for (let pairIdx = 0; pairIdx < Math.ceil(singlesPairingOrder.length / 2); pairIdx += 1) {
+      const i = pairIdx * 2;
+      const idA = singlesPairingOrder[i];
+      const idB = singlesPairingOrder[i + 1];
+      const pidA = idA ? singlesPairingDraft[idA] : undefined;
+      const pidB = idB ? singlesPairingDraft[idB] : undefined;
+      if (idA && idB && pidA && pidB) {
+        pairedInscriptionIds.add(idA);
+        pairedInscriptionIds.add(idB);
+      }
+    }
+    return pairIncompleteRows.filter((ins) => !pairedInscriptionIds.has(ins.id));
+  }, [pairIncompleteRows, selected, singlesPairingOrder, singlesPairingDraft]);
 
   const recommendedCourtsForSettings = useMemo(() => {
     const maxPlayers = Math.max(2, Number(settingsForm.max_players) || 0);
@@ -1286,7 +1511,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
         {!isDetailRoute && topTab === 'torneos' && (
           <button
             type="button"
-            onClick={() => setCreateOpen(true)}
+            onClick={() => {
+              resetCreateForm();
+              setCreateOpen(true);
+            }}
             className="flex items-center gap-1.5 px-4 py-2.5 bg-[#E31E24] text-white rounded-xl text-xs font-bold"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -1417,6 +1645,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
             {filteredItems.map((row) => {
               const confirmed = row.confirmed_count ?? 0;
               const pending = row.pending_count ?? 0;
+              const hasPendingEntryRequests = (row.pending_entry_requests_count ?? 0) > 0;
+              const hasUnreadChat = Boolean(chatUnread[row.id]);
+              const hasChatAlert = Boolean(chatUnread[row.id]) || hasPendingEntryRequests;
               const statusLabel = row.status === 'open' ? 'Próximo' : row.status === 'closed' ? 'Cerrado' : 'Cancelado';
               const statusClass =
                 row.status === 'open'
@@ -1442,7 +1673,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                           <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleDateString()}</span>
                           <span className="inline-flex items-center gap-1"><Clock3 className="w-3.5 h-3.5" /> {new Date(row.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                           <span className="inline-flex items-center gap-1"><Users className="w-3.5 h-3.5" /> {confirmed + pending}/{row.max_players}</span>
-                          {(row.pending_entry_requests_count ?? 0) > 0 && (
+                          {hasPendingEntryRequests && (
                             <span className="inline-flex items-center gap-1 text-amber-800 font-semibold">
                               <Inbox className="w-3.5 h-3.5" />
                               {row.pending_entry_requests_count} solicitud{(row.pending_entry_requests_count ?? 0) === 1 ? '' : 'es'}
@@ -1473,8 +1704,30 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       className="relative p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100"
                     >
                       <MessageCircle className="w-4 h-4" />
-                      {chatUnread[row.id] && (
-                        <span className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-[#E31E24] rounded-full border-2 border-white" />
+                      {hasChatAlert && (
+                        <>
+                          {hasUnreadChat && !hasPendingEntryRequests && (
+                            <span
+                              title="Mensajes no leídos"
+                              className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-[#E31E24] rounded-full border-2 border-white"
+                            />
+                          )}
+                          {!hasUnreadChat && hasPendingEntryRequests && (
+                            <span
+                              title="Solicitudes pendientes"
+                              className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-white"
+                            />
+                          )}
+                          {hasUnreadChat && hasPendingEntryRequests && (
+                            <span
+                              title="Mensajes no leídos y solicitudes pendientes"
+                              className="absolute -top-1 -right-1 inline-flex items-center rounded-full border-2 border-white overflow-hidden"
+                            >
+                              <span className="w-2 h-2 bg-[#E31E24]" />
+                              <span className="w-2 h-2 bg-amber-500" />
+                            </span>
+                          )}
+                        </>
                       )}
                     </button>
 
@@ -1489,7 +1742,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       className="relative p-1.5 rounded-lg text-gray-400 hover:text-amber-800 hover:bg-amber-50"
                     >
                       <Inbox className="w-4 h-4" />
-                      {(row.pending_entry_requests_count ?? 0) > 0 && (
+                      {hasPendingEntryRequests && (
                         <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-0.5 bg-amber-600 text-white text-[9px] font-bold rounded-full border-2 border-white flex items-center justify-center">
                           {(row.pending_entry_requests_count ?? 0) > 9 ? '9+' : row.pending_entry_requests_count}
                         </span>
@@ -1518,31 +1771,13 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                           className="w-full text-left px-3 py-2 hover:bg-gray-50 flex items-center gap-2"
                           onClick={async () => {
                             setRowMenuOpenId(null);
-                            try {
-                              const payload = {
-                                club_id: row.club_id,
-                                name: row.name ? `${row.name} (copia)` : null,
-                                start_at: row.start_at,
-                                duration_min: row.duration_min,
-                                price_cents: row.price_cents ?? 0,
-                                max_players: row.max_players,
-                                registration_mode: row.registration_mode,
-                                visibility: row.visibility ?? 'private',
-                                gender: row.gender ?? null,
-                                elo_min: row.elo_min ?? null,
-                                elo_max: row.elo_max ?? null,
-                                prizes: row.prizes ?? [],
-                                normas: row.normas ?? null,
-                              };
-                              await tournamentsService.create(payload);
-                              toast.success('Torneo copiado');
-                              await refreshList();
-                            } catch (err) {
-                              toast.error(err instanceof Error ? err.message : 'Error al copiar');
-                            }
+                            resetCreateForm();
+                            setCreateTemplateTournamentId(row.id);
+                            setCreateOpen(true);
+                            await loadCreateTemplateById(row.id);
                           }}
                         >
-                          <Copy className="w-3.5 h-3.5" /> Copiar torneo
+                          <Copy className="w-3.5 h-3.5" /> Copiar configuración al formulario
                         </button>
                         <button
                           type="button"
@@ -1804,19 +2039,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     className="px-3 py-2 rounded-xl bg-white border border-gray-300 text-gray-800 text-xs font-semibold"
                   >
                     {t('tournament_pairing_manage')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!selected) return;
-                      await tournamentsService.joinOwner(selected.id);
-                      toast.success('Te uniste al torneo');
-                      await refreshDetail(selected.id);
-                      await refreshList(selected.id);
-                    }}
-                    className="px-3 py-2 rounded-xl bg-gray-100 text-xs font-semibold text-gray-700"
-                  >
-                    Participar como organizador
                   </button>
                 </div>
                 {playersOrdered.map((ins) => {
@@ -2192,6 +2414,17 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         <option value="elo_tier_mid">Elo — priorizar nivel medio</option>
                       </select>
                     </div>
+                    <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 md:col-span-2">
+                      <p className="text-[10px] uppercase text-gray-500 font-semibold">Quién carga resultados</p>
+                      <select
+                        value={competitionResultsEntry}
+                        onChange={(e) => setCompetitionResultsEntry(e.target.value === 'players' ? 'players' : 'organizer')}
+                        className="mt-1 w-full text-xs outline-none bg-transparent"
+                      >
+                        <option value="organizer">Organizador (este panel)</option>
+                        <option value="players">Jugadores (app)</option>
+                      </select>
+                    </div>
                     {isGroupPlayoff && (
                       <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
                         <p className="text-[10px] uppercase text-gray-500 font-semibold">Tamaño grupo</p>
@@ -2226,6 +2459,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                             best_of_sets: Number(bestOfSets) || 3,
                             allow_draws: false,
                             bracket_seed_strategy: bracketSeedStrategy,
+                            results_entry: competitionResultsEntry,
                           },
                           standings_rules: { group_size: Number(groupSize) || 4, qualifiers_per_group: Number(qualifiersPerGroup) || 2 },
                         });
@@ -2252,11 +2486,41 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     >
                       {t('tournament_pairing_manage')}
                     </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!selected) return;
+                        if (!window.confirm('Se eliminarán los cruces actuales para volver a armar parejas. ¿Continuar?')) return;
+                        await resetCompetitionBracket(selected.id);
+                        openPairingModal();
+                        toast.success('Parejas listas para rehacer. Vuelve a definirlas y guarda.');
+                      }}
+                      className="px-3 py-2 rounded-xl bg-white border border-gray-300 text-gray-800 text-xs font-semibold"
+                    >
+                      Deshacer parejas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!selected) return;
+                        if (!window.confirm('Se eliminarán cruces y resultados cargados. ¿Continuar?')) return;
+                        await resetCompetitionBracket(selected.id);
+                        toast.success('Cruces eliminados. Ya puedes generarlos nuevamente.');
+                      }}
+                      className="px-3 py-2 rounded-xl bg-white border border-gray-300 text-gray-800 text-xs font-semibold"
+                    >
+                      Deshacer cruces
+                    </button>
                   </div>
                 </div>
 
                 <div className="rounded-xl border border-gray-200 p-3">
                   <p className="text-xs font-semibold text-[#1A1A1A] mb-2">{t('tournament_matches_results_title')}</p>
+                  {competitionResultsEntry === 'players' && (
+                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5 mb-2">
+                      Modo jugadores: los participantes cargan el resultado desde la app; acá podés corregir o usar podio manual si hace falta.
+                    </p>
+                  )}
                   {competitionLoading && <p className="text-xs text-gray-500">{t('tournament_matches_loading')}</p>}
                   {!competitionLoading && (!competition?.matches || competition.matches.length === 0) && (
                     <p className="text-xs text-gray-500">{t('tournament_matches_empty')}</p>
@@ -2439,6 +2703,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                             return (
                               <li key={m.id} className="border-b border-gray-100 pb-1 last:border-0">
                                 {t('tournament_match_round', { r: m.round_number, n: m.match_number })}: {ta} {t('tournament_match_vs')} {tb}
+                                {formatMatchScheduleLabel(m) ? <span className="text-sky-700 font-medium"> · {formatMatchScheduleLabel(m)}</span> : null}
                                 {score ? <span className="text-emerald-800 font-medium"> · {score}</span> : null}
                                 {wname ? (
                                   <span className="text-gray-600">
@@ -2475,6 +2740,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   <div>
                     <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Precio inscripción (€)</label>
                     <input value={settingsForm.price_euros} onChange={(e) => setSettingsForm((p) => ({ ...p, price_euros: e.target.value }))} placeholder="Ej. 25 o 25,50" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      Podés subir o bajar el precio aunque ya haya inscriptos: quien pague después verá el importe actual; no modificamos pagos ya confirmados.
+                    </p>
                   </div>
                   <div className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2 space-y-2">
                     <p className="text-[10px] font-semibold text-gray-500 uppercase">Premios por puesto (€)</p>
@@ -2570,6 +2838,25 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       onChange={(e) => setSettingsForm((p) => ({ ...p, max_players: e.target.value }))}
                       className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
                     />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Resultados de partidos</label>
+                    <select
+                      value={settingsForm.results_entry}
+                      onChange={(e) =>
+                        setSettingsForm((p) => ({
+                          ...p,
+                          results_entry: e.target.value === 'players' ? 'players' : 'organizer',
+                        }))
+                      }
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                    >
+                      <option value="organizer">Los carga el organizador (panel)</option>
+                      <option value="players">Los cargan los jugadores (app)</option>
+                    </select>
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      En modo jugadores el cuadro se actualiza con los marcadores enviados desde la app; igual podés corregir o anotar podio/campeón desde acá.
+                    </p>
                   </div>
                   <div className="md:col-span-2 rounded-xl border border-gray-200 p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -2748,6 +3035,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         registration_closed_at: settingsForm.registration_closed_at ? new Date(settingsForm.registration_closed_at).toISOString() : null,
                         poster_url: settingsForm.poster_url.trim() || null,
                         court_ids: settingsForm.court_ids,
+                        results_entry: settingsForm.results_entry,
                       });
                       setItems((prev) => prev.map((it) => (it.id === selected.id ? { ...it, ...updatedTournament } : it)));
                       setSelected((prev) => (prev?.id === selected.id ? { ...prev, ...updatedTournament } : prev));
@@ -2924,6 +3212,30 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {createStep === 0 && (
                   <>
+                <div className="rounded-2xl border border-gray-200 bg-white p-3 md:col-span-2">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">
+                    Copiar configuración desde otro torneo
+                  </label>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Pega el ID de un torneo existente para precargar este formulario (sin jugadores/inscripciones).
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <input
+                      value={createTemplateTournamentId}
+                      onChange={(e) => setCreateTemplateTournamentId(e.target.value)}
+                      placeholder="UUID del torneo origen"
+                      className="flex-1 min-w-[240px] rounded-lg border border-gray-300 px-3 py-2 text-xs"
+                    />
+                    <button
+                      type="button"
+                      disabled={createTemplateLoading}
+                      onClick={() => void loadCreateTemplateById(createTemplateTournamentId)}
+                      className="px-3 py-2 rounded-lg bg-gray-900 text-white text-xs font-semibold disabled:opacity-60"
+                    >
+                      {createTemplateLoading ? 'Cargando...' : 'Aplicar configuración'}
+                    </button>
+                  </div>
+                </div>
                 <div className="rounded-2xl border border-gray-200 bg-white p-3 md:col-span-2">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -3289,6 +3601,26 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Resultados de partidos</label>
+                  <select
+                    value={form.results_entry}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        results_entry: e.target.value === 'players' ? 'players' : 'organizer',
+                      }))
+                    }
+                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5"
+                  >
+                    <option value="organizer">Los carga el organizador (panel)</option>
+                    <option value="players">Los cargan los jugadores (app)</option>
+                  </select>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Podés cambiarlo después en Ajustes o Competición. Con jugadores, el cuadro avanza con los marcadores que envíen desde la app.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Visibilidad del torneo</label>
                   <select
                     value={form.visibility}
@@ -3462,6 +3794,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     description: form.description || null,
                     normas: form.normas || null,
                     court_ids: selectedCourtIds,
+                    results_entry: form.results_entry,
                   };
                   setSaving(true);
                   const savingToastId = toast.loading('Guardando torneo...');
@@ -3482,36 +3815,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       };
                       const result = await tournamentsService.createRecurring(recurringPayload);
                       setCreateOpen(false);
-                      setSelectedCourtIds([]);
-                      setPosterFileCreate(null);
-                      setForm({
-                        name: '',
-                        start_date: '',
-                        start_time: '21:30',
-                        end_time: '23:00',
-                        start_at: '',
-                        recurring_enabled: false,
-                        recurring_end_date: '',
-                        recurring_weekdays: [1],
-                        recurring_registration_close_hours: '12',
-                        registration_closed_at: '',
-                        reg_close_unit: 'days',
-                        reg_close_value: '0',
-                        cancellation_notice_hours: '24',
-                        cancel_unit: 'days',
-                        cancel_value: '1',
-                        duration_min: '120',
-                        price_euros: '0',
-                        max_players: '12',
-                        registration_mode: 'individual',
-                        visibility: 'private',
-                        gender: '',
-                        invite_ttl_minutes: '1440',
-                        elo_min: '',
-                        elo_max: '',
-                        description: '',
-                        normas: '',
-                      });
+                      resetCreateForm();
                       await refreshList();
                       if (result.skipped_count > 0) {
                         const first = result.skipped[0];
@@ -3543,35 +3847,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     });
                     setSelected({ ...created, confirmed_count: 0, pending_count: 0 });
                     setCreateOpen(false);
-                    setSelectedCourtIds([]);
-                    setForm({
-                      name: '',
-                      start_date: '',
-                      start_time: '21:30',
-                      end_time: '23:00',
-                      start_at: '',
-                      recurring_enabled: false,
-                      recurring_end_date: '',
-                      recurring_weekdays: [1],
-                      recurring_registration_close_hours: '12',
-                      registration_closed_at: '',
-                      reg_close_unit: 'days',
-                      reg_close_value: '0',
-                      cancellation_notice_hours: '24',
-                      cancel_unit: 'days',
-                      cancel_value: '1',
-                      duration_min: '120',
-                      price_euros: '0',
-                      max_players: '12',
-                      registration_mode: 'individual',
-                      visibility: 'private',
-                      gender: '',
-                      invite_ttl_minutes: '1440',
-                      elo_min: '',
-                      elo_max: '',
-                      description: '',
-                      normas: '',
-                    });
+                    resetCreateForm();
                     navigate(`/torneos/${created.id}`);
                     toast.success('Torneo creado correctamente', { id: savingToastId });
                     await refreshDetail(created.id);
@@ -3599,7 +3875,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
               <div>
                 <p className="text-sm font-bold text-[#1A1A1A]">Generador manual de cruces</p>
                 <p className="text-xs text-gray-500">
-                  Solo eliminación directa: define la primera ronda, asigna cancha por partido y confirma para guardar el cuadro.
+                  Solo eliminación directa: define la primera ronda, asigna cancha y horario por partido y confirma para guardar el cuadro.
                 </p>
               </div>
               <button
@@ -3613,7 +3889,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="rounded-xl border border-gray-200 p-3">
-                <p className="text-xs font-semibold text-[#1A1A1A] mb-2">Ronda inicial: enfrentamientos y cancha</p>
+                <p className="text-xs font-semibold text-[#1A1A1A] mb-2">Ronda inicial: enfrentamientos, cancha y horario</p>
                 <div className="space-y-2">
                   {manualRound1.map((m, idx) => {
                     const usedElsewhere = new Set(
@@ -3626,7 +3902,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     return (
                       <div key={m.id} className="rounded-lg border border-gray-100 p-2">
                         <p className="text-[11px] font-semibold text-gray-600 mb-1">Partido {idx + 1}</p>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                           <select
                             value={m.a}
                             onChange={(e) => setManualRound1((prev) => prev.map((x) => (x.id === m.id ? { ...x, a: e.target.value } : x)))}
@@ -3657,6 +3933,17 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                               <option key={`${m.id}-court-${c.id}`} value={c.id}>{c.name}</option>
                             ))}
                           </select>
+                          <input
+                            type="datetime-local"
+                            step={1800}
+                            value={m.startAt}
+                            onChange={(e) =>
+                              setManualRound1((prev) =>
+                                prev.map((x) => (x.id === m.id ? { ...x, startAt: normalizeHalfHourLocalDateTime(e.target.value) } : x))
+                              )
+                            }
+                            className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs"
+                          />
                         </div>
                       </div>
                     );
@@ -3675,6 +3962,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     const missingCourt = manualRound1.some((m) => !m.courtId);
                     if (missingCourt) {
                       toast.error('Selecciona una cancha para cada enfrentamiento.');
+                      return;
+                    }
+                    const missingStartAt = manualRound1.some((m) => !isHalfHourLocalDateTime(m.startAt));
+                    if (missingStartAt) {
+                      toast.error('Selecciona un horario válido (bloques de 30 min) para cada enfrentamiento.');
                       return;
                     }
                     const used = new Set<string>();
@@ -3698,10 +3990,19 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                           best_of_sets: Number(bestOfSets) || 3,
                           allow_draws: false,
                           bracket_seed_strategy: bracketSeedStrategy,
+                          results_entry: competitionResultsEntry,
                           manual_round1_courts: manualRound1.map((m, idx) => ({ match_number: idx + 1, court_id: m.courtId })),
                         } as Record<string, unknown>,
                       });
                       const r = await tournamentsService.generateCompetitionManual(selected.id, teamKeys);
+                      await tournamentsService.scheduleCompetitionRound1(
+                        selected.id,
+                        manualRound1.map((m, idx) => ({
+                          match_number: idx + 1,
+                          court_id: m.courtId,
+                          start_at: new Date(m.startAt).toISOString(),
+                        }))
+                      );
                       toast.success(`Cuadro generado: ${r.teams_count} equipos, ${r.matches_count} partidos`);
                       setManualOpen(false);
                       await reloadCompetitionView(selected.id);
@@ -3820,6 +4121,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     a: '',
                     b: '',
                     courtId: availableCourtIds[idx % Math.max(1, availableCourtIds.length)] ?? '',
+                    startAt: normalizeHalfHourLocalDateTime(
+                      new Date(new Date(freshTournament.start_at).getTime() + idx * 30 * 60_000).toISOString().slice(0, 16)
+                    ),
                   }));
                   setManualRound1(rows);
                   setManualOpen(true);
@@ -4123,6 +4427,31 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 <div className="flex flex-wrap gap-2 pt-1">
                   <button
                     type="button"
+                    disabled={pairingSaving || singlesPairingAvailablePlayerIds.length < 2}
+                    onClick={() => {
+                      if (singlesPairingOrder.length === 0) return;
+                      const autoPlayerOrder = autoBuildBalancedPairsByElo(
+                        singlesPairingAvailablePlayerIds,
+                        pairingPlayerElos,
+                        pairingTiebreakStats
+                      );
+                      const next: Record<string, string | undefined> = {};
+                      for (let i = 0; i < singlesPairingOrder.length; i++) {
+                        const insId = singlesPairingOrder[i];
+                        const playerId = autoPlayerOrder[i];
+                        if (playerId) next[insId] = playerId;
+                      }
+                      setSinglesPairingDraft(next);
+                    }}
+                    className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50"
+                  >
+                    Formar todas las parejas (Elo)
+                  </button>
+                  <p className="w-full text-[11px] text-gray-600">
+                    Empareja automáticamente combinando Elo alto con Elo bajo para equilibrar cada pareja. Si el Elo es muy parecido, se desempata por victorias/derrotas en torneos cerrados previos del mismo club.
+                  </p>
+                  <button
+                    type="button"
                     disabled={!pairingIsDirty || pairingSaving}
                     onClick={() => {
                       for (const insId of singlesPairingOrder) {
@@ -4152,10 +4481,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
             )}
             {(selected.registration_mode === 'pair' || selected.registration_mode === 'both') && (
               <div className="space-y-2">
-                {pairIncompleteRows.length === 0 ? (
+                {visiblePairIncompleteRows.length === 0 ? (
                   <p className="text-xs text-gray-500">{t('tournament_pairing_pair_none_incomplete')}</p>
                 ) : (
-                  pairIncompleteRows.map((ins) => (
+                  visiblePairIncompleteRows.map((ins) => (
                     <div
                       key={ins.id}
                       className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-100 p-2"

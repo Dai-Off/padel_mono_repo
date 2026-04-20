@@ -168,7 +168,7 @@ export async function finalizeTournamentPaidJoin(params: {
 
   const { data: tournament, error: tErr } = await supabase
     .from('tournaments')
-    .select('id, visibility, status, max_players, invite_ttl_minutes, gender, registration_mode, price_cents')
+    .select('id, visibility, status, max_players, invite_ttl_minutes, gender, registration_mode, price_cents, elo_min, elo_max')
     .eq('id', tournamentId)
     .maybeSingle();
   if (tErr || !tournament) return { ok: false, error: 'Torneo no encontrado' };
@@ -179,18 +179,39 @@ export async function finalizeTournamentPaidJoin(params: {
   if (String((tournament as { status: string }).status) !== 'open') {
     return { ok: false, error: 'El torneo no está abierto' };
   }
-  if (String((tournament as { registration_mode: string }).registration_mode) !== 'individual') {
+  const registrationMode = String((tournament as { registration_mode?: string }).registration_mode ?? 'individual');
+  if (!['individual', 'both'].includes(registrationMode)) {
+    console.warn('[finalizeTournamentPaidJoin] rejected by registration_mode', {
+      tournamentId,
+      playerId,
+      registrationMode,
+      stripePaymentIntentId,
+    });
     return { ok: false, error: 'Este torneo no admite inscripción individual pagada desde la app' };
   }
   const priceCents = Number((tournament as { price_cents: number }).price_cents ?? 0);
   if (priceCents <= 0) return { ok: false, error: 'Este torneo no tiene precio de inscripción' };
   if (amountCents !== priceCents) {
+    console.warn('[finalizeTournamentPaidJoin] amount mismatch', {
+      tournamentId,
+      playerId,
+      amountCents,
+      priceCents,
+      stripePaymentIntentId,
+    });
     return { ok: false, error: 'El importe del pago no coincide con el precio del torneo' };
   }
 
   await cleanupExpiredTournamentInvites(tournamentId);
   const slots = await getTournamentSlots(tournamentId);
   if (slots.confirmedPlayers >= Number((tournament as { max_players: number }).max_players)) {
+    console.warn('[finalizeTournamentPaidJoin] tournament full', {
+      tournamentId,
+      playerId,
+      confirmedPlayers: slots.confirmedPlayers,
+      maxPlayers: Number((tournament as { max_players: number }).max_players),
+      stripePaymentIntentId,
+    });
     return { ok: false, error: 'No hay cupos disponibles' };
   }
 
@@ -203,19 +224,47 @@ export async function finalizeTournamentPaidJoin(params: {
 
   const { data: joinPlayer } = await supabase
     .from('players')
-    .select('gender, first_name, last_name')
+    .select('gender, first_name, last_name, elo_rating')
     .eq('id', playerId)
     .maybeSingle();
-  if (
-    !playerMeetsTournamentGender(
-      (tournament as { gender?: string }).gender,
-      (joinPlayer as { gender?: string } | null)?.gender
-    )
-  ) {
+  const genderOk = playerMeetsTournamentGender(
+    (tournament as { gender?: string }).gender,
+    (joinPlayer as { gender?: string } | null)?.gender
+  );
+  const playerElo = Number((joinPlayer as { elo_rating?: number } | null)?.elo_rating ?? 0);
+  const eloMin = (tournament as { elo_min?: number | null }).elo_min;
+  const eloMax = (tournament as { elo_max?: number | null }).elo_max;
+  const eloOk =
+    (eloMin == null || playerElo >= Number(eloMin)) &&
+    (eloMax == null || playerElo <= Number(eloMax));
+  let hasApprovedEntryRequest = false;
+  if (!genderOk || !eloOk) {
+    const { data: approvedReq } = await supabase
+      .from('tournament_entry_requests')
+      .select('id')
+      .eq('tournament_id', tournamentId)
+      .eq('player_id', playerId)
+      .eq('status', 'approved')
+      .order('resolved_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    hasApprovedEntryRequest = Boolean(approvedReq?.id);
+  }
+  if ((!genderOk || !eloOk) && !hasApprovedEntryRequest) {
+    console.warn('[finalizeTournamentPaidJoin] rejected by gender', {
+      tournamentId,
+      playerId,
+      tournamentGender: (tournament as { gender?: string }).gender ?? null,
+      playerGender: (joinPlayer as { gender?: string } | null)?.gender ?? null,
+      playerElo,
+      eloMin,
+      eloMax,
+      stripePaymentIntentId,
+    });
     return {
       ok: false,
       error:
-        'Tu género en el perfil no coincide con este torneo. Actualiza tu perfil o elige un torneo mixto.',
+        'No cumples los requisitos automáticos del torneo (Elo/género). Envía una solicitud al organizador y completa el pago cuando te la aprueben.',
     };
   }
 
