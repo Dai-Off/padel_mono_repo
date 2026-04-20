@@ -1,16 +1,42 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SkillPolarChart } from './SkillPolarChart';
 
 import { CoachAssessment } from '../../api/coachAssessment';
+import { PeerFeedbackInsight } from '../../api/peerFeedbackInsight';
 
 interface AICoachSectionProps {
   assessment: CoachAssessment;
+  peerInsight: PeerFeedbackInsight | null;
 }
 
-export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment }) => {
+export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peerInsight }) => {
+  const [activeTab, setActiveTab] = useState<'today' | 'plan'>(
+    peerInsight && !peerInsight.empty ? 'today' : 'plan'
+  );
+
+  const isToday = activeTab === 'today';
+  
+  // Decide what to show
+  const showPeerData = isToday && peerInsight && !peerInsight.empty;
+  
+  const recommendation = showPeerData 
+    ? peerInsight.recommendation_ia 
+    : assessment.recommendation;
+
+  const strengths = showPeerData 
+    ? peerInsight.fortalezas 
+    : assessment.strengths;
+
+  const improvements = showPeerData 
+    ? peerInsight.a_mejorar 
+    : assessment.improvements;
+
+  const sourceLabel = showPeerData 
+    ? (peerInsight.insight_source === 'openai' ? '✨ IA' : '📋 Feedback') 
+    : '🎯 Evaluación';
   return (
     <View style={styles.container}>
       {/* Resumen Card */}
@@ -59,12 +85,25 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment }) =>
 
       {/* Tabs Menu */}
       <View style={styles.tabsContainer}>
-        <Pressable style={[styles.tab, styles.tabActive]}>
-          <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.tabGradient} />
-          <Text style={[styles.tabText, styles.tabTextActive]}>Resumen de Hoy</Text>
+        <Pressable 
+          style={[styles.tab, activeTab === 'today' && styles.tabActive]}
+          onPress={() => setActiveTab('today')}
+        >
+          {activeTab === 'today' && (
+            <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.tabGradient} />
+          )}
+          <Text style={[styles.tabText, activeTab === 'today' && styles.tabTextActive]}>
+            Resumen de Hoy
+          </Text>
         </Pressable>
-        <Pressable style={styles.tab}>
-          <Text style={styles.tabText}>Plan</Text>
+        <Pressable 
+          style={[styles.tab, activeTab === 'plan' && styles.tabActive]}
+          onPress={() => setActiveTab('plan')}
+        >
+          {activeTab === 'plan' && (
+            <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.tabGradient} />
+          )}
+          <Text style={[styles.tabText, activeTab === 'plan' && styles.tabTextActive]}>Plan</Text>
         </Pressable>
       </View>
 
@@ -89,16 +128,83 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment }) =>
         {/* Recomendación IA */}
         <View style={styles.recommendationBox}>
           <View style={styles.recIconContainer}>
-            <Ionicons name="sparkles-outline" size={12} color="#fff" />
+            <Ionicons name={showPeerData ? "chatbubbles-outline" : "sparkles-outline"} size={12} color="#fff" />
           </View>
           <View style={styles.recContent}>
-            <Text style={styles.recTitle}>Recomendación IA:</Text>
+            <View style={styles.recHeaderRow}>
+              <Text style={styles.recTitle}>Recomendación {sourceLabel}:</Text>
+              {showPeerData && peerInsight.feedback_created_at && (
+                <Text style={styles.recDate}>
+                  {new Date(peerInsight.feedback_created_at).toLocaleDateString()}
+                </Text>
+              )}
+            </View>
             <Text style={styles.recText}>
-              {assessment.recommendation || 'Continúa entrenando para mejorar tus habilidades.'}
+              {recommendation || 'Continúa entrenando para mejorar tus habilidades.'}
             </Text>
+            {showPeerData && (
+              <Text style={styles.peerCountText}>
+                Basado en el feedback de {peerInsight.peer_count} compañero{peerInsight.peer_count !== 1 ? 's' : ''}
+              </Text>
+            )}
+            {!showPeerData && activeTab === 'today' && (
+                <Text style={styles.emptyText}>
+                  ¡Juega un partido y recibe feedback para desbloquear recomendaciones dinámicas!
+                </Text>
+            )}
           </View>
         </View>
       </View>
+
+      {/* Percepción de Compañeros (Solo si hay datos de hoy) */}
+      {showPeerData && peerInsight.distribution && (
+        <View style={styles.analysisCard}>
+            <View style={styles.analysisHeader}>
+              <View style={[styles.analysisIconBox, { backgroundColor: 'rgba(59, 130, 246, 0.1)', borderColor: 'rgba(59, 130, 246, 0.2)' }]}>
+                <Ionicons name="people-outline" size={14} color="#3B82F6" />
+              </View>
+              <Text style={styles.analysisTitle}>Percepción de tus Compañeros</Text>
+            </View>
+            
+            <View style={styles.perceivedBadgeRow}>
+                <View style={[
+                    styles.perceivedBadge, 
+                    peerInsight.last_perceived === 1 ? styles.badgeHigh : 
+                    peerInsight.last_perceived === -1 ? styles.badgeLow : styles.badgeMid
+                ]}>
+                    <Text style={styles.perceivedBadgeText}>
+                        {peerInsight.last_perceived === 1 ? 'Nivel Superior' : 
+                         peerInsight.last_perceived === -1 ? 'Bajo lo Esperado' : 'Nivel Acertado'}
+                    </Text>
+                </View>
+                <Text style={styles.perceivedSubtext}>Última tendencia</Text>
+            </View>
+
+            <View style={styles.distributionContainer}>
+                <View style={styles.distItem}>
+                    <Text style={styles.distLabel}>Alto</Text>
+                    <View style={styles.distBarTrack}>
+                        <View style={[styles.distBarFill, { width: `${(peerInsight.distribution.high / peerInsight.peer_count) * 100}%`, backgroundColor: '#10B981' }]} />
+                    </View>
+                    <Text style={styles.distValue}>{peerInsight.distribution.high}</Text>
+                </View>
+                <View style={styles.distItem}>
+                    <Text style={styles.distLabel}>Normal</Text>
+                    <View style={styles.distBarTrack}>
+                        <View style={[styles.distBarFill, { width: `${(peerInsight.distribution.mid / peerInsight.peer_count) * 100}%`, backgroundColor: '#F97316' }]} />
+                    </View>
+                    <Text style={styles.distValue}>{peerInsight.distribution.mid}</Text>
+                </View>
+                <View style={styles.distItem}>
+                    <Text style={styles.distLabel}>Bajo</Text>
+                    <View style={styles.distBarTrack}>
+                        <View style={[styles.distBarFill, { width: `${(peerInsight.distribution.low / peerInsight.peer_count) * 100}%`, backgroundColor: '#EF4444' }]} />
+                    </View>
+                    <Text style={styles.distValue}>{peerInsight.distribution.low}</Text>
+                </View>
+            </View>
+        </View>
+      )}
 
       {/* Fortalezas y Áreas de Mejora */}
       <View style={styles.listsGrid}>
@@ -110,12 +216,15 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment }) =>
             <Text style={styles.listTitle}>Fortalezas</Text>
           </View>
           <View style={styles.listItems}>
-            {assessment.strengths.map((strength, index) => (
+            {strengths.map((strength, index) => (
               <View key={index} style={styles.listItem}>
                 <Ionicons name="checkmark-circle" size={12} color="#10B981" />
                 <Text style={styles.listItemText}>{strength}</Text>
               </View>
             ))}
+            {strengths.length === 0 && (
+                <Text style={styles.emptySmallText}>Sin datos aún</Text>
+            )}
           </View>
         </View>
 
@@ -127,12 +236,15 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment }) =>
             <Text style={styles.listTitle}>A mejorar</Text>
           </View>
           <View style={styles.listItems}>
-            {assessment.improvements.map((improvement, index) => (
+            {improvements.map((improvement, index) => (
               <View key={index} style={styles.listItem}>
                 <Ionicons name="alert-circle" size={12} color="#F97316" />
                 <Text style={styles.listItemText}>{improvement}</Text>
               </View>
             ))}
+            {improvements.length === 0 && (
+                <Text style={styles.emptySmallText}>Sin datos aún</Text>
+            )}
           </View>
         </View>
       </View>
@@ -335,15 +447,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   recTitle: {
-    fontSize: 11,
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#fff',
     marginBottom: 2,
   },
   recText: {
-    fontSize: 11,
-    color: '#9CA3AF',
-    lineHeight: 16,
+    fontSize: 13,
+    color: '#D1D5DB',
+    lineHeight: 18,
   },
   listsGrid: {
     flexDirection: 'row',
@@ -429,6 +541,100 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#10B981',
     width: 40,
+    textAlign: 'right',
+  },
+  recHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  recDate: {
+    fontSize: 10,
+    color: '#6B7280',
+    fontWeight: '500',
+  },
+  peerCountText: {
+    fontSize: 10,
+    fontStyle: 'italic',
+    color: '#F18F34',
+    marginTop: 6,
+    fontWeight: '500',
+  },
+  emptyText: {
+    fontSize: 11,
+    color: '#6B7280',
+    fontStyle: 'italic',
+    marginTop: 4,
+  },
+  emptySmallText: {
+    fontSize: 9,
+    color: '#4B5563',
+    marginLeft: 6,
+  },
+  perceivedBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  perceivedBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  badgeHigh: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  badgeMid: {
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
+    borderColor: 'rgba(249, 115, 22, 0.2)',
+  },
+  badgeLow: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderColor: 'rgba(239, 68, 68, 0.2)',
+  },
+  perceivedBadgeText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  perceivedSubtext: {
+    fontSize: 10,
+    color: '#6B7280',
+  },
+  distributionContainer: {
+    gap: 12,
+  },
+  distItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  distLabel: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    width: 45,
+  },
+  distBarTrack: {
+    flex: 1,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  distBarFill: {
+    height: '100%',
+    borderRadius: 2,
+  },
+  distValue: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#fff',
+    width: 15,
     textAlign: 'right',
   },
 });
