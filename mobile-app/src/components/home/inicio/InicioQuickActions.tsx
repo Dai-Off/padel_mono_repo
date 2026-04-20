@@ -9,6 +9,7 @@ export type HomeNavigateTab = 'pistas' | 'partidos' | 'torneos';
 
 type Props = {
   onNavigateToTab?: (tab: HomeNavigateTab) => void;
+  onCoursesPress?: () => void;
   /** Partidos abiertos (API). */
   openMatchesCount?: number | null;
   /** Pistas / recuentos desde API home. */
@@ -31,6 +32,7 @@ function countLine(
 
 export function InicioQuickActions({
   onNavigateToTab,
+  onCoursesPress,
   openMatchesCount,
   courtsFree,
   tournamentsCount,
@@ -85,7 +87,10 @@ export function InicioQuickActions({
             </View>
           </View>
         </Pressable>
-        <Pressable style={({ pressed }) => [styles.halfCard, pressed && styles.pressed]}>
+        <Pressable
+          onPress={() => onCoursesPress?.()}
+          style={({ pressed }) => [styles.halfCard, pressed && styles.pressed]}
+        >
           <View style={styles.blobPurple} />
           <View style={styles.rowSm}>
             <View style={styles.iconSm}>

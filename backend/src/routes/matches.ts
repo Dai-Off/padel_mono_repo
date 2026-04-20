@@ -450,14 +450,14 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
 
     const { data: joinPlayer, error: errJP } = await supabase
       .from('players')
-      .select('elo_rating, initial_rating_completed')
+      .select('elo_rating, onboarding_completed')
       .eq('id', playerId)
       .maybeSingle();
     if (errJP) return res.status(500).json({ ok: false, error: errJP.message });
 
     const mCompetitive = !!(match as { competitive?: boolean }).competitive;
     const mType = String((match as { type?: string }).type ?? 'open');
-    if (mCompetitive && !(joinPlayer as { initial_rating_completed?: boolean })?.initial_rating_completed) {
+    if (mCompetitive && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
       return res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
     }
     const eloJoin = Number((joinPlayer as { elo_rating?: number }).elo_rating ?? 0);

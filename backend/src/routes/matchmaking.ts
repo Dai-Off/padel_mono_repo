@@ -135,11 +135,11 @@ router.post('/join', async (req: Request, res: Response) => {
   }
   const { data: pl, error: e1 } = await supabase
     .from('players')
-    .select('initial_rating_completed')
+    .select('onboarding_completed')
     .eq('id', playerId)
     .maybeSingle();
   if (e1) return res.status(500).json({ ok: false, error: e1.message });
-  if (!(pl as { initial_rating_completed?: boolean } | null)?.initial_rating_completed) {
+  if (!(pl as { onboarding_completed?: boolean } | null)?.onboarding_completed) {
     return res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
   }
 

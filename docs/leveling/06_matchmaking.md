@@ -58,15 +58,15 @@ flowchart TD
 
 ## 2. Estado actual
 
-**Archivo:** `backend/src/routes/matches.ts`
+> Ultima verificacion: 2026-04-14
 
-La tabla `matches` tiene `elo_min`, `elo_max` y `gender` para filtrar en partidos abiertos. La función `hasCourtConflict` (línea 17–74) verifica conflictos de horario y puede reutilizarse.
-
-**No existe:**
-- Ninguna tabla de pool de matchmaking
-- Ningún algoritmo de emparejamiento
-- Ninguna ruta para activar/desactivar la búsqueda
-- Ninguna lógica de reserva automática
+**Implementado:**
+- Tabla `matchmaking_pool` creada (campos: player_id, paired_with_id, club_id, max_distance_km, preferred_side, gender, available_from/until, status, expires_at, proposed_match_id, reject_count, search_lat, search_lng).
+- `POST /matchmaking/join` — entrada en pool (valida onboarding completo, rechaza duplicados).
+- `runMatchmakingCycle()` en `matchmakingService.ts` — ciclo completo: expira propuestas, ejecuta expansion scan, lee pool con status='searching', genera combinaciones, aplica filtros (MAX_LEVEL_SPREAD, BASE_WIN_PROB_MIN/MAX), forma equipos.
+- `POST /matchmaking/run-cycle` — endpoint protegido por `x-cron-secret` para ejecutar el ciclo.
+- `bestTeamSplitSync()` en `matchmakingShared.ts` — formacion de equipos equilibrada con OpenSkill.
+- Filtros: distancia, nivel, genero, lado preferido.
 - El campo `type` en `matches` (ver componente 02)
 
 ---
