@@ -234,6 +234,7 @@
     "players_manual_subtitle": "First name, last name and phone are required. Email is optional.",
     "players_manual_required": "First name, last name and phone are required",
     "players_level_badge": "Level {{n}}",
+    "players_balance_label": "Balance",
     "players_no_phone": "No phone",
     "players_manual_success": "Player registered successfully",
     "players_optional": "optional",

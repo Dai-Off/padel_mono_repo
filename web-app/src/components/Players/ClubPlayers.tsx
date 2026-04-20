@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  X, Users, TrendingUp, Search, Eye, Mail, Phone, Zap, Plus, Loader2,
+  X, Users, TrendingUp, Search, Eye, Mail, Phone, Zap, Plus, Loader2, Wallet,
 } from 'lucide-react';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { useTranslation } from 'react-i18next';
@@ -38,7 +38,21 @@ function formatDate(iso: string): string {
   }
 }
 
-export function ClubPlayersTab() {
+function formatBalanceCents(cents: number, currency: string): string {
+  const code = (currency || 'EUR').trim() || 'EUR';
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: code }).format(cents / 100);
+  } catch {
+    return `${(cents / 100).toFixed(2)} ${code}`;
+  }
+}
+
+type ClubPlayersTabProps = {
+  clubId: string | null;
+  currency?: string;
+};
+
+export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps) {
   const { t } = useTranslation();
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,7 +66,7 @@ export function ClubPlayersTab() {
   const fetchPlayers = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await playerService.getAll();
+      const list = await playerService.getAll(undefined, clubId);
       setPlayers(list ?? []);
     } catch (e) {
       console.error(e);
@@ -60,7 +74,7 @@ export function ClubPlayersTab() {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, clubId]);
 
   useEffect(() => {
     fetchPlayers();
@@ -216,7 +230,32 @@ export function ClubPlayersTab() {
                       </span>
                       <span>{player.email ? player.email : t('players_no_email')}</span>
                     </div>
+                    {clubId && typeof player.wallet_balance_cents === 'number' && (
+                      <div className="sm:hidden mt-1 flex items-center gap-1.5 text-[10px]">
+                        <Wallet className="w-3 h-3 shrink-0 text-gray-400" />
+                        <span className="text-gray-400">{t('players_balance_label')}</span>
+                        <span
+                          className={`font-bold tabular-nums ${
+                            player.wallet_balance_cents < 0 ? 'text-red-600' : 'text-[#1A1A1A]'
+                          }`}
+                        >
+                          {formatBalanceCents(player.wallet_balance_cents, currency)}
+                        </span>
+                      </div>
+                    )}
                   </div>
+                  {clubId && typeof player.wallet_balance_cents === 'number' && (
+                    <div className="hidden sm:flex flex-col items-end justify-center px-2 min-w-[6.5rem] flex-shrink-0 text-right border-l border-gray-50 pl-3 ml-1">
+                      <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">{t('players_balance_label')}</span>
+                      <span
+                        className={`text-xs font-bold tabular-nums ${
+                          player.wallet_balance_cents < 0 ? 'text-red-600' : 'text-[#1A1A1A]'
+                        }`}
+                      >
+                        {formatBalanceCents(player.wallet_balance_cents, currency)}
+                      </span>
+                    </div>
+                  )}
                   <motion.button
                     type="button"
                     whileTap={{ scale: 0.9 }}
@@ -295,6 +334,19 @@ export function ClubPlayersTab() {
                       <Zap className="w-3 h-3" />
                       {t('players_level_badge', { n: selectedPlayer.elo_rating })}
                     </span>
+                    {clubId && typeof selectedPlayer.wallet_balance_cents === 'number' && (
+                      <span className="flex items-center gap-1">
+                        <Wallet className="w-3 h-3 shrink-0" />
+                        {t('players_balance_label')}:{' '}
+                        <span
+                          className={
+                            selectedPlayer.wallet_balance_cents < 0 ? 'text-red-600 font-semibold' : 'text-[#1A1A1A] font-semibold'
+                          }
+                        >
+                          {formatBalanceCents(selectedPlayer.wallet_balance_cents, currency)}
+                        </span>
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

@@ -234,6 +234,7 @@
     "players_manual_subtitle": "姓名、姓氏與電話必填；電郵可選。",
     "players_manual_required": "請填寫姓名、姓氏與電話",
     "players_level_badge": "等級 {{n}}",
+    "players_balance_label": "餘額",
     "players_no_phone": "無電話",
     "players_manual_success": "球員已成功登記",
     "players_optional": "可選",
