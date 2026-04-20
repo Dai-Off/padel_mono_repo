@@ -119,3 +119,7 @@ export async function sendStaffAccountEmail(
   `;
   return invokeEdgeFunction('send-email', { to, subject, html });
 }
+
+export async function syncPlayerVector(playerId: string): Promise<{ sent: boolean; error?: string }> {
+  return invokeEdgeFunction('sync-player-vector', { player_id: playerId });
+}
