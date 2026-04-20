@@ -18,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useStripe } from '@stripe/stripe-react-native';
+import { useStripe } from '../stripe';
 import { useAuth } from '../contexts/AuthContext';
 import {
   cancelMatchAsOrganizer,

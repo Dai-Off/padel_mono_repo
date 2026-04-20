@@ -7,7 +7,7 @@ create table if not exists public.learning_questions (
   id uuid primary key default gen_random_uuid(),
   type text not null check (type in ('test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence')),
   level numeric not null default 1.0,
-  area text not null check (area in ('technique', 'tactics', 'physical', 'mental_vocabulary')),
+  area text not null check (area in ('technique', 'tactics', 'physical', 'mental', 'rules')),
   has_video boolean not null default false,
   video_url text,
   content jsonb not null,

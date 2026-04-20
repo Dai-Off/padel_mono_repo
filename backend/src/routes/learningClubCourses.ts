@@ -17,7 +17,7 @@ async function getCourseForClubEdit(
   const supabase = getSupabaseServiceRoleClient();
   const { data: course, error } = await supabase
     .from('learning_courses')
-    .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, status, created_at, updated_at')
+    .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, review_notes, created_at, updated_at')
     .eq('id', courseId)
     .maybeSingle();
 
@@ -36,10 +36,74 @@ async function getCourseForClubEdit(
 // Course endpoints
 // ---------------------------------------------------------------------------
 
+// GET /club-courses?club_id=...
+router.get('/club-courses', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const club_id = req.query.club_id as string | undefined;
+    if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+
+    const supabase = getSupabaseServiceRoleClient();
+
+    const { data: courses, error } = await supabase
+      .from('learning_courses')
+      .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, review_notes, created_at, updated_at')
+      .eq('club_id', club_id)
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!courses || courses.length === 0) return res.json({ ok: true, data: [] });
+
+    // Obtener count de lecciones por curso
+    const courseIds = courses.map((c: any) => c.id);
+    const { data: lessons, error: lessonsErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id, course_id')
+      .in('course_id', courseIds);
+
+    if (lessonsErr) return res.status(500).json({ ok: false, error: lessonsErr.message });
+
+    const lessonCountMap: Record<string, number> = {};
+    for (const l of lessons || []) {
+      lessonCountMap[l.course_id] = (lessonCountMap[l.course_id] || 0) + 1;
+    }
+
+    const result = courses.map((c: any) => ({
+      ...c,
+      lesson_count: lessonCountMap[c.id] || 0,
+    }));
+
+    return res.json({ ok: true, data: result });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// GET /club-courses/:id — detalle de curso con lecciones
+router.get('/club-courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  try {
+    const result = await getCourseForClubEdit(req, req.params.id, false);
+    if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
+
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: lessons, error: lessonsErr } = await supabase
+      .from('learning_course_lessons')
+      .select('id, course_id, order, title, description, video_url, duration_seconds')
+      .eq('course_id', req.params.id)
+      .order('order', { ascending: true });
+
+    if (lessonsErr) return res.status(500).json({ ok: false, error: lessonsErr.message });
+
+    return res.json({ ok: true, data: { ...result.course, lessons: lessons || [] } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // POST /courses
 router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   try {
-    const { club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal } = req.body ?? {};
+    const { club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id } = req.body ?? {};
 
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
     if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -48,6 +112,9 @@ router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Respo
     }
     if (elo_min != null && elo_max != null && Number(elo_min) > Number(elo_max)) {
       return res.status(400).json({ ok: false, error: 'elo_min no puede ser mayor que elo_max' });
+    }
+    if (elo_min != null && elo_max != null && Number(elo_max) - Number(elo_min) > 3) {
+      return res.status(400).json({ ok: false, error: 'El rango ELO no puede superar 3 puntos' });
     }
 
     const supabase = getSupabaseServiceRoleClient();
@@ -61,6 +128,7 @@ router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Respo
         elo_min: elo_min ?? 0,
         elo_max: elo_max ?? 7,
         pedagogical_goal: pedagogical_goal || null,
+        staff_id: staff_id || null,
         status: 'draft',
       })
       .select('*')
@@ -79,7 +147,7 @@ router.put('/courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Re
     const result = await getCourseForClubEdit(req, req.params.id, true);
     if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
 
-    const { title, description, banner_url, elo_min, elo_max, pedagogical_goal } = req.body ?? {};
+    const { title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id } = req.body ?? {};
     const updates: Record<string, unknown> = {};
 
     if (title !== undefined) {
@@ -93,11 +161,15 @@ router.put('/courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Re
     if (elo_min !== undefined) updates.elo_min = elo_min;
     if (elo_max !== undefined) updates.elo_max = elo_max;
     if (pedagogical_goal !== undefined) updates.pedagogical_goal = pedagogical_goal || null;
+    if (staff_id !== undefined) updates.staff_id = staff_id || null;
 
     const finalMin = updates.elo_min ?? result.course.elo_min;
     const finalMax = updates.elo_max ?? result.course.elo_max;
     if (Number(finalMin) > Number(finalMax)) {
       return res.status(400).json({ ok: false, error: 'elo_min no puede ser mayor que elo_max' });
+    }
+    if (Number(finalMax) - Number(finalMin) > 3) {
+      return res.status(400).json({ ok: false, error: 'El rango ELO no puede superar 3 puntos' });
     }
 
     if (Object.keys(updates).length === 0) {
@@ -244,18 +316,19 @@ router.delete('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdmin, async (
 
     if (deleteErr) return res.status(500).json({ ok: false, error: deleteErr.message });
 
-    // Re-ordenar lecciones restantes
+    // Re-ordenar lecciones restantes en paralelo
     const { data: remaining } = await supabase
       .from('learning_course_lessons')
       .select('id')
       .eq('course_id', req.params.id)
       .order('order', { ascending: true });
 
-    for (let i = 0; i < (remaining || []).length; i++) {
-      await supabase
-        .from('learning_course_lessons')
-        .update({ order: i + 1 })
-        .eq('id', remaining![i].id);
+    if (remaining?.length) {
+      await Promise.all(
+        remaining.map((r, i) =>
+          supabase.from('learning_course_lessons').update({ order: i + 1 }).eq('id', r.id),
+        ),
+      );
     }
 
     return res.json({ ok: true, data: { id: lessonId, deleted: true } });
