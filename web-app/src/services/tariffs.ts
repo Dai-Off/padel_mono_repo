@@ -41,6 +41,7 @@ export type CalendarDay = {
     label: string | null;
     source: string | null;
     has_schedule: boolean;
+    avg_price_cents: number | null;
 };
 
 // ---------- Tariffs CRUD ----------

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Tag,
     Plus,
@@ -21,14 +22,13 @@ import { toast } from 'sonner';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { courtService } from '../../services/court';
 import type { Court } from '../../types/court';
+import { reservationTypePricesService } from '../../services/reservationTypePrices';
 import {
     listTariffs,
     createTariff,
     updateTariff,
     deleteTariff,
     getTariffCalendar,
-    putDayOverride,
-    deleteDayOverride,
     getDaySchedule,
     saveDaySchedule,
     repeatDaySchedule,
@@ -64,6 +64,7 @@ const CELL_COLORS = [
     { bg: 'bg-pink-100',    text: 'text-pink-800',    border: 'border-pink-300'    },
     { bg: 'bg-cyan-100',    text: 'text-cyan-800',    border: 'border-cyan-300'    },
     { bg: 'bg-orange-100',  text: 'text-orange-800',  border: 'border-orange-300'  },
+    { bg: 'bg-red-100',     text: 'text-red-700',     border: 'border-red-300'     },
 ] as const;
 
 type CellColor = (typeof CELL_COLORS)[number];
@@ -268,9 +269,6 @@ function TarifasSection({ clubId }: { clubId: string }) {
         try {
             await deleteTariff(id);
             setTariffs((prev) => prev.filter((t) => t.id !== id));
-            // Clear defaults if they referenced this tariff
-            if (weekdayId === id) setWeekdayId(null);
-            if (weekendId === id) setWeekendId(null);
             toast.success('Tarifa eliminada');
         } catch {
             toast.error('Error al eliminar la tarifa. Puede que esté en uso.');
@@ -425,6 +423,7 @@ function DayTariffModal({
     tariffs,
     cellColorMap,
     monthDays,
+    flatRateCents,
     onRepeat,
     onClose,
 }: {
@@ -433,6 +432,7 @@ function DayTariffModal({
     tariffs: Tariff[];
     cellColorMap: Record<string, CellColor>;
     monthDays: CalendarDay[];
+    flatRateCents: number | null;
     onRepeat: (targetDates: string[]) => Promise<void>;
     onClose: () => void;
 }) {
@@ -861,21 +861,31 @@ function DayTariffModal({
                                                 const tariffId = painted[key];
                                                 const c = tariffId ? cellColorMap[tariffId] : null;
                                                 const tariff = tariffs.find((t) => t.id === tariffId);
+                                                // Show flat rate badge only in read mode (not editMode) when cell has no custom tariff
+                                                const showFlatRate = !tariff && !editMode && flatRateCents !== null;
                                                 return (
                                                     <td
                                                         key={court.id}
                                                         onClick={() => handleCellClick(court.id, slot)}
-                                                        title={tariff ? `${tariff.name} · ${fmtPrice(tariff.price_cents)}` : 'Sin tarifa'}
+                                                        title={
+                                                            tariff
+                                                                ? `${tariff.name} · ${fmtPrice(tariff.price_cents)}`
+                                                                : flatRateCents !== null
+                                                                    ? `Tarifa Plana · ${fmtPrice(flatRateCents)}`
+                                                                    : 'Sin tarifa'
+                                                        }
                                                         className={`border border-gray-100 cursor-pointer select-none text-center transition-colors h-10
                                                             ${c
                                                                 ? `${c.bg} ${c.text} hover:brightness-95`
-                                                                : idx % 2 === 0
-                                                                    ? 'bg-white hover:bg-emerald-50'
-                                                                    : 'bg-gray-50/50 hover:bg-emerald-50'
+                                                                : showFlatRate
+                                                                    ? 'bg-amber-50 hover:bg-amber-100'
+                                                                    : idx % 2 === 0
+                                                                        ? 'bg-white hover:bg-emerald-50'
+                                                                        : 'bg-gray-50/50 hover:bg-emerald-50'
                                                             }
                                                         `}
                                                     >
-                                                        {tariff && (
+                                                        {tariff ? (
                                                             <div className="flex flex-col items-center justify-center gap-0.5 px-1 leading-none">
                                                                 <span className="text-[9px] font-bold truncate w-full text-center">
                                                                     {tariff.name}
@@ -884,7 +894,16 @@ function DayTariffModal({
                                                                     {fmtPrice(tariff.price_cents)}
                                                                 </span>
                                                             </div>
-                                                        )}
+                                                        ) : showFlatRate ? (
+                                                            <div className="flex flex-col items-center justify-center gap-0.5 px-1 leading-none text-amber-700">
+                                                                <span className="text-[9px] font-bold truncate w-full text-center">
+                                                                    Tarifa Plana
+                                                                </span>
+                                                                <span className="text-[8px] font-medium opacity-70 truncate w-full text-center tabular-nums">
+                                                                    {fmtPrice(flatRateCents)}
+                                                                </span>
+                                                            </div>
+                                                        ) : null}
                                                     </td>
                                                 );
                                             })}
@@ -1021,6 +1040,7 @@ function DayTariffModal({
 
 function CalendarioSection({ clubId }: { clubId: string }) {
     const today = new Date();
+    const navigate = useNavigate();
     const [year, setYear] = useState(today.getFullYear());
     const [month, setMonth] = useState(today.getMonth() + 1); // 1-12
     const [days, setDays] = useState<CalendarDay[]>([]);
@@ -1029,6 +1049,17 @@ function CalendarioSection({ clubId }: { clubId: string }) {
     const [gridDay, setGridDay] = useState<CalendarDay | null>(null);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
     const [resetting, setResetting] = useState(false);
+    // Flat rate price from reservation-type-prices (used as the default price when no custom tariff is set)
+    const [flatRateCents, setFlatRateCents] = useState<number | null>(null);
+
+    useEffect(() => {
+        reservationTypePricesService.getByClub(clubId)
+            .then((prices) => {
+                const fr = prices['flat_rate'];
+                if (fr?.price_per_hour_cents != null) setFlatRateCents(fr.price_per_hour_cents);
+            })
+            .catch(() => { /* fail silently — flat rate badge just won't appear */ });
+    }, [clubId]);
 
     const load = useCallback(async () => {
         setLoading(true);
@@ -1083,6 +1114,12 @@ function CalendarioSection({ clubId }: { clubId: string }) {
     const firstDow = days.length > 0 ? days[0].dow : 0; // 0=Sun
     const leadingEmpty = firstDow;
 
+    // Monthly average price across all days that have an avg_price_cents
+    const daysWithAvg = days.filter((d) => d.avg_price_cents != null);
+    const monthlyAvgCents = daysWithAvg.length > 0
+        ? Math.round(daysWithAvg.reduce((acc, d) => acc + d.avg_price_cents!, 0) / daysWithAvg.length)
+        : null;
+
     const tariffColorMap: Record<string, string> = {};
     const cellColorMap: Record<string, CellColor> = {};
     const PALETTE_BG = [
@@ -1135,23 +1172,43 @@ function CalendarioSection({ clubId }: { clubId: string }) {
                     {/* Divider (hidden on small screens if legend wraps) */}
                     <div className="h-4 w-px bg-gray-200 hidden md:block" />
 
-                    {/* Legend: Smaller and Tighter */}
-                    {tariffs.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 items-center">
-                            {tariffs.map((t, i) => (
-                                <span
-                                    key={t.id}
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border shadow-sm ${tariffColorMap[t.id] ?? PALETTE_BG[i % PALETTE_BG.length]}`}
-                                >
-                                    {t.is_blocking && <Ban className="w-2.5 h-2.5 text-red-500" />}
-                                    {t.name}
-                                </span>
-                            ))}
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold bg-gray-100 text-gray-500 border border-gray-200 shadow-sm">
-                                Por defecto
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-1.5 items-center">
+                        {/* Tarifa Plana — first chip, clickable → Precios por Tipo de Reserva */}
+                        {flatRateCents !== null && (
+                            <button
+                                type="button"
+                                onClick={() => navigate('/precios')}
+                                title="Ver Precios por Tipo de Reserva"
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-300 shadow-sm hover:bg-amber-100 hover:border-amber-400 transition-colors cursor-pointer"
+                            >
+                                <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+                                Tarifa Plana · {fmtPrice(flatRateCents)}
+                            </button>
+                        )}
+
+                        {/* Tariff chips */}
+                        {tariffs.map((t, i) => (
+                            <span
+                                key={t.id}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold border shadow-sm ${tariffColorMap[t.id] ?? PALETTE_BG[i % PALETTE_BG.length]}`}
+                            >
+                                {t.is_blocking && <Ban className="w-2.5 h-2.5 text-red-500" />}
+                                {t.name}
                             </span>
-                        </div>
-                    )}
+                        ))}
+
+                        {/* Monthly average price indicator */}
+                        {monthlyAvgCents != null && (
+                            <>
+                                <span className="text-gray-200 text-[9px] mx-0.5">|</span>
+                                <span className="text-[9px] font-semibold text-gray-500 whitespace-nowrap">
+                                    Precio Promedio Mensual:{' '}
+                                    <span className="font-bold text-gray-700">{fmtPrice(monthlyAvgCents)}</span>
+                                </span>
+                            </>
+                        )}
+                    </div>
                 </div>
 
                 {/* Secondary actions: Reset */}
@@ -1285,16 +1342,33 @@ function CalendarioSection({ clubId }: { clubId: string }) {
                                         >
                                             {new Date(day.date + 'T00:00:00').getDate()}
                                         </span>
-                                        {/* Blue dot: indicates the day has hourly schedule configured */}
-                                        {day.has_schedule && (
+                                        {/* Indicator dot:
+                                            - blue  = day has custom hourly schedule
+                                            - amber = no custom schedule → flat rate applies */}
+                                        {day.has_schedule ? (
                                             <span
                                                 className="w-3.5 h-3.5 rounded-full bg-blue-500 flex items-center justify-center shadow-sm shadow-blue-300 ring-1 ring-blue-400/30"
-                                                title="Franjas horarias configuradas"
+                                                title="Franjas horarias personalizadas"
                                             >
                                                 <span className="w-1.5 h-1.5 rounded-full bg-white" />
                                             </span>
-                                        )}
+                                        ) : flatRateCents !== null ? (
+                                            <span
+                                                className="w-3.5 h-3.5 rounded-full bg-amber-400 flex items-center justify-center shadow-sm shadow-amber-200 ring-1 ring-amber-300/40"
+                                                title="Tarifa Plana por defecto"
+                                            >
+                                                <span className="w-1.5 h-1.5 rounded-full bg-white" />
+                                            </span>
+                                        ) : null}
                                     </div>
+                                    {/* Avg price */}
+                                    {day.avg_price_cents != null && (
+                                        <div className="mt-auto text-right">
+                                            <span className="text-[10px] text-gray-500 font-medium">
+                                                Medio: {fmtPrice(day.avg_price_cents)}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}
@@ -1310,6 +1384,7 @@ function CalendarioSection({ clubId }: { clubId: string }) {
                     tariffs={tariffs}
                     cellColorMap={cellColorMap}
                     monthDays={days}
+                    flatRateCents={flatRateCents}
                     onRepeat={async (targetDates) => {
                         try {
                             const result = await repeatDaySchedule(clubId, gridDay.date, targetDates);

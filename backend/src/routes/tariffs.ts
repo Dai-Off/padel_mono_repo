@@ -164,6 +164,136 @@ router.post('/overrides/bulk-holidays', async (req: Request, res: Response) => {
   return res.status(201).json({ ok: true, inserted: data?.length ?? 0 });
 });
 
+// ----------------- SLOT PRICE (with prorating) -----------------
+// GET /tariffs/slot-price?club_id=X&court_id=Y&date=YYYY-MM-DD&slot=HH:MM&duration_minutes=90
+//
+// Calculates the total price for a booking that may span multiple hourly tariff slots.
+// For each hour touched by the booking it looks up the configured tariff and charges
+// only the proportional minutes. Falls back to flat_rate for unconfigured slots.
+//
+// Example: 90-min booking at 09:00 with tariff 40€/h at 09:xx and 30€/h at 10:xx
+//   → 60 min × 40 + 30 min × 30 = 4000 + 1500 = 5500 cents
+
+router.get('/slot-price', async (req: Request, res: Response) => {
+  const club_id         = req.query.club_id         as string | undefined;
+  const court_id        = req.query.court_id        as string | undefined;
+  const date            = req.query.date            as string | undefined;
+  const slot            = req.query.slot            as string | undefined; // "HH:MM"
+  const durationMinutes = Number(req.query.duration_minutes ?? 60);
+
+  if (!club_id || !court_id || !date || !slot) {
+    return res.status(400).json({ ok: false, error: 'club_id, court_id, date y slot son obligatorios' });
+  }
+  if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+    return res.status(400).json({ ok: false, error: 'duration_minutes debe ser un número positivo' });
+  }
+  if (!canAccessClub(req, club_id)) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  }
+
+  // Parse start slot into total minutes from midnight
+  const [startH, startM] = slot.split(':').map(Number);
+  const startMinutes = startH * 60 + (startM || 0);
+  const endMinutes   = startMinutes + durationMinutes;
+
+  // Collect all hourly slots the booking touches
+  const firstHour = Math.floor(startMinutes / 60);
+  // If booking ends exactly on the hour (e.g. 60-min from 09:00 → ends at 10:00),
+  // don't include the 10:00 slot (zero minutes overlap)
+  const lastHour  = endMinutes % 60 === 0
+    ? endMinutes / 60 - 1
+    : Math.floor(endMinutes / 60);
+
+  // Build list of "HH:MM:SS" strings for the DB query
+  const hourSlots: string[] = [];
+  for (let h = firstHour; h <= lastHour; h++) {
+    hourSlots.push(`${String(h).padStart(2, '0')}:00:00`);
+  }
+
+  const supabase = getSupabaseServiceRoleClient();
+
+  // Step 1: fetch tariff_id per slot (no FK join — club_day_schedule has no FK declared)
+  const { data: scheduleRows } = await supabase
+    .from('club_day_schedule')
+    .select('slot, tariff_id')
+    .eq('club_id', club_id)
+    .eq('court_id', court_id)
+    .eq('date', date)
+    .in('slot', hourSlots);
+
+  // Step 2: fetch prices for the tariff_ids found
+  const tariffIds = [...new Set((scheduleRows ?? []).map((r: any) => r.tariff_id).filter(Boolean))];
+  const tariffPriceById = new Map<string, number>();
+  if (tariffIds.length > 0) {
+    const { data: tariffRows } = await supabase
+      .from('club_tariffs')
+      .select('id, price_cents')
+      .in('id', tariffIds);
+    for (const t of tariffRows ?? []) {
+      tariffPriceById.set(t.id, t.price_cents);
+    }
+  }
+
+  // Build a map: hour (0-23) → price_per_hour_cents from the calendar
+  const calendarPriceByHour = new Map<number, number>();
+  for (const row of scheduleRows ?? []) {
+    const slotHour = parseInt(String(row.slot).substring(0, 2), 10);
+    const price = tariffPriceById.get(row.tariff_id);
+    if (price != null) {
+      calendarPriceByHour.set(slotHour, price);
+    }
+  }
+
+  // Fetch flat_rate once as fallback for unconfigured slots
+  const { data: flatRateRow } = await supabase
+    .from('reservation_type_prices')
+    .select('price_per_hour_cents')
+    .eq('club_id', club_id)
+    .eq('reservation_type', 'flat_rate')
+    .maybeSingle();
+  const flatRateCents = flatRateRow?.price_per_hour_cents ?? 0;
+
+  // Prorate: for each hourly slot, compute minutes of overlap and charge accordingly
+  let totalPriceCents = 0;
+  const breakdown: { slot: string; minutes: number; price_per_hour_cents: number; contribution_cents: number }[] = [];
+  const usedSources = new Set<string>();
+
+  for (let h = firstHour; h <= lastHour; h++) {
+    const slotStartMin = h * 60;
+    const slotEndMin   = slotStartMin + 60;
+    const overlapMin   = Math.min(endMinutes, slotEndMin) - Math.max(startMinutes, slotStartMin);
+
+    if (overlapMin <= 0) continue;
+
+    let pricePerHour: number;
+    let source: string;
+    if (calendarPriceByHour.has(h)) {
+      pricePerHour = calendarPriceByHour.get(h)!;
+      source = 'calendar';
+    } else {
+      pricePerHour = flatRateCents;
+      source = flatRateCents > 0 ? 'flat_rate' : 'none';
+    }
+
+    const contribution = Math.round((overlapMin / 60) * pricePerHour);
+    totalPriceCents += contribution;
+    usedSources.add(source);
+    breakdown.push({
+      slot: `${String(h).padStart(2, '0')}:00`,
+      minutes: overlapMin,
+      price_per_hour_cents: pricePerHour,
+      contribution_cents: contribution,
+    });
+  }
+
+  // Determine dominant source label for the response
+  const source = usedSources.has('calendar')
+    ? (usedSources.size > 1 ? 'mixed' : 'calendar')
+    : (usedSources.has('flat_rate') ? 'flat_rate' : 'none');
+
+  return res.json({ ok: true, total_price_cents: totalPriceCents, source, breakdown });
+});
+
 // ----------------- RESOLVED CALENDAR -----------------
 // GET /tariffs/calendar?club_id=X&year=YYYY&month=MM (1-12)
 
@@ -199,32 +329,44 @@ router.get('/calendar', async (req: Request, res: Response) => {
     .from('club_day_overrides').select('*').eq('club_id', club_id).gte('date', first).lte('date', last);
   if (oErr) return res.status(500).json({ ok: false, error: oErr.message });
 
-  // Build a Set of YYYY-MM-DD strings for has_schedule.
-  // Try the RPC (SELECT DISTINCT — efficient, no row-limit issues).
-  // Fall back to the direct query if the function doesn't exist yet.
-  const scheduledDatesSet = new Set<string>();
-  const rpcResult = await supabase.rpc('get_scheduled_dates', { p_club_id: club_id, p_first: first, p_last: last });
-  if (!rpcResult.error && rpcResult.data) {
-    (rpcResult.data as { scheduled_date: string }[]).forEach((r) => {
-      scheduledDatesSet.add(String(r.scheduled_date).substring(0, 10));
-    });
-  } else {
-    // Fallback: direct query with high limit and date normalization
-    const { data: scheduleDates } = await supabase
-      .from('club_day_schedule')
-      .select('date')
-      .eq('club_id', club_id)
-      .gte('date', first)
-      .lte('date', last)
-      .limit(5000);
-    (scheduleDates ?? []).forEach((r: any) => {
-      scheduledDatesSet.add(String(r.date).substring(0, 10));
-    });
-  }
+  // Get active courts count
+  const { data: courtsRows } = await supabase
+    .from('courts')
+    .select('id, status')
+    .eq('club_id', club_id);
+  const activeCourtsCount = (courtsRows || []).filter(c => c.status !== 'closed').length;
 
+  // Get flat_rate
+  const { data: flatRateRow } = await supabase
+    .from('reservation_type_prices')
+    .select('price_per_hour_cents')
+    .eq('club_id', club_id)
+    .eq('reservation_type', 'flat_rate')
+    .maybeSingle();
+  const flatRateCents = flatRateRow?.price_per_hour_cents ?? 0;
+
+  // Get full schedule for calculation
+  const { data: fullSchedule } = await supabase
+    .from('club_day_schedule')
+    .select('date, tariff_id')
+    .eq('club_id', club_id)
+    .gte('date', first)
+    .lte('date', last)
+    .limit(10000);
 
   const tariffMap = new Map<string, any>((tariffs ?? []).map((t: any) => [t.id, t]));
   const overrideMap = new Map<string, any>((overrides ?? []).map((o: any) => [o.date, o]));
+  
+  // Pre-calculate custom slots count and sum per date
+  const scheduleStats = new Map<string, { count: number, sum: number }>();
+  (fullSchedule ?? []).forEach(s => {
+    const d = String(s.date).substring(0, 10);
+    const tPrice = tariffMap.get(s.tariff_id)?.price_cents ?? 0;
+    const stat = scheduleStats.get(d) ?? { count: 0, sum: 0 };
+    stat.count += 1;
+    stat.sum += tPrice;
+    scheduleStats.set(d, stat);
+  });
   const weekdayTariff = defaults?.weekday_tariff_id ? tariffMap.get(defaults.weekday_tariff_id) : null;
   const weekendTariff = defaults?.weekend_tariff_id ? tariffMap.get(defaults.weekend_tariff_id) : null;
 
@@ -248,6 +390,23 @@ router.get('/calendar', async (req: Request, res: Response) => {
       origin = 'default';
     }
 
+    const has_schedule = scheduleStats.has(dateStr);
+    
+    // Calculate avg_price_cents
+    let avgPriceCents: number | null = null;
+    if (activeCourtsCount > 0) {
+      const TOTAL_SLOTS_PER_COURT = 17; // 07:00 to 23:00 (inclusive)
+      const totalDaySlots = activeCourtsCount * TOTAL_SLOTS_PER_COURT;
+      const stat = scheduleStats.get(dateStr) ?? { count: 0, sum: 0 };
+      const customSum = stat.sum;
+      // if for some reason count > total slots, cap empty slots to 0
+      const emptySlots = Math.max(0, totalDaySlots - stat.count);
+      const emptySum = emptySlots * flatRateCents;
+      
+      const totalPrice = customSum + emptySum;
+      avgPriceCents = Math.round(totalPrice / totalDaySlots);
+    }
+
     days.push({
       date: dateStr,
       dow,
@@ -260,7 +419,8 @@ router.get('/calendar', async (req: Request, res: Response) => {
       override_id: override?.id ?? null,
       label: override?.label ?? null,
       source: override?.source ?? null,
-      has_schedule: scheduledDatesSet.has(dateStr),
+      has_schedule,
+      avg_price_cents: avgPriceCents,
     });
   }
 
