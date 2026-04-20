@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { BookOpen, Edit, HelpCircle } from 'lucide-react';
+import { BookOpen, HelpCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { adminLearningService } from '../../../services/adminLearning';
@@ -22,7 +22,7 @@ const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
 type SubTab = 'questions' | 'courses';
 
 function extractPreview(q: AdminQuestion): string {
-  const c = q.content as Record<string, unknown>;
+  const c = q.content;
   if ('question' in c && typeof c.question === 'string') return c.question;
   if ('statement' in c && typeof c.statement === 'string') return c.statement;
   if ('pairs' in c && Array.isArray(c.pairs)) return `${c.pairs.length} pares`;

@@ -12,7 +12,7 @@ const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'men
 
 // Extraer texto legible del contenido de la pregunta
 function extractPreview(q: Question): string {
-  const c = q.content as Record<string, unknown>;
+  const c = q.content;
   if ('question' in c && typeof c.question === 'string') return c.question;
   if ('statement' in c && typeof c.statement === 'string') return c.statement;
   if ('pairs' in c && Array.isArray(c.pairs)) return `${c.pairs.length} pares`;
