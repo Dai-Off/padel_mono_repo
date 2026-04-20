@@ -15,7 +15,7 @@ import {
 import * as Linking from 'expo-linking';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useStripe } from '@stripe/stripe-react-native';
+import { useStripe } from '../../stripe';
 import { useAuth } from '../../contexts/AuthContext';
 import { createIntentForNewMatch, confirmPaymentFromClient } from '../../api/payments';
 import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';

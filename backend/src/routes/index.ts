@@ -33,6 +33,9 @@ import walletRouter from "./wallet";
 import onboardingQuestionsRouter from "./onboardingQuestions";
 import bonusesRouter from "./bonuses";
 import clubSpecialDatesRouter from "./clubSpecialDates";
+import coachAssessmentRouter from "./coachAssessment";
+import adminLearningRouter from "./adminLearning";
+
 
 const router = Router();
 
@@ -77,5 +80,8 @@ router.use("/wallet", walletRouter);
 router.use("/onboarding-questions", onboardingQuestionsRouter);
 router.use("/bonuses", bonusesRouter);
 router.use("/club-special-dates", clubSpecialDatesRouter);
+router.use("/coach-assessment", coachAssessmentRouter);
+router.use("/admin/learning", adminLearningRouter);
+
 
 export default router;

@@ -128,6 +128,28 @@ type MatchResponse = {
   error?: string;
 };
 
+export type SubmitMatchFeedbackBody = {
+  level_ratings: Array<{
+    player_id: string;
+    perceived: -1 | 0 | 1;
+    comment?: string | null;
+  }>;
+  would_repeat?: boolean;
+  would_not_repeat_reason?:
+    | 'rivals_above'
+    | 'rivals_below'
+    | 'partner_mismatch'
+    | 'imbalanced'
+    | 'schedule_or_venue'
+    | 'other';
+  comment?: string | null;
+};
+
+type SubmitMatchFeedbackResponse = {
+  ok?: boolean;
+  error?: string;
+};
+
 export async function prepareJoin(
   matchId: string,
   slotIndex: number,
@@ -235,6 +257,29 @@ export async function fetchMatchById(
     return null;
   } catch {
     return null;
+  }
+}
+
+export async function submitMatchFeedback(
+  matchId: string,
+  body: SubmitMatchFeedbackBody,
+  token: string | null | undefined
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/matches/${matchId}/feedback`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json()) as SubmitMatchFeedbackResponse;
+    if (res.ok && json.ok) return { ok: true };
+    return { ok: false, error: json.error ?? 'No se pudo guardar el feedback' };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
   }
 }
 

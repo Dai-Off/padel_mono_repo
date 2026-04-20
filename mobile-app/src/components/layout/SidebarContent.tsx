@@ -30,7 +30,10 @@ function SidebarUserHeader() {
       <View style={styles.userRow}>
         <Pressable
           style={({ pressed }) => [styles.userInfoWrap, pressed && styles.userSectionPressed]}
-          onPress={close}
+          onPress={() => {
+            close?.();
+            ctx?.onProfilePress?.();
+          }}
           accessibilityLabel="Perfil de usuario"
         >
           <View style={styles.avatarWrap}>
@@ -152,7 +155,10 @@ export function SidebarContent() {
             title="Editar perfil"
             subtitle="Edita nombre, correo, teléfono, ubicación, ..."
             iconVariant="orange"
-            onPress={close}
+            onPress={() => {
+              close?.();
+              ctx?.onProfilePress?.();
+            }}
           />
           <SidebarRowItem
             icon="trophy-outline"
