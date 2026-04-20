@@ -82,6 +82,7 @@ function buildSections(isAdmin: boolean): NavSection[] {
       children: [
         { id: 'escuela', path: '/escuela', label: 'Gestión Escuela' },
         { id: 'torneos', path: '/torneos', label: 'Torneos' },
+        { id: 'contenido-aprendizaje', path: '/contenido-aprendizaje', label: 'Contenido de aprendizaje' },
       ],
     },
     {
