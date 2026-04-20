@@ -105,30 +105,34 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
 
   // Validación del contenido según tipo
   const validateContent = (): string | null => {
-    const c = content as Record<string, unknown>;
     switch (type) {
       case 'test_classic': {
-        if (!c.question || !(c.question as string).trim()) return t('learning_field_question');
-        if (Array.isArray(c.options) && (c.options as string[]).some((o) => !o.trim())) return t('learning_field_options');
+        const c = content as TestClassicContent;
+        if (!c.question.trim()) return t('learning_field_question');
+        if (c.options.some((o) => !o.trim())) return t('learning_field_options');
         return null;
       }
       case 'true_false': {
-        if (!c.statement || !(c.statement as string).trim()) return t('learning_field_statement');
+        const c = content as TrueFalseContent;
+        if (!c.statement.trim()) return t('learning_field_statement');
         return null;
       }
       case 'multi_select': {
-        if (!c.question || !(c.question as string).trim()) return t('learning_field_question');
-        if (Array.isArray(c.options) && (c.options as string[]).some((o) => !o.trim())) return t('learning_field_options');
-        if (!Array.isArray(c.correct_indices) || (c.correct_indices as number[]).length < 2 || (c.correct_indices as number[]).length > 3) return t('learning_field_correct_answer');
+        const c = content as MultiSelectContent;
+        if (!c.question.trim()) return t('learning_field_question');
+        if (c.options.some((o) => !o.trim())) return t('learning_field_options');
+        if (c.correct_indices.length < 2 || c.correct_indices.length > 3) return t('learning_field_correct_answer');
         return null;
       }
       case 'match_columns': {
-        if (Array.isArray(c.pairs) && (c.pairs as { left: string; right: string }[]).some((p) => !p.left.trim() || !p.right.trim()))
+        const c = content as MatchColumnsContent;
+        if (c.pairs.some((p) => !p.left.trim() || !p.right.trim()))
           return `${t('learning_field_pair_left')} / ${t('learning_field_pair_right')}`;
         return null;
       }
       case 'order_sequence': {
-        if (Array.isArray(c.steps) && (c.steps as string[]).some((s) => !s.trim())) return t('learning_field_step');
+        const c = content as OrderSequenceContent;
+        if (c.steps.some((s) => !s.trim())) return t('learning_field_step');
         return null;
       }
     }
