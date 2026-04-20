@@ -1,8 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
-import { requireAuth, getPlayerFromAuth } from './learningHelpers';
+import { requireAuth, getPlayerFromAuth, requireOnboarding } from './learningHelpers';
 import { getMultiplier } from './learningStreaks';
 import { SharedStreakRow, lazyResetSharedStreak, normalizePair } from './learningStreaks';
+import { dayKeyInTz, previousDayKey } from './learningTimezone';
 
 const router = Router();
 
@@ -21,6 +22,8 @@ router.get('/streak', requireAuth, async (req: Request, res: Response) => {
     if (!player) {
       return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
     }
+
+    const tz = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
 
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
@@ -41,11 +44,27 @@ router.get('/streak', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
+    // Lazy reset: si la última lección no fue hoy ni ayer, la racha se rompió.
+    let currentStreak = data.current_streak ?? 0;
+    if (data.last_lesson_completed_at && currentStreak > 0) {
+      const todayKey = dayKeyInTz(new Date(), tz);
+      const yesterdayKey = previousDayKey(todayKey);
+      const lastKey = dayKeyInTz(new Date(data.last_lesson_completed_at), tz);
+
+      if (lastKey !== todayKey && lastKey !== yesterdayKey) {
+        currentStreak = 0;
+        await supabase
+          .from('learning_streaks')
+          .update({ current_streak: 0 })
+          .eq('player_id', player.id);
+      }
+    }
+
     return res.json({
       ok: true,
-      current_streak: data.current_streak,
+      current_streak: currentStreak,
       longest_streak: data.longest_streak,
-      multiplier: getMultiplier(data.current_streak),
+      multiplier: getMultiplier(currentStreak),
       last_lesson_completed_at: data.last_lesson_completed_at,
     });
   } catch (err) {
@@ -201,12 +220,13 @@ router.get('/courses', requireAuth, async (req: Request, res: Response) => {
   try {
     const player = await getPlayerFromAuth(req.authContext!.userId);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+    const needsOnboarding = !player.onboarding_completed;
 
     const supabase = getSupabaseServiceRoleClient();
 
     const { data: courses, error: coursesErr } = await supabase
       .from('learning_courses')
-      .select('id, title, description, banner_url, elo_min, elo_max, clubs(name)')
+      .select('id, title, description, banner_url, elo_min, elo_max, coach_name, is_certified, clubs(name)')
       .eq('status', 'active')
       .order('elo_min', { ascending: true });
 
@@ -254,15 +274,17 @@ router.get('/courses', requireAuth, async (req: Request, res: Response) => {
         banner_url: c.banner_url,
         elo_min: c.elo_min,
         elo_max: c.elo_max,
+        coach_name: c.coach_name || null,
+        is_certified: c.is_certified ?? false,
         club_name: c.clubs?.name || null,
         total_lessons: totalLessons,
         completed_lessons: completedCount,
         is_completed: totalLessons > 0 && completedCount === totalLessons,
-        locked: isCourseLocked(player.elo_rating, c.elo_min, c.elo_max),
+        locked: needsOnboarding || isCourseLocked(player.elo_rating, c.elo_min, c.elo_max),
       };
     });
 
-    return res.json({ ok: true, courses: result });
+    return res.json({ ok: true, courses: result, requires_onboarding: needsOnboarding });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -273,13 +295,14 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const player = await getPlayerFromAuth(req.authContext!.userId);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+    const needsOnboarding = !player.onboarding_completed;
 
     const supabase = getSupabaseServiceRoleClient();
     const courseId = req.params.id;
 
     const { data: course, error: courseErr } = await supabase
       .from('learning_courses')
-      .select('id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, clubs(name)')
+      .select('id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, coach_name, is_certified, clubs(name)')
       .eq('id', courseId)
       .eq('status', 'active')
       .maybeSingle();
@@ -287,13 +310,19 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
     if (courseErr) return res.status(500).json({ ok: false, error: courseErr.message });
     if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
 
-    const locked = isCourseLocked(player.elo_rating, course.elo_min, course.elo_max);
+    const locked = needsOnboarding || isCourseLocked(player.elo_rating, course.elo_min, course.elo_max);
 
     if (locked) {
-      const { count } = await supabase
+      const { data: lockedLessons } = await supabase
         .from('learning_course_lessons')
-        .select('id', { count: 'exact', head: true })
-        .eq('course_id', courseId);
+        .select('id, order, title, description, video_url, duration_seconds')
+        .eq('course_id', courseId)
+        .order('order', { ascending: true });
+
+      const lockedList = (lockedLessons || []).map((l: any) => ({
+        id: l.id, order: l.order, title: l.title, description: l.description,
+        video_url: l.video_url, duration_seconds: l.duration_seconds, status: 'locked',
+      }));
 
       return res.json({
         ok: true,
@@ -305,9 +334,14 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
           elo_min: course.elo_min,
           elo_max: course.elo_max,
           pedagogical_goal: course.pedagogical_goal,
+          coach_name: (course as any).coach_name || null,
+          is_certified: (course as any).is_certified ?? false,
           club_name: (course as any).clubs?.name || null,
           locked: true,
-          total_lessons: count || 0,
+          total_lessons: lockedList.length,
+          completed_lessons: 0,
+          is_completed: false,
+          lessons: lockedList,
         },
       });
     }
@@ -366,6 +400,8 @@ router.get('/courses/:id', requireAuth, async (req: Request, res: Response) => {
         elo_min: course.elo_min,
         elo_max: course.elo_max,
         pedagogical_goal: course.pedagogical_goal,
+        coach_name: (course as any).coach_name || null,
+        is_certified: (course as any).is_certified ?? false,
         club_name: (course as any).clubs?.name || null,
         locked: false,
         total_lessons: totalLessons,
@@ -384,6 +420,8 @@ router.post('/courses/:id/complete-lesson', requireAuth, async (req: Request, re
   try {
     const player = await getPlayerFromAuth(req.authContext!.userId);
     if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+    const onboardingErr = requireOnboarding(player);
+    if (onboardingErr) return res.status(403).json({ ok: false, error: onboardingErr, requires_onboarding: true });
 
     const { lesson_id } = req.body;
     if (!lesson_id) return res.status(400).json({ ok: false, error: 'lesson_id es requerido' });

@@ -35,47 +35,21 @@ Cuando un partido competitivo pasa a `score_status = 'confirmed'`, el sistema ej
 
 ## 2. Estado actual
 
-**Archivo:** `backend/src/routes/matchPlayers.ts`
+> Ultima verificacion: 2026-04-14
 
-El campo `rating_change` (línea 7, línea 84) existe y se puede actualizar manualmente vía `PUT /match-players/:id`. No hay ningún cálculo automático.
+**Todo el pipeline esta implementado.**
 
-El campo `result` existe pero no tiene tipo definido ni uso.
-
-**Archivo:** `backend/src/routes/players.ts`
-
-El campo `elo_rating` existe (línea 208, default 1200). Los campos `mu`, `sigma`, `beta`, contadores de partidos no existen todavía (ver componente 01).
-
-**No existe** ningún archivo de servicio de nivelación. No hay librería OpenSkill instalada.
+- **Archivo:** `backend/src/services/levelingService.ts` (419 lineas). Contiene `runLevelingPipeline()`, `calcEloRating()`, `calcScoreMargin()`, `detectComeback()`, `determineOutcome()`, `updateBeta()`, `fetchSynergyRow()`.
+- **OpenSkill:** Instalada y en uso (`import { rating, rate, predictWin } from 'openskill'`).
+- **RPC atomico:** `apply_leveling_pipeline` en `backend/db/014_leveling_matchmaking.sql` (lineas 246-323). Ejecuta updates a players, match_players y player_synergies en una transaccion.
+- **Integracion:** Se dispara desde `matchScores.ts` al confirmar marcador competitivo.
+- **Antifraude:** `runFraudCheck(matchId)` se llama tras confirmar scores (componente 07).
 
 ---
 
-## 3. Qué hay que cambiar
+## 3. Nada pendiente de implementar en este componente
 
-### 3.1 Endpoint `PUT /match-players/:id` (matchPlayers.ts línea 77)
-El `rating_change` ya no debe actualizarse desde este endpoint público — el valor lo escribe exclusivamente el algoritmo de nivelación. Añadir validación para rechazar actualizaciones de `rating_change` desde esta ruta.
-
-### 3.2 Tabla `match_players` en Supabase
-Añadir columnas:
-
-| Columna | Tipo SQL | Nullable | Descripción |
-|---|---|---|---|
-| `result` | `text` | SÍ | `'win'` \| `'loss'` \| `'draw'` — escrito por el algoritmo |
-| `pre_match_win_prob` | `float8` | SÍ | Probabilidad de victoria pre-partido del equipo de este jugador. Se guarda en el paso 1 del pipeline. Necesario para el sistema antifraude (componente 07) |
-
-> Se añade `'draw'` como valor posible de `result` para partidos con `match_end_reason = 'timeout'`.
-
----
-
-## 4. Qué hay que crear nuevo
-
-### 4.1 Librería OpenSkill
-Instalar en el backend:
-```bash
-npm install openskill
-```
-Librería TypeScript-native. Usa el modelo Plackett-Luce.
-
-**Parámetro tau activado:** OpenSkill incluye un parámetro `tau` (decay de sigma) que da más peso a los resultados recientes y hace que la sigma suba ligeramente con el tiempo si el jugador no juega. Esto gestiona automáticamente la inactividad y la forma reciente del jugador. **No hay que implementar lógica extra para estos casos.**
+Todo el pipeline esta completo: OpenSkill, score_margin, sinergia, beta residuals, RPC atomico. La unica adicion futura es el **arrastre de areas** (ver componente 01, seccion 4.2, Fuente 2) que se anadira cuando se implementen las columnas `area_*` en players.
 
 **Nivel/consistencia/experiencia del rival:** OpenSkill ya lo contempla implícitamente — el mu y sigma del rival determinan el impacto del resultado en el jugador. Un rival con mu alto y sigma baja (bueno y consistente) tiene mayor impacto en la actualización que un rival con sigma alta (incierto). No hay que implementar esto por separado.
 

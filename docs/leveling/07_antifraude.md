@@ -10,17 +10,20 @@ El sistema antifraude corre de forma **asíncrona**, sin bloquear el flujo norma
 
 ## 2. Estado actual
 
-No existe ningún sistema antifraude. No hay tablas de detecciones ni lógica de análisis.
+> Ultima verificacion: 2026-04-14
 
-La tabla `match_players` (`matchPlayers.ts`, línea 6–7) registra `result` y `rating_change` por jugador y partido. El campo `pre_match_win_prob` debe añadirse (ver componente 03, sección 3.2).
-
-La función `predictWinProbability` de OpenSkill (componente 03) es la fuente de las predicciones pre-partido.
+**Implementado:**
+- Tabla `fraud_alerts` creada (campos: detection_type, player_ids[], match_ids[], details, status, created_at, resolved_at).
+- `fraudService.ts` con todas las detecciones: `checkRepeatedResults()`, `checkPredictionFailures()`, `checkSandbagging()`, `checkClosedGroupInflation()`, `checkScoreManipulation()`, `checkStrategicRetirement()`.
+- Estados: 'open', 'reviewed', 'dismissed'.
+- Integracion: `runFraudCheck(matchId)` se llama desde `matchScores.ts` al confirmar scores competitivos.
+- V1: solo alertas manuales, sin acciones automaticas (como se recomendaba).
 
 ---
 
-## 3. Qué hay que cambiar
+## 3. Nada pendiente de implementar en V1
 
-Ningún archivo existente se modifica. El antifraude es una capa adicional sobre datos que ya existen.
+El sistema antifraude V1 esta completo. Las acciones automaticas (congelacion, penalizacion, expulsion) son V2.
 
 ---
 

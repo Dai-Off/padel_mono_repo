@@ -2164,12 +2164,12 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       if (match) {
         const { data: joinPlayer } = await supabase
           .from('players')
-          .select('elo_rating, initial_rating_completed')
+          .select('elo_rating, onboarding_completed')
           .eq('id', participant.player_id)
           .maybeSingle();
         const mCompetitive = !!(match as { competitive?: boolean }).competitive;
         const mType = String((match as { type?: string }).type ?? 'open');
-        if (mCompetitive && !(joinPlayer as { initial_rating_completed?: boolean })?.initial_rating_completed) {
+        if (mCompetitive && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
           res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
           return;
         }

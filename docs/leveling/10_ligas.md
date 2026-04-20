@@ -2,6 +2,8 @@
 
 ## Estado de este componente
 
+> Ultima verificacion: 2026-04-14
+
 La vision general y la relacion con otros componentes estan definidas. En backend existe una **primera implementacion** (temporadas globales MM, LP por resultado, ascenso/descenso, historial y cierre de temporada) usando **constantes provisionales** donde el texto siguiente las dejaba pendientes. Los valores deben calibrarse en producto.
 
 ---
