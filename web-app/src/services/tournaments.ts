@@ -11,6 +11,13 @@ export type TournamentDivisionRow = {
   sort_order: number;
 };
 
+export type TournamentMatchRules = {
+  best_of_sets?: number;
+  allow_draws?: boolean;
+  results_entry?: 'organizer' | 'players';
+  bracket_seed_strategy?: string;
+};
+
 export type TournamentListItem = {
   id: string;
   club_id: string;
@@ -41,6 +48,9 @@ export type TournamentListItem = {
   normas?: string | null;
   poster_url?: string | null;
   level_mode?: 'single_band' | 'multi_division';
+  competition_format?: string | null;
+  match_rules?: TournamentMatchRules | null;
+  standings_rules?: Record<string, unknown> | null;
   tournament_courts?: { court_id: string }[];
   confirmed_count?: number;
   pending_count?: number;
@@ -175,6 +185,7 @@ export type CompetitionView = {
       best_of_sets?: number;
       allow_draws?: boolean;
       bracket_seed_strategy?: string;
+      results_entry?: 'organizer' | 'players';
     } | null;
     standings_rules: Record<string, unknown> | null;
     status: string;
@@ -358,7 +369,12 @@ export const tournamentsService = {
     tournamentId: string,
     payload: {
       format: CompetitionFormat;
-      match_rules?: { best_of_sets?: number; allow_draws?: boolean; bracket_seed_strategy?: string };
+      match_rules?: {
+        best_of_sets?: number;
+        allow_draws?: boolean;
+        bracket_seed_strategy?: string;
+        results_entry?: 'organizer' | 'players';
+      };
       standings_rules?: Record<string, unknown>;
     }
   ): Promise<void> {
@@ -419,6 +435,16 @@ export const tournamentsService = {
       method: 'POST',
       body: JSON.stringify(payload),
     });
+  },
+
+  async pairingTiebreakStats(
+    tournamentId: string
+  ): Promise<Record<string, { wins: number; losses: number }>> {
+    const res = await apiFetchWithAuth<{
+      ok: true;
+      stats: Record<string, { wins: number; losses: number }>;
+    }>(`/tournaments/${tournamentId}/pairing-tiebreak-stats`);
+    return res.stats ?? {};
   },
 
   async savePodium(tournamentId: string, podium: CompetitionPodiumRow[]): Promise<void> {

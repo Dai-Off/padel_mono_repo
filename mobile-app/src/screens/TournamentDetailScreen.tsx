@@ -43,6 +43,7 @@ import {
   leaveTournament,
   sendTournamentChatMessage,
   submitTournamentEntryRequest,
+  submitTournamentMatchResultAsPlayer,
 } from '../api/tournaments';
 import { confirmPaymentFromClient, createIntentForTournament } from '../api/payments';
 import { PrivateReservationModal } from '../components/partido/PrivateReservationModal';
@@ -223,6 +224,30 @@ function matchScheduleLine(m: TournamentCompetitionMatch): string | null {
   return `${a} – ${b}${court}`;
 }
 
+function myTeamSideForMatch(m: TournamentCompetitionMatch, myTeamIds: string[]): 'A' | 'B' | null {
+  if (m.team_a_id && myTeamIds.includes(m.team_a_id)) return 'A';
+  if (m.team_b_id && myTeamIds.includes(m.team_b_id)) return 'B';
+  return null;
+}
+
+/** Marcadores de ejemplo válidos para BO3 (el club puede corregir con override). */
+function buildBo3DemoSets(
+  side: 'A' | 'B',
+  key: 'win_2_0' | 'win_2_1' | 'lose_0_2' | 'lose_1_2',
+): Array<{ games_a: number; games_b: number }> {
+  const template: [number, number][] =
+    key === 'win_2_0'
+      ? [[6, 2], [6, 3]]
+      : key === 'win_2_1'
+        ? [[6, 4], [3, 6], [6, 3]]
+        : key === 'lose_0_2'
+          ? [[3, 6], [2, 6]]
+          : [[6, 3], [4, 6], [3, 6]];
+  return template.map(([x, y]) =>
+    side === 'A' ? { games_a: x, games_b: y } : { games_a: y, games_b: x },
+  );
+}
+
 function slotLine(slot: TournamentCourtBookingSlot): string {
   const a = formatIsoDateTimeEs(slot.start_at) ?? slot.start_at;
   const b = formatIsoDateTimeEs(slot.end_at) ?? slot.end_at;
@@ -339,6 +364,7 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
   const [chatDraft, setChatDraft] = useState('');
   const [chatSending, setChatSending] = useState(false);
   const [competitionError, setCompetitionError] = useState<string | null>(null);
+  const [playerResultSubmittingId, setPlayerResultSubmittingId] = useState<string | null>(null);
   const [agenda, setAgenda] = useState<TournamentPlayerAgenda | null>(null);
   const [agendaError, setAgendaError] = useState<string | null>(null);
   const [confirmationModalData, setConfirmationModalData] =
@@ -455,6 +481,52 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
     [tournamentId, session?.access_token],
   );
 
+  const submitPlayerMatchResultBo3 = useCallback(
+    async (matchId: string, sets: Array<{ games_a: number; games_b: number }>) => {
+      if (!session?.access_token) return;
+      setPlayerResultSubmittingId(matchId);
+      try {
+        const r = await submitTournamentMatchResultAsPlayer(
+          tournamentId,
+          matchId,
+          sets,
+          session.access_token,
+        );
+        if (!r.ok) {
+          Alert.alert('Resultado', r.error);
+          return;
+        }
+        await load({ silent: true });
+      } finally {
+        setPlayerResultSubmittingId(null);
+      }
+    },
+    [tournamentId, session?.access_token, load],
+  );
+
+  const promptPlayerMatchResult = useCallback(
+    (m: TournamentCompetitionMatch) => {
+      const side = myTeamSideForMatch(m, competition?.my_team_ids ?? []);
+      if (!side) return;
+      const bo = Number(competition?.tournament?.match_rules?.best_of_sets ?? 3);
+      if (bo !== 3) {
+        Alert.alert(
+          'Resultado',
+          'Solo podés registrar desde la app en formato al mejor de 3 sets. Pedile al club que cargue el marcador o cambie la configuración.',
+        );
+        return;
+      }
+      Alert.alert('Registrar resultado', 'Elegí el desenlace. El club puede corregirlo si hace falta.', [
+        { text: 'Ganamos 2-0', onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'win_2_0')) },
+        { text: 'Ganamos 2-1', onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'win_2_1')) },
+        { text: 'Perdimos 0-2', onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'lose_0_2')) },
+        { text: 'Perdimos 1-2', onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'lose_1_2')) },
+        { text: 'Cancelar', style: 'cancel' },
+      ]);
+    },
+    [competition, submitPlayerMatchResultBo3],
+  );
+
   useEffect(() => {
     if (authBooting) return;
     void load();
@@ -564,7 +636,7 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
                 const fallbackMessage =
                   entryRequestMessage.trim() ||
                   'Hola! Me gustaría participar en este torneo aunque no cumpla el requisito automático. ¿Podrían revisar mi solicitud?';
-                const req = await submitTournamentEntryRequest(row.id, fallbackMessage, session.access_token);
+                const req = await submitTournamentEntryRequest(tournamentId, fallbackMessage, session.access_token);
                 if (!req.ok) {
                   Alert.alert('Solicitud', req.error);
                   return;
@@ -814,6 +886,7 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
   const competitionStages = competition?.stages ?? [];
   const competitionMatches = competition?.matches ?? [];
   const myCompetitionMatches = competition?.my_matches ?? [];
+  const playerResultsMode = competition?.tournament?.match_rules?.results_entry === 'players';
   const gridSlots = agenda?.court_bookings?.length
     ? agenda.court_bookings
     : competition?.court_bookings ?? [];
@@ -1381,6 +1454,22 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
                         </Text>
                         {matchSetsLabel(m) ? (
                           <Text style={styles.teamSub}>Resultado: {matchSetsLabel(m)}</Text>
+                        ) : null}
+                        {playerResultsMode &&
+                        m.status !== 'finished' &&
+                        !matchSetsLabel(m) &&
+                        myTeamSideForMatch(m, competition?.my_team_ids ?? []) != null &&
+                        m.team_a_id &&
+                        m.team_b_id ? (
+                          <Pressable
+                            onPress={() => promptPlayerMatchResult(m)}
+                            disabled={playerResultSubmittingId === m.id}
+                            style={{ marginTop: 8, alignSelf: 'flex-start' }}
+                          >
+                            <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '600' }}>
+                              {playerResultSubmittingId === m.id ? 'Guardando…' : 'Cargar resultado'}
+                            </Text>
+                          </Pressable>
                         ) : null}
                       </View>
                     </View>

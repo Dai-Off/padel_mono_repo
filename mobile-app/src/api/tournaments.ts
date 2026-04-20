@@ -288,6 +288,11 @@ export type TournamentCompetitionPlayerView = {
   my_matches: TournamentCompetitionMatch[];
   tournament_window?: TournamentTournamentWindow;
   court_bookings?: TournamentCourtBookingSlot[];
+  /** Incluido desde `competition/player-view` (reglas y formato). */
+  tournament?: {
+    id?: string;
+    match_rules?: { best_of_sets?: number; results_entry?: string } | null;
+  } | null;
 };
 
 /** Detalle con inscripción del jugador (requiere sesión). */
@@ -472,6 +477,7 @@ export async function fetchMyTournamentEntryRequests(
 
 type CompetitionPlayerViewResponse = {
   ok?: boolean;
+  tournament?: TournamentCompetitionPlayerView['tournament'];
   teams?: TournamentCompetitionTeam[];
   stages?: TournamentCompetitionStage[];
   matches?: TournamentCompetitionMatch[];
@@ -481,6 +487,30 @@ type CompetitionPlayerViewResponse = {
   court_bookings?: TournamentCourtBookingSlot[];
   error?: string;
 };
+
+export async function submitTournamentMatchResultAsPlayer(
+  tournamentId: string,
+  matchId: string,
+  sets: Array<{ games_a: number; games_b: number }>,
+  token: string,
+  options?: { override?: boolean },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(
+      `${API_URL}/tournaments/${encodeURIComponent(tournamentId)}/matches/${encodeURIComponent(matchId)}/result/player`,
+      {
+        method: 'POST',
+        headers: headers(token),
+        body: JSON.stringify({ sets, override: Boolean(options?.override) }),
+      },
+    );
+    const json = (await res.json()) as { ok?: boolean; error?: string };
+    if (res.ok && json.ok) return { ok: true };
+    return { ok: false, error: json.error ?? 'No se pudo guardar el resultado' };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
 
 export async function fetchTournamentCompetitionPlayerView(
   tournamentId: string,
@@ -506,6 +536,7 @@ export async function fetchTournamentCompetitionPlayerView(
         my_matches: json.my_matches ?? [],
         tournament_window: json.tournament_window,
         court_bookings: json.court_bookings ?? [],
+        tournament: json.tournament ?? null,
       },
     };
   } catch {

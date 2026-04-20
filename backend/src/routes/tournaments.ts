@@ -13,22 +13,25 @@ import {
   slotsFromInscriptionRows,
 } from '../services/tournamentsService';
 import { generateInviteToken } from '../lib/inviteToken';
-import { getPlayerIdFromBearer } from '../lib/authPlayer';
+import { getPlayerAuthFromBearer, getPlayerIdFromBearer } from '../lib/authPlayer';
 import { playerMeetsTournamentGender, tournamentGenderFromBody } from '../lib/tournamentGender';
 import { parsePrizesFromBody, sumPrizeCents, type TournamentPrizeEntry } from '../lib/tournamentPrizes';
 import { buildTournamentInviteUrl } from '../lib/env';
 import { normalizePosterUrl } from '../lib/tournamentPosterUrl';
 import {
+  assertPlayerMaySubmitMatchResult,
   computeStandings,
   generateTournamentFixtures,
   generateTournamentFixturesManual,
   getCompetitionView,
+  normalizeResultsEntryMode,
   resetTournamentCompetition,
   saveManualPodium,
   saveMatchResult,
   setupTournamentCompetition,
   type CompetitionFormat,
 } from '../services/tournamentCompetitionService';
+import { computePairingTiebreakStatsForClub } from '../services/tournamentPairingStatsService';
 import {
   refundStripeTournamentPaymentForPlayer,
   refundStripeTournamentPaymentTransactions,
@@ -192,6 +195,19 @@ function normalizeRegistrationMode(value: unknown): 'individual' | 'pair' | 'bot
   const mode = String(value ?? '').trim();
   if (mode === 'pair' || mode === 'both') return mode;
   return 'individual';
+}
+
+function buildInitialMatchRules(body: Record<string, unknown>): Record<string, unknown> {
+  const base: Record<string, unknown> = { best_of_sets: 3, results_entry: 'organizer' };
+  const mr = body.match_rules;
+  const merged: Record<string, unknown> =
+    mr && typeof mr === 'object' && !Array.isArray(mr) ? { ...base, ...(mr as Record<string, unknown>) } : { ...base };
+  merged.results_entry = normalizeResultsEntryMode(
+    mr && typeof mr === 'object' && !Array.isArray(mr)
+      ? (mr as Record<string, unknown>).results_entry ?? body.results_entry
+      : body.results_entry
+  );
+  return merged;
 }
 
 function asYmd(value: unknown): string | null {
@@ -531,7 +547,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
       .from('tournaments')
-      .select('id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, tournament_courts(court_id)')
+      .select('id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, competition_format, match_rules, standings_rules, tournament_courts(court_id)')
       .eq('club_id', clubId)
       .order('start_at', { ascending: true });
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -603,7 +619,7 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament, error } = await supabase
       .from('tournaments')
-      .select('id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, tournament_courts(court_id)')
+      .select('id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, competition_format, match_rules, standings_rules, tournament_courts(court_id)')
       .eq('id', id)
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -618,7 +634,7 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     const inscriptionSelect =
       'id, status, invited_at, expires_at, confirmed_at, invite_email_1, invite_email_2, player_id_1, player_id_2, division_id, players_1:players!tournament_inscriptions_player_id_1_fkey(id, first_name, last_name, email, avatar_url, elo_rating), players_2:players!tournament_inscriptions_player_id_2_fkey(id, first_name, last_name, email, avatar_url, elo_rating)';
     const fullTournamentSelect =
-      'id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, tournament_courts(court_id)';
+      'id, created_at, updated_at, club_id, name, start_at, end_at, duration_min, price_cents, prize_total_cents, prizes, currency, visibility, gender, elo_min, elo_max, max_players, registration_mode, registration_closed_at, cancellation_cutoff_at, invite_ttl_minutes, status, description, normas, poster_url, level_mode, competition_format, match_rules, standings_rules, tournament_courts(court_id)';
 
     const [{ data: tournamentFresh, error: t2Err }, { data: inscriptions, error: iErr }, { data: divisions, error: divErr }] = await Promise.all([
       supabase.from('tournaments').select(fullTournamentSelect).eq('id', id).maybeSingle(),
@@ -685,6 +701,13 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
  *               invite_ttl_minutes: { type: integer, minimum: 1 }
  *               description: { type: string, nullable: true }
  *               normas: { type: string, nullable: true, description: 'Reglas/normas del torneo visibles al jugador' }
+ *               results_entry:
+ *                 type: string
+ *                 enum: [organizer, players]
+ *                 description: 'Quién carga resultados de partidos (se guarda en match_rules). organizer = panel club; players = jugadores en la app.'
+ *               match_rules:
+ *                 type: object
+ *                 description: 'Opcional. Se fusiona con best_of_sets/results_entry por defecto.'
  *               prize_total_cents:
  *                 type: integer
  *                 minimum: 0
@@ -792,6 +815,7 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
       description: body.description != null ? String(body.description) : null,
       normas: body.normas != null ? String(body.normas) : null,
       level_mode: levelMode,
+      match_rules: buildInitialMatchRules(body as Record<string, unknown>),
     };
     if (posterNorm.mode === 'set') insertRow.poster_url = posterNorm.value;
 
@@ -1019,6 +1043,7 @@ router.post('/recurring', requireClubOwnerOrAdmin, async (req: Request, res: Res
             description: body.description != null ? String(body.description) : null,
             normas: body.normas != null ? String(body.normas) : null,
             level_mode: levelMode,
+            match_rules: buildInitialMatchRules(body as Record<string, unknown>),
           };
           if (posterNorm.mode === 'set') insertRow.poster_url = posterNorm.value;
           const { data: tournament, error } = await supabase.from('tournaments').insert(insertRow).select('*').single();
@@ -1070,7 +1095,9 @@ router.post('/recurring', requireClubOwnerOrAdmin, async (req: Request, res: Res
  *   put:
  *     tags: [Tournaments]
  *     summary: Editar torneo
- *     description: Permite ajustar horario, precio, Elo, categoría de género (male/female/mixed) y cortes.
+ *     description: |
+ *       Permite ajustar horario, precio (nuevas inscripciones/pagos usan el valor actual; no reajusta importes ya cobrados),
+ *       Elo, categoría de género (male/female/mixed), cortes y reglas de partido parciales (`match_rules`).
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -1115,6 +1142,13 @@ router.post('/recurring', requireClubOwnerOrAdmin, async (req: Request, res: Res
  *                 type: string
  *                 enum: [individual, pair, both]
  *                 description: 'Modo de inscripción: individual, parejas o ambos'
+ *               results_entry:
+ *                 type: string
+ *                 enum: [organizer, players]
+ *                 description: 'Fusionado en match_rules. Quién puede cargar resultados de cruces.'
+ *               match_rules:
+ *                 type: object
+ *                 description: 'Fusión superficial con el JSON existente (p. ej. results_entry, best_of_sets).'
  *     responses:
  *       200: { description: Torneo actualizado }
  *       400: { description: gender o prizes inválido }
@@ -1126,7 +1160,7 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     const supabase = getSupabaseServiceRoleClient();
     const { data: existing, error: exErr } = await supabase
       .from('tournaments')
-      .select('id, club_id, start_at, duration_min, status')
+      .select('id, club_id, start_at, duration_min, status, match_rules')
       .eq('id', id)
       .maybeSingle();
     if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
@@ -1197,6 +1231,21 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     const posterUp = normalizePosterUrl(body as Record<string, unknown>, 'poster_url');
     if (!posterUp.ok) return res.status(400).json({ ok: false, error: posterUp.error });
     if (posterUp.mode === 'set') update.poster_url = posterUp.value;
+
+    if (body.match_rules !== undefined || body.results_entry !== undefined) {
+      const prev = ((existing as { match_rules?: Record<string, unknown> }).match_rules || {}) as Record<string, unknown>;
+      const next = { ...prev };
+      if (body.match_rules !== undefined && body.match_rules !== null) {
+        if (typeof body.match_rules !== 'object' || Array.isArray(body.match_rules)) {
+          return res.status(400).json({ ok: false, error: 'match_rules debe ser un objeto' });
+        }
+        Object.assign(next, body.match_rules as Record<string, unknown>);
+      }
+      if (body.results_entry !== undefined) {
+        next.results_entry = normalizeResultsEntryMode(body.results_entry);
+      }
+      update.match_rules = next;
+    }
 
     const { data: tournament, error: upErr } = await supabase.from('tournaments').update(update).eq('id', id).select('*').single();
     if (upErr) return res.status(500).json({ ok: false, error: upErr.message });
@@ -3757,6 +3806,10 @@ router.post('/:id/chat/player', async (req: Request, res: Response) => {
  *                 properties:
  *                   best_of_sets: { type: integer, example: 3 }
  *                   allow_draws: { type: boolean, example: false }
+ *                   results_entry:
+ *                     type: string
+ *                     enum: [organizer, players]
+ *                     description: organizer = club carga resultados; players = jugadores vía app
  *                   bracket_seed_strategy:
  *                     type: string
  *                     enum: [registration_order, random, elo_snake, elo_top_vs_bottom, elo_tier_mid]
@@ -4137,11 +4190,142 @@ router.get('/:id/competition/admin-view', requireClubOwnerOrAdmin, async (req: R
 
 /**
  * @openapi
+ * /tournaments/{id}/pairing-tiebreak-stats:
+ *   get:
+ *     tags: [TournamentsCompetition]
+ *     summary: Estadísticas de torneos previos para desempate al emparejar
+ *     description: |
+ *       Suma victorias/derrotas por jugador en partidos terminados de otros torneos **cerrados** del mismo club
+ *       (excluye el torneo actual). Útil cuando el Elo es muy parecido al formar parejas en modo individual.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Mapa player_id -> { wins, losses }
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok: { type: boolean, example: true }
+ *                 stats:
+ *                   type: object
+ *                   additionalProperties:
+ *                     type: object
+ *                     properties:
+ *                       wins: { type: integer }
+ *                       losses: { type: integer }
+ *             example:
+ *               ok: true
+ *               stats:
+ *                 "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa": { wins: 3, losses: 1 }
+ *       403: { description: Sin permisos }
+ *       404: { description: Torneo no encontrado }
+ */
+router.get('/:id/pairing-tiebreak-stats', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
+    if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
+    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    const stats = await computePairingTiebreakStatsForClub(String((t as any).club_id), tournamentId);
+    return res.json({ ok: true, stats });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /tournaments/{id}/matches/{matchId}/result/player:
+ *   post:
+ *     tags: [TournamentsCompetition]
+ *     summary: Cargar resultado de partido (jugador inscrito)
+ *     description: |
+ *       Requiere `match_rules.results_entry = "players"`. Solo un jugador que pertenezca a uno de los equipos
+ *       del partido puede enviar el marcador; avanza el cuadro igual que el endpoint de organizador.
+ *       El organizador puede seguir corrigiendo con `POST .../result` y `override=true` si hace falta.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: path
+ *         name: matchId
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sets]
+ *             properties:
+ *               sets:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [games_a, games_b]
+ *                   properties:
+ *                     games_a: { type: integer, minimum: 0 }
+ *                     games_b: { type: integer, minimum: 0 }
+ *               override:
+ *                 type: boolean
+ *                 description: true para corregir un resultado ya cargado (mismo criterio que organizador)
+ *           examples:
+ *             sample:
+ *               value:
+ *                 sets:
+ *                   - { games_a: 6, games_b: 4 }
+ *                   - { games_a: 6, games_b: 3 }
+ *     responses:
+ *       200: { description: Resultado guardado }
+ *       400: { description: Modo no permitido o datos inválidos }
+ *       401: { description: Token requerido o sesión inválida }
+ *       404: { description: Torneo o partido no encontrado }
+ */
+router.post('/:id/matches/:matchId/result/player', async (req: Request, res: Response) => {
+  const tournamentId = req.params.id;
+  const matchId = req.params.matchId;
+  const auth = await getPlayerAuthFromBearer(req);
+  if (auth.error) return res.status(401).json({ ok: false, error: auth.error });
+  try {
+    await assertPlayerMaySubmitMatchResult({
+      tournamentId,
+      matchId,
+      playerId: auth.playerId,
+    });
+    const result = await saveMatchResult({
+      tournamentId,
+      matchId,
+      sets: Array.isArray(req.body?.sets) ? req.body.sets : [],
+      override: Boolean(req.body?.override),
+      submittedByUserId: auth.authUserId,
+    });
+    const standings = await computeStandings(tournamentId);
+    return res.json({ ok: true, ...result, standings });
+  } catch (err) {
+    return res.status(400).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
  * /tournaments/{id}/matches/{matchId}/result:
  *   post:
  *     tags: [TournamentsCompetition]
  *     summary: Cargar o corregir resultado de un partido
- *     description: Registra sets y ganador del partido. Si override=true permite corregir resultados ya finalizados.
+ *     description: |
+ *       Registra sets y ganador del partido. Si override=true permite corregir resultados ya finalizados.
+ *       Si el torneo tiene `results_entry: players`, los jugadores usan `POST .../result/player`; el club
+ *       sigue pudiendo cargar o corregir aquí (p. ej. podio manual o override).
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path

@@ -4,6 +4,8 @@ export type CompetitionFormat = 'single_elim' | 'group_playoff' | 'round_robin';
 export type MatchRules = {
   best_of_sets: number;
   allow_draws?: boolean;
+  /** Quién registra sets/ganador: organizador (panel) o jugadores (app). */
+  results_entry?: 'organizer' | 'players';
   bracket_seed_strategy?:
     | 'registration_order'
     | 'random'
@@ -12,6 +14,10 @@ export type MatchRules = {
     | 'elo_tier_mid'
     | string;
 };
+
+export function normalizeResultsEntryMode(v: unknown): 'organizer' | 'players' {
+  return v === 'players' ? 'players' : 'organizer';
+}
 export type SetScore = { games_a: number; games_b: number };
 
 type TeamRow = { id: string; name: string; slot_index: number };
@@ -332,6 +338,13 @@ export async function setupTournamentCompetition(params: {
   };
   if (params.matchRules?.bracket_seed_strategy != null) {
     nextRules.bracket_seed_strategy = String(params.matchRules.bracket_seed_strategy);
+  }
+  if (params.matchRules?.results_entry != null) {
+    nextRules.results_entry = normalizeResultsEntryMode(params.matchRules.results_entry);
+  }
+  const incomingMr = (params.matchRules ?? {}) as Record<string, unknown>;
+  if (incomingMr.manual_round1_courts != null) {
+    nextRules.manual_round1_courts = incomingMr.manual_round1_courts;
   }
   const payload = {
     competition_format: params.format,
@@ -693,6 +706,45 @@ function evalWinnerFromSets(sets: SetScore[], bestOfSets: number, allowDraws = f
   if (b >= toWin && b > a) return 'B';
   if (allowDraws && a === b) return 'DRAW';
   return null;
+}
+
+export async function assertPlayerMaySubmitMatchResult(params: {
+  tournamentId: string;
+  matchId: string;
+  playerId: string;
+}): Promise<void> {
+  const supabase = getSupabaseServiceRoleClient();
+  const { data: tournament } = await supabase
+    .from('tournaments')
+    .select('match_rules')
+    .eq('id', params.tournamentId)
+    .maybeSingle();
+  if (!tournament) throw new Error('Torneo no encontrado');
+  const rules = ((tournament as any).match_rules || {}) as MatchRules;
+  if (normalizeResultsEntryMode(rules.results_entry) !== 'players') {
+    throw new Error('Este torneo solo admite resultados cargados por el organizador');
+  }
+  const { data: match, error: mErr } = await supabase
+    .from('tournament_stage_matches')
+    .select('id, team_a_id, team_b_id, status')
+    .eq('id', params.matchId)
+    .eq('tournament_id', params.tournamentId)
+    .maybeSingle();
+  if (mErr) throw new Error(mErr.message);
+  if (!match) throw new Error('Partido no encontrado');
+  if ((match as any).status === 'bye') throw new Error('Partido no válido para resultado');
+  const teamA = (match as any).team_a_id as string | null;
+  const teamB = (match as any).team_b_id as string | null;
+  if (!teamA || !teamB) throw new Error('El partido aún no tiene ambos equipos definidos');
+  const { data: teams, error: tErr } = await supabase
+    .from('tournament_teams')
+    .select('id, player_id_1, player_id_2')
+    .in('id', [teamA, teamB]);
+  if (tErr) throw new Error(tErr.message);
+  const allowed = (teams ?? []).some(
+    (row: any) => row.player_id_1 === params.playerId || row.player_id_2 === params.playerId
+  );
+  if (!allowed) throw new Error('No participas en este partido');
 }
 
 export async function saveMatchResult(params: {

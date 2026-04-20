@@ -324,11 +324,22 @@ function removePlayerFromSlot(
   return next;
 }
 
-function autoBuildBalancedPairsByElo(playerIds: string[], eloByPlayerId: Record<string, number>): string[] {
+function autoBuildBalancedPairsByElo(
+  playerIds: string[],
+  eloByPlayerId: Record<string, number>,
+  tiebreak?: Record<string, { wins: number; losses: number }>
+): string[] {
   const sorted = [...playerIds].sort((a, b) => {
     const ea = Number.isFinite(eloByPlayerId[a]) ? eloByPlayerId[a] : -1;
     const eb = Number.isFinite(eloByPlayerId[b]) ? eloByPlayerId[b] : -1;
-    return eb - ea;
+    if (ea !== eb) return eb - ea;
+    const wa = tiebreak?.[a]?.wins ?? 0;
+    const wb = tiebreak?.[b]?.wins ?? 0;
+    if (wa !== wb) return wb - wa;
+    const la = tiebreak?.[a]?.losses ?? 0;
+    const lb = tiebreak?.[b]?.losses ?? 0;
+    if (la !== lb) return la - lb;
+    return a.localeCompare(b);
   });
   const out: string[] = [];
   let lo = 0;
@@ -649,6 +660,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [competitionFormat, setCompetitionFormat] = useState<'single_elim' | 'group_playoff' | 'round_robin'>('single_elim');
   const [bestOfSets, setBestOfSets] = useState('3');
   const [bracketSeedStrategy, setBracketSeedStrategy] = useState('registration_order');
+  const [competitionResultsEntry, setCompetitionResultsEntry] = useState<'organizer' | 'players'>('organizer');
   const [groupSize, setGroupSize] = useState('4');
   const [qualifiersPerGroup, setQualifiersPerGroup] = useState('2');
   const [podiumDraftByPos, setPodiumDraftByPos] = useState<Record<number, string>>({});
@@ -663,6 +675,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [singlesPairingAvailablePlayerIds, setSinglesPairingAvailablePlayerIds] = useState<string[]>([]);
   const [pairingPlayerElos, setPairingPlayerElos] = useState<Record<string, number>>({});
   const [pairingPlayerLabels, setPairingPlayerLabels] = useState<Record<string, string>>({});
+  const [pairingTiebreakStats, setPairingTiebreakStats] = useState<Record<string, { wins: number; losses: number }>>({});
   const [pairingConfirmOpen, setPairingConfirmOpen] = useState(false);
   const [pairingSaving, setPairingSaving] = useState(false);
   const [assignPartnerOpen, setAssignPartnerOpen] = useState(false);
@@ -705,6 +718,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     elo_max: '',
     description: '',
     normas: '',
+    results_entry: 'organizer' as 'organizer' | 'players',
   });
   const [settingsForm, setSettingsForm] = useState({
     name: '',
@@ -721,6 +735,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     registration_closed_at: '',
     normas: '',
     poster_url: '',
+    results_entry: 'organizer' as 'organizer' | 'players',
   });
   const routeId = location.pathname.startsWith('/torneos/') ? location.pathname.split('/')[2] : null;
   const isDetailRoute = Boolean(routeId);
@@ -782,6 +797,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       elo_max: '',
       description: '',
       normas: '',
+      results_entry: 'organizer',
     });
   }, []);
 
@@ -833,6 +849,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       elo_max: t.elo_max != null ? String(t.elo_max) : '',
       description: String(t.description ?? ''),
       normas: String(t.normas ?? ''),
+      results_entry: t.match_rules?.results_entry === 'players' ? 'players' : 'organizer',
     }));
     setCreatePrizeRows(prizesToFormRows(t.prizes ?? null));
     setSelectedCourtIds(Array.isArray(t.tournament_courts) ? t.tournament_courts.map((x) => String(x.court_id)).filter(Boolean) : []);
@@ -1042,6 +1059,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       registration_closed_at: selected.registration_closed_at ? new Date(selected.registration_closed_at).toISOString().slice(0, 16) : '',
       normas: String(selected.normas ?? ''),
       poster_url: String(selected.poster_url ?? ''),
+      results_entry: selected.match_rules?.results_entry === 'players' ? 'players' : 'organizer',
     });
   }, [selected?.id, selected?.updated_at, selectedCourtIdsKey]);
 
@@ -1144,6 +1162,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       if (view.tournament?.competition_format) setCompetitionFormat(view.tournament.competition_format);
       setBestOfSets(String(view.tournament?.match_rules?.best_of_sets ?? 3));
       setBracketSeedStrategy(String(view.tournament?.match_rules?.bracket_seed_strategy ?? 'registration_order'));
+      setCompetitionResultsEntry(view.tournament?.match_rules?.results_entry === 'players' ? 'players' : 'organizer');
       setGroupSize(String((view.tournament?.standings_rules?.group_size as number | undefined) ?? 4));
       setQualifiersPerGroup(String((view.tournament?.standings_rules?.qualifiers_per_group as number | undefined) ?? 2));
       const maxFromPodium = (view.podium ?? []).reduce((m, r) => Math.max(m, r.position), 0);
@@ -1306,6 +1325,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
   const openPairingModal = useCallback(() => {
     if (!selected) return;
+    setPairingTiebreakStats({});
     if (selected.registration_mode === 'individual' || selected.registration_mode === 'both') {
       const singles = [...detail]
         .filter((i) => i.status === 'confirmed' && i.players_1 && !i.players_2)
@@ -1336,6 +1356,14 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       setPairingPlayerElos(elos);
       setPairingPlayerLabels(labels);
       setPairingConfirmOpen(false);
+      void (async () => {
+        try {
+          const stats = await tournamentsService.pairingTiebreakStats(selected.id);
+          setPairingTiebreakStats(stats);
+        } catch {
+          setPairingTiebreakStats({});
+        }
+      })();
     } else {
       setSinglesPairingOrder([]);
       setSinglesPairingDraft({});
@@ -2386,6 +2414,17 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         <option value="elo_tier_mid">Elo — priorizar nivel medio</option>
                       </select>
                     </div>
+                    <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 md:col-span-2">
+                      <p className="text-[10px] uppercase text-gray-500 font-semibold">Quién carga resultados</p>
+                      <select
+                        value={competitionResultsEntry}
+                        onChange={(e) => setCompetitionResultsEntry(e.target.value === 'players' ? 'players' : 'organizer')}
+                        className="mt-1 w-full text-xs outline-none bg-transparent"
+                      >
+                        <option value="organizer">Organizador (este panel)</option>
+                        <option value="players">Jugadores (app)</option>
+                      </select>
+                    </div>
                     {isGroupPlayoff && (
                       <div className="rounded-xl border border-gray-200 bg-white px-3 py-2">
                         <p className="text-[10px] uppercase text-gray-500 font-semibold">Tamaño grupo</p>
@@ -2420,6 +2459,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                             best_of_sets: Number(bestOfSets) || 3,
                             allow_draws: false,
                             bracket_seed_strategy: bracketSeedStrategy,
+                            results_entry: competitionResultsEntry,
                           },
                           standings_rules: { group_size: Number(groupSize) || 4, qualifiers_per_group: Number(qualifiersPerGroup) || 2 },
                         });
@@ -2476,6 +2516,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
                 <div className="rounded-xl border border-gray-200 p-3">
                   <p className="text-xs font-semibold text-[#1A1A1A] mb-2">{t('tournament_matches_results_title')}</p>
+                  {competitionResultsEntry === 'players' && (
+                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-2 py-1.5 mb-2">
+                      Modo jugadores: los participantes cargan el resultado desde la app; acá podés corregir o usar podio manual si hace falta.
+                    </p>
+                  )}
                   {competitionLoading && <p className="text-xs text-gray-500">{t('tournament_matches_loading')}</p>}
                   {!competitionLoading && (!competition?.matches || competition.matches.length === 0) && (
                     <p className="text-xs text-gray-500">{t('tournament_matches_empty')}</p>
@@ -2695,6 +2740,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   <div>
                     <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Precio inscripción (€)</label>
                     <input value={settingsForm.price_euros} onChange={(e) => setSettingsForm((p) => ({ ...p, price_euros: e.target.value }))} placeholder="Ej. 25 o 25,50" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      Podés subir o bajar el precio aunque ya haya inscriptos: quien pague después verá el importe actual; no modificamos pagos ya confirmados.
+                    </p>
                   </div>
                   <div className="rounded-xl border border-gray-200 px-3 py-2 text-xs md:col-span-2 space-y-2">
                     <p className="text-[10px] font-semibold text-gray-500 uppercase">Premios por puesto (€)</p>
@@ -2790,6 +2838,25 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       onChange={(e) => setSettingsForm((p) => ({ ...p, max_players: e.target.value }))}
                       className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
                     />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Resultados de partidos</label>
+                    <select
+                      value={settingsForm.results_entry}
+                      onChange={(e) =>
+                        setSettingsForm((p) => ({
+                          ...p,
+                          results_entry: e.target.value === 'players' ? 'players' : 'organizer',
+                        }))
+                      }
+                      className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                    >
+                      <option value="organizer">Los carga el organizador (panel)</option>
+                      <option value="players">Los cargan los jugadores (app)</option>
+                    </select>
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      En modo jugadores el cuadro se actualiza con los marcadores enviados desde la app; igual podés corregir o anotar podio/campeón desde acá.
+                    </p>
                   </div>
                   <div className="md:col-span-2 rounded-xl border border-gray-200 p-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
@@ -2968,6 +3035,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         registration_closed_at: settingsForm.registration_closed_at ? new Date(settingsForm.registration_closed_at).toISOString() : null,
                         poster_url: settingsForm.poster_url.trim() || null,
                         court_ids: settingsForm.court_ids,
+                        results_entry: settingsForm.results_entry,
                       });
                       setItems((prev) => prev.map((it) => (it.id === selected.id ? { ...it, ...updatedTournament } : it)));
                       setSelected((prev) => (prev?.id === selected.id ? { ...prev, ...updatedTournament } : prev));
@@ -3533,6 +3601,26 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Resultados de partidos</label>
+                  <select
+                    value={form.results_entry}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        results_entry: e.target.value === 'players' ? 'players' : 'organizer',
+                      }))
+                    }
+                    className="mt-1.5 w-full text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5"
+                  >
+                    <option value="organizer">Los carga el organizador (panel)</option>
+                    <option value="players">Los cargan los jugadores (app)</option>
+                  </select>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Podés cambiarlo después en Ajustes o Competición. Con jugadores, el cuadro avanza con los marcadores que envíen desde la app.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-white p-3">
                   <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Visibilidad del torneo</label>
                   <select
                     value={form.visibility}
@@ -3706,6 +3794,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     description: form.description || null,
                     normas: form.normas || null,
                     court_ids: selectedCourtIds,
+                    results_entry: form.results_entry,
                   };
                   setSaving(true);
                   const savingToastId = toast.loading('Guardando torneo...');
@@ -3901,6 +3990,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                           best_of_sets: Number(bestOfSets) || 3,
                           allow_draws: false,
                           bracket_seed_strategy: bracketSeedStrategy,
+                          results_entry: competitionResultsEntry,
                           manual_round1_courts: manualRound1.map((m, idx) => ({ match_number: idx + 1, court_id: m.courtId })),
                         } as Record<string, unknown>,
                       });
@@ -4342,7 +4432,8 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       if (singlesPairingOrder.length === 0) return;
                       const autoPlayerOrder = autoBuildBalancedPairsByElo(
                         singlesPairingAvailablePlayerIds,
-                        pairingPlayerElos
+                        pairingPlayerElos,
+                        pairingTiebreakStats
                       );
                       const next: Record<string, string | undefined> = {};
                       for (let i = 0; i < singlesPairingOrder.length; i++) {
@@ -4357,7 +4448,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     Formar todas las parejas (Elo)
                   </button>
                   <p className="w-full text-[11px] text-gray-600">
-                    Empareja automáticamente combinando Elo alto con Elo bajo para equilibrar cada pareja y evitar duplas demasiado desparejas.
+                    Empareja automáticamente combinando Elo alto con Elo bajo para equilibrar cada pareja. Si el Elo es muy parecido, se desempata por victorias/derrotas en torneos cerrados previos del mismo club.
                   </p>
                   <button
                     type="button"
