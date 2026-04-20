@@ -42,6 +42,12 @@ function extractTextFromUnknown(payload: unknown): string | null {
 
   if (payload && typeof payload === 'object') {
     const record = payload as Record<string, unknown>;
+    const hasCandidateShape =
+      Array.isArray(record.candidates) ||
+      Array.isArray(record.jugadores) ||
+      Array.isArray(record.players);
+    if (hasCandidateShape) return JSON.stringify(record);
+
     const directCandidates = [
       record.output,
       record.response,

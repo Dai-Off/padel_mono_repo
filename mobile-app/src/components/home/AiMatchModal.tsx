@@ -100,6 +100,130 @@ export type MatchmakingSearchInput = {
   search_area: 'club' | 'km5' | 'km10' | 'km25';
 };
 
+/** Candidatos IA (respuesta estructurada o texto); alineado con parsing en `aiMatch`. */
+export type MatchCandidate = {
+  id: string;
+  name: string;
+  matchPercent: number;
+  level: string;
+  stats: { matches: number; wins: string; distance: string };
+  tags: string[];
+  reason: string;
+};
+
+export function parseCandidatesFromResponse(text: string): MatchCandidate[] {
+  const tryParseJsonLike = (raw: string): unknown | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    const attempts = [
+      trimmed,
+      trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim(),
+      trimmed.replace(/^json\s*/i, '').trim(),
+    ];
+
+    // Also try extracting the first JSON object from noisy wrappers.
+    const firstBrace = trimmed.indexOf('{');
+    const lastBrace = trimmed.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      attempts.push(trimmed.slice(firstBrace, lastBrace + 1));
+    }
+
+    for (const candidate of attempts) {
+      try {
+        return JSON.parse(candidate) as unknown;
+      } catch {
+        // continue
+      }
+    }
+    return null;
+  };
+
+  const parseCandidatesList = (input: unknown): MatchCandidate[] => {
+    if (!input || typeof input !== 'object') return [];
+    const record = input as Record<string, unknown>;
+    const list = (record.candidates ?? record.jugadores ?? record.players) as unknown;
+    if (!Array.isArray(list)) return [];
+
+    return list
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return null;
+        const p = item as Record<string, unknown>;
+        const name = String(p.name ?? p.nombre ?? '').trim();
+        if (!name) return null;
+        return {
+          id: String(index + 1),
+          name,
+          matchPercent: Number(p.matchPercent ?? p.compatibility ?? 90),
+          level: String(p.level ?? p.nivel ?? 'Nivel compatible'),
+          stats: {
+            matches: Number(p.matches ?? p.partidos ?? 0),
+            wins: String(p.wins ?? p.victorias ?? '-'),
+            distance: String(p.distance ?? p.distancia ?? '-'),
+          },
+          tags: Array.isArray(p.tags) ? (p.tags as string[]) : ['Pádel'],
+          reason: String(p.reason ?? p.razon ?? 'Recomendado por la IA.'),
+        } satisfies MatchCandidate;
+      })
+      .filter((x): x is MatchCandidate => x != null)
+      .slice(0, 5);
+  };
+
+  // 1) Prefer structured JSON when available.
+  try {
+    const parsed = tryParseJsonLike(text);
+    if (!parsed) throw new Error('non-json');
+    const root = parseCandidatesList(parsed);
+    if (root.length > 0) return root;
+
+    if (parsed && typeof parsed === 'object') {
+      const record = parsed as Record<string, unknown>;
+      const nestedCandidates = [record.output, record.response, record.answer, record.data, record.message];
+      for (const nested of nestedCandidates) {
+        const normalized = parseCandidatesList(nested);
+        if (normalized.length > 0) return normalized;
+        if (typeof nested === 'string') {
+          const nestedParsed = tryParseJsonLike(nested);
+          const normalizedNested = parseCandidatesList(nestedParsed);
+          if (normalizedNested.length > 0) return normalizedNested;
+        }
+      }
+    }
+  } catch {
+    // Non-JSON content: continue with text parsing.
+  }
+
+  // 2) Parse free text responses.
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const nameMatches: string[] = [];
+  for (const line of lines) {
+    const nameCandidate =
+      line.match(/^\d+[\).\-\s]+([A-ZÁÉÍÓÚÑ][\p{L}\s.'-]{2,})$/u)?.[1] ??
+      line.match(/^[-*]\s*([A-ZÁÉÍÓÚÑ][\p{L}\s.'-]{2,})$/u)?.[1] ??
+      line.match(/(?:jugador|jugadora|candidato|candidata)(?:\s+seleccionado)?\s*[:\-]\s*([A-ZÁÉÍÓÚÑ][\p{L}\s.'-]{2,})/iu)?.[1] ??
+      line.match(/(?:propuesto|propuesta)\s*[:\-]\s*([A-ZÁÉÍÓÚÑ][\p{L}\s.'-]{2,})/iu)?.[1];
+
+    if (nameCandidate) {
+      const clean = nameCandidate.trim();
+      if (!nameMatches.includes(clean)) nameMatches.push(clean);
+    }
+  }
+
+  return nameMatches.slice(0, 5).map((name, index) => ({
+    id: `${index + 1}`,
+    name,
+    matchPercent: Math.max(80, 98 - index * 3),
+    level: 'Nivel compatible',
+    stats: { matches: 0, wins: '-', distance: '-' },
+    tags: ['Pádel'],
+    reason: 'Recomendado por la IA según afinidad de nivel y disponibilidad.',
+  }));
+}
+
 type AiMatchModalProps = {
   visible: boolean;
   loading: boolean;

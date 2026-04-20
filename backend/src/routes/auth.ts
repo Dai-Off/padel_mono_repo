@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hashInviteToken } from '../lib/inviteToken';
-import { sendPasswordResetEmail } from '../lib/mailer';
+import { sendPasswordResetEmail, syncPlayerVector } from '../lib/mailer';
 import { getFrontendUrl } from '../lib/env';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 import { assignActiveMatchmakingSeasonIfNull } from '../services/matchmakingSeasonService';
@@ -69,6 +69,8 @@ router.post('/register', async (req: Request, res: Response) => {
     const lastName = nameParts.slice(1).join(' ') || '';
     const authUserId = data.user?.id ?? null;
 
+    let playerIdForVector: string | null = null;
+
     const { data: existingPlayer } = await supabase
       .from('players')
       .select('id, auth_user_id')
@@ -91,7 +93,10 @@ router.post('/register', async (req: Request, res: Response) => {
         })
         .eq('id', existingPlayer.id);
       if (updateErr) console.error('Error vinculando player en registro:', updateErr.message);
-      else await assignActiveMatchmakingSeasonIfNull(supabase, existingPlayer.id);
+      else {
+        await assignActiveMatchmakingSeasonIfNull(supabase, existingPlayer.id);
+        playerIdForVector = existingPlayer.id;
+      }
     } else {
       const { data: createdPlayer, error: playerError } = await supabase
         .from('players')
@@ -110,6 +115,14 @@ router.post('/register', async (req: Request, res: Response) => {
         console.error('Error creando player en registro:', playerError.message);
       } else if (createdPlayer?.id) {
         await assignActiveMatchmakingSeasonIfNull(supabase, createdPlayer.id as string);
+        playerIdForVector = createdPlayer.id as string;
+      }
+    }
+
+    if (playerIdForVector) {
+      const syncRes = await syncPlayerVector(playerIdForVector);
+      if (!syncRes.sent) {
+        console.error('[auth/register] sync-player-vector failed:', syncRes.error ?? 'unknown');
       }
     }
 
