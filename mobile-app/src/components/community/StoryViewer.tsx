@@ -97,11 +97,22 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
       <View style={styles.container}>
         <StatusBar hidden />
         
-        {/* Main Image */}
+        {/* Background Layer: Blurred Mirror */}
         <Image 
           source={{ uri: imageUrl }} 
-          style={styles.image} 
+          style={styles.backgroundImage} 
           resizeMode="cover" 
+          blurRadius={25}
+        />
+        
+        {/* Overlay for contrast */}
+        <View style={styles.overlay} />
+        
+        {/* Main Image: Contained without cropping */}
+        <Image 
+          source={{ uri: imageUrl }} 
+          style={styles.mainImage} 
+          resizeMode="contain" 
         />
 
         {/* Interaction Layer */}
@@ -190,7 +201,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  image: {
+  backgroundImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  mainImage: {
     width: width,
     height: height,
     position: 'absolute',
