@@ -3,6 +3,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { requireAuth, getPlayerFromAuth, requireOnboarding } from './learningHelpers';
 import { getMultiplier } from './learningStreaks';
 import { SharedStreakRow, lazyResetSharedStreak, normalizePair } from './learningStreaks';
+import { dayKeyInTz, previousDayKey } from './learningTimezone';
 
 const router = Router();
 
@@ -21,6 +22,8 @@ router.get('/streak', requireAuth, async (req: Request, res: Response) => {
     if (!player) {
       return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
     }
+
+    const tz = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
 
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
@@ -41,11 +44,27 @@ router.get('/streak', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
+    // Lazy reset: si la última lección no fue hoy ni ayer, la racha se rompió.
+    let currentStreak = data.current_streak ?? 0;
+    if (data.last_lesson_completed_at && currentStreak > 0) {
+      const todayKey = dayKeyInTz(new Date(), tz);
+      const yesterdayKey = previousDayKey(todayKey);
+      const lastKey = dayKeyInTz(new Date(data.last_lesson_completed_at), tz);
+
+      if (lastKey !== todayKey && lastKey !== yesterdayKey) {
+        currentStreak = 0;
+        await supabase
+          .from('learning_streaks')
+          .update({ current_streak: 0 })
+          .eq('player_id', player.id);
+      }
+    }
+
     return res.json({
       ok: true,
-      current_streak: data.current_streak,
+      current_streak: currentStreak,
       longest_streak: data.longest_streak,
-      multiplier: getMultiplier(data.current_streak),
+      multiplier: getMultiplier(currentStreak),
       last_lesson_completed_at: data.last_lesson_completed_at,
     });
   } catch (err) {

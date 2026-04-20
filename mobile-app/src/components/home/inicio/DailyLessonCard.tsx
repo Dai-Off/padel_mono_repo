@@ -7,6 +7,7 @@ import { androidReadableText } from './textStyles';
 import { useStreak } from '../../../hooks/useDailyLesson';
 
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
+const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
 type Props = {
   onPress?: () => void;
@@ -32,7 +33,7 @@ function getDayStatus(
 }
 
 export function DailyLessonCard({ onPress }: Props) {
-  const { currentStreak, multiplier, lastCompleted, loading } = useStreak();
+  const { currentStreak, multiplier, lastCompleted, loading } = useStreak(TIMEZONE);
 
   const now = new Date();
   const todayIndex = (now.getDay() + 6) % 7; // Lunes=0, Domingo=6
@@ -84,9 +85,11 @@ export function DailyLessonCard({ onPress }: Props) {
             <Text style={styles.title}>
               {completedToday ? 'Completada!' : 'Leccion diaria'}
             </Text>
-            <Text style={styles.subtitle}>
-              Bonus: {multiplierLabel ?? 'Sin bonus'}
-            </Text>
+            {multiplierLabel && (
+              <Text style={styles.subtitle}>
+                Bonus: {multiplierLabel}
+              </Text>
+            )}
           </View>
           <View style={styles.streakCol}>
             {currentStreak > 0 && (

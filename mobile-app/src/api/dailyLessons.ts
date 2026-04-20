@@ -240,10 +240,11 @@ export async function completeCourseLesson(
 
 export async function fetchStreak(
   token: string | null | undefined,
+  timezone = 'UTC',
 ): Promise<StreakInfo | { ok: false; error: string }> {
   if (!token) return { ok: false, error: 'Token requerido' };
   try {
-    const res = await fetch(`${API_URL}/learning/streak`, {
+    const res = await fetch(`${API_URL}/learning/streak?timezone=${encodeURIComponent(timezone)}`, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',

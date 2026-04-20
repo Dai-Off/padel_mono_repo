@@ -13,10 +13,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
-import { submitDailyLesson, type AnswerPayload, type SubmitLessonResponse } from '../api/dailyLessons';
+import { submitDailyLesson, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
+import { fetchMyCoachAssessment } from '../api/coachAssessment';
 import { QuestionCard } from '../components/learning/QuestionCard';
 import { VideoPlayer } from '../components/learning/VideoPlayer';
 import { Skeleton } from '../components/ui/Skeleton';
+import { LessonImpactRadar, type SkillValues } from '../components/learning/LessonImpactRadar';
 
 type Props = {
   onBack: () => void;
@@ -34,11 +36,43 @@ const AREA_LABELS: Record<string, { label: string; color: string; bg: string; bo
   mental_vocabulary: { label: 'Vocabulario', color: '#F59E0B', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.2)' },
 };
 
+// Mapeo areas del modulo learning -> skills del coachAssessment
+const AREA_TO_SKILL: Record<QuestionArea, keyof SkillValues> = {
+  technique: 'technical',
+  tactics: 'tactical',
+  physical: 'physical',
+  mental_vocabulary: 'mental',
+};
+
+// Skills por defecto si el jugador no tiene coachAssessment
+const DEFAULT_SKILLS: SkillValues = { technical: 25, physical: 25, mental: 25, tactical: 25 };
+
+// Umbrales de racha para siguiente bonus (sincronizados con getMultiplier del backend)
+const STREAK_THRESHOLDS = [3, 8, 21, 46] as const;
+
+function getNextStreakMilestone(current: number): number | null {
+  for (const threshold of STREAK_THRESHOLDS) {
+    if (current < threshold) return threshold - current;
+  }
+  return null; // ya en el maximo
+}
+
+function getQuestionPreview(q: DailyLessonQuestion): string {
+  const c = q.content as Record<string, unknown>;
+  if (q.type === 'match_columns') return 'Empareja los elementos';
+  if (q.type === 'order_sequence') {
+    return typeof c.instruction === 'string' && c.instruction
+      ? c.instruction
+      : 'Ordena la secuencia';
+  }
+  return typeof c.question === 'string' ? c.question : 'Pregunta';
+}
+
 export function DailyLessonScreen({ onBack, onComplete }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { questions, alreadyCompleted, loading, error } = useDailyLesson(TIMEZONE);
-  const streak = useStreak();
+  const streak = useStreak(TIMEZONE);
 
   const [phase, setPhase] = useState<Phase>('intro');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -49,6 +83,8 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showingVideo, setShowingVideo] = useState(false);
+  const [baseSkills, setBaseSkills] = useState<SkillValues>(DEFAULT_SKILLS);
+  const [questionVotes, setQuestionVotes] = useState<Record<string, 'up' | 'down' | null>>({});
 
   // Refs para timers y animaciones
   const questionStartTime = useRef(Date.now());
@@ -111,6 +147,26 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     }
   }, [phase]);
 
+  // Cargar skills base desde coachAssessment al entrar en results
+  useEffect(() => {
+    if (phase !== 'results' || !session?.access_token) return;
+    let mounted = true;
+    fetchMyCoachAssessment(session.access_token).then((assessment) => {
+      if (!mounted) return;
+      if (assessment?.skills) {
+        setBaseSkills({
+          technical: assessment.skills.technical,
+          physical: assessment.skills.physical,
+          mental: assessment.skills.mental,
+          tactical: assessment.skills.tactical,
+        });
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [phase, session?.access_token]);
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -156,7 +212,13 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
       setResults({
         ok: true,
         session: { id: 'repeat', correct_count: correctCount, total_count: answersToSend.length, score: totalScore, xp_earned: 0, completed_at: new Date().toISOString() },
-        streak: { current: 0, longest: 0, multiplier: 0, xp_base: 0, xp_bonus: 0 },
+        streak: {
+          current: streak.currentStreak,
+          longest: streak.longestStreak,
+          multiplier: streak.multiplier,
+          xp_base: 0,
+          xp_bonus: 0,
+        },
         shared_streaks: [],
         results: answersToSend.map((a, i) => ({ question_id: a.question_id, correct: !failedIndices.includes(i), correct_answer: null, points: failedIndices.includes(i) ? 0 : 100 })),
       });
@@ -171,11 +233,21 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
       setResults(res as SubmitLessonResponse);
       setPhase('results');
     } else {
-      setSubmitError('error' in res ? res.error : 'Error al enviar');
+      setSubmitError(('error' in res && res.error) ? res.error : 'Error al enviar');
       setPhase('results');
     }
     setSubmitting(false);
-  }, [session?.access_token, alreadyCompleted, failedIndices]);
+  }, [session?.access_token, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, streak.multiplier]);
+
+  const startQuestionOrVideo = useCallback((index: number) => {
+    const q = questions[index];
+    if (q?.has_video && q.video_url) {
+      setShowingVideo(true);
+    } else {
+      setShowingVideo(false);
+      questionStartTime.current = Date.now();
+    }
+  }, [questions]);
 
   const handleQuestionAnswered = useCallback((correct: boolean, selectedAnswer: unknown) => {
     const elapsed = Date.now() - questionStartTime.current;
@@ -229,16 +301,6 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
       }
     }, 2200);
   }, [reviewIndex, failedIndices, answers, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo]);
-
-  const startQuestionOrVideo = useCallback((index: number) => {
-    const q = questions[index];
-    if (q?.has_video && q.video_url) {
-      setShowingVideo(true);
-    } else {
-      setShowingVideo(false);
-      questionStartTime.current = Date.now();
-    }
-  }, [questions]);
 
   const handleVideoEnd = useCallback(() => {
     setTimeout(() => {
@@ -490,7 +552,26 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     if (!results) return null;
 
     const pct = Math.round((results.session.correct_count / results.session.total_count) * 100);
-    const title = pct >= 80 ? 'Excelente!' : pct >= 60 ? 'Bien hecho!' : 'Sigue practicando!';
+    const title = pct >= 80 ? '¡Excelente!' : pct >= 60 ? '¡Bien hecho!' : '¡Sigue practicando!';
+
+    // Delta por area de esta sesion (1 pto por acierto en la skill correspondiente)
+    const deltas: SkillValues = { technical: 0, physical: 0, mental: 0, tactical: 0 };
+    questions.forEach((q, idx) => {
+      const r = results.results[idx];
+      if (r?.correct) {
+        deltas[AREA_TO_SKILL[q.area]] += 1;
+      }
+    });
+
+    const nextMilestone = getNextStreakMilestone(results.streak.current);
+
+    const toggleVote = (questionId: string, vote: 'up' | 'down') => {
+      // TODO: persistir cuando se cree endpoint de feedback por pregunta
+      setQuestionVotes((prev) => ({
+        ...prev,
+        [questionId]: prev[questionId] === vote ? null : vote,
+      }));
+    };
 
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -506,16 +587,16 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           </View>
 
           <Text style={styles.resultsTitle}>{title}</Text>
-          <Text style={styles.resultsSubtitle}>Leccion completada</Text>
+          <Text style={styles.resultsSubtitle}>Lección completada</Text>
 
           <View style={styles.metricsCard}>
             <View style={styles.metricItem}>
-              <Text style={styles.metricValue}>{results.session.score}</Text>
-              <Text style={styles.metricLabel}>PUNTOS</Text>
+              <Text style={styles.metricValue}>{pct}%</Text>
+              <Text style={styles.metricLabel}>PUNTUACIÓN</Text>
             </View>
             <View style={[styles.metricItem, styles.metricXp]}>
-              <Text style={styles.metricValueXp}>{results.session.xp_earned}</Text>
-              <Text style={styles.metricLabel}>XP</Text>
+              <Text style={styles.metricValueXp}>+{results.session.xp_earned}</Text>
+              <Text style={styles.metricLabel}>PTS. HABILIDAD</Text>
             </View>
             <View style={[styles.metricItem, styles.metricCorrect]}>
               <Text style={styles.metricValueCorrect}>
@@ -525,32 +606,70 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
             </View>
           </View>
 
-          {results.streak.current > 0 && (
+          <LessonImpactRadar baseSkills={baseSkills} deltas={deltas} />
+
+          {(results.streak.current > 0 || nextMilestone !== null) && (
             <View style={styles.streakResultCard}>
-              <Ionicons name="flame" size={20} color="#F97316" />
-              <View style={styles.streakResultInfo}>
-                <Text style={styles.streakResultValue}>{results.streak.current} dias</Text>
-                <Text style={styles.streakResultLabel}>Racha actual</Text>
+              <View style={styles.streakResultTop}>
+                <Ionicons name="flame" size={20} color="#F97316" />
+                <View style={styles.streakResultInfo}>
+                  <Text style={styles.streakResultValue}>{results.streak.current} días</Text>
+                  <Text style={styles.streakResultLabel}>Racha actual</Text>
+                </View>
+                {results.streak.xp_bonus > 0 && (
+                  <View style={styles.bonusBadge}>
+                    <Text style={styles.bonusText}>+{results.streak.xp_bonus} XP bonus</Text>
+                  </View>
+                )}
               </View>
-              {results.streak.xp_bonus > 0 && (
-                <View style={styles.bonusBadge}>
-                  <Text style={styles.bonusText}>+{results.streak.xp_bonus} XP bonus</Text>
+              {nextMilestone !== null && (
+                <View style={styles.nextBonusRow}>
+                  <Ionicons name="trending-up-outline" size={12} color="#F18F34" />
+                  <Text style={styles.nextBonusText}>
+                    Siguiente bonus con {nextMilestone} {nextMilestone === 1 ? 'día' : 'días'} más de racha
+                  </Text>
                 </View>
               )}
             </View>
           )}
 
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryTitle}>Resumen</Text>
-            {results.results.map((r, i) => (
-              <View key={r.question_id} style={styles.summaryRow}>
-                <View style={[styles.summaryIcon, r.correct ? styles.summaryIconCorrect : styles.summaryIconIncorrect]}>
-                  <Ionicons name={r.correct ? 'checkmark' : 'close'} size={14} color={r.correct ? '#10B981' : '#EF4444'} />
+            <Text style={styles.summaryTitle}>Resumen de respuestas</Text>
+            {results.results.map((r, i) => {
+              const q = questions[i];
+              const preview = q ? getQuestionPreview(q) : `Pregunta ${i + 1}`;
+              const vote = questionVotes[r.question_id] ?? null;
+              return (
+                <View key={r.question_id} style={styles.summaryRow}>
+                  <View style={[styles.summaryIcon, r.correct ? styles.summaryIconCorrect : styles.summaryIconIncorrect]}>
+                    <Ionicons name={r.correct ? 'checkmark' : 'close'} size={14} color={r.correct ? '#10B981' : '#EF4444'} />
+                  </View>
+                  <Text style={styles.summaryText} numberOfLines={2}>{preview}</Text>
+                  <Pressable
+                    onPress={() => toggleVote(r.question_id, 'up')}
+                    hitSlop={6}
+                    style={[styles.voteBtn, vote === 'up' && styles.voteBtnUpActive]}
+                  >
+                    <Ionicons
+                      name={vote === 'up' ? 'thumbs-up' : 'thumbs-up-outline'}
+                      size={14}
+                      color={vote === 'up' ? '#10B981' : '#6B7280'}
+                    />
+                  </Pressable>
+                  <Pressable
+                    onPress={() => toggleVote(r.question_id, 'down')}
+                    hitSlop={6}
+                    style={[styles.voteBtn, vote === 'down' && styles.voteBtnDownActive]}
+                  >
+                    <Ionicons
+                      name={vote === 'down' ? 'thumbs-down' : 'thumbs-down-outline'}
+                      size={14}
+                      color={vote === 'down' ? '#EF4444' : '#6B7280'}
+                    />
+                  </Pressable>
                 </View>
-                <Text style={styles.summaryText} numberOfLines={1}>Pregunta {i + 1}</Text>
-                <Text style={styles.summaryPoints}>{r.points} pts</Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
 
           {/* Boton repasar fallos */}
@@ -680,25 +799,44 @@ const styles = StyleSheet.create({
   metricValueCorrect: { color: '#10B981', fontSize: 18, fontWeight: '900' },
   metricLabel: { color: '#6B7280', fontSize: 9, fontWeight: '600', letterSpacing: 1, marginTop: 4 },
   streakResultCard: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 14, gap: 12, width: '100%', marginBottom: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 14, width: '100%', marginBottom: 16,
   },
+  streakResultTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   streakResultInfo: { flex: 1 },
   streakResultValue: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
   streakResultLabel: { color: '#6B7280', fontSize: 11 },
   bonusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(241,143,52,0.1)', borderWidth: 1, borderColor: 'rgba(241,143,52,0.2)' },
   bonusText: { color: '#F18F34', fontSize: 11, fontWeight: '700' },
+  nextBonusRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  nextBonusText: { color: '#9CA3AF', fontSize: 11, fontWeight: '600' },
   summaryCard: {
     backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
     borderRadius: 16, padding: 16, width: '100%', marginBottom: 24,
   },
   summaryTitle: { color: '#FFFFFF', fontSize: 13, fontWeight: '700', marginBottom: 12 },
-  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8 },
   summaryIcon: { width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   summaryIconCorrect: { backgroundColor: 'rgba(16,185,129,0.2)' },
   summaryIconIncorrect: { backgroundColor: 'rgba(239,68,68,0.2)' },
-  summaryText: { flex: 1, color: '#9CA3AF', fontSize: 12 },
-  summaryPoints: { color: '#6B7280', fontSize: 12, fontWeight: '600' },
+  summaryText: { flex: 1, color: '#D1D5DB', fontSize: 12, lineHeight: 16 },
+  voteBtn: {
+    width: 28, height: 28, borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  voteBtnUpActive: {
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    borderColor: 'rgba(16,185,129,0.4)',
+  },
+  voteBtnDownActive: {
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderColor: 'rgba(239,68,68,0.4)',
+  },
   reviewButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     paddingVertical: 16, borderRadius: 16,
