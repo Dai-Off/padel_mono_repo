@@ -33,6 +33,7 @@ import { CoursesScreen } from './CoursesScreen';
 import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
 import { PublicCourseDetailScreen } from './PublicCourseDetailScreen';
 import { ProfileScreen } from './ProfileScreen';
+import { CommunityScreen } from './CommunityScreen';
 import type { EducationalCourse } from '../api/dailyLessons';
 import type { PublicCourse } from '../api/schoolCourses';
 
@@ -55,6 +56,7 @@ export function MainApp() {
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showCommunity, setShowCommunity] = useState(false);
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
@@ -127,6 +129,11 @@ export function MainApp() {
           onBack={() => setShowProfile(false)}
           onMenuPress={sidebar.toggle}
         />
+      );
+    }
+    if (showCommunity) {
+      return (
+        <CommunityScreen onBack={() => setShowCommunity(false)} />
       );
     }
     if (showTransacciones) {
@@ -282,7 +289,10 @@ export function MainApp() {
                 )
               : activeTab === 'inicio'
                 ? (
-                    <HomeHeader onMenuPress={sidebar.toggle} />
+                    <HomeHeader 
+                      onMenuPress={sidebar.toggle} 
+                      onGroupsPress={() => setShowCommunity(true)}
+                    />
                   )
                 : undefined;
 
