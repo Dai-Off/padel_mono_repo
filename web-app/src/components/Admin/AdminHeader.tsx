@@ -1,4 +1,4 @@
-import { LogOut, ClipboardList } from "lucide-react";
+import { LogOut, ClipboardList, BookOpen } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { authService } from "../../services/auth";
@@ -14,6 +14,8 @@ export const AdminHeader = () => {
   };
 
   const isQuestionsPage = location.pathname === "/admin/questions";
+  const isLearningPage = location.pathname === "/admin/learning";
+  const isSubPage = isQuestionsPage || isLearningPage;
 
   return (
     <header className="sticky top-0 z-55 bg-background/95 backdrop-blur-md border-b border-border-subtle">
@@ -39,21 +41,36 @@ export const AdminHeader = () => {
                   {t("admin_questions")}
                 </span>
               )}
+              {isLearningPage && (
+                <span className="text-[10px] font-medium text-gray-400 capitalize -mt-0.5">
+                  {t("admin_learning_title")}
+                </span>
+              )}
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {!isQuestionsPage && (
-              <button
-                type="button"
-                onClick={() => navigate("/admin/questions")}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-gray-800 transition-all border border-transparent shadow-sm"
-              >
-                <ClipboardList className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{t("admin_questions")}</span>
-              </button>
+            {!isSubPage && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigate("/admin/questions")}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-gray-800 transition-all border border-transparent shadow-sm"
+                >
+                  <ClipboardList className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{t("admin_questions")}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate("/admin/learning")}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition-all border border-transparent shadow-sm"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">{t("admin_learning_title")}</span>
+                </button>
+              </>
             )}
-            {isQuestionsPage && (
+            {isSubPage && (
               <button
                 type="button"
                 onClick={() => navigate("/admin")}

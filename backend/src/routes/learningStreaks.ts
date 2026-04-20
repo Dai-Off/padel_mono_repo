@@ -142,7 +142,6 @@ export function lazyResetSharedStreak(row: SharedStreakRow): boolean {
 
 export async function updateSharedStreaks(
   playerId: string,
-  _timezone: string,
 ): Promise<SharedStreakRow[]> {
   const supabase = getSupabaseServiceRoleClient();
 
