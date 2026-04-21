@@ -998,6 +998,7 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
  *     description: |
  *       Devuelve el total esperado para el arqueo de caja, relacionado con los bookings de ese día.
  *       Incluye por cada booking cuánto se pagó en `cash` y cuánto en `card`.
+ *       Tras un cierre del mismo día, solo cuentan pagos posteriores al cierre y el saldo de la última apertura **posterior** a ese cierre (`needs_new_opening_after_closing` indica si falta esa apertura).
  *       Requiere JWT con acceso al club (admin o dueño).
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -1031,6 +1032,8 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
  *               date: "2026-03-25"
  *               systemCashTotal_cents: 12800
  *               systemCardTotal_cents: 6400
+ *               last_closing_at: "2026-03-25T14:00:00.000Z"
+ *               needs_new_opening_after_closing: false
  *               bookings:
  *                 - booking_id: "uuid"
  *                   start_at: "2026-03-25T18:00:00.000Z"
@@ -1239,6 +1242,14 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       );
     const effectiveOpeningCashCents = shouldIncludeOpening ? openingCashCents : 0;
 
+    const openingAfterLastClose = Boolean(
+      openingRow &&
+        (!lastClosedAtIso ||
+          !Number.isFinite(openingOpenedAtMs) ||
+          openingOpenedAtMs > (closingCutoffMs ?? -Infinity)),
+    );
+    const needs_new_opening_after_closing = Boolean(lastClosedAtIso) && !openingAfterLastClose;
+
     const systemCashTotalEur = Math.round((systemCashTotalCents / 100) * 100) / 100;
     const systemCardTotalEur = Math.round((systemCardTotalCents / 100) * 100) / 100;
     const openingCashEur = Math.round((effectiveOpeningCashCents / 100) * 100) / 100;
@@ -1252,6 +1263,8 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       systemCardTotal_eur: systemCardTotalEur,
       openingCashTotal_cents: effectiveOpeningCashCents,
       openingCashTotal_eur: openingCashEur,
+      last_closing_at: lastClosedAtIso,
+      needs_new_opening_after_closing,
       opening: openingRecord,
       bookings: Array.from(byBooking.values()).sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? '')),
     });
@@ -1390,7 +1403,7 @@ export async function getCashOpeningForDayHandler(req: Request, res: Response): 
  *     summary: Registrar apertura de caja diaria
  *     description: |
  *       Persiste el saldo inicial de caja para `for_date`, con empleado responsable.
- *       Solo permite una apertura por día y club (si ya existe devuelve 409).
+ *       Permite varias aperturas el mismo día (p. ej. tras un cierre intermedio).
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -1430,7 +1443,6 @@ export async function getCashOpeningForDayHandler(req: Request, res: Response): 
  *       400: { description: Validación de datos }
  *       401: { description: Sin token }
  *       403: { description: Sin acceso o staff inválido }
- *       409: { description: Ya existe apertura para ese día }
  *       500: { description: Error de base de datos }
  *       503: { description: Tabla no migrada }
  */
@@ -1480,22 +1492,6 @@ export async function createCashOpeningRecordHandler(req: Request, res: Response
     }
     if (staffRow.status !== 'active') {
       res.status(400).json({ ok: false, error: 'El empleado no está activo' });
-      return;
-    }
-
-    const { data: existing, error: existingErr } = await supabase
-      .from('club_cash_openings')
-      .select('id')
-      .eq('club_id', clubId)
-      .eq('for_date', forDateStr)
-      .limit(1)
-      .maybeSingle();
-    if (existingErr && !(existingErr.message.includes('relation') && existingErr.message.includes('does not exist'))) {
-      res.status(500).json({ ok: false, error: existingErr.message });
-      return;
-    }
-    if (existing?.id) {
-      res.status(409).json({ ok: false, error: 'Ya existe una apertura de caja para este día' });
       return;
     }
 

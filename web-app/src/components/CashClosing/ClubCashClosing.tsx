@@ -102,10 +102,11 @@ export function ClubCashClosingTab({
   const [expectedBookings, setExpectedBookings] = useState<CashClosingBookingExpected[]>([]);
   const [systemCashTotal, setSystemCashTotal] = useState(0);
   const [systemCardTotal, setSystemCardTotal] = useState(0);
-  const [loadingExpected, setLoadingExpected] = useState(false);
+  const [loadingExpected, setLoadingExpected] = useState(true);
   const [saving, setSaving] = useState(false);
   const [operativeDate, setOperativeDate] = useState(localDateYmd());
   const [openingRecord, setOpeningRecord] = useState<CashOpeningSavedRecord | null>(null);
+  const [needsNewOpeningAfterClosing, setNeedsNewOpeningAfterClosing] = useState(false);
   const [openingEmployeeId, setOpeningEmployeeId] = useState('');
   const [openingCashTotal, setOpeningCashTotal] = useState('');
   const [openingNotes, setOpeningNotes] = useState('');
@@ -132,10 +133,25 @@ export function ClubCashClosingTab({
     return r.employeeName.toLowerCase().includes(q) || r.id.toLowerCase().includes(q);
   });
 
+  const openingAppliesToSelectedDay = useMemo(() => {
+    if (!openingRecord) return false;
+    const raw = openingRecord.for_date;
+    if (raw == null || String(raw).trim() === '') return true;
+    return String(raw).slice(0, 10) === operativeDate;
+  }, [openingRecord, operativeDate]);
+
+  useEffect(() => {
+    if (!needsNewOpeningAfterClosing) return;
+    setOpeningEmployeeId('');
+    setOpeningCashTotal('');
+    setOpeningNotes('');
+  }, [needsNewOpeningAfterClosing]);
+
   useEffect(() => {
     if (!clubResolved || !clubId) return;
     let cancelled = false;
     setLoadingExpected(true);
+    setOpeningRecord(null);
 
     (async () => {
       try {
@@ -151,6 +167,7 @@ export function ClubCashClosingTab({
         setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
         setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
         setOpeningRecord(opening.opening ?? null);
+        setNeedsNewOpeningAfterClosing(expected.needs_new_opening_after_closing === true);
 
         try {
           const recs = await paymentsService.listCashClosingRecords(clubId, 50, operativeDate);
@@ -167,6 +184,11 @@ export function ClubCashClosingTab({
         }
       } catch (e) {
         if (cancelled) return;
+        setOpeningRecord(null);
+        setNeedsNewOpeningAfterClosing(false);
+        setExpectedBookings([]);
+        setSystemCashTotal(0);
+        setSystemCardTotal(0);
         toast.error((e as Error).message || t('payments_load_error'));
       } finally {
         if (!cancelled) setLoadingExpected(false);
@@ -199,6 +221,7 @@ export function ClubCashClosingTab({
       setExpectedBookings(refreshedExpected.bookings ?? []);
       setSystemCashTotal(refreshedExpected.systemCashTotal_eur ?? 0);
       setSystemCardTotal(refreshedExpected.systemCardTotal_eur ?? 0);
+      setNeedsNewOpeningAfterClosing(refreshedExpected.needs_new_opening_after_closing === true);
       setCashBreakdown(emptyBreakdown);
       setCardTotal('');
       setEmployeeId('');
@@ -236,10 +259,11 @@ export function ClubCashClosingTab({
       setExpectedBookings(expected.bookings ?? []);
       setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
       setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
+      setNeedsNewOpeningAfterClosing(expected.needs_new_opening_after_closing === true);
       setEmployeeId(saved.staff_id ?? '');
       setOpeningCashTotal('');
       setOpeningNotes('');
-      toast.success('Apertura de caja registrada');
+      toast.success(t('cash_opening_success'));
     } catch (e) {
       toast.error((e as Error).message || t('payments_load_error'));
     } finally {
@@ -249,15 +273,17 @@ export function ClubCashClosingTab({
 
   if (!clubResolved) return <PageSpinner />;
   if (!clubId) return <p className="text-sm text-gray-500 text-center py-12">No se pudo determinar el club.</p>;
-  if (loadingExpected && view === 'new') return <PageSpinner />;
-  if (!openingRecord) {
+  if (loadingExpected) return <PageSpinner />;
+  const showOpeningOnly = !openingAppliesToSelectedDay || needsNewOpeningAfterClosing;
+  if (showOpeningOnly) {
     return (
       <div className="space-y-5">
         <div>
-          <h2 className="text-sm font-bold text-[#1A1A1A]">Apertura de caja diaria</h2>
-          <p className="text-[11px] text-gray-500 mt-1">
-            Debes registrar el saldo inicial y el empleado responsable antes de continuar con el cierre de caja.
-          </p>
+          <h2 className="text-sm font-bold text-[#1A1A1A]">{t('cash_opening_daily_title')}</h2>
+          <p className="text-[11px] text-gray-500 mt-1">{t('cash_opening_daily_sub')}</p>
+          {needsNewOpeningAfterClosing && (
+            <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">{t('cash_after_close_hint')}</p>
+          )}
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3 max-w-xl">
           <input
@@ -271,7 +297,7 @@ export function ClubCashClosingTab({
             onChange={(e) => setOpeningEmployeeId(e.target.value)}
             className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
           >
-            <option value="">Empleado que abre caja</option>
+            <option value="">{t('cash_opening_employee')}</option>
             {staff.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
@@ -284,13 +310,13 @@ export function ClubCashClosingTab({
             step="0.01"
             value={openingCashTotal}
             onChange={(e) => setOpeningCashTotal(e.target.value)}
-            placeholder="Saldo inicial de caja (€)"
+            placeholder={t('cash_opening_initial_placeholder')}
             className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
           />
           <textarea
             value={openingNotes}
             onChange={(e) => setOpeningNotes(e.target.value)}
-            placeholder="Detalle opcional (billetes, observaciones)"
+            placeholder={t('cash_opening_notes_placeholder')}
             className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs resize-none"
             rows={3}
           />
@@ -300,7 +326,7 @@ export function ClubCashClosingTab({
             disabled={!openingEmployeeId || savingOpening}
             className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1A1A1A] text-white disabled:opacity-40"
           >
-            {savingOpening ? t('loading') : 'Guardar apertura'}
+            {savingOpening ? t('loading') : t('cash_opening_save')}
           </button>
         </div>
       </div>
@@ -314,7 +340,10 @@ export function ClubCashClosingTab({
           <h2 className="text-sm font-bold text-[#1A1A1A]">{t('cash_closing_title')}</h2>
           <p className="text-[10px] text-gray-400">{operativeDate}</p>
           <p className="text-[10px] text-gray-500 mt-1">
-            Apertura: €{(openingRecord.opening_cash_cents / 100).toFixed(2)} - {openingRecord.employee_name}
+            {t('cash_opening_banner', {
+              amount: (openingRecord.opening_cash_cents / 100).toFixed(2),
+              name: openingRecord.employee_name,
+            })}
           </p>
         </div>
         <div className="flex items-center gap-2">

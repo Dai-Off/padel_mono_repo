@@ -36,6 +36,10 @@ export type CashClosingExpected = {
   systemCardTotal_eur: number;
   openingCashTotal_cents?: number;
   openingCashTotal_eur?: number;
+  /** Último cierre del día (ISO). */
+  last_closing_at?: string | null;
+  /** Tras un cierre, hace falta una apertura posterior para contar efectivo inicial en el esperado. */
+  needs_new_opening_after_closing?: boolean;
   opening?: CashOpeningSavedRecord | null;
   bookings: CashClosingBookingExpected[];
 };
