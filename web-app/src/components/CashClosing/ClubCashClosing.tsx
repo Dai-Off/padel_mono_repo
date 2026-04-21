@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { BarChart3, Calculator, CheckCircle2, History, Search, TrendingDown, TrendingUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -87,6 +88,7 @@ export function ClubCashClosingTab({
   clubResolved?: boolean;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [view, setView] = useState<'new' | 'history'>('new');
   const [staff, setStaff] = useState<ClubStaffMember[]>([]);
   const [employeeId, setEmployeeId] = useState('');
@@ -203,7 +205,8 @@ export function ClubCashClosingTab({
       setCardTotal('');
       setEmployeeId('');
       setObservations('');
-      setView('history');
+      toast.success('Arqueo guardado correctamente');
+      navigate('/grilla?menu=resumen');
     } catch (e) {
       if (e instanceof HttpError && e.status === 503) {
         toast.error(

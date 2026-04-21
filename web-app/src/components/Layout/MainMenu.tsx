@@ -15,7 +15,9 @@ import {
     Star,
     Settings,
     Shield,
-    UserCircle
+    UserCircle,
+    BookOpen,
+    Trophy,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -68,10 +70,17 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
             ],
         },
         {
-            title: 'Escuela y competición',
+            title: 'Escuela',
             items: [
                 { id: 'escuela', path: '/escuela', icon: Award, label: t('menu_escuela'), color: 'rgb(249, 115, 22)', bgColor: 'rgba(249, 115, 22, 0.06)' },
-                { id: 'torneos', path: '/torneos', icon: Award, label: t('menu_torneos'), color: 'rgb(234, 179, 8)', bgColor: 'rgba(234, 179, 8, 0.06)' },
+                { id: 'contenido-aprendizaje', path: '/contenido-aprendizaje', icon: BookOpen, label: t('menu_learning_content'), color: 'rgb(99, 102, 241)', bgColor: 'rgba(99, 102, 241, 0.06)' },
+            ],
+        },
+        {
+            title: 'Torneos',
+            items: [
+                { id: 'torneos', path: '/torneos', icon: Trophy, label: t('menu_torneos'), color: 'rgb(234, 179, 8)', bgColor: 'rgba(234, 179, 8, 0.06)' },
+                { id: 'ligas', path: '/torneos?tab=ligas', icon: Trophy, label: 'Ligas', color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
             ],
         },
         {
@@ -95,6 +104,9 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
     const handleItemClick = (item: { path: string; id: string }) => {
         if (item.path === '/grilla' && (item.id === 'resumen' || item.id === 'reservas')) {
             navigate(`/grilla?menu=${item.id}`);
+        } else if (item.path.includes('?')) {
+            const [path, query] = item.path.split('?');
+            navigate(`${path}?${query}`);
         } else {
             navigate(item.path);
         }

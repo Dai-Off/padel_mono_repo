@@ -3,19 +3,48 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import { ACCENT } from './constants';
-import { DASH, dash } from './dash';
 import { androidReadableText } from './textStyles';
+import { useStreak } from '../../../hooks/useDailyLesson';
 
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
+const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
 type Props = {
-  /** Texto bonus (API); sin dato → `-`. */
-  bonusText?: string | null;
   onPress?: () => void;
 };
 
-export function DailyLessonCard({ bonusText, onPress }: Props) {
-  const bonus = dash(bonusText);
+function getMultiplierLabel(multiplier: number): string | null {
+  if (multiplier <= 0) return null;
+  return `x${(1 + multiplier).toFixed(1)} XP`;
+}
+
+function getDayStatus(
+  dayIndex: number,
+  todayIndex: number,
+  currentStreak: number,
+  completedToday: boolean,
+): 'completed' | 'completed_today' | 'today' | 'missed' | 'future' {
+  if (dayIndex > todayIndex) return 'future';
+  if (dayIndex === todayIndex) return completedToday ? 'completed_today' : 'today';
+  // Dias pasados: si el streak cubre ese dia
+  const daysAgo = todayIndex - dayIndex;
+  const streakCovers = completedToday ? daysAgo < currentStreak : daysAgo <= currentStreak;
+  return streakCovers ? 'completed' : 'missed';
+}
+
+export function DailyLessonCard({ onPress }: Props) {
+  const { currentStreak, multiplier, lastCompleted, loading } = useStreak(TIMEZONE);
+
+  const now = new Date();
+  const todayIndex = (now.getDay() + 6) % 7; // Lunes=0, Domingo=6
+  const completedToday = !!lastCompleted &&
+    new Date(lastCompleted).toDateString() === now.toDateString();
+
+  const multiplierLabel = getMultiplierLabel(multiplier);
+
+  const gradientColors = completedToday
+    ? ['rgba(16,185,129,0.12)', 'rgba(16,185,129,0.06)', 'rgba(47,25,15,0.95)'] as const
+    : ['rgba(248,113,23,0.12)', 'rgba(223,30,36,0.22)', 'rgba(47,25,15,0.95)'] as const;
 
   return (
     <Pressable
@@ -23,7 +52,7 @@ export function DailyLessonCard({ bonusText, onPress }: Props) {
       style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
     >
       <LinearGradient
-        colors={['rgba(248,113,23,0.12)', 'rgba(223,30,36,0.22)', 'rgba(47,25,15,0.95)']}
+        colors={gradientColors}
         locations={[0, 0.4, 1]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
@@ -39,37 +68,71 @@ export function DailyLessonCard({ bonusText, onPress }: Props) {
           Platform.OS === 'android' && styles.innerAndroid,
         ]}
       >
+        {/* Fila superior: icono + titulo + racha */}
         <View style={styles.topRow}>
           <View style={styles.iconCol}>
-            <View style={styles.iconGlow} />
+            <View style={[styles.iconGlow, completedToday && { backgroundColor: 'rgba(16,185,129,0.45)' }]} />
             <LinearGradient
-              colors={['#f97316', ACCENT]}
+              colors={completedToday ? ['#10B981', '#059669'] : ['#f97316', ACCENT]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.iconBox}
             >
-              <Ionicons name="flame" size={28} color="#fff" />
+              <Ionicons name={completedToday ? 'checkmark' : 'flame'} size={28} color="#fff" />
             </LinearGradient>
           </View>
           <View style={styles.titleCol}>
-            <Text style={styles.title}>Lección diaria</Text>
-            <Text style={styles.bonus}>
-              Bonus: {bonus}
+            <Text style={styles.title}>
+              {completedToday ? 'Completada!' : 'Leccion diaria'}
             </Text>
+            {multiplierLabel && (
+              <Text style={styles.subtitle}>
+                Bonus: {multiplierLabel}
+              </Text>
+            )}
+          </View>
+          <View style={styles.streakCol}>
+            {currentStreak > 0 && (
+              <View style={styles.streakBadge}>
+                <Ionicons name="flame" size={12} color="#FB923C" />
+                <Text style={styles.streakNumber}>{currentStreak}</Text>
+              </View>
+            )}
           </View>
         </View>
 
+        {/* Grilla semanal */}
         <View style={styles.daysRow}>
-          {WEEK_LABELS.map((label) => (
-            <View key={label} style={styles.dayCol}>
-              <Text style={styles.dayLabel}>{label}</Text>
-              <View style={styles.dayCell}>
-                <Text style={styles.dayPlaceholder}>{DASH}</Text>
+          {WEEK_LABELS.map((label, i) => {
+            const status = getDayStatus(i, todayIndex, currentStreak, completedToday);
+            return (
+              <View key={label} style={styles.dayCol}>
+                <Text style={[styles.dayLabel, i === todayIndex && { color: '#fff' }]}>{label}</Text>
+                <View style={[
+                  styles.dayCell,
+                  status === 'completed_today' && styles.dayCellCompletedToday,
+                  status === 'completed' && styles.dayCellCompleted,
+                  status === 'today' && styles.dayCellToday,
+                ]}>
+                  {(status === 'completed' || status === 'completed_today') && (
+                    <Ionicons name="checkmark" size={12} color="#fff" />
+                  )}
+                  {status === 'today' && (
+                    <Ionicons name="book-outline" size={12} color="#9CA3AF" />
+                  )}
+                  {status === 'future' && (
+                    <Ionicons name="lock-closed" size={10} color="#374151" />
+                  )}
+                  {status === 'missed' && (
+                    <View style={styles.missedDot} />
+                  )}
+                </View>
               </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
+        {/* Footer */}
         <View style={styles.footer} collapsable={false}>
           <View style={styles.ctaShell} collapsable={false}>
             <Text
@@ -78,15 +141,16 @@ export function DailyLessonCard({ bonusText, onPress }: Props) {
               style={[
                 styles.cta,
                 Platform.OS === 'android' ? styles.ctaAndroid : null,
+                completedToday && { color: '#10B981' },
               ]}
             >
-              Empezar
+              {completedToday ? 'Repetir' : 'Empezar'}
             </Text>
           </View>
           <Ionicons
             name="chevron-forward"
             size={18}
-            color={ACCENT}
+            color={completedToday ? '#10B981' : ACCENT}
             style={styles.footerIcon}
           />
         </View>
@@ -111,7 +175,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.04)',
   },
   inner: { padding: 20, position: 'relative', zIndex: 2 },
-  /** Más aire a la derecha: el borde redondeado + overflow:hidden recorta el trazo en Android. */
   innerAndroid: {
     paddingRight: 30,
     paddingLeft: 20,
@@ -121,7 +184,6 @@ const styles = StyleSheet.create({
   topRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    justifyContent: 'space-between',
     marginBottom: 16,
   },
   iconCol: { position: 'relative' },
@@ -144,15 +206,35 @@ const styles = StyleSheet.create({
   },
   titleCol: { flex: 1, marginLeft: 12, justifyContent: 'center', minWidth: 0 },
   title: androidReadableText({
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '900',
     color: '#fff',
   }),
-  bonus: androidReadableText({
-    marginTop: 4,
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#9ca3af',
+  subtitle: androidReadableText({
+    marginTop: 2,
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#6B7280',
+  }),
+  streakCol: {
+    alignItems: 'flex-end',
+    gap: 2,
+  },
+  streakBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(249,115,22,0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(249,115,22,0.2)',
+  },
+  streakNumber: androidReadableText({
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#FB923C',
   }),
   daysRow: {
     flexDirection: 'row',
@@ -179,11 +261,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dayPlaceholder: androidReadableText({
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#6b7280',
-  }),
+  dayCellCompletedToday: {
+    backgroundColor: '#10B981',
+    borderColor: '#10B981',
+  },
+  dayCellCompleted: {
+    backgroundColor: '#F97316',
+    borderColor: '#F97316',
+  },
+  dayCellToday: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(241,143,52,0.4)',
+    borderWidth: 1,
+  },
+  missedDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#374151',
+  },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -191,7 +287,6 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     width: '100%',
   },
-  /** Sin `gap`: en algunos builds Android el gap + flex-end mide mal el ancho del Text. */
   footerIcon: { marginLeft: 6 },
   ctaShell: {
     flexShrink: 0,
@@ -202,10 +297,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: ACCENT,
   }),
-  /**
-   * Sin paddingVertical extra (androidReadableText): reserva ancho real del glifo.
-   * paddingRight: hueco antes del clip por overflow:hidden del card.
-   */
   ctaAndroid: {
     includeFontPadding: false,
     paddingVertical: 0,

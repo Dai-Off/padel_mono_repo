@@ -148,6 +148,79 @@ async function refundStripeTransactionsInternal(
   return { errors, stripeRefunded };
 }
 
+/**
+ * Acredita en wallet (tipo 'refund') el importe pagado manualmente por cada participante de
+ * una reserva. Solo actúa sobre filas con paid_amount_cents > 0 o wallet_amount_cents > 0.
+ * Los pagos Stripe (pi_*) se gestionan por separado con refundStripeBookingPaymentTransactions.
+ */
+export async function refundWalletForBookingParticipants(
+  supabase: ServiceSupabase,
+  bookingId: string,
+  clubId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const { data: participants } = await supabase
+    .from('booking_participants')
+    .select('player_id, paid_amount_cents, wallet_amount_cents')
+    .eq('booking_id', bookingId)
+    .eq('payment_status', 'paid');
+
+  if (!participants || participants.length === 0) return;
+
+  const rows = participants
+    .filter((p) => (p.paid_amount_cents ?? 0) > 0 || (p.wallet_amount_cents ?? 0) > 0)
+    .map((p) => ({
+      player_id: p.player_id,
+      club_id: clubId,
+      amount_cents: (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0),
+      concept: 'Reembolso por cancelación de reserva',
+      type: 'refund',
+      booking_id: bookingId,
+      created_at: now,
+    }));
+
+  if (rows.length === 0) return;
+
+  const { error } = await supabase.from('wallet_transactions').insert(rows);
+  if (error) console.error(`[refundWallet] booking ${bookingId}:`, error.message);
+}
+
+/**
+ * Acredita en wallet el importe pagado por un jugador individual al abandonar un partido público.
+ * Debe llamarse ANTES de borrar su fila en booking_participants.
+ */
+export async function refundWalletForSingleParticipant(
+  supabase: ServiceSupabase,
+  bookingId: string,
+  clubId: string,
+  playerId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const { data: participant } = await supabase
+    .from('booking_participants')
+    .select('paid_amount_cents, wallet_amount_cents')
+    .eq('booking_id', bookingId)
+    .eq('player_id', playerId)
+    .eq('payment_status', 'paid')
+    .maybeSingle();
+
+  if (!participant) return;
+
+  const amount = (participant.paid_amount_cents ?? 0) + (participant.wallet_amount_cents ?? 0);
+  if (amount <= 0) return;
+
+  const { error } = await supabase.from('wallet_transactions').insert({
+    player_id: playerId,
+    club_id: clubId,
+    amount_cents: amount,
+    concept: 'Reembolso por baja de partido',
+    type: 'refund',
+    booking_id: bookingId,
+    created_at: now,
+  });
+  if (error) console.error(`[refundWallet] player ${playerId} booking ${bookingId}:`, error.message);
+}
+
 export async function resolveClubIdForBooking(
   supabase: ServiceSupabase,
   bookingId: string,

@@ -36,6 +36,8 @@ export type PartidoItem = {
   players: PartidoPlayer[];
   /** IDs de jugadores ya en el partido (para ocultar Unirse al organizador/jugadores) */
   playerIds?: string[];
+  /** IDs por slot (0..3) para mapear feedback por jugador visualizado. */
+  playerIdsBySlot?: Array<string | null>;
   /** Si es 'private', otros jugadores no pueden unirse */
   visibility?: 'public' | 'private';
   venue: string;

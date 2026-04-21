@@ -1,10 +1,12 @@
 # 09 — Season Pass
 
-## ⚠ Estado de este componente
+## Estado de este componente
 
-Este componente está pendiente de definir en casi su totalidad.
-Solo se conocen las decisiones básicas de arquitectura.
-**NO implementar hasta que las decisiones pendientes estén resueltas.**
+> Ultima verificacion: 2026-04-14
+
+**POST-MVP.** Este componente esta pendiente de definir en casi su totalidad y queda fuera del MVP.
+Solo se conocen las decisiones basicas de arquitectura.
+**NO implementar hasta que las decisiones pendientes esten resueltas y entre en scope.**
 
 ## 1. Visión objetivo (lo poco que está definido)
 

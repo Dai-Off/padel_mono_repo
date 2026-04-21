@@ -602,9 +602,9 @@ function DayTariffModal({
     };
 
     // ------- Repeat helpers -------
-    type RepeatMode = 'weekday' | 'fri-sun' | 'sat-sun' | 'rest';
+    type RepeatMode = 'weekday' | 'fri-sun' | 'sat-sun' | 'rest' | 'rest-year';
 
-    const REPEAT_OPTIONS: { mode: RepeatMode; label: string; filter: (d: CalendarDay) => boolean }[] = [
+    const REPEAT_OPTIONS: { mode: RepeatMode; label: string; filter?: (d: CalendarDay) => boolean }[] = [
         {
             mode: 'weekday',
             label: 'Entresemana (este mes)',
@@ -626,15 +626,34 @@ function DayTariffModal({
             label: 'Resto del mes',
             filter: (d) => d.date > day.date,
         },
+        {
+            mode: 'rest-year',
+            label: 'Resto del año',
+        },
     ];
 
     const [repeating, setRepeating] = useState(false);
 
     const handleRepeat = async (mode: RepeatMode) => {
-        const option = REPEAT_OPTIONS.find(o => o.mode === mode)!;
-        const targetDates = monthDays
-            .filter(d => d.date !== day.date && option.filter(d))
-            .map(d => d.date);
+        let targetDates: string[];
+
+        if (mode === 'rest-year') {
+            const src = new Date(day.date + 'T00:00:00');
+            const yearEnd = new Date(src.getFullYear(), 11, 31);
+            const dates: string[] = [];
+            const cursor = new Date(src);
+            cursor.setDate(cursor.getDate() + 1);
+            while (cursor <= yearEnd) {
+                dates.push(cursor.toISOString().split('T')[0]);
+                cursor.setDate(cursor.getDate() + 1);
+            }
+            targetDates = dates;
+        } else {
+            const option = REPEAT_OPTIONS.find(o => o.mode === mode)!;
+            targetDates = monthDays
+                .filter(d => d.date !== day.date && option.filter!(d))
+                .map(d => d.date);
+        }
 
         if (targetDates.length === 0) {
             toast.info('No hay días disponibles para repetir con ese criterio');
@@ -1174,7 +1193,17 @@ function CalendarioSection({ clubId }: { clubId: string }) {
 
                     {/* Legend */}
                     <div className="flex flex-wrap gap-1.5 items-center">
-                        {/* Tarifa Plana — first chip, clickable → Precios por Tipo de Reserva */}
+                        {/* Dot legend */}
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200 shadow-sm">
+                            <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
+                            Tarifa especial
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-300 shadow-sm">
+                            <span className="w-2 h-2 rounded-full bg-amber-400 flex-shrink-0" />
+                            Solo por defecto
+                        </span>
+
+                        {/* Tarifa Plana — clickable → Precios por Tipo de Reserva */}
                         {flatRateCents !== null && (
                             <button
                                 type="button"
@@ -1343,19 +1372,19 @@ function CalendarioSection({ clubId }: { clubId: string }) {
                                             {new Date(day.date + 'T00:00:00').getDate()}
                                         </span>
                                         {/* Indicator dot:
-                                            - blue  = day has custom hourly schedule
-                                            - amber = no custom schedule → flat rate applies */}
-                                        {day.has_schedule ? (
+                                            - blue   = day has an override (special tariff)
+                                            - yellow = day uses only default tariffs */}
+                                        {day.origin === 'override' ? (
                                             <span
                                                 className="w-3.5 h-3.5 rounded-full bg-blue-500 flex items-center justify-center shadow-sm shadow-blue-300 ring-1 ring-blue-400/30"
-                                                title="Franjas horarias personalizadas"
+                                                title="Tarifa especial aplicada"
                                             >
                                                 <span className="w-1.5 h-1.5 rounded-full bg-white" />
                                             </span>
-                                        ) : flatRateCents !== null ? (
+                                        ) : day.origin === 'default' ? (
                                             <span
                                                 className="w-3.5 h-3.5 rounded-full bg-amber-400 flex items-center justify-center shadow-sm shadow-amber-200 ring-1 ring-amber-300/40"
-                                                title="Tarifa Plana por defecto"
+                                                title="Solo tarifas por defecto"
                                             >
                                                 <span className="w-1.5 h-1.5 rounded-full bg-white" />
                                             </span>

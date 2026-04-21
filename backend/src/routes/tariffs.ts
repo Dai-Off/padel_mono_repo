@@ -511,16 +511,6 @@ router.post('/schedule/repeat', async (req: Request, res: Response) => {
   const validDates = (target_dates as unknown[]).filter(d => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) as string[];
   if (validDates.length === 0) return res.status(400).json({ ok: false, error: 'target_dates inválidos' });
 
-  // Enforce same year-month as source_date (repeat only within the same month)
-  const sourceYM = source_date.substring(0, 7); // "YYYY-MM"
-  const crossMonth = validDates.filter(d => d.substring(0, 7) !== sourceYM);
-  if (crossMonth.length > 0) {
-    return res.status(400).json({
-      ok: false,
-      error: `Los días destino deben pertenecer al mismo mes que el origen (${sourceYM})`,
-    });
-  }
-
   // Delete existing schedule for all target dates
   const { error: delErr } = await supabase
     .from('club_day_schedule')

@@ -9,6 +9,8 @@ import { playerHasDebt } from '../lib/players/playerDebt';
 import {
   refundStripeBookingPaymentForPlayer,
   refundStripeBookingPaymentTransactions,
+  refundWalletForBookingParticipants,
+  refundWalletForSingleParticipant,
   resolveClubIdForBooking,
 } from '../services/paymentRefundService';
 
@@ -450,14 +452,14 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
 
     const { data: joinPlayer, error: errJP } = await supabase
       .from('players')
-      .select('elo_rating, initial_rating_completed')
+      .select('elo_rating, onboarding_completed')
       .eq('id', playerId)
       .maybeSingle();
     if (errJP) return res.status(500).json({ ok: false, error: errJP.message });
 
     const mCompetitive = !!(match as { competitive?: boolean }).competitive;
     const mType = String((match as { type?: string }).type ?? 'open');
-    if (mCompetitive && !(joinPlayer as { initial_rating_completed?: boolean })?.initial_rating_completed) {
+    if (mCompetitive && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
       return res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
     }
     const eloJoin = Number((joinPlayer as { elo_rating?: number }).elo_rating ?? 0);
@@ -782,6 +784,8 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         .maybeSingle();
       if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
 
+      await refundWalletForBookingParticipants(supabase, booking.id, clubId);
+
       return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
     }
 
@@ -826,6 +830,8 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         .select('id, status')
         .maybeSingle();
       if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
+
+      await refundWalletForBookingParticipants(supabase, booking.id, clubId);
 
       return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
     }

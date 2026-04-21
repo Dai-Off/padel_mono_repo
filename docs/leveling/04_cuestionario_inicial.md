@@ -34,13 +34,18 @@ La app redirige al cuestionario cuando el jugador intenta acceder a cualquier fu
 
 ## 2. Estado actual
 
-**Archivo:** `backend/src/routes/players.ts`
+> Ultima verificacion: 2026-04-14
 
-La tabla `players` ya tiene los campos de nivelacion OpenSkill (`mu`, `sigma`, `beta`) y el campo publico `elo_rating`, anadidos en `014_leveling_matchmaking.sql`. Tambien existe `initial_rating_completed` (boolean).
+**Implementado:**
+- `POST /players/onboarding` en `players.ts`.
+- `onboardingService.ts` con `calcInitialMu()` (rango 15-40 segun respuestas) y `getNextQuestion()` (flujo condicional adaptativo).
+- Tabla `onboarding_answers` creada.
+- `initial_rating_completed` flag en players.
+- El jugador no ve `elo_rating` hasta completar el cuestionario (mu=25 default no se muestra).
 
-Ya existe un endpoint `POST /players/onboarding` (linea ~215) con un `onboardingService.ts` que implementa el flujo provisional (arbol P1–P4 simplificado, escala mu ~20–30). Este flujo debe sustituirse por el comportamiento validado con el prototipo que se documenta en la seccion 4.
+**Relacion `mu` ↔ `elo_rating`:** El sistema trabaja internamente con `mu` (OpenSkill, ~15-40). El valor visible es `elo_rating` (0-7), calculado en `levelingService.ts` via `calcEloRating(mu, sigma)`. El cuestionario asigna un mu inicial y el servicio calcula el elo correspondiente.
 
-**Relacion entre `mu` y `elo_rating`:** El sistema de nivelacion trabaja internamente con `mu` (escala OpenSkill, ~15–40) y `sigma` (incertidumbre). El valor visible al jugador es `elo_rating` (escala 0–7), derivado en `levelingService.ts` via `calcEloRating(mu, sigma)`. El cuestionario inicial calcula un `elo_rating` objetivo en escala 0.5–6.25 (validado con el prototipo) y el servicio lo convierte internamente a `mu` para almacenarlo, manteniendo coherencia con el resto del sistema de nivelacion.
+**Pendiente:** El flujo actual es provisional (arbol simplificado). Debe sustituirse por el comportamiento validado con el prototipo (seccion 4). Ademas, al completar el cuestionario deben inicializarse las 4 areas de nivel (`area_technique = area_tactics = area_physical = area_mental = elo_rating`, ver componente 01).
 
 ---
 

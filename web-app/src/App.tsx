@@ -11,7 +11,10 @@ import { AdminPanel } from './components/Admin/AdminPanel';
 import { QuestionsListView } from './components/Admin/OnboardingQuestions/QuestionsListView';
 import { GrillaView } from './features/grilla';
 import { PreciosView } from './components/Precios/PreciosView';
+import { LearningContentView } from './components/Learning/LearningContentView';
+import { AdminLearningPage } from './components/Admin/Learning/AdminLearningPage';
 import { authService } from './services/auth';
+import { SmartHomeRedirect } from './components/Auth/SmartHomeRedirect';
 import { Toaster } from 'sonner';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -49,10 +52,18 @@ function App() {
           }
         />
         <Route
+          path="/admin/learning"
+          element={
+            <ProtectedRoute>
+              <AdminLearningPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/"
           element={
             <ProtectedRoute>
-              <Navigate to="/grilla?menu=resumen" replace />
+              <SmartHomeRedirect />
             </ProtectedRoute>
           }
         />
@@ -221,6 +232,14 @@ function App() {
           element={
             <ProtectedRoute>
               <PreciosView />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/contenido-aprendizaje"
+          element={
+            <ProtectedRoute>
+              <LearningContentView />
             </ProtectedRoute>
           }
         />

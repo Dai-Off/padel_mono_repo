@@ -37,6 +37,7 @@ import { MatchesManagementPanel } from './components/MatchesManagementPanel';
 import { WalletRecharge } from './components/WalletRecharge';
 
 import { GrillaQuickNav } from './components/GrillaQuickNav';
+import { GrillaLegend } from './components/GrillaLegend';
 import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
 import { HoverTooltip } from './components/HoverTooltip';
@@ -1720,6 +1721,7 @@ function GrillaViewInner() {
               clubId={clubId}
               dateStr={toDateStr(selectedDate)}
               onRefreshGrid={refresh}
+              onGoToGrid={() => setActiveView('grid')}
               onEditBooking={async (bookingId: string) => {
                 try {
                   const data = await apiFetchWithAuth<any>(`/bookings/${bookingId}`);
@@ -2214,6 +2216,9 @@ function GrillaViewInner() {
               ) : null}
             </DragOverlay>
           </DndContext>
+          )}
+          {activeView === 'grid' && (
+            <GrillaLegend typeColorOverrides={Object.keys(typeColorOverrides).length > 0 ? typeColorOverrides : undefined} />
           )}
         </main>
 
