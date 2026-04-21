@@ -241,7 +241,7 @@ export const ClubDashboard = () => {
             <main className="px-4 sm:px-5 py-5 pb-20">
                 <div className="max-w-7xl mx-auto space-y-6">
                     {isPlayersPage ? (
-                        <ClubPlayersTab />
+                        <ClubPlayersTab clubId={club?.id ?? null} currency={club?.base_currency ?? 'EUR'} />
                     ) : isResenasPage ? (
                         <ClubReviewsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isIncidenciasPage ? (
