@@ -555,6 +555,7 @@
     "personal_modal_edit": "编辑",
     "personal_delete_title": "删除该人员？",
     "personal_delete": "删除",
+    "cash_no_staff_authorized_for_caja": "沒有在職且角色適合收銀的人員（如接待、協調）。教練類角色不能操作結帳。",
 
     "school_management_title": "学校管理",
     "school_add_course": "新课程",

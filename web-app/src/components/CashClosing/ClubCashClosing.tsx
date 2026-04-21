@@ -79,6 +79,11 @@ const denominations: { key: keyof CashBreakdown; label: string; value: number }[
   { key: 'coins_002', label: '0.02EUR', value: 0.02 }, { key: 'coins_001', label: '0.01EUR', value: 0.01 },
 ];
 
+function staffRoleAllowsCashLedger(role: string | null | undefined): boolean {
+  const r = String(role ?? '').trim().toLowerCase();
+  return !/entrenador|entrenadora|coach|trainer|profesor/.test(r);
+}
+
 export function ClubCashClosingTab({
   clubId,
   clubResolved = true,
@@ -118,6 +123,23 @@ export function ClubCashClosingTab({
       return 'Europe/Madrid';
     }
   }, []);
+
+  const staffForCashOperations = useMemo(
+    () => staff.filter((m) => m.status === 'active' && staffRoleAllowsCashLedger(m.role)),
+    [staff],
+  );
+
+  useEffect(() => {
+    if (employeeId && !staffForCashOperations.some((s) => s.id === employeeId)) {
+      setEmployeeId('');
+    }
+  }, [staffForCashOperations, employeeId]);
+
+  useEffect(() => {
+    if (openingEmployeeId && !staffForCashOperations.some((s) => s.id === openingEmployeeId)) {
+      setOpeningEmployeeId('');
+    }
+  }, [staffForCashOperations, openingEmployeeId]);
 
   const realCashTotal = useMemo(
     () => denominations.reduce((acc, d) => acc + (cashBreakdown[d.key] * d.value), 0),
@@ -285,6 +307,9 @@ export function ClubCashClosingTab({
             <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">{t('cash_after_close_hint')}</p>
           )}
         </div>
+        {staff.length > 0 && staffForCashOperations.length === 0 && (
+          <p className="text-[11px] text-amber-800 font-medium max-w-xl">{t('cash_no_staff_authorized_for_caja')}</p>
+        )}
         <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3 max-w-xl">
           <input
             type="date"
@@ -298,7 +323,7 @@ export function ClubCashClosingTab({
             className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
           >
             <option value="">{t('cash_opening_employee')}</option>
-            {staff.map((m) => (
+            {staffForCashOperations.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>
@@ -323,7 +348,7 @@ export function ClubCashClosingTab({
           <button
             type="button"
             onClick={() => void saveOpening()}
-            disabled={!openingEmployeeId || savingOpening}
+            disabled={!openingEmployeeId || savingOpening || staffForCashOperations.length === 0}
             className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1A1A1A] text-white disabled:opacity-40"
           >
             {savingOpening ? t('loading') : t('cash_opening_save')}
@@ -340,10 +365,12 @@ export function ClubCashClosingTab({
           <h2 className="text-sm font-bold text-[#1A1A1A]">{t('cash_closing_title')}</h2>
           <p className="text-[10px] text-gray-400">{operativeDate}</p>
           <p className="text-[10px] text-gray-500 mt-1">
-            {t('cash_opening_banner', {
-              amount: (openingRecord.opening_cash_cents / 100).toFixed(2),
-              name: openingRecord.employee_name,
-            })}
+            {openingRecord
+              ? t('cash_opening_banner', {
+                  amount: (openingRecord.opening_cash_cents / 100).toFixed(2),
+                  name: openingRecord.employee_name,
+                })
+              : null}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -423,6 +450,9 @@ export function ClubCashClosingTab({
                 </div>
               ))}
             </div>
+            {staff.length > 0 && staffForCashOperations.length === 0 && (
+              <p className="mt-3 text-[11px] text-amber-800 font-medium">{t('cash_no_staff_authorized_for_caja')}</p>
+            )}
             <div className="grid md:grid-cols-2 gap-3 mt-4">
               <select
                 value={employeeId}
@@ -430,7 +460,7 @@ export function ClubCashClosingTab({
                 className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
               >
                 <option value="">{t('cash_employee')}</option>
-                {staff.map((m) => (
+                {staffForCashOperations.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.name}
                   </option>
@@ -484,7 +514,7 @@ export function ClubCashClosingTab({
             <button
               type="button"
               onClick={() => void saveClosing()}
-              disabled={!canSave || saving}
+              disabled={!canSave || saving || staffForCashOperations.length === 0}
               className="mt-4 px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1A1A1A] text-white disabled:opacity-40"
             >
               {saving ? t('loading') : t('cash_save_closing')}

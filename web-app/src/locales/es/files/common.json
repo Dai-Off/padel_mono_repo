@@ -583,6 +583,7 @@
     "personal_modal_edit": "Editar",
     "personal_delete_title": "¿Eliminar este miembro?",
     "personal_delete": "Eliminar",
+    "cash_no_staff_authorized_for_caja": "Ningún empleado activo con rol apto para caja (p. ej. recepción o coordinación). Los entrenadores no pueden cerrar caja.",
 
     "school_management_title": "Gestion escuela",
     "school_add_course": "Nuevo curso",

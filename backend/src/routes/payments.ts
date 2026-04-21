@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { bookingStartIsTooFarInPast, BOOKING_START_PAST_ERROR } from '../lib/bookingStartNotInPast';
 import { playerMeetsTournamentGender } from '../lib/tournamentGender';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { staffRoleAllowsCashLedger } from '../lib/staffCashRole';
 import {
   cleanupExpiredTournamentInvites,
   finalizeTournamentPaidJoin,
@@ -1281,6 +1282,46 @@ function cashClosingStatusFromDiffCents(diffCents: number): CashClosingStatus {
   return diffCents > 0 ? 'surplus' : 'deficit';
 }
 
+type StaffCashLedgerAuth =
+  | { ok: true; employeeName: string }
+  | { ok: false; status: number; error: string };
+
+async function assertStaffAuthorizedForCashLedger(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+  staffId: string,
+): Promise<StaffCashLedgerAuth> {
+  const { data: staffRow, error: staffErr } = await supabase
+    .from('club_staff')
+    .select('id, club_id, name, status, role')
+    .eq('id', staffId)
+    .maybeSingle();
+
+  if (staffErr) {
+    return { ok: false, status: 500, error: staffErr.message };
+  }
+  const row = staffRow as {
+    club_id?: string;
+    name?: string | null;
+    status?: string | null;
+    role?: string | null;
+  } | null;
+  if (!row || row.club_id !== clubId) {
+    return { ok: false, status: 403, error: 'El empleado no pertenece a este club' };
+  }
+  if (row.status !== 'active') {
+    return { ok: false, status: 400, error: 'El empleado no está activo' };
+  }
+  if (!staffRoleAllowsCashLedger(row.role)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Con el rol de este empleado no se permite apertura o cierre de caja (p. ej. entrenadores).',
+    };
+  }
+  return { ok: true, employeeName: String(row.name ?? '').trim() || 'Empleado' };
+}
+
 /**
  * GET /payments/cash-opening/today
  * Devuelve la apertura de caja registrada para el día del club.
@@ -1442,7 +1483,7 @@ export async function getCashOpeningForDayHandler(req: Request, res: Response): 
  *                 notes: "Apertura turno mañana"
  *       400: { description: Validación de datos }
  *       401: { description: Sin token }
- *       403: { description: Sin acceso o staff inválido }
+ *       403: { description: Sin acceso, empleado inactivo o rol no permitido para caja (p. ej. entrenador) }
  *       500: { description: Error de base de datos }
  *       503: { description: Tabla no migrada }
  */
@@ -1476,26 +1517,12 @@ export async function createCashOpeningRecordHandler(req: Request, res: Response
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data: staffRow, error: staffErr } = await supabase
-      .from('club_staff')
-      .select('id, club_id, name, status')
-      .eq('id', staffId)
-      .maybeSingle();
-
-    if (staffErr) {
-      res.status(500).json({ ok: false, error: staffErr.message });
+    const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
       return;
     }
-    if (!staffRow || staffRow.club_id !== clubId) {
-      res.status(403).json({ ok: false, error: 'El empleado no pertenece a este club' });
-      return;
-    }
-    if (staffRow.status !== 'active') {
-      res.status(400).json({ ok: false, error: 'El empleado no está activo' });
-      return;
-    }
-
-    const employeeName = String(staffRow.name ?? '').trim() || 'Empleado';
+    const employeeName = auth.employeeName;
     const { data: inserted, error: insErr } = await supabase
       .from('club_cash_openings')
       .insert({
@@ -1679,7 +1706,7 @@ export async function listCashClosingRecordsHandler(req: Request, res: Response)
  *         description: Creado
  *       400: { description: Validación }
  *       401: { description: Sin token }
- *       403: { description: Sin acceso o staff no pertenece al club }
+ *       403: { description: Sin acceso, empleado inactivo o rol no permitido para caja (p. ej. entrenador) }
  *       500: { description: Error de base de datos }
  *       503: { description: Tabla no migrada }
  */
@@ -1729,26 +1756,12 @@ export async function createCashClosingRecordHandler(req: Request, res: Response
   try {
     const supabase = getSupabaseServiceRoleClient();
 
-    const { data: staffRow, error: staffErr } = await supabase
-      .from('club_staff')
-      .select('id, club_id, name, status')
-      .eq('id', staffId)
-      .maybeSingle();
-
-    if (staffErr) {
-      res.status(500).json({ ok: false, error: staffErr.message });
+    const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
       return;
     }
-    if (!staffRow || staffRow.club_id !== clubId) {
-      res.status(403).json({ ok: false, error: 'El empleado no pertenece a este club' });
-      return;
-    }
-    if (staffRow.status !== 'active') {
-      res.status(400).json({ ok: false, error: 'El empleado no está activo' });
-      return;
-    }
-
-    const employeeName = String(staffRow.name ?? '').trim() || 'Empleado';
+    const employeeName = auth.employeeName;
     const diffCents = Math.trunc(rc + rcd - sc - scd);
     const status = cashClosingStatusFromDiffCents(diffCents);
 

@@ -187,12 +187,13 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
         if (!selectedClub) return;
         setSaving(true);
         try {
+            const desc = form.description.trim();
             const payload = {
                 name: form.name.trim(),
                 address: form.address.trim(),
                 city: form.city.trim(),
                 postal_code: form.postal_code.trim(),
-                description: form.description.trim() || null,
+                description: desc ? desc : undefined,
                 contact_phone: form.contact_phone.trim() || null,
                 contact_email: form.contact_email.trim() || null,
                 notify_new_bookings: form.notify_new_bookings,

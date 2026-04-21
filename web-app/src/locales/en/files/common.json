@@ -555,6 +555,7 @@
     "personal_modal_edit": "Edit",
     "personal_delete_title": "Delete this staff member?",
     "personal_delete": "Delete",
+    "cash_no_staff_authorized_for_caja": "No active staff with a cash-eligible role (e.g. reception or coordination). Coach-type roles cannot run cash closing.",
 
     "school_management_title": "School management",
     "school_add_course": "New course",
