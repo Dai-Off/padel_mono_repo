@@ -845,6 +845,8 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       });
     }
 
+    await refundWalletForSingleParticipant(supabase, booking.id, clubId, playerId);
+
     const { error: delMp } = await supabase
       .from('match_players')
       .delete()
