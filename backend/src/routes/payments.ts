@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { bookingStartIsTooFarInPast, BOOKING_START_PAST_ERROR } from '../lib/bookingStartNotInPast';
 import { playerMeetsTournamentGender } from '../lib/tournamentGender';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { staffRoleAllowsCashLedger } from '../lib/staffCashRole';
 import {
   cleanupExpiredTournamentInvites,
   finalizeTournamentPaidJoin,
@@ -998,6 +999,7 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
  *     description: |
  *       Devuelve el total esperado para el arqueo de caja, relacionado con los bookings de ese día.
  *       Incluye por cada booking cuánto se pagó en `cash` y cuánto en `card`.
+ *       Tras un cierre del mismo día, solo cuentan pagos posteriores al cierre y el saldo de la última apertura **posterior** a ese cierre (`needs_new_opening_after_closing` indica si falta esa apertura).
  *       Requiere JWT con acceso al club (admin o dueño).
  *     security: [{ bearerAuth: [] }]
  *     parameters:
@@ -1031,6 +1033,8 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
  *               date: "2026-03-25"
  *               systemCashTotal_cents: 12800
  *               systemCardTotal_cents: 6400
+ *               last_closing_at: "2026-03-25T14:00:00.000Z"
+ *               needs_new_opening_after_closing: false
  *               bookings:
  *                 - booking_id: "uuid"
  *                   start_at: "2026-03-25T18:00:00.000Z"
@@ -1239,6 +1243,14 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       );
     const effectiveOpeningCashCents = shouldIncludeOpening ? openingCashCents : 0;
 
+    const openingAfterLastClose = Boolean(
+      openingRow &&
+        (!lastClosedAtIso ||
+          !Number.isFinite(openingOpenedAtMs) ||
+          openingOpenedAtMs > (closingCutoffMs ?? -Infinity)),
+    );
+    const needs_new_opening_after_closing = Boolean(lastClosedAtIso) && !openingAfterLastClose;
+
     const systemCashTotalEur = Math.round((systemCashTotalCents / 100) * 100) / 100;
     const systemCardTotalEur = Math.round((systemCardTotalCents / 100) * 100) / 100;
     const openingCashEur = Math.round((effectiveOpeningCashCents / 100) * 100) / 100;
@@ -1252,6 +1264,8 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       systemCardTotal_eur: systemCardTotalEur,
       openingCashTotal_cents: effectiveOpeningCashCents,
       openingCashTotal_eur: openingCashEur,
+      last_closing_at: lastClosedAtIso,
+      needs_new_opening_after_closing,
       opening: openingRecord,
       bookings: Array.from(byBooking.values()).sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? '')),
     });
@@ -1266,6 +1280,46 @@ type CashClosingStatus = 'perfect' | 'surplus' | 'deficit';
 function cashClosingStatusFromDiffCents(diffCents: number): CashClosingStatus {
   if (Math.abs(diffCents) < 1) return 'perfect';
   return diffCents > 0 ? 'surplus' : 'deficit';
+}
+
+type StaffCashLedgerAuth =
+  | { ok: true; employeeName: string }
+  | { ok: false; status: number; error: string };
+
+async function assertStaffAuthorizedForCashLedger(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+  staffId: string,
+): Promise<StaffCashLedgerAuth> {
+  const { data: staffRow, error: staffErr } = await supabase
+    .from('club_staff')
+    .select('id, club_id, name, status, role')
+    .eq('id', staffId)
+    .maybeSingle();
+
+  if (staffErr) {
+    return { ok: false, status: 500, error: staffErr.message };
+  }
+  const row = staffRow as {
+    club_id?: string;
+    name?: string | null;
+    status?: string | null;
+    role?: string | null;
+  } | null;
+  if (!row || row.club_id !== clubId) {
+    return { ok: false, status: 403, error: 'El empleado no pertenece a este club' };
+  }
+  if (row.status !== 'active') {
+    return { ok: false, status: 400, error: 'El empleado no está activo' };
+  }
+  if (!staffRoleAllowsCashLedger(row.role)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Con el rol de este empleado no se permite apertura o cierre de caja (p. ej. entrenadores).',
+    };
+  }
+  return { ok: true, employeeName: String(row.name ?? '').trim() || 'Empleado' };
 }
 
 /**
@@ -1390,7 +1444,7 @@ export async function getCashOpeningForDayHandler(req: Request, res: Response): 
  *     summary: Registrar apertura de caja diaria
  *     description: |
  *       Persiste el saldo inicial de caja para `for_date`, con empleado responsable.
- *       Solo permite una apertura por día y club (si ya existe devuelve 409).
+ *       Permite varias aperturas el mismo día (p. ej. tras un cierre intermedio).
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -1429,8 +1483,7 @@ export async function getCashOpeningForDayHandler(req: Request, res: Response): 
  *                 notes: "Apertura turno mañana"
  *       400: { description: Validación de datos }
  *       401: { description: Sin token }
- *       403: { description: Sin acceso o staff inválido }
- *       409: { description: Ya existe apertura para ese día }
+ *       403: { description: Sin acceso, empleado inactivo o rol no permitido para caja (p. ej. entrenador) }
  *       500: { description: Error de base de datos }
  *       503: { description: Tabla no migrada }
  */
@@ -1464,42 +1517,12 @@ export async function createCashOpeningRecordHandler(req: Request, res: Response
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data: staffRow, error: staffErr } = await supabase
-      .from('club_staff')
-      .select('id, club_id, name, status')
-      .eq('id', staffId)
-      .maybeSingle();
-
-    if (staffErr) {
-      res.status(500).json({ ok: false, error: staffErr.message });
+    const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
       return;
     }
-    if (!staffRow || staffRow.club_id !== clubId) {
-      res.status(403).json({ ok: false, error: 'El empleado no pertenece a este club' });
-      return;
-    }
-    if (staffRow.status !== 'active') {
-      res.status(400).json({ ok: false, error: 'El empleado no está activo' });
-      return;
-    }
-
-    const { data: existing, error: existingErr } = await supabase
-      .from('club_cash_openings')
-      .select('id')
-      .eq('club_id', clubId)
-      .eq('for_date', forDateStr)
-      .limit(1)
-      .maybeSingle();
-    if (existingErr && !(existingErr.message.includes('relation') && existingErr.message.includes('does not exist'))) {
-      res.status(500).json({ ok: false, error: existingErr.message });
-      return;
-    }
-    if (existing?.id) {
-      res.status(409).json({ ok: false, error: 'Ya existe una apertura de caja para este día' });
-      return;
-    }
-
-    const employeeName = String(staffRow.name ?? '').trim() || 'Empleado';
+    const employeeName = auth.employeeName;
     const { data: inserted, error: insErr } = await supabase
       .from('club_cash_openings')
       .insert({
@@ -1683,7 +1706,7 @@ export async function listCashClosingRecordsHandler(req: Request, res: Response)
  *         description: Creado
  *       400: { description: Validación }
  *       401: { description: Sin token }
- *       403: { description: Sin acceso o staff no pertenece al club }
+ *       403: { description: Sin acceso, empleado inactivo o rol no permitido para caja (p. ej. entrenador) }
  *       500: { description: Error de base de datos }
  *       503: { description: Tabla no migrada }
  */
@@ -1733,26 +1756,12 @@ export async function createCashClosingRecordHandler(req: Request, res: Response
   try {
     const supabase = getSupabaseServiceRoleClient();
 
-    const { data: staffRow, error: staffErr } = await supabase
-      .from('club_staff')
-      .select('id, club_id, name, status')
-      .eq('id', staffId)
-      .maybeSingle();
-
-    if (staffErr) {
-      res.status(500).json({ ok: false, error: staffErr.message });
+    const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
       return;
     }
-    if (!staffRow || staffRow.club_id !== clubId) {
-      res.status(403).json({ ok: false, error: 'El empleado no pertenece a este club' });
-      return;
-    }
-    if (staffRow.status !== 'active') {
-      res.status(400).json({ ok: false, error: 'El empleado no está activo' });
-      return;
-    }
-
-    const employeeName = String(staffRow.name ?? '').trim() || 'Empleado';
+    const employeeName = auth.employeeName;
     const diffCents = Math.trunc(rc + rcd - sc - scd);
     const status = cashClosingStatusFromDiffCents(diffCents);
 

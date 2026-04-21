@@ -8,9 +8,9 @@ router.use(attachAuthContext);
 router.use(requireClubOwnerOrAdmin);
 
 const SELECT_LIST =
-  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, logo_url';
+  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, logo_url, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 const SELECT_ONE =
-  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions, logo_url';
+  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions, logo_url, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 
 function canAccessClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
@@ -73,6 +73,12 @@ router.post('/', async (req: Request, res: Response) => {
     weekly_schedule,
     schedule_exceptions,
     logo_url,
+    contact_phone,
+    contact_email,
+    notify_new_bookings,
+    notify_cancellations,
+    notify_maintenance_reminders,
+    notify_daily_email_summary,
   } = req.body ?? {};
   if (!owner_id || !fiscal_tax_id || !fiscal_legal_name || !name || !address || !city || !postal_code) {
     return res.status(400).json({
@@ -103,6 +109,12 @@ router.post('/', async (req: Request, res: Response) => {
           weekly_schedule: weekly_schedule ?? {},
           schedule_exceptions: schedule_exceptions ?? [],
           logo_url: logo_url ?? null,
+          contact_phone: typeof contact_phone === 'string' ? contact_phone.trim() || null : contact_phone ?? null,
+          contact_email: typeof contact_email === 'string' ? contact_email.trim() || null : contact_email ?? null,
+          notify_new_bookings: notify_new_bookings !== false,
+          notify_cancellations: notify_cancellations !== false,
+          notify_maintenance_reminders: notify_maintenance_reminders !== false,
+          notify_daily_email_summary: notify_daily_email_summary === true,
         },
       ])
       .select(SELECT_ONE)
@@ -123,9 +135,17 @@ router.put('/:id', async (req: Request, res: Response) => {
     'fiscal_tax_id', 'fiscal_legal_name', 'name', 'description',
     'address', 'city', 'postal_code', 'lat', 'lng', 'base_currency',
     'weekly_schedule', 'schedule_exceptions', 'logo_url',
+    'contact_phone', 'contact_email',
+    'notify_new_bookings', 'notify_cancellations', 'notify_maintenance_reminders', 'notify_daily_email_summary',
   ];
   for (const key of allowed) {
-    if (body[key] !== undefined) update[key] = body[key];
+    if (body[key] === undefined) continue;
+    if ((key === 'contact_phone' || key === 'contact_email') && typeof body[key] === 'string') {
+      const s = body[key].trim();
+      update[key] = s || null;
+      continue;
+    }
+    update[key] = body[key];
   }
   if (Object.keys(update).length === 1) {
     return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });

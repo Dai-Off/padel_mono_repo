@@ -42,6 +42,13 @@ export interface Club {
     base_currency: string;
     weekly_schedule?: any;
     schedule_exceptions?: any[];
+    logo_url?: string | null;
+    contact_phone?: string | null;
+    contact_email?: string | null;
+    notify_new_bookings?: boolean;
+    notify_cancellations?: boolean;
+    notify_maintenance_reminders?: boolean;
+    notify_daily_email_summary?: boolean;
 }
 
 export type BookingType =

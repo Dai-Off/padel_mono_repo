@@ -110,7 +110,7 @@ function App() {
           path="/ligas"
           element={
             <ProtectedRoute>
-              <Navigate to="/torneos?tab=ligas" replace />
+              <Navigate to="/torneos" replace />
             </ProtectedRoute>
           }
         />
