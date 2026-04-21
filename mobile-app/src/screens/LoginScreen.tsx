@@ -63,6 +63,7 @@ export function LoginScreen({ onGoToRegister }: LoginScreenProps) {
         setSession({
           access_token: res.session.access_token,
           refresh_token: res.session.refresh_token,
+          expires_at: res.session.expires_at,
           user: res.user,
         });
       } else {
