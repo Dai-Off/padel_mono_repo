@@ -45,6 +45,8 @@ export function MainApp() {
   const [showTusPagos, setShowTusPagos] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
   const [showDailyLesson, setShowDailyLesson] = useState(false);
+  /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
+  const [streakRefreshKey, setStreakRefreshKey] = useState(0);
   const [showCourses, setShowCourses] = useState(false);
   const [selectedEducationalCourse, setSelectedEducationalCourse] = useState<EducationalCourse | null>(null);
   const [selectedPublicCourse, setSelectedPublicCourse] = useState<{ course: PublicCourse; isReserved: boolean } | null>(null);
@@ -98,7 +100,10 @@ export function MainApp() {
       return (
         <DailyLessonScreen
           onBack={() => setShowDailyLesson(false)}
-          onComplete={() => setShowDailyLesson(false)}
+          onComplete={() => {
+            setShowDailyLesson(false);
+            setStreakRefreshKey((k) => k + 1);
+          }}
         />
       );
     }
@@ -182,6 +187,7 @@ export function MainApp() {
       case 'inicio':
         return (
           <HomeScreen
+            streakRefreshKey={streakRefreshKey}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onPartidoPress={(p) => setSelectedPartido(p)}
             onDailyLessonPress={() => setShowDailyLesson(true)}
@@ -210,7 +216,7 @@ export function MainApp() {
           />
         );
       default:
-        return <HomeScreen />;
+        return <HomeScreen streakRefreshKey={streakRefreshKey} />;
     }
   };
 
