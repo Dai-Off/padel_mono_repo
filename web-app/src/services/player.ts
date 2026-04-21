@@ -22,8 +22,12 @@ export const playerService = {
         return response.player;
     },
 
-    getAll: async (query?: string): Promise<Player[]> => {
-        const path = query ? `/players?q=${encodeURIComponent(query)}` : '/players';
+    getAll: async (query?: string, clubId?: string | null): Promise<Player[]> => {
+        const params = new URLSearchParams();
+        if (query) params.set('q', query);
+        if (clubId) params.set('club_id', clubId);
+        const qs = params.toString();
+        const path = qs ? `/players?${qs}` : '/players';
         const response = await apiFetch<ApiResponse<{ players: Player[] }>>(path);
         return response.players || [];
     },

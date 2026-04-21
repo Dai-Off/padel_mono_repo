@@ -11,6 +11,8 @@ export interface Player {
     status: 'active' | 'blocked' | 'deleted';
     auth_user_id?: string | null;
     gender?: 'male' | 'female' | 'other' | null;
+    /** Suma de `wallet_transactions` en el club indicado al listar con `club_id` (centavos). */
+    wallet_balance_cents?: number;
 }
 
 export interface ClubOwner {

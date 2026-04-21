@@ -235,6 +235,7 @@
     "players_manual_subtitle": "Nombre, apellidos y teléfono obligatorios. El email es opcional.",
     "players_manual_required": "Nombre, apellidos y teléfono son obligatorios",
     "players_level_badge": "Nivel {{n}}",
+    "players_balance_label": "Saldo",
     "players_no_phone": "Sin teléfono",
     "players_manual_success": "Jugador dado de alta correctamente",
     "players_optional": "opcional",
