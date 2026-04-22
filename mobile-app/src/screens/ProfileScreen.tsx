@@ -22,6 +22,7 @@ import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
+import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
 import { fetchMyCoachAssessment, submitCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
 import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
 
@@ -146,6 +147,7 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
   const [activeSport, setActiveSport] = useState('Pádel');
   const [activeLogroTab, setActiveLogroTab] = useState('Todos');
   const [showCoachModal, setShowCoachModal] = useState(false);
+  const [showOnboardingModal, setShowOnboardingModal] = useState(false);
   const [coachPhase, setCoachPhase] = useState<'questions' | 'results'>('questions');
   const [coachStepIdx, setCoachStepIdx] = useState(0);
   const [coachAnswers, setCoachAnswers] = useState<(string | null)[]>(
@@ -211,6 +213,19 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
     setCoachAnswers(Array.from({ length: COACH_QUESTIONS.length }, () => null));
     setCoachPhase('questions');
     setShowCoachModal(true);
+  };
+
+  const needsLevelOnboarding = profile != null && profile.onboardingCompleted === false;
+
+  const refreshProfileAndCoach = () => {
+    if (!session?.access_token) return;
+    fetchMyPlayerProfile(session.access_token).then((p) => {
+      setProfile(p);
+      if (p?.id) {
+        fetchMyPeerFeedbackInsight(session.access_token, p.id).then(setPeerInsight);
+      }
+    });
+    fetchMyCoachAssessment(session.access_token).then(setAssessment);
   };
 
   const closeCoachModal = () => {
@@ -521,13 +536,24 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
                     <Ionicons name="bulb-outline" size={28} color="#fff" />
                   </LinearGradient>
                 </View>
-                <Text style={styles.coachTitle}>Coach Virtual IA</Text>
-                <Text style={styles.coachDesc}>
-                  Mide tu nivel de Pádel para desbloquear análisis personalizados y recomendaciones del Coach IA
+                <Text style={styles.coachTitle}>
+                  {needsLevelOnboarding ? 'Nivelación inicial' : 'Coach Virtual IA'}
                 </Text>
-                <Pressable style={styles.coachCtaBtn} onPress={openCoachModal}>
+                <Text style={styles.coachDesc}>
+                  {needsLevelOnboarding
+                    ? 'Responde al cuestionario oficial para calcular tu ELO inicial (0–7) y desbloquear matchmaking y el resto de funciones.'
+                    : 'Mide tu nivel de Pádel para desbloquear análisis personalizados y recomendaciones del Coach IA'}
+                </Text>
+                <Pressable
+                  style={styles.coachCtaBtn}
+                  onPress={() =>
+                    needsLevelOnboarding ? setShowOnboardingModal(true) : openCoachModal()
+                  }
+                >
                   <Ionicons name="locate-outline" size={16} color="#fff" />
-                  <Text style={styles.coachCtaText}>Medir mi nivel de Pádel</Text>
+                  <Text style={styles.coachCtaText}>
+                    {needsLevelOnboarding ? 'Comenzar nivelación' : 'Medir mi nivel de Pádel'}
+                  </Text>
                 </Pressable>
               </View>
             </View>
@@ -652,6 +678,15 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
           </View>
         </View>
       </ScrollView>
+
+      <OnboardingLevelModal
+        visible={showOnboardingModal}
+        accessToken={session?.access_token ?? null}
+        onClose={() => setShowOnboardingModal(false)}
+        onCompleted={() => {
+          refreshProfileAndCoach();
+        }}
+      />
 
       <Modal visible={showCoachModal} transparent animationType="none" onRequestClose={closeCoachModal}>
         <View style={styles.coachModalRoot}>

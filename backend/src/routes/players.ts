@@ -60,7 +60,7 @@ const SELECT_PUBLIC_INTERNAL = `
   id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url, gender,
   mu, sigma, elo_rating, sp,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
-  elo_last_updated_at, stripe_customer_id, consents
+  elo_last_updated_at, stripe_customer_id, consents, onboarding_completed
 `;
 
 const AVATAR_URL_MAX = 2048;

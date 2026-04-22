@@ -16,6 +16,7 @@ type MeResponse = {
     phone?: string | null;
     elo_rating?: number | null;
     status?: string | null;
+    onboarding_completed?: boolean | null;
   };
   error?: string;
 };
@@ -28,6 +29,7 @@ export type MyPlayerProfile = {
   phone: string | null;
   eloRating: number | null;
   status: string | null;
+  onboardingCompleted: boolean;
 };
 
 /** Obtiene el jugador actual según la sesión (Bearer token). */
@@ -71,6 +73,8 @@ export async function fetchMyPlayerProfile(
       phone: json.player.phone ?? null,
       eloRating: eloNum != null && !Number.isNaN(eloNum) ? eloNum : null,
       status: json.player.status ?? null,
+      /** `undefined` en respuestas viejas se trata como ya completado para no bloquear la app. */
+      onboardingCompleted: json.player.onboarding_completed !== false,
     };
   } catch {
     return null;
