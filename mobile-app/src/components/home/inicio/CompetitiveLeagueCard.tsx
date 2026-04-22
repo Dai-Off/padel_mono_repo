@@ -85,6 +85,8 @@ type Props = {
   ladderProgressPercent?: number | null;
   winsLabel?: string | null;
   lossesLabel?: string | null;
+  /** Elo, fiabilidad, PJ MM (debajo de división / LP). */
+  eloFiabCaption?: string | null;
   modeLabel?: string | null;
   onPress?: () => void;
 };
@@ -96,6 +98,7 @@ export function CompetitiveLeagueHomeCard({
   ladderProgressPercent,
   winsLabel,
   lossesLabel,
+  eloFiabCaption,
   modeLabel,
   onPress,
 }: Props) {
@@ -215,7 +218,7 @@ export function CompetitiveLeagueHomeCard({
                 !compact && (Platform.OS === 'ios' ? styles.footerHint : styles.footerHintAndroid),
               ]}
             >
-              Toca para jugar ranked
+              Toca para buscar partido 2v2 (matchmaking rankeado)
             </Text>
           </View>
         </View>

@@ -3,10 +3,8 @@ import { AppState, type AppStateStatus, ScrollView, StyleSheet, View } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchMatches } from '../api/matches';
 import { fetchPublicTournaments } from '../api/tournaments';
-import { fetchMyPlayerProfile } from '../api/players';
-import type { MyPlayerProfile } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
-import { fetchMyPlayerId } from '../api/players';
+import { fetchMyPlayerId, fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import {
   CompetitiveLeagueHomeCard,
   DailyLessonCard,
@@ -28,7 +26,7 @@ import { selectMyUpcomingMatches } from '../domain/selectMyUpcomingMatches';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeStats } from '../hooks/useHomeStats';
 import type { PartidoItem } from './PartidosScreen';
-import { AiMatchModal } from '../components/home/AiMatchModal';
+import { IAAfinidadModal } from '../components/home/IAAfinidadModal';
 import { searchAiMatch } from '../api/aiMatch';
 
 type TabId = 'pistas' | 'partidos' | 'torneos';
@@ -40,7 +38,7 @@ type HomeScreenProps = {
   onPartidoPress?: (partido: PartidoItem) => void;
   onDailyLessonPress?: () => void;
   onCoursesPress?: () => void;
-  onOpenMessageThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
+  onOpenCompetitiveLeague?: () => void;
 };
 
 export function HomeScreen({
@@ -49,7 +47,7 @@ export function HomeScreen({
   onPartidoPress,
   onDailyLessonPress,
   onCoursesPress,
-  onOpenMessageThread,
+  onOpenCompetitiveLeague,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session, refreshAccessToken } = useAuth();
@@ -60,18 +58,10 @@ export function HomeScreen({
   const [misProximosPartidos, setMisProximosPartidos] = useState<PartidoItem[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(true);
   const [myPlayerProfile, setMyPlayerProfile] = useState<MyPlayerProfile | null>(null);
-  const [aiModalVisible, setAiModalVisible] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResponse, setAiResponse] = useState<string | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!session?.access_token) {
-      setMyPlayerProfile(null);
-      return;
-    }
-    fetchMyPlayerProfile(session.access_token).then(setMyPlayerProfile);
-  }, [session?.access_token]);
+  const [affinityModalVisible, setAffinityModalVisible] = useState(false);
+  const [affinityLoading, setAffinityLoading] = useState(false);
+  const [affinityResponse, setAffinityResponse] = useState<string | null>(null);
+  const [affinityError, setAffinityError] = useState<string | null>(null);
 
   const loadMatches = useCallback(async () => {
     setMatchesLoading(true);
@@ -141,45 +131,56 @@ export function HomeScreen({
     };
   }, [session?.access_token]);
 
+  useEffect(() => {
+    if (!session?.access_token) {
+      setMyPlayerProfile(null);
+      return;
+    }
+    void fetchMyPlayerProfile(session.access_token).then(setMyPlayerProfile);
+  }, [session?.access_token]);
+
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 
-  const handleAiMatchSearch = useCallback(async (prompt: string) => {
-    setAiLoading(true);
-    setAiError(null);
-    setAiResponse(null);
+  const handleAffinitySearch = useCallback(
+    async (prompt: string) => {
+      setAffinityLoading(true);
+      setAffinityError(null);
+      setAffinityResponse(null);
 
-    const userName =
-      [myPlayerProfile?.firstName, myPlayerProfile?.lastName]
-        .filter(Boolean)
-        .join(' ')
-        .trim() ||
-      session?.user?.user_metadata?.full_name ||
-      session?.user?.email?.split('@')[0] ||
-      'Sin dato';
+      const userName =
+        [myPlayerProfile?.firstName, myPlayerProfile?.lastName]
+          .filter(Boolean)
+          .join(' ')
+          .trim() ||
+        session?.user?.user_metadata?.full_name ||
+        session?.user?.email?.split('@')[0] ||
+        'Sin dato';
 
-    const enrichedPrompt = [
-      'CONTEXTO JUGADOR LOGUEADO (ANCLA)',
-      `- player_id: ${myPlayerProfile?.id ?? 'Sin dato'}`,
-      `- nombre: ${userName}`,
-      `- email: ${myPlayerProfile?.email ?? session?.user?.email ?? 'Sin dato'}`,
-      `- elo_rating: ${myPlayerProfile?.eloRating ?? 'Sin dato'}`,
-      `- telefono: ${myPlayerProfile?.phone ?? 'Sin dato'}`,
-      '',
-      'SOLICITUD DEL USUARIO',
-      prompt,
-      '',
-      'INSTRUCCION IMPORTANTE',
-      'Usa el jugador logueado como jugador ancla para el matching.',
-    ].join('\n');
+      const enrichedPrompt = [
+        'CONTEXTO JUGADOR LOGUEADO (ANCLA)',
+        `- player_id: ${myPlayerProfile?.id ?? 'Sin dato'}`,
+        `- nombre: ${userName}`,
+        `- email: ${myPlayerProfile?.email ?? session?.user?.email ?? 'Sin dato'}`,
+        `- elo_rating: ${myPlayerProfile?.eloRating ?? 'Sin dato'}`,
+        `- telefono: ${myPlayerProfile?.phone ?? 'Sin dato'}`,
+        '',
+        'SOLICITUD DEL USUARIO',
+        prompt,
+        '',
+        'INSTRUCCION IMPORTANTE',
+        'Usa el jugador logueado como jugador ancla para el matching.',
+      ].join('\n');
 
-    const result = await searchAiMatch(enrichedPrompt);
-    if (result.ok && result.text) {
-      setAiResponse(result.text);
-    } else {
-      setAiError(result.error ?? 'No se pudo completar la búsqueda.');
-    }
-    setAiLoading(false);
-  }, [myPlayerProfile, session?.user?.email, session?.user?.user_metadata?.full_name]);
+      const result = await searchAiMatch(enrichedPrompt);
+      if (result.ok && result.text) {
+        setAffinityResponse(result.text);
+      } else {
+        setAffinityError(result.error ?? 'No se pudo completar la búsqueda.');
+      }
+      setAffinityLoading(false);
+    },
+    [myPlayerProfile, session?.user?.email, session?.user?.user_metadata?.full_name]
+  );
 
   return (
     <>
@@ -216,7 +217,7 @@ export function HomeScreen({
             <SeasonPassHomeCard compact />
             <CompetitiveLeagueHomeCard
               compact
-              onPress={() => onNavigateToTab?.('torneos')}
+              onPress={() => onOpenCompetitiveLeague?.()}
             />
           </InicioWidgetsCarousel>
         </InicioEnterBlock>
@@ -233,9 +234,9 @@ export function HomeScreen({
         <InicioEnterBlock enterIndex={3}>
           <IAAfinidadCard
             onPress={() => {
-              setAiError(null);
-              setAiResponse(null);
-              setAiModalVisible(true);
+              setAffinityError(null);
+              setAffinityResponse(null);
+              setAffinityModalVisible(true);
             }}
           />
         </InicioEnterBlock>
@@ -253,18 +254,15 @@ export function HomeScreen({
         </ScrollView>
       </View>
 
-      <AiMatchModal
-        visible={aiModalVisible}
-        loading={aiLoading}
-        responseText={aiResponse}
-        errorText={aiError}
-        onClose={() => setAiModalVisible(false)}
-        onSubmit={handleAiMatchSearch}
-        onDirectMessageSent={(target) => {
-          setAiModalVisible(false);
-          onOpenMessageThread?.(target);
-        }}
+      <IAAfinidadModal
+        visible={affinityModalVisible}
+        loading={affinityLoading}
+        responseText={affinityResponse}
+        errorText={affinityError}
+        onClose={() => setAffinityModalVisible(false)}
+        onSubmit={handleAffinitySearch}
       />
+
     </>
   );
 }

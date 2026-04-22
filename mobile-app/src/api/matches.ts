@@ -10,6 +10,7 @@ export type Match = {
   gender: string | null;
   competitive: boolean;
   status: string;
+  type?: string | null;
 };
 
 type PlayerRef = {
@@ -17,6 +18,7 @@ type PlayerRef = {
   first_name: string;
   last_name: string;
   elo_rating: number;
+  liga?: string | null;
 };
 
 type MatchPlayerRef = {
@@ -35,6 +37,7 @@ export type MatchEnriched = Match & {
     end_at: string;
     total_price_cents: number;
     currency: string;
+    status?: string;
     court_id: string;
     courts?: {
       id: string;
@@ -257,6 +260,41 @@ export async function fetchMatchById(
     return null;
   } catch {
     return null;
+  }
+}
+
+export type SubmitMatchScoreBody = {
+  sets: Array<{ a: number; b: number }>;
+  match_end_reason?: 'completed' | 'retired' | 'timeout';
+  retired_team?: 'A' | 'B';
+};
+
+/** POST /matches/:id/score — primera propuesta de marcador (requiere score_status=pending). */
+export async function submitMatchScore(
+  matchId: string,
+  body: SubmitMatchScoreBody,
+  token: string | null | undefined
+): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  if (!token) return { ok: false, error: 'Token requerido', status: 401 };
+  try {
+    const res = await fetch(`${API_URL}/matches/${matchId}/score`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    let json: { ok?: boolean; error?: string } = {};
+    try {
+      json = (await res.json()) as { ok?: boolean; error?: string };
+    } catch {
+      /* vacío */
+    }
+    if (res.ok) return { ok: true };
+    return { ok: false, error: json.error ?? 'No se pudo guardar el marcador', status: res.status };
+  } catch {
+    return { ok: false, error: 'Error de conexión', status: 0 };
   }
 }
 
