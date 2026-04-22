@@ -11,6 +11,8 @@ export interface Player {
     status: 'active' | 'blocked' | 'deleted';
     auth_user_id?: string | null;
     gender?: 'male' | 'female' | 'other' | null;
+    /** Suma de `wallet_transactions` en el club indicado al listar con `club_id` (centavos). */
+    wallet_balance_cents?: number;
 }
 
 export interface ClubOwner {
@@ -40,6 +42,13 @@ export interface Club {
     base_currency: string;
     weekly_schedule?: any;
     schedule_exceptions?: any[];
+    logo_url?: string | null;
+    contact_phone?: string | null;
+    contact_email?: string | null;
+    notify_new_bookings?: boolean;
+    notify_cancellations?: boolean;
+    notify_maintenance_reminders?: boolean;
+    notify_daily_email_summary?: boolean;
 }
 
 export type BookingType =

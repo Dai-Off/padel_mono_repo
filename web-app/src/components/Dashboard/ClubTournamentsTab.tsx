@@ -21,10 +21,9 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { PageSpinner } from '../Layout/PageSpinner';
-import { ClubLeaguesTab } from '../Leagues/ClubLeaguesTab';
 import {
   tournamentsService,
   type CompetitionMatch,
@@ -611,7 +610,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const { i18n, t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<TournamentListItem[]>([]);
   const [selected, setSelected] = useState<TournamentListItem | null>(null);
@@ -739,8 +737,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   });
   const routeId = location.pathname.startsWith('/torneos/') ? location.pathname.split('/')[2] : null;
   const isDetailRoute = Boolean(routeId);
-  const rootTabParam = searchParams.get('tab');
-  const topTab: 'torneos' | 'ligas' = !isDetailRoute && rootTabParam === 'ligas' ? 'ligas' : 'torneos';
   const lang = i18n.resolvedLanguage?.startsWith('zh') ? 'zh' : i18n.resolvedLanguage?.startsWith('en') ? 'en' : 'es';
   const tx = {
     pageTitle: lang === 'en' ? 'Tournament and Events Management' : lang === 'zh' ? '锦标赛与活动管理' : 'Gestión de Torneos y Eventos',
@@ -1508,7 +1504,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
           <h2 className="text-sm font-bold text-[#1A1A1A]">{tx.pageTitle}</h2>
           <p className="text-[11px] text-gray-500 mt-0.5">{tx.pageSubtitle}</p>
         </div>
-        {!isDetailRoute && topTab === 'torneos' && (
+        {!isDetailRoute && (
           <button
             type="button"
             onClick={() => {
@@ -1524,33 +1520,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       </div>
 
       {!isDetailRoute && (
-        <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1">
-          <button
-            type="button"
-            onClick={() => {
-              const next = new URLSearchParams(searchParams);
-              next.delete('tab');
-              setSearchParams(next, { replace: true });
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${topTab === 'torneos' ? 'bg-[#1A1A1A] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
-          >
-            {t('menu_torneos')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const next = new URLSearchParams(searchParams);
-              next.set('tab', 'ligas');
-              setSearchParams(next, { replace: true });
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${topTab === 'ligas' ? 'bg-[#1A1A1A] text-white' : 'text-gray-700 hover:bg-gray-100'}`}
-          >
-            {t('menu_ligas')}
-          </button>
-        </div>
-      )}
-
-      {!isDetailRoute && topTab === 'torneos' && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <StatCard label={tx.totalTournaments} value={String(stats.total)} icon={<Award className="w-4 h-4" />} color="#5B8DEE" />
           <StatCard label={tx.inProgress} value={String(stats.inProgress)} icon={<TrendingUp className="w-4 h-4" />} color="#22C55E" />
@@ -1559,7 +1528,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
         </div>
       )}
 
-      {!isDetailRoute && topTab === 'torneos' && (
+      {!isDetailRoute && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative flex-1 min-w-[180px] max-w-xs">
@@ -1639,7 +1608,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
         </div>
       )}
 
-      {!isDetailRoute && topTab === 'torneos' && (
+      {!isDetailRoute && (
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="divide-y divide-gray-100">
             {filteredItems.map((row) => {
@@ -1856,10 +1825,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
             )}
           </div>
         </div>
-      )}
-
-      {!isDetailRoute && topTab === 'ligas' && (
-        <ClubLeaguesTab clubId={clubId} clubResolved={clubResolved} />
       )}
 
       {isDetailRoute && selected && (
