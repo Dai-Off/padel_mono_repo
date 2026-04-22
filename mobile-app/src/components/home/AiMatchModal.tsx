@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
+import { useAuth } from '../../contexts/AuthContext';
+import { sendDirectMessage } from '../../api/messages';
+import { searchPlayers } from '../../api/players';
 
 type Option = { id: string; label: string };
 type OptionGroup = {
@@ -75,6 +78,16 @@ type MatchCandidate = {
   tags: string[];
   reason: string;
 };
+
+const AI_AUTO_DM_TEXT = '¡Hola! Me gustaría jugar Pádel contigo. ¿Tienes disponibilidad?';
+
+function normalizeText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
 
 function parseCandidatesFromResponse(text: string): MatchCandidate[] {
   const tryParseJsonLike = (raw: string): unknown | null => {
@@ -196,6 +209,7 @@ type AiMatchModalProps = {
   errorText: string | null;
   onClose: () => void;
   onSubmit: (prompt: string) => void;
+  onDirectMessageSent: (target: { id: string; displayName: string; avatarUrl: string | null }) => void;
 };
 
 function OptionSection({
@@ -235,7 +249,15 @@ function OptionSection({
   );
 }
 
-function CandidateCard({ candidate }: { candidate: MatchCandidate }) {
+function CandidateCard({
+  candidate,
+  onMessagePress,
+  sending,
+}: {
+  candidate: MatchCandidate;
+  onMessagePress: (candidate: MatchCandidate) => void;
+  sending: boolean;
+}) {
   return (
     <View style={styles.candidateCard}>
       <View style={styles.candidateHeader}>
@@ -290,15 +312,25 @@ function CandidateCard({ candidate }: { candidate: MatchCandidate }) {
         </Text>
       </View>
 
-      <Pressable style={styles.messageBtn}>
+      <Pressable
+        style={[styles.messageBtn, sending && { opacity: 0.7 }]}
+        onPress={() => onMessagePress(candidate)}
+        disabled={sending}
+      >
         <LinearGradient
           colors={['#F18F34', '#E95F32']}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
           style={styles.messageBtnGradient}
         >
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
-          <Text style={styles.messageBtnText}>Enviar mensaje</Text>
+          {sending ? (
+            <Animated.View>
+              <Ionicons name="hourglass-outline" size={16} color="#fff" />
+            </Animated.View>
+          ) : (
+            <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
+          )}
+          <Text style={styles.messageBtnText}>{sending ? 'Enviando...' : 'Enviar mensaje'}</Text>
         </LinearGradient>
       </Pressable>
     </View>
@@ -312,9 +344,13 @@ export function AiMatchModal({
   errorText,
   onClose,
   onSubmit,
+  onDirectMessageSent,
 }: AiMatchModalProps) {
   const insets = useSafeAreaInsets();
+  const { session } = useAuth();
+  const token = session?.access_token;
   const [selections, setSelections] = useState<Selections>(DEFAULT_SELECTIONS);
+  const [sendingCandidateId, setSendingCandidateId] = useState<string | null>(null);
 
   const completedSteps = useMemo(
     () => Object.values(selections).filter((value) => value.length > 0).length,
@@ -445,6 +481,50 @@ export function AiMatchModal({
 
     return `Quiero buscar un partido de ${sport}. Disponibilidad: ${day} por la ${time}. Estilo preferido: ${style}. Dame los mejores jugadores compatibles para completar el partido.`;
   }, [selections]);
+
+  const handleCandidateMessage = async (candidate: MatchCandidate) => {
+    if (!token) {
+      Alert.alert('Mensajes', 'Inicia sesión para enviar mensajes.');
+      return;
+    }
+
+    setSendingCandidateId(candidate.id);
+    try {
+      const search = await searchPlayers(candidate.name, token);
+      if (!search.ok || search.players.length === 0) {
+        Alert.alert('Mensajes', `No se encontró a "${candidate.name}" para enviarle mensaje.`);
+        return;
+      }
+
+      const expected = normalizeText(candidate.name);
+      const exact =
+        search.players.find((p) => {
+          const full = normalizeText([p.first_name, p.last_name].filter(Boolean).join(' '));
+          return full === expected;
+        }) ??
+        search.players.find((p) => {
+          const full = normalizeText([p.first_name, p.last_name].filter(Boolean).join(' '));
+          return full.includes(expected) || expected.includes(full);
+        }) ??
+        search.players[0];
+
+      const sent = await sendDirectMessage(exact.id, AI_AUTO_DM_TEXT, token);
+      if (!sent.ok) {
+        Alert.alert('Mensajes', sent.error);
+        return;
+      }
+
+      const targetName = [exact.first_name, exact.last_name].filter(Boolean).join(' ').trim() || candidate.name;
+      onClose();
+      onDirectMessageSent({
+        id: exact.id,
+        displayName: targetName,
+        avatarUrl: null,
+      });
+    } finally {
+      setSendingCandidateId(null);
+    }
+  };
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -613,7 +693,12 @@ export function AiMatchModal({
                 <View style={styles.resultsList}>
                   {parsedCandidates.length > 0 ? (
                     parsedCandidates.map((candidate) => (
-                      <CandidateCard key={candidate.id} candidate={candidate} />
+                      <CandidateCard
+                        key={candidate.id}
+                        candidate={candidate}
+                        onMessagePress={handleCandidateMessage}
+                        sending={sendingCandidateId === candidate.id}
+                      />
                     ))
                   ) : (
                     <View style={styles.emptyCandidatesCard}>
