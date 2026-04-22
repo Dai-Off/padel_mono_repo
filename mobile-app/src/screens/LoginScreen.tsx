@@ -28,9 +28,10 @@ import { theme } from '../theme';
 
 type LoginScreenProps = {
   onGoToRegister: () => void;
+  onGoToForgot: () => void;
 };
 
-export function LoginScreen({ onGoToRegister }: LoginScreenProps) {
+export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) {
   const { setSession } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -136,7 +137,7 @@ export function LoginScreen({ onGoToRegister }: LoginScreenProps) {
           <View style={loginExtrasColRight}>
             <Pressable
               style={({ pressed }) => [styles.forgotPressable, pressed && styles.pressed]}
-              onPress={() => { /* TODO: navegación a recuperar contraseña */ }}
+              onPress={onGoToForgot}
               disabled={loading}
             >
               <SafeText style={loginForgotLabel}>

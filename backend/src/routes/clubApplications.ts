@@ -3,7 +3,7 @@ import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { generateInviteToken, hashInviteToken, getInviteExpiresAt } from '../lib/inviteToken';
 import { requireAdmin } from '../middleware/requireAdmin';
-import { sendInviteEmail } from '../lib/mailer';
+import { sendInviteEmail, sendClubApplicationConfirmationEmail, sendClubApprovedEmail } from '../lib/mailer';
 import { getFrontendUrl } from '../lib/env';
 
 const router = Router();
@@ -138,7 +138,7 @@ router.post('/:id/approve', requireAdmin, async (req: Request, res: Response) =>
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data: app, error: fetchErr } = await supabase.from('club_applications').select('id, status, email, club_name').eq('id', id).maybeSingle();
+    const { data: app, error: fetchErr } = await supabase.from('club_applications').select('id, status, email, club_name, responsible_first_name').eq('id', id).maybeSingle();
     if (fetchErr || !app) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
     if (app.status !== 'pending' && app.status !== 'contacted') return res.status(400).json({ ok: false, error: 'Solo se puede aprobar una solicitud en estado pending o contacted' });
     await supabase.from('club_application_invites').delete().eq('application_id', id);
@@ -157,7 +157,8 @@ router.post('/:id/approve', requireAdmin, async (req: Request, res: Response) =>
     if (updateErr) return res.status(500).json({ ok: false, error: updateErr.message });
     const inviteUrl = `${getFrontendUrl()}/registro-club?application_id=${id}&token=${token}`;
     const clubName = (app as { club_name?: string }).club_name ?? 'Tu club';
-    const emailResult = await sendInviteEmail(app.email, inviteUrl, clubName);
+    const managerName = (app as { responsible_first_name?: string }).responsible_first_name ?? 'Gestor';
+    const emailResult = await sendClubApprovedEmail(app.email, managerName, clubName, inviteUrl);
     return res.json({
       ok: true,
       message: emailResult.sent
@@ -181,7 +182,7 @@ router.post('/:id/resend-invite', requireAdmin, async (req: Request, res: Respon
     const supabase = getSupabaseServiceRoleClient();
     const { data: app, error: fetchErr } = await supabase
       .from('club_applications')
-      .select('id, status, email, club_name, club_owner_id')
+      .select('id, status, email, club_name, club_owner_id, responsible_first_name')
       .eq('id', id)
       .maybeSingle();
     if (fetchErr || !app) return res.status(404).json({ ok: false, error: 'Solicitud no encontrada' });
@@ -209,7 +210,8 @@ router.post('/:id/resend-invite', requireAdmin, async (req: Request, res: Respon
       .eq('id', id);
     const inviteUrl = `${getFrontendUrl()}/registro-club?application_id=${id}&token=${token}`;
     const clubName = (app as { club_name?: string }).club_name ?? 'Tu club';
-    const emailResult = await sendInviteEmail((app as { email: string }).email, inviteUrl, clubName);
+    const managerName = (app as { responsible_first_name?: string }).responsible_first_name ?? 'Gestor';
+    const emailResult = await sendClubApprovedEmail((app as { email: string }).email, managerName, clubName, inviteUrl);
     return res.json({
       ok: true,
       message: emailResult.sent
@@ -365,6 +367,10 @@ router.post('/', async (req: Request, res: Response) => {
       .single();
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    // Enviar correo de confirmación al responsable del club
+    await sendClubApplicationConfirmationEmail(trim(email).toLowerCase(), trim(club_name));
+
     return res.status(201).json({ ok: true, id: data?.id });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
