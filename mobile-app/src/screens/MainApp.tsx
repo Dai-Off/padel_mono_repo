@@ -36,6 +36,7 @@ import { ProfileScreen } from './ProfileScreen';
 import { CommunityScreen } from './CommunityScreen';
 import { MessagesScreen, type MessagePeerNav } from './MessagesScreen';
 import { DirectMessageThreadScreen } from './DirectMessageThreadScreen';
+import { CompetitiveLeagueScreen } from './CompetitiveLeagueScreen';
 import type { EducationalCourse } from '../api/dailyLessons';
 import type { PublicCourse } from '../api/schoolCourses';
 
@@ -61,6 +62,7 @@ export function MainApp() {
   const [showCommunity, setShowCommunity] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [messagesPeer, setMessagesPeer] = useState<MessagePeerNav | null>(null);
+  const [showCompetitiveLeague, setShowCompetitiveLeague] = useState(false);
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
@@ -159,6 +161,17 @@ export function MainApp() {
         />
       );
     }
+    if (showCompetitiveLeague) {
+      return (
+        <CompetitiveLeagueScreen
+          onBack={() => setShowCompetitiveLeague(false)}
+          onPartidoPress={(p) => {
+            setShowCompetitiveLeague(false);
+            setSelectedPartido(p);
+          }}
+        />
+      );
+    }
     if (showTransacciones) {
       return (
         <TransaccionesScreen onBack={() => setShowTransacciones(false)} />
@@ -209,10 +222,7 @@ export function MainApp() {
             onPartidoPress={(p) => setSelectedPartido(p)}
             onDailyLessonPress={() => setShowDailyLesson(true)}
             onCoursesPress={() => setShowCourses(true)}
-            onOpenMessageThread={(peer) => {
-              setShowMessages(true);
-              setMessagesPeer(peer);
-            }}
+            onOpenCompetitiveLeague={() => setShowCompetitiveLeague(true)}
           />
         );
       case 'pistas':
@@ -253,7 +263,8 @@ export function MainApp() {
     !showCourses &&
     !selectedEducationalCourse &&
     !selectedPublicCourse &&
-    !showMessages;
+    !showMessages &&
+    !showCompetitiveLeague;
 
   const customHeader =
     bookingSuccessData != null ||
@@ -261,6 +272,7 @@ export function MainApp() {
     showTransacciones ||
     showProfile ||
     showPartidoDetail ||
+    showCompetitiveLeague ||
     crearPartidoFlow.open ||
     showDailyLesson ||
     showCourses ||
@@ -332,6 +344,8 @@ export function MainApp() {
         ? '#0A0A0A'
         : showDailyLesson
           ? '#0F0F0F'
+          : showCompetitiveLeague
+            ? '#0F0F0F'
           : showPartidoDetail
             ? '#0F0F0F'
             : crearPartidoFlow.open
@@ -349,6 +363,7 @@ export function MainApp() {
     setShowProfile(false);
     setShowMessages(false);
     setMessagesPeer(null);
+    setShowCompetitiveLeague(false);
   };
 
   return (
@@ -367,6 +382,7 @@ export function MainApp() {
                 showProfile ||
               showClubDetail ||
               showPartidoDetail ||
+              showCompetitiveLeague ||
               showTusPagos ||
               showTransacciones ||
               crearPartidoFlow.open ||
@@ -396,7 +412,8 @@ export function MainApp() {
             !showCourses &&
             !selectedEducationalCourse &&
             !selectedPublicCourse &&
-            !showMessages && (
+            !showMessages &&
+            !showCompetitiveLeague && (
             <View style={styles.bottomBar}>
               <BottomNavbar activeTab={showProfile ? null : activeTab} onTabChange={handleTabChange} />
             </View>
