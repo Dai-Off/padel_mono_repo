@@ -52,6 +52,9 @@ import { ClubReviewsTab } from './ClubReviewsTab';
 import { ClubTournamentsTab } from './ClubTournamentsTab';
 import { ClubIncidentsTab } from './ClubIncidentsTab';
 import { ClubSpecialDatesTab } from './ClubSpecialDatesTab';
+import { ClubTariffsTab } from '../Tariffs/ClubTariffsTab';
+import { ClubCashMovementsTab } from '../CashMovements/ClubCashMovementsTab';
+import { CajaHubTab } from '../CashClosing/CajaHubTab';
 import { GrillaQuickNav } from '../../features/grilla/components/GrillaQuickNav';
 
 export const ClubDashboard = () => {
@@ -71,6 +74,9 @@ export const ClubDashboard = () => {
     const isResenasPage = location.pathname === '/resenas';
     const isIncidenciasPage = location.pathname === '/incidencias';
     const isFechasEspecialesPage = location.pathname === '/fechas-especiales';
+    const isTarifasPage = location.pathname === '/tarifas';
+    const isCashMovementsPage = location.pathname === '/movimientos-caja';
+    const isCajaHubPage = location.pathname === '/caja';
 
     const [loading, setLoading] = useState(true);
     const [clubResolved, setClubResolved] = useState(false);
@@ -134,7 +140,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isPlayerProfilePage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isPlayerProfilePage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage || isTarifasPage || isCashMovementsPage || isCajaHubPage) {
             setLoading(false);
             return;
         }
@@ -147,7 +153,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isPlayerProfilePage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isPlayerProfilePage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, isTarifasPage, isCashMovementsPage, isCajaHubPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -220,7 +226,7 @@ export const ClubDashboard = () => {
     };
 
     // Evita spinner doble en pantallas donde el tab ya se encarga del loader (CRM y Reseñas).
-    if (!club && loading && !isResenasPage && !isCrmPage && !isIncidenciasPage && !isFechasEspecialesPage) {
+    if (!club && loading && !isResenasPage && !isCrmPage && !isIncidenciasPage && !isFechasEspecialesPage && !isTarifasPage && !isCashMovementsPage && !isCajaHubPage) {
         return (
             <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
                 <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
@@ -266,6 +272,12 @@ export const ClubDashboard = () => {
                         <ClubCashClosingTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isFechasEspecialesPage ? (
                         <ClubSpecialDatesTab clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isTarifasPage ? (
+                        <ClubTariffsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isCashMovementsPage ? (
+                        <ClubCashMovementsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isCajaHubPage ? (
+                        <CajaHubTab />
                     ) : (
                         <>
                             <div className="flex items-center justify-between gap-3">

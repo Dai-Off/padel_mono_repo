@@ -35,9 +35,16 @@ type HomeScreenProps = {
   onPartidoPress?: (partido: PartidoItem) => void;
   onDailyLessonPress?: () => void;
   onCoursesPress?: () => void;
+  onOpenMessageThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
 };
 
-export function HomeScreen({ onNavigateToTab, onPartidoPress, onDailyLessonPress, onCoursesPress }: HomeScreenProps) {
+export function HomeScreen({
+  onNavigateToTab,
+  onPartidoPress,
+  onDailyLessonPress,
+  onCoursesPress,
+  onOpenMessageThread,
+}: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { stats, loading: statsLoading } = useHomeStats();
@@ -199,6 +206,10 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onDailyLessonPress
         errorText={aiError}
         onClose={() => setAiModalVisible(false)}
         onSubmit={handleAiMatchSearch}
+        onDirectMessageSent={(target) => {
+          setAiModalVisible(false);
+          onOpenMessageThread?.(target);
+        }}
       />
     </>
   );

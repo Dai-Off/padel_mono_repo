@@ -1,8 +1,10 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { ACCENT } from './constants';
 import { DASH } from './dash';
 import { androidReadableText } from './textStyles';
+import { ScalePressable } from './ScalePressable';
 
 /** Coincide con `HomeScreen` / `MainApp` (tabs inferiores). */
 export type HomeNavigateTab = 'pistas' | 'partidos' | 'torneos';
@@ -54,11 +56,19 @@ export function InicioQuickActions({
 
   return (
     <View style={styles.grid}>
-      <Pressable
+      <ScalePressable
         onPress={() => onNavigateToTab?.('partidos')}
+        pressedScale={0.985}
         style={({ pressed }) => [styles.rowWide, pressed && styles.pressed]}
       >
-        <View style={styles.blobOrange} />
+        <LinearGradient
+          colors={['rgba(241,143,52,0.32)', 'rgba(241,143,52,0.06)', 'transparent']}
+          locations={[0, 0.45, 1]}
+          start={{ x: 1, y: 0 }}
+          end={{ x: 0.15, y: 0.95 }}
+          style={styles.cornerWashOrange}
+          pointerEvents="none"
+        />
         <View style={styles.iconLg}>
           <Ionicons name="people" size={26} color={ACCENT} />
         </View>
@@ -68,48 +78,76 @@ export function InicioQuickActions({
           <Text style={styles.dataLine}>{buscarSub}</Text>
         </View>
         <Ionicons name="arrow-up" size={22} color="#6b7280" style={styles.arrowUp} />
-      </Pressable>
+      </ScalePressable>
 
       <View style={styles.halfRow}>
-        <Pressable
-          onPress={() => onNavigateToTab?.('pistas')}
-          style={({ pressed }) => [styles.halfCard, pressed && styles.pressed]}
-        >
-          <View style={styles.blobBlue} />
-          <View style={styles.rowSm}>
-            <View style={styles.iconSm}>
-              <Ionicons name="location" size={22} color="#60a5fa" />
+        <View style={styles.halfSlot}>
+          <ScalePressable
+            onPress={() => onNavigateToTab?.('pistas')}
+            pressedScale={0.985}
+            style={({ pressed }) => [styles.halfCard, pressed && styles.pressed]}
+          >
+            <LinearGradient
+              colors={['rgba(59,130,246,0.3)', 'rgba(59,130,246,0.06)', 'transparent']}
+              locations={[0, 0.45, 1]}
+              start={{ x: 1, y: 0 }}
+              end={{ x: 0.1, y: 1 }}
+              style={styles.cornerWashBlue}
+              pointerEvents="none"
+            />
+            <View style={styles.rowSm}>
+              <View style={styles.iconSm}>
+                <Ionicons name="location" size={22} color="#60a5fa" />
+              </View>
+              <View style={styles.textColSm}>
+                <Text style={styles.h3sm}>Pistas</Text>
+                <Text style={styles.p}>Reserva tu club</Text>
+                <Text style={styles.dataLineSm}>{pistasSub}</Text>
+              </View>
             </View>
-            <View style={styles.textColSm}>
-              <Text style={styles.h3sm}>Pistas</Text>
-              <Text style={styles.p}>Reserva tu club</Text>
-              <Text style={styles.dataLineSm}>{pistasSub}</Text>
+          </ScalePressable>
+        </View>
+        <View style={styles.halfSlot}>
+          <ScalePressable
+            onPress={() => onCoursesPress?.()}
+            pressedScale={0.985}
+            style={({ pressed }) => [styles.halfCard, pressed && styles.pressed]}
+          >
+            <LinearGradient
+              colors={['rgba(168,85,247,0.3)', 'rgba(168,85,247,0.06)', 'transparent']}
+              locations={[0, 0.45, 1]}
+              start={{ x: 1, y: 0 }}
+              end={{ x: 0.1, y: 1 }}
+              style={styles.cornerWashPurple}
+              pointerEvents="none"
+            />
+            <View style={styles.rowSm}>
+              <View style={styles.iconSm}>
+                <Ionicons name="school" size={22} color="#c084fc" />
+              </View>
+              <View style={styles.textColSm}>
+                <Text style={styles.h3sm}>Clases</Text>
+                <Text style={styles.p}>Mejora tu juego</Text>
+                <Text style={styles.dataLineSm}>{DASH}</Text>
+              </View>
             </View>
-          </View>
-        </Pressable>
-        <Pressable
-          onPress={() => onCoursesPress?.()}
-          style={({ pressed }) => [styles.halfCard, pressed && styles.pressed]}
-        >
-          <View style={styles.blobPurple} />
-          <View style={styles.rowSm}>
-            <View style={styles.iconSm}>
-              <Ionicons name="school" size={22} color="#c084fc" />
-            </View>
-            <View style={styles.textColSm}>
-              <Text style={styles.h3sm}>Clases</Text>
-              <Text style={styles.p}>Mejora tu juego</Text>
-              <Text style={styles.dataLineSm}>{DASH}</Text>
-            </View>
-          </View>
-        </Pressable>
+          </ScalePressable>
+        </View>
       </View>
 
-      <Pressable
+      <ScalePressable
         onPress={() => onNavigateToTab?.('torneos')}
+        pressedScale={0.985}
         style={({ pressed }) => [styles.rowWide, pressed && styles.pressed]}
       >
-        <View style={styles.blobAmber} />
+        <LinearGradient
+          colors={['rgba(245,158,11,0.32)', 'rgba(245,158,11,0.06)', 'transparent']}
+          locations={[0, 0.45, 1]}
+          start={{ x: 1, y: 0 }}
+          end={{ x: 0.15, y: 0.95 }}
+          style={styles.cornerWashAmber}
+          pointerEvents="none"
+        />
         <View style={styles.iconLg}>
           <Ionicons name="trophy" size={26} color="#fbbf24" />
         </View>
@@ -119,7 +157,7 @@ export function InicioQuickActions({
           <Text style={styles.dataLine}>{torneosSub}</Text>
         </View>
         <Ionicons name="arrow-up" size={22} color="#6b7280" style={styles.arrowUp} />
-      </Pressable>
+      </ScalePressable>
     </View>
   );
 }
@@ -143,41 +181,34 @@ const styles = StyleSheet.create({
     gap: 16,
     width: '100%',
   },
-  blobOrange: {
+  /** Esquina tipo X7 `bg-gradient-to-br from-…/20 to-transparent blur-2xl` (sin disco sólido). */
+  cornerWashOrange: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(241,143,52,0.2)',
+    top: -28,
+    right: -28,
+    width: 200,
+    height: 200,
   },
-  blobBlue: {
+  cornerWashBlue: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    backgroundColor: 'rgba(59,130,246,0.2)',
+    top: -36,
+    right: -36,
+    width: 180,
+    height: 180,
   },
-  blobPurple: {
+  cornerWashPurple: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 128,
-    height: 128,
-    borderRadius: 64,
-    backgroundColor: 'rgba(168,85,247,0.2)',
+    top: -36,
+    right: -36,
+    width: 180,
+    height: 180,
   },
-  blobAmber: {
+  cornerWashAmber: {
     position: 'absolute',
-    top: 0,
-    right: 0,
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: 'rgba(245,158,11,0.2)',
+    top: -28,
+    right: -28,
+    width: 200,
+    height: 200,
   },
   iconLg: {
     width: 48,
@@ -212,11 +243,13 @@ const styles = StyleSheet.create({
   }),
   arrowUp: { transform: [{ rotate: '45deg' }] },
   halfRow: { flexDirection: 'row', gap: 16 },
+  /** `flex:1` en el slot: el `ScalePressable` envuelve con `Animated.View` sin flex. */
+  halfSlot: { flex: 1, minWidth: 0 },
   halfCard: {
     ...cardBase,
-    flex: 1,
     padding: 16,
     minHeight: 100,
+    width: '100%',
   },
   rowSm: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   iconSm: {

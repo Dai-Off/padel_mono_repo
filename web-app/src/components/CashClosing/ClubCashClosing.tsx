@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { BarChart3, Calculator, CheckCircle2, History, Search, TrendingDown, TrendingUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { PageSpinner } from '../Layout/PageSpinner';
-import { clubStaffService } from '../../services/clubStaff';
 import { HttpError } from '../../services/api';
+import { authService } from '../../services/auth';
 import {
   paymentsService,
   type CashClosingBookingExpected,
   type CashOpeningSavedRecord,
   type CashClosingSavedRecord,
 } from '../../services/payments';
-import type { ClubStaffMember } from '../../types/clubStaff';
 
 type CashBreakdown = {
   bills_500: number;
@@ -79,11 +79,6 @@ const denominations: { key: keyof CashBreakdown; label: string; value: number }[
   { key: 'coins_002', label: '0.02EUR', value: 0.02 }, { key: 'coins_001', label: '0.01EUR', value: 0.01 },
 ];
 
-function staffRoleAllowsCashLedger(role: string | null | undefined): boolean {
-  const r = String(role ?? '').trim().toLowerCase();
-  return !/entrenador|entrenadora|coach|trainer|profesor/.test(r);
-}
-
 export function ClubCashClosingTab({
   clubId,
   clubResolved = true,
@@ -92,13 +87,9 @@ export function ClubCashClosingTab({
   clubResolved?: boolean;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [view, setView] = useState<'new' | 'history'>('new');
-  const [staff, setStaff] = useState<ClubStaffMember[]>([]);
-  const [employeeId, setEmployeeId] = useState('');
-  const selectedEmployeeName = useMemo(
-    () => staff.find((s) => s.id === employeeId)?.name ?? '',
-    [staff, employeeId]
-  );
+  const [loggedInUserName, setLoggedInUserName] = useState('');
   const [observations, setObservations] = useState('');
   const [cardTotal, setCardTotal] = useState('');
   const [cashBreakdown, setCashBreakdown] = useState<CashBreakdown>(emptyBreakdown);
@@ -112,7 +103,6 @@ export function ClubCashClosingTab({
   const [operativeDate, setOperativeDate] = useState(localDateYmd());
   const [openingRecord, setOpeningRecord] = useState<CashOpeningSavedRecord | null>(null);
   const [needsNewOpeningAfterClosing, setNeedsNewOpeningAfterClosing] = useState(false);
-  const [openingEmployeeId, setOpeningEmployeeId] = useState('');
   const [openingCashTotal, setOpeningCashTotal] = useState('');
   const [openingNotes, setOpeningNotes] = useState('');
   const [savingOpening, setSavingOpening] = useState(false);
@@ -124,22 +114,12 @@ export function ClubCashClosingTab({
     }
   }, []);
 
-  const staffForCashOperations = useMemo(
-    () => staff.filter((m) => m.status === 'active' && staffRoleAllowsCashLedger(m.role)),
-    [staff],
-  );
-
   useEffect(() => {
-    if (employeeId && !staffForCashOperations.some((s) => s.id === employeeId)) {
-      setEmployeeId('');
-    }
-  }, [staffForCashOperations, employeeId]);
-
-  useEffect(() => {
-    if (openingEmployeeId && !staffForCashOperations.some((s) => s.id === openingEmployeeId)) {
-      setOpeningEmployeeId('');
-    }
-  }, [staffForCashOperations, openingEmployeeId]);
+    authService.getMe().then((me) => {
+      const name = me.user?.user_metadata?.full_name?.trim() || me.user?.email || '';
+      setLoggedInUserName(name);
+    }).catch(() => {});
+  }, []);
 
   const realCashTotal = useMemo(
     () => denominations.reduce((acc, d) => acc + (cashBreakdown[d.key] * d.value), 0),
@@ -148,7 +128,7 @@ export function ClubCashClosingTab({
   const realCardTotal = Number(cardTotal) || 0;
   const totalDifference = (realCashTotal + realCardTotal) - (systemCashTotal + systemCardTotal);
 
-  const canSave = employeeId.trim() !== '';
+  const canSave = true;
 
   const filteredHistory = historyRecords.filter((r) => {
     const q = searchTerm.toLowerCase();
@@ -164,7 +144,6 @@ export function ClubCashClosingTab({
 
   useEffect(() => {
     if (!needsNewOpeningAfterClosing) return;
-    setOpeningEmployeeId('');
     setOpeningCashTotal('');
     setOpeningNotes('');
   }, [needsNewOpeningAfterClosing]);
@@ -177,14 +156,12 @@ export function ClubCashClosingTab({
 
     (async () => {
       try {
-        const [staffRows, expected, opening] = await Promise.all([
-          clubStaffService.list(clubId),
+        const [expected, opening] = await Promise.all([
           paymentsService.getCashClosingExpected(clubId, operativeDate, operativeTimezone),
           paymentsService.getCashOpeningForDay(clubId, operativeDate),
         ]);
         if (cancelled) return;
 
-        setStaff(staffRows ?? []);
         setExpectedBookings(expected.bookings ?? []);
         setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
         setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
@@ -224,13 +201,11 @@ export function ClubCashClosingTab({
 
   const saveClosing = async () => {
     if (!canSave || !clubId) return;
-    if (!selectedEmployeeName) return;
     setSaving(true);
     try {
       const forDate = operativeDate;
       const saved = await paymentsService.createCashClosingRecord({
         club_id: clubId,
-        staff_id: employeeId,
         for_date: forDate,
         real_cash_cents: Math.round(realCashTotal * 100),
         real_card_cents: Math.round(realCardTotal * 100),
@@ -246,9 +221,9 @@ export function ClubCashClosingTab({
       setNeedsNewOpeningAfterClosing(refreshedExpected.needs_new_opening_after_closing === true);
       setCashBreakdown(emptyBreakdown);
       setCardTotal('');
-      setEmployeeId('');
       setObservations('');
-      setView('history');
+      toast.success('Arqueo guardado correctamente');
+      navigate('/grilla?menu=resumen');
     } catch (e) {
       if (e instanceof HttpError && e.status === 503) {
         toast.error(
@@ -263,7 +238,7 @@ export function ClubCashClosingTab({
   };
 
   const saveOpening = async () => {
-    if (!clubId || !openingEmployeeId) return;
+    if (!clubId) return;
     const openingCashCents = Math.round((Number(openingCashTotal) || 0) * 100);
     if (openingCashCents < 0) return;
     setSavingOpening(true);
@@ -271,7 +246,6 @@ export function ClubCashClosingTab({
       const forDate = operativeDate;
       const saved = await paymentsService.createCashOpeningRecord({
         club_id: clubId,
-        staff_id: openingEmployeeId,
         for_date: forDate,
         opening_cash_cents: openingCashCents,
         notes: openingNotes.trim() || undefined,
@@ -282,7 +256,6 @@ export function ClubCashClosingTab({
       setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
       setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
       setNeedsNewOpeningAfterClosing(expected.needs_new_opening_after_closing === true);
-      setEmployeeId(saved.staff_id ?? '');
       setOpeningCashTotal('');
       setOpeningNotes('');
       toast.success(t('cash_opening_success'));
@@ -307,9 +280,6 @@ export function ClubCashClosingTab({
             <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">{t('cash_after_close_hint')}</p>
           )}
         </div>
-        {staff.length > 0 && staffForCashOperations.length === 0 && (
-          <p className="text-[11px] text-amber-800 font-medium max-w-xl">{t('cash_no_staff_authorized_for_caja')}</p>
-        )}
         <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3 max-w-xl">
           <input
             type="date"
@@ -317,18 +287,11 @@ export function ClubCashClosingTab({
             onChange={(e) => setOperativeDate(e.target.value)}
             className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
           />
-          <select
-            value={openingEmployeeId}
-            onChange={(e) => setOpeningEmployeeId(e.target.value)}
-            className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
-          >
-            <option value="">{t('cash_opening_employee')}</option>
-            {staffForCashOperations.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
+          {loggedInUserName && (
+            <div className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs text-gray-700 font-medium">
+              {loggedInUserName}
+            </div>
+          )}
           <input
             type="number"
             min={0}
@@ -348,7 +311,7 @@ export function ClubCashClosingTab({
           <button
             type="button"
             onClick={() => void saveOpening()}
-            disabled={!openingEmployeeId || savingOpening || staffForCashOperations.length === 0}
+            disabled={savingOpening}
             className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1A1A1A] text-white disabled:opacity-40"
           >
             {savingOpening ? t('loading') : t('cash_opening_save')}
@@ -450,22 +413,12 @@ export function ClubCashClosingTab({
                 </div>
               ))}
             </div>
-            {staff.length > 0 && staffForCashOperations.length === 0 && (
-              <p className="mt-3 text-[11px] text-amber-800 font-medium">{t('cash_no_staff_authorized_for_caja')}</p>
-            )}
             <div className="grid md:grid-cols-2 gap-3 mt-4">
-              <select
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
-              >
-                <option value="">{t('cash_employee')}</option>
-                {staffForCashOperations.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+              {loggedInUserName && (
+                <div className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs text-gray-700 font-medium">
+                  {loggedInUserName}
+                </div>
+              )}
               <input
                 type="number"
                 min={0}
@@ -514,7 +467,7 @@ export function ClubCashClosingTab({
             <button
               type="button"
               onClick={() => void saveClosing()}
-              disabled={!canSave || saving || staffForCashOperations.length === 0}
+              disabled={!canSave || saving}
               className="mt-4 px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1A1A1A] text-white disabled:opacity-40"
             >
               {saving ? t('loading') : t('cash_save_closing')}

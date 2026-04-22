@@ -14,6 +14,7 @@ import { PreciosView } from './components/Precios/PreciosView';
 import { LearningContentView } from './components/Learning/LearningContentView';
 import { AdminLearningPage } from './components/Admin/Learning/AdminLearningPage';
 import { authService } from './services/auth';
+import { SmartHomeRedirect } from './components/Auth/SmartHomeRedirect';
 import { Toaster } from 'sonner';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -62,7 +63,7 @@ function App() {
           path="/"
           element={
             <ProtectedRoute>
-              <Navigate to="/grilla?menu=resumen" replace />
+              <SmartHomeRedirect />
             </ProtectedRoute>
           }
         />
@@ -179,6 +180,14 @@ function App() {
           }
         />
         <Route
+          path="/caja"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/resenas"
           element={
             <ProtectedRoute>
@@ -196,6 +205,22 @@ function App() {
         />
         <Route
           path="/fechas-especiales"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/tarifas"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/movimientos-caja"
           element={
             <ProtectedRoute>
               <ClubDashboard />

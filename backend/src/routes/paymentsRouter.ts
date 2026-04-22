@@ -15,6 +15,7 @@ import {
   createCashClosingRecordHandler,
   customerPortalHandler,
   simulateTurnPaymentHandler,
+  cashMovementsHandler,
 } from './payments';
 
 const router = Router();
@@ -33,5 +34,6 @@ router.post('/create-intent-for-new-match', createIntentForNewMatchHandler);
 router.post('/create-intent-for-tournament', createIntentForTournamentHandler);
 router.post('/confirm-client', confirmClientHandler);
 router.post('/simulate-turn-payment', simulateTurnPaymentHandler);
+router.get('/cash-movements', requireClubOwnerOrAdmin, cashMovementsHandler);
 
 export default router;

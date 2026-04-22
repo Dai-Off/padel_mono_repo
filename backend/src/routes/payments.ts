@@ -1496,8 +1496,8 @@ export async function createCashOpeningRecordHandler(req: Request, res: Response
   const { club_id: bodyClubId, staff_id, for_date, opening_cash_cents, notes } = req.body ?? {};
   const clubId = typeof bodyClubId === 'string' ? bodyClubId.trim() : '';
   const staffId = typeof staff_id === 'string' ? staff_id.trim() : '';
-  if (!clubId || !staffId) {
-    res.status(400).json({ ok: false, error: 'club_id y staff_id son obligatorios' });
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
     return;
   }
   if (!canAccessClubForPayments(req, clubId)) {
@@ -1517,17 +1517,28 @@ export async function createCashOpeningRecordHandler(req: Request, res: Response
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
-    if (!auth.ok) {
-      res.status(auth.status).json({ ok: false, error: auth.error });
-      return;
+    let employeeName: string;
+    let resolvedStaffId: string | null = staffId || null;
+
+    if (staffId) {
+      const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
+      if (!auth.ok) {
+        res.status(auth.status).json({ ok: false, error: auth.error });
+        return;
+      }
+      employeeName = auth.employeeName;
+    } else {
+      const { data: authData } = await supabase.auth.admin.getUserById(req.authContext.userId);
+      const meta = (authData?.user?.user_metadata ?? {}) as Record<string, unknown>;
+      employeeName = (typeof meta.full_name === 'string' && meta.full_name.trim())
+        ? meta.full_name.trim()
+        : (authData?.user?.email ?? 'Usuario');
     }
-    const employeeName = auth.employeeName;
     const { data: inserted, error: insErr } = await supabase
       .from('club_cash_openings')
       .insert({
         club_id: clubId,
-        staff_id: staffId,
+        staff_id: resolvedStaffId,
         employee_name: employeeName,
         opened_by_name: employeeName,
         for_date: forDateStr,
@@ -1730,8 +1741,8 @@ export async function createCashClosingRecordHandler(req: Request, res: Response
   const clubId = typeof bodyClubId === 'string' ? bodyClubId.trim() : '';
   const staffId = typeof staff_id === 'string' ? staff_id.trim() : '';
 
-  if (!clubId || !staffId) {
-    res.status(400).json({ ok: false, error: 'club_id y staff_id son obligatorios' });
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
     return;
   }
   if (!canAccessClubForPayments(req, clubId)) {
@@ -1755,13 +1766,23 @@ export async function createCashClosingRecordHandler(req: Request, res: Response
 
   try {
     const supabase = getSupabaseServiceRoleClient();
+    let employeeName: string;
+    let resolvedStaffId: string | null = staffId || null;
 
-    const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
-    if (!auth.ok) {
-      res.status(auth.status).json({ ok: false, error: auth.error });
-      return;
+    if (staffId) {
+      const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
+      if (!auth.ok) {
+        res.status(auth.status).json({ ok: false, error: auth.error });
+        return;
+      }
+      employeeName = auth.employeeName;
+    } else {
+      const { data: authData } = await supabase.auth.admin.getUserById(req.authContext!.userId);
+      const meta = (authData?.user?.user_metadata ?? {}) as Record<string, unknown>;
+      employeeName = (typeof meta.full_name === 'string' && meta.full_name.trim())
+        ? meta.full_name.trim()
+        : (authData?.user?.email ?? 'Usuario');
     }
-    const employeeName = auth.employeeName;
     const diffCents = Math.trunc(rc + rcd - sc - scd);
     const status = cashClosingStatusFromDiffCents(diffCents);
 
@@ -2521,6 +2542,272 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
     });
   } catch (err) {
     console.error('[payments/simulate-turn-payment]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+export type CashMovementType = 'payment' | 'refund' | 'cancellation';
+export type CashMovementMethod = 'cash' | 'card' | 'wallet' | 'stripe';
+
+export interface CashMovement {
+  id: string;
+  type: CashMovementType;
+  method: CashMovementMethod | null;
+  amount_cents: number;
+  created_at: string;
+  booking_id: string | null;
+  start_at: string | null;
+  end_at: string | null;
+  court_name: string | null;
+  player_name: string | null;
+  concept: string;
+}
+
+export async function cashMovementsHandler(req: Request, res: Response): Promise<void> {
+  const clubId = String(req.query.club_id ?? '').trim();
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+
+  const dateStr = String(req.query.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  const timezone = String(req.query.timezone ?? 'Europe/Madrid').trim() || 'Europe/Madrid';
+
+  let startUtc: Date;
+  let endUtc: Date;
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone: timezone }).format(new Date());
+    startUtc = zonedTimeToUtc(`${dateStr}T00:00:00`, timezone);
+    endUtc = new Date(zonedTimeToUtc(`${dateStr}T23:59:59`, timezone).getTime() + 999);
+  } catch {
+    startUtc = new Date(`${dateStr}T00:00:00.000Z`);
+    endUtc = new Date(`${dateStr}T23:59:59.999Z`);
+  }
+  if (Number.isNaN(startUtc.getTime())) {
+    res.status(400).json({ ok: false, error: 'date inválida. Usa YYYY-MM-DD.' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const startIso = startUtc.toISOString();
+    const endIso = endUtc.toISOString();
+
+    // 1. Payment transactions (cash + card + stripe)
+    const { data: txRows, error: txErr } = await supabase
+      .from('payment_transactions')
+      .select(`
+        id,
+        amount_cents,
+        currency,
+        status,
+        created_at,
+        stripe_payment_intent_id,
+        booking_id,
+        players ( first_name, last_name ),
+        bookings!inner (
+          start_at,
+          end_at,
+          courts!inner (
+            name,
+            club_id
+          )
+        )
+      `)
+      .eq('status', 'succeeded')
+      .eq('bookings.courts.club_id', clubId)
+      .gte('created_at', startIso)
+      .lte('created_at', endIso)
+      .order('created_at', { ascending: false });
+
+    if (txErr) {
+      console.error('[payments/cash-movements:transactions]', txErr);
+      res.status(500).json({ ok: false, error: txErr.message });
+      return;
+    }
+
+    // 2. Wallet transactions (debits + refunds) for this club
+    const { data: walletRows, error: walletErr } = await supabase
+      .from('wallet_transactions')
+      .select(`
+        id,
+        amount_cents,
+        concept,
+        type,
+        booking_id,
+        created_at,
+        player_id,
+        players ( first_name, last_name ),
+        bookings (
+          start_at,
+          end_at,
+          courts ( name )
+        )
+      `)
+      .eq('club_id', clubId)
+      .gte('created_at', startIso)
+      .lte('created_at', endIso)
+      .order('created_at', { ascending: false });
+
+    if (walletErr) {
+      console.error('[payments/cash-movements:wallet]', walletErr);
+      res.status(500).json({ ok: false, error: walletErr.message });
+      return;
+    }
+
+    // 3. Cancelled bookings today
+    const { data: cancelledRows, error: cancelErr } = await supabase
+      .from('bookings')
+      .select(`
+        id,
+        cancelled_at,
+        start_at,
+        end_at,
+        total_price_cents,
+        courts!inner ( name, club_id ),
+        players!bookings_organizer_player_id_fkey ( first_name, last_name )
+      `)
+      .eq('status', 'cancelled')
+      .eq('courts.club_id', clubId)
+      .gte('cancelled_at', startIso)
+      .lte('cancelled_at', endIso)
+      .order('cancelled_at', { ascending: false });
+
+    if (cancelErr) {
+      console.error('[payments/cash-movements:cancelled]', cancelErr);
+      res.status(500).json({ ok: false, error: cancelErr.message });
+      return;
+    }
+
+    const movements: CashMovement[] = [];
+
+    // Process payment transactions
+    for (const r of (txRows ?? []) as Record<string, unknown>[]) {
+      const rawB = r.bookings;
+      const b = (Array.isArray(rawB) ? rawB[0] : rawB) as Record<string, unknown> | null;
+      const rawCourt = b?.courts;
+      const court = (Array.isArray(rawCourt) ? rawCourt[0] : rawCourt) as Record<string, unknown> | null;
+      const rawPlayer = r.players;
+      const player = (Array.isArray(rawPlayer) ? rawPlayer[0] : rawPlayer) as Record<string, unknown> | null;
+
+      const ref = typeof r.stripe_payment_intent_id === 'string' ? r.stripe_payment_intent_id : '';
+      let method: CashMovementMethod;
+      if (ref.startsWith('CASH_')) method = 'cash';
+      else if (ref.startsWith('pi_')) method = 'stripe';
+      else method = 'card';
+
+      const firstName = player?.first_name ? String(player.first_name) : '';
+      const lastName = player?.last_name ? String(player.last_name) : '';
+      const playerName = [firstName, lastName].filter(Boolean).join(' ') || null;
+
+      movements.push({
+        id: String(r.id),
+        type: 'payment',
+        method,
+        amount_cents: typeof r.amount_cents === 'number' ? r.amount_cents : 0,
+        created_at: String(r.created_at),
+        booking_id: r.booking_id ? String(r.booking_id) : null,
+        start_at: b?.start_at ? String(b.start_at) : null,
+        end_at: b?.end_at ? String(b.end_at) : null,
+        court_name: court?.name ? String(court.name) : null,
+        player_name: playerName,
+        concept: method === 'cash' ? 'Cobro en efectivo' : method === 'stripe' ? 'Cobro con tarjeta (online)' : 'Cobro con tarjeta',
+      });
+    }
+
+    // Process wallet transactions
+    for (const r of (walletRows ?? []) as Record<string, unknown>[]) {
+      const rawB = r.bookings;
+      const b = (Array.isArray(rawB) ? rawB[0] : rawB) as Record<string, unknown> | null;
+      const rawCourt = b?.courts;
+      const court = (Array.isArray(rawCourt) ? rawCourt[0] : rawCourt) as Record<string, unknown> | null;
+      const rawPlayer = r.players;
+      const player = (Array.isArray(rawPlayer) ? rawPlayer[0] : rawPlayer) as Record<string, unknown> | null;
+
+      const firstName = player?.first_name ? String(player.first_name) : '';
+      const lastName = player?.last_name ? String(player.last_name) : '';
+      const playerName = [firstName, lastName].filter(Boolean).join(' ') || null;
+      const amountCents = typeof r.amount_cents === 'number' ? r.amount_cents : 0;
+      const walletType = String(r.type ?? '');
+      const isRefund = walletType === 'refund' || amountCents > 0;
+
+      movements.push({
+        id: String(r.id),
+        type: isRefund ? 'refund' : 'payment',
+        method: 'wallet',
+        amount_cents: Math.abs(amountCents),
+        created_at: String(r.created_at),
+        booking_id: r.booking_id ? String(r.booking_id) : null,
+        start_at: b?.start_at ? String(b.start_at) : null,
+        end_at: b?.end_at ? String(b.end_at) : null,
+        court_name: court?.name ? String(court.name) : null,
+        player_name: playerName,
+        concept: r.concept ? String(r.concept) : (isRefund ? 'Devolución a monedero' : 'Cobro con monedero'),
+      });
+    }
+
+    // Process cancellations
+    for (const r of (cancelledRows ?? []) as Record<string, unknown>[]) {
+      const rawCourt = r.courts;
+      const court = (Array.isArray(rawCourt) ? rawCourt[0] : rawCourt) as Record<string, unknown> | null;
+      const rawPlayer = r.players;
+      const player = (Array.isArray(rawPlayer) ? rawPlayer[0] : rawPlayer) as Record<string, unknown> | null;
+
+      const firstName = player?.first_name ? String(player.first_name) : '';
+      const lastName = player?.last_name ? String(player.last_name) : '';
+      const playerName = [firstName, lastName].filter(Boolean).join(' ') || null;
+
+      movements.push({
+        id: `cancel_${String(r.id)}`,
+        type: 'cancellation',
+        method: null,
+        amount_cents: typeof r.total_price_cents === 'number' ? r.total_price_cents : 0,
+        created_at: String(r.cancelled_at),
+        booking_id: String(r.id),
+        start_at: r.start_at ? String(r.start_at) : null,
+        end_at: r.end_at ? String(r.end_at) : null,
+        court_name: court?.name ? String(court.name) : null,
+        player_name: playerName,
+        concept: 'Reserva anulada',
+      });
+    }
+
+    // Sort all movements by created_at desc
+    movements.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    // Build summary
+    const summary = {
+      cash_total_cents: 0,
+      card_total_cents: 0,
+      stripe_total_cents: 0,
+      wallet_payments_cents: 0,
+      refunds_total_cents: 0,
+      cancellations_count: 0,
+    };
+    for (const m of movements) {
+      if (m.type === 'payment') {
+        if (m.method === 'cash') summary.cash_total_cents += m.amount_cents;
+        else if (m.method === 'card') summary.card_total_cents += m.amount_cents;
+        else if (m.method === 'stripe') summary.stripe_total_cents += m.amount_cents;
+        else if (m.method === 'wallet') summary.wallet_payments_cents += m.amount_cents;
+      } else if (m.type === 'refund') {
+        summary.refunds_total_cents += m.amount_cents;
+      } else if (m.type === 'cancellation') {
+        summary.cancellations_count += 1;
+      }
+    }
+
+    res.json({ ok: true, date: dateStr, movements, summary });
+  } catch (err) {
+    console.error('[payments/cash-movements]', err);
     res.status(500).json({ ok: false, error: (err as Error).message });
   }
 }

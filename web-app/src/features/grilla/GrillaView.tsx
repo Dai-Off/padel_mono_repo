@@ -37,6 +37,7 @@ import { MatchesManagementPanel } from './components/MatchesManagementPanel';
 import { WalletRecharge } from './components/WalletRecharge';
 
 import { GrillaQuickNav } from './components/GrillaQuickNav';
+import { GrillaLegend } from './components/GrillaLegend';
 import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
 import { HoverTooltip } from './components/HoverTooltip';
@@ -93,17 +94,34 @@ const useClubData = (dateOrStr: Date | string) => {
     const [loading, setLoading] = useState(true);
     const [isCreatingCourt, setIsCreatingCourt] = useState(false);
     const [clubId, setClubId] = useState<string | null>(null);
+    const [typeColorOverrides, setTypeColorOverrides] = useState<Record<string, string>>({});
     const courtsRef = useRef<Court[]>([]);
     const dateStr = toDateStr(dateOrStr);
 
-    // Resolve club_id from the logged-in club owner's profile
+    // Resolve club_id from the logged-in club owner's profile, then load type colors
     useEffect(() => {
         authService.getMe()
-            .then((res) => {
+            .then(async (res) => {
                 const id = res.clubs?.[0]?.id ?? null;
                 // Reset courts cache so it re-fetches for the correct club
                 courtsRef.current = [];
                 setClubId(id);
+                if (id) {
+                    try {
+                        const pricesRes = await apiFetchWithAuth<{ ok: boolean; prices?: Record<string, { color?: string | null }> }>(
+                            `/reservation-type-prices?club_id=${encodeURIComponent(id)}`
+                        );
+                        if (pricesRes?.ok && pricesRes.prices) {
+                            const colorMap: Record<string, string> = {};
+                            for (const [type, entry] of Object.entries(pricesRes.prices)) {
+                                if (entry?.color) colorMap[type] = entry.color;
+                            }
+                            setTypeColorOverrides(colorMap);
+                        }
+                    } catch {
+                        // Fail silently — cards fall back to hardcoded colors
+                    }
+                }
             })
             .catch(() => setClubId(null));
     }, []);
@@ -164,8 +182,8 @@ const useClubData = (dateOrStr: Date | string) => {
         const schoolAsBookings = schoolSlots.map((slot) => ({
           id: `school-slot-${slot.id}`,
           court_id: slot.court_id,
-          start_at: `${date}T${slot.start_time}:00Z`,
-          end_at: `${date}T${slot.end_time}:00Z`,
+          start_at: new Date(`${date}T${slot.start_time}:00`).toISOString(),
+          end_at: new Date(`${date}T${slot.end_time}:00`).toISOString(),
           status: 'confirmed',
           reservation_type: 'school_course',
           source_channel: 'system',
@@ -193,8 +211,8 @@ const useClubData = (dateOrStr: Date | string) => {
                 const schoolAsBookings = schoolSlots.map((slot: any) => ({
                     id: `school-slot-${slot.id}`,
                     court_id: slot.court_id,
-                    start_at: `${ds}T${slot.start_time}:00Z`,
-                    end_at: `${ds}T${slot.end_time}:00Z`,
+                    start_at: new Date(`${ds}T${slot.start_time}:00`).toISOString(),
+                    end_at: new Date(`${ds}T${slot.end_time}:00`).toISOString(),
                     status: 'confirmed',
                     reservation_type: 'school_course',
                     source_channel: 'system',
@@ -428,7 +446,7 @@ const useClubData = (dateOrStr: Date | string) => {
         }
     }, []);
 
-    return { courts, reservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt };
+    return { courts, reservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides };
 };
 
 function linkedTournamentDisplayName(b: any): string | null {
@@ -450,8 +468,8 @@ function linkedTournamentId(b: any): string | null {
 
 function formatUtcTimeHHmm(value: string | Date): string {
     const d = value instanceof Date ? value : new Date(value);
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
     return `${hh}:${mm}`;
 }
 
@@ -631,7 +649,7 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
-  const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
 
   const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
   useEffect(() => {
@@ -1336,7 +1354,7 @@ function GrillaViewInner() {
 
     const durationMinutes = existing?.durationMinutes ?? 90;
     const baseDate = formatDateForInput(selectedDate);
-    const startAt = `${baseDate}T${startTime}:00.000Z`;
+    const startAt = new Date(`${baseDate}T${startTime}:00`).toISOString();
     const endAt = new Date(new Date(startAt).getTime() + durationMinutes * 60000).toISOString();
 
     if (isTournament && tournamentId) {
@@ -1703,6 +1721,7 @@ function GrillaViewInner() {
               clubId={clubId}
               dateStr={toDateStr(selectedDate)}
               onRefreshGrid={refresh}
+              onGoToGrid={() => setActiveView('grid')}
               onEditBooking={async (bookingId: string) => {
                 try {
                   const data = await apiFetchWithAuth<any>(`/bookings/${bookingId}`);
@@ -2107,6 +2126,7 @@ function GrillaViewInner() {
                               isCurrentlyFocused={court.id === focusedCourtId}
                               isCompactView={false}
                               totalCourts={gridCourts.length}
+                              typeColorOverrides={typeColorOverrides}
                             />
                           ))}
                         </div>
@@ -2164,6 +2184,7 @@ function GrillaViewInner() {
                           onHeaderHover={setHoveredCourtId}
                           onHoverStart={(res, el) => setHoveredTooltip({ res, el })}
                           onHoverEnd={() => setHoveredTooltip(null)}
+                          typeColorOverrides={typeColorOverrides}
                         />
                       ))}
                     </div>
@@ -2185,6 +2206,7 @@ function GrillaViewInner() {
                     reservation={activeReservation}
                     isOverlay
                     compactPxPerMinute={mobileFullView ? compactPxPerMinute : undefined}
+                    typeColorOverrides={typeColorOverrides}
                   />
                 </div>
               ) : draggingCourt ? (
@@ -2195,11 +2217,15 @@ function GrillaViewInner() {
             </DragOverlay>
           </DndContext>
           )}
+          {activeView === 'grid' && (
+            <GrillaLegend typeColorOverrides={Object.keys(typeColorOverrides).length > 0 ? typeColorOverrides : undefined} />
+          )}
         </main>
 
         <ReservationModal
           clubId={clubId}
           isOpen={selectedModalReservationId !== null}
+          gridDate={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}
           onGridRefresh={refresh}
           onClose={() => {
             // If the reservation was never saved (temp id), remove it from state
