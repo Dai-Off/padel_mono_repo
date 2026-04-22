@@ -18,6 +18,8 @@ export type ClubBrief = ClubPublicEmbed | ClubPublicEmbed[] | null;
 
 export type PublicTournamentRow = {
   id: string;
+  /** Título corto si el backend lo envía; si no, `tournamentTitle()` usa `description`. */
+  name?: string | null;
   club_id: string;
   created_at?: string;
   updated_at?: string;

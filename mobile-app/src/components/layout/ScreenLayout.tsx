@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader } from './AppHeader';
 import { HamburgerButton } from './HamburgerButton';
-import { NavbarActions } from './NavbarActions';
+import { NavbarActions, type NavbarActionsCallbacks } from './NavbarActions';
 
 /** Control del menú lateral (estado vive en MainApp para cubrir también la navbar inferior). */
 export type ScreenLayoutSidebar = {
@@ -18,6 +18,8 @@ type ScreenLayoutProps = {
   sidebar: ScreenLayoutSidebar;
   /** Fondo del layout (p. ej. #000 en home con header glass). Por defecto blanco. */
   layoutBackgroundColor?: string;
+  /** Acciones de la navbar por defecto (icono mensajes, etc.). */
+  navbarActions?: NavbarActionsCallbacks;
 };
 
 export function ScreenLayout({
@@ -26,13 +28,14 @@ export function ScreenLayout({
   hideHeader,
   sidebar,
   layoutBackgroundColor = '#fff',
+  navbarActions,
 }: ScreenLayoutProps) {
   const insets = useSafeAreaInsets();
 
   const header = customHeader ?? (
     <AppHeader
       leftSlot={<HamburgerButton onPress={sidebar.toggle} color="#fff" size={22} />}
-      rightSlot={<NavbarActions />}
+      rightSlot={<NavbarActions {...navbarActions} />}
     />
   );
 

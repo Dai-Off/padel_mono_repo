@@ -48,6 +48,7 @@ type HomeScreenProps = {
   onPartidoPress?: (partido: PartidoItem) => void;
   onDailyLessonPress?: () => void;
   onCoursesPress?: () => void;
+  onOpenMessageThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
 };
 
 function computeAvailabilityWindow(input: Pick<MatchmakingSearchInput, 'day' | 'time'>): {
@@ -57,11 +58,9 @@ function computeAvailabilityWindow(input: Pick<MatchmakingSearchInput, 'day' | '
   const now = new Date();
   const targetDay = new Date(now);
 
-  if (input.day === 'manana') {
-    targetDay.setDate(targetDay.getDate() + 1);
-  } else if (input.day === 'esta-semana') {
-    targetDay.setDate(targetDay.getDate() + 2);
-  } else if (input.day === 'fin-semana') {
+  if (input.day === 'manana') targetDay.setDate(targetDay.getDate() + 1);
+  else if (input.day === 'esta-semana') targetDay.setDate(targetDay.getDate() + 2);
+  else if (input.day === 'fin-semana') {
     const day = targetDay.getDay();
     const daysUntilSaturday = (6 - day + 7) % 7 || 7;
     targetDay.setDate(targetDay.getDate() + daysUntilSaturday);
@@ -82,18 +81,12 @@ function computeAvailabilityWindow(input: Pick<MatchmakingSearchInput, 'day' | '
 
   const availableFromDate = new Date(targetDay);
   availableFromDate.setHours(startHour, 0, 0, 0);
-
   const availableUntilDate = new Date(targetDay);
   availableUntilDate.setHours(endHour, 0, 0, 0);
-
   if (availableUntilDate <= availableFromDate) {
     availableUntilDate.setTime(availableFromDate.getTime() + 90 * 60 * 1000);
   }
-
-  return {
-    availableFrom: availableFromDate.toISOString(),
-    availableUntil: availableUntilDate.toISOString(),
-  };
+  return { availableFrom: availableFromDate.toISOString(), availableUntil: availableUntilDate.toISOString() };
 }
 
 export function HomeScreen({
@@ -101,6 +94,7 @@ export function HomeScreen({
   onPartidoPress,
   onDailyLessonPress,
   onCoursesPress,
+  onOpenMessageThread,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -571,7 +565,7 @@ export function HomeScreen({
         onSubmit={handleMatchmakingSearch}
         onLeaveQueue={handleLeaveQueue}
         onRespondExpansion={handleExpansionResponse}
-        onOpenProposal={matchmakingProposal?.match_id ? handleOpenMatchmakingProposal : undefined}
+        onDirectMessageSent={(target) => onOpenMessageThread?.(target)}
       />
     </>
   );

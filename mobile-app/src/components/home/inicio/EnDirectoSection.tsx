@@ -1,5 +1,7 @@
+import { useRef } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Image,
   Platform,
   Pressable,
@@ -19,6 +21,11 @@ import {
   androidSectionHeading,
   androidSectionSubline,
 } from './textStyles';
+import { LivePingRing } from './LivePingRing';
+import { INICIO_ENTER_EASING } from './inicioMotion';
+import { ScalePressable } from './ScalePressable';
+
+const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 /** Evita que Android parta el título y solo pinte «En». */
 const TITLE_EN_DIRECTO = 'En\u00A0Directo';
@@ -46,6 +53,123 @@ function splitDateTime(dateTime: string): { date: string; time: string } {
 
 function filledSlots(p: PartidoItem): number {
   return p.players.filter((x) => !x.isFree).length;
+}
+
+function EnDirectoLiveCard({
+  p,
+  onPartidoPress,
+}: {
+  p: PartidoItem;
+  onPartidoPress?: (partido: PartidoItem) => void;
+}) {
+  const imgScale = useRef(new Animated.Value(1)).current;
+
+  const bumpImg = (to: number, ms: number) => {
+    Animated.timing(imgScale, {
+      toValue: to,
+      duration: ms,
+      easing: INICIO_ENTER_EASING,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const { date, time } = splitDateTime(p.dateTime);
+  const modeLabel = p.mode === 'competitivo' ? 'Competitivo' : 'Partido';
+  const filled = filledSlots(p);
+  const badge = filled === 1 ? '1 jugador' : `${filled} jugadores`;
+
+  return (
+    <ScalePressable
+      pressedScale={0.985}
+      style={styles.card}
+      onPress={() => onPartidoPress?.(p)}
+      onPressIn={() => bumpImg(1.08, 420)}
+      onPressOut={() => bumpImg(1, 280)}
+    >
+      <View style={styles.imgWrap}>
+        {p.venueImage ? (
+          <AnimatedImage
+            source={{ uri: p.venueImage }}
+            style={[styles.img, { transform: [{ scale: imgScale }] }]}
+            resizeMode="cover"
+          />
+        ) : (
+          <Animated.View
+            style={[
+              styles.img,
+              styles.placeholderImg,
+              { transform: [{ scale: imgScale }] },
+            ]}
+          >
+            <Ionicons name="image-outline" size={40} color="#6b7280" />
+          </Animated.View>
+        )}
+        <LinearGradient
+          colors={[
+            'transparent',
+            'rgba(0,0,0,0.45)',
+            'rgba(0,0,0,0.85)',
+          ]}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.livePill}>
+          <LivePingRing size={10} />
+          <Text style={styles.liveText}>LIVE</Text>
+        </View>
+        <View style={styles.badgeTop}>
+          <Text style={styles.badgeText}>{badge}</Text>
+        </View>
+        <View style={styles.iconCorner}>
+          <Ionicons name="people" size={22} color="#fff" />
+        </View>
+      </View>
+      <View style={styles.body}>
+        <View style={styles.typePill}>
+          <Text style={styles.typePillText}>{modeLabel}</Text>
+        </View>
+        <Text style={styles.cardTitle} numberOfLines={1}>
+          {dash(p.venue)}
+        </Text>
+        <View style={styles.placeRow}>
+          <Ionicons name="location" size={14} color="#9ca3af" />
+          <Text style={styles.place}>{dash(p.location)}</Text>
+        </View>
+        <View style={styles.metaRow}>
+          <View style={styles.metaItem}>
+            <Ionicons
+              name="calendar-outline"
+              size={14}
+              color="#9ca3af"
+            />
+            <Text style={styles.metaText}>{date}</Text>
+          </View>
+          <View style={styles.metaItem}>
+            <Ionicons
+              name="time-outline"
+              size={14}
+              color="#9ca3af"
+            />
+            <Text style={styles.metaText}>{time}</Text>
+          </View>
+        </View>
+        <View style={styles.footerRow}>
+          <Text style={styles.price}>{dash(p.price)}</Text>
+          <Text style={styles.levelHint}>{dash(p.levelRange)}</Text>
+          <LinearGradient
+            colors={[ACCENT, '#FFA940']}
+            style={styles.ctaIcon}
+          >
+            <Ionicons
+              name="arrow-up"
+              size={18}
+              color="#fff"
+              style={styles.ctaArrow}
+            />
+          </LinearGradient>
+        </View>
+      </View>
+    </ScalePressable>
+  );
 }
 
 export function EnDirectoSection({
@@ -76,10 +200,7 @@ export function EnDirectoSection({
           ]}
         >
           <View style={styles.titleRow}>
-            <View style={styles.pingWrap}>
-              <View style={styles.ping} />
-              <View style={styles.dot} />
-            </View>
+            <LivePingRing size={12} />
             <View style={styles.titleTextShell}>
               <Text
                 style={[
@@ -107,102 +228,9 @@ export function EnDirectoSection({
           { paddingRight: 12 + insets.right },
         ]}
       >
-          {partidos.map((p) => {
-              const { date, time } = splitDateTime(p.dateTime);
-              const modeLabel =
-                p.mode === 'competitivo' ? 'Competitivo' : 'Partido';
-              const filled = filledSlots(p);
-              const badge =
-                filled === 1 ? '1 jugador' : `${filled} jugadores`;
-
-              return (
-                <Pressable
-                  key={p.id}
-                  onPress={() => onPartidoPress?.(p)}
-                  style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-                >
-                  <View style={styles.imgWrap}>
-                    {p.venueImage ? (
-                      <Image
-                        source={{ uri: p.venueImage }}
-                        style={styles.img}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={[styles.img, styles.placeholderImg]}>
-                        <Ionicons name="image-outline" size={40} color="#6b7280" />
-                      </View>
-                    )}
-                    <LinearGradient
-                      colors={[
-                        'transparent',
-                        'rgba(0,0,0,0.45)',
-                        'rgba(0,0,0,0.85)',
-                      ]}
-                      style={StyleSheet.absoluteFill}
-                    />
-                    <View style={styles.livePill}>
-                      <View style={styles.pingWrapSm}>
-                        <View style={styles.pingSm} />
-                        <View style={styles.dotSm} />
-                      </View>
-                      <Text style={styles.liveText}>LIVE</Text>
-                    </View>
-                    <View style={styles.badgeTop}>
-                      <Text style={styles.badgeText}>{badge}</Text>
-                    </View>
-                    <View style={styles.iconCorner}>
-                      <Ionicons name="people" size={22} color="#fff" />
-                    </View>
-                  </View>
-                  <View style={styles.body}>
-                    <View style={styles.typePill}>
-                      <Text style={styles.typePillText}>{modeLabel}</Text>
-                    </View>
-                    <Text style={styles.cardTitle} numberOfLines={1}>
-                      {dash(p.venue)}
-                    </Text>
-                    <View style={styles.placeRow}>
-                      <Ionicons name="location" size={14} color="#9ca3af" />
-                      <Text style={styles.place}>{dash(p.location)}</Text>
-                    </View>
-                    <View style={styles.metaRow}>
-                      <View style={styles.metaItem}>
-                        <Ionicons
-                          name="calendar-outline"
-                          size={14}
-                          color="#9ca3af"
-                        />
-                        <Text style={styles.metaText}>{date}</Text>
-                      </View>
-                      <View style={styles.metaItem}>
-                        <Ionicons
-                          name="time-outline"
-                          size={14}
-                          color="#9ca3af"
-                        />
-                        <Text style={styles.metaText}>{time}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.footerRow}>
-                      <Text style={styles.price}>{dash(p.price)}</Text>
-                      <Text style={styles.levelHint}>{dash(p.levelRange)}</Text>
-                      <LinearGradient
-                        colors={[ACCENT, '#FFA940']}
-                        style={styles.ctaIcon}
-                      >
-                        <Ionicons
-                          name="arrow-up"
-                          size={18}
-                          color="#fff"
-                          style={styles.ctaArrow}
-                        />
-                      </LinearGradient>
-                    </View>
-                  </View>
-                </Pressable>
-              );
-            })}
+          {partidos.map((p) => (
+            <EnDirectoLiveCard key={p.id} p={p} onPartidoPress={onPartidoPress} />
+          ))}
       </ScrollView>
       ) : (
         <View style={styles.fullWidthRow}>
@@ -221,10 +249,11 @@ export function EnDirectoSection({
               </View>
             </View>
           ) : (
-            <Pressable
+            <ScalePressable
               onPress={() => onOpenPartidos?.()}
               accessibilityRole="button"
               accessibilityLabel="Ver partidos abiertos"
+              pressedScale={0.99}
               style={({ pressed }) => [
                 styles.emptyStateOuter,
                 pressed && styles.pressed,
@@ -266,7 +295,7 @@ export function EnDirectoSection({
                   </Text>
                 </View>
               </LinearGradient>
-            </Pressable>
+            </ScalePressable>
           )}
         </View>
       )}
@@ -318,27 +347,6 @@ const styles = StyleSheet.create({
   titleTextShell: {
     flex: 1,
     justifyContent: 'center',
-  },
-  pingWrap: {
-    width: 12,
-    height: 12,
-    justifyContent: 'center',
-    marginRight: 2,
-    flexShrink: 0,
-  },
-  ping: {
-    position: 'absolute',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#ef4444',
-    opacity: 0.6,
-  },
-  dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#dc2626',
   },
   h2: androidSectionHeading({
     fontSize: 24,
@@ -413,21 +421,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.6)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-  },
-  pingWrapSm: { width: 10, height: 10, justifyContent: 'center' },
-  pingSm: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#ef4444',
-    opacity: 0.6,
-  },
-  dotSm: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#dc2626',
   },
   liveText: androidReadableText({
     color: '#fff',

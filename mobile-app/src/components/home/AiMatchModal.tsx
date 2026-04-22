@@ -1,19 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
+import { useAuth } from '../../contexts/AuthContext';
+import { sendDirectMessage } from '../../api/messages';
+import { searchPlayers } from '../../api/players';
 import type { MatchmakingProposalResponse, MatchmakingStatusResponse } from '../../api/matchmaking';
 
 type Option = { id: string; label: string };
@@ -111,7 +104,17 @@ export type MatchCandidate = {
   reason: string;
 };
 
-export function parseCandidatesFromResponse(text: string): MatchCandidate[] {
+const AI_AUTO_DM_TEXT = '¡Hola! Me gustaría jugar Pádel contigo. ¿Tienes disponibilidad?';
+
+function normalizeText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function parseCandidatesFromResponse(text: string): MatchCandidate[] {
   const tryParseJsonLike = (raw: string): unknown | null => {
     const trimmed = raw.trim();
     if (!trimmed) return null;
@@ -236,8 +239,7 @@ type AiMatchModalProps = {
   onSubmit: (input: MatchmakingSearchInput) => void;
   onLeaveQueue: () => void;
   onRespondExpansion: (accept: boolean) => void;
-  /** Abre el detalle del partido (pago de plaza matchmaking). */
-  onOpenProposal?: () => void;
+  onDirectMessageSent: (target: { id: string; displayName: string; avatarUrl: string | null }) => void;
 };
 
 function OptionSection({
@@ -277,17 +279,15 @@ function OptionSection({
   );
 }
 
-function ProposalCard({
-  proposal,
-  openingProposal,
-  onOpenProposal,
+function CandidateCard({
+  candidate,
+  onMessagePress,
+  sending,
 }: {
-  proposal: MatchmakingProposalResponse;
-  openingProposal?: boolean;
-  onOpenProposal?: () => void;
+  candidate: MatchCandidate;
+  onMessagePress: (candidate: MatchCandidate) => void;
+  sending: boolean;
 }) {
-  const paid = proposal.your_payment_status === 'paid';
-  const ctaLabel = paid ? 'Ver partido' : 'Ver partido y pagar';
   return (
     <View style={styles.candidateCard}>
       <View style={styles.candidateHeader}>
@@ -306,28 +306,26 @@ function ProposalCard({
             <View style={styles.percentPill}>
               <Ionicons name="sparkles" size={12} color="#F18F34" />
               <Text style={styles.percentText}>
-                {proposal.pre_match_win_prob != null ? `${Math.round(proposal.pre_match_win_prob * 100)}%` : 'MM'}
+                {candidate.matchPercent != null ? `${Math.round(candidate.matchPercent)}%` : 'MM'}
               </Text>
             </View>
           </View>
-          <Text style={styles.candidateLevel}>Compatibilidad detectada</Text>
+          <Text style={styles.candidateLevel}>{candidate.level}</Text>
         </View>
       </View>
 
       <View style={styles.statGrid}>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>PARTIDOS</Text>
-          <Text style={styles.statValue}>{proposal.booking_id ? 'OK' : '-'}</Text>
+          <Text style={styles.statValue}>{candidate.stats.matches || '-'}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>TU PARTE</Text>
-          <Text style={styles.statValue}>
-            {proposal.your_share_cents != null ? `€${(proposal.your_share_cents / 100).toFixed(2)}` : '-'}
-          </Text>
+          <Text style={styles.statLabel}>VICTORIAS</Text>
+          <Text style={styles.statValue}>{candidate.stats.wins}</Text>
         </View>
         <View style={styles.statCard}>
           <Text style={styles.statLabel}>DISTANCIA</Text>
-          <Text style={styles.statValue}>{proposal.your_payment_status ?? 'pending'}</Text>
+          <Text style={styles.statValue}>{candidate.stats.distance}</Text>
         </View>
       </View>
 
@@ -348,9 +346,9 @@ function ProposalCard({
       </View>
 
       <Pressable
-        style={[styles.messageBtn, (openingProposal || !onOpenProposal) && styles.messageBtnDisabled]}
-        disabled={openingProposal || !onOpenProposal}
-        onPress={onOpenProposal}
+        style={[styles.messageBtn, sending && { opacity: 0.7 }]}
+        onPress={() => onMessagePress(candidate)}
+        disabled={sending}
       >
         <LinearGradient
           colors={['#F18F34', '#E95F32']}
@@ -358,12 +356,14 @@ function ProposalCard({
           end={{ x: 1, y: 0.5 }}
           style={styles.messageBtnGradient}
         >
-          {openingProposal ? (
-            <ActivityIndicator color="#fff" size="small" />
+          {sending ? (
+            <Animated.View>
+              <Ionicons name="hourglass-outline" size={16} color="#fff" />
+            </Animated.View>
           ) : (
-            <Ionicons name="arrow-forward-circle-outline" size={18} color="#fff" />
+            <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
           )}
-          <Text style={styles.messageBtnText}>{ctaLabel}</Text>
+          <Text style={styles.messageBtnText}>{sending ? 'Enviando...' : 'Enviar mensaje'}</Text>
         </LinearGradient>
       </Pressable>
     </View>
@@ -381,11 +381,14 @@ export function AiMatchModal({
   onSubmit,
   onLeaveQueue,
   onRespondExpansion,
-  onOpenProposal,
+  onDirectMessageSent,
 }: AiMatchModalProps) {
   const insets = useSafeAreaInsets();
   const sheetTitle = 'Liga competitiva 2v2';
+  const { session } = useAuth();
+  const token = session?.access_token;
   const [selections, setSelections] = useState<Selections>(DEFAULT_SELECTIONS);
+  const [sendingCandidateId, setSendingCandidateId] = useState<string | null>(null);
 
   const completedSteps = useMemo(
     () => Object.values(selections).filter((value) => value.length > 0).length,
@@ -496,6 +499,64 @@ export function AiMatchModal({
     setShowResults(false);
   }, [visible]);
 
+  const parsedCandidates = useMemo<MatchCandidate[]>(() => {
+    if (proposal?.has_proposal !== true) return [];
+    return [
+      {
+        id: String(proposal.match_id ?? '1'),
+        name: 'Partido encontrado',
+        matchPercent: proposal.pre_match_win_prob != null ? Math.round(proposal.pre_match_win_prob * 100) : 90,
+        level: 'Compatibilidad detectada',
+        stats: { matches: 0, wins: '-', distance: '-' },
+        tags: ['Matchmaking'],
+        reason: 'Propuesta activa de matchmaking',
+      },
+    ];
+  }, [proposal]);
+
+  const handleCandidateMessage = async (candidate: MatchCandidate) => {
+    if (!token) {
+      Alert.alert('Mensajes', 'Inicia sesión para enviar mensajes.');
+      return;
+    }
+
+    setSendingCandidateId(candidate.id);
+    try {
+      const search = await searchPlayers(candidate.name, token);
+      if (!search.ok || search.players.length === 0) {
+        Alert.alert('Mensajes', `No se encontró a "${candidate.name}" para enviarle mensaje.`);
+        return;
+      }
+
+      const expected = normalizeText(candidate.name);
+      const exact =
+        search.players.find((p) => {
+          const full = normalizeText([p.first_name, p.last_name].filter(Boolean).join(' '));
+          return full === expected;
+        }) ??
+        search.players.find((p) => {
+          const full = normalizeText([p.first_name, p.last_name].filter(Boolean).join(' '));
+          return full.includes(expected) || expected.includes(full);
+        }) ??
+        search.players[0];
+
+      const sent = await sendDirectMessage(exact.id, AI_AUTO_DM_TEXT, token);
+      if (!sent.ok) {
+        Alert.alert('Mensajes', sent.error);
+        return;
+      }
+
+      const targetName = [exact.first_name, exact.last_name].filter(Boolean).join(' ').trim() || candidate.name;
+      onClose();
+      onDirectMessageSent({
+        id: exact.id,
+        displayName: targetName,
+        avatarUrl: null,
+      });
+    } finally {
+      setSendingCandidateId(null);
+    }
+  };
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={styles.overlay}>
@@ -697,12 +758,15 @@ export function AiMatchModal({
                 </View>
 
                 <View style={styles.resultsList}>
-                  {hasProposal && proposal ? (
-                    <ProposalCard
-                      proposal={proposal}
-                      openingProposal={openingProposal}
-                      onOpenProposal={onOpenProposal}
-                    />
+                  {parsedCandidates.length > 0 ? (
+                    parsedCandidates.map((candidate) => (
+                      <CandidateCard
+                        key={candidate.id}
+                        candidate={candidate}
+                        onMessagePress={handleCandidateMessage}
+                        sending={sendingCandidateId === candidate.id}
+                      />
+                    ))
                   ) : (
                     <View style={styles.emptyCandidatesCard}>
                       <Text style={styles.emptyCandidatesText}>
