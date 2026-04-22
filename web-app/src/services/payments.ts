@@ -71,6 +71,39 @@ export type CashClosingSavedRecord = {
   status: 'perfect' | 'surplus' | 'deficit';
 };
 
+export type CashMovementType = 'payment' | 'refund' | 'cancellation';
+export type CashMovementMethod = 'cash' | 'card' | 'wallet' | 'stripe';
+
+export interface CashMovement {
+  id: string;
+  type: CashMovementType;
+  method: CashMovementMethod | null;
+  amount_cents: number;
+  created_at: string;
+  booking_id: string | null;
+  start_at: string | null;
+  end_at: string | null;
+  court_name: string | null;
+  player_name: string | null;
+  concept: string;
+}
+
+export interface CashMovementsSummary {
+  cash_total_cents: number;
+  card_total_cents: number;
+  stripe_total_cents: number;
+  wallet_payments_cents: number;
+  refunds_total_cents: number;
+  cancellations_count: number;
+}
+
+export interface CashMovementsResponse {
+  ok: true;
+  date: string;
+  movements: CashMovement[];
+  summary: CashMovementsSummary;
+}
+
 export const paymentsService = {
   listTransactions: async (limit = 100): Promise<PaymentTransaction[]> => {
     const q = new URLSearchParams({ limit: String(limit) });
@@ -102,7 +135,7 @@ export const paymentsService = {
 
   createCashOpeningRecord: async (body: {
     club_id: string;
-    staff_id: string;
+    staff_id?: string;
     for_date?: string;
     opening_cash_cents: number;
     notes?: string;
@@ -123,9 +156,16 @@ export const paymentsService = {
     return res.records ?? [];
   },
 
+  getCashMovements: async (clubId: string, date?: string, timezone?: string): Promise<CashMovementsResponse> => {
+    const q = new URLSearchParams({ club_id: clubId });
+    if (date) q.set('date', date);
+    if (timezone) q.set('timezone', timezone);
+    return apiFetchWithAuth<CashMovementsResponse>(`/payments/cash-movements?${q}`);
+  },
+
   createCashClosingRecord: async (body: {
     club_id: string;
-    staff_id: string;
+    staff_id?: string;
     for_date?: string;
     real_cash_cents: number;
     real_card_cents: number;

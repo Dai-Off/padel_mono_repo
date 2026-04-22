@@ -61,7 +61,8 @@
       "Bash(echo \"EXIT:$?\")",
       "Bash(curl -s \"http://localhost:3000/tariffs?club_id=5768474f-b079-41f5-b1c8-1bc45c96b2c3\" -H \"Authorization: $\\(cd C:/Users/Avalith/Documents/jose/proyectos/padelrepo/padel_mono_repo && cat backend/.env)",
       "Bash(curl *)",
-      "Bash(npx supabase *)"
+      "Bash(npx supabase *)",
+      "Bash(npx vite *)"
     ]
   }
 }

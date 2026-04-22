@@ -66,7 +66,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
                 { id: 'precios', path: '/precios', icon: DollarSign, label: t('menu_precios_reservas'), color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.06)' },
                 { id: 'tarifas', path: '/tarifas', icon: DollarSign, label: 'Tarifas del club', color: 'rgb(5, 150, 105)', bgColor: 'rgba(5, 150, 105, 0.06)' },
                 { id: 'pagos', path: '/pagos', icon: DollarSign, label: t('menu_pagos'), color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.06)' },
-                { id: 'cierreCaja', path: '/cierreCaja', icon: DollarSign, label: t('menu_cierre_caja'), color: 'rgb(5, 150, 105)', bgColor: 'rgba(5, 150, 105, 0.06)' },
+                { id: 'caja', path: '/caja', icon: DollarSign, label: 'Caja', color: 'rgb(5, 150, 105)', bgColor: 'rgba(5, 150, 105, 0.06)' },
             ],
         },
         {

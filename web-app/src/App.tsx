@@ -180,6 +180,14 @@ function App() {
           }
         />
         <Route
+          path="/caja"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/resenas"
           element={
             <ProtectedRoute>
@@ -205,6 +213,14 @@ function App() {
         />
         <Route
           path="/tarifas"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/movimientos-caja"
           element={
             <ProtectedRoute>
               <ClubDashboard />
