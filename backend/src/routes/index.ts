@@ -36,6 +36,7 @@ import clubSpecialDatesRouter from "./clubSpecialDates";
 import coachAssessmentRouter from "./coachAssessment";
 import communityRouter from "./community";
 import adminLearningRouter from "./adminLearning";
+import messagesRouter from "./messages";
 
 
 const router = Router();
@@ -83,6 +84,7 @@ router.use("/bonuses", bonusesRouter);
 router.use("/club-special-dates", clubSpecialDatesRouter);
 router.use("/coach-assessment", coachAssessmentRouter);
 router.use("/community", communityRouter);
+router.use("/messages", messagesRouter);
 router.use("/admin/learning", adminLearningRouter);
 
 
