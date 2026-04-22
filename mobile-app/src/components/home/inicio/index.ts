@@ -15,3 +15,6 @@ export { MissionsHomeSection } from './MissionsHomeSection';
 export type { HomeMission } from './MissionsHomeSection';
 export { EnDirectoSection } from './EnDirectoSection';
 export { ProximosPartidosSection } from './ProximosPartidosSection';
+export { InicioEnterBlock } from './InicioEnterBlock';
+export { InicioAmbientBackground } from './InicioAmbientBackground';
+export { InicioWidgetsCarousel } from './InicioWidgetsCarousel';

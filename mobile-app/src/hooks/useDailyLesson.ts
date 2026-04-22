@@ -75,7 +75,7 @@ type StreakState = {
   loading: boolean;
 };
 
-export function useStreak(timezone = 'UTC'): StreakState {
+export function useStreak(timezone = 'UTC', refreshKey = 0): StreakState {
   const { session } = useAuth();
   const [state, setState] = useState<StreakState>({
     currentStreak: 0,
@@ -87,6 +87,8 @@ export function useStreak(timezone = 'UTC'): StreakState {
 
   useEffect(() => {
     let mounted = true;
+
+    setState((prev) => ({ ...prev, loading: true }));
 
     fetchStreak(session?.access_token, timezone)
       .then((res) => {
@@ -111,7 +113,7 @@ export function useStreak(timezone = 'UTC'): StreakState {
     return () => {
       mounted = false;
     };
-  }, [session?.access_token, timezone]);
+  }, [session?.access_token, timezone, refreshKey]);
 
   return state;
 }
