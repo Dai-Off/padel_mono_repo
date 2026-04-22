@@ -24,6 +24,14 @@ export { exceedsLevelSpread, bestTeamSplitSync, MAX_LEVEL_SPREAD, BASE_WIN_PROB_
 export type { PoolRow, SkillRow } from './matchmakingShared';
 
 const MAX_UNIT_COMBINATIONS = 12000;
+
+export type MatchmakingCycleResult = {
+  formed: number;
+  expired: number;
+  expansion_prompts: number;
+  /** Solo si `MATCHMAKING_RUN_DIAG=1` en el servidor (dev). */
+  diag?: Record<string, number | string | null>;
+};
 const REJECT_FAULT_EXPIRY_DAYS = 30;
 const MATCHMAKING_BLOCK_DAYS = 2;
 const REJECT_LPS_PENALTY_1 = 5;
@@ -48,14 +56,20 @@ async function buildSynergyMap(
   return m;
 }
 
-function confirmDeadlineIso(matchStartMs: number): string {
-  const until = matchStartMs - Date.now();
-  const half = Math.floor(until * 0.5);
-  const maxMs = 24 * 60 * 60 * 1000;
-  const minMs = 30 * 60 * 1000;
-  let allowed = Math.min(Math.max(half, minMs), maxMs);
-  if (!Number.isFinite(allowed)) allowed = minMs;
-  return new Date(Date.now() + allowed).toISOString();
+/** Plazo para pagar / declinar explícitamente; no acorta a minutos por error al cerrar Stripe. */
+function confirmDeadlineIsoMatchmaking(matchStartMs: number): string {
+  const now = Date.now();
+  const minFromNow = 24 * 60 * 60 * 1000;
+  const maxFromNow = 72 * 60 * 60 * 1000;
+  const twoHoursBeforeKick = matchStartMs - 2 * 60 * 60 * 1000;
+  let deadline = now + minFromNow;
+  if (Number.isFinite(matchStartMs) && matchStartMs > now) {
+    deadline = Math.min(deadline, twoHoursBeforeKick);
+  }
+  if (deadline <= now) deadline = now + minFromNow;
+  deadline = Math.max(deadline, now + 15 * 60 * 1000);
+  deadline = Math.min(deadline, now + maxFromNow);
+  return new Date(deadline).toISOString();
 }
 
 export async function releaseMatchmakingProposal(
@@ -69,6 +83,20 @@ export async function releaseMatchmakingProposal(
     const { data: m } = await supabase.from('matches').select('booking_id').eq('id', matchId).maybeSingle();
     bookingId = (m as { booking_id?: string | null } | null)?.booking_id ?? null;
   }
+
+  const { data: mps } = await supabase.from('match_players').select('player_id').eq('match_id', matchId);
+  const playerIds = new Set<string>();
+  for (const row of mps ?? []) {
+    playerIds.add((row as { player_id: string }).player_id);
+  }
+  const { data: poolByProposal } = await supabase
+    .from('matchmaking_pool')
+    .select('player_id')
+    .eq('proposed_match_id', matchId);
+  for (const row of poolByProposal ?? []) {
+    playerIds.add((row as { player_id: string }).player_id);
+  }
+
   if (options?.cancelBooking !== false && bookingId) {
     await supabase
       .from('bookings')
@@ -83,12 +111,15 @@ export async function releaseMatchmakingProposal(
   }
   await supabase.from('matches').update({ status: 'cancelled', updated_at: now }).eq('id', matchId);
 
-  const { data: mps } = await supabase.from('match_players').select('player_id').eq('match_id', matchId);
-  for (const row of mps ?? []) {
-    await supabase
+  const ids = [...playerIds];
+  if (ids.length > 0) {
+    const { error: poolErr } = await supabase
       .from('matchmaking_pool')
       .update({ status: 'searching', proposed_match_id: null, updated_at: now })
-      .eq('player_id', (row as { player_id: string }).player_id);
+      .in('player_id', ids);
+    if (poolErr) {
+      console.error('[releaseMatchmakingProposal] pool update:', poolErr.message);
+    }
   }
 }
 
@@ -115,10 +146,11 @@ export async function expireOverdueMatchmakingProposals(): Promise<number> {
   return n;
 }
 
-export async function runMatchmakingCycle(): Promise<{ formed: number; expired: number; expansion_prompts: number }> {
+export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
   const supabase = getSupabaseServiceRoleClient();
   const expired = await expireOverdueMatchmakingProposals();
   const expansion_prompts = await runMatchmakingExpansionScan();
+  const wantDiag = process.env.MATCHMAKING_RUN_DIAG === '1';
 
   const nowIso = new Date().toISOString();
   const { data: pool } = await supabase
@@ -133,7 +165,20 @@ export async function runMatchmakingCycle(): Promise<{ formed: number; expired: 
     return !ex || new Date(ex).getTime() > Date.now();
   });
 
-  if (rows.length < 4) return { formed: 0, expired, expansion_prompts };
+  if (rows.length < 4) {
+    return {
+      formed: 0,
+      expired,
+      expansion_prompts,
+      ...(wantDiag && {
+        diag: {
+          searching_pool_rows: (pool ?? []).length,
+          eligible_after_expiry_filter: rows.length,
+          note: 'Se necesitan al menos 4 filas searching no expiradas',
+        },
+      }),
+    };
+  }
 
   const units = buildUnits(rows);
   const poolIds = [...new Set(rows.map((r) => r.player_id))];
@@ -207,6 +252,12 @@ export async function runMatchmakingCycle(): Promise<{ formed: number; expired: 
   } | null = null;
 
   let comboCount = 0;
+  let dNoClub = 0;
+  let dPreCourt = 0;
+  let dNoSlot = 0;
+  let dNoCourt = 0;
+  let firstCourtConflict: string | null = null;
+
   for (const combo of iterUnitCombos(units, 4, 0, [])) {
     comboCount++;
     if (comboCount > MAX_UNIT_COMBINATIONS) break;
@@ -216,15 +267,33 @@ export async function runMatchmakingCycle(): Promise<{ formed: number; expired: 
     if (ids.length !== 4) continue;
 
     const clubId = resolveClubId(flatRows);
-    if (!clubId) continue;
+    if (!clubId) {
+      if (wantDiag) dNoClub++;
+      continue;
+    }
 
     const q = quartetPreCourtValid(flatRows, ids, clubId, ctx);
-    if (!q) continue;
+    if (!q) {
+      if (wantDiag) dPreCourt++;
+      continue;
+    }
 
-    const slot = intersectRange(flatRows);
-    if (!slot) continue;
+    const rawSlot = intersectRange(flatRows);
+    if (!rawSlot) {
+      if (wantDiag) dNoSlot++;
+      continue;
+    }
+    const MM_SLOT_MS = 90 * 60 * 1000;
+    const slotStartMs = new Date(rawSlot.start).getTime();
+    const slotEndMs = Math.min(new Date(rawSlot.end).getTime(), slotStartMs + MM_SLOT_MS);
+    const slot = { start: new Date(slotStartMs).toISOString(), end: new Date(slotEndMs).toISOString() };
 
-    const { data: courtList } = await supabase.from('courts').select('id').eq('club_id', clubId).order('id');
+    const { data: courtList } = await supabase
+      .from('courts')
+      .select('id')
+      .eq('club_id', clubId)
+      .eq('is_hidden', false)
+      .order('id');
     let courtId: string | null = null;
     for (const c of courtList ?? []) {
       const cid = (c as { id: string }).id;
@@ -233,8 +302,14 @@ export async function runMatchmakingCycle(): Promise<{ formed: number; expired: 
         courtId = cid;
         break;
       }
+      if (wantDiag && firstCourtConflict == null && typeof conflict === 'string') {
+        firstCourtConflict = conflict.length > 200 ? `${conflict.slice(0, 200)}…` : conflict;
+      }
     }
-    if (!courtId) continue;
+    if (!courtId) {
+      if (wantDiag) dNoCourt++;
+      continue;
+    }
 
     const ls = maxLeagueSpread(ids, ligaById);
     const split = q.split;
@@ -248,7 +323,30 @@ export async function runMatchmakingCycle(): Promise<{ formed: number; expired: 
     }
   }
 
-  if (!best) return { formed: 0, expired, expansion_prompts };
+  if (!best) {
+    return {
+      formed: 0,
+      expired,
+      expansion_prompts,
+      ...(wantDiag && {
+        diag: {
+          searching_pool_rows: rows.length,
+          distinct_players: poolIds.length,
+          players_with_skill_row: skillRows?.length ?? 0,
+          units: units.length,
+          combos_evaluated: comboCount,
+          reject_no_common_club: dNoClub,
+          reject_quartet_pre_court: dPreCourt,
+          reject_no_intersect_slot: dNoSlot,
+          reject_no_free_visible_court: dNoCourt,
+          first_court_conflict: firstCourtConflict,
+          hint:
+            'reject_quartet_pre_court incluye elo/ligas/género y balance OpenSkill (win prob 0.35–0.65). ' +
+            'reject_no_free_visible_court: bookings, cursos escuela en pista o torneo en cancha/horario.',
+        },
+      }),
+    };
+  }
 
   let totalCents: number;
   try {
@@ -258,7 +356,7 @@ export async function runMatchmakingCycle(): Promise<{ formed: number; expired: 
   }
   const shareCents = Math.ceil(totalCents / 4);
   const organizer = best.ids[0];
-  const deadlineAt = confirmDeadlineIso(new Date(best.slot.start).getTime());
+  const deadlineAt = confirmDeadlineIsoMatchmaking(new Date(best.slot.start).getTime());
 
   const { data: booking, error: bErr } = await supabase
     .from('bookings')

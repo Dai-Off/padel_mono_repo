@@ -24,6 +24,21 @@ function durationMinutes(startAt: string, endAt: string): number {
   return Math.round((end - start) / 60000);
 }
 
+/** Nivel 0–7 (OpenSkill). Por encima de 25 se asume ELO legacy (p. ej. 1200 → 1,20). */
+function formatSkillNumber(rating: number | null | undefined): string {
+  if (rating == null || !Number.isFinite(Number(rating))) return '—';
+  const v = Number(rating);
+  if (v <= 25) return v.toFixed(1).replace('.', ',');
+  return (v / 1000).toFixed(2).replace('.', ',');
+}
+
+function playerLevelLine(p: { elo_rating: number; liga?: string | null }): string {
+  const core = formatSkillNumber(p.elo_rating);
+  const raw = p.liga != null && String(p.liga).trim() !== '' ? String(p.liga).trim() : '';
+  const ligaLabel = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : '';
+  return ligaLabel ? `${core} · ${ligaLabel}` : core;
+}
+
 export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   const b = m.bookings;
   if (!b?.start_at || !b?.end_at || !b?.total_price_cents) return null;
@@ -43,11 +58,10 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   ].join(', ');
   const mode: PartidoMode = m.competitive ? 'competitivo' : 'amistoso';
   const typeLabel = m.gender === 'mixed' ? 'Mixto' : 'Todos los jugadores';
-  const fmtElo = (v: number) => (v / 1000).toFixed(2).replace('.', ',');
   const levelRange =
     m.elo_min != null && m.elo_max != null
-      ? `${fmtElo(m.elo_min)} - ${fmtElo(m.elo_max)}`
-      : '0,25 - 1,25';
+      ? `${formatSkillNumber(m.elo_min)} - ${formatSkillNumber(m.elo_max)}`
+      : 'Libre';
 
   const durationMin = durationMinutes(b.start_at, b.end_at);
 
@@ -89,7 +103,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
       parts.length >= 2
         ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
         : fullName[0]?.toUpperCase() ?? '?';
-    const level = (p.elo_rating / 1000).toFixed(2).replace('.', ',');
+    const level = playerLevelLine(p);
     slots[idx] = { name: fullName, initial, level, isFree: false };
   });
   const players = slots;
@@ -112,6 +126,9 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     location: city ? `${city}` : '—',
     price: formatPrice(b.total_price_cents, b.currency ?? 'EUR'),
     duration: `${durationMin}min`,
+    matchType: m.type ?? undefined,
+    matchStatus: m.status,
+    bookingStatus: b.status,
     venueAddress: address || undefined,
     courtName,
     courtType,

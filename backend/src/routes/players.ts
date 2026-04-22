@@ -56,11 +56,41 @@ function toPublicPlayer(row: Row): Row {
   };
 }
 
+type MmWl = { mm_wins: number; mm_losses: number; mm_draws: number };
+
+const ZERO_MM_WL: MmWl = { mm_wins: 0, mm_losses: 0, mm_draws: 0 };
+
+async function fetchPlayerMatchmakingWl(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string
+): Promise<MmWl> {
+  try {
+    const { data, error } = await supabase.rpc('player_matchmaking_record', { p_player_id: playerId });
+    if (error) return ZERO_MM_WL;
+    const rows = data as unknown;
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    if (!row || typeof row !== 'object') return ZERO_MM_WL;
+    const r = row as Record<string, unknown>;
+    return {
+      mm_wins: Number(r.wins ?? 0),
+      mm_losses: Number(r.losses ?? 0),
+      mm_draws: Number(r.draws ?? 0),
+    };
+  } catch {
+    return ZERO_MM_WL;
+  }
+}
+
+function withPublicPlayerAndMm(row: Row, wl: MmWl): Row {
+  return { ...(toPublicPlayer(row) as Row), ...wl };
+}
+
 const SELECT_PUBLIC_INTERNAL = `
   id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url, gender,
   mu, sigma, elo_rating, sp,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
-  elo_last_updated_at, stripe_customer_id, consents, onboarding_completed
+  elo_last_updated_at, stripe_customer_id, consents,
+  liga, lps, mm_peak_liga
 `;
 
 const AVATAR_URL_MAX = 2048;
@@ -91,7 +121,7 @@ function normalizeAvatarUrl(body: Record<string, unknown>): AvatarNormalize {
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       200:
- *         description: Incluye elo 0–7, sp, fiabilidad y contadores de partidos
+ *         description: Incluye elo 0–7, sp, fiabilidad, contadores, liga MM (liga, lps, mm_peak_liga), record MM confirmado (mm_wins, mm_losses, mm_draws)
  */
 router.get('/me', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
@@ -128,7 +158,9 @@ router.get('/me', async (req: Request, res: Response) => {
     if (!player) {
       return res.status(404).json({ ok: false, error: 'No existe jugador asociado a esta cuenta' });
     }
-    return res.json({ ok: true, player: toPublicPlayer(player as Row) });
+    const pid = String((player as Row).id);
+    const wl = await fetchPlayerMatchmakingWl(supabase, pid);
+    return res.json({ ok: true, player: withPublicPlayerAndMm(player as Row, wl) });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -336,7 +368,8 @@ router.patch('/me', async (req: Request, res: Response) => {
       }
     }
 
-    return res.json({ ok: true, player: toPublicPlayer(updated as Row) });
+    const wl = await fetchPlayerMatchmakingWl(supabase, playerId);
+    return res.json({ ok: true, player: withPublicPlayerAndMm(updated as Row, wl) });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -412,7 +445,7 @@ router.post('/manual', async (req: Request, res: Response) => {
       return res.status(500).json({ ok: false, error: error.message });
     }
 
-    return res.status(201).json({ ok: true, player: toPublicPlayer((data ?? {}) as Row) });
+    return res.status(201).json({ ok: true, player: withPublicPlayerAndMm((data ?? {}) as Row, ZERO_MM_WL) });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return res.status(500).json({ ok: false, error: message });
@@ -784,7 +817,8 @@ router.get('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ ok: false, error: 'Player not found' });
     }
 
-    return res.json({ ok: true, player: toPublicPlayer(data as Row) });
+    const wl = await fetchPlayerMatchmakingWl(supabase, id);
+    return res.json({ ok: true, player: withPublicPlayerAndMm(data as Row, wl) });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return res.status(500).json({ ok: false, error: message });
@@ -835,7 +869,7 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(500).json({ ok: false, error: error.message });
     }
 
-    return res.status(201).json({ ok: true, player: toPublicPlayer((data ?? {}) as Row) });
+    return res.status(201).json({ ok: true, player: withPublicPlayerAndMm((data ?? {}) as Row, ZERO_MM_WL) });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return res.status(500).json({ ok: false, error: message });
@@ -890,7 +924,8 @@ router.put('/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ ok: false, error: 'Player not found' });
     }
 
-    return res.json({ ok: true, player: toPublicPlayer(data as Row) });
+    const wl = await fetchPlayerMatchmakingWl(supabase, id);
+    return res.json({ ok: true, player: withPublicPlayerAndMm(data as Row, wl) });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return res.status(500).json({ ok: false, error: message });

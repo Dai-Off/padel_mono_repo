@@ -11,6 +11,7 @@ import {
   refundStripeBookingPaymentTransactions,
   resolveClubIdForBooking,
 } from '../services/paymentRefundService';
+import { releaseMatchmakingProposal } from '../services/matchmakingService';
 
 const router = Router();
 
@@ -22,7 +23,7 @@ const SELECT_ONE =
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team,
           ${bookingRel} (
-            id, organizer_player_id, start_at, end_at, total_price_cents, currency, court_id,
+            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type,
@@ -31,7 +32,7 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
           ),
           match_players (
             id, team, created_at, slot_index,
-            players (id, first_name, last_name, elo_rating)
+            players (id, first_name, last_name, elo_rating, liga)
           )`;
 }
 
@@ -696,7 +697,7 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
 
     const { data: match, error: errMatch } = await supabase
       .from('matches')
-      .select('id, booking_id, status, visibility')
+      .select('id, booking_id, status, visibility, type')
       .eq('id', matchId)
       .maybeSingle();
     if (errMatch) return res.status(500).json({ ok: false, error: errMatch.message });
@@ -782,6 +783,14 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         .maybeSingle();
       if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
 
+      if ((match as { type?: string }).type === 'matchmaking') {
+        try {
+          await releaseMatchmakingProposal(matchId, { cancelBooking: false });
+        } catch (e) {
+          console.error('[matches/cancel] releaseMatchmakingProposal (privado):', e);
+        }
+      }
+
       return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
     }
 
@@ -826,6 +835,14 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         .select('id, status')
         .maybeSingle();
       if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
+
+      if ((match as { type?: string }).type === 'matchmaking') {
+        try {
+          await releaseMatchmakingProposal(matchId, { cancelBooking: false });
+        } catch (e) {
+          console.error('[matches/cancel] releaseMatchmakingProposal (público vacío):', e);
+        }
+      }
 
       return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
     }
@@ -937,6 +954,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const { data: before } = await supabase.from('matches').select('type').eq('id', id).maybeSingle();
     const { data, error } = await supabase
       .from('matches')
       .update({ status: 'cancelled', updated_at: new Date().toISOString() })
@@ -945,6 +963,13 @@ router.delete('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Match not found' });
+    if ((before as { type?: string } | null)?.type === 'matchmaking') {
+      try {
+        await releaseMatchmakingProposal(id, { cancelBooking: false });
+      } catch (e) {
+        console.error('[matches/delete] releaseMatchmakingProposal:', e);
+      }
+    }
     return res.json({ ok: true, match: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

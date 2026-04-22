@@ -25,11 +25,13 @@ import {
   fetchMatchById,
   prepareJoin,
   submitMatchFeedback,
+  submitMatchScore,
   type SubmitMatchFeedbackBody,
 } from '../api/matches';
 import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
 import { fetchMyPlayerId } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import { rejectMatchmakingProposal } from '../api/matchmaking';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import {
   MatchEvaluationFlow,
@@ -109,6 +111,8 @@ export function PartidoDetailScreen({
   const [playerContextResolved, setPlayerContextResolved] = useState(() => !session?.access_token);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
   const [joiningSlotIndex, setJoiningSlotIndex] = useState<number | null>(null);
+  const [matchmakingPayBusy, setMatchmakingPayBusy] = useState(false);
+  const [decliningMatchmaking, setDecliningMatchmaking] = useState(false);
   const [clubInfoVisible, setClubInfoVisible] = useState(false);
   const [evaluationVisible, setEvaluationVisible] = useState(false);
   /** Overlay mientras el backend cancela / reembolsa (Stripe puede tardar varios segundos). */
@@ -140,6 +144,10 @@ export function PartidoDetailScreen({
         setPartido((prev) => ({
           ...updated,
           organizerPlayerId: updated.organizerPlayerId ?? prev.organizerPlayerId,
+          matchmakingPayment: prev.matchmakingPayment,
+          matchType: updated.matchType ?? prev.matchType,
+          matchStatus: updated.matchStatus ?? prev.matchStatus,
+          bookingStatus: updated.bookingStatus ?? prev.bookingStatus,
         }));
       }
     });
@@ -209,6 +217,92 @@ export function PartidoDetailScreen({
     [partido.id, session?.access_token, initPaymentSheet, presentPaymentSheet]
   );
 
+  const handleMatchmakingPay = useCallback(async () => {
+    const token = session?.access_token;
+    const mp = partido.matchmakingPayment;
+    if (!token || !mp?.bookingId || !mp?.participantId) {
+      Alert.alert('Iniciar sesión', 'Necesitas iniciar sesión para pagar.');
+      return;
+    }
+    setMatchmakingPayBusy(true);
+    const intentRes = await createPaymentIntent(mp.bookingId, mp.participantId, token);
+    if (!intentRes.ok || !intentRes.clientSecret) {
+      setMatchmakingPayBusy(false);
+      Alert.alert('Error', intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.');
+      return;
+    }
+    const returnURL = Linking.createURL('stripe-redirect');
+    const { error: initErr } = await initPaymentSheet({
+      paymentIntentClientSecret: intentRes.clientSecret,
+      merchantDisplayName: 'WeMatch Padel',
+      returnURL,
+    });
+    if (initErr) {
+      setMatchmakingPayBusy(false);
+      Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+      return;
+    }
+    const { error: presentErr } = await presentPaymentSheet();
+    if (presentErr) {
+      setMatchmakingPayBusy(false);
+      if (presentErr.code === 'Canceled') {
+        Alert.alert('Cancelado', 'Pago cancelado.');
+      } else {
+        Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
+      }
+      return;
+    }
+    const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, token);
+    setMatchmakingPayBusy(false);
+    if (!confirmRes.ok) {
+      Alert.alert('Error', 'No se pudo confirmar. Inténtalo de nuevo.');
+      return;
+    }
+    const match = await fetchMatchById(partido.id, token);
+    if (match) {
+      const updated = mapMatchToPartido(match);
+      if (updated) setPartido({ ...updated, matchmakingPayment: undefined });
+    }
+  }, [
+    partido.id,
+    partido.matchmakingPayment,
+    session?.access_token,
+    initPaymentSheet,
+    presentPaymentSheet,
+  ]);
+
+  const handleDeclineMatchmaking = useCallback(() => {
+    Alert.alert(
+      'Declinar partido',
+      'Se cancelará la reserva y el partido para los cuatro jugadores. Solo ocurre si confirmás acá.',
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Sí, declinar',
+          style: 'destructive',
+          onPress: async () => {
+            const token = session?.access_token;
+            if (!token) {
+              Alert.alert('Iniciar sesión', 'Necesitas iniciar sesión.');
+              return;
+            }
+            setDecliningMatchmaking(true);
+            try {
+              const r = await rejectMatchmakingProposal(partido.id, token);
+              if (!r.ok) {
+                Alert.alert('Error', r.error);
+                return;
+              }
+              Alert.alert('Listo', 'Has declinado el partido.', [{ text: 'OK', onPress: () => onBack() }]);
+            } finally {
+              setDecliningMatchmaking(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [partido.id, session?.access_token, onBack]);
+
   const scrollToTab = (tab: TabId) => {
     setActiveTab(tab);
     const y = sectionY.current[tab];
@@ -236,8 +330,20 @@ export function PartidoDetailScreen({
     }
   };
 
-  const joinBusy = joiningSlotIndex !== null;
   const matchPhase = partido.matchPhase ?? 'upcoming';
+
+  const pendingMmPay =
+    !!partido.matchmakingPayment?.bookingId && !!partido.matchmakingPayment?.participantId;
+  const joinBusy = joiningSlotIndex !== null || matchmakingPayBusy || decliningMatchmaking;
+  const mmPayShareLabel =
+    partido.matchmakingPayment?.shareAmountCents != null
+      ? `${(partido.matchmakingPayment.shareAmountCents / 100).toFixed(2).replace('.', ',')}€`
+      : partido.price;
+  const canDeclineMmProposal =
+    partido.matchType === 'matchmaking' &&
+    partido.matchStatus === 'pending' &&
+    partido.bookingStatus === 'pending_payment' &&
+    matchPhase !== 'past';
   const handleSubmitEvaluation = useCallback(
     async (payload: MatchEvaluationPayload) => {
       const token = session?.access_token;
@@ -264,6 +370,33 @@ export function PartidoDetailScreen({
         };
       }
 
+      if (payload.sets.length > 0 && currentPlayerId) {
+        const fresh = await fetchMatchById(partido.id, token);
+        let team: 'A' | 'B' | null = null;
+        if (fresh?.match_players) {
+          const mine = fresh.match_players.find((mp) => mp.players?.id === currentPlayerId);
+          team = mine?.team ?? null;
+        }
+        if (!team) {
+          return {
+            ok: false as const,
+            error: 'No se pudo determinar tu equipo para guardar el marcador.',
+          };
+        }
+        const apiSets =
+          team === 'A'
+            ? payload.sets.map((s) => ({ a: s.us, b: s.them }))
+            : payload.sets.map((s) => ({ a: s.them, b: s.us }));
+        const scoreRes = await submitMatchScore(
+          partido.id,
+          { sets: apiSets, match_end_reason: 'completed' },
+          token
+        );
+        if (!scoreRes.ok && scoreRes.status !== 409) {
+          return { ok: false as const, error: scoreRes.error };
+        }
+      }
+
       const res = await submitMatchFeedback(
         partido.id,
         {
@@ -276,19 +409,23 @@ export function PartidoDetailScreen({
       if (!res.ok) return res;
       return { ok: true as const };
     },
-    [partido.id, partido.playerIds, partido.playerIdsBySlot, session?.access_token]
+    [partido.id, partido.playerIds, partido.playerIdsBySlot, currentPlayerId, session?.access_token]
   );
   /** Usuario apuntado y partido aún no cerrado: barra inferior con finalizar + papelera. */
   const playersFilledCount = partido.players.filter((p) => !p.isFree).length;
   const showFinishBar =
-    playerContextResolved && isInMatch && matchPhase !== 'past';
-  const bottomReserve = insets.bottom + (showFinishBar ? 100 : 88);
+    playerContextResolved && isInMatch && matchPhase !== 'past' && !pendingMmPay;
+  const bottomBarNeedsStack = pendingMmPay || canDeclineMmProposal;
+  const bottomReserve = insets.bottom + (showFinishBar ? 100 : bottomBarNeedsStack ? 148 : 88);
   const canPressCta =
     playerContextResolved &&
     firstFreeIndex >= 0 &&
     !isInMatch &&
     !joinBusy &&
     matchPhase !== 'past';
+
+  const canPressMatchmakingPay =
+    playerContextResolved && pendingMmPay && !joinBusy && matchPhase !== 'past';
 
   const handleTrashMatch = useCallback(() => {
     const token = session?.access_token;
@@ -643,8 +780,39 @@ export function PartidoDetailScreen({
             </Pressable>
           </View>
         </View>
+      ) : pendingMmPay ? (
+        <View style={[styles.bottomBar, styles.bottomBarStack, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.ctaBtn,
+              !canPressMatchmakingPay && styles.ctaBtnDisabled,
+              pressed && canPressMatchmakingPay && styles.pressed,
+            ]}
+            onPress={() => void handleMatchmakingPay()}
+            disabled={!canPressMatchmakingPay}
+          >
+            {matchmakingPayBusy ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <View style={styles.ctaTextWrap}>
+                <Text style={styles.ctaText}>Pagar mi plaza — {mmPayShareLabel}</Text>
+              </View>
+            )}
+          </Pressable>
+          {canDeclineMmProposal ? (
+            <Pressable
+              style={({ pressed }) => [styles.declineMmBtn, pressed && styles.pressed]}
+              onPress={handleDeclineMatchmaking}
+              disabled={decliningMatchmaking || matchmakingPayBusy}
+            >
+              <Text style={styles.declineMmBtnText}>
+                {decliningMatchmaking ? 'Declinando…' : 'Declinar partido'}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : (
-        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+        <View style={[styles.bottomBar, styles.bottomBarStack, { paddingBottom: Math.max(insets.bottom, 16) }]}>
           <Pressable
             style={({ pressed }) => [
               styles.ctaBtn,
@@ -668,6 +836,17 @@ export function PartidoDetailScreen({
               </View>
             )}
           </Pressable>
+          {canDeclineMmProposal ? (
+            <Pressable
+              style={({ pressed }) => [styles.declineMmBtn, pressed && styles.pressed]}
+              onPress={handleDeclineMatchmaking}
+              disabled={decliningMatchmaking || joinBusy}
+            >
+              <Text style={styles.declineMmBtnText}>
+                {decliningMatchmaking ? 'Declinando…' : 'Declinar partido'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       )}
 
@@ -1162,6 +1341,23 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,15,15,0.95)',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  bottomBarStack: {
+    gap: 10,
+  },
+  declineMmBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.45)',
+    backgroundColor: 'rgba(248,113,113,0.08)',
+  },
+  declineMmBtnText: {
+    color: '#f87171',
+    fontSize: 15,
+    fontWeight: '600',
   },
   finishBarRow: {
     flexDirection: 'row',

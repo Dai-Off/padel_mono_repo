@@ -16,6 +16,15 @@ type MeResponse = {
     phone?: string | null;
     elo_rating?: number | null;
     status?: string | null;
+    liga?: string | null;
+    lps?: number | null;
+    mm_peak_liga?: string | null;
+    matches_played_matchmaking?: number | null;
+    fiabilidad?: number | null;
+    mm_wins?: number | null;
+    mm_losses?: number | null;
+    mm_draws?: number | null;
+    /** Presente solo si el backend lo incluye en `/players/me`. */
     onboarding_completed?: boolean | null;
   };
   error?: string;
@@ -29,6 +38,19 @@ export type MyPlayerProfile = {
   phone: string | null;
   eloRating: number | null;
   status: string | null;
+  /** Código de liga MM global: bronce | plata | oro | elite */
+  liga: string | null;
+  lps: number | null;
+  mmPeakLiga: string | null;
+  matchesPlayedMatchmaking: number | null;
+  fiabilidad: number | null;
+  mmWins: number;
+  mmLosses: number;
+  mmDraws: number;
+  /**
+   * Onboarding de nivelación; si el backend no envía el campo, se asume completado
+   * para no bloquear la app.
+   */
   onboardingCompleted: boolean;
 };
 
@@ -65,6 +87,32 @@ export async function fetchMyPlayerProfile(
         : typeof rawElo === 'number'
           ? rawElo
           : Number(String(rawElo).trim());
+    const rawLps = json.player.lps as number | string | null | undefined;
+    const lpsNum =
+      rawLps == null || rawLps === ''
+        ? null
+        : typeof rawLps === 'number'
+          ? rawLps
+          : Number(String(rawLps).trim());
+    const rawMpm = json.player.matches_played_matchmaking as number | string | null | undefined;
+    const mpmNum =
+      rawMpm == null || rawMpm === ''
+        ? null
+        : typeof rawMpm === 'number'
+          ? rawMpm
+          : Number(String(rawMpm).trim());
+    const rawFiab = json.player.fiabilidad as number | string | null | undefined;
+    const fiabNum =
+      rawFiab == null || rawFiab === ''
+        ? null
+        : typeof rawFiab === 'number'
+          ? rawFiab
+          : Number(String(rawFiab).trim());
+    const parseInt0 = (v: unknown): number => {
+      if (v == null || v === '') return 0;
+      const n = typeof v === 'number' ? v : Number(String(v).trim());
+      return n != null && !Number.isNaN(n) ? Math.max(0, Math.round(n)) : 0;
+    };
     return {
       id: json.player.id,
       firstName: json.player.first_name ?? null,
@@ -73,7 +121,17 @@ export async function fetchMyPlayerProfile(
       phone: json.player.phone ?? null,
       eloRating: eloNum != null && !Number.isNaN(eloNum) ? eloNum : null,
       status: json.player.status ?? null,
-      /** `undefined` en respuestas viejas se trata como ya completado para no bloquear la app. */
+      liga: json.player.liga != null && String(json.player.liga).trim() !== '' ? String(json.player.liga) : null,
+      lps: lpsNum != null && !Number.isNaN(lpsNum) ? Math.max(0, Math.round(lpsNum)) : null,
+      mmPeakLiga:
+        json.player.mm_peak_liga != null && String(json.player.mm_peak_liga).trim() !== ''
+          ? String(json.player.mm_peak_liga)
+          : null,
+      matchesPlayedMatchmaking: mpmNum != null && !Number.isNaN(mpmNum) ? Math.max(0, Math.round(mpmNum)) : null,
+      fiabilidad: fiabNum != null && !Number.isNaN(fiabNum) ? Math.max(0, Math.min(100, Math.round(fiabNum))) : null,
+      mmWins: parseInt0(json.player.mm_wins),
+      mmLosses: parseInt0(json.player.mm_losses),
+      mmDraws: parseInt0(json.player.mm_draws),
       onboardingCompleted: json.player.onboarding_completed !== false,
     };
   } catch {
