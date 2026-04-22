@@ -9,8 +9,6 @@ import { playerHasDebt } from '../lib/players/playerDebt';
 import {
   refundStripeBookingPaymentForPlayer,
   refundStripeBookingPaymentTransactions,
-  refundWalletForBookingParticipants,
-  refundWalletForSingleParticipant,
   resolveClubIdForBooking,
 } from '../services/paymentRefundService';
 
@@ -784,8 +782,6 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         .maybeSingle();
       if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
 
-      await refundWalletForBookingParticipants(supabase, booking.id, clubId);
-
       return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
     }
 
@@ -831,8 +827,6 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         .maybeSingle();
       if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
 
-      await refundWalletForBookingParticipants(supabase, booking.id, clubId);
-
       return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
     }
 
@@ -844,8 +838,6 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         refund_errors: stripeSolo.errors,
       });
     }
-
-    await refundWalletForSingleParticipant(supabase, booking.id, clubId, playerId);
 
     const { error: delMp } = await supabase
       .from('match_players')

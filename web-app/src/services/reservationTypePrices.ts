@@ -16,7 +16,7 @@ export type ReservationType = (typeof RESERVATION_TYPES)[number];
 
 export type PricesByType = Record<
   string,
-  { price_per_hour_cents: number; currency: string; color: string | null }
+  { price_per_hour_cents: number; currency: string }
 >;
 
 class ReservationTypePricesService extends ApiServiceWithAuth {
@@ -28,10 +28,10 @@ class ReservationTypePricesService extends ApiServiceWithAuth {
     return res.prices ?? {};
   }
 
-  async update(clubId: string, prices: Record<string, number>, colors?: Record<string, string | null>): Promise<PricesByType> {
+  async update(clubId: string, prices: Record<string, number>): Promise<PricesByType> {
     const res = await this.put<{ ok: boolean; prices: PricesByType }>(
       '/reservation-type-prices',
-      { club_id: clubId, prices, colors }
+      { club_id: clubId, prices }
     );
     if (!res.ok) throw new Error('Error updating prices');
     return res.prices ?? {};

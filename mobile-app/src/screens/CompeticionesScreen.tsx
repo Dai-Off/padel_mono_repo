@@ -37,11 +37,6 @@ const BG = '#0F0F0F';
 
 type CompeticionTab = 'disponibles' | 'inscritas' | 'solicitudes';
 
-/** Fila unificada para `FlatList` (torneos vs solicitudes de inscripción). */
-type CompeticionesListRow =
-  | { kind: 'tournament'; row: PublicTournamentRow }
-  | { kind: 'request'; req: MyTournamentEntryRequest };
-
 type CompeticionesScreenProps = {
   onBack?: () => void;
 };
@@ -204,7 +199,7 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
     setRefreshing(false);
   }, [load]);
 
-  const filtered = useMemo((): PublicTournamentRow[] => {
+  const filtered = useMemo(() => {
     if (activeTab === 'solicitudes') return [];
     const now = Date.now();
     return items
@@ -230,13 +225,6 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
         return da - db;
       });
   }, [activeTab, items, searchQuery, formatFilter, levelFilter, joinableOnly, canJoinTournament]);
-
-  const flatListData = useMemo((): CompeticionesListRow[] => {
-    if (activeTab === 'solicitudes') {
-      return requestItems.map((req) => ({ kind: 'request' as const, req }));
-    }
-    return filtered.map((row) => ({ kind: 'tournament' as const, row }));
-  }, [activeTab, requestItems, filtered]);
 
   const formatChipLabel =
     formatFilter === 'all' ? 'Formato' : formatFormatLabel(formatFilter);
@@ -422,11 +410,9 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
           </Pressable>
         </View>
       ) : (
-        <FlatList<CompeticionesListRow>
-          data={flatListData}
-          keyExtractor={(item) =>
-            item.kind === 'request' ? `req:${item.req.id}` : `t:${item.row.id}`
-          }
+        <FlatList
+          data={activeTab === 'solicitudes' ? requestItems : filtered}
+          keyExtractor={(item) => String((item as any).id)}
           ListHeaderComponent={listHeader}
           contentContainerStyle={[
             styles.listContent,
@@ -441,49 +427,44 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
             />
           }
           renderItem={({ item }) =>
-            item.kind === 'request' ? (
+            activeTab === 'solicitudes' ? (
               <Pressable
                 onPress={() => {
-                  const tid = item.req.tournament_id;
+                  const tid = (item as MyTournamentEntryRequest).tournament_id;
                   if (tid) setDetailOpen({ id: tid });
                 }}
                 style={({ pressed }) => [styles.requestCard, pressed && styles.pressed]}
               >
                 <Text style={styles.requestTitle}>
                   {tournamentTitle({
-                    id: String(item.req.tournament?.id ?? item.req.tournament_id),
-                    name: item.req.tournament?.name ?? null,
+                    id: String((item as MyTournamentEntryRequest).tournament?.id ?? (item as MyTournamentEntryRequest).tournament_id),
                     club_id: '',
-                    start_at: String(item.req.tournament?.start_at ?? ''),
-                    end_at: String(item.req.tournament?.start_at ?? ''),
+                    start_at: String((item as MyTournamentEntryRequest).tournament?.start_at ?? ''),
+                    end_at: String((item as MyTournamentEntryRequest).tournament?.start_at ?? ''),
                     duration_min: 0,
-                    price_cents: Number(item.req.tournament?.price_cents ?? 0),
+                    price_cents: Number((item as MyTournamentEntryRequest).tournament?.price_cents ?? 0),
                     currency: 'EUR',
                     max_players: 0,
-                    status: String(item.req.tournament?.status ?? ''),
-                    description: String(item.req.tournament?.name ?? ''),
-                    elo_min: item.req.tournament?.elo_min ?? null,
-                    elo_max: item.req.tournament?.elo_max ?? null,
-                    registration_mode: ((): PublicTournamentRow['registration_mode'] => {
-                      const rm = item.req.tournament?.registration_mode;
-                      if (rm === 'pair' || rm === 'both' || rm === 'individual') return rm;
-                      return 'individual';
-                    })(),
-                  })}
+                    status: String((item as MyTournamentEntryRequest).tournament?.status ?? ''),
+                    description: String((item as MyTournamentEntryRequest).tournament?.name ?? ''),
+                    elo_min: (item as MyTournamentEntryRequest).tournament?.elo_min ?? null,
+                    elo_max: (item as MyTournamentEntryRequest).tournament?.elo_max ?? null,
+                    registration_mode: ((item as MyTournamentEntryRequest).tournament?.registration_mode as any) ?? 'individual',
+                  } as PublicTournamentRow)}
                 </Text>
                 <Text style={styles.requestStatus}>
-                  Estado: {String(item.req.status ?? '').toUpperCase()}
+                  Estado: {String((item as MyTournamentEntryRequest).status ?? '').toUpperCase()}
                 </Text>
                 <Text style={styles.requestMessage} numberOfLines={2}>
-                  {item.req.response_message?.trim() ||
-                    item.req.message ||
+                  {(item as MyTournamentEntryRequest).response_message?.trim() ||
+                    (item as MyTournamentEntryRequest).message ||
                     'Sin mensaje'}
                 </Text>
               </Pressable>
             ) : (
               <TournamentListCard
-                row={item.row}
-                onPress={() => setDetailOpen({ id: item.row.id })}
+                row={item as PublicTournamentRow}
+                onPress={() => setDetailOpen({ id: (item as PublicTournamentRow).id })}
               />
             )
           }

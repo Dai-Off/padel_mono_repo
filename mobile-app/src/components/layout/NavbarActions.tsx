@@ -32,36 +32,12 @@ function NavbarActionButton({
   );
 }
 
-export type NavbarActionsCallbacks = {
-  onMessagesPress?: () => void;
-  onNotificationsPress?: () => void;
-  onGroupsPress?: () => void;
-};
-
-export function NavbarActions({
-  onMessagesPress,
-  onNotificationsPress,
-  onGroupsPress,
-}: NavbarActionsCallbacks = {}) {
+export function NavbarActions() {
   return (
     <View style={styles.container}>
-      <NavbarActionButton
-        icon="chatbubble-outline"
-        accessibilityLabel="Mensajes"
-        onPress={onMessagesPress}
-      />
-      <NavbarActionButton
-        icon="notifications-outline"
-        accessibilityLabel="Notificaciones"
-        onPress={onNotificationsPress}
-      />
-      <NavbarActionButton
-        icon="people-outline"
-        showBadge
-        opacity={0.7}
-        accessibilityLabel="Grupos"
-        onPress={onGroupsPress}
-      />
+      <NavbarActionButton icon="chatbubble-outline" accessibilityLabel="Mensajes" />
+      <NavbarActionButton icon="notifications-outline" accessibilityLabel="Notificaciones" />
+      <NavbarActionButton icon="people-outline" showBadge opacity={0.7} accessibilityLabel="Grupos" />
     </View>
   );
 }

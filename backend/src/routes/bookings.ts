@@ -5,7 +5,7 @@ import { recordPayment } from '../lib/payment';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { findTournamentConflict } from '../lib/tournamentConflicts';
 import { isExpiredMatchLock, MATCH_DRAFT_LOCK_MARKER, getAvailableCourtIds } from '../lib/courtConflict';
-import { refundStripeBookingPaymentTransactions, refundWalletForBookingParticipants } from '../services/paymentRefundService';
+import { refundStripeBookingPaymentTransactions } from '../services/paymentRefundService';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -1256,9 +1256,34 @@ router.delete('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
-    // 4. Web / reserva manual: reembolsos al monedero según participantes
+    // 4. Web / reserva manual: reembolsos al monedero según participantes (comportamiento original del panel)
     if (clubId) {
-      await refundWalletForBookingParticipants(supabase, id, clubId);
+      const { data: paidParticipants } = await supabase
+        .from('booking_participants')
+        .select('player_id, paid_amount_cents, wallet_amount_cents')
+        .eq('booking_id', id)
+        .eq('payment_status', 'paid');
+
+      if (paidParticipants && paidParticipants.length > 0) {
+        const refundRows = paidParticipants
+          .filter((p) => (p.paid_amount_cents ?? 0) > 0 || (p.wallet_amount_cents ?? 0) > 0)
+          .map((p) => ({
+            player_id: p.player_id,
+            club_id: clubId,
+            amount_cents: (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0),
+            concept: `Reembolso por cancelación de reserva`,
+            type: 'refund',
+            booking_id: id,
+            created_at: now,
+          }));
+
+        if (refundRows.length > 0) {
+          const { error: refundErr } = await supabase.from('wallet_transactions').insert(refundRows);
+          if (refundErr) {
+            console.error(`[DELETE /bookings/${id}] Refund insert error:`, refundErr.message);
+          }
+        }
+      }
     }
 
     // 5. Also cancel any match linked to this booking

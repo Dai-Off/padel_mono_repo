@@ -24,7 +24,6 @@ interface Props {
     isCompactView?: boolean;
     compactPxPerMinute?: number;
     totalCourts?: number;
-    typeColorOverrides?: Record<string, string>;
 }
 
 // Split "Pista 2 CENTRAL" → { main: "PISTA 2", sub: "CENTRAL" }
@@ -39,7 +38,7 @@ function parseCourtName(name: string): { main: string; sub?: string } {
     return { main: mainParts, sub };
 }
 
-export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, recentlyDroppedId, onReservationClick, onFreeSlotClick, onHeaderClick, onHeaderHover, isMaintenanceBlocked, onHoverStart, onHoverEnd, isFocusedMode, isCurrentlyFocused, isCompactView, compactPxPerMinute, totalCourts, typeColorOverrides }) => {
+export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, recentlyDroppedId, onReservationClick, onFreeSlotClick, onHeaderClick, onHeaderHover, isMaintenanceBlocked, onHoverStart, onHoverEnd, isFocusedMode, isCurrentlyFocused, isCompactView, compactPxPerMinute, totalCourts }) => {
     const { tData } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
     const isSmallZoom = !isCompactView && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
@@ -245,7 +244,6 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
                         compactPxPerMinute={compactPxPerMinute}
                         onHoverStart={onHoverStart}
                         onHoverEnd={onHoverEnd}
-                        typeColorOverrides={typeColorOverrides}
                     />
                 ))}
             </div>

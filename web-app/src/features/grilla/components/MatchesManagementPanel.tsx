@@ -10,8 +10,7 @@ import {
     Plus,
     MoreVertical,
     Trash2,
-    Pencil,
-    LayoutGrid,
+    Pencil
 } from 'lucide-react';
 import { apiFetchWithAuth } from '../../../services/api';
 import { CreateMatchModal } from './CreateMatchModal';
@@ -22,10 +21,9 @@ interface MatchesManagementPanelProps {
     dateStr: string;
     onRefreshGrid: () => void;
     onEditBooking?: (bookingId: string) => void;
-    onGoToGrid?: () => void;
 }
 
-export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ clubId, dateStr, onRefreshGrid, onEditBooking, onGoToGrid }) => {
+export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ clubId, dateStr, onRefreshGrid, onEditBooking }) => {
     const [matches, setMatches] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     
@@ -321,16 +319,6 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                             <ChevronRight className="w-4 h-4" />
                         </button>
                     </div>
-                    {onGoToGrid && (
-                        <button
-                            onClick={onGoToGrid}
-                            title="Ir a la grilla"
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-[#006A6A] hover:border-[#006A6A] transition-colors shadow-sm"
-                        >
-                            <LayoutGrid className="w-4 h-4" />
-                            <span className="hidden sm:inline text-xs font-semibold">Grilla</span>
-                        </button>
-                    )}
                     <button
                         onClick={() => setShowFilters(prev => !prev)}
                         className={`p-1.5 border rounded-lg transition-colors relative ${

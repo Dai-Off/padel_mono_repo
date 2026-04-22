@@ -78,35 +78,6 @@ export async function fetchMyPlayerProfile(
 }
 
 /** Obtiene el id del primer jugador disponible (para desarrollo/pruebas cuando no hay auth). */
-export type PlayerSearchHit = {
-  id: string;
-  first_name?: string | null;
-  last_name?: string | null;
-};
-
-/** Lista jugadores; con `q` filtra por nombre o teléfono (misma API que el panel). */
-export async function searchPlayers(
-  q: string,
-  token: string | null | undefined
-): Promise<{ ok: true; players: PlayerSearchHit[] } | { ok: false; error: string }> {
-  try {
-    const url = new URL(`${API_URL}/players`);
-    const trimmed = q.trim();
-    if (trimmed.length > 0) url.searchParams.set('q', trimmed);
-    const res = await fetch(url.toString(), {
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-    const json = (await res.json()) as { ok?: boolean; players?: PlayerSearchHit[]; error?: string };
-    if (!res.ok || !json.ok) return { ok: false, error: json.error ?? 'Búsqueda no disponible' };
-    return { ok: true, players: json.players ?? [] };
-  } catch {
-    return { ok: false, error: 'Error de conexión' };
-  }
-}
-
 export async function fetchFirstPlayerId(): Promise<string | null> {
   try {
     const res = await fetch(`${API_URL}/players`, {

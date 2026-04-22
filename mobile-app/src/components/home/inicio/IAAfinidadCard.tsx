@@ -1,8 +1,7 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { androidReadableText } from './textStyles';
-import { ScalePressable } from './ScalePressable';
 
 type IAAfinidadCardProps = {
   onPress?: () => void;
@@ -10,19 +9,8 @@ type IAAfinidadCardProps = {
 
 export function IAAfinidadCard({ onPress }: IAAfinidadCardProps) {
   return (
-    <ScalePressable
-      pressedScale={0.985}
-      style={({ pressed }) => [styles.wrap, pressed && styles.pressed]}
-      onPress={onPress}
-    >
-      <LinearGradient
-        colors={['rgba(168,85,247,0.28)', 'rgba(168,85,247,0.05)', 'transparent']}
-        locations={[0, 0.4, 1]}
-        start={{ x: 1, y: 0 }}
-        end={{ x: 0.2, y: 0.9 }}
-        style={styles.cornerWash}
-        pointerEvents="none"
-      />
+    <Pressable style={({ pressed }) => [styles.wrap, pressed && styles.pressed]} onPress={onPress}>
+      <View style={styles.blob} />
       <LinearGradient
         colors={['rgba(147,51,234,0.15)', 'rgba(236,72,153,0.12)', 'rgba(225,29,72,0.1)']}
         start={{ x: 0, y: 0 }}
@@ -46,7 +34,7 @@ export function IAAfinidadCard({ onPress }: IAAfinidadCardProps) {
           </Text>
         </View>
       </View>
-    </ScalePressable>
+    </Pressable>
   );
 }
 
@@ -59,16 +47,16 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   pressed: { opacity: 0.94 },
-  cornerWash: {
+  blob: {
     position: 'absolute',
-    top: -56,
-    right: -56,
-    width: 280,
-    height: 280,
+    top: -48,
+    right: -48,
+    width: 256,
+    height: 256,
+    borderRadius: 128,
+    backgroundColor: 'rgba(168,85,247,0.2)',
   },
   inner: {
-    position: 'relative',
-    zIndex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,

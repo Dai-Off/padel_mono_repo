@@ -1,6 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
 import {
-  Animated,
   Platform,
   Pressable,
   ScrollView,
@@ -14,7 +12,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { PartidoItem } from '../../../screens/PartidosScreen';
 import { PartidoOpenCard } from '../../partido/PartidoOpenCard';
 import { INICIO_PAD_H } from './constants';
-import { INICIO_ENTER_EASING } from './inicioMotion';
 import { androidReadableText } from './textStyles';
 
 const CARD_RADIUS = 12;
@@ -50,62 +47,16 @@ function subtitleLine(count: number): string {
  * Capa absolute inset-0 como en web (hover allí = opacity-100; aquí siempre visible).
  * elevation > card para que en Android no quede debajo del elevation del PartidoOpenCard.
  */
-function CarouselItemEnter({
-  index,
-  width,
-  children,
-}: {
-  index: number;
-  width: number;
-  children: ReactNode;
-}) {
-  const p = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    p.setValue(0);
-    Animated.timing(p, {
-      toValue: 1,
-      delay: index * 56,
-      duration: 400,
-      easing: INICIO_ENTER_EASING,
-      useNativeDriver: true,
-    }).start();
-  }, [index, p]);
-
-  return (
-    <Animated.View
-      style={[
-        styles.carouselItem,
-        {
-          width,
-          opacity: p,
-          transform: [
-            {
-              translateX: p.interpolate({
-                inputRange: [0, 1],
-                outputRange: [16, 0],
-              }),
-            },
-          ],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
-}
-
 function ProximoCard({
   item,
   onPress,
-  fullWidth,
 }: {
   item: PartidoItem;
   onPress: () => void;
-  fullWidth: boolean;
 }) {
   return (
-    <View style={[styles.cardShell, fullWidth && styles.cardShellFull]}>
-      <PartidoOpenCard item={item} onPress={onPress} fullWidth={fullWidth} />
+    <View style={styles.cardShell}>
+      <PartidoOpenCard item={item} onPress={onPress} />
       <LinearGradient
         pointerEvents="none"
         colors={[...GRADIENT_BR_ORANGE_FADE.colors]}
@@ -125,15 +76,11 @@ export function ProximosPartidosSection({
 }: Props) {
   const insets = useSafeAreaInsets();
   const { width: windowW } = useWindowDimensions();
-  const usableW = windowW - INICIO_PAD_H * 2;
-  /** Una reserva: card a todo el ancho útil del Inicio. Dos o más: ancho tipo carrusel (como antes). */
+  /** Mismo padding horizontal que `HomeScreen` (`INICIO_PAD_H`), para que la card quepa en el carrusel. */
   const carouselCardW = Math.min(
     CAROUSEL_CARD_W_MAX,
-    Math.max(200, usableW - CAROUSEL_INNER_PAD),
+    Math.max(200, windowW - INICIO_PAD_H * 2 - CAROUSEL_INNER_PAD)
   );
-  const singleCardW = Math.max(200, usableW);
-  const cardWidth =
-    !loading && items.length === 1 ? singleCardW : carouselCardW;
 
   if (!loading && items.length === 0) {
     return null;
@@ -158,26 +105,23 @@ export function ProximosPartidosSection({
           showsHorizontalScrollIndicator={false}
           nestedScrollEnabled
           removeClippedSubviews={false}
-          scrollEnabled={false}
           style={styles.carouselScroll}
           contentContainerStyle={[
             styles.carouselContent,
             { paddingRight: 12 + insets.right },
           ]}
         >
-          <CarouselItemEnter index={0} width={carouselCardW}>
-            <Pressable style={[styles.skeletonCard, { width: carouselCardW }]} disabled>
-              <LinearGradient
-                colors={[...GRADIENT_BR_ORANGE_FADE.colors]}
-                locations={[...GRADIENT_BR_ORANGE_FADE.locations]}
-                start={GRADIENT_BR_ORANGE_FADE.start}
-                end={GRADIENT_BR_ORANGE_FADE.end}
-                style={StyleSheet.absoluteFill}
-              />
-              <View style={styles.skeletonLineLg} />
-              <View style={styles.skeletonLineSm} />
-            </Pressable>
-          </CarouselItemEnter>
+          <Pressable style={[styles.skeletonCard, { width: carouselCardW }]} disabled>
+            <LinearGradient
+              colors={[...GRADIENT_BR_ORANGE_FADE.colors]}
+              locations={[...GRADIENT_BR_ORANGE_FADE.locations]}
+              start={GRADIENT_BR_ORANGE_FADE.start}
+              end={GRADIENT_BR_ORANGE_FADE.end}
+              style={StyleSheet.absoluteFill}
+            />
+            <View style={styles.skeletonLineLg} />
+            <View style={styles.skeletonLineSm} />
+          </Pressable>
         </ScrollView>
       ) : (
         <ScrollView
@@ -185,24 +129,19 @@ export function ProximosPartidosSection({
           showsHorizontalScrollIndicator={false}
           nestedScrollEnabled
           removeClippedSubviews={false}
-          scrollEnabled={items.length > 1}
           style={styles.carouselScroll}
           contentContainerStyle={[
             styles.carouselContent,
-            {
-              paddingRight:
-                items.length === 1 ? insets.right : 12 + insets.right,
-            },
+            { paddingRight: 12 + insets.right },
           ]}
         >
-          {items.map((item, index) => (
-            <CarouselItemEnter key={item.id} index={index} width={cardWidth}>
+          {items.map((item) => (
+            <View key={item.id} style={[styles.carouselItem, { width: carouselCardW }]}>
               <ProximoCard
                 item={item}
-                fullWidth={items.length === 1}
                 onPress={() => onPartidoPress?.(item)}
               />
-            </CarouselItemEnter>
+            </View>
           ))}
         </ScrollView>
       )}
@@ -277,16 +216,11 @@ const styles = StyleSheet.create({
   },
   carouselItem: {
     flexShrink: 0,
-    overflow: 'visible',
   },
   cardShell: {
     position: 'relative',
     borderRadius: CARD_RADIUS,
     overflow: 'hidden',
-  },
-  cardShellFull: {
-    width: '100%',
-    alignSelf: 'stretch',
   },
   cardGlowOverlay: {
     ...StyleSheet.absoluteFillObject,
