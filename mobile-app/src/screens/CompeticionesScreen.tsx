@@ -64,6 +64,7 @@ function FilterChipButton({
 }
 
 export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
+  const PAGE_SIZE = 20;
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<CompeticionTab>('disponibles');
@@ -76,12 +77,16 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   const [requestItems, setRequestItems] = useState<MyTournamentEntryRequest[]>([]);
   const [requestUnreadCount, setRequestUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [detailOpen, setDetailOpen] = useState<{ id: string } | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts?: { append?: boolean; offset?: number }) => {
+    const append = Boolean(opts?.append);
+    const nextOffset = append ? Math.max(0, Number(opts?.offset ?? 0)) : 0;
     setError(null);
     if (activeTab === 'solicitudes') {
       const r = await fetchMyTournamentEntryRequests(session?.access_token ?? null);
@@ -93,21 +98,27 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
       return;
     }
     if (activeTab === 'disponibles') {
-      const r = await fetchPublicTournaments(session?.access_token ?? null);
-      if (r.ok) setItems(r.tournaments);
+      const r = await fetchPublicTournaments(session?.access_token ?? null, { limit: PAGE_SIZE, offset: nextOffset });
+      if (r.ok) {
+        setItems((prev) => (append ? [...prev, ...r.tournaments] : r.tournaments));
+        setHasMore(r.pagination.has_more);
+      }
       else {
-        setItems([]);
+        if (!append) setItems([]);
         setError(r.error);
       }
       return;
     }
-    const r = await fetchMyTournaments(session?.access_token ?? null);
-    if (r.ok) setItems(r.tournaments);
+    const r = await fetchMyTournaments(session?.access_token ?? null, { limit: PAGE_SIZE, offset: nextOffset });
+    if (r.ok) {
+      setItems((prev) => (append ? [...prev, ...r.tournaments] : r.tournaments));
+      setHasMore(r.pagination.has_more);
+    }
     else {
-      setItems([]);
+      if (!append) setItems([]);
       setError(r.error);
     }
-  }, [activeTab, session?.access_token]);
+  }, [PAGE_SIZE, activeTab, session?.access_token]);
 
   useEffect(() => {
     if (!session?.access_token || requestItems.length === 0) {
@@ -163,7 +174,8 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
     (async () => {
       setLoading(true);
       setError(null);
-      await load();
+      setHasMore(true);
+      await load({ append: false });
       if (!cancelled) setLoading(false);
     })();
     return () => {
@@ -195,9 +207,17 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
+    setHasMore(true);
+    await load({ append: false });
     setRefreshing(false);
   }, [load]);
+
+  const onEndReached = useCallback(async () => {
+    if (activeTab === 'solicitudes' || loading || refreshing || loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    await load({ append: true, offset: items.length });
+    setLoadingMore(false);
+  }, [activeTab, hasMore, items.length, load, loading, loadingMore, refreshing]);
 
   const filtered = useMemo(() => {
     if (activeTab === 'solicitudes') return [];
@@ -411,6 +431,10 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
         </View>
       ) : (
         <FlatList
+          onEndReachedThreshold={0.35}
+          onEndReached={() => {
+            void onEndReached();
+          }}
           data={activeTab === 'solicitudes' ? requestItems : filtered}
           keyExtractor={(item) => String((item as any).id)}
           ListHeaderComponent={listHeader}
@@ -483,6 +507,13 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
                       : 'No hay torneos que coincidan con tu búsqueda.'}
               </Text>
             </View>
+          }
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: 16 }}>
+                <ActivityIndicator size="small" color={theme.auth.accent} />
+              </View>
+            ) : null
           }
         />
       )}

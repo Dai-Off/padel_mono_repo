@@ -549,7 +549,7 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
     void loadChat();
     const timer = setInterval(() => {
       void loadChat({ silent: true });
-    }, 10000);
+    }, 3000);
     return () => clearInterval(timer);
   }, [tab, session?.access_token, loadChat]);
 
@@ -578,8 +578,8 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
   const eloMismatchReason = useMemo(() => {
     if (!row || myElo == null || Number.isNaN(Number(myElo))) return null;
     const elo = Number(myElo);
-    if (eloMin != null && elo < eloMin) return `No cumples el Elo mínimo (${eloMin}). Tu Elo actual es ${Math.round(elo)}.`;
-    if (eloMax != null && elo > eloMax) return `Superas el Elo máximo (${eloMax}). Tu Elo actual es ${Math.round(elo)}.`;
+    if (eloMin != null && elo < eloMin) return `No cumples el nivel mínimo (${eloMin}). Tu nivel actual es ${Math.round(elo)}.`;
+    if (eloMax != null && elo > eloMax) return `Superas el nivel máximo (${eloMax}). Tu nivel actual es ${Math.round(elo)}.`;
     return null;
   }, [row, myElo, eloMin, eloMax]);
   const requestStatus = String(myEntryRequest?.status ?? '').toLowerCase();
@@ -1254,7 +1254,7 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
                           <View style={styles.teamRowText}>
                             <Text style={styles.teamName}>{fullName}</Text>
                             <Text style={styles.teamSub}>
-                              Elo {p.elo_rating != null ? Math.round(Number(p.elo_rating)) : '—'}
+                              Nivel {p.elo_rating != null ? Math.round(Number(p.elo_rating)) : '—'}
                             </Text>
                           </View>
                         </View>
@@ -1310,32 +1310,28 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
                 <Text style={styles.normasEmpty}>Inicia sesión para ver y escribir en el chat.</Text>
               ) : (
                 <>
-                  {chatLoading ? (
-                    <View style={styles.chatLoadingWrap}>
-                      <ActivityIndicator color={ACCENT} />
-                    </View>
-                  ) : (
-                    <ScrollView
-                      style={styles.chatListWrap}
-                      contentContainerStyle={styles.chatListContent}
-                      nestedScrollEnabled
-                      keyboardShouldPersistTaps="handled"
-                    >
-                      {chatMessages.length === 0 ? (
-                        <Text style={styles.normasEmpty}>Aún no hay mensajes. Sé el primero en escribir.</Text>
-                      ) : (
-                        chatMessages.map((m) => (
-                          <View key={m.id} style={styles.chatMessageBubble}>
-                            <Text style={styles.chatAuthor}>{m.author_name || 'Jugador'}</Text>
-                            <Text style={styles.chatMessageText}>{m.message}</Text>
-                            <Text style={styles.chatDate}>
-                              {formatIsoDateTimeEs(m.created_at) ?? formatShortDateEs(m.created_at)}
-                            </Text>
-                          </View>
-                        ))
-                      )}
-                    </ScrollView>
-                  )}
+                  <ScrollView
+                    style={styles.chatListWrap}
+                    contentContainerStyle={styles.chatListContent}
+                    nestedScrollEnabled
+                    keyboardShouldPersistTaps="handled"
+                  >
+                    {chatMessages.length === 0 ? (
+                      <Text style={styles.normasEmpty}>
+                        {chatLoading ? 'Cargando mensajes...' : 'Aún no hay mensajes. Sé el primero en escribir.'}
+                      </Text>
+                    ) : (
+                      chatMessages.map((m) => (
+                        <View key={m.id} style={styles.chatMessageBubble}>
+                          <Text style={styles.chatAuthor}>{m.author_name || 'Jugador'}</Text>
+                          <Text style={styles.chatMessageText}>{m.message}</Text>
+                          <Text style={styles.chatDate}>
+                            {formatIsoDateTimeEs(m.created_at) ?? formatShortDateEs(m.created_at)}
+                          </Text>
+                        </View>
+                      ))
+                    )}
+                  </ScrollView>
                   <View style={styles.chatInputRow}>
                     <TextInput
                       value={chatDraft}
@@ -1358,7 +1354,14 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
                             return;
                           }
                           setChatDraft('');
-                          await loadChat();
+                          if (res.message) {
+                            setChatMessages((prev) => {
+                              if (prev.some((m) => m.id === res.message!.id)) return prev;
+                              return [...prev, res.message!];
+                            });
+                          } else {
+                            await loadChat({ silent: true });
+                          }
                         } finally {
                           setChatSending(false);
                         }
