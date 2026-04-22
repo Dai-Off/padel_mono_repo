@@ -545,11 +545,11 @@ router.post('/onboarding', async (req: Request, res: Response) => {
     // Aplica fase 2
     pool = await getPhase2Pool(eloPhase1);
     const p2Result = await calcPhase2Result(phase2Ans);
-    finalElo = calcFinalElo(eloPhase1, p2Result.adjustment);
+    finalElo = await calcFinalElo(eloPhase1, p2Result.adjustment);
     phase2Score = p2Result.score;
   } else {
     // Floor/Ceil para fase 1 directa sin fase 2
-    finalElo = calcFinalElo(eloPhase1, 0); 
+    finalElo = await calcFinalElo(eloPhase1, 0);
   }
 
   const muToSave = eloToMu(finalElo);

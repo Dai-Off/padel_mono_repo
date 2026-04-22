@@ -1,6 +1,9 @@
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 
-// Tipos básicos
+// ============================================================================
+// Tipos
+// ============================================================================
+
 export type OnboardingAnswer = { question_key: string; value: any };
 
 export type Question = {
@@ -10,226 +13,284 @@ export type Question = {
   pool?: string | null;
   text: string;
   type: 'single' | 'multi' | 'order';
-  options: any[];
+  options: any;
   display_order: number;
 };
 
+type Phase2PoolRange = { min: number; max: number; pool: string };
+type Phase2AdjustmentRow = { min_score: number; adjustment: number };
+type FinalBounds = { floor: number; ceiling: number };
+
+type OnboardingConfig = {
+  p6_factors: Record<string, number>;
+  phase2_pools: Phase2PoolRange[];
+  phase2_adjustments: Phase2AdjustmentRow[]; // ordenada descendente por min_score
+  final_bounds: FinalBounds;
+};
+
+// ============================================================================
+// Config: lectura desde onboarding_config con cache en memoria (TTL 5 min)
+// ============================================================================
+
+const CONFIG_TTL_MS = 5 * 60 * 1000;
+let configCache: OnboardingConfig | null = null;
+let configCacheAt = 0;
+
+export async function getOnboardingConfig(forceRefresh = false): Promise<OnboardingConfig> {
+  if (!forceRefresh && configCache && Date.now() - configCacheAt < CONFIG_TTL_MS) {
+    return configCache;
+  }
+
+  const supabase = getSupabaseServiceRoleClient();
+  const { data, error } = await supabase.from('onboarding_config').select('key, value');
+  if (error) throw new Error(`No se pudo leer onboarding_config: ${error.message}`);
+
+  const byKey: Record<string, any> = {};
+  for (const row of (data || [])) byKey[row.key] = row.value;
+
+  const required = ['p6_factors', 'phase2_pools', 'phase2_adjustments', 'final_bounds'];
+  for (const k of required) {
+    if (byKey[k] === undefined) throw new Error(`onboarding_config: falta la clave '${k}'`);
+  }
+
+  configCache = {
+    p6_factors: byKey.p6_factors as Record<string, number>,
+    phase2_pools: byKey.phase2_pools as Phase2PoolRange[],
+    phase2_adjustments: (byKey.phase2_adjustments as Phase2AdjustmentRow[])
+      .slice()
+      .sort((a, b) => b.min_score - a.min_score),
+    final_bounds: byKey.final_bounds as FinalBounds,
+  };
+  configCacheAt = Date.now();
+  return configCache;
+}
+
 /**
- * Deriva el valor interno "mu" usado por OpenSkill a partir de un elo_rating en escala 0-7.
- * sigma se asume 8.333 (valor por defecto para nuevos jugadores).
- * mu = (elo_rating / 7 * 50) + 2 * sigma
+ * Invalida la cache de config (úsalo tras un cambio vía panel admin).
+ */
+export function invalidateOnboardingConfigCache(): void {
+  configCache = null;
+  configCacheAt = 0;
+}
+
+// ============================================================================
+// Conversión ELO <-> mu (OpenSkill)
+// ============================================================================
+
+/**
+ * Deriva el valor interno "mu" usado por OpenSkill a partir de un elo_rating
+ * en escala 0-7. sigma se asume 8.333 (default nuevo jugador).
  */
 export function eloToMu(eloRating: number): number {
   const sigma = 8.333;
   return (eloRating / 7 * 50) + 2 * sigma;
 }
 
-/**
- * Calcula el Elo Final sumando y aplicando floor y ceiling
- */
-export function calcFinalElo(eloPhase1: number, phase2Adjustment: number): number {
-  return Math.max(0.5, Math.min(6.25, eloPhase1 + phase2Adjustment));
+// ============================================================================
+// Cálculo ELO final (floor/ceiling de onboarding_config)
+// ============================================================================
+
+export async function calcFinalElo(eloPhase1: number, phase2Adjustment: number): Promise<number> {
+  const { final_bounds } = await getOnboardingConfig();
+  return Math.max(final_bounds.floor, Math.min(final_bounds.ceiling, eloPhase1 + phase2Adjustment));
 }
 
-/**
- * Obtiene el pool de Fase 2 según el ELO de la Fase 1
- */
-export function getPhase2Pool(eloPhase1: number): string {
-  if (eloPhase1 < 2.0) return 'beginner';
-  if (eloPhase1 < 3.5) return 'intermediate';
-  if (eloPhase1 < 4.5) return 'advanced';
-  if (eloPhase1 < 5.5) return 'competition';
-  return 'professional';
+// ============================================================================
+// Pool Fase 2 (rangos de onboarding_config)
+// ============================================================================
+
+export async function getPhase2Pool(eloPhase1: number): Promise<string> {
+  const { phase2_pools } = await getOnboardingConfig();
+  for (const range of phase2_pools) {
+    if (eloPhase1 >= range.min && eloPhase1 < range.max) return range.pool;
+  }
+  return phase2_pools[phase2_pools.length - 1]?.pool ?? 'beginner';
 }
 
-/**
- * Obtiene la siguiente pregunta (o las 5 finales de Fase 2) basado en respuestas hasta ahora.
- * Retorna { type: 'question', question: Question } | { type: 'phase2', questions: Question[] } | { type: 'complete' }
- */
+// ============================================================================
+// Flujo de preguntas
+// ============================================================================
+
 export async function getNextQuestionState(answers: OnboardingAnswer[]): Promise<any> {
   const supabase = getSupabaseServiceRoleClient();
-
-  // Helper para buscar respuesta
   const getAns = (key: string) => answers.find((a) => a.question_key === key)?.value;
   const p1Val = getAns('p1');
   const p7Val = getAns('p7');
 
-  // Si no hay P1, la primera es P1
   if (p1Val === undefined) return { type: 'question', question: await fetchQuestion('p1') };
 
   if (p1Val < 2) {
-    // Si P1 < 2, salta directo a P7
     if (p7Val === undefined) return { type: 'question', question: await fetchQuestion('p7') };
-    // Si respondió P7 = sí, va a P8 y P9
     if (p7Val === 'yes') {
       if (getAns('p8') === undefined) return { type: 'question', question: await fetchQuestion('p8') };
       if (getAns('p9') === undefined) return { type: 'question', question: await fetchQuestion('p9') };
     }
-    // Fin cuestionario (no hay Fase 2 para P1 < 2)
     return { type: 'complete' };
-  } else {
-    // P1 >= 2. Activa P2, P3, P5
-    if (getAns('p2') === undefined) return { type: 'question', question: await fetchQuestion('p2') };
-    if (getAns('p3') === undefined) return { type: 'question', question: await fetchQuestion('p3') };
-    
-    // P4 y P6 solo si P1 >= 3
-    if (p1Val >= 3 && getAns('p4') === undefined) return { type: 'question', question: await fetchQuestion('p4') };
-    
-    if (getAns('p5') === undefined) return { type: 'question', question: await fetchQuestion('p5') };
-    
-    if (p1Val >= 3 && getAns('p6') === undefined) return { type: 'question', question: await fetchQuestion('p6') };
-
-    // P7 siempre
-    if (p7Val === undefined) return { type: 'question', question: await fetchQuestion('p7') };
-    if (p7Val === 'yes') {
-      if (getAns('p8') === undefined) return { type: 'question', question: await fetchQuestion('p8') };
-      if (getAns('p9') === undefined) return { type: 'question', question: await fetchQuestion('p9') };
-    }
-
-    // Fin Fase 1. Retornamos las 5 de Fase 2.
-    // Para no devolverlas cada vez, verificamos si ya están en las answers marcadas.
-    // Asumiremos que si la API nos contacta y ya respondió P7/P9, necesita las questions de Fase 2.
-    
-    const questionsPhase1 = await fetchAllPhase1Questions();
-    const eloPhase1 = calcEloPhase1FromData(answers, questionsPhase1);
-    const pool = getPhase2Pool(eloPhase1);
-    
-    // Obtenemos 5 preguntas random del pool de Fase 2
-    const { data: qPhase2, error } = await supabase
-      .from('onboarding_questions')
-      .select('*')
-      .eq('phase', 2)
-      .eq('pool', pool)
-      .eq('is_active', true)
-      .order('id') // Para entorno real, aquí se mezclarían, en BBDD o local. Supabase no tiene ORDER BY random de caja fácil, pero si hay 5, traemos todas y mezclamos.
-      .limit(5);
-
-    if (error || !qPhase2) return { type: 'complete' }; // Fallback
-
-    // Mezclar (Fisher-Yates) y eliminar respuesta correcta de las opciones
-    const mixed = qPhase2.map(q => {
-      let optionsCopy = typeof q.options === 'string' ? JSON.parse(q.options) : q.options;
-      // Quitamos campos sensibles para el cliente
-      if (optionsCopy.correct_index !== undefined) delete optionsCopy.correct_index;
-      if (optionsCopy.correct_indices !== undefined) delete optionsCopy.correct_indices;
-      
-      // Si type is order, desordenamos las steps
-      if (q.type === 'order' && optionsCopy.steps) {
-        const steps = [...optionsCopy.steps];
-        for (let i = steps.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [steps[i], steps[j]] = [steps[j], steps[i]];
-        }
-        optionsCopy.client_steps = steps; // Enviamos los desordenados
-      }
-      return { ...q, options: optionsCopy };
-    }).sort(() => Math.random() - 0.5);
-
-    return { type: 'phase2', questions: mixed, elo_phase1: eloPhase1, pool_assigned: pool };
   }
+
+  // P1 >= 2
+  if (getAns('p2') === undefined) return { type: 'question', question: await fetchQuestion('p2') };
+  if (getAns('p3') === undefined) return { type: 'question', question: await fetchQuestion('p3') };
+  if (p1Val >= 3 && getAns('p4') === undefined) return { type: 'question', question: await fetchQuestion('p4') };
+  if (getAns('p5') === undefined) return { type: 'question', question: await fetchQuestion('p5') };
+  if (p1Val >= 3 && getAns('p6') === undefined) return { type: 'question', question: await fetchQuestion('p6') };
+
+  if (p7Val === undefined) return { type: 'question', question: await fetchQuestion('p7') };
+  if (p7Val === 'yes') {
+    if (getAns('p8') === undefined) return { type: 'question', question: await fetchQuestion('p8') };
+    if (getAns('p9') === undefined) return { type: 'question', question: await fetchQuestion('p9') };
+  }
+
+  // Fin Fase 1 -> servimos 5 preguntas aleatorias del pool correspondiente
+  const questionsPhase1 = await fetchAllPhase1Questions();
+  const eloPhase1 = await calcEloPhase1FromData(answers, questionsPhase1);
+  const pool = await getPhase2Pool(eloPhase1);
+
+  const { data: qPhase2, error } = await supabase
+    .from('onboarding_questions')
+    .select('*')
+    .eq('phase', 2)
+    .eq('pool', pool)
+    .eq('is_active', true)
+    .order('id')
+    .limit(5);
+
+  if (error || !qPhase2) return { type: 'complete' };
+
+  const mixed = qPhase2.map(q => {
+    const optionsCopy = typeof q.options === 'string' ? JSON.parse(q.options) : { ...q.options };
+    if (optionsCopy.correct_index !== undefined) delete optionsCopy.correct_index;
+    if (optionsCopy.correct_indices !== undefined) delete optionsCopy.correct_indices;
+
+    if (q.type === 'order' && optionsCopy.steps) {
+      const steps = [...optionsCopy.steps];
+      for (let i = steps.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [steps[i], steps[j]] = [steps[j], steps[i]];
+      }
+      optionsCopy.client_steps = steps;
+    }
+    return { ...q, options: optionsCopy };
+  }).sort(() => Math.random() - 0.5);
+
+  return { type: 'phase2', questions: mixed, elo_phase1: eloPhase1, pool_assigned: pool };
 }
 
-/**
- * Extrae y calcula el ELO de Fase 1.
- */
+// ============================================================================
+// Cálculo ELO Fase 1
+// ============================================================================
+
 export async function calcEloPhase1(answers: OnboardingAnswer[]): Promise<number> {
   const questions = await fetchAllPhase1Questions();
   return calcEloPhase1FromData(answers, questions);
 }
 
-function calcEloPhase1FromData(answers: OnboardingAnswer[], questions: Question[]): number {
+async function calcEloPhase1FromData(answers: OnboardingAnswer[], questions: Question[]): Promise<number> {
   const getAns = (key: string) => answers.find((a) => a.question_key === key)?.value;
   const p1Val = getAns('p1');
   if (p1Val === undefined) return 0.5;
 
-  const P9_MATRIX: Record<string, number[]> = {
-    "sin P2": [0.5, 0.7, 1.0, 1.8],
-    "A": [0.1, 0.2, 0.3, 1.3],
-    "B": [0.1, 0.1, 0.2, 0.9],
-    "C": [0.0, 0.0, 0.1, 0.4],
-    "D": [0.0, 0.0, 0.0, 0.0]
-  };
+  const { p6_factors, final_bounds } = await getOnboardingConfig();
 
+  // Matriz P9 leída de las options de p9 (opt.correctors).
+  const p9q = questions.find(q => q.question_key === 'p9');
   const p9Val = getAns('p9') !== undefined ? Number(getAns('p9')) : 0;
+  const p9Option = Array.isArray(p9q?.options)
+    ? (p9q!.options as any[]).find(o => Number(o.value) === p9Val)
+    : null;
+  const p9Correctors: Record<string, number> = p9Option?.correctors ?? {};
 
   if (p1Val < 2) {
     if (getAns('p7') === 'yes' && getAns('p9') !== undefined) {
-      return P9_MATRIX["sin P2"][p9Val] || 0.5;
+      const v = p9Correctors['sin_p2'];
+      return typeof v === 'number' ? v : 0.5;
     }
     return 0.5;
   }
 
-  // Caso P1 >= 2
+  // P1 >= 2: acumulador + techos
   let elo = 0;
-  let ceilP1 = p1Val === 2 ? 2.9 : (p1Val === 3 ? 4.4 : 6.25);
-  let ceilP2 = 6.25;
+
+  // Techo P1 leído de las options de p1 (opt.ceiling).
+  const p1q = questions.find(q => q.question_key === 'p1');
+  const p1Option = Array.isArray(p1q?.options)
+    ? (p1q!.options as any[]).find(o => Number(o.value) === Number(p1Val))
+    : null;
+  const ceilP1: number | null = p1Option?.ceiling ?? null;
+
+  let ceilP2 = final_bounds.ceiling;
 
   const p2Ans = getAns('p2');
   if (p2Ans) {
     const p2q = questions.find(q => q.question_key === 'p2');
-    const opt = p2q?.options.find(o => o.value === p2Ans);
+    const opt = Array.isArray(p2q?.options)
+      ? (p2q!.options as any[]).find(o => o.value === p2Ans)
+      : null;
     if (opt) {
-      elo += opt.base_elo || 0;
-      ceilP2 = opt.ceiling || 6.25;
+      elo += Number(opt.base_elo) || 0;
+      ceilP2 = (opt.ceiling != null ? Number(opt.ceiling) : final_bounds.ceiling);
     }
   }
 
   const addCorrector = (qKey: string) => {
     const ans = getAns(qKey);
-    if (ans !== undefined) {
-      const q = questions.find(q => q.question_key === qKey);
-      const opt = q?.options.find((o, idx) => o.text === ans || o.value == ans || idx == ans);
-      if (opt && opt.corrector) elo += Number(opt.corrector);
-    }
+    if (ans === undefined) return;
+    const q = questions.find(qq => qq.question_key === qKey);
+    if (!q || !Array.isArray(q.options)) return;
+    const opt = (q.options as any[]).find((o, idx) => o.text === ans || o.value == ans || idx == ans);
+    if (opt && opt.corrector != null) elo += Number(opt.corrector);
   };
 
   addCorrector('p3');
   addCorrector('p4');
   addCorrector('p5');
 
-  // P6 Multiselect
-  const p6Ans = getAns('p6'); // array of texts/indices
-  if (p6Ans && Array.isArray(p6Ans) && p6Ans.length > 0) {
+  // P6 multiselect: elo = max(seleccionados) + sum(resto) * factor[p1Val]
+  const p6Ans = getAns('p6');
+  if (Array.isArray(p6Ans) && p6Ans.length > 0) {
     const p6q = questions.find(q => q.question_key === 'p6');
-    const factor = p1Val === 3 ? 0.3 : 0.2;
+    const factor = Number(p6_factors[String(p1Val)] ?? 0);
     const prop = p1Val === 3 ? 'elo_reg' : 'elo_adv';
-    
-    let elos: number[] = [];
-    for (const text of p6Ans) {
-      const opt = p6q?.options.find((o: any) => o.text === text || o.value === text);
-      if (opt && opt[prop]) {
-        elos.push(Number(opt[prop]));
+
+    const elos: number[] = [];
+    if (Array.isArray(p6q?.options)) {
+      for (const value of p6Ans) {
+        const opt = (p6q!.options as any[]).find(o => o.text === value || o.value === value);
+        if (opt && opt[prop] != null) {
+          const v = Number(opt[prop]);
+          if (v > 0) elos.push(v);
+        }
       }
     }
-    elos.sort((a, b) => b - a); // Mayor a menor
+    elos.sort((a, b) => b - a);
     if (elos.length > 0) {
       elo += elos[0];
-      for (let i = 1; i < elos.length; i++) {
-        elo += elos[i] * factor;
-      }
+      for (let i = 1; i < elos.length; i++) elo += elos[i] * factor;
     }
   }
 
-  // Corrector P9
-  if (getAns('p7') === 'yes' && getAns('p9') !== undefined) {
-    if (P9_MATRIX[p2Ans]) {
-      elo += P9_MATRIX[p2Ans][p9Val] || 0;
-    }
+  // Corrector P9 (matriz cruzada con P2)
+  if (getAns('p7') === 'yes' && getAns('p9') !== undefined && typeof p2Ans === 'string') {
+    const v = p9Correctors[p2Ans];
+    if (typeof v === 'number') elo += v;
   }
 
-  // Techos
+  // Aplicar techos en cascada: primero P2, luego P1
   elo = Math.min(elo, ceilP2);
-  elo = Math.min(elo, ceilP1);
+  if (ceilP1 != null) elo = Math.min(elo, ceilP1);
 
   return elo;
 }
 
-/**
- * Calcula la puntuación de la Fase 2 (0 a 5) y el ajuste de ELO final.
- */
-export async function calcPhase2Result(phase2Answers: OnboardingAnswer[]): Promise<{ score: number, adjustment: number }> {
+// ============================================================================
+// Cálculo resultado Fase 2
+// ============================================================================
+
+export async function calcPhase2Result(
+  phase2Answers: OnboardingAnswer[]
+): Promise<{ score: number; adjustment: number }> {
   if (!phase2Answers || phase2Answers.length === 0) return { score: 0, adjustment: 0 };
-  
+
   const supabase = getSupabaseServiceRoleClient();
   const keys = phase2Answers.map(a => a.question_key);
   const { data: questions } = await supabase
@@ -253,47 +314,42 @@ export async function calcPhase2Result(phase2Answers: OnboardingAnswer[]): Promi
       }
     } else if (q.type === 'multi') {
       const selected = Array.isArray(p2ans.value) ? p2ans.value : [p2ans.value];
-      let correctIndices = opts.correct_indices as number[];
-      // convert names to indices if needed
-      let selIndices = selected.map(s => typeof s === 'number' ? s : opts.options.indexOf(s));
-      
-      const allCorrect = correctIndices.every(c => selIndices.includes(c)) && selIndices.every(s => correctIndices.includes(s));
-      const someCorrect = selIndices.some(s => correctIndices.includes(s));
-      const noneWrong = selIndices.every(s => correctIndices.includes(s));
+      const correctIndices = opts.correct_indices as number[];
+      const selIndices = selected.map((s: any) => typeof s === 'number' ? s : opts.options.indexOf(s));
+
+      const allCorrect =
+        correctIndices.every(c => selIndices.includes(c)) &&
+        selIndices.every((s: number) => correctIndices.includes(s));
+      const someCorrect = selIndices.some((s: number) => correctIndices.includes(s));
+      const noneWrong = selIndices.every((s: number) => correctIndices.includes(s));
 
       if (allCorrect) score += 1;
       else if (someCorrect && noneWrong) score += 0.5;
-      else score += 0;
     } else if (q.type === 'order') {
-      // expected order is the original array
       const originalSteps = opts.steps as string[];
-      let isCorrect = true;
-      if (Array.isArray(p2ans.value) && p2ans.value.length === originalSteps.length) {
+      let isCorrect = Array.isArray(p2ans.value) && p2ans.value.length === originalSteps.length;
+      if (isCorrect) {
         for (let i = 0; i < originalSteps.length; i++) {
-          if (p2ans.value[i] !== originalSteps[i]) {
-            isCorrect = false;
-            break;
-          }
+          if (p2ans.value[i] !== originalSteps[i]) { isCorrect = false; break; }
         }
-      } else {
-        isCorrect = false;
       }
       if (isCorrect) score += 1;
     }
   }
 
-  let adjustment = 0;
-  if (score >= 5) adjustment = 0.7;
-  else if (score >= 4) adjustment = 0.4;
-  else if (score >= 3) adjustment = 0.2;
-  else if (score > 2) adjustment = 0;
-  else if (score === 2) adjustment = -0.3;
-  else if (score >= 1) adjustment = -0.7;
-  else adjustment = -1.0;
+  // Ajuste leído de onboarding_config (ya ordenado descendentemente en cache)
+  const { phase2_adjustments } = await getOnboardingConfig();
+  let adjustment = phase2_adjustments[phase2_adjustments.length - 1]?.adjustment ?? -1.0;
+  for (const row of phase2_adjustments) {
+    if (score >= row.min_score) { adjustment = row.adjustment; break; }
+  }
 
   return { score, adjustment };
 }
 
+// ============================================================================
+// Helpers de fetch
+// ============================================================================
 
 async function fetchQuestion(key: string): Promise<Question | null> {
   const supabase = getSupabaseServiceRoleClient();
@@ -302,7 +358,6 @@ async function fetchQuestion(key: string): Promise<Question | null> {
     .select('*')
     .eq('question_key', key)
     .maybeSingle();
-
   if (error || !data) return null;
   return data as Question;
 }
