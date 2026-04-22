@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { AppState, type AppStateStatus, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchMatches } from '../api/matches';
 import { fetchPublicTournaments } from '../api/tournaments';
@@ -10,6 +10,9 @@ import {
   DailyLessonCard,
   EnDirectoSection,
   IAAfinidadCard,
+  InicioAmbientBackground,
+  InicioEnterBlock,
+  InicioWidgetsCarousel,
   InicioQuickActions,
   INICIO_PAD_BOTTOM,
   INICIO_PAD_H,
@@ -25,11 +28,12 @@ import { useHomeStats } from '../hooks/useHomeStats';
 import type { PartidoItem } from './PartidosScreen';
 import { IAAfinidadModal } from '../components/home/IAAfinidadModal';
 import { searchAiMatch } from '../api/aiMatch';
-import { fetchMatchmakingLeagueConfig, type MatchmakingLeagueConfigRow } from '../api/matchmaking';
 
 type TabId = 'pistas' | 'partidos' | 'torneos';
 
 type HomeScreenProps = {
+  /** Incrementar al volver de la lección diaria para refrescar racha en la card. */
+  streakRefreshKey?: number;
   onNavigateToTab?: (tab: TabId) => void;
   onPartidoPress?: (partido: PartidoItem) => void;
   onDailyLessonPress?: () => void;
@@ -38,6 +42,7 @@ type HomeScreenProps = {
 };
 
 export function HomeScreen({
+  streakRefreshKey = 0,
   onNavigateToTab,
   onPartidoPress,
   onDailyLessonPress,
@@ -45,7 +50,7 @@ export function HomeScreen({
   onOpenCompetitiveLeague,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
-  const { session } = useAuth();
+  const { session, refreshAccessToken } = useAuth();
   const { stats, loading: statsLoading } = useHomeStats();
   const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
   const [tournamentsLoading, setTournamentsLoading] = useState(true);
@@ -57,25 +62,26 @@ export function HomeScreen({
   const [affinityLoading, setAffinityLoading] = useState(false);
   const [affinityResponse, setAffinityResponse] = useState<string | null>(null);
   const [affinityError, setAffinityError] = useState<string | null>(null);
-  const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    void fetchMatchmakingLeagueConfig().then((rows) => {
-      if (mounted) setLeagueRows(rows);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, []);
 
   const loadMatches = useCallback(async () => {
     setMatchesLoading(true);
-    const token = session?.access_token ?? null;
-    const [playerId, matches] = await Promise.all([
+    let token = session?.access_token ?? null;
+    let [playerId, matches] = await Promise.all([
       token ? fetchMyPlayerId(token) : Promise.resolve(null),
       fetchMatches({ expand: true, token }),
     ]);
+
+    if (!playerId && session?.refresh_token) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        token = newToken;
+        [playerId, matches] = await Promise.all([
+          fetchMyPlayerId(newToken),
+          fetchMatches({ expand: true, token: newToken }),
+        ]);
+      }
+    }
+
     const mineRaw = selectMyUpcomingMatches(matches, playerId);
     const misProximos = mineRaw
       .map(mapMatchToPartido)
@@ -89,10 +95,22 @@ export function HomeScreen({
       .filter((p) => p.matchPhase !== 'past');
     setPartidos(all.filter((p) => p.visibility !== 'private'));
     setMatchesLoading(false);
-  }, [session?.access_token]);
+  }, [session?.access_token, session?.refresh_token, refreshAccessToken]);
 
   useEffect(() => {
     loadMatches();
+  }, [loadMatches]);
+
+  useEffect(() => {
+    let last: AppStateStatus = AppState.currentState;
+    const sub = AppState.addEventListener('change', (next) => {
+      const prev = last;
+      last = next;
+      if (prev.match(/inactive|background/) && next === 'active') {
+        loadMatches();
+      }
+    });
+    return () => sub.remove();
   }, [loadMatches]);
 
   useEffect(() => {
@@ -122,46 +140,6 @@ export function HomeScreen({
   }, [session?.access_token]);
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
-
-  const competitiveLeagueHomeProps = useMemo(() => {
-    const p = myPlayerProfile;
-    if (!p) {
-      return {
-        divisionName: null as string | null,
-        leaguePoints: null as string | null,
-        ladderProgressPercent: null as number | null,
-        winsLabel: null as string | null,
-        lossesLabel: null as string | null,
-        eloFiabCaption: null as string | null,
-      };
-    }
-    const row = leagueRows?.find((r) => r.code === p.liga);
-    const divisionName =
-      row?.label ??
-      (p.liga && p.liga.length > 0 ? p.liga.charAt(0).toUpperCase() + p.liga.slice(1) : null);
-    const leaguePoints = p.lps != null ? String(p.lps) : null;
-    let ladderProgressPercent: number | null = null;
-    if (p.lps != null) {
-      const t = row?.lps_to_promote != null && row.lps_to_promote > 0 ? row.lps_to_promote : 100;
-      ladderProgressPercent = Math.min(100, Math.round((p.lps / t) * 100));
-    }
-    const winsLabel = `${p.mmWins} victorias`;
-    const lossesLabel = `${p.mmLosses} derrotas`;
-    const capParts: string[] = [];
-    if (p.eloRating != null) capParts.push(`Elo ${p.eloRating.toFixed(1)}`);
-    if (p.fiabilidad != null) capParts.push(`Fiab. ${p.fiabilidad}%`);
-    if (p.matchesPlayedMatchmaking != null) capParts.push(`${p.matchesPlayedMatchmaking} PJ MM`);
-    if (p.mmDraws > 0) capParts.push(`${p.mmDraws} empates`);
-    const eloFiabCaption = capParts.length > 0 ? capParts.join(' · ') : null;
-    return {
-      divisionName,
-      leaguePoints,
-      ladderProgressPercent,
-      winsLabel,
-      lossesLabel,
-      eloFiabCaption,
-    };
-  }, [myPlayerProfile, leagueRows]);
 
   const handleAffinitySearch = useCallback(
     async (prompt: string) => {
@@ -206,59 +184,75 @@ export function HomeScreen({
 
   return (
     <>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[
-          styles.content,
-          {
-            paddingTop: INICIO_PAD_TOP,
-            paddingBottom: INICIO_PAD_BOTTOM + insets.bottom,
-          },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        <ProximosPartidosSection
-          items={misProximosPartidos}
-          /** No acoplar a session aquí: en iOS la sesión hidrata tarde y `loading` quedaba false con items vacíos → la sección se ocultaba por completo (early return). */
-          loading={matchesLoading}
-          onPartidoPress={onPartidoPress}
-        />
-        <DailyLessonCard onPress={() => onDailyLessonPress?.()} />
-        <SeasonPassHomeCard />
-        <CompetitiveLeagueHomeCard
-          divisionName={competitiveLeagueHomeProps.divisionName}
-          leaguePoints={competitiveLeagueHomeProps.leaguePoints}
-          ladderProgressPercent={competitiveLeagueHomeProps.ladderProgressPercent}
-          winsLabel={competitiveLeagueHomeProps.winsLabel}
-          lossesLabel={competitiveLeagueHomeProps.lossesLabel}
-          eloFiabCaption={competitiveLeagueHomeProps.eloFiabCaption}
-          onPress={() => {
-            onOpenCompetitiveLeague?.();
-          }}
-        />
-        <InicioQuickActions
-          onNavigateToTab={onNavigateToTab}
-          onCoursesPress={onCoursesPress}
-          openMatchesCount={partidos.length}
-          courtsFree={stats?.courtsFree}
-          tournamentsCount={publicTournamentsCount}
-          loading={listLoading}
-        />
-        <IAAfinidadCard
-          onPress={() => {
-            setAffinityError(null);
-            setAffinityResponse(null);
-            setAffinityModalVisible(true);
-          }}
-        />
-        <MissionsHomeSection />
-        <EnDirectoSection
-          partidos={partidos.filter((p) => p.matchPhase === 'live')}
-          loading={matchesLoading}
-          onPartidoPress={onPartidoPress}
-          onOpenPartidos={() => onNavigateToTab?.('partidos')}
-        />
-      </ScrollView>
+      <View style={styles.screenRoot}>
+        <InicioAmbientBackground />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingTop: INICIO_PAD_TOP,
+              paddingBottom: INICIO_PAD_BOTTOM + insets.bottom,
+            },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+        {(matchesLoading || misProximosPartidos.length > 0) && (
+          <InicioEnterBlock enterIndex={0}>
+            <ProximosPartidosSection
+              items={misProximosPartidos}
+              /** No acoplar a session aquí: en iOS la sesión hidrata tarde y `loading` quedaba false con items vacíos → la sección se ocultaba por completo (early return). */
+              loading={matchesLoading}
+              onPartidoPress={onPartidoPress}
+            />
+          </InicioEnterBlock>
+        )}
+        <InicioEnterBlock enterIndex={1}>
+          <InicioWidgetsCarousel>
+            <DailyLessonCard
+              variant="carousel"
+              streakRefreshKey={streakRefreshKey}
+              onPress={() => onDailyLessonPress?.()}
+            />
+            <SeasonPassHomeCard compact />
+            <CompetitiveLeagueHomeCard
+              compact
+              onPress={() => onOpenCompetitiveLeague?.()}
+            />
+          </InicioWidgetsCarousel>
+        </InicioEnterBlock>
+        <InicioEnterBlock enterIndex={2}>
+          <InicioQuickActions
+            onNavigateToTab={onNavigateToTab}
+            onCoursesPress={onCoursesPress}
+            openMatchesCount={partidos.length}
+            courtsFree={stats?.courtsFree}
+            tournamentsCount={publicTournamentsCount}
+            loading={listLoading}
+          />
+        </InicioEnterBlock>
+        <InicioEnterBlock enterIndex={3}>
+          <IAAfinidadCard
+            onPress={() => {
+              setAffinityError(null);
+              setAffinityResponse(null);
+              setAffinityModalVisible(true);
+            }}
+          />
+        </InicioEnterBlock>
+        <InicioEnterBlock enterIndex={4}>
+          <MissionsHomeSection />
+        </InicioEnterBlock>
+        <InicioEnterBlock enterIndex={5}>
+          <EnDirectoSection
+            partidos={partidos.filter((p) => p.matchPhase === 'live')}
+            loading={matchesLoading}
+            onPartidoPress={onPartidoPress}
+            onOpenPartidos={() => onNavigateToTab?.('partidos')}
+          />
+        </InicioEnterBlock>
+        </ScrollView>
+      </View>
 
       <IAAfinidadModal
         visible={affinityModalVisible}
@@ -274,9 +268,14 @@ export function HomeScreen({
 }
 
 const styles = StyleSheet.create({
+  screenRoot: {
+    flex: 1,
+    backgroundColor: '#0F0F0F',
+  },
   scroll: {
     flex: 1,
-    backgroundColor: '#000',
+    zIndex: 1,
+    backgroundColor: 'transparent',
   },
   content: {
     paddingHorizontal: INICIO_PAD_H,
