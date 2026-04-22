@@ -704,15 +704,9 @@ router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response
  *         name: q
  *         schema: { type: string }
  *         description: Texto de búsqueda (nombre, apellido o teléfono)
- *       - in: query
- *         name: club_id
- *         schema: { type: string, format: uuid }
- *         description: Si se envía, cada jugador incluye `wallet_balance_cents` (suma de wallet_transactions en ese club)
  */
 router.get('/', async (req: Request, res: Response) => {
   const query = req.query.q as string | undefined;
-  const clubIdRaw = req.query.club_id as string | undefined;
-  const clubId = typeof clubIdRaw === 'string' && clubIdRaw.trim() ? clubIdRaw.trim() : null;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const terms = String(query ?? '')
@@ -760,37 +754,6 @@ router.get('/', async (req: Request, res: Response) => {
       });
       players = players.slice(0, 50);
     }
-
-    if (clubId && players.length > 0) {
-      const ids = players.map((p) => String((p as { id?: string }).id)).filter(Boolean);
-      const { data: wtRows, error: wtErr } = await supabase
-        .from('wallet_transactions')
-        .select('player_id, amount_cents')
-        .eq('club_id', clubId)
-        .in('player_id', ids);
-
-      if (wtErr) {
-        if (wtErr.code === '42P01' || wtErr.message?.includes('does not exist')) {
-          players = players.map((p) => ({ ...p, wallet_balance_cents: 0 }));
-        } else {
-          console.error('[GET /players] wallet aggregate:', wtErr.message);
-          players = players.map((p) => ({ ...p, wallet_balance_cents: 0 }));
-        }
-      } else {
-        const sums = new Map<string, number>();
-        for (const r of wtRows ?? []) {
-          const pid = String((r as { player_id?: string }).player_id ?? '');
-          if (!pid) continue;
-          const amt = Number((r as { amount_cents?: number }).amount_cents ?? 0);
-          sums.set(pid, (sums.get(pid) ?? 0) + amt);
-        }
-        players = players.map((p) => {
-          const id = String((p as { id?: string }).id);
-          return { ...p, wallet_balance_cents: sums.get(id) ?? 0 };
-        });
-      }
-    }
-
     return res.json({ ok: true, players });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
