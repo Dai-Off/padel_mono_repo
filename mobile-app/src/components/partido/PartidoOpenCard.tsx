@@ -1,5 +1,6 @@
 import {
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -59,6 +60,8 @@ function countFree(players: PartidoPlayer[]): number {
 type Props = {
   item: PartidoItem;
   onPress: () => void;
+  /** Ancho completo del padre (p. ej. una sola reserva en Inicio). */
+  fullWidth?: boolean;
 };
 
 function PlayerFace({ player }: { player: PartidoPlayer }) {
@@ -88,7 +91,7 @@ function PlayerFace({ player }: { player: PartidoPlayer }) {
 }
 
 /** Tarjeta alineada al listado web (imagen + meta + slots horizontales). */
-export function PartidoOpenCard({ item, onPress }: Props) {
+export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
   const { datePart, timePart } = splitDateTime(item.dateTime);
   const uri = item.venueImage ?? pickPlaceholderUri(item.id);
   const libres = countFree(item.players);
@@ -96,7 +99,11 @@ export function PartidoOpenCard({ item, onPress }: Props) {
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.card,
+        fullWidth && styles.cardFullWidth,
+        pressed && styles.pressed,
+      ]}
     >
       <LinearGradient
         colors={["rgba(255,255,255,0.07)", "rgba(255,255,255,0.03)"]}
@@ -141,14 +148,12 @@ export function PartidoOpenCard({ item, onPress }: Props) {
                 </>
               ) : null}
             </View>
-            <View style={styles.badgesRow}>
-              <View style={styles.badge}>
-                <Text style={styles.badgeTxt} numberOfLines={1}>
-                  {item.typeLabel}
-                </Text>
+            <View style={styles.badgesColumn}>
+              <View style={[styles.badge, styles.badgeBand]}>
+                <Text style={styles.badgeTxt}>{item.typeLabel}</Text>
               </View>
-              <View style={styles.badge}>
-                <Text style={styles.badgeTxt} numberOfLines={1}>
+              <View style={[styles.badge, styles.badgeBand]}>
+                <Text style={styles.badgeTxt}>
                   📊 {item.levelRange.replace(/\./g, ",")}
                 </Text>
               </View>
@@ -187,6 +192,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 10,
     elevation: 6,
+  },
+  cardFullWidth: {
+    alignSelf: "stretch",
+    width: "100%",
   },
   pressed: { opacity: 0.92 },
   cardBorder: {
@@ -268,11 +277,17 @@ const styles = StyleSheet.create({
     color: "#6b7280",
     fontWeight: "500",
   },
-  badgesRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+  /**
+   * Dos filas a ancho completo: texto íntegro (sin …), ELO siempre debajo del tipo.
+   * Evita el layout en columnas estrechas donde el tipo y el ELO competían en una fila.
+   */
+  badgesColumn: {
+    flexDirection: "column",
+    alignSelf: "stretch",
     gap: 6,
     marginBottom: 4,
+    /** Misma altura mínima del bloque (tipo + ELO) entre cards; si el texto ocupa más, crece sin recortar. */
+    minHeight: 54,
   },
   badge: {
     paddingHorizontal: 8,
@@ -281,13 +296,20 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.1)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
-    maxWidth: "100%",
+  },
+  badgeBand: {
+    alignSelf: "stretch",
   },
   badgeTxt: {
     fontSize: 9,
     fontWeight: "700",
     color: "#d1d5db",
     textTransform: "uppercase",
+    lineHeight: 12,
+    ...Platform.select({
+      android: { includeFontPadding: false },
+      default: {},
+    }),
   },
   slotsRow: {
     flexDirection: "row",

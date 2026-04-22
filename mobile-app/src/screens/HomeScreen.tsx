@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ScrollView, StyleSheet } from 'react-native';
+import { AppState, type AppStateStatus, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchMatches } from '../api/matches';
 import { fetchPublicTournaments } from '../api/tournaments';
@@ -12,6 +12,9 @@ import {
   DailyLessonCard,
   EnDirectoSection,
   IAAfinidadCard,
+  InicioAmbientBackground,
+  InicioEnterBlock,
+  InicioWidgetsCarousel,
   InicioQuickActions,
   INICIO_PAD_BOTTOM,
   INICIO_PAD_H,
@@ -31,15 +34,25 @@ import { searchAiMatch } from '../api/aiMatch';
 type TabId = 'pistas' | 'partidos' | 'torneos';
 
 type HomeScreenProps = {
+  /** Incrementar al volver de la lección diaria para refrescar racha en la card. */
+  streakRefreshKey?: number;
   onNavigateToTab?: (tab: TabId) => void;
   onPartidoPress?: (partido: PartidoItem) => void;
   onDailyLessonPress?: () => void;
   onCoursesPress?: () => void;
+  onOpenMessageThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
 };
 
-export function HomeScreen({ onNavigateToTab, onPartidoPress, onDailyLessonPress, onCoursesPress }: HomeScreenProps) {
+export function HomeScreen({
+  streakRefreshKey = 0,
+  onNavigateToTab,
+  onPartidoPress,
+  onDailyLessonPress,
+  onCoursesPress,
+  onOpenMessageThread,
+}: HomeScreenProps) {
   const insets = useSafeAreaInsets();
-  const { session } = useAuth();
+  const { session, refreshAccessToken } = useAuth();
   const { stats, loading: statsLoading } = useHomeStats();
   const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
   const [tournamentsLoading, setTournamentsLoading] = useState(true);
@@ -62,11 +75,23 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onDailyLessonPress
 
   const loadMatches = useCallback(async () => {
     setMatchesLoading(true);
-    const token = session?.access_token ?? null;
-    const [playerId, matches] = await Promise.all([
+    let token = session?.access_token ?? null;
+    let [playerId, matches] = await Promise.all([
       token ? fetchMyPlayerId(token) : Promise.resolve(null),
       fetchMatches({ expand: true, token }),
     ]);
+
+    if (!playerId && session?.refresh_token) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        token = newToken;
+        [playerId, matches] = await Promise.all([
+          fetchMyPlayerId(newToken),
+          fetchMatches({ expand: true, token: newToken }),
+        ]);
+      }
+    }
+
     const mineRaw = selectMyUpcomingMatches(matches, playerId);
     const misProximos = mineRaw
       .map(mapMatchToPartido)
@@ -80,10 +105,22 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onDailyLessonPress
       .filter((p) => p.matchPhase !== 'past');
     setPartidos(all.filter((p) => p.visibility !== 'private'));
     setMatchesLoading(false);
-  }, [session?.access_token]);
+  }, [session?.access_token, session?.refresh_token, refreshAccessToken]);
 
   useEffect(() => {
     loadMatches();
+  }, [loadMatches]);
+
+  useEffect(() => {
+    let last: AppStateStatus = AppState.currentState;
+    const sub = AppState.addEventListener('change', (next) => {
+      const prev = last;
+      last = next;
+      if (prev.match(/inactive|background/) && next === 'active') {
+        loadMatches();
+      }
+    });
+    return () => sub.remove();
   }, [loadMatches]);
 
   useEffect(() => {
@@ -146,51 +183,75 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onDailyLessonPress
 
   return (
     <>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[
-          styles.content,
-          {
-            paddingTop: INICIO_PAD_TOP,
-            paddingBottom: INICIO_PAD_BOTTOM + insets.bottom,
-          },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        <ProximosPartidosSection
-          items={misProximosPartidos}
-          /** No acoplar a session aquí: en iOS la sesión hidrata tarde y `loading` quedaba false con items vacíos → la sección se ocultaba por completo (early return). */
-          loading={matchesLoading}
-          onPartidoPress={onPartidoPress}
-        />
-        <DailyLessonCard onPress={() => onDailyLessonPress?.()} />
-        <SeasonPassHomeCard />
-        <CompetitiveLeagueHomeCard
-          onPress={() => onNavigateToTab?.('torneos')}
-        />
-        <InicioQuickActions
-          onNavigateToTab={onNavigateToTab}
-          onCoursesPress={onCoursesPress}
-          openMatchesCount={partidos.length}
-          courtsFree={stats?.courtsFree}
-          tournamentsCount={publicTournamentsCount}
-          loading={listLoading}
-        />
-        <IAAfinidadCard
-          onPress={() => {
-            setAiError(null);
-            setAiResponse(null);
-            setAiModalVisible(true);
-          }}
-        />
-        <MissionsHomeSection />
-        <EnDirectoSection
-          partidos={partidos.filter((p) => p.matchPhase === 'live')}
-          loading={matchesLoading}
-          onPartidoPress={onPartidoPress}
-          onOpenPartidos={() => onNavigateToTab?.('partidos')}
-        />
-      </ScrollView>
+      <View style={styles.screenRoot}>
+        <InicioAmbientBackground />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingTop: INICIO_PAD_TOP,
+              paddingBottom: INICIO_PAD_BOTTOM + insets.bottom,
+            },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+        {(matchesLoading || misProximosPartidos.length > 0) && (
+          <InicioEnterBlock enterIndex={0}>
+            <ProximosPartidosSection
+              items={misProximosPartidos}
+              /** No acoplar a session aquí: en iOS la sesión hidrata tarde y `loading` quedaba false con items vacíos → la sección se ocultaba por completo (early return). */
+              loading={matchesLoading}
+              onPartidoPress={onPartidoPress}
+            />
+          </InicioEnterBlock>
+        )}
+        <InicioEnterBlock enterIndex={1}>
+          <InicioWidgetsCarousel>
+            <DailyLessonCard
+              variant="carousel"
+              streakRefreshKey={streakRefreshKey}
+              onPress={() => onDailyLessonPress?.()}
+            />
+            <SeasonPassHomeCard compact />
+            <CompetitiveLeagueHomeCard
+              compact
+              onPress={() => onNavigateToTab?.('torneos')}
+            />
+          </InicioWidgetsCarousel>
+        </InicioEnterBlock>
+        <InicioEnterBlock enterIndex={2}>
+          <InicioQuickActions
+            onNavigateToTab={onNavigateToTab}
+            onCoursesPress={onCoursesPress}
+            openMatchesCount={partidos.length}
+            courtsFree={stats?.courtsFree}
+            tournamentsCount={publicTournamentsCount}
+            loading={listLoading}
+          />
+        </InicioEnterBlock>
+        <InicioEnterBlock enterIndex={3}>
+          <IAAfinidadCard
+            onPress={() => {
+              setAiError(null);
+              setAiResponse(null);
+              setAiModalVisible(true);
+            }}
+          />
+        </InicioEnterBlock>
+        <InicioEnterBlock enterIndex={4}>
+          <MissionsHomeSection />
+        </InicioEnterBlock>
+        <InicioEnterBlock enterIndex={5}>
+          <EnDirectoSection
+            partidos={partidos.filter((p) => p.matchPhase === 'live')}
+            loading={matchesLoading}
+            onPartidoPress={onPartidoPress}
+            onOpenPartidos={() => onNavigateToTab?.('partidos')}
+          />
+        </InicioEnterBlock>
+        </ScrollView>
+      </View>
 
       <AiMatchModal
         visible={aiModalVisible}
@@ -199,15 +260,24 @@ export function HomeScreen({ onNavigateToTab, onPartidoPress, onDailyLessonPress
         errorText={aiError}
         onClose={() => setAiModalVisible(false)}
         onSubmit={handleAiMatchSearch}
+        onDirectMessageSent={(target) => {
+          setAiModalVisible(false);
+          onOpenMessageThread?.(target);
+        }}
       />
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  screenRoot: {
+    flex: 1,
+    backgroundColor: '#0F0F0F',
+  },
   scroll: {
     flex: 1,
-    backgroundColor: '#000',
+    zIndex: 1,
+    backgroundColor: 'transparent',
   },
   content: {
     paddingHorizontal: INICIO_PAD_H,

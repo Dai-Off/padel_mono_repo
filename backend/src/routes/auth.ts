@@ -215,30 +215,43 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 });
 
-// POST /auth/refresh — renueva el token de sesión
+// POST /auth/refresh — renueva access_token con refresh_token (app móvil sin SDK de Supabase en cliente).
 router.post('/refresh', async (req: Request, res: Response) => {
-  const { refresh_token } = req.body ?? {};
-  if (!refresh_token) return res.status(400).json({ ok: false, error: 'refresh_token es obligatorio' });
+  const refresh_token = req.body?.refresh_token;
+  if (!refresh_token || typeof refresh_token !== 'string') {
+    return res.status(400).json({
+      ok: false,
+      error: 'refresh_token es obligatorio',
+    });
+  }
 
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase.auth.refreshSession({ refresh_token });
 
-    if (error || !data.session) {
-      return res.status(401).json({ ok: false, error: error?.message || 'Sesión inválida' });
+    if (error || !data.session || !data.user) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Sesión inválida o expirada. Inicia sesión de nuevo.',
+      });
     }
 
     return res.json({
       ok: true,
+      user: {
+        id: data.user.id,
+        email: data.user.email,
+        user_metadata: data.user.user_metadata,
+      },
       session: {
         access_token: data.session.access_token,
         refresh_token: data.session.refresh_token,
         expires_at: data.session.expires_at,
       },
-      user: data.user
     });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: (err as Error).message });
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ ok: false, error: message });
   }
 });
 

@@ -34,6 +34,8 @@ import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
 import { PublicCourseDetailScreen } from './PublicCourseDetailScreen';
 import { ProfileScreen } from './ProfileScreen';
 import { CommunityScreen } from './CommunityScreen';
+import { MessagesScreen, type MessagePeerNav } from './MessagesScreen';
+import { DirectMessageThreadScreen } from './DirectMessageThreadScreen';
 import type { EducationalCourse } from '../api/dailyLessons';
 import type { PublicCourse } from '../api/schoolCourses';
 
@@ -45,6 +47,8 @@ export function MainApp() {
   const [showTusPagos, setShowTusPagos] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
   const [showDailyLesson, setShowDailyLesson] = useState(false);
+  /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
+  const [streakRefreshKey, setStreakRefreshKey] = useState(0);
   const [showCourses, setShowCourses] = useState(false);
   const [selectedEducationalCourse, setSelectedEducationalCourse] = useState<EducationalCourse | null>(null);
   const [selectedPublicCourse, setSelectedPublicCourse] = useState<{ course: PublicCourse; isReserved: boolean } | null>(null);
@@ -57,6 +61,8 @@ export function MainApp() {
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [showCommunity, setShowCommunity] = useState(false);
+  const [showMessages, setShowMessages] = useState(false);
+  const [messagesPeer, setMessagesPeer] = useState<MessagePeerNav | null>(null);
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
@@ -98,7 +104,10 @@ export function MainApp() {
       return (
         <DailyLessonScreen
           onBack={() => setShowDailyLesson(false)}
-          onComplete={() => setShowDailyLesson(false)}
+          onComplete={() => {
+            setShowDailyLesson(false);
+            setStreakRefreshKey((k) => k + 1);
+          }}
         />
       );
     }
@@ -134,6 +143,25 @@ export function MainApp() {
     if (showCommunity) {
       return (
         <CommunityScreen onBack={() => setShowCommunity(false)} />
+      );
+    }
+    if (showMessages) {
+      if (messagesPeer) {
+        return (
+          <DirectMessageThreadScreen
+            peer={messagesPeer}
+            onBack={() => setMessagesPeer(null)}
+          />
+        );
+      }
+      return (
+        <MessagesScreen
+          onBack={() => {
+            setShowMessages(false);
+            setMessagesPeer(null);
+          }}
+          onSelectPeer={setMessagesPeer}
+        />
       );
     }
     if (showTransacciones) {
@@ -182,10 +210,15 @@ export function MainApp() {
       case 'inicio':
         return (
           <HomeScreen
+            streakRefreshKey={streakRefreshKey}
             onNavigateToTab={(tab) => setActiveTab(tab)}
             onPartidoPress={(p) => setSelectedPartido(p)}
             onDailyLessonPress={() => setShowDailyLesson(true)}
             onCoursesPress={() => setShowCourses(true)}
+            onOpenMessageThread={(peer) => {
+              setShowMessages(true);
+              setMessagesPeer(peer);
+            }}
           />
         );
       case 'pistas':
@@ -210,7 +243,7 @@ export function MainApp() {
           />
         );
       default:
-        return <HomeScreen />;
+        return <HomeScreen streakRefreshKey={streakRefreshKey} />;
     }
   };
 
@@ -225,7 +258,8 @@ export function MainApp() {
     !showDailyLesson &&
     !showCourses &&
     !selectedEducationalCourse &&
-    !selectedPublicCourse;
+    !selectedPublicCourse &&
+    !showMessages;
 
   const customHeader =
     bookingSuccessData != null ||
@@ -289,8 +323,9 @@ export function MainApp() {
                 )
               : activeTab === 'inicio'
                 ? (
-                    <HomeHeader 
-                      onMenuPress={sidebar.toggle} 
+                    <HomeHeader
+                      onMenuPress={sidebar.toggle}
+                      onMessagesPress={() => setShowMessages(true)}
                       onGroupsPress={() => setShowCommunity(true)}
                     />
                   )
@@ -299,23 +334,27 @@ export function MainApp() {
   const layoutBackgroundColor =
     bookingSuccessData != null
       ? '#000000'
-      : showDailyLesson
-        ? '#0F0F0F'
-        : showPartidoDetail
+      : showMessages
+        ? '#0A0A0A'
+        : showDailyLesson
           ? '#0F0F0F'
-          : crearPartidoFlow.open
+          : showPartidoDetail
             ? '#0F0F0F'
-            : showProfile
+            : crearPartidoFlow.open
               ? '#0F0F0F'
-              : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
-                ? '#000000'
-                : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
-                  ? '#0F0F0F'
-                  : '#ffffff';
+              : showProfile
+                ? '#0F0F0F'
+                : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
+                  ? '#000000'
+                  : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
+                    ? '#0F0F0F'
+                    : '#ffffff';
 
   const handleTabChange = (tab: MainTabId) => {
     setActiveTab(tab);
     setShowProfile(false);
+    setShowMessages(false);
+    setMessagesPeer(null);
   };
 
   return (
@@ -341,10 +380,15 @@ export function MainApp() {
               showCourses ||
               selectedEducationalCourse != null ||
               selectedPublicCourse != null ||
+              showMessages ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos')
             }
             layoutBackgroundColor={layoutBackgroundColor}
+            navbarActions={{
+              onMessagesPress: () => setShowMessages(true),
+              onGroupsPress: () => setShowCommunity(true),
+            }}
           >
             {renderContent()}
           </ScreenLayout>
@@ -357,7 +401,8 @@ export function MainApp() {
             !showDailyLesson &&
             !showCourses &&
             !selectedEducationalCourse &&
-            !selectedPublicCourse && (
+            !selectedPublicCourse &&
+            !showMessages && (
             <View style={styles.bottomBar}>
               <BottomNavbar activeTab={showProfile ? null : activeTab} onTabChange={handleTabChange} />
             </View>
