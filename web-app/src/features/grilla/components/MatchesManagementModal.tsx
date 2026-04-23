@@ -55,20 +55,65 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
             const allMatches: any[] = [];
             const processedBookingIds = new Set();
 
+            const bookingsById = new Map<string, any>();
+            if (bookingsRes.ok && bookingsRes.bookings) {
+                for (const b of bookingsRes.bookings) {
+                    bookingsById.set(b.id, b);
+                }
+            }
+
             if (matchesRes.ok && matchesRes.matches) {
                 const filteredMatches = matchesRes.matches.filter((m: any) => {
                     const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
                     if (!booking || !booking.courts || !booking.start_at) return false;
                     const bClubId = booking.courts.club_id || booking.courts.clubs?.id;
                     if (bClubId !== clubId) return false;
-                    
+
                     const mDate = new Date(booking.start_at);
                     const mDateStr = `${mDate.getFullYear()}-${String(mDate.getMonth() + 1).padStart(2, '0')}-${String(mDate.getDate()).padStart(2, '0')}`;
                     return mDateStr === currentDateStr;
                 });
                 for (const m of filteredMatches) {
-                    allMatches.push(m);
                     const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
+                    const fullBooking = booking?.id ? bookingsById.get(booking.id) : null;
+                    const existingMps: any[] = Array.isArray(m.match_players) ? m.match_players : [];
+                    const existingPlayerIds = new Set<string>(
+                        existingMps
+                            .map((mp: any) => {
+                                const p = Array.isArray(mp.players) ? mp.players[0] : mp.players;
+                                return p?.id;
+                            })
+                            .filter(Boolean)
+                    );
+                    const participants = fullBooking?.booking_participants || [];
+                    const missing = participants.filter((p: any) => {
+                        const person = Array.isArray(p.players) ? p.players[0] : p.players;
+                        return person?.id && !existingPlayerIds.has(person.id);
+                    });
+                    if (missing.length > 0) {
+                        let teamACount = existingMps.filter((mp: any) => mp.team === 'A').length;
+                        let teamBCount = existingMps.filter((mp: any) => mp.team === 'B').length;
+                        const extras = missing.map((p: any) => {
+                            const person = Array.isArray(p.players) ? p.players[0] : p.players;
+                            let team: 'A' | 'B';
+                            if (teamACount < 2) { team = 'A'; teamACount++; }
+                            else if (teamBCount < 2) { team = 'B'; teamBCount++; }
+                            else if (teamACount <= teamBCount) { team = 'A'; teamACount++; }
+                            else { team = 'B'; teamBCount++; }
+                            return {
+                                id: p.id,
+                                team,
+                                players: {
+                                    id: person?.id,
+                                    first_name: person?.first_name,
+                                    last_name: person?.last_name,
+                                    elo_rating: person?.elo_rating
+                                }
+                            };
+                        });
+                        m.match_players = [...existingMps, ...extras];
+                    }
+                    allMatches.push(m);
                     if (booking?.id) processedBookingIds.add(booking.id);
                 }
             }

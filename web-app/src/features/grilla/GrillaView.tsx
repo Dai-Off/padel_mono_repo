@@ -181,8 +181,8 @@ const useClubData = (dateOrStr: Date | string) => {
         const schoolAsBookings = schoolSlots.map((slot) => ({
           id: `school-slot-${slot.id}`,
           court_id: slot.court_id,
-          start_at: `${date}T${slot.start_time}:00Z`,
-          end_at: `${date}T${slot.end_time}:00Z`,
+          start_at: `${date}T${slot.start_time}:00`,
+          end_at: `${date}T${slot.end_time}:00`,
           status: 'confirmed',
           reservation_type: 'school_course',
           source_channel: 'system',
@@ -210,8 +210,8 @@ const useClubData = (dateOrStr: Date | string) => {
                 const schoolAsBookings = schoolSlots.map((slot: any) => ({
                     id: `school-slot-${slot.id}`,
                     court_id: slot.court_id,
-                    start_at: `${ds}T${slot.start_time}:00Z`,
-                    end_at: `${ds}T${slot.end_time}:00Z`,
+                    start_at: `${ds}T${slot.start_time}:00`,
+                    end_at: `${ds}T${slot.end_time}:00`,
                     status: 'confirmed',
                     reservation_type: 'school_course',
                     source_channel: 'system',
@@ -263,9 +263,6 @@ const useClubData = (dateOrStr: Date | string) => {
         const supabase = getSupabaseClient();
         if (!supabase || !clubId) return;
 
-        // bookings no tiene club_id — filtramos client-side por court_id
-        const courtIds = new Set(courtsRef.current.map(c => c.id));
-
         const channel = supabase
             .channel(`bookings-club-${clubId}`)
             .on(
@@ -276,12 +273,15 @@ const useClubData = (dateOrStr: Date | string) => {
                     table: 'bookings',
                 },
                 (payload) => {
-                    // Ignorar reservas de otras canchas (otros clubs)
+                    // Leemos courtsRef.current en cada evento para evitar el
+                    // stale-closure: al momento de suscribir las canchas aún
+                    // pueden no haber cargado, pero sí lo estarán al llegar eventos.
+                    const courtIds = new Set(courtsRef.current.map(c => c.id));
                     const courtId =
                         payload.eventType === 'DELETE'
                             ? (payload.old as any).court_id
                             : (payload.new as any).court_id;
-                    if (!courtIds.has(courtId)) return;
+                    if (courtIds.size > 0 && !courtIds.has(courtId)) return;
 
                     if (payload.eventType === 'INSERT') {
                         const raw = payload.new as any;
@@ -370,7 +370,13 @@ const useClubData = (dateOrStr: Date | string) => {
                     }
                 }
             )
-            .subscribe();
+            .subscribe((status, err) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log(`[Realtime] ✓ suscrito al canal bookings-club-${clubId}`);
+                } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                    console.error(`[Realtime] ✗ error en canal bookings-club-${clubId}:`, status, err);
+                }
+            });
 
         return () => { supabase.removeChannel(channel); };
     }, [clubId, dateStr]);
@@ -465,10 +471,10 @@ function linkedTournamentId(b: any): string | null {
     return tid ? String(tid) : null;
 }
 
-function formatUtcTimeHHmm(value: string | Date): string {
+function formatLocalTimeHHmm(value: string | Date): string {
     const d = value instanceof Date ? value : new Date(value);
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
     return `${hh}:${mm}`;
 }
 
@@ -502,7 +508,7 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
             id: b.id,
             courtId: b.court_id,
             courtName: courtMap.get(b.court_id) || b.court_id,
-            startTime: formatUtcTimeHHmm(start),
+            startTime: formatLocalTimeHHmm(start),
             durationMinutes: (new Date(b.end_at).getTime() - start.getTime()) / 60000,
             playerName,
             matchType: isMaintenance ? 'MANTENIMIENTO' : undefined,
@@ -1735,7 +1741,7 @@ function GrillaViewInner() {
                         id: bookingId,
                         courtId: b.court_id,
                         courtName: court?.name ?? 'Pista',
-                        startTime: formatUtcTimeHHmm(b.start_at),
+                        startTime: formatLocalTimeHHmm(b.start_at),
                         durationMinutes: Math.round((new Date(b.end_at).getTime() - new Date(b.start_at).getTime()) / 60000),
                         playerName: b.players?.first_name ? `${b.players.first_name} ${b.players.last_name || ''}` : '',
                         status: b.status ?? 'pending_payment',

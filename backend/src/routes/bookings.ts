@@ -838,6 +838,51 @@ router.post('/', async (req: Request, res: Response) => {
 
     const supabase = getSupabaseServiceRoleClient();
 
+    // Check player conflict — block only if the player is already in another booking at the SAME time
+    if (organizer_player_id) {
+      const newStartMs = new Date(String(start_at)).getTime();
+      const newEndMs = new Date(String(end_at)).getTime();
+
+      const overlaps = (bookings: { start_at: string; end_at: string }[]): boolean =>
+        bookings.some((b) => {
+          const s = new Date(b.start_at).getTime();
+          const e = new Date(b.end_at).getTime();
+          return newStartMs < e && newEndMs > s;
+        });
+
+      // 1a. Bookings where the player is the organizer
+      const { data: orgBookings } = await supabase
+        .from('bookings')
+        .select('start_at, end_at')
+        .eq('organizer_player_id', String(organizer_player_id))
+        .neq('status', 'cancelled')
+        .is('deleted_at', null);
+
+      if (overlaps(orgBookings ?? [])) {
+        return res.status(409).json({ ok: false, error: 'El jugador ya tiene una reserva en ese horario' });
+      }
+
+      // 1b. Bookings where the player is a participant
+      const { data: participations } = await supabase
+        .from('booking_participants')
+        .select('booking_id')
+        .eq('player_id', String(organizer_player_id));
+
+      const bIds = [...new Set((participations ?? []).map((p: any) => p.booking_id).filter(Boolean))];
+      if (bIds.length > 0) {
+        const { data: partBookings } = await supabase
+          .from('bookings')
+          .select('start_at, end_at')
+          .in('id', bIds)
+          .neq('status', 'cancelled')
+          .is('deleted_at', null);
+
+        if (overlaps(partBookings ?? [])) {
+          return res.status(409).json({ ok: false, error: 'El jugador ya tiene una reserva en ese horario' });
+        }
+      }
+    }
+
     const wantConfirmed = status === 'confirmed';
 
     // 1. Insert Booking (siempre como pending; el middleware de pago lo confirma si aplica)
