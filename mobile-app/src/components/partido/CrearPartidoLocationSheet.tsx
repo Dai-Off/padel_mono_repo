@@ -281,7 +281,7 @@ export function CrearPartidoLocationSheet({
     } else {
       onClose();
     }
-  }, [selectedSlot, selectedClub, competitive, gender, orgId, session?.access_token, initPaymentSheet, presentPaymentSheet, onPartidoCreado, onClose, partidoPrivado]);
+  }, [selectedSlot, selectedClub, competitive, gender, orgId, session?.access_token, initPaymentSheet, presentPaymentSheet, onPartidoCreado, onClose, partidoPrivado, priceData, priceLoading]);
 
   const handleSiguiente = () => {
     if (selected === 'club_wematch') {
