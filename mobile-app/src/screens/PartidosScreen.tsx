@@ -43,6 +43,7 @@ export type PartidoItem = {
   venue: string;
   location: string;
   price: string;
+  pricePerPlayer: string;
   duration: string;
   venueImage?: string;
   venueAddress?: string;

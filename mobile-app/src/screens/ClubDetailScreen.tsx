@@ -488,6 +488,11 @@ export function ClubDetailScreen({
         duration: `${DURATION_MIN} min`,
         priceFormatted: priceInfo.minPriceFormatted,
         matchVisibility: "private",
+        clubId: court.clubId,
+        courtId: c.id,
+        date: localCalendarYmd(selectedDate),
+        slot: selectedTimeSlot,
+        durationMinutes: DURATION_MIN,
       });
     },
     [

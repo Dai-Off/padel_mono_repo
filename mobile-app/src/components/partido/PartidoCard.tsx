@@ -200,7 +200,7 @@ export function PartidoCard({
           <Text
             style={[styles.venuePriceValue, d && styles.venuePriceValueDark]}
           >
-            {item.price}
+            {item.pricePerPlayer}
           </Text>
           <Text style={[styles.venueDuration, d && styles.venueDurationDark]}>
             {item.duration}

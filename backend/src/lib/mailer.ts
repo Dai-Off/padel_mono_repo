@@ -10,6 +10,7 @@ function escapeHtml(s: string): string {
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
 const EDGE_INVOKE_SECRET = (process.env.EDGE_INVOKE_SECRET || '').trim();
+const WEBHOOK_SECRET = (process.env.WEBHOOK_SECRET || '').trim();
 const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
 // Configuración SMTP
@@ -57,7 +58,12 @@ async function invokeEdgeFunction(name: string, body: Record<string, unknown>): 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  if (EDGE_INVOKE_SECRET) headers['x-edge-invoke-secret'] = EDGE_INVOKE_SECRET;
+  if (EDGE_INVOKE_SECRET || WEBHOOK_SECRET) {
+    const edgeSecret = EDGE_INVOKE_SECRET || WEBHOOK_SECRET;
+    const webhookSecret = WEBHOOK_SECRET || EDGE_INVOKE_SECRET;
+    if (edgeSecret) headers['x-edge-invoke-secret'] = edgeSecret;
+    if (webhookSecret) headers['x-webhook-secret'] = webhookSecret;
+  }
   if (SUPABASE_SERVICE_ROLE_KEY) headers['Authorization'] = `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`;
 
   try {

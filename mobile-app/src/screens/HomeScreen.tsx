@@ -39,6 +39,7 @@ type HomeScreenProps = {
   onDailyLessonPress?: () => void;
   onCoursesPress?: () => void;
   onOpenCompetitiveLeague?: () => void;
+  onOpenMessageThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
 };
 
 export function HomeScreen({
@@ -48,6 +49,7 @@ export function HomeScreen({
   onDailyLessonPress,
   onCoursesPress,
   onOpenCompetitiveLeague,
+  onOpenMessageThread,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session, refreshAccessToken } = useAuth();
@@ -261,6 +263,10 @@ export function HomeScreen({
         errorText={affinityError}
         onClose={() => setAffinityModalVisible(false)}
         onSubmit={handleAffinitySearch}
+        onDirectMessageSent={(target) => {
+          setAffinityModalVisible(false);
+          onOpenMessageThread?.(target);
+        }}
       />
 
     </>

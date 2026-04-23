@@ -100,9 +100,9 @@ type Props = {
   visible: boolean;
   accessToken: string | null;
   onClose: () => void;
-  /** Llamado tras guardar ELO en backend (perfil conviene refrescarlo fuera). */
+  /** Llamado tras guardar nivel en backend (perfil conviene refrescarlo fuera). */
   onCompleted: (eloRating: number) => void;
-  /** ELO del perfil (`/players/me`) para mostrarlo si la API indica que la nivelación ya está hecha. */
+  /** Nivel del perfil (`/players/me`) para mostrarlo si la API indica que la nivelación ya está hecha. */
   savedEloRating?: number | null;
 };
 
@@ -150,6 +150,7 @@ export function OnboardingLevelModal({
   const [orderDrafts, setOrderDrafts] = useState<Record<string, string[]>>({});
   const orderDraftsRef = useRef(orderDrafts);
   orderDraftsRef.current = orderDrafts;
+  const completionNotifiedRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
 
@@ -164,6 +165,7 @@ export function OnboardingLevelModal({
   }, [view]);
 
   const resetLocal = useCallback(() => {
+    completionNotifiedRef.current = false;
     setAnswers([]);
     setSingleSelected(null);
     setMultiSelected([]);
@@ -173,6 +175,15 @@ export function OnboardingLevelModal({
     setBootError(null);
     setView({ kind: 'loading' });
   }, []);
+
+  const notifyCompletedOnce = useCallback(
+    (elo: number) => {
+      if (completionNotifiedRef.current) return;
+      completionNotifiedRef.current = true;
+      onCompleted(elo);
+    },
+    [onCompleted],
+  );
 
   const animateOpen = useCallback(() => {
     translateY.setValue(SCREEN_HEIGHT);
@@ -207,10 +218,11 @@ export function OnboardingLevelModal({
         try {
           const { elo_rating } = await submitPlayerOnboarding(accessToken, nextAnswers);
           const eloNum = Number(elo_rating);
+          notifyCompletedOnce(Number.isFinite(eloNum) ? eloNum : 0);
           setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
         } catch (e) {
           if (isAlreadyCompletedError(e)) {
-            onCompleted(0);
+            notifyCompletedOnce(0);
             setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
             return;
           }
@@ -244,10 +256,11 @@ export function OnboardingLevelModal({
           setSubmitting(true);
           const { elo_rating } = await submitPlayerOnboarding(accessToken, nextAnswers);
           const eloNum = Number(elo_rating);
+          notifyCompletedOnce(Number.isFinite(eloNum) ? eloNum : 0);
           setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
         } catch (e) {
           if (isAlreadyCompletedError(e)) {
-            onCompleted(0);
+            notifyCompletedOnce(0);
             setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
             return;
           }
@@ -408,10 +421,11 @@ export function OnboardingLevelModal({
       setSubmitting(true);
       const { elo_rating } = await submitPlayerOnboarding(accessToken, merged);
       const eloNum = Number(elo_rating);
+      notifyCompletedOnce(Number.isFinite(eloNum) ? eloNum : 0);
       setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
     } catch (e) {
       if (isAlreadyCompletedError(e)) {
-        onCompleted(0);
+        notifyCompletedOnce(0);
         setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
         return;
       }
@@ -561,7 +575,7 @@ export function OnboardingLevelModal({
           pendientes.
         </Text>
         {view.elo != null && Number.isFinite(view.elo) ? (
-          <Text style={styles.alreadyDoneElo}>Tu ELO en perfil: {view.elo.toFixed(2)}</Text>
+          <Text style={styles.alreadyDoneElo}>Tu nivel en perfil: {view.elo.toFixed(2)}</Text>
         ) : null}
         <Pressable style={styles.primaryWrap} onPress={handleClose}>
           <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
@@ -624,12 +638,12 @@ export function OnboardingLevelModal({
         >
           <Text style={styles.questionTitle}>Afinamos tu nivel con 5 preguntas técnicas</Text>
           <Text style={styles.phase2IntroBody}>
-            Tras el cuestionario oficial, tu puntuación orientativa es{' '}
+            Tras el cuestionario oficial, tu nivel orientativo es{' '}
             <Text style={styles.phase2IntroElo}>{view.eloPhase1.toFixed(2)}</Text> (escala 0–7). El bloque siguiente
             está calibrado para el perfil «{poolLabel(view.poolAssigned)}».
           </Text>
           <Text style={styles.phase2IntroHint}>
-            Responde con cuidado: estas respuestas ajustan tu ELO inicial antes de guardarlo en tu perfil.
+            Responde con cuidado: estas respuestas ajustan tu nivel inicial antes de guardarlo en tu perfil.
           </Text>
         </ScrollView>
         <View style={[styles.footer, { paddingBottom: footerPadding }]}>
@@ -714,7 +728,7 @@ export function OnboardingLevelModal({
         <Pressable
           style={styles.primaryWrap}
           onPress={() => {
-            onCompleted(Number.isFinite(view.elo) ? view.elo : 0);
+            notifyCompletedOnce(Number.isFinite(view.elo) ? view.elo : 0);
             handleClose();
           }}
         >
