@@ -11,10 +11,10 @@ import { AdminPanel } from './components/Admin/AdminPanel';
 import { QuestionsListView } from './components/Admin/OnboardingQuestions/QuestionsListView';
 import { GrillaView } from './features/grilla';
 import { PreciosView } from './components/Precios/PreciosView';
+import { TarifasView } from './components/Precios/TarifasView';
 import { LearningContentView } from './components/Learning/LearningContentView';
 import { AdminLearningPage } from './components/Admin/Learning/AdminLearningPage';
 import { authService } from './services/auth';
-import { SmartHomeRedirect } from './components/Auth/SmartHomeRedirect';
 import { Toaster } from 'sonner';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -63,7 +63,7 @@ function App() {
           path="/"
           element={
             <ProtectedRoute>
-              <SmartHomeRedirect />
+              <Navigate to="/grilla?menu=resumen" replace />
             </ProtectedRoute>
           }
         />
@@ -180,14 +180,6 @@ function App() {
           }
         />
         <Route
-          path="/caja"
-          element={
-            <ProtectedRoute>
-              <ClubDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
           path="/resenas"
           element={
             <ProtectedRoute>
@@ -205,22 +197,6 @@ function App() {
         />
         <Route
           path="/fechas-especiales"
-          element={
-            <ProtectedRoute>
-              <ClubDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/tarifas"
-          element={
-            <ProtectedRoute>
-              <ClubDashboard />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/movimientos-caja"
           element={
             <ProtectedRoute>
               <ClubDashboard />
@@ -248,6 +224,14 @@ function App() {
           element={
             <ProtectedRoute>
               <PreciosView />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/tarifas"
+          element={
+            <ProtectedRoute>
+              <TarifasView />
             </ProtectedRoute>
           }
         />

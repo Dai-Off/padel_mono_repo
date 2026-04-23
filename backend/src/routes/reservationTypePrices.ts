@@ -18,10 +18,6 @@ function canAccessClub(req: Request, clubId: string): boolean {
   return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
 }
 
-/**
- * GET /reservation-type-prices?club_id=xxx
- * Devuelve precios por tipo de reserva. Si no hay fila para un tipo, devuelve 0.
- */
 router.get('/', async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id?.trim()) {
@@ -59,13 +55,8 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-/**
- * PUT /reservation-type-prices
- * Body: { club_id, prices: { standard: 2000, open_match: 1800, ... } }
- * price_per_hour_cents en céntimos (ej: 2000 = 20€/h)
- */
 router.put('/', async (req: Request, res: Response) => {
-  const { club_id, prices } = req.body ?? {};
+  const { club_id, prices, colors } = req.body ?? {};
   if (!club_id?.trim()) {
     return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   }
@@ -76,8 +67,6 @@ router.put('/', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'prices es obligatorio y debe ser un objeto' });
   }
 
-  const { colors } = req.body ?? {};
-
   try {
     const supabase = getSupabaseServiceRoleClient();
     const clubId = String(club_id).trim();
@@ -86,8 +75,10 @@ router.put('/', async (req: Request, res: Response) => {
     for (const type of RESERVATION_TYPES) {
       const raw = prices[type];
       const cents = raw != null ? Math.max(0, Math.round(Number(raw))) : 0;
-      const rawColor = colors?.[type];
-      const color = typeof rawColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(rawColor) ? rawColor : null;
+
+      const colorVal = colors?.[type];
+      const colorHex =
+        typeof colorVal === 'string' && /^#[0-9a-fA-F]{6}$/.test(colorVal) ? colorVal : undefined;
 
       const { error: upsertErr } = await supabase
         .from('reservation_type_prices')
@@ -97,8 +88,8 @@ router.put('/', async (req: Request, res: Response) => {
             reservation_type: type,
             price_per_hour_cents: cents,
             currency: 'EUR',
-            color,
             updated_at: now,
+            ...(colorHex !== undefined ? { color: colorHex } : {}),
           },
           { onConflict: 'club_id,reservation_type' }
         );

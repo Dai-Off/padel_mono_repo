@@ -55,6 +55,7 @@ export type PublicTournamentRow = {
 };
 
 type ListResponse = { ok?: boolean; tournaments?: PublicTournamentRow[]; error?: string };
+type ListPagination = { limit: number; offset: number; has_more: boolean };
 
 function headers(token: string | null | undefined): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -64,12 +65,23 @@ function headers(token: string | null | undefined): Record<string, string> {
 
 export async function fetchPublicTournaments(
   token: string | null | undefined,
-): Promise<{ ok: true; tournaments: PublicTournamentRow[] } | { ok: false; error: string }> {
+  opts?: { limit?: number; offset?: number },
+): Promise<
+  | { ok: true; tournaments: PublicTournamentRow[]; pagination: ListPagination }
+  | { ok: false; error: string }
+> {
   try {
-    const res = await fetch(`${API_URL}/tournaments/public/list`, { headers: headers(token) });
-    const json = (await res.json()) as ListResponse;
+    const limit = Math.max(1, Math.trunc(opts?.limit ?? 20));
+    const offset = Math.max(0, Math.trunc(opts?.offset ?? 0));
+    const url = `${API_URL}/tournaments/public/list?limit=${limit}&offset=${offset}`;
+    const res = await fetch(url, { headers: headers(token) });
+    const json = (await res.json()) as ListResponse & { pagination?: ListPagination };
     if (!res.ok) return { ok: false, error: json.error ?? 'No se pudieron cargar los torneos' };
-    return { ok: true, tournaments: json.tournaments ?? [] };
+    return {
+      ok: true,
+      tournaments: json.tournaments ?? [],
+      pagination: json.pagination ?? { limit, offset, has_more: false },
+    };
   } catch {
     return { ok: false, error: 'Error de conexión' };
   }
@@ -77,13 +89,24 @@ export async function fetchPublicTournaments(
 
 export async function fetchMyTournaments(
   token: string | null | undefined,
-): Promise<{ ok: true; tournaments: PublicTournamentRow[] } | { ok: false; error: string }> {
+  opts?: { limit?: number; offset?: number },
+): Promise<
+  | { ok: true; tournaments: PublicTournamentRow[]; pagination: ListPagination }
+  | { ok: false; error: string }
+> {
   if (!token) return { ok: false, error: 'Inicia sesión para ver tus inscripciones' };
   try {
-    const res = await fetch(`${API_URL}/tournaments/player/me-list`, { headers: headers(token) });
-    const json = (await res.json()) as ListResponse;
+    const limit = Math.max(1, Math.trunc(opts?.limit ?? 20));
+    const offset = Math.max(0, Math.trunc(opts?.offset ?? 0));
+    const url = `${API_URL}/tournaments/player/me-list?limit=${limit}&offset=${offset}`;
+    const res = await fetch(url, { headers: headers(token) });
+    const json = (await res.json()) as ListResponse & { pagination?: ListPagination };
     if (!res.ok) return { ok: false, error: json.error ?? 'No se pudieron cargar tus torneos' };
-    return { ok: true, tournaments: json.tournaments ?? [] };
+    return {
+      ok: true,
+      tournaments: json.tournaments ?? [],
+      pagination: json.pagination ?? { limit, offset, has_more: false },
+    };
   } catch {
     return { ok: false, error: 'Error de conexión' };
   }
@@ -445,7 +468,7 @@ export async function sendTournamentChatMessage(
   tournamentId: string,
   message: string,
   token: string | null | undefined,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true; message?: TournamentChatMessage } | { ok: false; error: string }> {
   if (!token) return { ok: false, error: 'Inicia sesión para escribir en el chat del torneo' };
   try {
     const res = await fetch(`${API_URL}/tournaments/${encodeURIComponent(tournamentId)}/chat/player`, {
@@ -453,9 +476,9 @@ export async function sendTournamentChatMessage(
       headers: headers(token),
       body: JSON.stringify({ message }),
     });
-    const json = (await res.json()) as { ok?: boolean; error?: string };
+    const json = (await res.json()) as { ok?: boolean; message?: TournamentChatMessage; error?: string };
     if (!res.ok || !json.ok) return { ok: false, error: json.error ?? 'No se pudo enviar el mensaje' };
-    return { ok: true };
+    return { ok: true, message: json.message };
   } catch {
     return { ok: false, error: 'Error de conexión' };
   }

@@ -34,10 +34,11 @@ import onboardingQuestionsRouter from "./onboardingQuestions";
 import bonusesRouter from "./bonuses";
 import clubSpecialDatesRouter from "./clubSpecialDates";
 import coachAssessmentRouter from "./coachAssessment";
-import tariffsRouter from "./tariffs";
 import communityRouter from "./community";
 import adminLearningRouter from "./adminLearning";
 import messagesRouter from "./messages";
+import tariffsRouter from "./tariffs";
+
 
 const router = Router();
 
@@ -83,9 +84,10 @@ router.use("/onboarding-questions", onboardingQuestionsRouter);
 router.use("/bonuses", bonusesRouter);
 router.use("/club-special-dates", clubSpecialDatesRouter);
 router.use("/coach-assessment", coachAssessmentRouter);
-router.use("/tariffs", tariffsRouter);
 router.use("/community", communityRouter);
 router.use("/messages", messagesRouter);
 router.use("/admin/learning", adminLearningRouter);
+router.use("/tariffs", tariffsRouter);
+
 
 export default router;

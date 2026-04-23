@@ -1,3 +1,4 @@
+import { API_URL } from '../config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createContext,
@@ -17,7 +18,7 @@ const SESSION_KEY = '@padel_session';
 export type Session = {
   access_token: string;
   refresh_token: string;
-  expires_at?: number;
+  expires_at?: number; // timestamp en segundos (de Supabase)
   user: { id: string; email: string; user_metadata?: { full_name?: string } };
 };
 
@@ -90,6 +91,7 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
     return next.access_token;
   }, [setSession]);
 
+  // Carga inicial de sesión
   useEffect(() => {
     let mounted = true;
     let done = false;
@@ -187,6 +189,24 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
     setSessionState(null);
     await AsyncStorage.removeItem(SESSION_KEY);
   }, []);
+
+  // Lógica de autorefresh de token (revisión proactiva)
+  useEffect(() => {
+    if (!session?.refresh_token || !session?.expires_at) return;
+
+    const checkAndRefresh = async () => {
+      if (sessionNeedsRefresh(session)) {
+        console.log('[AuthContext] Refrescando sesión proactivamente...');
+        await refreshAccessToken();
+      }
+    };
+
+    // Revisar cada minuto
+    const interval = setInterval(checkAndRefresh, 60000);
+    checkAndRefresh(); // Revisar al montar
+
+    return () => clearInterval(interval);
+  }, [session, refreshAccessToken]);
 
   const value: AuthContextValue = {
     session,

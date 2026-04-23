@@ -79,7 +79,6 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
     const isVeryShort = isCompact && computedHeight < 10;
     const isShort = isCompact && computedHeight >= 10 && computedHeight < 20;
 
-    // Custom color from admin settings — overrides the hardcoded Tailwind class
     const customColor = typeColorOverrides?.[reservation.booking_type];
     const typeColorClass = customColor ? '' : (bookingTypeColors[reservation.booking_type] ?? bookingTypeColors['standard']);
     const typeColorStyle: React.CSSProperties = customColor

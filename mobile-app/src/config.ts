@@ -24,3 +24,8 @@ function getApiUrl(): string {
 }
 
 export const API_URL = getApiUrl();
+
+/** Club por defecto para búsqueda de matchmaking (integración / pruebas). */
+export const MATCHMAKING_DEFAULT_CLUB_ID =
+  (process.env.EXPO_PUBLIC_MATCHMAKING_CLUB_ID as string | undefined)?.trim() ||
+  '5768474f-b079-41f5-b1c8-1bc45c96b2c3';

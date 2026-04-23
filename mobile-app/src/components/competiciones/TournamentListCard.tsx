@@ -103,7 +103,7 @@ export function TournamentListCard({ row, onPress }: TournamentListCardProps) {
               </View>
               <View style={styles.chip}>
                 <Text style={styles.chipMutedText}>
-                  📊 {formatEloRange(row.elo_min, row.elo_max)}
+                  📊 Nivel {formatEloRange(row.elo_min, row.elo_max)}
                 </Text>
               </View>
               <View style={styles.chip}>

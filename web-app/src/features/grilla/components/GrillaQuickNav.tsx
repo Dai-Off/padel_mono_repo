@@ -11,7 +11,6 @@ import {
   Shield,
   CreditCard,
   ClipboardList,
-  Trophy,
 } from 'lucide-react';
 
 type NavChild = { id: string; path: string; label: string; queryParam?: string };
@@ -83,16 +82,8 @@ function buildSections(isAdmin: boolean): NavSection[] {
       icon: GraduationCap,
       children: [
         { id: 'escuela', path: '/escuela', label: 'Gestión Escuela' },
-        { id: 'contenido-aprendizaje', path: '/contenido-aprendizaje', label: 'Contenido de aprendizaje' },
-      ],
-    },
-    {
-      id: 'torneos',
-      label: 'Torneos',
-      icon: Trophy,
-      children: [
         { id: 'torneos', path: '/torneos', label: 'Torneos' },
-        { id: 'ligas', path: '/torneos?tab=ligas', label: 'Ligas' },
+        { id: 'contenido-aprendizaje', path: '/contenido-aprendizaje', label: 'Contenido de aprendizaje' },
       ],
     },
     {
@@ -128,24 +119,21 @@ function buildSections(isAdmin: boolean): NavSection[] {
   return sections;
 }
 
-function isChildActive(pathname: string, menuParam: string | null, child: NavChild, tabParam?: string | null): boolean {
+function isChildActive(pathname: string, menuParam: string | null, child: NavChild): boolean {
   if (child.path === '/grilla') {
     if (pathname !== '/grilla') return false;
     if (child.queryParam === 'reservas') return menuParam === 'reservas';
     if (child.queryParam === 'resumen') return menuParam !== 'reservas';
     return false;
   }
-  if (child.path === '/torneos?tab=ligas') {
-    return (pathname === '/torneos' || pathname.startsWith('/torneos/')) && tabParam === 'ligas';
-  }
   if (child.path === '/torneos') {
-    return (pathname === '/torneos' || pathname.startsWith('/torneos/')) && tabParam !== 'ligas';
+    return pathname === '/torneos' || pathname.startsWith('/torneos/');
   }
   return pathname === child.path;
 }
 
-function isSectionActive(pathname: string, menuParam: string | null, section: NavSection, tabParam?: string | null): boolean {
-  return section.children.some(c => isChildActive(pathname, menuParam, c, tabParam));
+function isSectionActive(pathname: string, menuParam: string | null, section: NavSection): boolean {
+  return section.children.some(c => isChildActive(pathname, menuParam, c));
 }
 
 export function GrillaQuickNav({ isAdmin }: { isAdmin: boolean }) {
@@ -177,8 +165,6 @@ export function GrillaQuickNav({ isAdmin }: { isAdmin: boolean }) {
     setOpenSection(null);
   };
 
-  const tabParam = searchParams.get('tab');
-
   return (
     <nav
       ref={navRef}
@@ -187,7 +173,7 @@ export function GrillaQuickNav({ isAdmin }: { isAdmin: boolean }) {
     >
       <div className="flex items-stretch justify-start">
         {sections.map((section) => {
-          const active = isSectionActive(location.pathname, menuParam, section, tabParam);
+          const active = isSectionActive(location.pathname, menuParam, section);
           const isOpen = openSection === section.id;
           const Icon = section.icon;
 
@@ -219,7 +205,7 @@ export function GrillaQuickNav({ isAdmin }: { isAdmin: boolean }) {
               {isOpen && section.children.length > 1 && (
                 <div className="absolute top-full left-0 mt-0 bg-white border border-gray-200 rounded-b-lg shadow-lg z-50 min-w-[200px] py-1">
                   {section.children.map((child) => {
-                    const childActive = isChildActive(location.pathname, menuParam, child, tabParam);
+                    const childActive = isChildActive(location.pathname, menuParam, child);
                     return (
                       <button
                         key={child.id}

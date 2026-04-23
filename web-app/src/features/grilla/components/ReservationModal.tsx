@@ -35,8 +35,6 @@ interface ReservationModalProps {
     isOnHiddenCourt?: boolean;
     onGridRefresh?: () => void;
     isLoadingBookingData?: boolean;
-    /** Date currently shown in the grid — used to pre-fill bookingDate and resolve slot prices */
-    gridDate?: string; // "YYYY-MM-DD"
 }
 
 // Helper: Player Search Component
@@ -423,7 +421,7 @@ const PaymentSlot: React.FC<{
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate,
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData,
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
     const { t, i18n } = useGrillaTranslation();
@@ -453,7 +451,6 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [overlapError, setOverlapError] = useState<string | null>(null);
     const [paymentError, setPaymentError] = useState<string | null>(null);
     const [pricesByType, setPricesByType] = useState<Record<string, { price_per_hour_cents: number }>>({});
-    const [calendarTotalCents, setCalendarTotalCents] = useState<number | null>(null);
     const [isMarkingPaid, setIsMarkingPaid] = useState(false);
     const [guestInviteMode, setGuestInviteMode] = useState<'single' | 'double'>('double');
     const [isMovingToHidden, setIsMovingToHidden] = useState(false);
@@ -589,67 +586,21 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         return () => { document.body.style.overflow = 'unset'; };
     }, [isOpen, reservation?.id, editingBookingData?.id]);
 
-    // Fetch generic prices (used as last fallback)
+    // Fetch prices on open (both create and edit mode)
     useEffect(() => {
         if (!isOpen || !clubId) return;
         reservationTypePricesService.getByClub(clubId).then(setPricesByType).catch(() => setPricesByType({}));
     }, [isOpen, clubId]);
 
-    // Fetch prorated calendar price whenever court/date/slot/duration changes.
-    // The endpoint covers all hourly slots the booking spans and charges proportional minutes.
-    useEffect(() => {
-        if (!isOpen || !clubId) return;
-
-        const courtId = isEditMode
-            ? editingBookingData?.court_id
-            : reservation?.courtId;
-        // Priority: explicit bookingDate → gridDate (grilla's date) → today
-        const date = bookingDate || gridDate || new Date().toISOString().split('T')[0];
-        const slot = `${startHour}:${startMinute}`;
-
-        if (!courtId || !date) {
-            setCalendarTotalCents(null);
-            return;
-        }
-
-        let cancelled = false;
-        const params = new URLSearchParams({
-            club_id: clubId,
-            court_id: courtId,
-            date,
-            slot,
-            duration_minutes: String(duration),
-        });
-        apiFetchWithAuth<{ ok: boolean; total_price_cents: number; source: string }>(
-            `/tariffs/slot-price?${params.toString()}`
-        )
-            .then((res) => {
-                if (cancelled) return;
-                // Store total_price_cents directly (already prorated for the full duration)
-                if (res?.ok && res.total_price_cents > 0) {
-                    setCalendarTotalCents(res.total_price_cents); // reusing state: now holds TOTAL cents
-                } else {
-                    setCalendarTotalCents(null);
-                }
-            })
-            .catch(() => { if (!cancelled) setCalendarTotalCents(null); });
-
-        return () => { cancelled = true; };
-    }, [isOpen, clubId, bookingDate, gridDate, startHour, startMinute, duration, reservation?.courtId, editingBookingData?.court_id, isEditMode]);
-
     const totalPriceCents = useMemo(() => {
-        // 1. Calendar prorated price (primary — already accounts for all slots and duration)
-        if (calendarTotalCents != null && calendarTotalCents > 0) {
-            return calendarTotalCents; // value is already the total, not per-hour
-        }
-        // 2. Generic price by reservation type × duration (fallback)
         const pricePerHour = pricesByType[resType]?.price_per_hour_cents;
+        // If club has a configured rate for this type, recalculate from current duration
         if (pricePerHour != null && pricePerHour > 0) {
             return Math.round((duration / 60) * pricePerHour);
         }
-        // 3. Stored price on the booking (edit mode, no rule configured)
+        // Fallback: use the stored price (no price rule configured)
         return editingBookingData?.total_price_cents ?? 0;
-    }, [calendarTotalCents, pricesByType, resType, duration, editingBookingData?.total_price_cents]);
+    }, [pricesByType, resType, duration, editingBookingData?.total_price_cents]);
 
     const formattedPrice = totalPriceCents != null && totalPriceCents >= 0
         ? (totalPriceCents / 100).toFixed(2).replace('.', ',') + ' €'

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     X,
     Calendar,
@@ -22,10 +23,11 @@ interface MatchesManagementPanelProps {
     dateStr: string;
     onRefreshGrid: () => void;
     onEditBooking?: (bookingId: string) => void;
-    onGoToGrid?: () => void;
+    onBackToGrid?: () => void;
 }
 
-export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ clubId, dateStr, onRefreshGrid, onEditBooking, onGoToGrid }) => {
+export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ clubId, dateStr, onRefreshGrid, onEditBooking, onBackToGrid }) => {
+    const navigate = useNavigate();
     const [matches, setMatches] = useState<any[]>([]);
     const [loading, setLoading] = useState(false);
     
@@ -321,16 +323,13 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                             <ChevronRight className="w-4 h-4" />
                         </button>
                     </div>
-                    {onGoToGrid && (
-                        <button
-                            onClick={onGoToGrid}
-                            title="Ir a la grilla"
-                            className="flex items-center gap-1.5 px-2.5 py-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 hover:text-[#006A6A] hover:border-[#006A6A] transition-colors shadow-sm"
-                        >
-                            <LayoutGrid className="w-4 h-4" />
-                            <span className="hidden sm:inline text-xs font-semibold">Grilla</span>
-                        </button>
-                    )}
+                    <button
+                        onClick={() => onBackToGrid ? onBackToGrid() : navigate(`/grilla?date=${currentDateStr}`)}
+                        title="Ver en la grilla"
+                        className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-[#006A6A]/5 hover:border-[#006A6A] hover:text-[#006A6A] transition-colors"
+                    >
+                        <LayoutGrid className="w-4 h-4" />
+                    </button>
                     <button
                         onClick={() => setShowFilters(prev => !prev)}
                         className={`p-1.5 border rounded-lg transition-colors relative ${
@@ -499,13 +498,13 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                         <td className="px-3 py-2.5 whitespace-nowrap">
                                             <div className="flex items-center gap-3">
                                                 <div className="flex items-center -space-x-2">
-                                                    {renderPlayer(teamA[0], 1, booking?.id, 'A', match.id)}
-                                                    {renderPlayer(teamA[1], 2, booking?.id, 'A', match.id)}
+                                                    {renderPlayer(teamA[0], 0, booking?.id, 'A', match.id)}
+                                                    {renderPlayer(teamA[1], 1, booking?.id, 'A', match.id)}
                                                 </div>
                                                 <span className="text-[9px] font-bold tracking-wider text-gray-300">VS</span>
                                                 <div className="flex items-center -space-x-2">
-                                                    {renderPlayer(teamB[0], 3, booking?.id, 'B', match.id)}
-                                                    {renderPlayer(teamB[1], 4, booking?.id, 'B', match.id)}
+                                                    {renderPlayer(teamB[0], 0, booking?.id, 'B', match.id)}
+                                                    {renderPlayer(teamB[1], 1, booking?.id, 'B', match.id)}
                                                 </div>
                                             </div>
                                         </td>

@@ -6,7 +6,6 @@ import { toast } from 'sonner';
 import { apiFetchWithAuth } from '../../services/api';
 import { RESERVATION_TYPES } from '../../services/reservationTypePrices';
 
-// Default fallback colors matching the grilla cards
 const DEFAULT_COLORS: Record<string, string> = {
   standard:          '#005bc5',
   open_match:        '#7c3aed',
@@ -33,7 +32,6 @@ interface PreciosFormProps {
   clubId: string | null;
 }
 
-/** Formulario que usa apiFetchWithAuth directamente para evitar problemas con el servicio */
 export function PreciosForm({ clubId }: PreciosFormProps) {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
@@ -41,7 +39,6 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [colors, setColors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
-  // Refs to hidden <input type="color"> elements — one per type
   const colorInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   useEffect(() => {
@@ -56,10 +53,7 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
     )
       .then((res) => {
         if (cancelled) return;
-        if (!res?.ok || !res.prices) {
-          setPrices({});
-          return;
-        }
+        if (!res?.ok || !res.prices) { setPrices({}); return; }
         const nextPrices: Record<string, number> = {};
         const nextColors: Record<string, string> = {};
         for (const type of RESERVATION_TYPES) {
@@ -74,18 +68,12 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
         setError(err instanceof Error ? err.message : t('precios_load_error'));
         toast.error(t('precios_load_error'));
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; controller.abort(); };
   }, [clubId]);
 
   const handleChange = (type: string, value: string) => {
-    const cents = parseEurToCents(value);
-    setPrices((prev) => ({ ...prev, [type]: Math.max(0, cents) }));
+    setPrices((prev) => ({ ...prev, [type]: Math.max(0, parseEurToCents(value)) }));
   };
 
   const handleColorChange = (type: string, value: string) => {
@@ -114,10 +102,7 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
   };
 
   if (!clubId) return null;
-
-  if (loading) {
-    return <PageSpinner />;
-  }
+  if (loading) return <PageSpinner />;
 
   return (
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
@@ -132,16 +117,14 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
                   {t(`reservation_type_${type}`)}
                 </label>
                 <div className="flex-1 flex items-center gap-1.5">
-                  {/* Hidden native color input */}
                   <input
                     type="color"
                     ref={(el) => { colorInputRefs.current[type] = el; }}
                     value={currentColor}
                     onChange={(e) => handleColorChange(type, e.target.value)}
                     className="sr-only"
-                    aria-label={`Color para ${t(`reservation_type_${type}`)}`}
+                    aria-label={`Color ${t(`reservation_type_${type}`)}`}
                   />
-                  {/* Visible color swatch button */}
                   <button
                     type="button"
                     onClick={() => colorInputRefs.current[type]?.click()}
@@ -169,13 +152,9 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
           className="mt-4 w-full py-3 rounded-xl bg-[#E31E24] text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-70 hover:bg-[#c41a1f]"
         >
           {saving ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin" /> {t('loading')}
-            </>
+            <><Loader2 className="w-4 h-4 animate-spin" /> {t('loading')}</>
           ) : (
-            <>
-              <Save className="w-4 h-4" /> {t('club_settings_save')}
-            </>
+            <><Save className="w-4 h-4" /> {t('club_settings_save')}</>
           )}
         </button>
       </form>
