@@ -73,6 +73,7 @@ const COACH_QUESTIONS: CoachQuestion[] = [
 type ProfileScreenProps = {
   onBack: () => void;
   onMenuPress: () => void;
+  onPreferencesPress?: () => void;
 };
 
 type Achievement = {
@@ -139,7 +140,7 @@ function getInitials(firstName?: string | null, lastName?: string | null): strin
   return 'SN';
 }
 
-export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
+export function ProfileScreen({ onBack, onMenuPress, onPreferencesPress }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
@@ -637,10 +638,16 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
               { title: 'Ayuda y soporte', icon: 'people-outline' },
               { title: 'Términos y condiciones', icon: 'document-text-outline' },
             ].map((item, idx, arr) => (
-              <Pressable 
-                key={item.title} 
+              <Pressable
+                key={item.title}
                 style={[styles.menuItem, idx === arr.length - 1 && styles.menuItemLast]}
-                onPress={() => Alert.alert(item.title, `Navegando a ${item.title}`)}
+                onPress={() => {
+                  if (item.title === 'Preferencias') {
+                    onPreferencesPress?.();
+                    return;
+                  }
+                  Alert.alert(item.title, `Navegando a ${item.title}`);
+                }}
               >
                 <View style={styles.menuIconBox}>
                   <Ionicons name={item.icon as any} size={16} color="#9CA3AF" />

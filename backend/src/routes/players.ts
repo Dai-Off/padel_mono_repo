@@ -7,6 +7,7 @@ import { ligaFromEloWithBands } from '../services/matchmakingLeague';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
+import { syncPlayerVector } from '../lib/mailer';
 
 const router = Router();
 
@@ -90,6 +91,9 @@ const SELECT_PUBLIC_INTERNAL = `
   mu, sigma, elo_rating, sp,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents,
+  preferred_side, preferred_schedule_slots, preferred_days, preferred_play_style,
+  preferred_match_duration_min, preferred_partner_level, favorite_clubs,
+  notif_new_matches, notif_tournament_reminders, notif_class_updates, notif_chat_messages,
   liga, lps, mm_peak_liga
 `;
 
@@ -110,6 +114,111 @@ function normalizeAvatarUrl(body: Record<string, unknown>): AvatarNormalize {
   if (t.length > AVATAR_URL_MAX) return { ok: false, error: `avatar_url admite como máximo ${AVATAR_URL_MAX} caracteres` };
   if (!/^https?:\/\//i.test(t)) return { ok: false, error: 'avatar_url debe ser una URL http(s) absoluta' };
   return { ok: true, mode: 'set', value: t };
+}
+
+type PreferencesPatchNormalize =
+  | { ok: true; hasAny: false; patch: Record<string, unknown> }
+  | { ok: true; hasAny: true; patch: Record<string, unknown> }
+  | { ok: false; error: string };
+
+const PREF_SIDE = new Set(['right', 'left', 'both']);
+const PREF_SLOTS = new Set(['morning', 'afternoon', 'evening', 'night']);
+const PREF_DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
+const PREF_STYLE = new Set(['competitive', 'social', 'learning', 'balanced']);
+const PREF_PARTNER_LEVEL = new Set(['similar', 'higher', 'lower', 'any']);
+const PREF_DURATION = new Set([60, 90, 120]);
+
+function parseStringArray(value: unknown, field: string, maxItems: number): { ok: true; value: string[] } | { ok: false; error: string } {
+  if (!Array.isArray(value)) return { ok: false, error: `${field} debe ser un arreglo` };
+  if (value.length > maxItems) return { ok: false, error: `${field} admite como máximo ${maxItems} elementos` };
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') return { ok: false, error: `${field} solo admite texto` };
+    const v = item.trim();
+    if (!v) return { ok: false, error: `${field} no admite valores vacíos` };
+    out.push(v);
+  }
+  return { ok: true, value: Array.from(new Set(out)) };
+}
+
+function normalizePreferencesPatch(body: Record<string, unknown>): PreferencesPatchNormalize {
+  const patch: Record<string, unknown> = {};
+  let hasAny = false;
+
+  if (Object.prototype.hasOwnProperty.call(body, 'preferred_side')) {
+    hasAny = true;
+    if (typeof body.preferred_side !== 'string') return { ok: false, error: 'preferred_side debe ser texto' };
+    const v = body.preferred_side.trim().toLowerCase();
+    if (!PREF_SIDE.has(v)) return { ok: false, error: 'preferred_side inválido' };
+    patch.preferred_side = v;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'preferred_schedule_slots')) {
+    hasAny = true;
+    const parsed = parseStringArray(body.preferred_schedule_slots, 'preferred_schedule_slots', 4);
+    if (!parsed.ok) return parsed;
+    const normalized = parsed.value.map((v) => v.toLowerCase());
+    if (!normalized.every((v) => PREF_SLOTS.has(v))) return { ok: false, error: 'preferred_schedule_slots contiene valores inválidos' };
+    patch.preferred_schedule_slots = Array.from(new Set(normalized));
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'preferred_days')) {
+    hasAny = true;
+    const parsed = parseStringArray(body.preferred_days, 'preferred_days', 7);
+    if (!parsed.ok) return parsed;
+    const normalized = parsed.value.map((v) => v.toLowerCase());
+    if (!normalized.every((v) => PREF_DAYS.has(v))) return { ok: false, error: 'preferred_days contiene valores inválidos' };
+    patch.preferred_days = Array.from(new Set(normalized));
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'preferred_play_style')) {
+    hasAny = true;
+    if (typeof body.preferred_play_style !== 'string') return { ok: false, error: 'preferred_play_style debe ser texto' };
+    const v = body.preferred_play_style.trim().toLowerCase();
+    if (!PREF_STYLE.has(v)) return { ok: false, error: 'preferred_play_style inválido' };
+    patch.preferred_play_style = v;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'preferred_match_duration_min')) {
+    hasAny = true;
+    const v = Number(body.preferred_match_duration_min);
+    if (!Number.isFinite(v) || !PREF_DURATION.has(v)) {
+      return { ok: false, error: 'preferred_match_duration_min inválido' };
+    }
+    patch.preferred_match_duration_min = v;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'preferred_partner_level')) {
+    hasAny = true;
+    if (typeof body.preferred_partner_level !== 'string') return { ok: false, error: 'preferred_partner_level debe ser texto' };
+    const v = body.preferred_partner_level.trim().toLowerCase();
+    if (!PREF_PARTNER_LEVEL.has(v)) return { ok: false, error: 'preferred_partner_level inválido' };
+    patch.preferred_partner_level = v;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'favorite_clubs')) {
+    hasAny = true;
+    const parsed = parseStringArray(body.favorite_clubs, 'favorite_clubs', 20);
+    if (!parsed.ok) return parsed;
+    patch.favorite_clubs = parsed.value.slice(0, 20);
+  }
+
+  const boolFields = [
+    'notif_new_matches',
+    'notif_tournament_reminders',
+    'notif_class_updates',
+    'notif_chat_messages',
+  ] as const;
+
+  for (const bf of boolFields) {
+    if (Object.prototype.hasOwnProperty.call(body, bf)) {
+      hasAny = true;
+      if (typeof body[bf] !== 'boolean') return { ok: false, error: `${bf} debe ser boolean` };
+      patch[bf] = body[bf];
+    }
+  }
+
+  return { ok: true, hasAny, patch };
 }
 
 /**
@@ -277,8 +386,16 @@ router.patch('/me', async (req: Request, res: Response) => {
     phoneFinal = ph;
   }
 
-  if (!firstFinal && avatarNorm.mode === 'omit' && !hasPhone) {
-    return res.status(400).json({ ok: false, error: 'Envía first_name y last_name, y/o avatar_url, y/o phone' });
+  const prefsNorm = normalizePreferencesPatch(body as Record<string, unknown>);
+  if (!prefsNorm.ok) {
+    return res.status(400).json({ ok: false, error: prefsNorm.error });
+  }
+
+  if (!firstFinal && avatarNorm.mode === 'omit' && !hasPhone && !prefsNorm.hasAny) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Envía first_name y last_name, y/o avatar_url, y/o phone, y/o preferencias',
+    });
   }
 
   try {
@@ -352,6 +469,7 @@ router.patch('/me', async (req: Request, res: Response) => {
       }
       patch.phone = phoneFinal;
     }
+    Object.assign(patch, prefsNorm.patch);
 
     const { data: updated, error: upErr } = await supabase.from('players').update(patch).eq('id', playerId).select(SELECT_PUBLIC_INTERNAL).maybeSingle();
 
@@ -365,6 +483,13 @@ router.patch('/me', async (req: Request, res: Response) => {
       });
       if (metaErr) {
         console.error('[PATCH /players/me] auth metadata sync:', metaErr.message);
+      }
+    }
+
+    if (prefsNorm.hasAny) {
+      const syncRes = await syncPlayerVector(playerId);
+      if (!syncRes.sent) {
+        console.error('[PATCH /players/me] sync-player-vector failed:', syncRes.error ?? 'unknown');
       }
     }
 
