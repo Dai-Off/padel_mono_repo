@@ -540,7 +540,7 @@ export function IAAfinidadModal({
     const time = getLabel('time', selections.time);
     const style = getLabel('style', selections.style);
 
-    return `Quiero buscar un partido de ${sport}. Disponibilidad: ${day} por la ${time}. Estilo preferido: ${style}. Dame los mejores jugadores compatibles para completar el partido.`;
+    return `Quiero buscar un compañero para jugar ${sport}. Disponibilidad: ${day} por la ${time}. Estilo preferido: ${style}. Dame los mejores jugadores compatibles.`;
   }, [selections]);
 
   return (
@@ -571,7 +571,7 @@ export function IAAfinidadModal({
                   </LinearGradient>
                 </View>
                 <View>
-                  <Text style={styles.headerTitle}>Buscar Partido con IA</Text>
+                  <Text style={styles.headerTitle}>Buscar Compañero con IA</Text>
                   <Text style={styles.headerSubtitle}>
                     {loading ? 'Buscando...' : isFormView ? `${completedSteps}/4 seleccionados` : 'Resultados IA'}
                   </Text>
@@ -664,7 +664,7 @@ export function IAAfinidadModal({
                     </Animated.View>
                   </View>
                 </View>
-                <Text style={styles.loaderTitle}>Buscando partidos...</Text>
+                <Text style={styles.loaderTitle}>Buscando compañeros...</Text>
                 <Text style={styles.loaderSubtitle}>Generando recomendaciones...</Text>
                 <View style={styles.loaderDots}>
                   {[dotA, dotB, dotC].map((dot, idx) => (
@@ -700,10 +700,10 @@ export function IAAfinidadModal({
                     <Ionicons name="checkmark" size={42} color="#fff" />
                   </View>
                   <Text style={styles.resultTitle}>
-                    {parsedCandidates.length > 0 ? `${parsedCandidates.length} partidos encontrados!` : 'No se encontraron partidos'}
+                    {parsedCandidates.length > 0 ? `${parsedCandidates.length} compañeros encontrados!` : 'No se encontraron compañeros'}
                   </Text>
                   <Text style={styles.resultSubtitle}>
-                    {parsedCandidates.length > 0 ? 'Partidos perfectos para ti' : 'Prueba ajustando filtros para ampliar opciones.'}
+                    {parsedCandidates.length > 0 ? 'Compañeros perfectos para ti' : 'Prueba ajustando filtros para ampliar opciones.'}
                   </Text>
                 </View>
 
@@ -720,7 +720,7 @@ export function IAAfinidadModal({
                   ) : (
                     <View style={styles.emptyCandidatesCard}>
                       <Text style={styles.emptyCandidatesText}>
-                        No se encontraron partidos.
+                        No se encontraron compañeros.
                       </Text>
                     </View>
                   )}
@@ -767,7 +767,7 @@ export function IAAfinidadModal({
                       (loading || !isFormComplete) && styles.submitTextDisabled,
                     ]}
                   >
-                    Buscar Partidos
+                    Buscar Compañero
                   </Text>
                 </Pressable>
 
@@ -1292,6 +1292,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     marginBottom: 6,
+    textAlign: 'center',
+    width: '100%',
   },
   loaderSubtitle: {
     fontSize: 14,

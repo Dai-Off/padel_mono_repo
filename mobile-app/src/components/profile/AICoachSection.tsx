@@ -34,9 +34,9 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
     ? peerInsight.a_mejorar 
     : assessment.improvements;
 
-  const sourceLabel = showPeerData 
-    ? (peerInsight.insight_source === 'openai' ? '✨ IA' : '📋 Feedback') 
-    : '🎯 Evaluación';
+  const sourceLabel = showPeerData
+    ? (peerInsight.insight_source === 'openai' ? 'IA' : 'Feedback')
+    : 'Evaluación';
   return (
     <View style={styles.container}>
       {/* Resumen Card */}
@@ -149,7 +149,7 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
             )}
             {!showPeerData && activeTab === 'today' && (
                 <Text style={styles.emptyText}>
-                  ¡Juega un partido y recibe feedback para desbloquear recomendaciones dinámicas!
+                  Cuando juegues un partido con feedback, veremos aquí un resumen claro para tu próximo paso.
                 </Text>
             )}
           </View>
