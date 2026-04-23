@@ -7,8 +7,13 @@ import {
 } from './learningAlgorithm';
 import { getTodayRange } from './learningTimezone';
 import {
-  getMultiplier, updateIndividualStreak, updateSharedStreaks,
+  computeSeasonPassLessonSpDelta,
+  getMultiplier,
+  updateIndividualStreak,
+  updateSharedStreaks,
 } from './learningStreaks';
+import { addSeasonPassSp } from '../services/seasonPassService';
+import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 
 const router = Router();
 
@@ -229,6 +234,22 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
 
     if (sessionErr) return res.status(500).json({ ok: false, error: sessionErr.message });
 
+    let season_pass_sp_total: number | null = null;
+    let season_pass_grant_error: string | null = null;
+    try {
+      const activeSeason = await getActiveSeasonRow();
+      if (!activeSeason) {
+        season_pass_grant_error = 'sin_temporada_activa';
+      } else {
+        const spGain = computeSeasonPassLessonSpDelta(activeSeason.lesson_sp_base, streak.current_streak);
+        const r = await addSeasonPassSp(player.id, spGain);
+        season_pass_sp_total = r.sp;
+      }
+    } catch (e) {
+      season_pass_grant_error = (e as Error).message;
+      console.warn('[season-pass] No se pudo sumar SP al pase:', season_pass_grant_error);
+    }
+
     return res.json({
       ok: true,
       session: sessionData,
@@ -246,6 +267,8 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
         longest_streak: s.longest_streak,
         both_completed_today: s.player1_completed_today && s.player2_completed_today,
       })),
+      season_pass_sp_total,
+      season_pass_grant_error,
       results,
     });
   } catch (err) {

@@ -151,6 +151,8 @@ export type ConfirmClientResponse = {
   ok?: boolean;
   match?: unknown;
   booking?: { id: string };
+  tournament_id?: string;
+  season_pass?: { has_elite: boolean };
   error?: string;
 };
 
@@ -190,6 +192,27 @@ export async function createIntentForTournament(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ tournament_id: tournamentId }),
+    });
+    const json = (await res.json()) as CreatePaymentIntentResponse;
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al crear el pago' };
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+/** Pase Elite temporada: PaymentSheet + `confirmPaymentFromClient`. */
+export async function createIntentForSeasonPassElite(
+  token: string | null | undefined
+): Promise<CreatePaymentIntentResponse> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/payments/create-intent-for-season-pass-elite`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
     });
     const json = (await res.json()) as CreatePaymentIntentResponse;
     if (!res.ok) return { ok: false, error: json.error ?? 'Error al crear el pago' };
