@@ -380,22 +380,55 @@ router.post('/:id/admin-add-player', async (req: Request, res: Response) => {
 router.post('/:id/admin-remove-player', async (req: Request, res: Response) => {
   const matchId = req.params.id;
   const { player_id, booking_id } = req.body;
-  
+
   if (!player_id || !booking_id) {
     return res.status(400).json({ ok: false, error: 'Faltan player_id o booking_id' });
   }
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    
-    // 1. Remover de match_players
+    const now = new Date().toISOString();
+
+    // 1. Fetch participant payment before removal to compute refund
+    const { data: participant } = await supabase
+      .from('booking_participants')
+      .select('paid_amount_cents, wallet_amount_cents, payment_status')
+      .eq('booking_id', booking_id)
+      .eq('player_id', player_id)
+      .maybeSingle();
+
+    // 2. Remover de match_players
     if (!matchId.startsWith('mock-match-')) {
        await supabase.from('match_players').delete().eq('match_id', matchId).eq('player_id', player_id);
     }
-    
-    // 2. Remover de booking_participants
+
+    // 3. Remover de booking_participants
     await supabase.from('booking_participants').delete().eq('booking_id', booking_id).eq('player_id', player_id);
-    
+
+    // 4. Acreditar en wallet si el jugador había pagado
+    if (participant && participant.payment_status === 'paid') {
+      const refundCents = (participant.paid_amount_cents ?? 0) + (participant.wallet_amount_cents ?? 0);
+      if (refundCents > 0) {
+        const { data: bookingRow } = await supabase
+          .from('bookings')
+          .select('courts(club_id)')
+          .eq('id', booking_id)
+          .maybeSingle();
+        const clubId = (bookingRow?.courts as { club_id?: string } | null)?.club_id;
+        if (clubId) {
+          await supabase.from('wallet_transactions').insert({
+            player_id,
+            club_id: clubId,
+            amount_cents: refundCents,
+            concept: 'Reembolso por baja de reserva',
+            type: 'refund',
+            booking_id,
+            created_at: now,
+          });
+        }
+      }
+    }
+
     return res.status(200).json({ ok: true });
   } catch (err: any) {
     return res.status(500).json({ ok: false, error: err.message });
@@ -954,22 +987,69 @@ router.delete('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { data: before } = await supabase.from('matches').select('type').eq('id', id).maybeSingle();
+    const now = new Date().toISOString();
+
+    // Fetch match before deletion: need booking_id (wallet refund) and type (matchmaking release)
+    const { data: matchRow } = await supabase
+      .from('matches')
+      .select('id, booking_id, type')
+      .eq('id', id)
+      .maybeSingle();
+    if (!matchRow) return res.status(404).json({ ok: false, error: 'Match not found' });
+
     const { data, error } = await supabase
       .from('matches')
-      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .update({ status: 'cancelled', updated_at: now })
       .eq('id', id)
       .select('id, status')
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Match not found' });
-    if ((before as { type?: string } | null)?.type === 'matchmaking') {
+
+    // Release matchmaking slot if applicable (from develop)
+    if (matchRow.type === 'matchmaking') {
       try {
         await releaseMatchmakingProposal(id, { cancelBooking: false });
       } catch (e) {
         console.error('[matches/delete] releaseMatchmakingProposal:', e);
       }
     }
+
+    // Refund wallet for all paid participants of the associated booking
+    if (matchRow.booking_id) {
+      const { data: bookingRow } = await supabase
+        .from('bookings')
+        .select('courts(club_id)')
+        .eq('id', matchRow.booking_id)
+        .maybeSingle();
+      const clubId = (bookingRow?.courts as { club_id?: string } | null)?.club_id;
+
+      if (clubId) {
+        const { data: paidParticipants } = await supabase
+          .from('booking_participants')
+          .select('player_id, paid_amount_cents, wallet_amount_cents')
+          .eq('booking_id', matchRow.booking_id)
+          .eq('payment_status', 'paid');
+
+        if (paidParticipants && paidParticipants.length > 0) {
+          const refundRows = paidParticipants
+            .filter((p) => (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0) > 0)
+            .map((p) => ({
+              player_id: p.player_id,
+              club_id: clubId,
+              amount_cents: (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0),
+              concept: 'Reembolso por cancelación de partido',
+              type: 'refund',
+              booking_id: matchRow.booking_id,
+              created_at: now,
+            }));
+          if (refundRows.length > 0) {
+            await supabase.from('wallet_transactions').insert(refundRows);
+          }
+        }
+      }
+    }
+
     return res.json({ ok: true, match: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

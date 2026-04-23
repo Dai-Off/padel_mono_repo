@@ -133,7 +133,10 @@ export async function getNextQuestionState(answers: OnboardingAnswer[]): Promise
   if (getAns('p3') === undefined) return { type: 'question', question: await fetchQuestion('p3') };
   if (p1Val >= 3 && getAns('p4') === undefined) return { type: 'question', question: await fetchQuestion('p4') };
   if (getAns('p5') === undefined) return { type: 'question', question: await fetchQuestion('p5') };
-  if (p1Val >= 3 && getAns('p6') === undefined) return { type: 'question', question: await fetchQuestion('p6') };
+  if (p1Val >= 3) {
+    const p6Key = Number(p1Val) === 3 ? 'p6a' : 'p6b';
+    if (getAns(p6Key) === undefined) return { type: 'question', question: await fetchQuestion(p6Key) };
+  }
 
   if (p7Val === undefined) return { type: 'question', question: await fetchQuestion('p7') };
   if (p7Val === 'yes') {
@@ -245,19 +248,19 @@ async function calcEloPhase1FromData(answers: OnboardingAnswer[], questions: Que
   addCorrector('p4');
   addCorrector('p5');
 
-  // P6 multiselect: elo = max(seleccionados) + sum(resto) * factor[p1Val]
-  const p6Ans = getAns('p6');
+  // P6 multiselect (p6a si P1=3, p6b si P1=4): elo = max + sum(resto) * factor
+  const p6Key = Number(p1Val) === 3 ? 'p6a' : 'p6b';
+  const p6Ans = getAns(p6Key);
   if (Array.isArray(p6Ans) && p6Ans.length > 0) {
-    const p6q = questions.find(q => q.question_key === 'p6');
-    const factor = Number(p6_factors[String(p1Val)] ?? 0);
-    const prop = p1Val === 3 ? 'elo_reg' : 'elo_adv';
+    const p6q = questions.find(q => q.question_key === p6Key);
+    const factor = Number(p6_factors[p6Key] ?? 0);
 
     const elos: number[] = [];
     if (Array.isArray(p6q?.options)) {
       for (const value of p6Ans) {
         const opt = (p6q!.options as any[]).find(o => o.text === value || o.value === value);
-        if (opt && opt[prop] != null) {
-          const v = Number(opt[prop]);
+        if (opt && opt.elo != null) {
+          const v = Number(opt.elo);
           if (v > 0) elos.push(v);
         }
       }
