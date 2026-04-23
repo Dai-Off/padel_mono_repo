@@ -304,13 +304,13 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                                             <td className="px-6 py-4 whitespace-nowrap">
                                                 <div className="flex items-center gap-4">
                                                     <div className="flex items-center -space-x-2">
-                                                        {renderPlayer(teamA[0], 1, booking?.id, 'A', match.id)}
-                                                        {renderPlayer(teamA[1], 2, booking?.id, 'A', match.id)}
+                                                        {renderPlayer(teamA[0], 0, booking?.id, 'A', match.id)}
+                                                        {renderPlayer(teamA[1], 1, booking?.id, 'A', match.id)}
                                                     </div>
                                                     <span className="text-[11px] font-bold tracking-wider text-gray-300">VS</span>
                                                     <div className="flex items-center -space-x-2">
-                                                        {renderPlayer(teamB[0], 3, booking?.id, 'B', match.id)}
-                                                        {renderPlayer(teamB[1], 4, booking?.id, 'B', match.id)}
+                                                        {renderPlayer(teamB[0], 0, booking?.id, 'B', match.id)}
+                                                        {renderPlayer(teamB[1], 1, booking?.id, 'B', match.id)}
                                                     </div>
                                                 </div>
                                             </td>
