@@ -87,38 +87,58 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                     return mDateStr === currentDateStr;
                 });
                 for (const m of filteredMatches) {
-                    // When match_players is empty, derive players from booking_participants
-                    if ((!m.match_players || m.match_players.length === 0)) {
-                        const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
-                        const fullBooking = booking?.id ? bookingsById.get(booking.id) : null;
-                        if (fullBooking) {
-                            const participants = fullBooking.booking_participants || [];
-                            if (participants.length > 0) {
-                                m.match_players = participants.map((p: any, i: number) => {
-                                    const person = Array.isArray(p.players) ? p.players[0] : p.players;
-                                    return {
-                                        id: p.id,
-                                        team: i % 2 === 0 ? 'A' : 'B',
-                                        players: {
-                                            id: person?.id,
-                                            first_name: person?.first_name,
-                                            last_name: person?.last_name,
-                                            elo_rating: person?.elo_rating
-                                        }
-                                    };
-                                });
-                            } else if (fullBooking.players) {
-                                const org = fullBooking.players;
-                                m.match_players = [{
-                                    id: fullBooking.organizer_player_id,
-                                    team: 'A',
-                                    players: { id: org.id, first_name: org.first_name, last_name: org.last_name, elo_rating: org.elo_rating }
-                                }];
-                            }
-                        }
-                    }
-                    allMatches.push(m);
                     const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
+                    const fullBooking = booking?.id ? bookingsById.get(booking.id) : null;
+                    const existingMps: any[] = Array.isArray(m.match_players) ? m.match_players : [];
+                    const existingPlayerIds = new Set<string>(
+                        existingMps
+                            .map((mp: any) => {
+                                const p = Array.isArray(mp.players) ? mp.players[0] : mp.players;
+                                return p?.id;
+                            })
+                            .filter(Boolean)
+                    );
+
+                    // Fill in any booking_participants missing from match_players (keeps partidos listing in sync with grilla)
+                    const participants = fullBooking?.booking_participants || [];
+                    const missing = participants.filter((p: any) => {
+                        const person = Array.isArray(p.players) ? p.players[0] : p.players;
+                        return person?.id && !existingPlayerIds.has(person.id);
+                    });
+
+                    if (missing.length > 0) {
+                        let teamACount = existingMps.filter((mp: any) => mp.team === 'A').length;
+                        let teamBCount = existingMps.filter((mp: any) => mp.team === 'B').length;
+                        const extras = missing.map((p: any) => {
+                            const person = Array.isArray(p.players) ? p.players[0] : p.players;
+                            // Prefer filling team A up to 2, then team B up to 2, otherwise whichever is lightest
+                            let team: 'A' | 'B';
+                            if (teamACount < 2) { team = 'A'; teamACount++; }
+                            else if (teamBCount < 2) { team = 'B'; teamBCount++; }
+                            else if (teamACount <= teamBCount) { team = 'A'; teamACount++; }
+                            else { team = 'B'; teamBCount++; }
+                            return {
+                                id: p.id,
+                                team,
+                                players: {
+                                    id: person?.id,
+                                    first_name: person?.first_name,
+                                    last_name: person?.last_name,
+                                    elo_rating: person?.elo_rating
+                                }
+                            };
+                        });
+                        m.match_players = [...existingMps, ...extras];
+                    } else if (existingMps.length === 0 && fullBooking?.players) {
+                        const org = fullBooking.players;
+                        m.match_players = [{
+                            id: fullBooking.organizer_player_id,
+                            team: 'A',
+                            players: { id: org.id, first_name: org.first_name, last_name: org.last_name, elo_rating: org.elo_rating }
+                        }];
+                    }
+
+                    allMatches.push(m);
                     if (booking?.id) processedBookingIds.add(booking.id);
                 }
             }

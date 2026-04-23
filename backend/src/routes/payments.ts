@@ -89,6 +89,15 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       res.status(400).json({ ok: false, error: BOOKING_START_PAST_ERROR });
       return;
     }
+    // Check player conflict: block only if the player already has a booking at the SAME time
+    const timeOverlaps = (bookings: { start_at: string; end_at: string }[]): boolean =>
+      bookings.some((b) => {
+        const s = new Date(b.start_at).getTime();
+        const e = new Date(b.end_at).getTime();
+        return newStart < e && newEnd > s;
+      });
+
+    // 1. Check via match_players (matches the player is in)
     const { data: playerMatches } = await supabase
       .from('match_players')
       .select('match_id')
@@ -100,18 +109,34 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
         .select('id, status, bookings(start_at, end_at)')
         .in('id', matchIds)
         .neq('status', 'cancelled');
-      const overlaps = (matchesWithBookings ?? []).some((m: { status: string; bookings?: { start_at: string; end_at: string } | { start_at: string; end_at: string }[] }) => {
+      const matchOverlap = (matchesWithBookings ?? []).some((m: { status: string; bookings?: { start_at: string; end_at: string } | { start_at: string; end_at: string }[] }) => {
         const b = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
         if (!b?.start_at || !b?.end_at) return false;
-        const exStart = new Date(b.start_at).getTime();
-        const exEnd = new Date(b.end_at).getTime();
-        return newStart < exEnd && newEnd > exStart;
+        const s = new Date(b.start_at).getTime();
+        const e = new Date(b.end_at).getTime();
+        return newStart < e && newEnd > s;
       });
-      if (overlaps) {
-        res.status(400).json({
-          ok: false,
-          error: 'Ya tienes un partido a esa hora. Elige otro horario.',
-        });
+      if (matchOverlap) {
+        res.status(409).json({ ok: false, error: 'Ya tienes un partido a esa hora. Elige otro horario.' });
+        return;
+      }
+    }
+
+    // 2. Check via booking_participants (non-match bookings)
+    const { data: participations } = await supabase
+      .from('booking_participants')
+      .select('booking_id')
+      .eq('player_id', organizer_player_id);
+    const bIds = [...new Set((participations ?? []).map((p: any) => p.booking_id).filter(Boolean))];
+    if (bIds.length > 0) {
+      const { data: partBookings } = await supabase
+        .from('bookings')
+        .select('start_at, end_at')
+        .in('id', bIds)
+        .neq('status', 'cancelled')
+        .is('deleted_at', null);
+      if (timeOverlaps(partBookings ?? [])) {
+        res.status(409).json({ ok: false, error: 'Ya tienes una reserva a esa hora. Elige otro horario.' });
         return;
       }
     }
@@ -723,13 +748,14 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         if (!existing) {
           const slotIdx = meta.slot_index != null ? parseInt(meta.slot_index, 10) : undefined;
           const team = slotIdx != null ? (slotIdx <= 1 ? 'A' : 'B') : 'A';
-          await supabase.from('match_players').insert({
+          const { error: errMP } = await supabase.from('match_players').insert({
             match_id: match.id,
             player_id: participant.player_id,
             team,
             invite_status: 'accepted',
             slot_index: slotIdx ?? null,
           });
+          if (errMP) console.error('[payments/webhook] match_players insert failed:', errMP, { match_id: match.id, player_id: participant.player_id, slot_index: slotIdx ?? null });
         }
       }
     }
@@ -2302,35 +2328,16 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       }
     }
 
-    // Si es guest (join): añadir a match_players tras el pago
+    // Si es guest (join): añadir a match_players tras el pago.
+    // Las validaciones de ELO/onboarding ya corrieron en prepare-join; re-chequear aquí
+    // dejaría al jugador como pagado en booking_participants pero sin fila en match_players.
     if (participant?.role === 'guest') {
       const { data: match } = await supabase
         .from('matches')
-        .select('id, competitive, type, elo_min, elo_max')
+        .select('id')
         .eq('booking_id', booking_id)
         .maybeSingle();
       if (match) {
-        const { data: joinPlayer } = await supabase
-          .from('players')
-          .select('elo_rating, onboarding_completed')
-          .eq('id', participant.player_id)
-          .maybeSingle();
-        const mCompetitive = !!(match as { competitive?: boolean }).competitive;
-        const mType = String((match as { type?: string }).type ?? 'open');
-        if (mCompetitive && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
-          res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
-          return;
-        }
-        const eloJoin = Number((joinPlayer as { elo_rating?: number }).elo_rating ?? 0);
-        const eloMin = (match as { elo_min?: number | null }).elo_min;
-        const eloMax = (match as { elo_max?: number | null }).elo_max;
-        if (mCompetitive && mType === 'open' && eloMin != null && eloMax != null) {
-          if (eloJoin < eloMin || eloJoin > eloMax) {
-            res.status(403).json({ ok: false, error: 'Tu nivel no está en el rango permitido para este partido' });
-            return;
-          }
-        }
-
         const { data: existing } = await supabase
           .from('match_players')
           .select('id')
@@ -2340,13 +2347,14 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         if (!existing) {
           const slotIdx = meta.slot_index != null ? parseInt(meta.slot_index, 10) : undefined;
           const team = slotIdx != null ? (slotIdx <= 1 ? 'A' : 'B') : 'A';
-          await supabase.from('match_players').insert({
+          const { error: errMP } = await supabase.from('match_players').insert({
             match_id: match.id,
             player_id: participant.player_id,
             team,
             invite_status: 'accepted',
             slot_index: slotIdx ?? null,
           });
+          if (errMP) console.error('[payments/confirm-client] match_players insert failed:', errMP, { match_id: match.id, player_id: participant.player_id, slot_index: slotIdx ?? null });
         }
       }
     }
