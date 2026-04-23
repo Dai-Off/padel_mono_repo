@@ -748,13 +748,14 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         if (!existing) {
           const slotIdx = meta.slot_index != null ? parseInt(meta.slot_index, 10) : undefined;
           const team = slotIdx != null ? (slotIdx <= 1 ? 'A' : 'B') : 'A';
-          await supabase.from('match_players').insert({
+          const { error: errMP } = await supabase.from('match_players').insert({
             match_id: match.id,
             player_id: participant.player_id,
             team,
             invite_status: 'accepted',
             slot_index: slotIdx ?? null,
           });
+          if (errMP) console.error('[payments/webhook] match_players insert failed:', errMP, { match_id: match.id, player_id: participant.player_id, slot_index: slotIdx ?? null });
         }
       }
     }
@@ -2327,35 +2328,16 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       }
     }
 
-    // Si es guest (join): añadir a match_players tras el pago
+    // Si es guest (join): añadir a match_players tras el pago.
+    // Las validaciones de ELO/onboarding ya corrieron en prepare-join; re-chequear aquí
+    // dejaría al jugador como pagado en booking_participants pero sin fila en match_players.
     if (participant?.role === 'guest') {
       const { data: match } = await supabase
         .from('matches')
-        .select('id, competitive, type, elo_min, elo_max')
+        .select('id')
         .eq('booking_id', booking_id)
         .maybeSingle();
       if (match) {
-        const { data: joinPlayer } = await supabase
-          .from('players')
-          .select('elo_rating, onboarding_completed')
-          .eq('id', participant.player_id)
-          .maybeSingle();
-        const mCompetitive = !!(match as { competitive?: boolean }).competitive;
-        const mType = String((match as { type?: string }).type ?? 'open');
-        if (mCompetitive && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
-          res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
-          return;
-        }
-        const eloJoin = Number((joinPlayer as { elo_rating?: number }).elo_rating ?? 0);
-        const eloMin = (match as { elo_min?: number | null }).elo_min;
-        const eloMax = (match as { elo_max?: number | null }).elo_max;
-        if (mCompetitive && mType === 'open' && eloMin != null && eloMax != null) {
-          if (eloJoin < eloMin || eloJoin > eloMax) {
-            res.status(403).json({ ok: false, error: 'Tu nivel no está en el rango permitido para este partido' });
-            return;
-          }
-        }
-
         const { data: existing } = await supabase
           .from('match_players')
           .select('id')
@@ -2365,13 +2347,14 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         if (!existing) {
           const slotIdx = meta.slot_index != null ? parseInt(meta.slot_index, 10) : undefined;
           const team = slotIdx != null ? (slotIdx <= 1 ? 'A' : 'B') : 'A';
-          await supabase.from('match_players').insert({
+          const { error: errMP } = await supabase.from('match_players').insert({
             match_id: match.id,
             player_id: participant.player_id,
             team,
             invite_status: 'accepted',
             slot_index: slotIdx ?? null,
           });
+          if (errMP) console.error('[payments/confirm-client] match_players insert failed:', errMP, { match_id: match.id, player_id: participant.player_id, slot_index: slotIdx ?? null });
         }
       }
     }
