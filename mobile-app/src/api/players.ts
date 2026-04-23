@@ -24,6 +24,8 @@ type MeResponse = {
     mm_wins?: number | null;
     mm_losses?: number | null;
     mm_draws?: number | null;
+    /** Presente solo si el backend lo incluye en `/players/me`. */
+    onboarding_completed?: boolean | null;
   };
   error?: string;
 };
@@ -45,6 +47,11 @@ export type MyPlayerProfile = {
   mmWins: number;
   mmLosses: number;
   mmDraws: number;
+  /**
+   * Onboarding de nivelación; si el backend no envía el campo, se asume completado
+   * para no bloquear la app.
+   */
+  onboardingCompleted: boolean;
 };
 
 /** Obtiene el jugador actual según la sesión (Bearer token). */
@@ -80,21 +87,21 @@ export async function fetchMyPlayerProfile(
         : typeof rawElo === 'number'
           ? rawElo
           : Number(String(rawElo).trim());
-    const rawLps = json.player.lps;
+    const rawLps = json.player.lps as number | string | null | undefined;
     const lpsNum =
       rawLps == null || rawLps === ''
         ? null
         : typeof rawLps === 'number'
           ? rawLps
           : Number(String(rawLps).trim());
-    const rawMpm = json.player.matches_played_matchmaking;
+    const rawMpm = json.player.matches_played_matchmaking as number | string | null | undefined;
     const mpmNum =
       rawMpm == null || rawMpm === ''
         ? null
         : typeof rawMpm === 'number'
           ? rawMpm
           : Number(String(rawMpm).trim());
-    const rawFiab = json.player.fiabilidad;
+    const rawFiab = json.player.fiabilidad as number | string | null | undefined;
     const fiabNum =
       rawFiab == null || rawFiab === ''
         ? null
@@ -125,6 +132,7 @@ export async function fetchMyPlayerProfile(
       mmWins: parseInt0(json.player.mm_wins),
       mmLosses: parseInt0(json.player.mm_losses),
       mmDraws: parseInt0(json.player.mm_draws),
+      onboardingCompleted: json.player.onboarding_completed !== false,
     };
   } catch {
     return null;
