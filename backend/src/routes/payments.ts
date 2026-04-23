@@ -11,6 +11,12 @@ import {
   STRIPE_META_TOURNAMENT_PURPOSE,
 } from '../services/tournamentsService';
 import { refreshBookingStatusAfterParticipantPayment } from '../lib/bookingPaymentSync';
+import {
+  finalizeSeasonPassElitePurchase,
+  getOrCreateSeasonPassRow,
+  STRIPE_META_SEASON_PASS_ELITE,
+} from '../services/seasonPassService';
+import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import { zonedTimeToUtc } from './learningTimezone';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
@@ -376,6 +382,102 @@ export async function createIntentForTournamentHandler(req: Request, res: Respon
 }
 
 /**
+ * POST /payments/create-intent-for-season-pass-elite
+ * Crea PaymentIntent (9,99 € por defecto). El Pase Elite se activa en webhook / confirm-client.
+ * Importe: env `SEASON_PASS_ELITE_PRICE_CENTS` (mín. 50), por defecto 999.
+ */
+export async function createIntentForSeasonPassEliteHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const { data: player } = await supabase
+      .from('players')
+      .select('id, email, stripe_customer_id')
+      .eq('email', user.email.trim().toLowerCase())
+      .maybeSingle();
+
+    if (!player) {
+      res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+      return;
+    }
+
+    const row = await getOrCreateSeasonPassRow(player.id as string);
+    if (row.has_elite) {
+      res.status(409).json({ ok: false, error: 'Ya tienes el Pase Elite activo' });
+      return;
+    }
+
+    const activeSeason = await getActiveSeasonRow();
+    if (!activeSeason) {
+      res.status(503).json({
+        ok: false,
+        error: 'Temporada del pase no configurada (season_pass_seasons).',
+      });
+      return;
+    }
+
+    const rawCents = process.env.SEASON_PASS_ELITE_PRICE_CENTS;
+    const priceCents =
+      rawCents != null && String(rawCents).trim() !== '' && Number.isFinite(Number(rawCents))
+        ? Math.max(50, Math.round(Number(rawCents)))
+        : 999;
+
+    const stripe = getStripe();
+    const metadata: Record<string, string> = {
+      payer_player_id: player.id as string,
+      purpose: STRIPE_META_SEASON_PASS_ELITE,
+      season_slug: activeSeason.slug,
+    };
+
+    const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
+      amount: priceCents,
+      currency: 'eur',
+      automatic_payment_methods: { enabled: true },
+      setup_future_usage: 'off_session',
+      metadata,
+    };
+
+    if (player.stripe_customer_id) {
+      paymentIntentParams.customer = player.stripe_customer_id as string;
+    } else {
+      const customer = await stripe.customers.create({
+        email: player.email as string,
+        metadata: { player_id: player.id as string },
+      });
+      paymentIntentParams.customer = customer.id;
+      await supabase
+        .from('players')
+        .update({ stripe_customer_id: customer.id, updated_at: new Date().toISOString() })
+        .eq('id', player.id);
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
+
+    res.json({
+      ok: true,
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      amountCents: priceCents,
+    });
+  } catch (err) {
+    console.error('[payments/create-intent-for-season-pass-elite]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
  * POST /payments/create-intent
  * Body:
  * - Join nuevo: { booking_id, slot_index } (sin crear participant antes de pagar)
@@ -633,6 +735,27 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
           stripePaymentIntentId: pi.id,
           amountCents,
         });
+      }
+      res.json({ received: true });
+      return;
+    }
+
+    // Pase Elite (temporada)
+    if (meta.purpose === STRIPE_META_SEASON_PASS_ELITE && meta.payer_player_id) {
+      const { data: existingPi } = await supabase
+        .from('payment_transactions')
+        .select('id')
+        .eq('stripe_payment_intent_id', pi.id)
+        .maybeSingle();
+      if (!existingPi) {
+        const amountCents =
+          typeof pi.amount_received === 'number' ? pi.amount_received : Number(pi.amount ?? 0);
+        const r = await finalizeSeasonPassElitePurchase({
+          playerId: String(meta.payer_player_id),
+          stripePaymentIntentId: pi.id,
+          amountCents,
+        });
+        if (!r.ok) console.error('[payments/webhook] season pass elite:', r.error);
       }
       res.json({ received: true });
       return;
@@ -2230,6 +2353,27 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
       res.json({ ok: true, tournament_id: String(meta.tournament_id) });
+      return;
+    }
+
+    // Pase Elite (temporada)
+    if (meta.purpose === STRIPE_META_SEASON_PASS_ELITE && payer_player_id) {
+      if (player.id !== String(payer_player_id)) {
+        res.status(403).json({ ok: false, error: 'No eres el pagador de este pago' });
+        return;
+      }
+      const amountCents =
+        typeof pi.amount_received === 'number' ? pi.amount_received : Number(pi.amount ?? 0);
+      const r = await finalizeSeasonPassElitePurchase({
+        playerId: String(payer_player_id),
+        stripePaymentIntentId: payment_intent_id,
+        amountCents,
+      });
+      if (!r.ok) {
+        res.status(400).json({ ok: false, error: r.error ?? 'No se pudo activar el Pase Elite' });
+        return;
+      }
+      res.json({ ok: true, season_pass: { has_elite: true } });
       return;
     }
 

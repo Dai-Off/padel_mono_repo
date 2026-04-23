@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   LayoutChangeEvent,
@@ -167,23 +168,26 @@ function SeasonPassBarFill({ pct }: { pct: number }) {
 }
 
 function RewardGem({ size = 32 }: { size?: number }) {
+  const gid = useId().replace(/:/g, "_");
+  const fillId = `gemFill_${gid}`;
+  const strokeId = `gemStroke_${gid}`;
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
       <Defs>
-        <SvgGrad id="gemFill" x1="0%" y1="0%" x2="100%" y2="100%">
+        <SvgGrad id={fillId} x1="0%" y1="0%" x2="100%" y2="100%">
           <Stop offset="0%" stopColor="#6B7280" stopOpacity={0.85} />
           <Stop offset="100%" stopColor="#9CA3AF" stopOpacity={0.6} />
         </SvgGrad>
-        <SvgGrad id="gemStroke" x1="0%" y1="0%" x2="100%" y2="100%">
+        <SvgGrad id={strokeId} x1="0%" y1="0%" x2="100%" y2="100%">
           <Stop offset="0%" stopColor="#9CA3AF" />
           <Stop offset="100%" stopColor="#6B7280" />
         </SvgGrad>
       </Defs>
-      <Path d="M50,8 L92,50 L50,92 L8,50 Z" fill="url(#gemFill)" />
+      <Path d="M50,8 L92,50 L50,92 L8,50 Z" fill={`url(#${fillId})`} />
       <Path
         d="M50,8 L92,50 L50,92 L8,50 Z"
         fill="none"
-        stroke="url(#gemStroke)"
+        stroke={`url(#${strokeId})`}
         strokeWidth={2.5}
       />
       <Circle cx={50} cy={50} r={13} fill="#374151" opacity={0.9} />
@@ -196,6 +200,7 @@ function RewardGem({ size = 32 }: { size?: number }) {
 type Props = {
   /** Misma altura que `SeasonPassWidget` dentro del carrusel X7 (160px). */
   compact?: boolean;
+  loading?: boolean;
   seasonLabel?: string | null;
   seasonTitle?: string | null;
   levelCurrent?: string | null;
@@ -210,6 +215,7 @@ type Props = {
 
 export function SeasonPassHomeCard({
   compact = false,
+  loading = false,
   seasonLabel,
   seasonTitle,
   levelCurrent,
@@ -269,14 +275,22 @@ export function SeasonPassHomeCard({
           </View>
           <View style={styles.levelCol}>
             <Text style={[styles.levelHint, compact && styles.levelHintCompact]}>Nivel</Text>
-            <Text style={[styles.levelNum, compact && styles.levelNumCompact]}>
-              {dash(levelCurrent)}
-            </Text>
-            <Text style={[styles.levelMax, compact && styles.levelMaxCompact]}>
-              {levelMax != null && String(levelMax).trim() !== ""
-                ? `/ ${dash(levelMax)}`
-                : DASH}
-            </Text>
+            {loading ? (
+              <View style={{ minHeight: compact ? 28 : 34, justifyContent: "center", alignItems: "flex-end" }}>
+                <ActivityIndicator size="small" color={ACCENT} />
+              </View>
+            ) : (
+              <>
+                <Text style={[styles.levelNum, compact && styles.levelNumCompact]}>
+                  {dash(levelCurrent)}
+                </Text>
+                <Text style={[styles.levelMax, compact && styles.levelMaxCompact]}>
+                  {levelMax != null && String(levelMax).trim() !== ""
+                    ? `/ ${dash(levelMax)}`
+                    : DASH}
+                </Text>
+              </>
+            )}
           </View>
         </View>
 
@@ -377,12 +391,15 @@ const styles = StyleSheet.create({
   }),
   levelCol: { alignItems: "flex-end" },
   levelHint: androidReadableText({
-    fontSize: 12,
+    fontSize: 10,
     color: "#6b7280",
+    lineHeight: 12,
     paddingRight: 4,
   }),
   levelHintCompact: androidReadableText({
     fontSize: 10,
+    color: "#6b7280",
+    lineHeight: 12,
     paddingRight: 0,
   }),
   levelNum: androidReadableText({
