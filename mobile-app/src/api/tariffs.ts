@@ -28,6 +28,7 @@ export async function getSlotPrice(params: {
   slot: string;         // "HH:MM"
   duration_minutes: number;
   reservation_type?: string;
+  token?: string;
 }): Promise<SlotPriceResult> {
   try {
     const url = new URL(`${API_URL}/tariffs/slot-price`);
@@ -40,9 +41,16 @@ export async function getSlotPrice(params: {
       url.searchParams.set('reservation_type', params.reservation_type);
     }
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (params.token) {
+      headers['Authorization'] = `Bearer ${params.token}`;
+    }
+
     console.log('[getSlotPrice] Requesting:', url.toString());
     const res = await fetch(url.toString(), {
-      headers: { 'Content-Type': 'application/json' },
+      headers,
     });
     const json = (await res.json()) as SlotPriceResult;
     console.log('[getSlotPrice] Response:', json);
