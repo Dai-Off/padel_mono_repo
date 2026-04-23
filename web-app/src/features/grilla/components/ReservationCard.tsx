@@ -16,6 +16,7 @@ interface Props {
     compactPxPerMinute?: number;
     onHoverStart?: (res: Reservation, el: HTMLElement) => void;
     onHoverEnd?: () => void;
+    typeColorOverrides?: Record<string, string>;
 }
 
 // Color is driven by booking_type (the "what"), not by payment status
@@ -35,7 +36,7 @@ const bookingTypeColors: Record<ReservationType, string> = {
 // Pending payment: dashed border to indicate "not yet paid"
 const pendingPaymentStyle = 'border-dashed opacity-80';
 
-export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justDropped, onClick, compactPxPerMinute, onHoverStart, onHoverEnd }) => {
+export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justDropped, onClick, compactPxPerMinute, onHoverStart, onHoverEnd, typeColorOverrides }) => {
     const { tData, t } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
     const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -78,15 +79,21 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
     const isVeryShort = isCompact && computedHeight < 10;
     const isShort = isCompact && computedHeight >= 10 && computedHeight < 20;
 
+    const customColor = typeColorOverrides?.[reservation.booking_type];
+    const typeColorClass = customColor ? '' : (bookingTypeColors[reservation.booking_type] ?? bookingTypeColors['standard']);
+    const typeColorStyle: React.CSSProperties = customColor
+        ? { backgroundColor: customColor, color: 'white', borderColor: customColor }
+        : {};
+
     if (isDragging && !isOverlay) {
         return (
             <div
                 className={clsx(
                     'absolute inset-x-0 border flex flex-col overflow-hidden text-xs transition-none opacity-50 grayscale',
                     isCompact ? 'p-0 px-0.5' : 'p-1.5',
-                    bookingTypeColors[reservation.booking_type] ?? bookingTypeColors['standard']
+                    typeColorClass
                 )}
-                style={{ ...style, transform: undefined, zIndex: 0 }}
+                style={{ ...style, ...typeColorStyle, transform: undefined, zIndex: 0 }}
             >
                 <div className={clsx(
                     "font-bold text-center leading-none overflow-hidden",
@@ -106,7 +113,7 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
         <div
             id={reservation.id}
             ref={isOverlay ? undefined : setNodeRef}
-            style={style}
+            style={{ ...style, ...typeColorStyle }}
             {...(isOverlay ? {} : listeners)}
             {...(isOverlay ? {} : attributes)}
             data-dnd-draggable
@@ -131,7 +138,7 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                 'absolute inset-x-0 border flex flex-col overflow-hidden cursor-pointer hover:brightness-95 transition-[filter]',
                 isShortBooking && 'justify-center items-center',
                 isCompact ? 'p-0 px-0.5 text-[8px]' : isShortBooking ? 'p-0 px-0.5' : isSmallZoom ? 'p-1.5 text-[18px]' : 'p-1.5 text-xs',
-                bookingTypeColors[reservation.booking_type] ?? bookingTypeColors['standard'],
+                typeColorClass,
                 reservation.status === 'pending_payment' && pendingPaymentStyle,
                 isOverlay && 'shadow-lg scale-[1.02] ring-2 ring-blue-400 opacity-95 cursor-grabbing !transition-none',
                 justDropped && 'relative z-20'
