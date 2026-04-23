@@ -18,6 +18,7 @@ import { useStripe } from "../stripe";
 import { Ionicons } from "@expo/vector-icons";
 import type { SearchCourtResult } from "../api/search";
 import { fetchSearchCourts } from "../api/search";
+import { fetchAvailableSlots } from "../api/availability";
 import { fetchClubById } from "../api/clubs";
 import { fetchCourtsByClubId, type Court } from "../api/courts";
 import { fetchMatches } from "../api/matches";
@@ -300,20 +301,18 @@ export function ClubDetailScreen({
       try {
         const dateStr = localCalendarYmd(date);
         const slotsPerCourt: Record<string, string[]> = {};
-        const results = await fetchSearchCourts({
+        
+        // Mantener fetchSearchCourts solo para precios
+        const searchResults = await fetchSearchCourts({
           dateFrom: dateStr,
           dateTo: dateStr,
         });
-        const clubResults = results.filter((r) => r.clubId === court.clubId);
-        const allSlots: string[] = [];
+        const clubResults = searchResults.filter((r) => r.clubId === court.clubId);
         const prices: Record<
           string,
           { minPriceCents: number; minPriceFormatted: string }
         > = {};
         for (const r of clubResults) {
-          const courtSlots = r.timeSlots ?? [];
-          allSlots.push(...courtSlots);
-          slotsPerCourt[r.id] = courtSlots;
           if (r.minPriceCents > 0) {
             prices[r.id] = {
               minPriceCents: r.minPriceCents,
@@ -322,11 +321,30 @@ export function ClubDetailScreen({
             };
           }
         }
-        setRawTimeSlotsUnion([...new Set(allSlots)].sort());
         setCourtPrices(prices);
+
+        // Nueva fuente para disponibilidad: fetchAvailableSlots
+        const availability = await fetchAvailableSlots({
+          clubId: court.clubId,
+          date: dateStr,
+          durationMinutes: DURATION_MIN,
+          token: session?.access_token,
+        });
+
+        const allSlots: string[] = [];
+        if (availability.ok) {
+          for (const res of availability.results) {
+            const courtSlots = res.free_slots.map(s => s.start);
+            allSlots.push(...courtSlots);
+            slotsPerCourt[res.court_id] = courtSlots;
+          }
+        }
+
+        setRawTimeSlotsUnion([...new Set(allSlots)].sort());
         setRawSlotsByCourt(slotsPerCourt);
         setSlotNow(new Date());
-      } catch {
+      } catch (err) {
+        __DEV__ && console.warn("[ClubDetail] Error loading availability:", err);
         setRawTimeSlotsUnion([]);
         setCourtPrices({});
         setRawSlotsByCourt({});
@@ -334,7 +352,7 @@ export function ClubDetailScreen({
         setTimeSlotsLoading(false);
       }
     },
-    [court.clubId],
+    [court.clubId, session?.access_token],
   );
 
   useEffect(() => {

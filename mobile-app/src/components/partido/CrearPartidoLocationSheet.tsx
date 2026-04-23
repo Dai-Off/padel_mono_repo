@@ -129,7 +129,7 @@ export function CrearPartidoLocationSheet({
     setClubsLoading(true);
     setClubsError(null);
     try {
-      const data = await fetchClubAvailabilityForCreate();
+      const data = await fetchClubAvailabilityForCreate(session?.access_token);
       setClubs(data);
     } catch {
       setClubsError('No se pudo cargar la disponibilidad');
@@ -137,7 +137,7 @@ export function CrearPartidoLocationSheet({
     } finally {
       setClubsLoading(false);
     }
-  }, []);
+  }, [session?.access_token]);
 
   useEffect(() => {
     const active = presentation === 'fullscreen' || visible;
