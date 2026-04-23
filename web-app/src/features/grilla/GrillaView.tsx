@@ -263,9 +263,6 @@ const useClubData = (dateOrStr: Date | string) => {
         const supabase = getSupabaseClient();
         if (!supabase || !clubId) return;
 
-        // bookings no tiene club_id — filtramos client-side por court_id
-        const courtIds = new Set(courtsRef.current.map(c => c.id));
-
         const channel = supabase
             .channel(`bookings-club-${clubId}`)
             .on(
@@ -276,12 +273,15 @@ const useClubData = (dateOrStr: Date | string) => {
                     table: 'bookings',
                 },
                 (payload) => {
-                    // Ignorar reservas de otras canchas (otros clubs)
+                    // Leemos courtsRef.current en cada evento para evitar el
+                    // stale-closure: al momento de suscribir las canchas aún
+                    // pueden no haber cargado, pero sí lo estarán al llegar eventos.
+                    const courtIds = new Set(courtsRef.current.map(c => c.id));
                     const courtId =
                         payload.eventType === 'DELETE'
                             ? (payload.old as any).court_id
                             : (payload.new as any).court_id;
-                    if (!courtIds.has(courtId)) return;
+                    if (courtIds.size > 0 && !courtIds.has(courtId)) return;
 
                     if (payload.eventType === 'INSERT') {
                         const raw = payload.new as any;
@@ -370,7 +370,13 @@ const useClubData = (dateOrStr: Date | string) => {
                     }
                 }
             )
-            .subscribe();
+            .subscribe((status, err) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log(`[Realtime] ✓ suscrito al canal bookings-club-${clubId}`);
+                } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                    console.error(`[Realtime] ✗ error en canal bookings-club-${clubId}:`, status, err);
+                }
+            });
 
         return () => { supabase.removeChannel(channel); };
     }, [clubId, dateStr]);
