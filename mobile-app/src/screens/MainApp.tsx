@@ -128,6 +128,11 @@ export function MainApp() {
           organizerPlayerId={crearPartidoFlow.organizerId}
           onClose={closeFlow}
           onSiguiente={closeFlow}
+          onNavigateToCompleteOnboarding={() => {
+            setCrearPartidoFlow({ open: false, organizerId: null });
+            bumpPartidos();
+            setShowProfile(true);
+          }}
           onPartidoCreado={(data) => {
             setCrearPartidoFlow({ open: false, organizerId: null });
             bumpPartidos();
@@ -267,6 +272,7 @@ export function MainApp() {
             onOpenWeMatchClubsFlow={(organizerId) =>
               setCrearPartidoFlow({ open: true, organizerId })
             }
+            onNavigateToCompleteOnboarding={() => setShowProfile(true)}
             partidosRefreshNonce={partidosRefreshNonce}
           />
         );

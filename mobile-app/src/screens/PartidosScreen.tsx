@@ -68,6 +68,8 @@ type PartidosScreenProps = {
   onPartidoPress?: (partido: PartidoItem) => void;
   /** Tras elegir WeMatch en el modal y Siguiente: abre pantalla completa de clubes/horarios. */
   onOpenWeMatchClubsFlow?: (organizerPlayerId: string | null) => void;
+  /** Abre perfil para completar nivelación inicial (desde alerta en crear partido). */
+  onNavigateToCompleteOnboarding?: () => void;
   /** Incrementado desde MainApp al cerrar el flujo para refrescar listas */
   partidosRefreshNonce?: number;
 };
@@ -75,6 +77,7 @@ type PartidosScreenProps = {
 export function PartidosScreen({
   onPartidoPress,
   onOpenWeMatchClubsFlow,
+  onNavigateToCompleteOnboarding,
   partidosRefreshNonce = 0,
 }: PartidosScreenProps) {
   const { session } = useAuth();
@@ -218,6 +221,14 @@ export function PartidosScreen({
         onClose={() => setLocationModalVisible(false)}
         onSiguiente={() => {}}
         onPartidoCreado={undefined}
+        onNavigateToCompleteOnboarding={
+          onNavigateToCompleteOnboarding
+            ? () => {
+                setLocationModalVisible(false);
+                onNavigateToCompleteOnboarding();
+              }
+            : undefined
+        }
       />
     </View>
   );
