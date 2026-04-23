@@ -490,11 +490,11 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       }
       const { data: existingBookingParticipant } = await supabase
         .from('booking_participants')
-        .select('id')
+        .select('id, payment_status')
         .eq('booking_id', booking_id)
         .eq('player_id', player.id)
         .maybeSingle();
-      if (existingBookingParticipant) {
+      if (existingBookingParticipant && existingBookingParticipant.payment_status !== 'pending') {
         res.status(409).json({ ok: false, error: 'Ya tienes una plaza reservada en este partido' });
         return;
       }
