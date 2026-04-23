@@ -584,27 +584,48 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
 
     const { data: existingParticipant } = await supabase
       .from('booking_participants')
-      .select('id')
+      .select('id, payment_status')
       .eq('booking_id', match.booking_id)
       .eq('player_id', playerId)
       .maybeSingle();
-    if (existingParticipant) {
-      return res.status(409).json({ ok: false, error: 'Ya tienes una plaza reservada en este partido' });
-    }
 
-    const { data: participant, error: errBP } = await supabase
-      .from('booking_participants')
-      .insert([
-        { booking_id: match.booking_id, player_id: playerId, role: 'guest', share_amount_cents: shareCents },
-      ])
-      .select('id')
-      .maybeSingle();
-    if (errBP) return res.status(500).json({ ok: false, error: errBP.message });
-    if (!participant) return res.status(500).json({ ok: false, error: 'No se pudo preparar la plaza' });
+    let participantId;
+
+    if (existingParticipant) {
+      if (existingParticipant.payment_status === 'pending') {
+        // El usuario canceló un intento previo o falló el pago. Reutilizamos el registro.
+        participantId = existingParticipant.id;
+      } else {
+        // Ya está unido con un pago confirmado u otro estado definitivo.
+        return res.status(409).json({
+          ok: false,
+          error: 'Ya tienes una plaza reservada en este partido',
+        });
+      }
+    } else {
+      const { data: participant, error: errBP } = await supabase
+        .from('booking_participants')
+        .insert([
+          {
+            booking_id: match.booking_id,
+            player_id: playerId,
+            role: 'guest',
+            share_amount_cents: shareCents,
+          },
+        ])
+        .select('id')
+        .maybeSingle();
+
+      if (errBP) return res.status(500).json({ ok: false, error: errBP.message });
+      if (!participant) {
+        return res.status(500).json({ ok: false, error: 'No se pudo preparar la plaza' });
+      }
+      participantId = participant.id;
+    }
 
     return res.status(200).json({
       ok: true,
-      participant_id: participant.id,
+      participant_id: participantId,
       booking_id: match.booking_id,
       share_amount_cents: shareCents,
     });
