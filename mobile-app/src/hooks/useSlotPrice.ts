@@ -8,6 +8,7 @@ export function useSlotPrice(params: {
   slot?: string;
   durationMinutes?: number;
   reservationType?: string;
+  token?: string;
 }) {
   const [priceData, setPriceData] = useState<SlotPriceResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -27,6 +28,7 @@ export function useSlotPrice(params: {
             slot: params.slot!,
             duration_minutes: params.durationMinutes!,
             reservation_type: params.reservationType,
+            token: params.token,
           });
           console.log('[useSlotPrice] Success:', result);
           setPriceData(result);
@@ -39,7 +41,7 @@ export function useSlotPrice(params: {
       };
       fetchPrice();
     }
-  }, [params.clubId, params.courtId, params.date, params.slot, params.durationMinutes, params.reservationType]);
+  }, [params.clubId, params.courtId, params.date, params.slot, params.durationMinutes, params.reservationType, params.token]);
 
   return { priceData, loading, error };
 }

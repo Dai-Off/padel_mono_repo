@@ -99,6 +99,13 @@ router.get('/courts', async (req: Request, res: Response) => {
 
     const searchDate = dateFrom ?? new Date().toISOString().slice(0, 10);
 
+    // Also block slots occupied by active school courses for the searched day
+    const { data: rtPrices } = await supabase
+      .from('reservation_type_prices')
+      .select('club_id, reservation_type, price_per_hour_cents')
+      .in('club_id', clubIds)
+      .eq('reservation_type', 'standard');
+
     let bookingsQuery = supabase
       .from('bookings')
       .select('id, court_id, start_at, end_at, total_price_cents, status')
@@ -198,7 +205,10 @@ router.get('/courts', async (req: Request, res: Response) => {
         const rules = rulesByCourt.get(court.id) ?? [];
         const booked = bookedRangesByCourt.get(court.id) ?? [];
         const timeSlots: string[] = [];
-        let minPriceCents = 0;
+        
+        // Base price from reservation_type_prices if available
+        const clubRtPrice = (rtPrices ?? []).find(p => p.club_id === court.club_id);
+        let minPriceCents = clubRtPrice?.price_per_hour_cents ?? 0;
 
         for (const rule of rules) {
           for (let min = rule.startMin; min < rule.endMin; min += 60) {
