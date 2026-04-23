@@ -174,9 +174,10 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
     let cancelled = false;
     void fetchMatches({ expand: true, token, activeOnly: false }).then((rows) => {
       if (cancelled) return;
-      setRecentMatchRows(toRecentRows(rows, myId));
+      const myMatches = rows.filter((m) => (m.match_players ?? []).some((mp) => mp.players?.id === myId));
+      setRecentMatchRows(toRecentRows(myMatches, myId));
       const clubs = new Map<string, string>();
-      for (const m of rows) {
+      for (const m of myMatches) {
         const c = m.bookings?.courts?.clubs;
         if (c?.id && c.name) clubs.set(c.id, c.name);
       }
@@ -218,6 +219,7 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
   function toRecentRows(matches: MatchEnriched[], myPlayerId: string) {
     return matches
       .filter((m) => m.type === 'matchmaking')
+      .filter((m) => (m.match_players ?? []).some((mp) => mp.players?.id === myPlayerId))
       .filter((m) => {
         const start = m.bookings?.start_at ? new Date(m.bookings.start_at).getTime() : 0;
         return Number.isFinite(start) && start > 0 && start <= Date.now();
@@ -229,18 +231,21 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
       })
       .slice(0, 3)
       .map((m) => {
-        const others = (m.match_players ?? [])
+        const players = m.match_players ?? [];
+        const mySlot = players.find((mp) => mp.players?.id === myPlayerId);
+        const rivals = players
+          .filter((mp) => !!mySlot?.team && mp.team !== mySlot.team)
           .map((mp) => mp.players)
-          .filter((p): p is NonNullable<typeof p> => !!p && p.id !== myPlayerId);
-        const title = others
+          .filter((p): p is NonNullable<typeof p> => !!p);
+        const title = rivals
           .slice(0, 2)
           .map((p) => `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim())
           .filter(Boolean)
           .join(' & ');
-        const subtitle = others[0]?.liga ? `${others[0].liga}` : 'Partido competitivo';
+        const subtitle = rivals[0]?.liga ? `Rivales · ${rivals[0].liga}` : 'Rivales';
         return {
           id: m.id,
-          title: title || 'Partido competitivo',
+          title: title || 'Rivales pendientes',
           subtitle,
           when: m.bookings?.start_at ? formatRelativeDate(m.bookings.start_at) : 'Reciente',
         };
