@@ -5,7 +5,7 @@ export interface SlotPriceBreakdownItem {
   minutes: number;
   price_per_hour_cents: number;
   contribution_cents: number;
-  source: 'calendar' | 'flat_rate' | 'none';
+  source: 'calendar' | 'reservation_type' | 'flat_rate' | 'none';
 }
 
 export interface SlotPriceResult {
@@ -16,7 +16,7 @@ export interface SlotPriceResult {
   slot: string;
   duration_minutes: number;
   total_price_cents: number;
-  source: 'calendar' | 'flat_rate' | 'mixed' | 'none';
+  source: 'calendar' | 'reservation_type' | 'flat_rate' | 'mixed' | 'none';
   breakdown: SlotPriceBreakdownItem[];
   error?: string;
 }
@@ -27,6 +27,7 @@ export async function getSlotPrice(params: {
   date: string;         // "YYYY-MM-DD"
   slot: string;         // "HH:MM"
   duration_minutes: number;
+  reservation_type?: string;
 }): Promise<SlotPriceResult> {
   try {
     const url = new URL(`${API_URL}/tariffs/slot-price`);
@@ -35,6 +36,9 @@ export async function getSlotPrice(params: {
     url.searchParams.set('date', params.date);
     url.searchParams.set('slot', params.slot);
     url.searchParams.set('duration_minutes', params.duration_minutes.toString());
+    if (params.reservation_type) {
+      url.searchParams.set('reservation_type', params.reservation_type);
+    }
 
     console.log('[getSlotPrice] Requesting:', url.toString());
     const res = await fetch(url.toString(), {

@@ -73,6 +73,7 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
     date: data.date,
     slot: data.slot,
     durationMinutes: data.durationMinutes,
+    reservationType: 'standard',
   });
 
   const getPriceValue = () => {

@@ -120,6 +120,7 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
     date: data.date,
     slot: data.slot,
     durationMinutes: data.durationMinutes,
+    reservationType: 'open_match',
   });
 
   const renderPrice = () => {

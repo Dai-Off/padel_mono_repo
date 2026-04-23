@@ -154,6 +154,7 @@ export function CrearPartidoLocationSheet({
     date: selectedSlot?.dateStr,
     slot: selectedSlot?.time,
     durationMinutes: DURATION_MIN,
+    reservationType: 'open_match',
   });
 
   const getSlotDisplayPrice = () => {

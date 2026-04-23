@@ -179,6 +179,10 @@ router.get('/slot-price', async (req: Request, res: Response) => {
   const date            = req.query.date            as string | undefined;
   const slot            = req.query.slot            as string | undefined; // "HH:MM"
   const durationMinutes = Number(req.query.duration_minutes ?? 60);
+  
+  const VALID_TYPES = ['standard', 'open_match', 'pozo', 'fixed_recurring', 'school_group', 'school_individual', 'flat_rate', 'tournament', 'blocked'];
+  const rawType = req.query.reservation_type as string | undefined;
+  const reservationType = VALID_TYPES.includes(rawType ?? '') ? rawType! : 'open_match';
 
   if (!club_id || !court_id || !date || !slot) {
     return res.status(400).json({ ok: false, error: 'club_id, court_id, date y slot son obligatorios' });
@@ -240,38 +244,18 @@ router.get('/slot-price', async (req: Request, res: Response) => {
     }
   }
 
-  // Fetch flat_rate once as fallback for unconfigured slots
-  const { data: flatRateRow } = await supabase
+  // Fetch price from reservation_type_prices
+  // Strategy: seek the specific type (e.g. open_match), fallback to flat_rate if not found
+  const typesToFetch = reservationType !== 'flat_rate' ? [reservationType, 'flat_rate'] : ['flat_rate'];
+  const { data: priceRows } = await supabase
     .from('reservation_type_prices')
-    .select('price_per_hour_cents')
+    .select('reservation_type, price_per_hour_cents')
     .eq('club_id', club_id)
-    .eq('reservation_type', 'flat_rate')
-    .maybeSingle();
-  const flatRateCents = flatRateRow?.price_per_hour_cents ?? 0;
-
-  // Step 3: Fetch pricing_rules for the court as a secondary fallback
-  const { data: pricingRules } = await supabase
-    .from('pricing_rules')
-    .select('days_of_week, start_minutes, end_minutes, amount_cents')
-    .eq('court_id', court_id)
-    .eq('active', true);
+    .in('reservation_type', typesToFetch);
   
-  const rules = (pricingRules ?? []) as { days_of_week: number[]; start_minutes: number; end_minutes: number; amount_cents: number }[];
-
-  // Helper to pick price from pricing_rules (System A fallback)
-  const getRulePrice = (hour: number) => {
-    const mins = hour * 60;
-    // Parse YYYY-MM-DD reliably as UTC
-    const dateObj = new Date(`${date}T00:00:00Z`);
-    const dayOfWeek = dateObj.getUTCDay(); // 0=Sun, 1=Mon...
-    const isoDay = dayOfWeek === 0 ? 7 : dayOfWeek;
-    const rule = rules.find(r => {
-      const dows = Array.isArray(r.days_of_week) ? r.days_of_week : [];
-      const dayOk = dows.some(d => Number(d) === dayOfWeek || Number(d) === isoDay);
-      return dayOk && mins >= r.start_minutes && mins < r.end_minutes;
-    });
-    return rule?.amount_cents;
-  };
+  const priceByType = new Map((priceRows ?? []).map(r => [r.reservation_type, r.price_per_hour_cents ?? 0]));
+  const typePriceCents = priceByType.get(reservationType) ?? 0;
+  const flatRateCents  = priceByType.get('flat_rate') ?? 0;
 
   // Prorate: for each hourly slot, compute minutes of overlap and charge accordingly
   let totalPriceCents = 0;
@@ -291,15 +275,15 @@ router.get('/slot-price', async (req: Request, res: Response) => {
     if (calendarPriceByHour.has(h)) {
       pricePerHour = calendarPriceByHour.get(h)!;
       source = 'calendar';
+    } else if (typePriceCents > 0) {
+      pricePerHour = typePriceCents;
+      source = 'reservation_type';
+    } else if (flatRateCents > 0) {
+      pricePerHour = flatRateCents;
+      source = 'flat_rate';
     } else {
-      const rulePrice = getRulePrice(h);
-      if (rulePrice != null) {
-        pricePerHour = rulePrice;
-        source = 'pricing_rule';
-      } else {
-        pricePerHour = flatRateCents;
-        source = flatRateCents > 0 ? 'flat_rate' : 'none';
-      }
+      pricePerHour = 0;
+      source = 'none';
     }
 
     const contribution = Math.round((overlapMin / 60) * pricePerHour);
@@ -314,11 +298,21 @@ router.get('/slot-price', async (req: Request, res: Response) => {
   }
 
   // Determine dominant source label for the response
-  const source = usedSources.has('calendar')
-    ? (usedSources.size > 1 ? 'mixed' : 'calendar')
-    : (usedSources.has('pricing_rule') ? (usedSources.size > 1 ? 'mixed' : 'pricing_rule') : (usedSources.has('flat_rate') ? 'flat_rate' : 'none'));
+  const usedSourcesArr = Array.from(usedSources);
+  const dominantSource = usedSourcesArr.length > 1 ? 'mixed' : (usedSourcesArr[0] ?? 'none');
 
-  return res.json({ ok: true, total_price_cents: totalPriceCents, source, breakdown });
+  return res.json({
+    ok: true,
+    club_id,
+    court_id,
+    date,
+    slot,
+    duration_minutes: durationMinutes,
+    reservation_type: reservationType,
+    total_price_cents: totalPriceCents,
+    source: dominantSource,
+    breakdown
+  });
 });
 
 // ----------------- RESOLVED CALENDAR -----------------
