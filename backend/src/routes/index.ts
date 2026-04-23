@@ -38,7 +38,8 @@ import communityRouter from "./community";
 import adminLearningRouter from "./adminLearning";
 import messagesRouter from "./messages";
 import tariffsRouter from "./tariffs";
-import availabilityRouter from "./availability";
+import seasonPassRouter from "./seasonPass";
+import publicRouter from "./public";import availabilityRouter from "./availability";
 
 
 const router = Router();
@@ -89,7 +90,8 @@ router.use("/community", communityRouter);
 router.use("/messages", messagesRouter);
 router.use("/admin/learning", adminLearningRouter);
 router.use("/tariffs", tariffsRouter);
-router.use("/availability", availabilityRouter);
+router.use("/season-pass", seasonPassRouter);
+router.use("/public", publicRouter);router.use("/availability", availabilityRouter);
 
 
 export default router;

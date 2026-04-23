@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
@@ -326,6 +326,106 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
 
 /**
  * @openapi
+ * /school-courses/slots:
+ *   get:
+ *     tags: [School courses]
+ *     summary: Bloqueos de pista por cursos para la grilla
+ *     description: Devuelve instancias de cursos para una fecha específica y así pintarlas como bloqueos en grilla.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: date
+ *         required: true
+ *         schema: { type: string, format: date }
+ *         description: Fecha YYYY-MM-DD.
+ *     responses:
+ *       200:
+ *         description: Bloqueos de cursos.
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   slots:
+ *                     - id: "course-slot-uuid"
+ *                       course_id: "uuid"
+ *                       court_id: "uuid"
+ *                       start_time: "19:00"
+ *                       end_time: "20:00"
+ *                       course_name: "Curso Intermedio"
+ *                       staff_name: "Juan Coach"
+ *     400: { description: Validación }
+ *     403: { description: Sin acceso al club }
+ */
+router.get('/slots', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+  const clubId = String(req.query.club_id ?? '').trim();
+  const date = String(req.query.date ?? '').trim();
+  if (!clubId || !date) return res.status(400).json({ ok: false, error: 'club_id y date son obligatorios' });
+  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ ok: false, error: 'date debe ser YYYY-MM-DD' });
+
+  const jsDate = new Date(`${date}T00:00:00Z`);
+  const idx = jsDate.getUTCDay(); // 0 sun
+  const weekday: Weekday = idx === 0 ? 'sun' : (WEEKDAYS[idx - 1] as Weekday);
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: courses, error } = await supabase
+      .from('club_school_courses')
+      .select('id, name, club_id, staff_id, court_id, starts_on, ends_on, is_active')
+      .eq('club_id', clubId)
+      .eq('is_active', true);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    const activeForDay = (courses ?? []).filter((c: any) => {
+      if (c.starts_on && date < c.starts_on) return false;
+      if (c.ends_on && date > c.ends_on) return false;
+      return true;
+    });
+    const ids = activeForDay.map((x: any) => x.id);
+    if (ids.length === 0) return res.json({ ok: true, slots: [] });
+
+    const [daysRes, staffRes] = await Promise.all([
+      supabase
+        .from('club_school_course_days')
+        .select('id, course_id, weekday, start_time, end_time')
+        .in('course_id', ids)
+        .eq('weekday', weekday),
+      supabase.from('club_staff').select('id, name').eq('club_id', clubId),
+    ]);
+    if (daysRes.error) return res.status(500).json({ ok: false, error: daysRes.error.message });
+    if (staffRes.error) return res.status(500).json({ ok: false, error: staffRes.error.message });
+
+    const coursesById = new Map(activeForDay.map((c: any) => [c.id, c]));
+    const staffById = new Map((staffRes.data ?? []).map((s: any) => [s.id, s.name]));
+    const out = (daysRes.data ?? [])
+      .map((d: any) => {
+        const c = coursesById.get(d.course_id);
+        if (!c) return null;
+        return {
+          id: `${d.course_id}:${d.id}:${date}`,
+          course_id: d.course_id,
+          date,
+          court_id: c.court_id,
+          start_time: d.start_time,
+          end_time: d.end_time,
+          course_name: c.name,
+          staff_name: staffById.get(c.staff_id) ?? null,
+        };
+      })
+      .filter(Boolean);
+    return res.json({ ok: true, slots: out });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
  * /school-courses/{id}:
  *   get:
  *     tags: [School courses]
@@ -361,12 +461,8 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
  *       403: { description: Sin acceso }
  *       404: { description: No encontrado }
  */
-router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response, next: NextFunction) => {
+router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  // Fix route conflict: if someone calls /school-courses/slots,
-  // Express may match this parameterized route first.
-  // We forward to let /school-courses/slots handler run.
-  if (id === 'slots') return next();
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: course, error: cErr } = await supabase
@@ -762,106 +858,6 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     if (countErr) return res.status(500).json({ ok: false, error: countErr.message });
 
     return res.json({ ok: true, course: { ...updated, days: days ?? [], enrolled_count: enrolledCount ?? 0 } });
-  } catch (err) {
-    return res.status(500).json({ ok: false, error: (err as Error).message });
-  }
-});
-
-/**
- * @openapi
- * /school-courses/slots:
- *   get:
- *     tags: [School courses]
- *     summary: Bloqueos de pista por cursos para la grilla
- *     description: Devuelve instancias de cursos para una fecha específica y así pintarlas como bloqueos en grilla.
- *     security: [{ bearerAuth: [] }]
- *     parameters:
- *       - in: query
- *         name: club_id
- *         required: true
- *         schema: { type: string, format: uuid }
- *       - in: query
- *         name: date
- *         required: true
- *         schema: { type: string, format: date }
- *         description: Fecha YYYY-MM-DD.
- *     responses:
- *       200:
- *         description: Bloqueos de cursos.
- *         content:
- *           application/json:
- *             examples:
- *               ok:
- *                 value:
- *                   ok: true
- *                   slots:
- *                     - id: "course-slot-uuid"
- *                       course_id: "uuid"
- *                       court_id: "uuid"
- *                       start_time: "19:00"
- *                       end_time: "20:00"
- *                       course_name: "Curso Intermedio"
- *                       staff_name: "Juan Coach"
- *     400: { description: Validación }
- *     403: { description: Sin acceso al club }
- */
-router.get('/slots', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
-  const clubId = String(req.query.club_id ?? '').trim();
-  const date = String(req.query.date ?? '').trim();
-  if (!clubId || !date) return res.status(400).json({ ok: false, error: 'club_id y date son obligatorios' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ ok: false, error: 'date debe ser YYYY-MM-DD' });
-
-  const jsDate = new Date(`${date}T00:00:00Z`);
-  const idx = jsDate.getUTCDay(); // 0 sun
-  const weekday: Weekday = idx === 0 ? 'sun' : (WEEKDAYS[idx - 1] as Weekday);
-
-  try {
-    const supabase = getSupabaseServiceRoleClient();
-    const { data: courses, error } = await supabase
-      .from('club_school_courses')
-      .select('id, name, club_id, staff_id, court_id, starts_on, ends_on, is_active')
-      .eq('club_id', clubId)
-      .eq('is_active', true);
-    if (error) return res.status(500).json({ ok: false, error: error.message });
-    const activeForDay = (courses ?? []).filter((c: any) => {
-      if (c.starts_on && date < c.starts_on) return false;
-      if (c.ends_on && date > c.ends_on) return false;
-      return true;
-    });
-    const ids = activeForDay.map((x: any) => x.id);
-    if (ids.length === 0) return res.json({ ok: true, slots: [] });
-
-    const [daysRes, staffRes] = await Promise.all([
-      supabase
-        .from('club_school_course_days')
-        .select('id, course_id, weekday, start_time, end_time')
-        .in('course_id', ids)
-        .eq('weekday', weekday),
-      supabase.from('club_staff').select('id, name').eq('club_id', clubId),
-    ]);
-    if (daysRes.error) return res.status(500).json({ ok: false, error: daysRes.error.message });
-    if (staffRes.error) return res.status(500).json({ ok: false, error: staffRes.error.message });
-
-    const coursesById = new Map(activeForDay.map((c: any) => [c.id, c]));
-    const staffById = new Map((staffRes.data ?? []).map((s: any) => [s.id, s.name]));
-    const out = (daysRes.data ?? [])
-      .map((d: any) => {
-        const c = coursesById.get(d.course_id);
-        if (!c) return null;
-        return {
-          id: `${d.course_id}:${d.id}:${date}`,
-          course_id: d.course_id,
-          date,
-          court_id: c.court_id,
-          start_time: d.start_time,
-          end_time: d.end_time,
-          course_name: c.name,
-          staff_name: staffById.get(c.staff_id) ?? null,
-        };
-      })
-      .filter(Boolean);
-    return res.json({ ok: true, slots: out });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState, type AppStateStatus, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { fetchMatches } from '../api/matches';
@@ -19,6 +19,7 @@ import {
   INICIO_PAD_TOP,
   INICIO_STACK_GAP,
   MissionsHomeSection,
+  type HomeMission,
   ProximosPartidosSection,
   SeasonPassHomeCard,
 } from '../components/home/inicio';
@@ -28,8 +29,32 @@ import { useHomeStats } from '../hooks/useHomeStats';
 import type { PartidoItem } from './PartidosScreen';
 import { IAAfinidadModal } from '../components/home/IAAfinidadModal';
 import { searchAiMatch } from '../api/aiMatch';
+import { fetchSeasonPassMe, type SeasonPassMeOk, type SeasonPassMissionDto } from '../api/seasonPass';
+import {
+  isSeasonPassSpCapped,
+  seasonPassHomeNextLine,
+  seasonPassNextLevel,
+  seasonSlugToLabel,
+  levelMaxResolved,
+} from '../lib/seasonPassHome';
 
 type TabId = 'pistas' | 'partidos' | 'torneos';
+
+function mapSeasonMissionToHome(m: SeasonPassMissionDto): HomeMission {
+  const pctNum = m.target > 0 ? Math.min(100, Math.round((m.current / m.target) * 100)) : 0;
+  const tag = m.period === 'daily' ? 'Diaria' : m.period === 'weekly' ? 'Semanal' : 'Mensual';
+  return {
+    id: m.id,
+    tag,
+    title: m.title,
+    desc: m.reward_hint ? `${m.description} (${m.reward_hint})` : m.description,
+    progress: `${m.current}/${m.target}`,
+    pct: `${pctNum}%`,
+    pctNum,
+    claim: false,
+    highlight: m.done,
+  };
+}
 
 type HomeScreenProps = {
   /** Incrementar al volver de la lección diaria para refrescar racha en la card. */
@@ -39,6 +64,7 @@ type HomeScreenProps = {
   onDailyLessonPress?: () => void;
   onCoursesPress?: () => void;
   onOpenCompetitiveLeague?: () => void;
+  onOpenSeasonPass?: () => void;
   onOpenMessageThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
 };
 
@@ -49,6 +75,7 @@ export function HomeScreen({
   onDailyLessonPress,
   onCoursesPress,
   onOpenCompetitiveLeague,
+  onOpenSeasonPass,
   onOpenMessageThread,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
@@ -64,6 +91,8 @@ export function HomeScreen({
   const [affinityLoading, setAffinityLoading] = useState(false);
   const [affinityResponse, setAffinityResponse] = useState<string | null>(null);
   const [affinityError, setAffinityError] = useState<string | null>(null);
+  const [seasonPassMe, setSeasonPassMe] = useState<SeasonPassMeOk | null>(null);
+  const [seasonPassLoading, setSeasonPassLoading] = useState(false);
 
   const loadMatches = useCallback(async () => {
     setMatchesLoading(true);
@@ -98,9 +127,28 @@ export function HomeScreen({
     setMatchesLoading(false);
   }, [session?.access_token, session?.refresh_token, refreshAccessToken]);
 
+  const loadSeasonPass = useCallback(async () => {
+    let token = session?.access_token ?? null;
+    if (!token) {
+      setSeasonPassMe(null);
+      setSeasonPassLoading(false);
+      return;
+    }
+    setSeasonPassLoading(true);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    /** No llamar a `refreshAccessToken` aquí ante 4xx/5xx: si `/season-pass/me` falla (p. ej. 500 sin migración 050), refrescar token cambia `access_token`, re-dispara este effect y genera bucle infinito. */
+    const data = await fetchSeasonPassMe(token, tz);
+    setSeasonPassMe(data);
+    setSeasonPassLoading(false);
+  }, [session?.access_token, streakRefreshKey]);
+
   useEffect(() => {
     loadMatches();
   }, [loadMatches]);
+
+  useEffect(() => {
+    void loadSeasonPass();
+  }, [loadSeasonPass]);
 
   useEffect(() => {
     let last: AppStateStatus = AppState.currentState;
@@ -109,10 +157,11 @@ export function HomeScreen({
       last = next;
       if (prev.match(/inactive|background/) && next === 'active') {
         loadMatches();
+        void loadSeasonPass();
       }
     });
     return () => sub.remove();
-  }, [loadMatches]);
+  }, [loadMatches, loadSeasonPass]);
 
   useEffect(() => {
     let mounted = true;
@@ -183,6 +232,38 @@ export function HomeScreen({
     [myPlayerProfile, session?.user?.email, session?.user?.user_metadata?.full_name]
   );
 
+  const homeMissionsFromPass = useMemo(() => {
+    const list = seasonPassMe?.missions ?? [];
+    return list.filter((m) => m.period === 'daily').slice(0, 8).map(mapSeasonMissionToHome);
+  }, [seasonPassMe?.missions]);
+
+  const seasonPassCardProps =
+    seasonPassMe != null
+      ? {
+          loading: false as const,
+          seasonLabel: seasonSlugToLabel(seasonPassMe.season.slug),
+          seasonTitle: seasonPassMe.season.title,
+          levelCurrent: String(seasonPassMe.level),
+          levelMax: String(levelMaxResolved(seasonPassMe)),
+          progressPercent: Math.min(100, Math.max(0, seasonPassMe.pct * 100)),
+          spCurrent: `${seasonPassMe.into_level.toLocaleString('es-ES')} SP`,
+          spToNext: isSeasonPassSpCapped(seasonPassMe)
+            ? 'Tope de SP'
+            : `${seasonPassMe.sp_to_next.toLocaleString('es-ES')} SP para nivel ${seasonPassNextLevel(seasonPassMe)}`,
+          nextRewardName: seasonPassHomeNextLine(seasonPassMe),
+        }
+      : {
+          loading: Boolean(session?.access_token && seasonPassLoading),
+          seasonLabel: null as string | null,
+          seasonTitle: null as string | null,
+          levelCurrent: null as string | null,
+          levelMax: null as string | null,
+          progressPercent: null as number | null,
+          spCurrent: null as string | null,
+          spToNext: null as string | null,
+          nextRewardName: null as string | null,
+        };
+
   return (
     <>
       <View style={styles.screenRoot}>
@@ -215,7 +296,19 @@ export function HomeScreen({
               streakRefreshKey={streakRefreshKey}
               onPress={() => onDailyLessonPress?.()}
             />
-            <SeasonPassHomeCard compact />
+            <SeasonPassHomeCard
+              compact
+              loading={seasonPassCardProps.loading}
+              seasonLabel={seasonPassCardProps.seasonLabel}
+              seasonTitle={seasonPassCardProps.seasonTitle}
+              levelCurrent={seasonPassCardProps.levelCurrent}
+              levelMax={seasonPassCardProps.levelMax}
+              progressPercent={seasonPassCardProps.progressPercent}
+              spCurrent={seasonPassCardProps.spCurrent}
+              spToNext={seasonPassCardProps.spToNext}
+              nextRewardName={seasonPassCardProps.nextRewardName}
+              onPress={() => onOpenSeasonPass?.()}
+            />
             <CompetitiveLeagueHomeCard
               compact
               onPress={() => onOpenCompetitiveLeague?.()}
@@ -242,7 +335,7 @@ export function HomeScreen({
           />
         </InicioEnterBlock>
         <InicioEnterBlock enterIndex={4}>
-          <MissionsHomeSection />
+          <MissionsHomeSection missions={homeMissionsFromPass} />
         </InicioEnterBlock>
         <InicioEnterBlock enterIndex={5}>
           <EnDirectoSection

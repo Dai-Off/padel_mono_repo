@@ -13,6 +13,37 @@ export function getMultiplier(currentStreak: number): number {
   return 2.0;
 }
 
+/** SP de pase por lección diaria (misma fórmula que `learningDailyLesson` y misiones). */
+export function computeSeasonPassLessonSpDelta(lessonSpBase: number, currentStreak: number): number {
+  const s = Math.max(0, Math.floor(Number(currentStreak) || 0));
+  return Math.round(lessonSpBase * (1 + getMultiplier(s)));
+}
+
+/**
+ * Racha usada para SP del pase / textos: si ya completó hoy, la guardada; si no, la que
+ * resultaría al completar hoy (misma lógica que el inicio de `updateIndividualStreak`).
+ */
+export function streakForSeasonPassLessonPreview(
+  timezone: string,
+  row: { current_streak: number | null; last_lesson_completed_at: string | null } | null
+): number {
+  const now = new Date();
+  const todayKey = dayKeyInTz(now, timezone);
+  const yesterdayKey = previousDayKey(todayKey);
+
+  if (!row?.last_lesson_completed_at) {
+    return 1;
+  }
+  const lastKey = dayKeyInTz(new Date(row.last_lesson_completed_at), timezone);
+  if (lastKey === todayKey) {
+    return Math.max(1, Number(row.current_streak ?? 1));
+  }
+  if (lastKey === yesterdayKey) {
+    return Math.max(1, Number(row.current_streak ?? 0) + 1);
+  }
+  return 1;
+}
+
 // ---------------------------------------------------------------------------
 // Individual streak
 // ---------------------------------------------------------------------------
