@@ -26,6 +26,12 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type OptionEntry = { label: string; value: unknown };
 
+function isAlreadyCompletedError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message.toLowerCase();
+  return msg.includes('ya está completada') || msg.includes('ya completada');
+}
+
 /** Supabase/API a veces devuelve `options` como string JSON. */
 function coerceOptionsRaw(raw: unknown): unknown {
   if (typeof raw !== 'string') return raw;
@@ -203,6 +209,11 @@ export function OnboardingLevelModal({
           const eloNum = Number(elo_rating);
           setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
         } catch (e) {
+          if (isAlreadyCompletedError(e)) {
+            onCompleted(0);
+            setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
+            return;
+          }
           const msg = e instanceof Error ? e.message : 'No se pudo guardar tu nivel';
           setBootError(msg);
           Alert.alert('Error', msg);
@@ -235,6 +246,11 @@ export function OnboardingLevelModal({
           const eloNum = Number(elo_rating);
           setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
         } catch (e) {
+          if (isAlreadyCompletedError(e)) {
+            onCompleted(0);
+            setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
+            return;
+          }
           const msg = e instanceof Error ? e.message : 'No se pudo guardar tu nivel';
           setBootError(msg);
           Alert.alert('Error', msg);
@@ -394,6 +410,11 @@ export function OnboardingLevelModal({
       const eloNum = Number(elo_rating);
       setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
     } catch (e) {
+      if (isAlreadyCompletedError(e)) {
+        onCompleted(0);
+        setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
+        return;
+      }
       Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo guardar');
     } finally {
       setSubmitting(false);

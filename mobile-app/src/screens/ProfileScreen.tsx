@@ -228,6 +228,14 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
         {/* Profile Details Card */}
         <View style={styles.profileCardWrap}>
           <View style={styles.profileCard}>
+            <View style={styles.eloBadge}>
+              <Text style={styles.eloLabel}>ELO</Text>
+              <Text style={styles.eloValue}>
+                {profile?.eloRating != null && Number.isFinite(profile.eloRating)
+                  ? profile.eloRating.toFixed(2)
+                  : '--'}
+              </Text>
+            </View>
             <View style={styles.profileHeader}>
               <View style={styles.avatarContainer}>
                 <LinearGradient 
@@ -317,12 +325,17 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
                     ? 'Responde al cuestionario oficial para calcular tu ELO inicial (0–7) y desbloquear matchmaking y el resto de funciones.'
                     : 'Mide tu nivel de Pádel para desbloquear análisis personalizados y recomendaciones del Coach IA'}
                 </Text>
-                <Pressable style={styles.coachCtaBtn} onPress={() => setShowOnboardingModal(true)}>
-                  <Ionicons name="locate-outline" size={16} color="#fff" />
-                  <Text style={styles.coachCtaText}>
-                    {needsLevelOnboarding ? 'Comenzar nivelación' : 'Medir mi nivel de Pádel'}
-                  </Text>
-                </Pressable>
+                {needsLevelOnboarding ? (
+                  <Pressable style={styles.coachCtaBtn} onPress={() => setShowOnboardingModal(true)}>
+                    <Ionicons name="locate-outline" size={16} color="#fff" />
+                    <Text style={styles.coachCtaText}>Comenzar nivelación</Text>
+                  </Pressable>
+                ) : (
+                  <View style={styles.levelCompletedBadge}>
+                    <Ionicons name="checkmark-circle" size={16} color="#34D399" />
+                    <Text style={styles.levelCompletedText}>Nivel de pádel ya medido</Text>
+                  </View>
+                )}
               </View>
             </View>
           </View>
@@ -525,6 +538,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   profileCard: {
+    position: 'relative',
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 20,
     borderWidth: 1,
@@ -560,6 +574,34 @@ const styles = StyleSheet.create({
   profileInfo: {
     flex: 1,
     paddingTop: 2,
+  },
+  eloBadge: {
+    position: 'absolute',
+    top: -24,
+    right: 14,
+    minWidth: 74,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F18F34',
+    backgroundColor: '#F18F34',
+    zIndex: 2,
+  },
+  eloLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    color: '#fff',
+  },
+  eloValue: {
+    marginTop: 2,
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#fff',
+    lineHeight: 20,
   },
   profileName: {
     fontSize: 18,
@@ -759,6 +801,23 @@ const styles = StyleSheet.create({
   coachCtaText: {
     color: '#fff',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  levelCompletedBadge: {
+    width: '100%',
+    height: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.35)',
+    backgroundColor: 'rgba(52,211,153,0.10)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  levelCompletedText: {
+    color: '#A7F3D0',
+    fontSize: 13,
     fontWeight: '600',
   },
   achievementsContainer: {
