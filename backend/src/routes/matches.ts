@@ -283,6 +283,7 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
           source_channel: ['mobile', 'web', 'manual', 'system'].includes(source_channel)
             ? source_channel
             : 'web',
+          reservation_type: 'open_match',
         },
       ])
       .select('id')

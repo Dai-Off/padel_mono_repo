@@ -124,7 +124,7 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
             />
             <View style={styles.priceTag}>
               <Text style={styles.priceLine}>
-                <Text style={styles.priceMain}>{item.price}</Text>
+                <Text style={styles.priceMain}>{item.pricePerPlayer}</Text>
                 <Text style={styles.priceSub}>
                   /{durationHuman(item.duration)}
                 </Text>
