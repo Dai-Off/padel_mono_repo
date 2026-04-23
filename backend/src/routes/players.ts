@@ -60,6 +60,78 @@ type MmWl = { mm_wins: number; mm_losses: number; mm_draws: number };
 
 const ZERO_MM_WL: MmWl = { mm_wins: 0, mm_losses: 0, mm_draws: 0 };
 
+type CoachSkills = { technical: number; physical: number; mental: number; tactical: number };
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
+}
+
+function deriveCoachAssessmentFromLevel(level0to7: number): {
+  level_number: number;
+  level_name: string;
+  skills: CoachSkills;
+  strengths: string[];
+  improvements: string[];
+  recommendation: string;
+} {
+  const base = clamp((level0to7 / 7) * 100, 0, 100);
+  const skills: CoachSkills = {
+    technical: Math.round(clamp(base + 4, 10, 100)),
+    physical: Math.round(clamp(base - 2, 10, 100)),
+    mental: Math.round(clamp(base + 1, 10, 100)),
+    tactical: Math.round(clamp(base - 3, 10, 100)),
+  };
+  const avg = (skills.technical + skills.physical + skills.mental + skills.tactical) / 4;
+  let level_number = 1;
+  let level_name = 'Principiante';
+  if (avg > 80) {
+    level_number = 5;
+    level_name = 'Elite';
+  } else if (avg > 60) {
+    level_number = 4;
+    level_name = 'Profesional';
+  } else if (avg > 40) {
+    level_number = 3;
+    level_name = 'Avanzado';
+  } else if (avg > 20) {
+    level_number = 2;
+    level_name = 'Intermedio';
+  }
+  return {
+    level_number,
+    level_name,
+    skills,
+    strengths: ['Nivelacion inicial completada', 'Base tecnica registrada'],
+    improvements: ['Jugar partidos para afinar el radar', 'Completar objetivos del plan'],
+    recommendation:
+      'Ya completaste la nivelacion inicial. Juega tus proximos partidos para que el radar del coach se personalice con mayor precision.',
+  };
+}
+
+async function upsertCoachAssessmentFromOnboarding(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string,
+  level0to7: number
+): Promise<void> {
+  const derived = deriveCoachAssessmentFromLevel(level0to7);
+  const { error } = await supabase.from('coach_assessments').upsert(
+    {
+      player_id: playerId,
+      answers: [],
+      level_number: derived.level_number,
+      level_name: derived.level_name,
+      skills: derived.skills,
+      strengths: derived.strengths,
+      improvements: derived.improvements,
+      recommendation: derived.recommendation,
+    },
+    { onConflict: 'player_id' }
+  );
+  if (error) {
+    console.error('[POST /players/onboarding] coach_assessments sync:', error.message);
+  }
+}
+
 async function fetchPlayerMatchmakingWl(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
   playerId: string
@@ -587,6 +659,9 @@ router.post('/onboarding', async (req: Request, res: Response) => {
     pool_assigned: pool,
     phase2_score: phase2Score,
   });
+
+  // Sincronizar coach_assessments con el nuevo onboarding para que el radar se renderice siempre.
+  await upsertCoachAssessmentFromOnboarding(supabase, playerId, finalElo);
 
   return res.json({ ok: true, elo_rating: finalElo, message: 'Nivel inicial asignado' });
 });
