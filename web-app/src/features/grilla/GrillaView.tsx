@@ -37,6 +37,7 @@ import { MatchesManagementPanel } from './components/MatchesManagementPanel';
 import { WalletRecharge } from './components/WalletRecharge';
 
 import { GrillaQuickNav } from './components/GrillaQuickNav';
+import { GrillaLegend } from './components/GrillaLegend';
 import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
 import { HoverTooltip } from './components/HoverTooltip';
@@ -93,17 +94,33 @@ const useClubData = (dateOrStr: Date | string) => {
     const [loading, setLoading] = useState(true);
     const [isCreatingCourt, setIsCreatingCourt] = useState(false);
     const [clubId, setClubId] = useState<string | null>(null);
+    const [typeColorOverrides, setTypeColorOverrides] = useState<Record<string, string>>({});
     const courtsRef = useRef<Court[]>([]);
     const dateStr = toDateStr(dateOrStr);
 
-    // Resolve club_id from the logged-in club owner's profile
+    // Resolve club_id and load custom type colors from admin settings
     useEffect(() => {
         authService.getMe()
-            .then((res) => {
+            .then(async (res) => {
                 const id = res.clubs?.[0]?.id ?? null;
-                // Reset courts cache so it re-fetches for the correct club
                 courtsRef.current = [];
                 setClubId(id);
+                if (id) {
+                    try {
+                        const pricesRes = await apiFetchWithAuth<{ ok: boolean; prices?: Record<string, { color?: string | null }> }>(
+                            `/reservation-type-prices?club_id=${encodeURIComponent(id)}`
+                        );
+                        if (pricesRes?.ok && pricesRes.prices) {
+                            const colorMap: Record<string, string> = {};
+                            for (const [type, entry] of Object.entries(pricesRes.prices)) {
+                                if (entry?.color) colorMap[type] = entry.color;
+                            }
+                            setTypeColorOverrides(colorMap);
+                        }
+                    } catch {
+                        // Fail silently — cards fall back to hardcoded colors
+                    }
+                }
             })
             .catch(() => setClubId(null));
     }, []);
@@ -428,7 +445,7 @@ const useClubData = (dateOrStr: Date | string) => {
         }
     }, []);
 
-    return { courts, reservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt };
+    return { courts, reservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides };
 };
 
 function linkedTournamentDisplayName(b: any): string | null {
@@ -631,7 +648,7 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
-  const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
 
   const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
   useEffect(() => {
@@ -1703,6 +1720,7 @@ function GrillaViewInner() {
               clubId={clubId}
               dateStr={toDateStr(selectedDate)}
               onRefreshGrid={refresh}
+              onBackToGrid={() => setActiveView('grid')}
               onEditBooking={async (bookingId: string) => {
                 try {
                   const data = await apiFetchWithAuth<any>(`/bookings/${bookingId}`);
@@ -2107,6 +2125,7 @@ function GrillaViewInner() {
                               isCurrentlyFocused={court.id === focusedCourtId}
                               isCompactView={false}
                               totalCourts={gridCourts.length}
+                              typeColorOverrides={typeColorOverrides}
                             />
                           ))}
                         </div>
@@ -2164,6 +2183,7 @@ function GrillaViewInner() {
                           onHeaderHover={setHoveredCourtId}
                           onHoverStart={(res, el) => setHoveredTooltip({ res, el })}
                           onHoverEnd={() => setHoveredTooltip(null)}
+                          typeColorOverrides={typeColorOverrides}
                         />
                       ))}
                     </div>
@@ -2196,6 +2216,8 @@ function GrillaViewInner() {
           </DndContext>
           )}
         </main>
+
+        <GrillaLegend typeColorOverrides={Object.keys(typeColorOverrides).length > 0 ? typeColorOverrides : undefined} />
 
         <ReservationModal
           clubId={clubId}

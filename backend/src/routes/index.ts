@@ -37,6 +37,7 @@ import coachAssessmentRouter from "./coachAssessment";
 import communityRouter from "./community";
 import adminLearningRouter from "./adminLearning";
 import messagesRouter from "./messages";
+import tariffsRouter from "./tariffs";
 
 
 const router = Router();
@@ -86,6 +87,7 @@ router.use("/coach-assessment", coachAssessmentRouter);
 router.use("/community", communityRouter);
 router.use("/messages", messagesRouter);
 router.use("/admin/learning", adminLearningRouter);
+router.use("/tariffs", tariffsRouter);
 
 
 export default router;

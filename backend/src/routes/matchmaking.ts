@@ -479,7 +479,9 @@ router.post('/reject', async (req: Request, res: Response) => {
  *         schema: { type: string }
  *     responses:
  *       200:
- *         description: OK
+ *         description: |
+ *           OK. Si `MATCHMAKING_RUN_DIAG=1` en el servidor y `formed=0`, puede incluirse `diag` con contadores
+ *           (rechazos pre-cancha, sin pista libre, etc.).
  *         content:
  *           application/json:
  *             examples:
@@ -492,8 +494,9 @@ router.post('/run-cycle', async (req: Request, res: Response) => {
     if (h !== secret) return res.status(403).json({ ok: false, error: 'No autorizado' });
   }
   try {
-    const { formed, expired, expansion_prompts } = await runMatchmakingCycle();
-    return res.json({ ok: true, formed, expired, expansion_prompts });
+    const r = await runMatchmakingCycle();
+    const { formed, expired, expansion_prompts, diag } = r;
+    return res.json({ ok: true, formed, expired, expansion_prompts, ...(diag ? { diag } : {}) });
   } catch (e) {
     return res.status(500).json({ ok: false, error: (e as Error).message });
   }

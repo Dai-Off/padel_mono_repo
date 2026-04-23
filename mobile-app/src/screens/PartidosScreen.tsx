@@ -52,6 +52,15 @@ export type PartidoItem = {
   matchPhase?: MatchListPhase;
   /** Organizador de la reserva (cancelación / gestión). */
   organizerPlayerId?: string | null;
+  /** Matchmaking: plaza ya creada en booking_participants; pagar con create-intent (sin prepare-join). */
+  matchmakingPayment?: {
+    bookingId: string;
+    participantId: string;
+    shareAmountCents?: number;
+  };
+  matchType?: string | null;
+  matchStatus?: string;
+  bookingStatus?: string;
 };
 
 type PartidosScreenProps = {

@@ -1,217 +1,231 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Lock, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Eye, EyeOff, CheckCircle2, AlertCircle, ArrowRight } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { useTranslation } from 'react-i18next';
 import { getSupabaseClient, parseHashParams } from '../../lib/supabase';
 
 type Status = 'loading' | 'ready' | 'invalid' | 'success';
 
 export const ResetPassword: React.FC = () => {
-  const { t } = useTranslation();
-  const [status, setStatus] = useState<Status>('loading');
-  const [password, setPassword] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const navigate = useNavigate();
+    const [status, setStatus] = useState<Status>('loading');
+    const [errorDetail, setErrorDetail] = useState<string | null>(null);
+    const [password, setPassword] = useState('');
+    const [confirm, setConfirm] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const navigate = useNavigate();
 
-  useEffect(() => {
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-      setStatus('invalid');
-      return;
-    }
-    const params = parseHashParams();
-    const accessToken = params.access_token;
-    const refreshToken = params.refresh_token;
-    const type = params.type;
-    if (type === 'recovery' && accessToken && refreshToken) {
-      supabase.auth
-        .setSession({ access_token: accessToken, refresh_token: refreshToken })
-        .then(() => {
-          window.history.replaceState(null, '', window.location.pathname);
-          setStatus('ready');
-        })
-        .catch(() => setStatus('invalid'));
-    } else {
-      const search = new URLSearchParams(window.location.search);
-      const tokenHash = search.get('token_hash');
-      const queryType = search.get('type');
-      if (tokenHash && queryType === 'recovery') {
-        supabase.auth
-          .verifyOtp({ token_hash: tokenHash, type: 'recovery' })
-          .then(() => {
-            window.history.replaceState(null, '', window.location.pathname);
-            setStatus('ready');
-          })
-          .catch(() => setStatus('invalid'));
-      } else {
-        setStatus('invalid');
-      }
-    }
-  }, []);
+    useEffect(() => {
+        const init = async () => {
+            try {
+                const supabase = getSupabaseClient();
+                if (!supabase) throw new Error('No se pudo conectar con el sistema de autenticación');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (password.length < 6) {
-      toast.error(t('reset_password_min_length'));
-      return;
-    }
-    if (password !== confirm) {
-      toast.error(t('reset_password_mismatch'));
-      return;
-    }
-    const supabase = getSupabaseClient();
-    if (!supabase) return;
-    setIsSubmitting(true);
-    try {
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-      setStatus('success');
-      toast.success(t('reset_password_success'));
-      setTimeout(() => navigate('/login'), 2000);
-    } catch {
-      toast.error(t('connection_error'));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+                const params = parseHashParams();
+                const accessToken = params.access_token;
+                const refreshToken = params.refresh_token;
+                const isRecovery = params.type === 'recovery' || window.location.hash.includes('type=recovery');
 
-  if (status === 'loading') {
+                if (isRecovery && accessToken) {
+                    const { error } = await supabase.auth.setSession({ 
+                        access_token: accessToken, 
+                        refresh_token: refreshToken || '' 
+                    });
+                    
+                    if (error) throw error;
+                    
+                    // Limpiar la URL para seguridad
+                    window.history.replaceState(null, '', window.location.pathname);
+                    setStatus('ready');
+                } else {
+                    // Si no hay tokens en el fragmento o no es tipo recovery, probamos con query params (OTP)
+                    const search = new URLSearchParams(window.location.search);
+                    const tokenHash = search.get('token_hash');
+                    if (tokenHash) {
+                        const { error } = await supabase.auth.verifyOtp({ 
+                            token_hash: tokenHash, 
+                            type: 'recovery' 
+                        });
+                        if (error) throw error;
+                        setStatus('ready');
+                    } else {
+                        throw new Error('El enlace no contiene las claves de seguridad necesarias o ya ha sido utilizado.');
+                    }
+                }
+            } catch (err: any) {
+                console.error('Reset password init error:', err);
+                setErrorDetail(err.message || 'Error desconocido');
+                setStatus('invalid');
+            }
+        };
+
+        init();
+    }, []);
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (password.length < 6) {
+            toast.error('La contraseña debe tener al menos 6 caracteres');
+            return;
+        }
+        if (password !== confirm) {
+            toast.error('Las contraseñas no coinciden');
+            return;
+        }
+
+        const supabase = getSupabaseClient();
+        if (!supabase) return;
+
+        setIsSubmitting(true);
+        try {
+            const { error } = await supabase.auth.updateUser({ password });
+            if (error) throw error;
+
+            setStatus('success');
+            toast.success('Contraseña actualizada correctamente');
+            setTimeout(() => navigate('/login'), 3000);
+        } catch (err: any) {
+            toast.error(err.message || 'Error al guardar la contraseña');
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    if (status === 'loading') {
+        return (
+            <div className="fixed inset-0 bg-[#000000] z-50 flex items-center justify-center">
+                <div className="w-10 h-10 border-2 border-[#F18F34]/20 border-t-[#F18F34] rounded-full animate-spin" />
+            </div>
+        );
+    }
+
     return (
-      <div className="fixed inset-0 bg-[#0D0D0D] z-50 flex items-center justify-center p-5">
-        <div className="w-8 h-8 border-2 border-[#E31E24]/30 border-t-[#E31E24] rounded-full animate-spin" />
-      </div>
-    );
-  }
-
-  if (status === 'invalid') {
-    return (
-      <div className="fixed inset-0 bg-[#0D0D0D] z-50 flex items-center justify-center p-5">
-        <motion.div
-          className="relative w-full max-w-md rounded-3xl border-2 border-white/10 p-8"
-          style={{ background: 'linear-gradient(170deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%)' }}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <div className="flex flex-col items-center gap-4 text-center">
-            <AlertCircle className="w-12 h-12 text-amber-500" />
-            <h1 className="text-xl font-bold text-white">{t('reset_password_invalid_title')}</h1>
-            <p className="text-sm text-white/60">{t('reset_password_invalid_help')}</p>
-            <Link
-              to="/forgot-password"
-              className="py-3 px-6 rounded-2xl text-white font-semibold text-sm"
-              style={{ background: 'linear-gradient(135deg, rgb(227, 30, 36) 0%, rgb(192, 26, 32) 100%)' }}
-            >
-              {t('forgot_password_title')}
-            </Link>
-            <Link to="/login" className="text-white/50 hover:text-white/80 text-sm">
-              {t('back_to_login')}
-            </Link>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
-
-  if (status === 'success') {
-    return (
-      <div className="fixed inset-0 bg-[#0D0D0D] z-50 flex items-center justify-center p-5">
-        <motion.div
-          className="relative w-full max-w-md rounded-3xl border-2 border-[#E31E24]/80 p-8 text-center"
-          style={{ background: 'linear-gradient(170deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%)' }}
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-        >
-          <CheckCircle className="w-14 h-14 text-green-500 mx-auto mb-4" />
-          <h1 className="text-xl font-bold text-white">{t('reset_password_done')}</h1>
-          <p className="text-white/60 text-sm mt-2">{t('reset_password_redirect')}</p>
-        </motion.div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="fixed inset-0 bg-[#0D0D0D] z-50 flex items-center justify-center p-5">
-      <motion.div
-        className="relative w-full max-w-md"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <div
-          className="relative overflow-hidden rounded-3xl border-2 border-[#E31E24]/80 shadow-[0_0_24px_rgba(227,30,36,0.15)]"
-          style={{ background: 'linear-gradient(170deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%)' }}
-        >
-          <div className="absolute inset-0 backdrop-blur-xl" />
-          <div className="relative z-10 p-8">
-            <div className="text-center mb-8">
-              <h1 className="text-2xl font-black text-white tracking-tight">{t('reset_password_title')}</h1>
-              <p className="text-sm text-white/50 mt-2">{t('reset_password_subtitle')}</p>
+        <div className="min-h-screen flex flex-col items-center justify-center bg-[#000000] px-4 selection:bg-[#F18F34]/30">
+            {/* Background decorative elements */}
+            <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+                <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-[#F18F34]/5 blur-[120px]" />
+                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-[#F18F34]/5 blur-[120px]" />
             </div>
 
-            <form className="space-y-5" onSubmit={handleSubmit}>
-              <div>
-                <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-2">
-                  {t('reset_password_new')}
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    minLength={6}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
-                    placeholder={t('reset_password_placeholder')}
-                  />
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
+            <div className="w-full max-w-md relative">
+                {/* Logo */}
+                <div className="flex justify-center mb-10">
+                    <img 
+                        src="https://oxowmfhnorxnabhzkcmi.supabase.co/storage/v1/object/public/public-assets/imagen_2026-04-22_105702379.png" 
+                        alt="WeMatch" 
+                        className="h-10 w-auto"
+                    />
                 </div>
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-2">
-                  {t('reset_password_confirm')}
-                </label>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  minLength={6}
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
-                  placeholder={t('reset_password_placeholder')}
-                />
-              </div>
-              <motion.button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full py-4 rounded-2xl text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                style={{ background: 'linear-gradient(135deg, rgb(227, 30, 36) 0%, rgb(192, 26, 32) 100%)' }}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-              >
-                {isSubmitting && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />}
-                {isSubmitting ? t('reset_password_saving') : t('reset_password_submit')}
-              </motion.button>
-            </form>
 
-            <Link to="/login" className="block mt-4 text-center text-white/40 hover:text-white/70 text-sm">
-              {t('back_to_login')}
-            </Link>
-          </div>
+                <div className="w-full rounded-[2.5rem] border border-white/[0.08] bg-white/[0.02] backdrop-blur-xl p-8 text-center shadow-[0_24px_48px_rgba(0,0,0,0.4)]">
+                    <AnimatePresence mode="wait">
+                        {status === 'invalid' && (
+                            <motion.div 
+                                key="invalid"
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="space-y-6"
+                            >
+                                <div className="w-20 h-20 rounded-3xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 mx-auto">
+                                    <AlertCircle className="w-10 h-10 text-amber-500" />
+                                </div>
+                                <div className="space-y-2">
+                                    <h1 className="text-xl font-bold text-white">Enlace inválido o expirado</h1>
+                                    <p className="text-sm text-white/50 leading-relaxed px-4">
+                                        {errorDetail || 'Este enlace de recuperación ya no es válido. Por favor, solicita uno nuevo desde la aplicación.'}
+                                    </p>
+                                </div>
+                                <div className="pt-4 space-y-4">
+                                    <Link 
+                                        to="/login"
+                                        className="inline-flex w-full py-4 px-6 rounded-2xl bg-white/5 text-white font-semibold text-sm transition-all hover:bg-white/10 items-center justify-center gap-2"
+                                    >
+                                        Volver al inicio
+                                    </Link>
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {status === 'success' && (
+                            <motion.div 
+                                key="success"
+                                initial={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="space-y-6"
+                            >
+                                <div className="w-20 h-20 rounded-3xl bg-green-500/10 flex items-center justify-center border border-green-500/20 mx-auto">
+                                    <CheckCircle2 className="w-10 h-10 text-green-500" />
+                                </div>
+                                <div className="space-y-2">
+                                    <h1 className="text-xl font-bold text-white">¡Listo! Contraseña actualizada</h1>
+                                    <p className="text-sm text-white/50 tracking-tight">Redirigiéndote al inicio de sesión...</p>
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {status === 'ready' && (
+                            <motion.div 
+                                key="ready"
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="text-left"
+                            >
+                                <div className="text-center mb-8">
+                                    <h1 className="text-2xl font-bold text-white tracking-tight">Nueva Contraseña</h1>
+                                    <p className="text-sm text-white/50 mt-2">Elige una contraseña segura que puedas recordar.</p>
+                                </div>
+
+                                <form onSubmit={handleSubmit} className="space-y-5">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em] ml-1">Nueva Contraseña</label>
+                                        <div className="relative group">
+                                            <input
+                                                type={showPassword ? 'text' : 'password'}
+                                                required
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                                className="w-full px-5 py-4 bg-white/[0.03] border border-white/[0.06] rounded-2xl focus:ring-2 focus:ring-[#F18F34]/40 focus:border-[#F18F34]/40 text-white placeholder-white/10 text-sm outline-none transition-all"
+                                                placeholder="Mínimo 6 caracteres"
+                                            />
+                                            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowPassword(!showPassword)}
+                                                    className="p-1 text-white/20 hover:text-white/60 transition-colors"
+                                                >
+                                                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold text-white/40 uppercase tracking-[0.2em] ml-1">Confirmar Contraseña</label>
+                                        <input
+                                            type={showPassword ? 'text' : 'password'}
+                                            required
+                                            value={confirm}
+                                            onChange={(e) => setConfirm(e.target.value)}
+                                            className="w-full px-5 py-4 bg-white/[0.03] border border-white/[0.06] rounded-2xl focus:ring-2 focus:ring-[#F18F34]/40 focus:border-[#F18F34]/40 text-white placeholder-white/10 text-sm outline-none transition-all"
+                                            placeholder="Repite tu contraseña"
+                                        />
+                                    </div>
+
+                                    <button 
+                                        type="submit"
+                                        disabled={isSubmitting}
+                                        className="group w-full py-4 mt-4 px-6 rounded-2xl bg-[#F18F34] text-black font-bold text-sm transition-all duration-300 hover:bg-[#ff9d47] hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:scale-100 flex items-center justify-center gap-2"
+                                    >
+                                        {isSubmitting ? 'Guardando...' : 'Actualizar Contraseña'}
+                                        {!isSubmitting && <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />}
+                                    </button>
+                                </form>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
+                </div>
+            </div>
         </div>
-      </motion.div>
-    </div>
-  );
+    );
 };

@@ -1339,7 +1339,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
         if (ins.players_1) {
           const pid = ins.players_1.id;
           const fullName = `${ins.players_1.first_name} ${ins.players_1.last_name}`.trim();
-          labels[pid] = `${fullName} · Elo ${formatPlayerElo(ins.players_1.elo_rating)}`;
+          labels[pid] = `${fullName} · Nivel ${formatPlayerElo(ins.players_1.elo_rating)}`;
           elos[pid] = Number(ins.players_1.elo_rating ?? 0);
           availablePlayerIds.push(pid);
           draft[ins.id] = pid;
@@ -2189,20 +2189,20 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
             {tab === 'solicitudes' && (
               <div className="p-5 space-y-4">
                 <p className="text-xs text-gray-600">
-                  Los jugadores pueden pedir ingreso cuando no cumplen el Elo automático (u otras reglas). Aquí aceptas o rechazas; si al aceptar el torneo ya está lleno, podrás rechazar o dejar la solicitud en visto.
+                  Los jugadores pueden pedir ingreso cuando no cumplen el nivel automático (u otras reglas). Aquí aceptas o rechazas; si al aceptar el torneo ya está lleno, podrás rechazar o dejar la solicitud en visto.
                 </p>
                 {selected.level_mode === 'multi_division' && divisionsDetail.length > 0 && (
                   <div className="rounded-xl border border-amber-100 bg-amber-50/80 px-3 py-2 space-y-1">
                     <p className="text-[11px] font-semibold text-amber-900">Categoría al aprobar</p>
                     <p className="text-[10px] text-amber-800">
-                      Si el Elo del jugador no encaja en ninguna categoría, elige una manualmente antes de aprobar.
+                      Si el nivel del jugador no encaja en ninguna categoría, elige una manualmente antes de aprobar.
                     </p>
                     <select
                       value={entryApproveDivisionId}
                       onChange={(e) => setEntryApproveDivisionId(e.target.value)}
                       className="w-full max-w-md rounded-lg border border-amber-200 bg-white px-2 py-1.5 text-xs"
                     >
-                      <option value="">Automática según Elo del jugador</option>
+                      <option value="">Automática según nivel del jugador</option>
                       {divisionsDetail.map((d) => (
                         <option key={d.id} value={d.id}>
                           {d.label} ({d.code})
@@ -2227,7 +2227,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                             <p className="text-sm font-bold text-[#1A1A1A]">{name}</p>
                             {p ? (
                               <p className="text-[11px] text-gray-500 mt-0.5">
-                                Elo {formatPlayerElo(p.elo_rating)} · {p.email ?? 'sin email'}
+                                Nivel {formatPlayerElo(p.elo_rating)} · {p.email ?? 'sin email'}
                               </p>
                             ) : null}
                             <p className="text-[10px] text-gray-400 mt-1">{new Date(er.created_at).toLocaleString()}</p>
@@ -2374,9 +2374,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       >
                         <option value="registration_order">Orden de inscripción</option>
                         <option value="random">Aleatorio</option>
-                        <option value="elo_snake">Elo — cruces tipo bracket (potencia de 2)</option>
-                        <option value="elo_top_vs_bottom">Elo — mejor vs peor (1ª ronda)</option>
-                        <option value="elo_tier_mid">Elo — priorizar nivel medio</option>
+                        <option value="elo_snake">Nivel — cruces tipo bracket (potencia de 2)</option>
+                        <option value="elo_top_vs_bottom">Nivel — mejor vs peor (1ª ronda)</option>
+                        <option value="elo_tier_mid">Nivel — priorizar nivel medio</option>
                       </select>
                     </div>
                     <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 md:col-span-2">
@@ -2763,11 +2763,11 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     </button>
                   </div>
                   <div>
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Elo mínimo</label>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Nivel mínimo</label>
                     <input value={settingsForm.elo_min} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_min: e.target.value }))} placeholder="Ej. 3.0" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   </div>
                   <div>
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Elo máximo</label>
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Nivel máximo</label>
                     <input value={settingsForm.elo_max} onChange={(e) => setSettingsForm((p) => ({ ...p, elo_max: e.target.value }))} placeholder="Ej. 5.0" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   </div>
                   <div>
@@ -3150,7 +3150,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
           <div className="w-full max-w-2xl bg-white rounded-3xl border border-gray-200 shadow-2xl overflow-hidden my-3 md:my-0 max-h-[92vh] flex flex-col">
             <div className="px-6 py-5 border-b border-gray-200 bg-[#ED1C24]">
               <p className="text-base font-black text-white">{tx.createTournament}</p>
-              <p className="text-xs text-white/90 mt-1">Configura horarios, cupos, Elo y canchas con un formato visual más claro.</p>
+              <p className="text-xs text-white/90 mt-1">Configura horarios, cupos, nivel y canchas con un formato visual más claro.</p>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {['Básico', 'Competición', 'Detalle final'].map((label, idx) => (
                   <button
@@ -3532,7 +3532,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Elo mínimo</label>
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Nivel mínimo</label>
                   <input
                     value={form.elo_min}
                     onChange={(e) => setForm((p) => ({ ...p, elo_min: e.target.value }))}
@@ -3542,7 +3542,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-3">
-                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Elo máximo</label>
+                  <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Nivel máximo</label>
                   <input
                     value={form.elo_max}
                     onChange={(e) => setForm((p) => ({ ...p, elo_max: e.target.value }))}
@@ -3604,7 +3604,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     onChange={(e) => setForm((p) => ({ ...p, gender: e.target.value }))}
                     className="mt-1.5 w-full text-sm outline-none rounded-lg border border-black bg-white px-2 py-1.5"
                   >
-                    <option value="">Sin definir (cualquier género, con Elo válido)</option>
+                    <option value="">Sin definir (cualquier género, con nivel válido)</option>
                     <option value="mixed">Mixto (explícito)</option>
                     <option value="male">Masculino</option>
                     <option value="female">Femenino</option>
@@ -4410,10 +4410,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     }}
                     className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50"
                   >
-                    Formar todas las parejas (Elo)
+                    Formar todas las parejas (Nivel)
                   </button>
                   <p className="w-full text-[11px] text-gray-600">
-                    Empareja automáticamente combinando Elo alto con Elo bajo para equilibrar cada pareja. Si el Elo es muy parecido, se desempata por victorias/derrotas en torneos cerrados previos del mismo club.
+                    Empareja automáticamente combinando nivel alto con nivel bajo para equilibrar cada pareja. Si el nivel es muy parecido, se desempata por victorias/derrotas en torneos cerrados previos del mismo club.
                   </p>
                   <button
                     type="button"

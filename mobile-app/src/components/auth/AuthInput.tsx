@@ -1,5 +1,5 @@
-import type { ComponentProps } from 'react';
-import { Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useState, type ComponentProps } from 'react';
+import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { lineHeightFor, theme } from '../../theme';
@@ -17,8 +17,13 @@ export function AuthInput({
   error,
   containerStyle,
   style,
+  secureTextEntry: initialSecureTextEntry,
   ...inputProps
 }: AuthInputProps) {
+  const [showPassword, setShowPassword] = useState(false);
+  const isPassword = initialSecureTextEntry;
+  const secureValue = isPassword ? !showPassword : false;
+
   return (
     <View style={[styles.wrap, containerStyle]}>
       <Text style={styles.label}>{label}</Text>
@@ -32,8 +37,21 @@ export function AuthInput({
         <TextInput
           style={[styles.input, style]}
           placeholderTextColor={theme.auth.textSecondary}
+          secureTextEntry={secureValue}
           {...inputProps}
         />
+        {isPassword && (
+          <Pressable
+            onPress={() => setShowPassword(!showPassword)}
+            style={({ pressed }) => [styles.eyeIcon, pressed && styles.pressed]}
+          >
+            <Ionicons
+              name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+              size={20}
+              color={theme.auth.textSecondary}
+            />
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -70,6 +88,13 @@ const styles = StyleSheet.create({
   },
   icon: {
     marginRight: theme.spacing.sm,
+  },
+  eyeIcon: {
+    padding: theme.spacing.xs,
+    marginLeft: theme.spacing.xs,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   input: {
     flex: 1,
