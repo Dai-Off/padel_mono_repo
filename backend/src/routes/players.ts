@@ -497,8 +497,8 @@ router.post('/onboarding', async (req: Request, res: Response) => {
   }
 
   // Separar respuestas (solo p1 a p99 son de fase 1)
-  const phase1Ans = answers.filter(a => /^p\d+$/.test(a.question_key));
-  const phase2Ans = answers.filter(a => !/^p\d+$/.test(a.question_key));
+  const phase1Ans = answers.filter(a => /^p\d+[a-z]?$/.test(a.question_key));
+  const phase2Ans = answers.filter(a => !/^p\d+[a-z]?$/.test(a.question_key));
 
   // Calculos
   const eloPhase1 = await calcEloPhase1(phase1Ans);
