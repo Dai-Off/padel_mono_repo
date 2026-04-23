@@ -87,15 +87,14 @@ export function HomeScreen({
     const mineRaw = selectMyUpcomingMatches(matches, playerId);
     const misProximos = mineRaw
       .map(mapMatchToPartido)
-      .filter((p): p is PartidoItem => p != null)
-      .filter((p) => p.visibility !== 'private');
+      .filter((p): p is PartidoItem => p != null);
     setMisProximosPartidos(misProximos);
 
     const all = matches
       .map(mapMatchToPartido)
       .filter((p): p is PartidoItem => p != null)
       .filter((p) => p.matchPhase !== 'past');
-    setPartidos(all.filter((p) => p.visibility !== 'private'));
+    setPartidos(all);
     setMatchesLoading(false);
   }, [session?.access_token, session?.refresh_token, refreshAccessToken]);
 

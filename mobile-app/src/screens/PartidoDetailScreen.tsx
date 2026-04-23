@@ -111,6 +111,7 @@ export function PartidoDetailScreen({
   const [playerContextResolved, setPlayerContextResolved] = useState(() => !session?.access_token);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
   const [joiningSlotIndex, setJoiningSlotIndex] = useState<number | null>(null);
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
   const [matchmakingPayBusy, setMatchmakingPayBusy] = useState(false);
   const [decliningMatchmaking, setDecliningMatchmaking] = useState(false);
   const [clubInfoVisible, setClubInfoVisible] = useState(false);
@@ -156,6 +157,14 @@ export function PartidoDetailScreen({
   const isInMatch = currentPlayerId != null && (partido.playerIds ?? []).includes(currentPlayerId);
   const firstFreeIndex = partido.players.findIndex((p) => p.isFree);
 
+  useEffect(() => {
+    if (selectedSlotIndex == null) return;
+    const slot = partido.players[selectedSlotIndex];
+    if (!slot?.isFree || isInMatch) {
+      setSelectedSlotIndex(null);
+    }
+  }, [partido.players, selectedSlotIndex, isInMatch]);
+
   const handleJoin = useCallback(
     async (slotIndex: number) => {
       const token = session?.access_token;
@@ -165,17 +174,17 @@ export function PartidoDetailScreen({
       }
       setJoiningSlotIndex(slotIndex);
       const prep = await prepareJoin(partido.id, slotIndex, token);
-      if (!('participantId' in prep)) {
+      if (!('bookingId' in prep)) {
         setJoiningSlotIndex(null);
         const err = prep.error ?? 'No se pudo preparar.';
-        if (err.includes('esa hora') || err.includes('otro horario')) {
+        if (prep.code === 'schedule_conflict' || err.includes('esa hora') || err.includes('otro horario')) {
           Alert.alert('Horario no disponible', 'Ya tienes un partido a esa hora. Elige otro partido.');
         } else {
           Alert.alert('Error', err);
         }
         return;
       }
-      const intentRes = await createPaymentIntent(prep.bookingId, prep.participantId, token, slotIndex);
+      const intentRes = await createPaymentIntent(prep.bookingId, token, slotIndex);
       if (!intentRes.ok || !intentRes.clientSecret) {
         setJoiningSlotIndex(null);
         Alert.alert('Error', 'No se pudo iniciar el pago. Inténtalo de nuevo.');
@@ -213,6 +222,7 @@ export function PartidoDetailScreen({
         const updated = mapMatchToPartido(match);
         if (updated) setPartido(updated);
       }
+      setSelectedSlotIndex(null);
     },
     [partido.id, session?.access_token, initPaymentSheet, presentPaymentSheet]
   );
@@ -225,7 +235,7 @@ export function PartidoDetailScreen({
       return;
     }
     setMatchmakingPayBusy(true);
-    const intentRes = await createPaymentIntent(mp.bookingId, mp.participantId, token);
+    const intentRes = await createPaymentIntent(mp.bookingId, token, undefined, mp.participantId);
     if (!intentRes.ok || !intentRes.clientSecret) {
       setMatchmakingPayBusy(false);
       Alert.alert('Error', intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.');
@@ -419,7 +429,7 @@ export function PartidoDetailScreen({
   const bottomReserve = insets.bottom + (showFinishBar ? 100 : bottomBarNeedsStack ? 148 : 88);
   const canPressCta =
     playerContextResolved &&
-    firstFreeIndex >= 0 &&
+    selectedSlotIndex != null &&
     !isInMatch &&
     !joinBusy &&
     matchPhase !== 'past';
@@ -685,10 +695,11 @@ export function PartidoDetailScreen({
                           p.isFree &&
                           !isInMatch &&
                           (joiningSlotIndex == null || joiningSlotIndex === i)
-                            ? () => handleJoin(i)
+                            ? () => setSelectedSlotIndex(i)
                             : undefined
                         }
                         joining={joiningSlotIndex === i}
+                        selected={selectedSlotIndex === i}
                       />
                     ))}
                   </View>
@@ -705,10 +716,11 @@ export function PartidoDetailScreen({
                             p.isFree &&
                             !isInMatch &&
                             (joiningSlotIndex == null || joiningSlotIndex === slotIdx)
-                              ? () => handleJoin(slotIdx)
+                              ? () => setSelectedSlotIndex(slotIdx)
                               : undefined
                           }
                           joining={joiningSlotIndex === slotIdx}
+                          selected={selectedSlotIndex === slotIdx}
                         />
                       );
                     })}
@@ -819,7 +831,7 @@ export function PartidoDetailScreen({
               !canPressCta && styles.ctaBtnDisabled,
               pressed && canPressCta && styles.pressed,
             ]}
-            onPress={() => firstFreeIndex >= 0 && handleJoin(firstFreeIndex)}
+            onPress={() => selectedSlotIndex != null && handleJoin(selectedSlotIndex)}
             disabled={!canPressCta}
           >
             {joinBusy ? (
@@ -831,7 +843,9 @@ export function PartidoDetailScreen({
                     ? 'Ya estás en el partido'
                     : firstFreeIndex < 0
                       ? 'No hay plazas libres'
-                      : `Reservar plaza - ${partido.pricePerPlayer}`}
+                      : selectedSlotIndex == null
+                        ? 'Selecciona una plaza para continuar'
+                        : `Reservar plaza - ${partido.pricePerPlayer}`}
                 </Text>
               </View>
             )}
@@ -904,16 +918,22 @@ function PlayerSlotDetail({
   player,
   onJoin,
   joining,
+  selected,
 }: {
   player: PartidoPlayer;
   onJoin?: () => void;
   joining?: boolean;
+  selected?: boolean;
 }) {
   if (player.isFree) {
     return (
       <View style={styles.plSlot}>
         <Pressable
-          style={({ pressed }) => [styles.plFree, pressed && onJoin && styles.pressed]}
+          style={({ pressed }) => [
+            styles.plFree,
+            selected && styles.plFreeSelected,
+            pressed && onJoin && styles.pressed,
+          ]}
           onPress={onJoin}
           disabled={joining || !onJoin}
         >
@@ -924,7 +944,7 @@ function PlayerSlotDetail({
           )}
         </Pressable>
         <Text style={styles.plFreeCap}>
-          {joining ? 'Uniendo...' : onJoin ? 'Unirse' : 'Libre'}
+          {joining ? 'Uniendo...' : selected ? 'Seleccionada' : onJoin ? 'Elegir plaza' : 'Libre'}
         </Text>
       </View>
     );
@@ -1285,6 +1305,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
+  },
+  plFreeSelected: {
+    borderColor: ACCENT,
+    backgroundColor: 'rgba(241,143,52,0.12)',
   },
   plFreePlus: {
     fontSize: 28,
