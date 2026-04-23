@@ -119,9 +119,9 @@ type JoinMatchResponse = {
 
 type PrepareJoinResponse = {
   ok?: boolean;
-  participant_id?: string;
   booking_id?: string;
   share_amount_cents?: number;
+  code?: string;
   error?: string;
 };
 
@@ -157,7 +157,7 @@ export async function prepareJoin(
   matchId: string,
   slotIndex: number,
   token: string | null | undefined
-): Promise<{ participantId: string; bookingId: string } | { ok: false; error: string }> {
+): Promise<{ bookingId: string } | { ok: false; error: string; code?: string }> {
   if (!token) return { ok: false, error: 'Token requerido' };
   try {
     const res = await fetch(`${API_URL}/matches/${matchId}/prepare-join`, {
@@ -169,10 +169,10 @@ export async function prepareJoin(
       body: JSON.stringify({ slot_index: slotIndex }),
     });
     const json = (await res.json()) as PrepareJoinResponse;
-    if (json.ok && json.participant_id && json.booking_id) {
-      return { participantId: json.participant_id, bookingId: json.booking_id };
+    if (json.ok && json.booking_id) {
+      return { bookingId: json.booking_id };
     }
-    return { ok: false, error: json.error ?? 'No se pudo preparar' };
+    return { ok: false, error: json.error ?? 'No se pudo preparar', code: json.code };
   } catch {
     return { ok: false, error: 'Error de conexión' };
   }

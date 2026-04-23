@@ -35,15 +35,15 @@ export async function confirmPaymentFromClient(
 
 export async function createPaymentIntent(
   bookingId: string,
-  participantId: string,
   token: string | null | undefined,
-  slotIndex?: number
+  slotIndex?: number,
+  participantId?: string
 ): Promise<CreatePaymentIntentResponse> {
   if (!token) return { ok: false, error: 'Token requerido' };
-  const body: { booking_id: string; participant_id: string; slot_index?: number } = {
+  const body: { booking_id: string; participant_id?: string; slot_index?: number } = {
     booking_id: bookingId,
-    participant_id: participantId,
   };
+  if (participantId) body.participant_id = participantId;
   if (slotIndex != null) body.slot_index = slotIndex;
   try {
     const res = await fetch(`${API_URL}/payments/create-intent`, {
