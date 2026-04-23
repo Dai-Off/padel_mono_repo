@@ -1,24 +1,112 @@
 -- ============================================================================
--- 046_onboarding_seed.sql
--- Ajustes Fase 1 e inserción de 60 preguntas Fase 2 (pools: beginner,
--- intermediate, advanced, competition, professional).
+-- 045_onboarding.sql
+-- Setup completo del módulo de onboarding (cuestionario de nivelación inicial).
+-- Unifica en un solo script: configuración global del algoritmo, ajustes de
+-- preguntas de Fase 1 (P1, P2, P6a/b, P9) y carga de 60 preguntas de Fase 2
+-- (12 por pool: beginner, intermediate, advanced, competition, professional).
 --
--- Requiere que 045_onboarding_config.sql se haya ejecutado antes (el servicio
--- lee onboarding_config al arrancar tras este cambio de schema).
+-- Idempotente: se puede re-ejecutar sin efectos colaterales.
 --
--- Convenciones:
---   - options (Fase 2 single): {"options":[...], "correct_index":N, "has_image":bool}
---   - options (Fase 2 multi):  {"options":[...], "correct_indices":[...], "has_image":bool}
---   - options (Fase 2 order):  {"steps":[...correctos en orden...], "has_image":bool}
---   - Preguntas 🔜 marcadas con has_image=true.
---   - A-TEC-02 y A-REG-02 originales como true_false se guardan como single
---     con 2 opciones (el servicio solo soporta single/multi/order).
+-- Convenciones de options:
+--   - Fase 1 P1/P2/P3/P4/P5/P7/P9: array de {value, text, ...campos específicos}.
+--   - Fase 1 P6a/P6b (multi):      array de {value, text, elo}.
+--   - Fase 2 single: {"options":[...], "correct_index":N, "has_image":bool}
+--   - Fase 2 multi:  {"options":[...], "correct_indices":[...], "has_image":bool}
+--   - Fase 2 order:  {"steps":[...correctos en orden...], "has_image":bool}
 -- ============================================================================
 
 BEGIN;
 
 -- ----------------------------------------------------------------------------
--- FASE 1: ajustes puntuales en preguntas existentes
+-- 1. Tabla onboarding_config: parámetros globales del algoritmo
+-- ----------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS onboarding_config (
+  key         text PRIMARY KEY,
+  value       jsonb NOT NULL,
+  description text,
+  updated_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION onboarding_config_touch_updated_at()
+RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS onboarding_config_touch ON onboarding_config;
+CREATE TRIGGER onboarding_config_touch
+BEFORE UPDATE ON onboarding_config
+FOR EACH ROW EXECUTE FUNCTION onboarding_config_touch_updated_at();
+
+-- RLS desactivada: onboarding_config es config global (no contiene datos de
+-- usuarios). Si se deja activa sin policies, las queries del backend pueden
+-- devolver 0 filas cuando el cliente Supabase ha sido contaminado con un JWT
+-- de usuario al autenticar, y el servicio revienta con "falta la clave X".
+ALTER TABLE onboarding_config DISABLE ROW LEVEL SECURITY;
+
+-- ----------------------------------------------------------------------------
+-- 2. Seeds de onboarding_config
+-- ----------------------------------------------------------------------------
+
+-- p6_factors: factor de agregación del multiselect P6.
+-- Fórmula: elo = max(seleccionados) + sum(resto) * factor[question_key]
+INSERT INTO onboarding_config (key, value, description) VALUES
+('p6_factors',
+ '{"p6a":0.3,"p6b":0.2}'::jsonb,
+ 'Factor aplicado a las opciones no-máximas en el multiselect P6 (p6a para P1=3, p6b para P1=4)')
+ON CONFLICT (key) DO UPDATE SET
+  value       = EXCLUDED.value,
+  description = EXCLUDED.description;
+
+-- phase2_pools: rangos de ELO Fase 1 -> pool de Fase 2.
+-- Se evalúa en orden: el primer pool cuyo "max" sea mayor que eloPhase1 gana.
+-- "min" es inclusivo, "max" exclusivo.
+INSERT INTO onboarding_config (key, value, description) VALUES
+('phase2_pools',
+ '[
+    {"min":0.0,"max":2.0,"pool":"beginner"},
+    {"min":2.0,"max":3.5,"pool":"intermediate"},
+    {"min":3.5,"max":4.5,"pool":"advanced"},
+    {"min":4.5,"max":5.5,"pool":"competition"},
+    {"min":5.5,"max":999,"pool":"professional"}
+  ]'::jsonb,
+ 'Mapeo de rangos de ELO Fase 1 al pool de preguntas de Fase 2')
+ON CONFLICT (key) DO UPDATE SET
+  value       = EXCLUDED.value,
+  description = EXCLUDED.description;
+
+-- phase2_adjustments: ajuste al ELO según score de Fase 2 (0-5).
+-- Se evalúa de mayor a menor min_score; primer match gana.
+INSERT INTO onboarding_config (key, value, description) VALUES
+('phase2_adjustments',
+ '[
+    {"min_score":5.0,"adjustment":0.7},
+    {"min_score":4.0,"adjustment":0.4},
+    {"min_score":3.0,"adjustment":0.2},
+    {"min_score":2.5,"adjustment":0.0},
+    {"min_score":2.0,"adjustment":-0.3},
+    {"min_score":1.0,"adjustment":-0.7},
+    {"min_score":0.0,"adjustment":-1.0}
+  ]'::jsonb,
+ 'Ajuste al ELO Fase 1 según puntuación de Fase 2')
+ON CONFLICT (key) DO UPDATE SET
+  value       = EXCLUDED.value,
+  description = EXCLUDED.description;
+
+-- final_bounds: floor y ceiling del ELO final tras sumar Fase 1 + Fase 2.
+INSERT INTO onboarding_config (key, value, description) VALUES
+('final_bounds',
+ '{"floor":0.5,"ceiling":6.25}'::jsonb,
+ 'Floor y ceiling aplicados al ELO final (post Fase 2)')
+ON CONFLICT (key) DO UPDATE SET
+  value       = EXCLUDED.value,
+  description = EXCLUDED.description;
+
+-- ----------------------------------------------------------------------------
+-- 3. Ajustes puntuales en preguntas de Fase 1 (P1, P2, P9)
 -- ----------------------------------------------------------------------------
 
 -- P2 opción D: ceiling 6.25 -> 5.5
@@ -32,7 +120,7 @@ SET options = options #- '{0,base_elo}'
 WHERE question_key = 'p1';
 
 -- P1: añadir techos de Fase 1 por opción (idx 0 y 1 sin techo -> null).
--- El servicio lee opt.ceiling para aplicar el techo de P1, en lugar de tenerlo hardcoded.
+-- El servicio lee opt.ceiling para aplicar el techo de P1.
 UPDATE onboarding_questions
 SET options = (
   SELECT jsonb_agg(
@@ -50,11 +138,7 @@ SET options = (
 )
 WHERE question_key = 'p1';
 
--- P9: inyectar la matriz de correctores por opción.
--- Cada opción P9 lleva un objeto "correctors" con los correctores cruzados por P2
--- (clave "sin_p2" cuando P1 <= 1 -> usado como ELO directo; resto son correctores
--- sumados al ELO acumulado). El servicio lee opt.correctors[p2Ans || 'sin_p2'].
---
+-- P9: inyectar matriz de correctores por opción.
 -- Matriz:
 --   P9 \ P2 | sin_p2 | A   | B   | C   | D
 --   0 Cas.  | 0.5    | 0.1 | 0.1 | 0.0 | 0.0
@@ -78,15 +162,58 @@ SET options = (
 WHERE question_key = 'p9';
 
 -- ----------------------------------------------------------------------------
--- FASE 2: desactivar preguntas del seed antiguo (phase2_*_N)
+-- 4. Desactivar preguntas antiguas que ya no se sirven
 -- ----------------------------------------------------------------------------
 
+-- Fase 2 antigua (claves phase2_*)
 UPDATE onboarding_questions
 SET is_active = false
 WHERE phase = 2 AND question_key LIKE 'phase2_%';
 
+-- P6 antigua (ahora dividida en p6a y p6b según P1)
+UPDATE onboarding_questions
+SET is_active = false
+WHERE question_key = 'p6';
+
 -- ----------------------------------------------------------------------------
--- FASE 2: upsert de las 60 preguntas nuevas
+-- 5. UPSERT de p6a (P1=3) y p6b (P1=4)
+-- ----------------------------------------------------------------------------
+
+INSERT INTO onboarding_questions (question_key, phase, pool, text, type, options, display_order, is_active) VALUES
+
+('p6a', 1, NULL,
+ '¿Cómo y dónde juegas o compites?',
+ 'multi',
+ '[
+    {"value":"amigos","text":"Con amigos o conocidos","elo":0.1},
+    {"value":"torneos_sociales","text":"Torneos sociales o amistosos","elo":0.2},
+    {"value":"torneos_competitivos","text":"Torneos competitivos de club o ranking","elo":0.5},
+    {"value":"ligas_amateur","text":"Ligas amateur organizadas","elo":0.8}
+  ]'::jsonb,
+ 60, true),
+
+('p6b', 1, NULL,
+ '¿Cómo y dónde juegas o compites?',
+ 'multi',
+ '[
+    {"value":"torneos_competitivos","text":"Torneos competitivos de club o ranking","elo":0.3},
+    {"value":"ligas_amateur","text":"Ligas amateur organizadas","elo":0.3},
+    {"value":"liga_federados","text":"Liga/torneos federados","elo":0.8},
+    {"value":"circuitos","text":"Circuitos nacionales o internacionales","elo":1.2}
+  ]'::jsonb,
+ 61, true)
+
+ON CONFLICT (question_key) DO UPDATE SET
+  phase         = EXCLUDED.phase,
+  pool          = EXCLUDED.pool,
+  text          = EXCLUDED.text,
+  type          = EXCLUDED.type,
+  options       = EXCLUDED.options,
+  display_order = EXCLUDED.display_order,
+  is_active     = EXCLUDED.is_active;
+
+-- ----------------------------------------------------------------------------
+-- 6. UPSERT de las 60 preguntas de Fase 2 (12 por pool)
 -- ----------------------------------------------------------------------------
 
 INSERT INTO onboarding_questions (question_key, phase, pool, text, type, options, display_order, is_active) VALUES
@@ -470,13 +597,16 @@ COMMIT;
 -- ============================================================================
 -- Verificación recomendada tras ejecutar:
 --
+-- SELECT key, jsonb_pretty(value) FROM onboarding_config ORDER BY key;
+--   -> 4 filas: final_bounds, p6_factors, phase2_adjustments, phase2_pools.
+--
+-- SELECT question_key, is_active, jsonb_array_length(options) AS n_opts
+-- FROM onboarding_questions
+-- WHERE question_key IN ('p6','p6a','p6b') ORDER BY question_key;
+--   -> p6 inactive, p6a active 4 opts, p6b active 4 opts.
+--
 -- SELECT pool, COUNT(*) FROM onboarding_questions
 -- WHERE phase = 2 AND is_active = true
 -- GROUP BY pool ORDER BY pool;
---   -> debe devolver 12 por pool (beginner, intermediate, advanced,
---      competition, professional).
---
--- SELECT question_key, options->>'ceiling' AS ceiling
--- FROM onboarding_questions WHERE question_key = 'p2';
---   -> D debe mostrar 5.5
+--   -> 12 por pool.
 -- ============================================================================
