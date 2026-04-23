@@ -35,6 +35,8 @@ type MeResponse = {
     notif_tournament_reminders?: boolean | null;
     notif_class_updates?: boolean | null;
     notif_chat_messages?: boolean | null;
+    /** Presente solo si el backend lo incluye en `/players/me`. */
+    onboarding_completed?: boolean | null;
   };
   error?: string;
 };
@@ -71,6 +73,11 @@ export type MyPlayerProfile = {
   mmLosses: number;
   mmDraws: number;
   preferences: PlayerPreferences;
+  /**
+   * Onboarding de nivelación; si el backend no envía el campo, se asume completado
+   * para no bloquear la app.
+   */
+  onboardingCompleted: boolean;
 };
 
 /** Obtiene el jugador actual según la sesión (Bearer token). */
@@ -203,6 +210,7 @@ export async function fetchMyPlayerProfile(
         notifClassUpdates: json.player.notif_class_updates !== false,
         notifChatMessages: json.player.notif_chat_messages !== false,
       },
+      onboardingCompleted: json.player.onboarding_completed !== false,
     };
   } catch {
     return null;
