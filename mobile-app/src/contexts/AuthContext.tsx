@@ -49,6 +49,12 @@ function sessionNeedsRefresh(s: Session): boolean {
   return expSec * 1000 < Date.now() + REFRESH_BUFFER_MS;
 }
 
+function sessionIsExpired(s: Session): boolean {
+  const expSec = s.expires_at;
+  if (expSec == null || !Number.isFinite(expSec)) return false;
+  return expSec * 1000 <= Date.now();
+}
+
 function AuthProviderInner({ children }: { children: ReactNode }) {
   const [session, setSessionState] = useState<Session | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -72,7 +78,7 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
     if (!current?.refresh_token) return null;
     const res = await refreshSessionApi(current.refresh_token);
     if (!res.ok || !res.session?.access_token || !res.session.refresh_token || !res.user?.id) {
-      if (res.httpStatus === 401) {
+      if (res.httpStatus === 401 || (current && sessionIsExpired(current))) {
         setSession(null);
       }
       return null;
@@ -146,7 +152,7 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
           return;
         }
         /** 401: refresh revocado/expirado. Red u otros: conservar sesión guardada. */
-        if (res.httpStatus === 401) {
+        if (res.httpStatus === 401 || sessionIsExpired(parsed)) {
           await AsyncStorage.removeItem(SESSION_KEY);
           if (mounted) setSessionState(null);
         } else if (mounted) {
