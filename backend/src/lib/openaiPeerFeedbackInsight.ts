@@ -36,6 +36,14 @@ function normalizeStringList(arr: unknown, len: number): string[] | null {
   return out;
 }
 
+function stripEmoji(text: string): string {
+  return text
+    .replace(/[\u{1F300}-\u{1FAFF}]/gu, '')
+    .replace(/[\u{2600}-\u{27BF}]/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function parseJsonFromAssistantContent(raw: string): Record<string, unknown> | null {
   const t = raw.trim();
   if (!t) return null;
@@ -65,9 +73,11 @@ export async function generatePeerFeedbackCardWithOpenAI(
 
   const system = [
     'Eres un coach de pádel para jugadores amateur/intermedio en España.',
-    'Tienes que generar contenido en español, tono cercano y profesional.',
+    'Tienes que generar contenido en español, tono natural, cercano y profesional.',
+    'Evita lenguaje grandilocuente, frases de marketing y estilo robótico.',
+    'No uses emojis, iconos ni símbolos decorativos.',
     'Responde SOLO un objeto JSON (sin markdown ni texto fuera del JSON) con exactamente estas claves:',
-    '- "recommendation_ia": string, un solo párrafo (3-6 frases) que sintetice el feedback del último partido y oriente al siguiente paso.',
+    '- "recommendation_ia": string, un solo párrafo (2-4 frases) que sintetice el feedback del último partido y oriente al siguiente paso.',
     '- "fortalezas": array de exactamente 3 strings, cada uno una frase corta (máx. ~120 caracteres).',
     '- "a_mejorar": array de exactamente 3 strings, cada uno una frase corta (máx. ~120 caracteres).',
     'Basa las listas en las valoraciones numéricas y en los comentarios si existen; no inventes hechos concretos que no aparezcan en los datos (puedes generalizar a técnica/táctica/físico/mental).',
@@ -115,14 +125,16 @@ export async function generatePeerFeedbackCardWithOpenAI(
 
     const rec =
       typeof parsed.recommendation_ia === 'string'
-        ? parsed.recommendation_ia.trim()
+        ? stripEmoji(parsed.recommendation_ia)
         : typeof parsed.recommendationIA === 'string'
-          ? parsed.recommendationIA.trim()
+          ? stripEmoji(parsed.recommendationIA)
           : '';
     if (!rec) return null;
 
-    const fortalezas = normalizeStringList(parsed.fortalezas, 3);
-    const a_mejorar = normalizeStringList(parsed.a_mejorar ?? parsed.aMejorar, 3);
+    const fortalezasRaw = normalizeStringList(parsed.fortalezas, 3);
+    const aMejorarRaw = normalizeStringList(parsed.a_mejorar ?? parsed.aMejorar, 3);
+    const fortalezas = fortalezasRaw?.map(stripEmoji).filter(Boolean) ?? null;
+    const a_mejorar = aMejorarRaw?.map(stripEmoji).filter(Boolean) ?? null;
     if (!fortalezas || !a_mejorar) return null;
 
     return {
