@@ -184,10 +184,20 @@ export function CrearPartidoLocationSheet({
   const handleCheckout = useCallback(async () => {
     if (!selectedSlot || !selectedClub) return;
     if (!orgId || !session?.access_token) return;
+    if (priceLoading) {
+      Alert.alert('Calculando precio', 'Espera un momento a que terminemos de calcular el precio exacto.');
+      return;
+    }
+
+    if (!priceData || priceData.total_price_cents <= 0) {
+      setCreating(false);
+      setCreateError('No se pudo calcular el precio del partido. Por favor, selecciona el horario de nuevo.');
+      return;
+    }
+
     setCreating(true);
     setCreateError(null);
     const { start_at, end_at } = buildStartEnd(selectedSlot.dateStr, selectedSlot.time);
-    const totalPriceCents = Math.max(selectedSlot.minPriceCents, 100);
 
     const intentRes = await createIntentForNewMatch(
       {
@@ -195,7 +205,7 @@ export function CrearPartidoLocationSheet({
         organizer_player_id: orgId,
         start_at,
         end_at,
-        total_price_cents: priceData?.total_price_cents ?? Math.round(totalPriceCents * (DURATION_MIN / 60)),
+        total_price_cents: priceData.total_price_cents,
         visibility: partidoPrivado ? 'private' : 'public',
         competitive,
         gender,
