@@ -26,8 +26,18 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 type OptionEntry = { label: string; value: unknown };
 
+/** Supabase/API a veces devuelve `options` como string JSON. */
+function coerceOptionsRaw(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return raw;
+  }
+}
+
 function getOptionEntries(q: OnboardingQuestionPayload): OptionEntry[] {
-  const raw = q.options;
+  const raw = coerceOptionsRaw(q.options);
   if (
     q.type !== 'order' &&
     raw &&
@@ -68,7 +78,7 @@ function getOptionEntries(q: OnboardingQuestionPayload): OptionEntry[] {
 }
 
 function getOrderClientSteps(q: OnboardingQuestionPayload): string[] {
-  const raw = q.options;
+  const raw = coerceOptionsRaw(q.options);
   if (raw && typeof raw === 'object' && !Array.isArray(raw) && 'client_steps' in raw) {
     const cs = (raw as { client_steps: unknown }).client_steps;
     if (Array.isArray(cs)) return cs.map(String);
@@ -86,23 +96,54 @@ type Props = {
   onClose: () => void;
   /** Llamado tras guardar ELO en backend (perfil conviene refrescarlo fuera). */
   onCompleted: (eloRating: number) => void;
+  /** ELO del perfil (`/players/me`) para mostrarlo si la API indica que la nivelación ya está hecha. */
+  savedEloRating?: number | null;
 };
+
+const POOL_LABELS: Record<string, string> = {
+  beginner: 'Iniciación',
+  intermediate: 'Intermedio',
+  advanced: 'Avanzado',
+  expert: 'Experto',
+};
+
+function poolLabel(pool: string): string {
+  return POOL_LABELS[pool] ?? pool.replace(/_/g, ' ');
+}
 
 type ViewMode =
   | { kind: 'loading' }
+  | { kind: 'already_done'; elo: number | null }
   | { kind: 'single'; question: OnboardingQuestionPayload; stepLabel: string }
+  | {
+      kind: 'phase2_intro';
+      questions: OnboardingQuestionPayload[];
+      eloPhase1: number;
+      poolAssigned: string;
+    }
   | { kind: 'phase2'; questions: OnboardingQuestionPayload[]; stepLabel: string }
   | { kind: 'done'; elo: number };
 
-export function OnboardingLevelModal({ visible, accessToken, onClose, onCompleted }: Props) {
+export function OnboardingLevelModal({
+  visible,
+  accessToken,
+  onClose,
+  onCompleted,
+  savedEloRating = null,
+}: Props) {
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  /** No incluir en deps del bootstrap: al guardar el padre refresca perfil y cambiaría `savedEloRating` y reiniciaría el modal. */
+  const savedEloRatingRef = useRef(savedEloRating);
+  savedEloRatingRef.current = savedEloRating;
   const [view, setView] = useState<ViewMode>({ kind: 'loading' });
   const [answers, setAnswers] = useState<OnboardingAnswerPayload[]>([]);
   const [singleSelected, setSingleSelected] = useState<unknown>(null);
   const [multiSelected, setMultiSelected] = useState<unknown[]>([]);
   const [phase2Values, setPhase2Values] = useState<Record<string, unknown>>({});
   const [orderDrafts, setOrderDrafts] = useState<Record<string, string[]>>({});
+  const orderDraftsRef = useRef(orderDrafts);
+  orderDraftsRef.current = orderDrafts;
   const [submitting, setSubmitting] = useState(false);
   const [bootError, setBootError] = useState<string | null>(null);
 
@@ -159,7 +200,12 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
         setSubmitting(true);
         try {
           const { elo_rating } = await submitPlayerOnboarding(accessToken, nextAnswers);
-          setView({ kind: 'done', elo: elo_rating });
+          const eloNum = Number(elo_rating);
+          setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'No se pudo guardar tu nivel';
+          setBootError(msg);
+          Alert.alert('Error', msg);
         } finally {
           setSubmitting(false);
         }
@@ -170,7 +216,7 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
         setSingleSelected(null);
         setMultiSelected([]);
         const n = nextAnswers.length + 1;
-        setView({ kind: 'single', question: state.question, stepLabel: `Paso ${n}` });
+        setView({ kind: 'single', question: state.question, stepLabel: `Cuestionario oficial · Paso ${n}` });
         return;
       }
       setAnswers(nextAnswers);
@@ -182,10 +228,26 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
       }
       setOrderDrafts(drafts);
       setPhase2Values({});
+      if (!state.questions?.length) {
+        try {
+          setSubmitting(true);
+          const { elo_rating } = await submitPlayerOnboarding(accessToken, nextAnswers);
+          const eloNum = Number(elo_rating);
+          setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'No se pudo guardar tu nivel';
+          setBootError(msg);
+          Alert.alert('Error', msg);
+        } finally {
+          setSubmitting(false);
+        }
+        return;
+      }
       setView({
-        kind: 'phase2',
+        kind: 'phase2_intro',
         questions: state.questions,
-        stepLabel: 'Fase 2 — 5 preguntas',
+        eloPhase1: state.elo_phase1,
+        poolAssigned: state.pool_assigned,
       });
     },
     [accessToken],
@@ -206,11 +268,11 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
         const state = await fetchOnboardingNext(accessToken, []);
         if (cancelled) return;
         if (state.type === 'complete') {
-          setBootError('No hay preguntas pendientes. Si ya completaste la nivelación, cierra esta ventana.');
+          setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
           return;
         }
         if (state.type === 'question') {
-          setView({ kind: 'single', question: state.question, stepLabel: 'Paso 1' });
+          setView({ kind: 'single', question: state.question, stepLabel: 'Cuestionario oficial · Paso 1' });
         } else if (state.type === 'phase2') {
           const drafts: Record<string, string[]> = {};
           for (const q of state.questions) {
@@ -219,7 +281,16 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
             }
           }
           setOrderDrafts(drafts);
-          setView({ kind: 'phase2', questions: state.questions, stepLabel: 'Fase 2 — 5 preguntas' });
+          if (!state.questions.length) {
+            setBootError('No hay preguntas de Fase 2 disponibles. Cierra e intenta de nuevo o contacta al club.');
+            return;
+          }
+          setView({
+            kind: 'phase2_intro',
+            questions: state.questions,
+            eloPhase1: state.elo_phase1,
+            poolAssigned: state.pool_assigned,
+          });
         }
       } catch (e) {
         if (!cancelled) {
@@ -296,14 +367,22 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
 
   const submitPhase2 = async () => {
     if (view.kind !== 'phase2') return;
+    if (!accessToken) {
+      Alert.alert('Sesión', 'Tenés que iniciar sesión de nuevo.');
+      return;
+    }
     const nextVals: Record<string, unknown> = { ...phase2Values };
     for (const q of view.questions) {
       let v = nextVals[q.question_key];
       if (v === undefined && q.type === 'order') {
-        v = orderDrafts[q.question_key] ?? getOrderClientSteps(q);
+        v = orderDraftsRef.current[q.question_key] ?? getOrderClientSteps(q);
       }
-      if (v === undefined || (q.type === 'multi' && Array.isArray(v) && v.length === 0)) {
-        Alert.alert('Fase 2', 'Responde todas las preguntas antes de enviar.');
+      const orderEmpty = q.type === 'order' && Array.isArray(v) && v.length === 0;
+      if (v === undefined || orderEmpty || (q.type === 'multi' && Array.isArray(v) && v.length === 0)) {
+        Alert.alert(
+          'Fase 2',
+          'Falta completar alguna pregunta. En las de orden, tocá «Confirmar orden» después de ordenar (o reordená si no hay pasos visibles).',
+        );
         return;
       }
       nextVals[q.question_key] = v;
@@ -311,8 +390,9 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
     const merged = [...answers, ...view.questions.map((q) => ({ question_key: q.question_key, value: nextVals[q.question_key]! }))];
     try {
       setSubmitting(true);
-      const { elo_rating } = await submitPlayerOnboarding(accessToken!, merged);
-      setView({ kind: 'done', elo: elo_rating });
+      const { elo_rating } = await submitPlayerOnboarding(accessToken, merged);
+      const eloNum = Number(elo_rating);
+      setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo guardar');
     } finally {
@@ -340,9 +420,16 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
 
     if (q.type === 'order') {
       const steps = orderDrafts[q.question_key] ?? getOrderClientSteps(q);
+      const orderConfirmed =
+        mode === 'phase2' &&
+        Array.isArray(phase2Values[q.question_key]) &&
+        (phase2Values[q.question_key] as unknown[]).length > 0;
       return (
         <View style={styles.block}>
           <Text style={styles.orderHint}>Ordena de arriba a abajo (1 = primero). Usa las flechas.</Text>
+          {steps.length === 0 ? (
+            <Text style={styles.orderEmptyWarn}>No se pudieron cargar los pasos. Cierra y abre de nuevo el cuestionario.</Text>
+          ) : null}
           {steps.map((step, i) => (
             <View key={`${q.question_key}-${i}`} style={styles.orderRow}>
               <Text style={styles.orderIndex}>{i + 1}</Text>
@@ -356,14 +443,18 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
             </View>
           ))}
           {mode === 'phase2' ? (
-            <Pressable
-              style={styles.secondaryBtn}
-              onPress={() =>
-                setPhase2Values((p) => ({ ...p, [q.question_key]: [...(orderDrafts[q.question_key] ?? steps)] }))
-              }
-            >
-              <Text style={styles.secondaryBtnText}>Confirmar orden</Text>
-            </Pressable>
+            <>
+              <Pressable
+                style={styles.secondaryBtn}
+                onPress={() => {
+                  const latest = orderDraftsRef.current[q.question_key] ?? getOrderClientSteps(q);
+                  setPhase2Values((p) => ({ ...p, [q.question_key]: [...latest] }));
+                }}
+              >
+                <Text style={styles.secondaryBtnText}>Confirmar orden</Text>
+              </Pressable>
+              {orderConfirmed ? <Text style={styles.orderConfirmed}>Orden registrado para enviar</Text> : null}
+            </>
           ) : null}
         </View>
       );
@@ -426,7 +517,7 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
       <View style={styles.centerPad}>
         <Text style={styles.errorText}>{bootError}</Text>
         <Pressable style={styles.primaryWrap} onPress={handleClose}>
-          <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
+          <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
             <Text style={styles.primaryText}>Cerrar</Text>
           </LinearGradient>
         </Pressable>
@@ -439,30 +530,101 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
         <Text style={styles.muted}>Cargando cuestionario…</Text>
       </View>
     );
+  } else if (view.kind === 'already_done') {
+    inner = (
+      <View style={styles.centerPad}>
+        <Ionicons name="checkmark-circle" size={48} color="#34D399" style={{ marginBottom: 8 }} />
+        <Text style={styles.alreadyDoneTitle}>Nivelación del club completada</Text>
+        <Text style={styles.alreadyDoneBody}>
+          El cuestionario oficial del club (el que viene del servidor) ya está registrado. No quedan pasos
+          pendientes.
+        </Text>
+        {view.elo != null && Number.isFinite(view.elo) ? (
+          <Text style={styles.alreadyDoneElo}>Tu ELO en perfil: {view.elo.toFixed(2)}</Text>
+        ) : null}
+        <Pressable style={styles.primaryWrap} onPress={handleClose}>
+          <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
+            <Text style={styles.primaryText}>Cerrar</Text>
+          </LinearGradient>
+        </Pressable>
+      </View>
+    );
   } else if (view.kind === 'single') {
     inner = (
       <>
         <View style={styles.header}>
           <View style={styles.handle} />
           <View style={styles.headerRow}>
-            <Text style={styles.kicker}>Nivelación inicial · {view.stepLabel}</Text>
+            <Text style={styles.kicker}>Nivelación del club · {view.stepLabel}</Text>
             <Pressable onPress={handleClose} style={styles.iconClose}>
               <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
             </Pressable>
           </View>
         </View>
-        <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <Text style={styles.questionTitle}>{view.question.text}</Text>
           {renderQuestionBody(view.question, 'single_flow')}
         </ScrollView>
         <View style={[styles.footer, { paddingBottom: footerPadding }]}>
           <Pressable disabled={submitting} onPress={confirmSingleAndAdvance} style={styles.primaryWrap}>
-            <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
+            <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
               {submitting ? (
                 <ActivityIndicator color="#fff" />
               ) : (
                 <Text style={styles.primaryText}>Siguiente</Text>
               )}
+            </LinearGradient>
+          </Pressable>
+        </View>
+      </>
+    );
+  } else if (view.kind === 'phase2_intro') {
+    inner = (
+      <>
+        <View style={styles.header}>
+          <View style={styles.handle} />
+          <View style={styles.headerRow}>
+            <Text style={styles.kicker}>Fase 2 de 2</Text>
+            <Pressable onPress={handleClose} style={styles.iconClose}>
+              <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
+            </Pressable>
+          </View>
+        </View>
+        <ScrollView
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.questionTitle}>Afinamos tu nivel con 5 preguntas técnicas</Text>
+          <Text style={styles.phase2IntroBody}>
+            Tras el cuestionario oficial, tu puntuación orientativa es{' '}
+            <Text style={styles.phase2IntroElo}>{view.eloPhase1.toFixed(2)}</Text> (escala 0–7). El bloque siguiente
+            está calibrado para el perfil «{poolLabel(view.poolAssigned)}».
+          </Text>
+          <Text style={styles.phase2IntroHint}>
+            Responde con cuidado: estas respuestas ajustan tu ELO inicial antes de guardarlo en tu perfil.
+          </Text>
+        </ScrollView>
+        <View style={[styles.footer, { paddingBottom: footerPadding }]}>
+          <Pressable
+            disabled={submitting}
+            onPress={() =>
+              setView({
+                kind: 'phase2',
+                questions: view.questions,
+                stepLabel: `Fase 2 · ${view.questions.length} preguntas`,
+              })
+            }
+            style={styles.primaryWrap}
+          >
+            <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
+              <Text style={styles.primaryText}>Ir a las preguntas de Fase 2</Text>
             </LinearGradient>
           </Pressable>
         </View>
@@ -480,18 +642,31 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
             </Pressable>
           </View>
         </View>
-        <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           {view.questions.map((q, idx) => (
             <View key={q.question_key} style={styles.phase2Block}>
-              <Text style={styles.phase2Label}>Pregunta {idx + 1} de 5</Text>
+              <Text style={styles.phase2Label}>
+                Pregunta {idx + 1} de {view.questions.length}
+              </Text>
               <Text style={styles.questionTitle}>{q.text}</Text>
               {renderQuestionBody(q, 'phase2')}
             </View>
           ))}
         </ScrollView>
         <View style={[styles.footer, { paddingBottom: footerPadding }]}>
-          <Pressable disabled={submitting} onPress={submitPhase2} style={styles.primaryWrap}>
-            <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
+          <Pressable
+            disabled={submitting}
+            onPress={() => {
+              void submitPhase2();
+            }}
+            style={styles.primaryWrap}
+          >
+            <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
               {submitting ? (
                 <ActivityIndicator color="#fff" />
               ) : (
@@ -503,22 +678,26 @@ export function OnboardingLevelModal({ visible, accessToken, onClose, onComplete
       </>
     );
   } else if (view.kind === 'done') {
+    const eloLabel = Number.isFinite(view.elo) ? view.elo.toFixed(2) : '—';
     inner = (
       <View style={styles.doneRoot}>
         <Pressable style={[styles.iconClose, styles.doneClose]} onPress={handleClose}>
           <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
         </Pressable>
         <Text style={styles.doneTitle}>Tu nivel inicial</Text>
-        <Text style={styles.doneElo}>{view.elo.toFixed(2)}</Text>
-        <Text style={styles.doneSub}>Escala 0–7 · ya puedes usar matchmaking y lecciones según las reglas del club.</Text>
+        <Text style={styles.doneElo}>{eloLabel}</Text>
+        <Text style={styles.doneSub}>
+          Escala 0–7 · según tus respuestas (camino corto o completo). Ya puedes usar matchmaking y lecciones según las
+          reglas del club.
+        </Text>
         <Pressable
           style={styles.primaryWrap}
           onPress={() => {
-            onCompleted(view.elo);
+            onCompleted(Number.isFinite(view.elo) ? view.elo : 0);
             handleClose();
           }}
         >
-          <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
+          <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
             <Text style={styles.primaryText}>Listo</Text>
           </LinearGradient>
         </Pressable>
@@ -601,7 +780,7 @@ const styles = StyleSheet.create({
   checkOuterOn: { backgroundColor: '#F18F34', borderColor: '#F18F34' },
   optionText: { flex: 1, color: '#E5E7EB', fontSize: 14, lineHeight: 20 },
   footer: { paddingHorizontal: 16, paddingTop: 8 },
-  primaryWrap: { borderRadius: 14, overflow: 'hidden' },
+  primaryWrap: { borderRadius: 14, overflow: 'hidden', width: '100%' },
   primaryGrad: {
     paddingVertical: 14,
     alignItems: 'center',
@@ -636,8 +815,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(241,143,52,0.35)',
   },
   secondaryBtnText: { color: '#F18F34', fontWeight: '600', fontSize: 13 },
+  orderConfirmed: { color: '#6EE7B7', fontSize: 13, fontWeight: '600', marginTop: 10 },
+  orderEmptyWarn: { color: '#FCA5A5', fontSize: 13, marginBottom: 10 },
   phase2Block: { marginBottom: 22, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
   phase2Label: { color: '#6B7280', fontSize: 11, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase' },
+  phase2IntroBody: { color: '#9CA3AF', fontSize: 14, lineHeight: 22, marginBottom: 14 },
+  phase2IntroElo: { color: '#F18F34', fontWeight: '800' },
+  phase2IntroHint: { color: '#6B7280', fontSize: 13, lineHeight: 20 },
+  alreadyDoneTitle: { color: '#fff', fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  alreadyDoneBody: { color: '#9CA3AF', fontSize: 14, lineHeight: 22, textAlign: 'center', paddingHorizontal: 8 },
+  alreadyDoneElo: { color: '#F18F34', fontSize: 20, fontWeight: '800', marginTop: 8 },
   doneRoot: { padding: 24, alignItems: 'center' },
   doneClose: { alignSelf: 'flex-end', marginBottom: 8 },
   doneTitle: { color: 'rgba(255,255,255,0.7)', fontSize: 14, marginBottom: 8 },
