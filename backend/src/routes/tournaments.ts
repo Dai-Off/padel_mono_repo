@@ -2499,13 +2499,18 @@ router.post('/:id/chat', requireClubOwnerOrAdmin, async (req: Request, res: Resp
 router.get('/public/list', async (req: Request, res: Response) => {
   try {
     const clubId = String(req.query.club_id ?? '').trim();
+    const limitRaw = Number(req.query.limit ?? 20);
+    const offsetRaw = Number(req.query.offset ?? 0);
+    const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, Math.trunc(limitRaw))) : 20;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.trunc(offsetRaw)) : 0;
     const supabase = getSupabaseServiceRoleClient();
     let q = supabase
       .from('tournaments')
       .select(TOURNAMENT_PUBLIC_LIST_SELECT)
       .eq('visibility', 'public')
       .neq('status', 'cancelled')
-      .order('start_at', { ascending: true });
+      .order('start_at', { ascending: true })
+      .range(offset, offset + limit - 1);
     if (clubId) q = q.eq('club_id', clubId);
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -2530,7 +2535,15 @@ router.get('/public/list', async (req: Request, res: Response) => {
       confirmed_count: countsByTournament[t.id]?.confirmed ?? 0,
       pending_count: countsByTournament[t.id]?.pending ?? 0,
     }));
-    return res.json({ ok: true, tournaments: enriched });
+    return res.json({
+      ok: true,
+      tournaments: enriched,
+      pagination: {
+        limit,
+        offset,
+        has_more: enriched.length === limit,
+      },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -2575,6 +2588,10 @@ router.get('/player/me-list', async (req: Request, res: Response) => {
     return res.status(401).json({ ok: false, error: auth.error ?? 'Token requerido' });
   }
   try {
+    const limitRaw = Number(req.query.limit ?? 20);
+    const offsetRaw = Number(req.query.offset ?? 0);
+    const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, Math.trunc(limitRaw))) : 20;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.trunc(offsetRaw)) : 0;
     const supabase = getSupabaseServiceRoleClient();
     const playerId = auth.playerId;
     const { data: insRows, error: insErr } = await supabase
@@ -2626,7 +2643,16 @@ router.get('/player/me-list', async (req: Request, res: Response) => {
       (a, b) =>
         new Date(String(a.start_at)).getTime() - new Date(String(b.start_at)).getTime(),
     );
-    return res.json({ ok: true, tournaments: enriched });
+    const paginated = enriched.slice(offset, offset + limit);
+    return res.json({
+      ok: true,
+      tournaments: paginated,
+      pagination: {
+        limit,
+        offset,
+        has_more: offset + limit < enriched.length,
+      },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -3703,12 +3729,14 @@ router.get('/:id/chat/player', async (req: Request, res: Response) => {
     if (visibility !== 'public' && !ctx.myInscription) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso al chat de este torneo' });
     }
-    const { data, error } = await supabase
+    const after = String(req.query.after ?? '').trim();
+    let q = supabase
       .from('tournament_chat_messages')
       .select('id, created_at, author_user_id, author_name, message')
       .eq('tournament_id', tournamentId)
-      .order('created_at', { ascending: true })
-      .limit(200);
+      .order('created_at', { ascending: true });
+    if (after) q = q.gt('created_at', after);
+    const { data, error } = await q.limit(200);
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, messages: data ?? [] });
   } catch (err) {

@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hashInviteToken } from '../lib/inviteToken';
-import { sendPasswordResetEmail, syncPlayerVector } from '../lib/mailer';
+import { sendPasswordResetEmail, sendRegistrationConfirmationEmail, syncPlayerVector } from '../lib/mailer';
 import { getFrontendUrl } from '../lib/env';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 import { assignActiveMatchmakingSeasonIfNull } from '../services/matchmakingSeasonService';
@@ -32,17 +32,35 @@ router.post('/register', async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
     const baseUrl = getFrontendUrl();
-    const isMobileSource = source === 'mobile' || is_mobile === true;
-    const redirectTo = isMobileSource ? `${baseUrl}/email-confirmed` : `${baseUrl}/login`;
+    const redirectTo = `${baseUrl}/email-confirmed`;
 
-    const { data, error } = await supabase.auth.signUp({
+    // Usamos admin.createUser para evitar que Supabase envíe su correo automático por defecto.
+    // Esto nos permite enviar exclusivamente nuestro correo personalizado con Resend.
+    const { data, error } = await supabase.auth.admin.createUser({
       email: emailStr,
       password: passwordStr,
-      options: {
-        data: name ? { full_name: String(name).trim() } : undefined,
-        emailRedirectTo: redirectTo,
-      },
+      email_confirm: false,
+      user_metadata: name ? { full_name: String(name).trim() } : undefined,
     });
+
+    if (!error && data.user && !data.user.email_confirmed_at) {
+      // Envío manual de correo con diseño WeMatch vía Resend
+      const { data: linkData } = await supabase.auth.admin.generateLink({
+        type: 'signup',
+        email: emailStr,
+        password: passwordStr,
+        options: { redirectTo }
+      });
+      
+      const confirmationUrl = linkData?.properties?.action_link || (linkData as any)?.action_link;
+      if (confirmationUrl) {
+        await sendRegistrationConfirmationEmail(
+          emailStr,
+          name ? String(name).trim() : 'Jugador',
+          confirmationUrl
+        );
+      }
+    }
 
     if (error) {
       const msg = error.message.toLowerCase();
@@ -59,9 +77,8 @@ router.post('/register', async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: error.message });
     }
 
-    if (!data.session && data.user?.identities?.length === 0) {
-      return res.status(409).json({ ok: false, error: 'El email ya está registrado' });
-    }
+    // Con admin.createUser no obtenemos sesión, y si el usuario ya existiera,
+    // el error se habría capturado arriba.
 
     const fullName = (name ? String(name).trim() : '') || '';
     const nameParts = fullName ? fullName.split(/\s+/) : [];
@@ -133,13 +150,7 @@ router.post('/register', async (req: Request, res: Response) => {
         email: data.user?.email,
         user_metadata: data.user?.user_metadata,
       },
-      session: data.session
-        ? {
-            access_token: data.session.access_token,
-            refresh_token: data.session.refresh_token,
-            expires_at: data.session.expires_at,
-          }
-        : null,
+      session: null,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
