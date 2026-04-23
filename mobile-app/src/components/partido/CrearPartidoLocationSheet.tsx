@@ -22,6 +22,7 @@ import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
+import { useSlotPrice } from '../../hooks/useSlotPrice';
 
 export type LocationType = 'club_wematch' | 'pista_externa';
 
@@ -146,6 +147,23 @@ export function CrearPartidoLocationSheet({
 
   const [selectedSlot, setSelectedSlot] = useState<SlotForCreate | null>(null);
   const [selectedClub, setSelectedClub] = useState<ClubDisplay | null>(null);
+
+  const { priceData, loading: priceLoading } = useSlotPrice({
+    clubId: selectedClub?.clubId,
+    courtId: selectedSlot?.courtId,
+    date: selectedSlot?.dateStr,
+    slot: selectedSlot?.time,
+    durationMinutes: DURATION_MIN,
+  });
+
+  const getSlotDisplayPrice = () => {
+    if (priceLoading) return 'Calculando...';
+    if (priceData && priceData.total_price_cents > 0) {
+      return `${(priceData.total_price_cents / 100).toFixed(2)}€`;
+    }
+    return selectedSlot ? slotPriceForDuration(selectedSlot) : '—';
+  };
+
   const [competitive, setCompetitive] = useState(true);
   const [gender, setGender] = useState<GenderOption>('any');
 
@@ -176,7 +194,7 @@ export function CrearPartidoLocationSheet({
         organizer_player_id: orgId,
         start_at,
         end_at,
-        total_price_cents: Math.round(totalPriceCents * (DURATION_MIN / 60)),
+        total_price_cents: priceData?.total_price_cents ?? Math.round(totalPriceCents * (DURATION_MIN / 60)),
         visibility: partidoPrivado ? 'private' : 'public',
         competitive,
         gender,
@@ -231,13 +249,20 @@ export function CrearPartidoLocationSheet({
       return;
     }
 
+    const currentPriceFormatted = getSlotDisplayPrice();
+
     const confirmation: BookingConfirmationData = {
       courtName: selectedSlot.courtName,
       clubName: selectedClub.clubName,
       dateTimeFormatted: formatDateTimeForBookingConfirm(selectedSlot.dateStr, selectedSlot.time),
       duration: `${DURATION_MIN} min`,
-      priceFormatted: slotPriceForDuration(selectedSlot),
+      priceFormatted: currentPriceFormatted,
       matchVisibility: partidoPrivado ? 'private' : 'public',
+      clubId: selectedClub.clubId,
+      courtId: selectedSlot.courtId,
+      date: selectedSlot.dateStr,
+      slot: selectedSlot.time,
+      durationMinutes: DURATION_MIN,
     };
     /** El padre (p. ej. MainApp) cierra el flujo dentro de `onPartidoCreado`; no llamar `onClose` después para evitar carrera con la pantalla de éxito. */
     if (onPartidoCreado) {
@@ -601,7 +626,7 @@ export function CrearPartidoLocationSheet({
                         {selectedSlot.dateLabel} • {selectedSlot.time}
                       </Text>
                     </View>
-                    <Text style={styles.configClubPrice}>{slotPriceForDuration(selectedSlot)}</Text>
+                    <Text style={styles.configClubPrice}>{getSlotDisplayPrice()}</Text>
                   </View>
                 </View>
 

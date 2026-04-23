@@ -594,7 +594,7 @@ export function PartidoDetailScreen({
                   </View>
                   <View style={styles.gridCell}>
                     <Text style={styles.gridLabel}>Precio</Text>
-                    <Text style={styles.gridValue}>{partido.price}</Text>
+                    <Text style={styles.gridValue}>{partido.pricePerPlayer}</Text>
                   </View>
                 </View>
                 <DetailRow
@@ -831,7 +831,7 @@ export function PartidoDetailScreen({
                     ? 'Ya estás en el partido'
                     : firstFreeIndex < 0
                       ? 'No hay plazas libres'
-                      : `Reservar plaza - ${partido.price}`}
+                      : `Reservar plaza - ${partido.pricePerPlayer}`}
                 </Text>
               </View>
             )}

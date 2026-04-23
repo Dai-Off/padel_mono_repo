@@ -110,6 +110,8 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
 
   const matchPhase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
 
+  const pricePerPlayerCents = Math.ceil(b.total_price_cents / 4);
+
   return {
     id: m.id,
     playerIds,
@@ -125,6 +127,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     venue,
     location: city ? `${city}` : '—',
     price: formatPrice(b.total_price_cents, b.currency ?? 'EUR'),
+    pricePerPlayer: formatPrice(pricePerPlayerCents, b.currency ?? 'EUR'),
     duration: `${durationMin}min`,
     matchType: m.type ?? undefined,
     matchStatus: m.status,

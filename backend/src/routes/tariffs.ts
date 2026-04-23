@@ -5,7 +5,6 @@ import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
 
 const router = Router();
 router.use(attachAuthContext);
-router.use(requireClubOwnerOrAdmin);
 
 function canAccessClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
@@ -20,7 +19,7 @@ function parsePrice(input: unknown): number | null {
 
 // ----------------- DEFAULTS (must precede /:id) -----------------
 
-router.get('/defaults', async (req: Request, res: Response) => {
+router.get('/defaults', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -35,7 +34,7 @@ router.get('/defaults', async (req: Request, res: Response) => {
   return res.json({ ok: true, defaults: data ?? { club_id, weekday_tariff_id: null, weekend_tariff_id: null } });
 });
 
-router.put('/defaults', async (req: Request, res: Response) => {
+router.put('/defaults', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { club_id, weekday_tariff_id, weekend_tariff_id } = req.body ?? {};
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   if (!canAccessClub(req, String(club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -60,7 +59,7 @@ router.put('/defaults', async (req: Request, res: Response) => {
 
 // ----------------- DAY OVERRIDES (must precede /:id) -----------------
 
-router.get('/overrides', async (req: Request, res: Response) => {
+router.get('/overrides', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -82,7 +81,7 @@ router.get('/overrides', async (req: Request, res: Response) => {
   return res.json({ ok: true, overrides: data ?? [] });
 });
 
-router.put('/overrides', async (req: Request, res: Response) => {
+router.put('/overrides', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { club_id, date, tariff_id, label, source } = req.body ?? {};
   if (!club_id || !date || !tariff_id) {
     return res.status(400).json({ ok: false, error: 'club_id, date y tariff_id son obligatorios' });
@@ -111,7 +110,7 @@ router.put('/overrides', async (req: Request, res: Response) => {
   return res.json({ ok: true, override: data });
 });
 
-router.delete('/overrides', async (req: Request, res: Response) => {
+router.delete('/overrides', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   const date = req.query.date as string | undefined;
   if (!club_id || !date) return res.status(400).json({ ok: false, error: 'club_id y date son obligatorios' });
@@ -127,7 +126,7 @@ router.delete('/overrides', async (req: Request, res: Response) => {
   return res.json({ ok: true });
 });
 
-router.post('/overrides/bulk-holidays', async (req: Request, res: Response) => {
+router.post('/overrides/bulk-holidays', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { club_id, tariff_id, dates } = req.body ?? {};
   if (!club_id || !tariff_id || !Array.isArray(dates) || dates.length === 0) {
     return res.status(400).json({ ok: false, error: 'club_id, tariff_id y dates son obligatorios' });
@@ -186,9 +185,6 @@ router.get('/slot-price', async (req: Request, res: Response) => {
   }
   if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
     return res.status(400).json({ ok: false, error: 'duration_minutes debe ser un número positivo' });
-  }
-  if (!canAccessClub(req, club_id)) {
-    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 
   // Parse start slot into total minutes from midnight
@@ -253,6 +249,30 @@ router.get('/slot-price', async (req: Request, res: Response) => {
     .maybeSingle();
   const flatRateCents = flatRateRow?.price_per_hour_cents ?? 0;
 
+  // Step 3: Fetch pricing_rules for the court as a secondary fallback
+  const { data: pricingRules } = await supabase
+    .from('pricing_rules')
+    .select('days_of_week, start_minutes, end_minutes, amount_cents')
+    .eq('court_id', court_id)
+    .eq('active', true);
+  
+  const rules = (pricingRules ?? []) as { days_of_week: number[]; start_minutes: number; end_minutes: number; amount_cents: number }[];
+
+  // Helper to pick price from pricing_rules (System A fallback)
+  const getRulePrice = (hour: number) => {
+    const mins = hour * 60;
+    // Parse YYYY-MM-DD reliably as UTC
+    const dateObj = new Date(`${date}T00:00:00Z`);
+    const dayOfWeek = dateObj.getUTCDay(); // 0=Sun, 1=Mon...
+    const isoDay = dayOfWeek === 0 ? 7 : dayOfWeek;
+    const rule = rules.find(r => {
+      const dows = Array.isArray(r.days_of_week) ? r.days_of_week : [];
+      const dayOk = dows.some(d => Number(d) === dayOfWeek || Number(d) === isoDay);
+      return dayOk && mins >= r.start_minutes && mins < r.end_minutes;
+    });
+    return rule?.amount_cents;
+  };
+
   // Prorate: for each hourly slot, compute minutes of overlap and charge accordingly
   let totalPriceCents = 0;
   const breakdown: { slot: string; minutes: number; price_per_hour_cents: number; contribution_cents: number }[] = [];
@@ -267,12 +287,19 @@ router.get('/slot-price', async (req: Request, res: Response) => {
 
     let pricePerHour: number;
     let source: string;
+    
     if (calendarPriceByHour.has(h)) {
       pricePerHour = calendarPriceByHour.get(h)!;
       source = 'calendar';
     } else {
-      pricePerHour = flatRateCents;
-      source = flatRateCents > 0 ? 'flat_rate' : 'none';
+      const rulePrice = getRulePrice(h);
+      if (rulePrice != null) {
+        pricePerHour = rulePrice;
+        source = 'pricing_rule';
+      } else {
+        pricePerHour = flatRateCents;
+        source = flatRateCents > 0 ? 'flat_rate' : 'none';
+      }
     }
 
     const contribution = Math.round((overlapMin / 60) * pricePerHour);
@@ -289,7 +316,7 @@ router.get('/slot-price', async (req: Request, res: Response) => {
   // Determine dominant source label for the response
   const source = usedSources.has('calendar')
     ? (usedSources.size > 1 ? 'mixed' : 'calendar')
-    : (usedSources.has('flat_rate') ? 'flat_rate' : 'none');
+    : (usedSources.has('pricing_rule') ? (usedSources.size > 1 ? 'mixed' : 'pricing_rule') : (usedSources.has('flat_rate') ? 'flat_rate' : 'none'));
 
   return res.json({ ok: true, total_price_cents: totalPriceCents, source, breakdown });
 });
@@ -297,7 +324,7 @@ router.get('/slot-price', async (req: Request, res: Response) => {
 // ----------------- RESOLVED CALENDAR -----------------
 // GET /tariffs/calendar?club_id=X&year=YYYY&month=MM (1-12)
 
-router.get('/calendar', async (req: Request, res: Response) => {
+router.get('/calendar', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   const yearStr = req.query.year as string | undefined;
   const monthStr = req.query.month as string | undefined;
@@ -448,7 +475,7 @@ router.get('/schedule', async (req: Request, res: Response) => {
 });
 
 // PUT /tariffs/schedule — replace all slots for a date (delete-then-insert)
-router.put('/schedule', async (req: Request, res: Response) => {
+router.put('/schedule', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { club_id, date, slots } = req.body ?? {};
   if (!club_id || !date) return res.status(400).json({ ok: false, error: 'club_id y date son obligatorios' });
   if (!canAccessClub(req, String(club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -488,7 +515,7 @@ router.put('/schedule', async (req: Request, res: Response) => {
 });
 
 // POST /tariffs/schedule/repeat — copy source_date schedule to target_dates
-router.post('/schedule/repeat', async (req: Request, res: Response) => {
+router.post('/schedule/repeat', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { club_id, source_date, target_dates } = req.body ?? {};
   if (!club_id || !source_date || !Array.isArray(target_dates) || target_dates.length === 0) {
     return res.status(400).json({ ok: false, error: 'club_id, source_date y target_dates son obligatorios' });
@@ -538,7 +565,7 @@ router.post('/schedule/repeat', async (req: Request, res: Response) => {
 });
 
 // DELETE /tariffs/schedule/month?club_id=X&year=YYYY&month=M — reset full month
-router.delete('/schedule/month', async (req: Request, res: Response) => {
+router.delete('/schedule/month', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const club_id  = req.query.club_id  as string | undefined;
   const yearStr  = req.query.year     as string | undefined;
   const monthStr = req.query.month    as string | undefined;
@@ -576,7 +603,7 @@ router.delete('/schedule/month', async (req: Request, res: Response) => {
 
 
 
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });

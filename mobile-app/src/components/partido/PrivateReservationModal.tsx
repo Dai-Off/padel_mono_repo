@@ -14,6 +14,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
+import { useSlotPrice } from '../../hooks/useSlotPrice';
 
 const ORANGE = '#F18F34';
 const ORANGE_END = '#C46A20';
@@ -65,6 +66,25 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
   const titleLine = `${data.courtName} - ${data.clubName}`;
   const sheetMaxH = Math.round(screenH * 0.9);
   const kind = data.confirmationKind ?? 'match';
+
+  const { priceData, loading } = useSlotPrice({
+    clubId: data.clubId,
+    courtId: data.courtId,
+    date: data.date,
+    slot: data.slot,
+    durationMinutes: data.durationMinutes,
+  });
+
+  const getPriceValue = () => {
+    if (loading) return 'Calculando...';
+    if (priceData) {
+      if (priceData.source === 'none') {
+        return 'No disponible, contacta al club.';
+      }
+      return `${(priceData.total_price_cents / 100).toFixed(2)} €`;
+    }
+    return data.priceFormatted;
+  };
 
   return (
     <Modal
@@ -130,7 +150,7 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
                 {data.spotsLine ? (
                   <PrivateInfoRow icon="people-outline" label="Plazas" value={data.spotsLine} />
                 ) : null}
-                <PrivateInfoRow icon="cash-outline" label="Precio" value={data.priceFormatted} />
+                <PrivateInfoRow icon="cash-outline" label="Precio" value={getPriceValue()} />
               </View>
 
               <View style={styles.emailBox}>
