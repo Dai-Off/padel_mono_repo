@@ -87,6 +87,56 @@ function buildTeammateList(partido: PartidoItem, currentPlayerId: string | null)
   return list;
 }
 
+function isValidCompletedPadelSet(us: number, them: number): boolean {
+  if (!Number.isInteger(us) || !Number.isInteger(them) || us < 0 || them < 0 || us === them) return false;
+  const max = Math.max(us, them);
+  const min = Math.min(us, them);
+  if (max === 6) return min <= 4;
+  if (max === 7) return min === 5 || min === 6;
+  return false;
+}
+
+function validateCompletedPadelMatch(sets: Array<{ us: number; them: number }>): string | null {
+  if (sets.length < 2) return 'Debes cargar al menos 2 sets.';
+  if (sets.length > 3) return 'Solo se permiten hasta 3 sets.';
+  if (!sets.every((s) => isValidCompletedPadelSet(s.us, s.them))) {
+    return 'Set inválido. Solo valen 6-0..6-4, 7-5 o 7-6.';
+  }
+
+  let usWins = 0;
+  let themWins = 0;
+  for (const s of sets) {
+    if (s.us > s.them) usWins += 1;
+    else themWins += 1;
+  }
+
+  if (sets.length === 2) {
+    if (!((usWins === 2 && themWins === 0) || (themWins === 2 && usWins === 0))) {
+      return 'Con 2 sets, el resultado debe quedar 2-0.';
+    }
+    return null;
+  }
+
+  // Aquí sets.length === 3
+  const firstWinner = sets[0].us > sets[0].them ? 'US' : 'THEM';
+  const secondWinner = sets[1].us > sets[1].them ? 'US' : 'THEM';
+  if (firstWinner === secondWinner) {
+    return 'Si los dos primeros sets los gana el mismo equipo, no puede haber tercer set.';
+  }
+  if (!((usWins === 2 && themWins === 1) || (themWins === 2 && usWins === 1))) {
+    return 'Con 3 sets, el resultado final debe ser 2-1.';
+  }
+  return null;
+}
+
+function winnerFromCompletedSetRow(row: { us: string; them: string }): 'US' | 'THEM' | null {
+  const us = parseInt(row.us, 10);
+  const them = parseInt(row.them, 10);
+  if (Number.isNaN(us) || Number.isNaN(them)) return null;
+  if (!isValidCompletedPadelSet(us, them)) return null;
+  return us > them ? 'US' : 'THEM';
+}
+
 export function MatchEvaluationFlow({
   visible,
   partido,
@@ -114,6 +164,12 @@ export function MatchEvaluationFlow({
   ]);
   const [feedbackText, setFeedbackText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const shouldShowThirdSet = useMemo(() => {
+    const winner1 = winnerFromCompletedSetRow(sets[0] ?? { us: '', them: '' });
+    const winner2 = winnerFromCompletedSetRow(sets[1] ?? { us: '', them: '' });
+    return winner1 != null && winner2 != null && winner1 !== winner2;
+  }, [sets]);
+  const visibleSets = useMemo(() => sets.slice(0, shouldShowThirdSet ? 3 : 2), [sets, shouldShowThirdSet]);
 
   const reset = useCallback(() => {
     setShowSuccess(false);
@@ -134,6 +190,17 @@ export function MatchEvaluationFlow({
       reset();
     }
   }, [visible, reset]);
+
+  useEffect(() => {
+    if (shouldShowThirdSet) return;
+    if (!sets[2] || (sets[2].us === '' && sets[2].them === '')) return;
+    setSets((prev) => {
+      const next = [...prev];
+      if (!next[2] || (next[2].us === '' && next[2].them === '')) return prev;
+      next[2] = { us: '', them: '' };
+      return next;
+    });
+  }, [shouldShowThirdSet, sets]);
 
   const handleClose = useCallback(() => {
     reset();
@@ -191,7 +258,7 @@ export function MatchEvaluationFlow({
       };
     });
 
-    const setsParsed = sets
+    const setsParsed = visibleSets
       .filter((row) => row.us.trim() !== '' && row.them.trim() !== '')
       .map((row) => ({
         us: parseInt(row.us, 10),
@@ -226,14 +293,23 @@ export function MatchEvaluationFlow({
 
   const canAdvanceTeammate = (playerIndex: number) => ratings[playerIndex]?.level != null;
 
-  const canAdvanceScore = () => {
-    const filled = sets.filter((row) => row.us.trim() !== '' || row.them.trim() !== '');
-    if (filled.length === 0) return false;
-    return filled.every((row) => {
-      const u = parseInt(row.us, 10);
-      const t = parseInt(row.them, 10);
-      return !Number.isNaN(u) && !Number.isNaN(t) && u >= 0 && u <= 99 && t >= 0 && t <= 99;
-    });
+  const canAdvanceScore = (): { ok: boolean; reason: string | null } => {
+    const withAnyValue = visibleSets.filter((row) => row.us.trim() !== '' || row.them.trim() !== '');
+    if (withAnyValue.length === 0) return { ok: false, reason: 'Debes cargar el resultado del partido.' };
+    if (withAnyValue.some((row) => row.us.trim() === '' || row.them.trim() === '')) {
+      return { ok: false, reason: 'Completa ambos números en cada set cargado.' };
+    }
+    const parsed = withAnyValue
+      .map((row) => ({
+        us: parseInt(row.us, 10),
+        them: parseInt(row.them, 10),
+      }))
+      .filter((s) => !Number.isNaN(s.us) && !Number.isNaN(s.them));
+    if (parsed.length !== withAnyValue.length) {
+      return { ok: false, reason: 'Hay sets con valores no válidos.' };
+    }
+    const reason = validateCompletedPadelMatch(parsed);
+    return { ok: reason == null, reason };
   };
 
   if (!visible) return null;
@@ -246,7 +322,7 @@ export function MatchEvaluationFlow({
           ? !canAdvanceTeammate(currentTeammate.playerIndex)
           : true
       : sectionIndex === 1
-        ? !canAdvanceScore()
+        ? !canAdvanceScore().ok
         : true;
 
   return (
@@ -345,7 +421,14 @@ export function MatchEvaluationFlow({
                 extraQuestionIndex={currentTeammate.order}
               />
             )}
-            {sectionIndex === 1 && <ScoreStepContent sets={sets} onChangeSets={setSets} />}
+            {sectionIndex === 1 && (
+              <ScoreStepContent
+                sets={sets}
+                showThirdSet={shouldShowThirdSet}
+                onChangeSets={setSets}
+                validationReason={canAdvanceScore().reason}
+              />
+            )}
             {sectionIndex === 2 && (
               <FeedbackStepContent text={feedbackText} onChangeText={setFeedbackText} />
             )}
@@ -515,25 +598,24 @@ function TeammateStepContent({
 
 function ScoreStepContent({
   sets,
+  showThirdSet,
   onChangeSets,
+  validationReason,
 }: {
   sets: { us: string; them: string }[];
+  showThirdSet: boolean;
   onChangeSets: Dispatch<SetStateAction<{ us: string; them: string }[]>>;
+  validationReason: string | null;
 }) {
   const setRow = (i: number, field: 'us' | 'them', v: string) => {
-    const cleaned = v.replace(/[^\d]/g, '').slice(0, 2);
+    const cleaned = v.replace(/[^\d]/g, '').slice(0, 1);
+    const normalized =
+      cleaned === '' ? '' : String(Math.min(7, parseInt(cleaned, 10)));
     onChangeSets((prev) => {
       const next = [...prev];
-      next[i] = { ...next[i], [field]: cleaned };
+      next[i] = { ...next[i], [field]: normalized };
       return next;
     });
-  };
-
-  const addSet = () => {
-    onChangeSets((prev) => [...prev, { us: '', them: '' }]);
-  };
-  const removeSet = () => {
-    onChangeSets((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
   };
 
   return (
@@ -551,7 +633,7 @@ function ScoreStepContent({
         <Text style={[styles.setHeadMuted, styles.setColThem]}>Ellos</Text>
       </View>
 
-      {sets.map((row, i) => (
+      {sets.slice(0, showThirdSet ? 3 : 2).map((row, i) => (
         <View key={i} style={styles.setGrid}>
           <Text style={styles.setLabel}>Set {i + 1}</Text>
           <TextInput
@@ -574,14 +656,10 @@ function ScoreStepContent({
         </View>
       ))}
 
-      <View style={styles.setActions}>
-        <Pressable onPress={removeSet} style={({ pressed }) => [styles.setLinkBtn, pressed && styles.pressed]}>
-          <Text style={styles.setLinkMuted}>− Quitar set</Text>
-        </Pressable>
-        <Pressable onPress={addSet} style={({ pressed }) => [styles.setLinkBtn, pressed && styles.pressed]}>
-          <Text style={styles.setLinkAccent}>+ Añadir set</Text>
-        </Pressable>
-      </View>
+      <Text style={styles.scoreHintText}>
+        El 3er set aparece automáticamente solo si los dos primeros quedan 1-1.
+      </Text>
+      {validationReason ? <Text style={styles.scoreValidationText}>{validationReason}</Text> : null}
     </View>
   );
 }
@@ -813,6 +891,20 @@ const styles = StyleSheet.create({
   setLinkBtn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.06)' },
   setLinkMuted: { fontSize: 14, color: '#9ca3af' },
   setLinkAccent: { fontSize: 14, color: ACCENT, fontWeight: '700' },
+  scoreHintText: {
+    marginTop: 8,
+    textAlign: 'center',
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  scoreValidationText: {
+    marginTop: 8,
+    textAlign: 'center',
+    color: '#fca5a5',
+    fontSize: 12,
+    lineHeight: 18,
+  },
   textarea: {
     minHeight: 180,
     padding: 20,
