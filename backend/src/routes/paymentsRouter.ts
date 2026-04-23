@@ -5,6 +5,7 @@ import {
   createIntentHandler,
   createIntentForNewMatchHandler,
   createIntentForTournamentHandler,
+  createIntentForSeasonPassEliteHandler,
   confirmClientHandler,
   listTransactionsHandler,
   listClubTransactionsHandler,
@@ -31,6 +32,7 @@ router.post('/customer-portal', customerPortalHandler);
 router.post('/create-intent', createIntentHandler);
 router.post('/create-intent-for-new-match', createIntentForNewMatchHandler);
 router.post('/create-intent-for-tournament', createIntentForTournamentHandler);
+router.post('/create-intent-for-season-pass-elite', createIntentForSeasonPassEliteHandler);
 router.post('/confirm-client', confirmClientHandler);
 router.post('/simulate-turn-payment', simulateTurnPaymentHandler);
 

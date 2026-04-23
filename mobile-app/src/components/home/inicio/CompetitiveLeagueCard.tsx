@@ -85,7 +85,7 @@ type Props = {
   ladderProgressPercent?: number | null;
   winsLabel?: string | null;
   lossesLabel?: string | null;
-  /** Elo, fiabilidad, PJ MM (debajo de división / LP). */
+  /** Nivel, fiabilidad, PJ MM (debajo de división / LP). */
   eloFiabCaption?: string | null;
   modeLabel?: string | null;
   onPress?: () => void;

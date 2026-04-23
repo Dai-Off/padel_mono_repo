@@ -11,6 +11,12 @@ import {
   STRIPE_META_TOURNAMENT_PURPOSE,
 } from '../services/tournamentsService';
 import { refreshBookingStatusAfterParticipantPayment } from '../lib/bookingPaymentSync';
+import {
+  finalizeSeasonPassElitePurchase,
+  getOrCreateSeasonPassRow,
+  STRIPE_META_SEASON_PASS_ELITE,
+} from '../services/seasonPassService';
+import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import { zonedTimeToUtc } from './learningTimezone';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
@@ -89,6 +95,15 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       res.status(400).json({ ok: false, error: BOOKING_START_PAST_ERROR });
       return;
     }
+    // Check player conflict: block only if the player already has a booking at the SAME time
+    const timeOverlaps = (bookings: { start_at: string; end_at: string }[]): boolean =>
+      bookings.some((b) => {
+        const s = new Date(b.start_at).getTime();
+        const e = new Date(b.end_at).getTime();
+        return newStart < e && newEnd > s;
+      });
+
+    // 1. Check via match_players (matches the player is in)
     const { data: playerMatches } = await supabase
       .from('match_players')
       .select('match_id')
@@ -100,18 +115,34 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
         .select('id, status, bookings(start_at, end_at)')
         .in('id', matchIds)
         .neq('status', 'cancelled');
-      const overlaps = (matchesWithBookings ?? []).some((m: { status: string; bookings?: { start_at: string; end_at: string } | { start_at: string; end_at: string }[] }) => {
+      const matchOverlap = (matchesWithBookings ?? []).some((m: { status: string; bookings?: { start_at: string; end_at: string } | { start_at: string; end_at: string }[] }) => {
         const b = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
         if (!b?.start_at || !b?.end_at) return false;
-        const exStart = new Date(b.start_at).getTime();
-        const exEnd = new Date(b.end_at).getTime();
-        return newStart < exEnd && newEnd > exStart;
+        const s = new Date(b.start_at).getTime();
+        const e = new Date(b.end_at).getTime();
+        return newStart < e && newEnd > s;
       });
-      if (overlaps) {
-        res.status(400).json({
-          ok: false,
-          error: 'Ya tienes un partido a esa hora. Elige otro horario.',
-        });
+      if (matchOverlap) {
+        res.status(409).json({ ok: false, error: 'Ya tienes un partido a esa hora. Elige otro horario.' });
+        return;
+      }
+    }
+
+    // 2. Check via booking_participants (non-match bookings)
+    const { data: participations } = await supabase
+      .from('booking_participants')
+      .select('booking_id')
+      .eq('player_id', organizer_player_id);
+    const bIds = [...new Set((participations ?? []).map((p: any) => p.booking_id).filter(Boolean))];
+    if (bIds.length > 0) {
+      const { data: partBookings } = await supabase
+        .from('bookings')
+        .select('start_at, end_at')
+        .in('id', bIds)
+        .neq('status', 'cancelled')
+        .is('deleted_at', null);
+      if (timeOverlaps(partBookings ?? [])) {
+        res.status(409).json({ ok: false, error: 'Ya tienes una reserva a esa hora. Elige otro horario.' });
         return;
       }
     }
@@ -287,6 +318,7 @@ export async function createIntentForTournamentHandler(req: Request, res: Respon
       .select('id')
       .eq('tournament_id', tournament_id)
       .eq('player_id_1', player.id)
+      .in('status', ['pending', 'confirmed'])
       .maybeSingle();
     if (existingIns) {
       res.status(409).json({ ok: false, error: 'Ya estás inscrito en este torneo' });
@@ -375,8 +407,106 @@ export async function createIntentForTournamentHandler(req: Request, res: Respon
 }
 
 /**
+ * POST /payments/create-intent-for-season-pass-elite
+ * Crea PaymentIntent (9,99 € por defecto). El Pase Elite se activa en webhook / confirm-client.
+ * Importe: env `SEASON_PASS_ELITE_PRICE_CENTS` (mín. 50), por defecto 999.
+ */
+export async function createIntentForSeasonPassEliteHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const { data: player } = await supabase
+      .from('players')
+      .select('id, email, stripe_customer_id')
+      .eq('email', user.email.trim().toLowerCase())
+      .maybeSingle();
+
+    if (!player) {
+      res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+      return;
+    }
+
+    const row = await getOrCreateSeasonPassRow(player.id as string);
+    if (row.has_elite) {
+      res.status(409).json({ ok: false, error: 'Ya tienes el Pase Elite activo' });
+      return;
+    }
+
+    const activeSeason = await getActiveSeasonRow();
+    if (!activeSeason) {
+      res.status(503).json({
+        ok: false,
+        error: 'Temporada del pase no configurada (season_pass_seasons).',
+      });
+      return;
+    }
+
+    const rawCents = process.env.SEASON_PASS_ELITE_PRICE_CENTS;
+    const priceCents =
+      rawCents != null && String(rawCents).trim() !== '' && Number.isFinite(Number(rawCents))
+        ? Math.max(50, Math.round(Number(rawCents)))
+        : 999;
+
+    const stripe = getStripe();
+    const metadata: Record<string, string> = {
+      payer_player_id: player.id as string,
+      purpose: STRIPE_META_SEASON_PASS_ELITE,
+      season_slug: activeSeason.slug,
+    };
+
+    const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
+      amount: priceCents,
+      currency: 'eur',
+      automatic_payment_methods: { enabled: true },
+      setup_future_usage: 'off_session',
+      metadata,
+    };
+
+    if (player.stripe_customer_id) {
+      paymentIntentParams.customer = player.stripe_customer_id as string;
+    } else {
+      const customer = await stripe.customers.create({
+        email: player.email as string,
+        metadata: { player_id: player.id as string },
+      });
+      paymentIntentParams.customer = customer.id;
+      await supabase
+        .from('players')
+        .update({ stripe_customer_id: customer.id, updated_at: new Date().toISOString() })
+        .eq('id', player.id);
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
+
+    res.json({
+      ok: true,
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      amountCents: priceCents,
+    });
+  } catch (err) {
+    console.error('[payments/create-intent-for-season-pass-elite]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
  * POST /payments/create-intent
- * Body: { booking_id, participant_id }
+ * Body:
+ * - Join nuevo: { booking_id, slot_index } (sin crear participant antes de pagar)
+ * - Participant existente: { booking_id, participant_id, slot_index? }
  * Headers: Authorization: Bearer <token>
  *
  * Crea un PaymentIntent para que el jugador pague su parte del booking.
@@ -391,8 +521,8 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
   }
 
   const { booking_id, participant_id, slot_index } = req.body ?? {};
-  if (!booking_id || !participant_id) {
-    res.status(400).json({ ok: false, error: 'booking_id y participant_id son obligatorios' });
+  if (!booking_id) {
+    res.status(400).json({ ok: false, error: 'booking_id es obligatorio' });
     return;
   }
 
@@ -405,31 +535,14 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       return;
     }
 
-    const { data: participant, error: errParticipant } = await supabase
-      .from('booking_participants')
-      .select('id, booking_id, player_id, role, share_amount_cents, payment_status')
-      .eq('id', participant_id)
-      .eq('booking_id', booking_id)
-      .maybeSingle();
-
-    if (errParticipant || !participant) {
-      res.status(404).json({ ok: false, error: 'Participante no encontrado' });
-      return;
-    }
-
-    if (participant.payment_status === 'paid') {
-      res.status(400).json({ ok: false, error: 'Ya has pagado tu parte' });
-      return;
-    }
-
     const { data: player } = await supabase
       .from('players')
       .select('id, email, stripe_customer_id')
       .eq('email', user.email.trim().toLowerCase())
       .maybeSingle();
 
-    if (!player || player.id !== participant.player_id) {
-      res.status(403).json({ ok: false, error: 'No puedes pagar por este participante' });
+    if (!player) {
+      res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
       return;
     }
 
@@ -443,13 +556,77 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       res.status(404).json({ ok: false, error: 'Reserva no encontrada' });
       return;
     }
-    // Organizer: booking debe estar pending_payment. Guest (join): booking puede estar confirmed.
-    if (participant.role === 'organizer' && booking.status !== 'pending_payment') {
-      res.status(400).json({ ok: false, error: 'La reserva no está pendiente de pago' });
-      return;
+    let amountCents = Math.ceil(Number(booking.total_price_cents ?? 0) / 4);
+    if (participant_id) {
+      const { data: participant, error: errParticipant } = await supabase
+        .from('booking_participants')
+        .select('id, booking_id, player_id, role, share_amount_cents, payment_status')
+        .eq('id', participant_id)
+        .eq('booking_id', booking_id)
+        .maybeSingle();
+      if (errParticipant || !participant) {
+        res.status(404).json({ ok: false, error: 'Participante no encontrado' });
+        return;
+      }
+      if (participant.payment_status === 'paid') {
+        res.status(400).json({ ok: false, error: 'Ya has pagado tu parte' });
+        return;
+      }
+      if (player.id !== participant.player_id) {
+        res.status(403).json({ ok: false, error: 'No puedes pagar por este participante' });
+        return;
+      }
+      // Organizer: booking debe estar pending_payment. Guest (join): booking puede estar confirmed.
+      if (participant.role === 'organizer' && booking.status !== 'pending_payment') {
+        res.status(400).json({ ok: false, error: 'La reserva no está pendiente de pago' });
+        return;
+      }
+      amountCents = Number(participant.share_amount_cents ?? amountCents);
+    } else {
+      if (typeof slot_index !== 'number' || slot_index < 0 || slot_index > 3) {
+        res.status(400).json({ ok: false, error: 'slot_index (0-3) es obligatorio para reservar plaza' });
+        return;
+      }
+      const { data: match } = await supabase
+        .from('matches')
+        .select('id, status')
+        .eq('booking_id', booking_id)
+        .maybeSingle();
+      if (!match || match.status === 'cancelled' || match.status === 'finished') {
+        res.status(400).json({ ok: false, error: 'El partido no permite nuevas plazas' });
+        return;
+      }
+      const { data: inMatch } = await supabase
+        .from('match_players')
+        .select('id')
+        .eq('match_id', match.id)
+        .eq('player_id', player.id)
+        .maybeSingle();
+      if (inMatch) {
+        res.status(409).json({ ok: false, error: 'Ya estás en este partido' });
+        return;
+      }
+      const { data: takenSlots } = await supabase
+        .from('match_players')
+        .select('slot_index')
+        .eq('match_id', match.id);
+      const slotTaken = (takenSlots ?? []).some((row) => Number(row.slot_index) === Number(slot_index));
+      if (slotTaken) {
+        res.status(409).json({ ok: false, error: 'Esa plaza ya está ocupada' });
+        return;
+      }
+      const { data: existingBookingParticipant } = await supabase
+        .from('booking_participants')
+        .select('id, payment_status')
+        .eq('booking_id', booking_id)
+        .eq('player_id', player.id)
+        .maybeSingle();
+      if (existingBookingParticipant && existingBookingParticipant.payment_status !== 'pending') {
+        res.status(409).json({ ok: false, error: 'Ya tienes una plaza reservada en este partido' });
+        return;
+      }
     }
 
-    const amountCents = participant.share_amount_cents;
     if (amountCents < 50) {
       res.status(400).json({ ok: false, error: 'El monto mínimo es 0.50€' });
       return;
@@ -458,9 +635,9 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
     const stripe = getStripe();
     const metadata: Record<string, string> = {
       booking_id,
-      participant_id,
       payer_player_id: player.id,
     };
+    if (participant_id) metadata.participant_id = String(participant_id);
     if (slot_index != null) metadata.slot_index = String(slot_index);
 
     const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
@@ -588,9 +765,30 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
       return;
     }
 
+    // Pase Elite (temporada)
+    if (meta.purpose === STRIPE_META_SEASON_PASS_ELITE && meta.payer_player_id) {
+      const { data: existingPi } = await supabase
+        .from('payment_transactions')
+        .select('id')
+        .eq('stripe_payment_intent_id', pi.id)
+        .maybeSingle();
+      if (!existingPi) {
+        const amountCents =
+          typeof pi.amount_received === 'number' ? pi.amount_received : Number(pi.amount ?? 0);
+        const r = await finalizeSeasonPassElitePurchase({
+          playerId: String(meta.payer_player_id),
+          stripePaymentIntentId: pi.id,
+          amountCents,
+        });
+        if (!r.ok) console.error('[payments/webhook] season pass elite:', r.error);
+      }
+      res.json({ received: true });
+      return;
+    }
+
     // Flujo "pago de participante existente"
-    const { booking_id, participant_id } = meta;
-    if (!booking_id || !participant_id) {
+    const { booking_id, participant_id, payer_player_id } = meta;
+    if (!booking_id) {
       console.warn('[payments/webhook] PaymentIntent sin metadata esperada:', pi.id);
       res.json({ received: true });
       return;
@@ -602,17 +800,60 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
       .eq('stripe_payment_intent_id', pi.id);
     if (errTx) console.error('[payments/webhook] Error actualizando transaction:', errTx);
 
-    const { error: errBP } = await supabase
-      .from('booking_participants')
-      .update({ payment_status: 'paid' })
-      .eq('id', participant_id);
-    if (errBP) console.error('[payments/webhook] Error actualizando participant:', errBP);
-
-    const { data: participant } = await supabase
-      .from('booking_participants')
-      .select('role, player_id')
-      .eq('id', participant_id)
-      .maybeSingle();
+    let participant: { role: string; player_id: string } | null = null;
+    if (participant_id) {
+      const { error: errBP } = await supabase
+        .from('booking_participants')
+        .update({ payment_status: 'paid' })
+        .eq('id', participant_id);
+      if (errBP) console.error('[payments/webhook] Error actualizando participant:', errBP);
+      const { data: participantById } = await supabase
+        .from('booking_participants')
+        .select('role, player_id')
+        .eq('id', participant_id)
+        .maybeSingle();
+      participant = participantById;
+    } else if (payer_player_id) {
+      const { data: existingBp } = await supabase
+        .from('booking_participants')
+        .select('id, role, player_id')
+        .eq('booking_id', booking_id)
+        .eq('player_id', payer_player_id)
+        .maybeSingle();
+      if (existingBp) {
+        await supabase.from('booking_participants').update({ payment_status: 'paid' }).eq('id', existingBp.id);
+        participant = { role: String(existingBp.role), player_id: String(existingBp.player_id) };
+      } else {
+        const { data: bookingShare } = await supabase
+          .from('bookings')
+          .select('total_price_cents')
+          .eq('id', booking_id)
+          .maybeSingle();
+        const shareAmount = Math.ceil(Number(bookingShare?.total_price_cents ?? 0) / 4);
+        const { data: insertedBp } = await supabase
+          .from('booking_participants')
+          .insert({
+            booking_id,
+            player_id: payer_player_id,
+            role: 'guest',
+            share_amount_cents: shareAmount,
+            payment_status: 'paid',
+          })
+          .select('role, player_id')
+          .maybeSingle();
+        if (insertedBp) {
+          participant = insertedBp;
+        } else {
+          const { data: existingAfterInsert } = await supabase
+            .from('booking_participants')
+            .select('role, player_id')
+            .eq('booking_id', booking_id)
+            .eq('player_id', payer_player_id)
+            .maybeSingle();
+          participant = existingAfterInsert ?? null;
+        }
+      }
+    }
 
     if (participant?.role === 'guest') {
       const { data: match } = await supabase
@@ -630,13 +871,14 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
         if (!existing) {
           const slotIdx = meta.slot_index != null ? parseInt(meta.slot_index, 10) : undefined;
           const team = slotIdx != null ? (slotIdx <= 1 ? 'A' : 'B') : 'A';
-          await supabase.from('match_players').insert({
+          const { error: errMP } = await supabase.from('match_players').insert({
             match_id: match.id,
             player_id: participant.player_id,
             team,
             invite_status: 'accepted',
             slot_index: slotIdx ?? null,
           });
+          if (errMP) console.error('[payments/webhook] match_players insert failed:', errMP, { match_id: match.id, player_id: participant.player_id, slot_index: slotIdx ?? null });
         }
       }
     }
@@ -2140,9 +2382,30 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       return;
     }
 
+    // Pase Elite (temporada)
+    if (meta.purpose === STRIPE_META_SEASON_PASS_ELITE && payer_player_id) {
+      if (player.id !== String(payer_player_id)) {
+        res.status(403).json({ ok: false, error: 'No eres el pagador de este pago' });
+        return;
+      }
+      const amountCents =
+        typeof pi.amount_received === 'number' ? pi.amount_received : Number(pi.amount ?? 0);
+      const r = await finalizeSeasonPassElitePurchase({
+        playerId: String(payer_player_id),
+        stripePaymentIntentId: payment_intent_id,
+        amountCents,
+      });
+      if (!r.ok) {
+        res.status(400).json({ ok: false, error: r.error ?? 'No se pudo activar el Pase Elite' });
+        return;
+      }
+      res.json({ ok: true, season_pass: { has_elite: true } });
+      return;
+    }
+
     // Flujo "pago de participante existente" (join)
     const { booking_id, participant_id } = meta;
-    if (!booking_id || !participant_id || !payer_player_id) {
+    if (!booking_id || !payer_player_id) {
       res.status(400).json({ ok: false, error: 'Metadata de pago inválida' });
       return;
     }
@@ -2152,46 +2415,73 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       .update({ status: 'succeeded', updated_at: new Date().toISOString() })
       .eq('stripe_payment_intent_id', pi.id);
 
-    await supabase
-      .from('booking_participants')
-      .update({ payment_status: 'paid' })
-      .eq('id', participant_id);
+    let participant: { role: string; player_id: string } | null = null;
+    if (participant_id) {
+      await supabase
+        .from('booking_participants')
+        .update({ payment_status: 'paid' })
+        .eq('id', participant_id);
+      const { data: participantById } = await supabase
+        .from('booking_participants')
+        .select('role, player_id')
+        .eq('id', participant_id)
+        .maybeSingle();
+      participant = participantById;
+    } else {
+      const { data: existingBp } = await supabase
+        .from('booking_participants')
+        .select('id, role, player_id')
+        .eq('booking_id', booking_id)
+        .eq('player_id', payer_player_id)
+        .maybeSingle();
+      if (existingBp) {
+        await supabase
+          .from('booking_participants')
+          .update({ payment_status: 'paid' })
+          .eq('id', existingBp.id);
+        participant = { role: String(existingBp.role), player_id: String(existingBp.player_id) };
+      } else {
+        const { data: bookingShare } = await supabase
+          .from('bookings')
+          .select('total_price_cents')
+          .eq('id', booking_id)
+          .maybeSingle();
+        const shareAmount = Math.ceil(Number(bookingShare?.total_price_cents ?? 0) / 4);
+        const { data: insertedBp } = await supabase
+          .from('booking_participants')
+          .insert({
+            booking_id,
+            player_id: payer_player_id,
+            role: 'guest',
+            share_amount_cents: shareAmount,
+            payment_status: 'paid',
+          })
+          .select('role, player_id')
+          .maybeSingle();
+        if (insertedBp) {
+          participant = insertedBp;
+        } else {
+          const { data: existingAfterInsert } = await supabase
+            .from('booking_participants')
+            .select('role, player_id')
+            .eq('booking_id', booking_id)
+            .eq('player_id', payer_player_id)
+            .maybeSingle();
+          participant = existingAfterInsert ?? null;
+        }
+      }
+    }
 
-    const { data: participant } = await supabase
-      .from('booking_participants')
-      .select('role, player_id')
-      .eq('id', participant_id)
-      .maybeSingle();
-
-    // Si es guest (join): añadir a match_players tras el pago
+    // Si es guest (join): añadir a match_players tras el pago.
+    // Las validaciones de ELO/onboarding ya corrieron en prepare-join; re-chequear aquí
+    // dejaría al jugador como pagado en booking_participants pero sin fila en match_players.
     if (participant?.role === 'guest') {
       const { data: match } = await supabase
         .from('matches')
-        .select('id, competitive, type, elo_min, elo_max')
+        .select('id')
         .eq('booking_id', booking_id)
         .maybeSingle();
       if (match) {
-        const { data: joinPlayer } = await supabase
-          .from('players')
-          .select('elo_rating, onboarding_completed')
-          .eq('id', participant.player_id)
-          .maybeSingle();
-        const mCompetitive = !!(match as { competitive?: boolean }).competitive;
-        const mType = String((match as { type?: string }).type ?? 'open');
-        if (mCompetitive && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
-          res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
-          return;
-        }
-        const eloJoin = Number((joinPlayer as { elo_rating?: number }).elo_rating ?? 0);
-        const eloMin = (match as { elo_min?: number | null }).elo_min;
-        const eloMax = (match as { elo_max?: number | null }).elo_max;
-        if (mCompetitive && mType === 'open' && eloMin != null && eloMax != null) {
-          if (eloJoin < eloMin || eloJoin > eloMax) {
-            res.status(403).json({ ok: false, error: 'Tu nivel no está en el rango permitido para este partido' });
-            return;
-          }
-        }
-
         const { data: existing } = await supabase
           .from('match_players')
           .select('id')
@@ -2201,13 +2491,14 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         if (!existing) {
           const slotIdx = meta.slot_index != null ? parseInt(meta.slot_index, 10) : undefined;
           const team = slotIdx != null ? (slotIdx <= 1 ? 'A' : 'B') : 'A';
-          await supabase.from('match_players').insert({
+          const { error: errMP } = await supabase.from('match_players').insert({
             match_id: match.id,
             player_id: participant.player_id,
             team,
             invite_status: 'accepted',
             slot_index: slotIdx ?? null,
           });
+          if (errMP) console.error('[payments/confirm-client] match_players insert failed:', errMP, { match_id: match.id, player_id: participant.player_id, slot_index: slotIdx ?? null });
         }
       }
     }

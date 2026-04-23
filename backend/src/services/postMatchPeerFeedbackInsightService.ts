@@ -47,6 +47,14 @@ function clip(s: string, max: number): string {
   return `${t.slice(0, max - 1)}…`;
 }
 
+function stripEmoji(text: string): string {
+  return text
+    .replace(/[\u{1F300}-\u{1FAFF}]/gu, '')
+    .replace(/[\u{2600}-\u{27BF}]/gu, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 function parsePerceived(raw: unknown): -1 | 0 | 1 | null {
   const n = Number(raw);
   if (n === -1 || n === 0 || n === 1) return n;
@@ -68,7 +76,7 @@ export function extractRatingForPlayerInRow(
     const c = o.comment;
     const comment =
       typeof c === 'string' && c.trim()
-        ? clip(c, 400)
+        ? clip(stripEmoji(c), 400)
         : null;
     return { perceived, comment };
   }
@@ -174,7 +182,7 @@ export function buildPeerFeedbackInsightFromMultiple(ratings: PeerRatingForPlaye
     uniqueComments.length > 0
       ? clip(uniqueComments.join(' · '), 320)
       : null;
-  const note = joined ? ` Comentarios de compañeros: «${joined}».` : '';
+  const note = joined ? ` Comentarios de compañeros: «${stripEmoji(joined)}».` : '';
 
   const label = peerLabel(n);
   const distText = `${nPlus} por encima, ${nZero} acertado${nZero === 1 ? '' : 's'}, ${nMinus} por debajo.`;
@@ -289,6 +297,9 @@ export async function getLastPeerFeedbackInsightForPlayer(
   const fromOpenAi = await generatePeerFeedbackCardWithOpenAI(llmInput);
   const card = fromOpenAi ?? buildPeerFeedbackInsightFromMultiple(ratings);
   const insight_source: 'openai' | 'template' = fromOpenAi ? 'openai' : 'template';
+  const sanitizedRecommendation = stripEmoji(card.recommendation_ia);
+  const sanitizedStrengths = card.fortalezas.map(stripEmoji).filter(Boolean).slice(0, 3);
+  const sanitizedImprovements = card.a_mejorar.map(stripEmoji).filter(Boolean).slice(0, 3);
 
   return {
     ok: true,
@@ -299,9 +310,9 @@ export async function getLastPeerFeedbackInsightForPlayer(
     average_perceived: Math.round(avg * 100) / 100,
     distribution: { high: nPlus, mid: nZero, low: nMinus },
     last_perceived: roundedSummaryPerceived(avg),
-    recommendation_ia: card.recommendation_ia,
-    fortalezas: card.fortalezas,
-    a_mejorar: card.a_mejorar,
+    recommendation_ia: sanitizedRecommendation,
+    fortalezas: sanitizedStrengths,
+    a_mejorar: sanitizedImprovements,
     insight_source,
   };
 }

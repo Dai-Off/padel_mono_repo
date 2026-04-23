@@ -24,7 +24,7 @@ function durationMinutes(startAt: string, endAt: string): number {
   return Math.round((end - start) / 60000);
 }
 
-/** Nivel 0–7 (OpenSkill). Por encima de 25 se asume ELO legacy (p. ej. 1200 → 1,20). */
+/** Nivel 0–7 (OpenSkill). Por encima de 25 se asume escala legacy (p. ej. 1200 → 1,20). */
 function formatSkillNumber(rating: number | null | undefined): string {
   if (rating == null || !Number.isFinite(Number(rating))) return '—';
   const v = Number(rating);
@@ -88,13 +88,27 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   ];
   const playerIds: string[] = [];
   const playerIdsBySlot: Array<string | null> = [null, null, null, null];
+  const usedSlots = new Set<number>();
+
+  function resolveSlotIndex(preferredIdx: number): number {
+    if (preferredIdx >= 0 && preferredIdx <= 3 && !usedSlots.has(preferredIdx)) {
+      return preferredIdx;
+    }
+    for (let i = 0; i < 4; i++) {
+      if (!usedSlots.has(i)) return i;
+    }
+    return -1;
+  }
+
   mps.forEach((mp, i) => {
-    const idx = hasSlotIndex && mp.slot_index != null && mp.slot_index >= 0 && mp.slot_index <= 3
+    const preferredIdx = hasSlotIndex && mp.slot_index != null && mp.slot_index >= 0 && mp.slot_index <= 3
       ? mp.slot_index
       : i;
+    const idx = resolveSlotIndex(preferredIdx);
     if (idx >= 4) return;
     const p = mp.players;
     if (!p) return;
+    usedSlots.add(idx);
     if (p.id) playerIdsBySlot[idx] = p.id;
     if (p.id) playerIds.push(p.id);
     const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
@@ -109,6 +123,8 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   const players = slots;
 
   const matchPhase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
+
+  const pricePerPlayerCents = Math.ceil(b.total_price_cents / 4);
 
   return {
     id: m.id,
@@ -125,6 +141,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     venue,
     location: city ? `${city}` : '—',
     price: formatPrice(b.total_price_cents, b.currency ?? 'EUR'),
+    pricePerPlayer: formatPrice(pricePerPlayerCents, b.currency ?? 'EUR'),
     duration: `${durationMin}min`,
     matchType: m.type ?? undefined,
     matchStatus: m.status,

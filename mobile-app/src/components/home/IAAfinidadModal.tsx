@@ -1,9 +1,12 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
+import { useAuth } from '../../contexts/AuthContext';
+import { sendDirectMessage } from '../../api/messages';
+import { searchPlayers } from '../../api/players';
 
 type Option = { id: string; label: string };
 type OptionGroup = {
@@ -76,37 +79,114 @@ type MatchCandidate = {
   reason: string;
 };
 
+const AI_AUTO_DM_TEXT = '¡Hola! Me gustaría jugar Pádel contigo. ¿Tienes disponibilidad?';
+
+function normalizeText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
 function parseCandidatesFromResponse(text: string): MatchCandidate[] {
+  const tryParseJsonLike = (raw: string): unknown | null => {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    const attempts = [
+      trimmed,
+      trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim(),
+      trimmed.replace(/^json\s*/i, '').trim(),
+      // Some providers return escaped markdown/json (\\n instead of real newlines).
+      trimmed.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t'),
+      trimmed
+        .replace(/^```(?:json)?\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim()
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t'),
+    ];
+
+    const firstBrace = trimmed.indexOf('{');
+    const lastBrace = trimmed.lastIndexOf('}');
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      attempts.push(trimmed.slice(firstBrace, lastBrace + 1));
+      attempts.push(
+        trimmed
+          .slice(firstBrace, lastBrace + 1)
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t')
+      );
+    }
+
+    for (const candidate of attempts) {
+      try {
+        const parsed = JSON.parse(candidate) as unknown;
+        // If response itself is a JSON-encoded string, parse one more time.
+        if (typeof parsed === 'string') {
+          const nested = tryParseJsonLike(parsed);
+          if (nested) return nested;
+        }
+        return parsed;
+      } catch {
+        // keep trying
+      }
+    }
+    return null;
+  };
+
+  const parseCandidatesList = (input: unknown): MatchCandidate[] => {
+    if (!input || typeof input !== 'object') return [];
+    const record = input as Record<string, unknown>;
+    const list = (record.candidates ?? record.jugadores ?? record.players) as unknown;
+    if (!Array.isArray(list)) return [];
+
+    return list
+      .map((item, index) => {
+        if (!item || typeof item !== 'object') return null;
+        const p = item as Record<string, unknown>;
+        const name = String(p.name ?? p.nombre ?? '').trim();
+        if (!name) return null;
+        return {
+          id: String(index + 1),
+          name,
+          matchPercent: Number(p.matchPercent ?? p.compatibility ?? 90),
+          level: String(p.level ?? p.nivel ?? 'Nivel compatible'),
+          stats: {
+            matches: Number(p.matches ?? p.partidos ?? 0),
+            wins: String(p.wins ?? p.victorias ?? '-'),
+            distance: String(p.distance ?? p.distancia ?? '-'),
+          },
+          tags: Array.isArray(p.tags) ? (p.tags as string[]) : ['Pádel'],
+          reason: String(p.reason ?? p.razon ?? 'Recomendado por la IA.'),
+        } satisfies MatchCandidate;
+      })
+      .filter((x): x is MatchCandidate => x != null)
+      .slice(0, 5);
+  };
+
   // 1) Prefer structured JSON when available.
   try {
-    const parsed = JSON.parse(text) as unknown;
+    const parsed = tryParseJsonLike(text);
+    if (!parsed) throw new Error('non-json');
+
+    const root = parseCandidatesList(parsed);
+    if (root.length > 0) return root;
+
     if (parsed && typeof parsed === 'object') {
       const record = parsed as Record<string, unknown>;
-      const list = (record.candidates ?? record.jugadores ?? record.players) as unknown;
-      if (Array.isArray(list)) {
-        const normalized = list
-          .map((item, index) => {
-            if (!item || typeof item !== 'object') return null;
-            const p = item as Record<string, unknown>;
-            const name = String(p.name ?? p.nombre ?? '').trim();
-            if (!name) return null;
-            return {
-              id: String(index + 1),
-              name,
-              matchPercent: Number(p.matchPercent ?? p.compatibility ?? 90),
-              level: String(p.level ?? p.nivel ?? 'Nivel compatible'),
-              stats: {
-                matches: Number(p.matches ?? p.partidos ?? 0),
-                wins: String(p.wins ?? p.victorias ?? '-'),
-                distance: String(p.distance ?? p.distancia ?? '-'),
-              },
-              tags: Array.isArray(p.tags) ? (p.tags as string[]) : ['Pádel'],
-              reason: String(p.reason ?? p.razon ?? 'Recomendado por la IA.'),
-            } satisfies MatchCandidate;
-          })
-          .filter((x): x is MatchCandidate => x != null)
-          .slice(0, 5);
+      const nestedCandidates = [record.output, record.response, record.answer, record.data, record.message];
+      for (const nested of nestedCandidates) {
+        const normalized = parseCandidatesList(nested);
         if (normalized.length > 0) return normalized;
+        if (typeof nested === 'string') {
+          const nestedParsed = tryParseJsonLike(nested);
+          const normalizedNested = parseCandidatesList(nestedParsed);
+          if (normalizedNested.length > 0) return normalizedNested;
+        }
       }
     }
   } catch {
@@ -151,6 +231,7 @@ type IAAfinidadModalProps = {
   errorText: string | null;
   onClose: () => void;
   onSubmit: (prompt: string) => void;
+  onDirectMessageSent?: (target: { id: string; displayName: string; avatarUrl: string | null }) => void;
 };
 
 function OptionSection({
@@ -190,7 +271,15 @@ function OptionSection({
   );
 }
 
-function CandidateCard({ candidate }: { candidate: MatchCandidate }) {
+function CandidateCard({
+  candidate,
+  onMessagePress,
+  sending,
+}: {
+  candidate: MatchCandidate;
+  onMessagePress: (candidate: MatchCandidate) => void;
+  sending: boolean;
+}) {
   return (
     <View style={styles.candidateCard}>
       <View style={styles.candidateHeader}>
@@ -245,15 +334,21 @@ function CandidateCard({ candidate }: { candidate: MatchCandidate }) {
         </Text>
       </View>
 
-      <Pressable style={styles.messageBtn}>
+      <Pressable style={[styles.messageBtn, sending && { opacity: 0.7 }]} onPress={() => onMessagePress(candidate)} disabled={sending}>
         <LinearGradient
           colors={['#F18F34', '#E95F32']}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
           style={styles.messageBtnGradient}
         >
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
-          <Text style={styles.messageBtnText}>Enviar mensaje</Text>
+          {sending ? (
+            <Animated.View>
+              <Ionicons name="hourglass-outline" size={16} color="#fff" />
+            </Animated.View>
+          ) : (
+            <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
+          )}
+          <Text style={styles.messageBtnText}>{sending ? 'Enviando...' : 'Enviar mensaje'}</Text>
         </LinearGradient>
       </Pressable>
     </View>
@@ -267,8 +362,11 @@ export function IAAfinidadModal({
   errorText,
   onClose,
   onSubmit,
+  onDirectMessageSent,
 }: IAAfinidadModalProps) {
   const insets = useSafeAreaInsets();
+  const { session } = useAuth();
+  const token = session?.access_token ?? null;
   const [selections, setSelections] = useState<Selections>(DEFAULT_SELECTIONS);
 
   const completedSteps = useMemo(
@@ -278,11 +376,55 @@ export function IAAfinidadModal({
   const progressPercent = Math.round((completedSteps / GROUPS.length) * 100);
   const isFormComplete = completedSteps === GROUPS.length;
   const [showResults, setShowResults] = useState(false);
+  const [sendingCandidateId, setSendingCandidateId] = useState<string | null>(null);
   const isFormView = !loading && !showResults;
   const parsedCandidates = useMemo(
     () => (responseText ? parseCandidatesFromResponse(responseText) : []),
     [responseText]
   );
+  const handleCandidateMessage = async (candidate: MatchCandidate) => {
+    if (!token) {
+      Alert.alert('Mensajes', 'Inicia sesión para enviar mensajes.');
+      return;
+    }
+
+    setSendingCandidateId(candidate.id);
+    try {
+      const search = await searchPlayers(candidate.name, token);
+      if (!search.ok || search.players.length === 0) {
+        Alert.alert('Mensajes', `No se encontró a "${candidate.name}" para enviarle mensaje.`);
+        return;
+      }
+
+      const expected = normalizeText(candidate.name);
+      const exact =
+        search.players.find((p) => {
+          const full = normalizeText([p.first_name, p.last_name].filter(Boolean).join(' '));
+          return full === expected;
+        }) ??
+        search.players.find((p) => {
+          const full = normalizeText([p.first_name, p.last_name].filter(Boolean).join(' '));
+          return full.includes(expected) || expected.includes(full);
+        }) ??
+        search.players[0];
+
+      const sent = await sendDirectMessage(exact.id, AI_AUTO_DM_TEXT, token);
+      if (!sent.ok) {
+        Alert.alert('Mensajes', sent.error);
+        return;
+      }
+
+      const targetName = [exact.first_name, exact.last_name].filter(Boolean).join(' ').trim() || candidate.name;
+      onClose();
+      onDirectMessageSent?.({
+        id: exact.id,
+        displayName: targetName,
+        avatarUrl: null,
+      });
+    } finally {
+      setSendingCandidateId(null);
+    }
+  };
   const ringA = useRef(new Animated.Value(0)).current;
   const ringB = useRef(new Animated.Value(0)).current;
   const ringC = useRef(new Animated.Value(0)).current;
@@ -398,7 +540,7 @@ export function IAAfinidadModal({
     const time = getLabel('time', selections.time);
     const style = getLabel('style', selections.style);
 
-    return `Quiero buscar un partido de ${sport}. Disponibilidad: ${day} por la ${time}. Estilo preferido: ${style}. Dame los mejores jugadores compatibles para completar el partido.`;
+    return `Quiero buscar un compañero para jugar ${sport}. Disponibilidad: ${day} por la ${time}. Estilo preferido: ${style}. Dame los mejores jugadores compatibles.`;
   }, [selections]);
 
   return (
@@ -429,7 +571,7 @@ export function IAAfinidadModal({
                   </LinearGradient>
                 </View>
                 <View>
-                  <Text style={styles.headerTitle}>Buscar Partido con IA</Text>
+                  <Text style={styles.headerTitle}>Buscar Compañero con IA</Text>
                   <Text style={styles.headerSubtitle}>
                     {loading ? 'Buscando...' : isFormView ? `${completedSteps}/4 seleccionados` : 'Resultados IA'}
                   </Text>
@@ -522,7 +664,7 @@ export function IAAfinidadModal({
                     </Animated.View>
                   </View>
                 </View>
-                <Text style={styles.loaderTitle}>Buscando partidos...</Text>
+                <Text style={styles.loaderTitle}>Buscando compañeros...</Text>
                 <Text style={styles.loaderSubtitle}>Generando recomendaciones...</Text>
                 <View style={styles.loaderDots}>
                   {[dotA, dotB, dotC].map((dot, idx) => (
@@ -558,22 +700,27 @@ export function IAAfinidadModal({
                     <Ionicons name="checkmark" size={42} color="#fff" />
                   </View>
                   <Text style={styles.resultTitle}>
-                    {parsedCandidates.length > 0 ? `${parsedCandidates.length} partidos encontrados!` : 'No se encontraron partidos'}
+                    {parsedCandidates.length > 0 ? `${parsedCandidates.length} compañeros encontrados!` : 'No se encontraron compañeros'}
                   </Text>
                   <Text style={styles.resultSubtitle}>
-                    {parsedCandidates.length > 0 ? 'Partidos perfectos para ti' : 'Prueba ajustando filtros para ampliar opciones.'}
+                    {parsedCandidates.length > 0 ? 'Compañeros perfectos para ti' : 'Prueba ajustando filtros para ampliar opciones.'}
                   </Text>
                 </View>
 
                 <View style={styles.resultsList}>
                   {parsedCandidates.length > 0 ? (
                     parsedCandidates.map((candidate) => (
-                      <CandidateCard key={candidate.id} candidate={candidate} />
+                      <CandidateCard
+                        key={candidate.id}
+                        candidate={candidate}
+                        onMessagePress={handleCandidateMessage}
+                        sending={sendingCandidateId === candidate.id}
+                      />
                     ))
                   ) : (
                     <View style={styles.emptyCandidatesCard}>
                       <Text style={styles.emptyCandidatesText}>
-                        No se encontraron partidos.
+                        No se encontraron compañeros.
                       </Text>
                     </View>
                   )}
@@ -620,7 +767,7 @@ export function IAAfinidadModal({
                       (loading || !isFormComplete) && styles.submitTextDisabled,
                     ]}
                   >
-                    Buscar Partidos
+                    Buscar Compañero
                   </Text>
                 </Pressable>
 
@@ -1145,6 +1292,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     marginBottom: 6,
+    textAlign: 'center',
+    width: '100%',
   },
   loaderSubtitle: {
     fontSize: 14,

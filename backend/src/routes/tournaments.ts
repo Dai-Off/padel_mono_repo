@@ -2793,6 +2793,7 @@ router.post('/:id/join', async (req: Request, res: Response) => {
       .select('id')
       .eq('tournament_id', tournamentId)
       .eq('player_id_1', auth.playerId)
+      .in('status', ['pending', 'confirmed'])
       .maybeSingle();
     if (existingIns) return res.json({ ok: true, already_joined: true });
 
@@ -2933,6 +2934,7 @@ router.post('/:id/entry-requests', async (req: Request, res: Response) => {
       .select('id')
       .eq('tournament_id', tournamentId)
       .or(`player_id_1.eq.${auth.playerId},player_id_2.eq.${auth.playerId}`)
+      .in('status', ['pending', 'confirmed'])
       .maybeSingle();
     if (existingIns) return res.status(409).json({ ok: false, error: 'Ya estás inscrito en este torneo' });
 
@@ -3124,6 +3126,7 @@ router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdmin, a
       .select('id')
       .eq('tournament_id', tournamentId)
       .or(`player_id_1.eq.${playerId},player_id_2.eq.${playerId}`)
+      .in('status', ['pending', 'confirmed'])
       .maybeSingle();
     if (existingIns) {
       return res.status(409).json({ ok: false, error: 'El jugador ya está inscrito en este torneo' });
@@ -3553,6 +3556,7 @@ router.post('/:id/join-pair', async (req: Request, res: Response) => {
       .select('id')
       .eq('tournament_id', tournamentId)
       .or(`player_id_1.eq.${auth.playerId},player_id_2.eq.${auth.playerId}`)
+      .in('status', ['pending', 'confirmed'])
       .maybeSingle();
     if (existingIns) return res.status(409).json({ ok: false, error: 'Ya estás inscrito en este torneo' });
 

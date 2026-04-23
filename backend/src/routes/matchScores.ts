@@ -19,10 +19,45 @@ function parseSets(body: unknown): ScoreSet[] | null {
     const o = s as Record<string, unknown>;
     const a = Number(o.a);
     const b = Number(o.b);
-    if (!Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < 0) return null;
+    if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) {
+      return null;
+    }
     out.push({ a, b });
   }
   return out;
+}
+
+function isValidCompletedPadelSet(a: number, b: number): boolean {
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a === b) return false;
+  const max = Math.max(a, b);
+  const min = Math.min(a, b);
+  if (max === 6) return min <= 4;
+  if (max === 7) return min === 5 || min === 6;
+  return false;
+}
+
+function isValidCompletedPadelMatch(sets: ScoreSet[]): boolean {
+  if (sets.length < 2 || sets.length > 3) return false;
+  if (!sets.every((s) => isValidCompletedPadelSet(s.a, s.b))) return false;
+
+  let winsA = 0;
+  let winsB = 0;
+  for (const s of sets) {
+    if (s.a > s.b) winsA += 1;
+    else winsB += 1;
+  }
+
+  if (sets.length === 2) {
+    return (winsA === 2 && winsB === 0) || (winsB === 2 && winsA === 0);
+  }
+
+  // Con 3 sets, debe ser 2-1 y no puede existir tercer set si ya iba 2-0.
+  if (!(winsA === 2 && winsB === 1) && !(winsB === 2 && winsA === 1)) return false;
+  const firstWinner = sets[0].a > sets[0].b ? 'A' : 'B';
+  const secondWinner = sets[1].a > sets[1].b ? 'A' : 'B';
+  if (firstWinner === secondWinner) return false;
+
+  return true;
 }
 
 async function countSubmissions(matchId: string): Promise<number> {
@@ -123,6 +158,13 @@ router.post('/:id/score', async (req: Request, res: Response) => {
       : 'completed';
   const rt =
     mer === 'retired' && retiredTeam && ['A', 'B'].includes(retiredTeam) ? retiredTeam : null;
+  if (mer === 'completed' && !isValidCompletedPadelMatch(sets)) {
+    return res.status(400).json({
+      ok: false,
+      error:
+        'Marcador inválido para pádel (best-of-3). Usa sets válidos: 6-0..6-4, 7-5 o 7-6.',
+    });
+  }
 
   const supabase = getSupabaseServiceRoleClient();
 
@@ -294,6 +336,13 @@ router.post('/:id/score/dispute', async (req: Request, res: Response) => {
   const matchId = req.params.id;
   const sets = parseSets(req.body);
   if (!sets) return res.status(400).json({ ok: false, error: 'sets inválido' });
+  if (!isValidCompletedPadelMatch(sets)) {
+    return res.status(400).json({
+      ok: false,
+      error:
+        'Marcador inválido para pádel (best-of-3). Usa sets válidos: 6-0..6-4, 7-5 o 7-6.',
+    });
+  }
 
   const supabase = getSupabaseServiceRoleClient();
   const { data: mp } = await supabase

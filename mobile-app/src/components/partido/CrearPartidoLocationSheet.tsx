@@ -17,11 +17,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useStripe } from '../../stripe';
 import { useAuth } from '../../contexts/AuthContext';
+import { fetchMyPlayerProfile } from '../../api/players';
 import { createIntentForNewMatch, confirmPaymentFromClient } from '../../api/payments';
 import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
+import { useSlotPrice } from '../../hooks/useSlotPrice';
 
 export type LocationType = 'club_wematch' | 'pista_externa';
 
@@ -45,6 +47,8 @@ type CrearPartidoLocationSheetProps = {
   /** Tras pago y confirmación en backend; datos para pantalla de éxito. */
   onPartidoCreado?: (data: BookingConfirmationData) => void;
   organizerPlayerId?: string | null;
+  /** Si el jugador no completó la nivelación inicial, la alerta ofrece ir al perfil. */
+  onNavigateToCompleteOnboarding?: () => void;
 };
 
 type Step = CrearPartidoFlowStep;
@@ -96,6 +100,7 @@ export function CrearPartidoLocationSheet({
   onSiguiente,
   onPartidoCreado,
   organizerPlayerId: organizerProp,
+  onNavigateToCompleteOnboarding,
 }: CrearPartidoLocationSheetProps) {
   const { session } = useAuth();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -124,7 +129,7 @@ export function CrearPartidoLocationSheet({
     setClubsLoading(true);
     setClubsError(null);
     try {
-      const data = await fetchClubAvailabilityForCreate();
+      const data = await fetchClubAvailabilityForCreate(session?.access_token);
       setClubs(data);
     } catch {
       setClubsError('No se pudo cargar la disponibilidad');
@@ -132,7 +137,7 @@ export function CrearPartidoLocationSheet({
     } finally {
       setClubsLoading(false);
     }
-  }, []);
+  }, [session?.access_token]);
 
   useEffect(() => {
     const active = presentation === 'fullscreen' || visible;
@@ -146,29 +151,89 @@ export function CrearPartidoLocationSheet({
 
   const [selectedSlot, setSelectedSlot] = useState<SlotForCreate | null>(null);
   const [selectedClub, setSelectedClub] = useState<ClubDisplay | null>(null);
+
+  const { priceData, loading: priceLoading } = useSlotPrice({
+    clubId: selectedClub?.clubId,
+    courtId: selectedSlot?.courtId,
+    date: selectedSlot?.dateStr,
+    slot: selectedSlot?.time,
+    durationMinutes: DURATION_MIN,
+    reservationType: 'open_match',
+  });
+
+  const getSlotDisplayPrice = () => {
+    if (priceLoading) return 'Calculando...';
+    if (priceData && priceData.total_price_cents > 0) {
+      return `${(priceData.total_price_cents / 100).toFixed(2)}€`;
+    }
+    return selectedSlot ? slotPriceForDuration(selectedSlot) : '—';
+  };
+
   const [competitive, setCompetitive] = useState(true);
   const [gender, setGender] = useState<GenderOption>('any');
+  const [onboardingCheckPending, setOnboardingCheckPending] = useState(false);
 
-  const handleSlotPress = useCallback((slot: SlotForCreate, club: ClubDisplay) => {
-    if (!orgId) {
-      setCreateError('Necesitas iniciar sesión para crear un partido');
-      return;
-    }
-    setCreateError(null);
-    setSelectedSlot(slot);
-    setSelectedClub(club);
-    setCompetitive(true);
-    setGender('any');
-    setStep('configurar');
-  }, [orgId]);
+  const handleSlotPress = useCallback(
+    async (slot: SlotForCreate, club: ClubDisplay) => {
+      if (!orgId) {
+        setCreateError('Necesitas iniciar sesión para crear un partido');
+        return;
+      }
+      const token = session?.access_token;
+      if (!token) return;
+
+      setOnboardingCheckPending(true);
+      try {
+        const profile = await fetchMyPlayerProfile(token);
+        if (profile && profile.onboardingCompleted === false) {
+          Alert.alert(
+            'Completa tu nivelación',
+            'Para elegir tipo de partido y reservar en WeMatch necesitas completar la nivelación inicial en tu perfil.',
+            [
+              { text: 'Ahora no', style: 'cancel' },
+              onNavigateToCompleteOnboarding
+                ? {
+                    text: 'Ir a completar',
+                    onPress: () => onNavigateToCompleteOnboarding(),
+                  }
+                : { text: 'Entendido', style: 'default' },
+            ],
+          );
+          return;
+        }
+      } catch {
+        // Si falla la verificación, no bloqueamos el flujo.
+      } finally {
+        setOnboardingCheckPending(false);
+      }
+
+      setCreateError(null);
+      setSelectedSlot(slot);
+      setSelectedClub(club);
+      setCompetitive(true);
+      setGender('any');
+      setStep('configurar');
+    },
+    [orgId, session?.access_token, onNavigateToCompleteOnboarding],
+  );
 
   const handleCheckout = useCallback(async () => {
     if (!selectedSlot || !selectedClub) return;
     if (!orgId || !session?.access_token) return;
+    if (priceLoading) {
+      Alert.alert('Calculando precio', 'Espera un momento a que terminemos de calcular el precio exacto.');
+      return;
+    }
+
+    if (!priceData || priceData.total_price_cents <= 0) {
+      setCreating(false);
+      setCreateError('No se pudo calcular el precio del partido. Por favor, selecciona el horario de nuevo.');
+      return;
+    }
+
     setCreating(true);
     setCreateError(null);
     const { start_at, end_at } = buildStartEnd(selectedSlot.dateStr, selectedSlot.time);
-    const totalPriceCents = Math.max(selectedSlot.minPriceCents, 100);
 
     const intentRes = await createIntentForNewMatch(
       {
@@ -176,7 +241,7 @@ export function CrearPartidoLocationSheet({
         organizer_player_id: orgId,
         start_at,
         end_at,
-        total_price_cents: Math.round(totalPriceCents * (DURATION_MIN / 60)),
+        total_price_cents: priceData.total_price_cents,
         visibility: partidoPrivado ? 'private' : 'public',
         competitive,
         gender,
@@ -231,13 +296,20 @@ export function CrearPartidoLocationSheet({
       return;
     }
 
+    const currentPriceFormatted = getSlotDisplayPrice();
+
     const confirmation: BookingConfirmationData = {
       courtName: selectedSlot.courtName,
       clubName: selectedClub.clubName,
       dateTimeFormatted: formatDateTimeForBookingConfirm(selectedSlot.dateStr, selectedSlot.time),
       duration: `${DURATION_MIN} min`,
-      priceFormatted: slotPriceForDuration(selectedSlot),
+      priceFormatted: currentPriceFormatted,
       matchVisibility: partidoPrivado ? 'private' : 'public',
+      clubId: selectedClub.clubId,
+      courtId: selectedSlot.courtId,
+      date: selectedSlot.dateStr,
+      slot: selectedSlot.time,
+      durationMinutes: DURATION_MIN,
     };
     /** El padre (p. ej. MainApp) cierra el flujo dentro de `onPartidoCreado`; no llamar `onClose` después para evitar carrera con la pantalla de éxito. */
     if (onPartidoCreado) {
@@ -245,7 +317,7 @@ export function CrearPartidoLocationSheet({
     } else {
       onClose();
     }
-  }, [selectedSlot, selectedClub, competitive, gender, orgId, session?.access_token, initPaymentSheet, presentPaymentSheet, onPartidoCreado, onClose, partidoPrivado]);
+  }, [selectedSlot, selectedClub, competitive, gender, orgId, session?.access_token, initPaymentSheet, presentPaymentSheet, onPartidoCreado, onClose, partidoPrivado, priceData, priceLoading]);
 
   const handleSiguiente = () => {
     if (selected === 'club_wematch') {
@@ -601,7 +673,7 @@ export function CrearPartidoLocationSheet({
                         {selectedSlot.dateLabel} • {selectedSlot.time}
                       </Text>
                     </View>
-                    <Text style={styles.configClubPrice}>{slotPriceForDuration(selectedSlot)}</Text>
+                    <Text style={styles.configClubPrice}>{getSlotDisplayPrice()}</Text>
                   </View>
                 </View>
 
@@ -728,8 +800,8 @@ export function CrearPartidoLocationSheet({
                                   pressed && styles.slotPressedGlass,
                                   creating && styles.slotDisabled,
                                 ]}
-                                onPress={() => handleSlotPress(slot, club)}
-                                disabled={creating}
+                                onPress={() => void handleSlotPress(slot, club)}
+                                disabled={creating || onboardingCheckPending}
                               >
                                 <Text style={styles.slotTimeGlass}>{slot.time}</Text>
                                 <Text style={styles.slotDurationGlass}>{slot.duration}</Text>

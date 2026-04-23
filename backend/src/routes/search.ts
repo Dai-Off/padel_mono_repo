@@ -30,6 +30,7 @@ type ClubSearchRow = {
   lat: number | null;
   lng: number | null;
   logo_url: string | null;
+  photo_urls: string[] | null;
 };
 
 /** GET /search/courts - Busca pistas con disponibilidad. Filtros opcionales por query. */
@@ -62,7 +63,7 @@ router.get('/courts', async (req: Request, res: Response) => {
     const clubIds = [...new Set(courts.map((c) => c.club_id))];
     const { data: clubs, error: clubsError } = await supabase
       .from('clubs')
-      .select('id, name, city, address, lat, lng, logo_url')
+      .select('id, name, city, address, lat, lng, logo_url, photo_urls')
       .in('id', clubIds);
     if (clubsError) return res.status(500).json({ ok: false, error: clubsError.message });
 
@@ -77,7 +78,12 @@ router.get('/courts', async (req: Request, res: Response) => {
     const resolvedLogoByClubId = new Map<string, string | null>(
       await Promise.all(
         [...clubMap.entries()].map(async ([id, club]) => {
-          const url = await resolveClubLogoUrlForClient(supabase, club.logo_url);
+          // Prioritize first photo from photo_urls, then logo_url
+          const firstPhoto = Array.isArray(club.photo_urls) && club.photo_urls.length > 0 
+            ? club.photo_urls[0] 
+            : null;
+          const urlToResolve = firstPhoto || club.logo_url;
+          const url = await resolveClubLogoUrlForClient(supabase, urlToResolve);
           return [id, url] as const;
         })
       )
@@ -92,6 +98,13 @@ router.get('/courts', async (req: Request, res: Response) => {
       .eq('active', true);
 
     const searchDate = dateFrom ?? new Date().toISOString().slice(0, 10);
+
+    // Also block slots occupied by active school courses for the searched day
+    const { data: rtPrices } = await supabase
+      .from('reservation_type_prices')
+      .select('club_id, reservation_type, price_per_hour_cents')
+      .in('club_id', clubIds)
+      .eq('reservation_type', 'standard');
 
     let bookingsQuery = supabase
       .from('bookings')
@@ -192,7 +205,10 @@ router.get('/courts', async (req: Request, res: Response) => {
         const rules = rulesByCourt.get(court.id) ?? [];
         const booked = bookedRangesByCourt.get(court.id) ?? [];
         const timeSlots: string[] = [];
-        let minPriceCents = 0;
+        
+        // Base price from reservation_type_prices if available
+        const clubRtPrice = (rtPrices ?? []).find(p => p.club_id === court.club_id);
+        let minPriceCents = clubRtPrice?.price_per_hour_cents ?? 0;
 
         for (const rule of rules) {
           for (let min = rule.startMin; min < rule.endMin; min += 60) {

@@ -37,6 +37,8 @@ import { CommunityScreen } from './CommunityScreen';
 import { MessagesScreen, type MessagePeerNav } from './MessagesScreen';
 import { DirectMessageThreadScreen } from './DirectMessageThreadScreen';
 import { CompetitiveLeagueScreen } from './CompetitiveLeagueScreen';
+import { SeasonPassScreen } from './SeasonPassScreen';
+import { PreferencesScreen } from './PreferencesScreen';
 import type { EducationalCourse } from '../api/dailyLessons';
 import type { PublicCourse } from '../api/schoolCourses';
 
@@ -61,10 +63,12 @@ export function MainApp() {
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showPreferences, setShowPreferences] = useState(false);
   const [showCommunity, setShowCommunity] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [messagesPeer, setMessagesPeer] = useState<MessagePeerNav | null>(null);
   const [showCompetitiveLeague, setShowCompetitiveLeague] = useState(false);
+  const [showSeasonPass, setShowSeasonPass] = useState(false);
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
@@ -126,6 +130,11 @@ export function MainApp() {
           organizerPlayerId={crearPartidoFlow.organizerId}
           onClose={closeFlow}
           onSiguiente={closeFlow}
+          onNavigateToCompleteOnboarding={() => {
+            setCrearPartidoFlow({ open: false, organizerId: null });
+            bumpPartidos();
+            setShowProfile(true);
+          }}
           onPartidoCreado={(data) => {
             setCrearPartidoFlow({ open: false, organizerId: null });
             bumpPartidos();
@@ -137,9 +146,21 @@ export function MainApp() {
     if (showProfile) {
       return (
         <ProfileScreen
-          onBack={() => setShowProfile(false)}
+          onBack={() => {
+            setShowProfile(false);
+            setShowPreferences(false);
+          }}
           onMenuPress={sidebar.toggle}
+          onPreferencesPress={() => {
+            setShowProfile(false);
+            setShowPreferences(true);
+          }}
         />
+      );
+    }
+    if (showPreferences) {
+      return (
+        <PreferencesScreen onBack={() => setShowPreferences(false)} />
       );
     }
     if (showCommunity) {
@@ -176,6 +197,9 @@ export function MainApp() {
           }}
         />
       );
+    }
+    if (showSeasonPass) {
+      return <SeasonPassScreen onBack={() => setShowSeasonPass(false)} />;
     }
     if (showTransacciones) {
       return (
@@ -229,6 +253,11 @@ export function MainApp() {
             onDailyLessonPress={() => setShowDailyLesson(true)}
             onCoursesPress={() => setShowCourses(true)}
             onOpenCompetitiveLeague={() => setShowCompetitiveLeague(true)}
+            onOpenSeasonPass={() => setShowSeasonPass(true)}
+            onOpenMessageThread={(peer) => {
+              setMessagesPeer(peer);
+              setShowMessages(true);
+            }}
           />
         );
       case 'pistas':
@@ -249,6 +278,7 @@ export function MainApp() {
             onOpenWeMatchClubsFlow={(organizerId) =>
               setCrearPartidoFlow({ open: true, organizerId })
             }
+            onNavigateToCompleteOnboarding={() => setShowProfile(true)}
             partidosRefreshNonce={partidosRefreshNonce}
           />
         );
@@ -262,6 +292,7 @@ export function MainApp() {
     !showTusPagos &&
     !showTransacciones &&
     !showProfile &&
+    !showPreferences &&
     !showPartidoDetail &&
     !showClubDetail &&
     !crearPartidoFlow.open &&
@@ -270,15 +301,18 @@ export function MainApp() {
     !selectedEducationalCourse &&
     !selectedPublicCourse &&
     !showMessages &&
-    !showCompetitiveLeague;
+    !showCompetitiveLeague &&
+    !showSeasonPass;
 
   const customHeader =
     bookingSuccessData != null ||
     showTusPagos ||
     showTransacciones ||
     showProfile ||
+    showPreferences ||
     showPartidoDetail ||
     showCompetitiveLeague ||
+    showSeasonPass ||
     crearPartidoFlow.open ||
     showDailyLesson ||
     showCourses ||
@@ -348,9 +382,11 @@ export function MainApp() {
       ? '#000000'
       : showMessages
         ? '#0A0A0A'
+        : showPreferences
+          ? '#0F0F0F'
         : showDailyLesson
           ? '#0F0F0F'
-          : showCompetitiveLeague
+          : showCompetitiveLeague || showSeasonPass
             ? '#0F0F0F'
           : showPartidoDetail
             ? '#0F0F0F'
@@ -367,9 +403,11 @@ export function MainApp() {
   const handleTabChange = (tab: MainTabId) => {
     setActiveTab(tab);
     setShowProfile(false);
+    setShowPreferences(false);
     setShowMessages(false);
     setMessagesPeer(null);
     setShowCompetitiveLeague(false);
+    setShowSeasonPass(false);
   };
 
   return (
@@ -386,9 +424,11 @@ export function MainApp() {
             hideHeader={
               bookingSuccessData != null ||
                 showProfile ||
+              showPreferences ||
               showClubDetail ||
               showPartidoDetail ||
               showCompetitiveLeague ||
+              showSeasonPass ||
               showTusPagos ||
               showTransacciones ||
               crearPartidoFlow.open ||
@@ -413,13 +453,15 @@ export function MainApp() {
             !showPartidoDetail &&
             !showTusPagos &&
             !showTransacciones &&
+            !showPreferences &&
             !crearPartidoFlow.open &&
             !showDailyLesson &&
             !showCourses &&
             !selectedEducationalCourse &&
             !selectedPublicCourse &&
             !showMessages &&
-            !showCompetitiveLeague && (
+            !showCompetitiveLeague &&
+            !showSeasonPass && (
             <View style={styles.bottomBar}>
               <BottomNavbar activeTab={showProfile ? null : activeTab} onTabChange={handleTabChange} />
             </View>

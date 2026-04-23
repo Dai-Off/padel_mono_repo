@@ -283,6 +283,7 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
           source_channel: ['mobile', 'web', 'manual', 'system'].includes(source_channel)
             ? source_channel
             : 'web',
+          reservation_type: 'open_match',
         },
       ])
       .select('id')
@@ -435,8 +436,8 @@ router.post('/:id/admin-remove-player', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /matches/:id/prepare-join - prepara unirse (crea participant pendiente de pago). Body: { slot_index }.
- *  Devuelve participant_id y booking_id para crear PaymentIntent. El join real se hace tras pago exitoso. */
+/** POST /matches/:id/prepare-join - valida plaza y devuelve datos para pago. Body: { slot_index }.
+ *  No crea participantes: el alta real ocurre tras pago exitoso. */
 router.post('/:id/prepare-join', async (req: Request, res: Response) => {
   const matchId = req.params.id;
   const authHeader = req.headers.authorization;
@@ -567,6 +568,7 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
         if (overlaps) {
           return res.status(400).json({
             ok: false,
+            code: 'schedule_conflict',
             error: 'Ya tienes un partido a esa hora. Elige otro horario.',
           });
         }
@@ -581,29 +583,8 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
     const totalCents = booking?.total_price_cents ?? 0;
     const shareCents = Math.ceil(totalCents / 4);
 
-    const { data: existingParticipant } = await supabase
-      .from('booking_participants')
-      .select('id')
-      .eq('booking_id', match.booking_id)
-      .eq('player_id', playerId)
-      .maybeSingle();
-    if (existingParticipant) {
-      return res.status(409).json({ ok: false, error: 'Ya tienes una plaza reservada en este partido' });
-    }
-
-    const { data: participant, error: errBP } = await supabase
-      .from('booking_participants')
-      .insert([
-        { booking_id: match.booking_id, player_id: playerId, role: 'guest', share_amount_cents: shareCents },
-      ])
-      .select('id')
-      .maybeSingle();
-    if (errBP) return res.status(500).json({ ok: false, error: errBP.message });
-    if (!participant) return res.status(500).json({ ok: false, error: 'No se pudo preparar la plaza' });
-
     return res.status(200).json({
       ok: true,
-      participant_id: participant.id,
       booking_id: match.booking_id,
       share_amount_cents: shareCents,
     });

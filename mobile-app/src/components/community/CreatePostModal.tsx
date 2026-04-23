@@ -15,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createPost } from '../../api/community';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -31,6 +32,7 @@ type PostType = 'post' | 'story' | 'reel';
 export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onClose, onSuccess }) => {
   const { session } = useAuth();
   const token = session?.access_token;
+  const insets = useSafeAreaInsets();
 
   const [selectedType, setSelectedType] = useState<PostType>('post');
   const [selectedImages, setSelectedImages] = useState<{ uri: string; name: string; type: string }[]>([]);
@@ -38,7 +40,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
   const [location, setLocation] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const pickImage = async () => {
+  const openGallery = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para publicar.');
@@ -60,6 +62,40 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
       }));
       setSelectedImages([...selectedImages, ...newImages]);
     }
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permiso denegado', 'Necesitamos acceso a tu cámara para tomar fotos.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      const newImage = {
+        uri: result.assets[0].uri,
+        name: result.assets[0].fileName || `photo-${Date.now()}.jpg`,
+        type: result.assets[0].mimeType || 'image/jpeg',
+      };
+      setSelectedImages([...selectedImages, newImage]);
+    }
+  };
+
+  const handleAddMedia = () => {
+    Alert.alert(
+      'Añadir contenido',
+      '¿De dónde quieres añadir la imagen?',
+      [
+        { text: 'Cámara', onPress: takePhoto },
+        { text: 'Galería', onPress: openGallery },
+        { text: 'Cancelar', style: 'cancel' },
+      ]
+    );
   };
 
   const handlePost = async () => {
@@ -115,7 +151,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
         <View style={styles.content}>
           <LinearGradient
             colors={['rgba(241, 143, 52, 0.1)', 'transparent']}
-            style={styles.header}
+            style={[styles.header, { paddingTop: 20 + insets.top }]}
           >
             <TouchableOpacity onPress={onClose}>
               <Text style={styles.cancelButton}>Cancelar</Text>
@@ -163,9 +199,9 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
                       </TouchableOpacity>
                     </View>
                   ) : (
-                    <TouchableOpacity style={styles.addButton} onPress={pickImage}>
+                    <TouchableOpacity style={styles.addButton} onPress={handleAddMedia}>
                       <Ionicons name="camera" size={30} color="rgba(255,255,255,0.3)" />
-                      <Text style={styles.addMediaText}>Galería</Text>
+                      <Text style={styles.addMediaText}>Añadir</Text>
                     </TouchableOpacity>
                   )
                 )}
@@ -213,7 +249,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: 20,
     paddingBottom: 20,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.05)',

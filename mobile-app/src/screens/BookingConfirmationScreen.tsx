@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { BookingSuccessRadialBg } from '../components/partido/BookingSuccessRadialBg';
+import { useSlotPrice } from '../hooks/useSlotPrice';
 
 const ORANGE = '#F18F34';
 const ORANGE_END = '#C46A20';
@@ -31,6 +32,12 @@ export type BookingConfirmationData = {
   confirmationKind?: 'match' | 'tournament';
   /** Ej. «15/16» en inscripción a torneo. */
   spotsLine?: string;
+  // Props para consumo de precio dinámico
+  clubId?: string;
+  courtId?: string;
+  date?: string;
+  slot?: string;
+  durationMinutes?: number;
 };
 
 type Props = {
@@ -106,6 +113,26 @@ function EmptySlot({ small }: { small?: boolean }) {
 function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
   const { date: datePart, time: timePart } = splitDateTime(data.dateTimeFormatted);
   const playersLine = resolvePlayersHint(data);
+
+  const { priceData, loading } = useSlotPrice({
+    clubId: data.clubId,
+    courtId: data.courtId,
+    date: data.date,
+    slot: data.slot,
+    durationMinutes: data.durationMinutes,
+    reservationType: 'open_match',
+  });
+
+  const renderPrice = () => {
+    if (loading) return ' · Calculando precio...';
+    if (priceData) {
+      if (priceData.source === 'none') {
+        return ' · Precio no disponible, contacta al club.';
+      }
+      return ` · ${(priceData.total_price_cents / 100).toFixed(2)} €`;
+    }
+    return data.priceFormatted ? ` · ${data.priceFormatted}` : '';
+  };
 
   return (
     <View style={styles.column}>
@@ -199,7 +226,7 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
           <Text style={[styles.courtHint, androidLabel({})]}>
             {data.courtName}
             {data.duration ? ` · ${data.duration}` : ''}
-            {data.priceFormatted ? ` · ${data.priceFormatted}` : ''}
+            {renderPrice()}
           </Text>
         </View>
       </View>

@@ -35,15 +35,15 @@ export async function confirmPaymentFromClient(
 
 export async function createPaymentIntent(
   bookingId: string,
-  participantId: string,
   token: string | null | undefined,
-  slotIndex?: number
+  slotIndex?: number,
+  participantId?: string
 ): Promise<CreatePaymentIntentResponse> {
   if (!token) return { ok: false, error: 'Token requerido' };
-  const body: { booking_id: string; participant_id: string; slot_index?: number } = {
+  const body: { booking_id: string; participant_id?: string; slot_index?: number } = {
     booking_id: bookingId,
-    participant_id: participantId,
   };
+  if (participantId) body.participant_id = participantId;
   if (slotIndex != null) body.slot_index = slotIndex;
   try {
     const res = await fetch(`${API_URL}/payments/create-intent`, {
@@ -151,6 +151,8 @@ export type ConfirmClientResponse = {
   ok?: boolean;
   match?: unknown;
   booking?: { id: string };
+  tournament_id?: string;
+  season_pass?: { has_elite: boolean };
   error?: string;
 };
 
@@ -190,6 +192,27 @@ export async function createIntentForTournament(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ tournament_id: tournamentId }),
+    });
+    const json = (await res.json()) as CreatePaymentIntentResponse;
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al crear el pago' };
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+/** Pase Elite temporada: PaymentSheet + `confirmPaymentFromClient`. */
+export async function createIntentForSeasonPassElite(
+  token: string | null | undefined
+): Promise<CreatePaymentIntentResponse> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/payments/create-intent-for-season-pass-elite`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
     });
     const json = (await res.json()) as CreatePaymentIntentResponse;
     if (!res.ok) return { ok: false, error: json.error ?? 'Error al crear el pago' };
