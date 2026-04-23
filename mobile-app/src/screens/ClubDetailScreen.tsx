@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  Image,
   Platform,
   Pressable,
   ScrollView,
@@ -577,10 +578,17 @@ export function ClubDetailScreen({
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.hero}>
+          {court.imageUrl ? (
+            <Image
+              source={{ uri: court.imageUrl }}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
+          ) : null}
           <LinearGradient
-            colors={["#1a1a1a", "#2a2a2a"]}
+            colors={["rgba(0,0,0,0.6)", "rgba(0,0,0,0.8)"]}
             start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+            end={{ x: 0, y: 1 }}
             style={styles.heroGradient}
           >
             <View style={styles.heroOrb} />

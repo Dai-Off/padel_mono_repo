@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
@@ -8,9 +9,9 @@ router.use(attachAuthContext);
 router.use(requireClubOwnerOrAdmin);
 
 const SELECT_LIST =
-  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, logo_url, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
+  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 const SELECT_ONE =
-  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions, logo_url, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
+  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 
 function canAccessClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
@@ -33,7 +34,15 @@ router.get('/', async (req: Request, res: Response) => {
     }
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, clubs: data ?? [] });
+
+    const clubs = await Promise.all((data ?? []).map(async (club) => {
+      const firstPhoto = Array.isArray(club.photo_urls) && club.photo_urls.length > 0 ? club.photo_urls[0] : null;
+      const urlToResolve = firstPhoto || club.logo_url;
+      const resolvedImage = await resolveClubLogoUrlForClient(supabase, urlToResolve);
+      return { ...club, logo_url: resolvedImage };
+    }));
+
+    return res.json({ ok: true, clubs });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -51,7 +60,12 @@ router.get('/:id', async (req: Request, res: Response) => {
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Club not found' });
     if (!canAccessClub(req, id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
-    return res.json({ ok: true, club: data });
+
+    const firstPhoto = Array.isArray(data.photo_urls) && data.photo_urls.length > 0 ? data.photo_urls[0] : null;
+    const urlToResolve = firstPhoto || data.logo_url;
+    const resolvedImage = await resolveClubLogoUrlForClient(supabase, urlToResolve);
+
+    return res.json({ ok: true, club: { ...data, logo_url: resolvedImage } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -134,7 +148,7 @@ router.put('/:id', async (req: Request, res: Response) => {
   const allowed = [
     'fiscal_tax_id', 'fiscal_legal_name', 'name', 'description',
     'address', 'city', 'postal_code', 'lat', 'lng', 'base_currency',
-    'weekly_schedule', 'schedule_exceptions', 'logo_url',
+    'weekly_schedule', 'schedule_exceptions', 'logo_url', 'photo_urls',
     'contact_phone', 'contact_email',
     'notify_new_bookings', 'notify_cancellations', 'notify_maintenance_reminders', 'notify_daily_email_summary',
   ];
