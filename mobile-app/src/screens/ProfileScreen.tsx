@@ -7,6 +7,7 @@ import {
   Image,
   Pressable,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
@@ -25,64 +26,6 @@ type ProfileScreenProps = {
   onBack: () => void;
   onMenuPress: () => void;
 };
-
-type Achievement = {
-  id: string;
-  title: string;
-  description: string;
-  tier: 'LEGENDARIO' | 'ÉPICO' | 'NORMAL';
-  icon: keyof typeof Ionicons.glyphMap;
-  date: string;
-  sport?: string;
-  color: string;
-  isPublic: boolean;
-  isLocked?: boolean;
-};
-
-const ACHIEVEMENTS: Achievement[] = [
-  {
-    id: '1',
-    title: 'Campeón Torneo Verano',
-    description: '1er puesto en el Torneo de Verano 2025',
-    tier: 'LEGENDARIO',
-    icon: 'trophy',
-    date: 'Ago 2025',
-    sport: 'Pádel',
-    color: '#F18F34',
-    isPublic: true,
-  },
-  {
-    id: '2',
-    title: 'Imparable',
-    description: 'Completaste la lección diaria 7 días seguidos',
-    tier: 'ÉPICO',
-    icon: 'flame',
-    date: 'Jul 2025',
-    sport: 'Pádel',
-    color: '#A855F7',
-    isPublic: true,
-  },
-  {
-    id: '3',
-    title: 'Muro de la Red',
-    description: 'Completaste tu primer curso de volea',
-    tier: 'NORMAL',
-    icon: 'ribbon',
-    date: 'Jun 2025',
-    color: '#6B7280',
-    isPublic: true,
-  },
-  {
-    id: '4',
-    title: 'Francotirador',
-    description: 'Dominaste los fundamentos del saque y resto',
-    tier: 'NORMAL',
-    icon: 'locate',
-    date: 'May 2025',
-    color: '#3B82F6',
-    isPublic: false,
-  },
-];
 
 function getInitials(firstName?: string | null, lastName?: string | null): string {
   if (firstName && lastName) return (firstName[0] + lastName[0]).toUpperCase();
@@ -126,59 +69,6 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
       }
     });
     fetchMyCoachAssessment(session.access_token).then(setAssessment);
-  };
-
-  const renderAchievementItem = (item: Achievement) => {
-    const isLegendary = item.tier === 'LEGENDARIO';
-    const isEpic = item.tier === 'ÉPICO';
-    const isPrivate = !item.isPublic;
-
-    return (
-      <View
-        key={item.id}
-        style={[
-          styles.achievementItem,
-          isLegendary && styles.achievementLegendary,
-          isEpic && styles.achievementEpic,
-          isPrivate && styles.achievementPrivate,
-          item.tier === 'NORMAL' && !isPrivate && styles.achievementNormal,
-        ]}
-      >
-        <View style={[styles.achievementIconBox, { backgroundColor: `${item.color}20`, borderColor: `${item.color}40` }]}>
-          <Ionicons name={item.icon} size={20} color={isPrivate ? '#9CA3AF' : item.color} />
-        </View>
-        <View style={styles.achievementContent}>
-          <View style={styles.achievementTitleRow}>
-            <Text style={styles.achievementTitle} numberOfLines={1}>{item.title}</Text>
-            {isLegendary && (
-              <View style={styles.tierBadgeLegendary}>
-                <Text style={styles.tierBadgeTextLegendary}>✦ LEGENDARIO</Text>
-              </View>
-            )}
-            {isEpic && (
-              <View style={styles.tierBadgeEpic}>
-                <Text style={styles.tierBadgeTextEpic}>ÉPICO</Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.achievementDesc} numberOfLines={1}>{item.description}</Text>
-          <View style={styles.achievementFooter}>
-            <Text style={styles.achievementDate}>{item.date}</Text>
-            {item.sport && (
-              <View style={styles.sportBadge}>
-                <Text style={styles.sportBadgeText}>{item.sport}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-        <Pressable 
-          style={[styles.eyeButton, !item.isPublic && styles.eyeButtonDisabled]}
-          onPress={() => Alert.alert('Visibilidad', `Cambiar visibilidad de ${item.title}`)}
-        >
-          <Ionicons name={item.isPublic ? "eye-outline" : "eye-off-outline"} size={14} color={item.isPublic ? "#F18F34" : "#4B5563"} />
-        </Pressable>
-      </View>
-    );
   };
 
   return (
@@ -229,9 +119,9 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
         <View style={styles.profileCardWrap}>
           <View style={styles.profileCard}>
             <View style={styles.eloBadge}>
-              <Text style={styles.eloLabel}>ELO</Text>
+              <Text style={styles.eloLabel}>NIVEL</Text>
               <Text style={styles.eloValue}>
-                {profile?.eloRating != null && Number.isFinite(profile.eloRating)
+                {profile?.onboardingCompleted && profile?.eloRating != null && Number.isFinite(profile.eloRating)
                   ? profile.eloRating.toFixed(2)
                   : '--'}
               </Text>
@@ -257,17 +147,17 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
             {/* Stats Row */}
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>0</Text>
+                <Text style={styles.statValue}>{profile?.matchesPlayedMatchmaking ?? 0}</Text>
                 <Text style={styles.statLabel}>PARTIDOS</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>0</Text>
+                <Text style={styles.statValue}>--</Text>
                 <Text style={styles.statLabel}>SEGUIDORES</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>1</Text>
+                <Text style={styles.statValue}>--</Text>
                 <Text style={styles.statLabel}>SEGUIDOS</Text>
               </View>
             </View>
@@ -304,7 +194,7 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
         </View>
 
         {/* Virtual Coach Card / Analysis */}
-        {!assessment ? (
+        {needsLevelOnboarding ? (
           <View style={styles.coachCardContainer}>
             <View style={styles.coachCard}>
               <View style={styles.coachGlow} />
@@ -322,25 +212,28 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
                 </Text>
                 <Text style={styles.coachDesc}>
                   {needsLevelOnboarding
-                    ? 'Responde al cuestionario oficial para calcular tu ELO inicial (0–7) y desbloquear matchmaking y el resto de funciones.'
+                    ? 'Responde al cuestionario oficial para calcular tu nivel inicial (0–7) y desbloquear matchmaking y el resto de funciones.'
                     : 'Mide tu nivel de Pádel para desbloquear análisis personalizados y recomendaciones del Coach IA'}
                 </Text>
-                {needsLevelOnboarding ? (
-                  <Pressable style={styles.coachCtaBtn} onPress={() => setShowOnboardingModal(true)}>
-                    <Ionicons name="locate-outline" size={16} color="#fff" />
-                    <Text style={styles.coachCtaText}>Comenzar nivelación</Text>
-                  </Pressable>
-                ) : (
-                  <View style={styles.levelCompletedBadge}>
-                    <Ionicons name="checkmark-circle" size={16} color="#34D399" />
-                    <Text style={styles.levelCompletedText}>Nivel de pádel ya medido</Text>
-                  </View>
-                )}
+                <Pressable style={styles.coachCtaBtn} onPress={() => setShowOnboardingModal(true)}>
+                  <Ionicons name="locate-outline" size={16} color="#fff" />
+                  <Text style={styles.coachCtaText}>Comenzar nivelación</Text>
+                </Pressable>
               </View>
             </View>
           </View>
-        ) : (
+        ) : assessment ? (
           <AICoachSection assessment={assessment} peerInsight={peerInsight} />
+        ) : (
+          <View style={styles.coachCardContainer}>
+            <View style={styles.coachCard}>
+              <View style={styles.coachGlow} />
+              <View style={styles.coachContent}>
+                <ActivityIndicator color="#F18F34" />
+                <Text style={styles.coachDesc}>Cargando status de nivelación…</Text>
+              </View>
+            </View>
+          </View>
         )}
 
         {/* Achievements Section */}
@@ -359,76 +252,14 @@ export function ProfileScreen({ onBack, onMenuPress }: ProfileScreenProps) {
                   </LinearGradient>
                   <View>
                     <Text style={styles.achievementsTitle}>Vitrina de Logros</Text>
-                    <Text style={styles.achievementsCount}>10 logros conseguidos</Text>
+                    <Text style={styles.achievementsCount}>Sin logros disponibles todavía</Text>
                   </View>
                 </View>
-                <View style={styles.publicBadge}>
-                  <Ionicons name="eye-outline" size={12} color="#F18F34" />
-                  <Text style={styles.publicBadgeText}>8 públicos</Text>
-                </View>
               </View>
-
-              {/* Achievement Mini Stats */}
-              <View style={styles.achStatsRow}>
-                <View style={styles.achStatItem}>
-                  <Text style={styles.achStatEmoji}>🏆</Text>
-                  <Text style={styles.achStatVal}>5</Text>
-                  <Text style={styles.achStatLab}>Trofeos</Text>
-                </View>
-                <View style={styles.achStatItem}>
-                  <Text style={styles.achStatEmoji}>🎖️</Text>
-                  <Text style={styles.achStatVal}>2</Text>
-                  <Text style={styles.achStatLab}>Insignias</Text>
-                </View>
-                <View style={styles.achStatItem}>
-                  <Text style={styles.achStatEmoji}>📚</Text>
-                  <Text style={styles.achStatVal}>3</Text>
-                  <Text style={styles.achStatLab}>Cursos</Text>
-                </View>
-              </View>
-
-              {/* Achievement Categories */}
-              <View style={styles.achTabsRow}>
-                <View style={styles.achTabsInner}>
-                  {['Todos', 'Trofeos', 'Insignias', 'Cursos'].map(tab => (
-                    <Pressable 
-                      key={tab} 
-                      onPress={() => setActiveLogroTab(tab)}
-                      style={[styles.achTab, activeLogroTab === tab && styles.achTabActive]}
-                    >
-                      <Ionicons 
-                        name={
-                          tab === 'Todos' ? 'star' : 
-                          tab === 'Trofeos' ? 'trophy' : 
-                          tab === 'Insignias' ? 'medal' : 'school'
-                        } 
-                        size={14} 
-                        color={activeLogroTab === tab ? '#F18F34' : '#6B7280'} 
-                      />
-                      <Text style={[styles.achTabText, activeLogroTab === tab ? styles.achTabTextActive : styles.achTabTextInactive]}>
-                        {tab}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-
-              {/* Achievement List */}
-              <View style={styles.achList}>
-                {ACHIEVEMENTS.map(renderAchievementItem)}
-              </View>
-
-              {/* View All Button */}
-              <Pressable style={styles.viewAllBtn}>
-                <Text style={styles.viewAllText}>Ver todos (10)</Text>
-                <Ionicons name="chevron-down" size={14} color="#9CA3AF" />
-              </Pressable>
-
-              {/* Visibility Disclaimer */}
-              <View style={styles.publicDisclaimer}>
-                <Ionicons name="lock-closed" size={12} color="#4B5563" />
-                <Text style={styles.disclaimerText}>
-                  Los logros marcados como <Text style={styles.disclaimerHighlight}>públicos</Text> serán visibles para otros jugadores en tu perfil.
+              <View style={styles.emptyAchievementsBox}>
+                <Ionicons name="trophy-outline" size={24} color="#6B7280" />
+                <Text style={styles.emptyAchievementsText}>
+                  Aun no hay datos reales de logros para mostrar.
                 </Text>
               </View>
             </View>
@@ -863,235 +694,23 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 1,
   },
-  publicBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-    backgroundColor: 'rgba(241,143,52,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.2)',
-  },
-  publicBadgeText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: '#F18F34',
-  },
-  achStatsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  achStatItem: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 12,
-    paddingVertical: 10,
-    alignItems: 'center',
-  },
-  achStatEmoji: {
-    fontSize: 18,
-  },
-  achStatVal: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-    marginTop: 2,
-  },
-  achStatLab: {
-    fontSize: 9,
-    color: '#6B7280',
-    fontWeight: '600',
-  },
-  achTabsRow: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 16,
-  },
-  achTabsInner: {
-    flexDirection: 'row',
-    gap: 4,
-  },
-  achTab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  achTabActive: {
-    backgroundColor: 'rgba(241,143,52,0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.2)',
-  },
-  achTabText: {
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  achTabTextActive: {
-    color: '#F18F34',
-  },
-  achTabTextInactive: {
-    color: '#6B7280',
-  },
-  achList: {
-    gap: 8,
-  },
-  achievementItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-  },
-  achievementLegendary: {
-    borderColor: 'rgba(241,143,52,0.3)',
-    backgroundColor: 'rgba(241,143,52,0.1)',
-  },
-  achievementEpic: {
-    borderColor: 'rgba(168,85,247,0.3)',
-    backgroundColor: 'rgba(168,85,247,0.1)',
-  },
-  achievementNormal: {
-    borderColor: 'rgba(107,114,128,0.3)',
-    backgroundColor: 'rgba(107,114,128,0.1)',
-  },
-  achievementPrivate: {
-    borderColor: 'rgba(107,114,128,0.3)',
-    backgroundColor: 'rgba(107,114,128,0.1)',
-    opacity: 0.6,
-  },
-  achievementIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  achievementContent: {
-    flex: 1,
-  },
-  achievementTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  achievementTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#fff',
-    maxWidth: '65%',
-  },
-  tierBadgeLegendary: {
-    backgroundColor: 'rgba(241,143,52,0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.3)',
-  },
-  tierBadgeTextLegendary: {
-    fontSize: 8,
-    fontWeight: '900',
-    color: '#F18F34',
-  },
-  tierBadgeEpic: {
-    backgroundColor: 'rgba(168,85,247,0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(168,85,247,0.3)',
-  },
-  tierBadgeTextEpic: {
-    fontSize: 8,
-    fontWeight: '900',
-    color: '#A855F7',
-  },
-  achievementDesc: {
-    fontSize: 10,
-    color: '#9CA3AF',
-    marginTop: 2,
-  },
-  achievementFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 4,
-  },
-  achievementDate: {
-    fontSize: 9,
-    color: '#4B5563',
-  },
-  sportBadge: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  sportBadgeText: {
-    fontSize: 8,
-    color: '#6B7280',
-    fontWeight: '500',
-  },
-  eyeButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(241,143,52,0.15)',
-  },
-  eyeButtonDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  viewAllBtn: {
-    width: '100%',
-    height: 40,
-    marginTop: 12,
+  emptyAchievementsBox: {
+    marginTop: 8,
+    minHeight: 88,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'transparent',
-    flexDirection: 'row',
+    backgroundColor: 'rgba(255,255,255,0.03)',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-  },
-  viewAllText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#9CA3AF',
-  },
-  publicDisclaimer: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
-    marginTop: 12,
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  disclaimerText: {
-    fontSize: 10,
-    color: '#4B5563',
-    flex: 1,
-    lineHeight: 14,
-  },
-  disclaimerHighlight: {
-    color: '#F18F34',
-    fontWeight: '600',
+  emptyAchievementsText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    textAlign: 'center',
   },
   menuContainer: {
     paddingHorizontal: 16,

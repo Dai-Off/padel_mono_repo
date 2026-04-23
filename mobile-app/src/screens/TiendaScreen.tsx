@@ -467,7 +467,7 @@ export function TiendaScreen() {
               Tu IA personal de compras
             </Text>
             <Text style={[styles.aiSub, textBase(12, "400")]}>
-              Recomendaciones según tu ELO y estilo
+              Recomendaciones según tu nivel y estilo
             </Text>
           </View>
           <View style={styles.aiChevronWrap}>

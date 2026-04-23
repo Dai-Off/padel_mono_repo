@@ -278,15 +278,15 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   /**
-   * Dos filas a ancho completo: texto íntegro (sin …), ELO siempre debajo del tipo.
-   * Evita el layout en columnas estrechas donde el tipo y el ELO competían en una fila.
+   * Dos filas a ancho completo: texto íntegro (sin …), nivel siempre debajo del tipo.
+   * Evita el layout en columnas estrechas donde el tipo y el nivel competían en una fila.
    */
   badgesColumn: {
     flexDirection: "column",
     alignSelf: "stretch",
     gap: 6,
     marginBottom: 4,
-    /** Misma altura mínima del bloque (tipo + ELO) entre cards; si el texto ocupa más, crece sin recortar. */
+    /** Misma altura mínima del bloque (tipo + nivel) entre cards; si el texto ocupa más, crece sin recortar. */
     minHeight: 54,
   },
   badge: {

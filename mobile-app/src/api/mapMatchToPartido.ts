@@ -24,7 +24,7 @@ function durationMinutes(startAt: string, endAt: string): number {
   return Math.round((end - start) / 60000);
 }
 
-/** Nivel 0–7 (OpenSkill). Por encima de 25 se asume ELO legacy (p. ej. 1200 → 1,20). */
+/** Nivel 0–7 (OpenSkill). Por encima de 25 se asume escala legacy (p. ej. 1200 → 1,20). */
 function formatSkillNumber(rating: number | null | undefined): string {
   if (rating == null || !Number.isFinite(Number(rating))) return '—';
   const v = Number(rating);
