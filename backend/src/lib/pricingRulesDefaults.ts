@@ -12,7 +12,7 @@ const DEFAULTS_REQUIRED: Required<PricingRuleDefaults> = {
   days_of_week: [1, 2, 3, 4, 5, 6, 7],
   start_minutes: 8 * 60,
   end_minutes: 22 * 60,
-  amount_cents: 2000,
+  amount_cents: 3000,
   currency: 'EUR',
 };
 
