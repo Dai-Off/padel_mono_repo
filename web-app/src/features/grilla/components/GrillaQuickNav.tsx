@@ -11,6 +11,7 @@ import {
   Shield,
   CreditCard,
   ClipboardList,
+  Trophy,
 } from 'lucide-react';
 
 type NavChild = { id: string; path: string; label: string; queryParam?: string };
@@ -77,12 +78,19 @@ function buildSections(isAdmin: boolean): NavSection[] {
       ],
     },
     {
+      id: 'torneos',
+      label: 'Torneos',
+      icon: Trophy,
+      children: [
+        { id: 'torneos', path: '/torneos', label: 'Torneos' },
+      ],
+    },
+    {
       id: 'escuela',
       label: 'Escuela',
       icon: GraduationCap,
       children: [
         { id: 'escuela', path: '/escuela', label: 'Gestión Escuela' },
-        { id: 'torneos', path: '/torneos', label: 'Torneos' },
         { id: 'contenido-aprendizaje', path: '/contenido-aprendizaje', label: 'Contenido de aprendizaje' },
       ],
     },

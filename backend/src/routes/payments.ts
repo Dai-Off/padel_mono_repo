@@ -1170,6 +1170,8 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
         status,
         created_at,
         booking_id,
+        payer_player_id,
+        stripe_payment_intent_id,
         players ( first_name, last_name, email ),
         bookings!inner (
           start_at,
@@ -1192,6 +1194,85 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
       return;
     }
 
+    const bookingIds = Array.from(
+      new Set((rows ?? []).map((r) => (r as Record<string, unknown>).booking_id).filter(Boolean) as string[]),
+    );
+
+    // Build a map of actual paid amounts from payment_transactions (authoritative for Stripe/app payments)
+    // bookingId → playerId → { amount_cents, method }
+    const txByBookingPlayer = new Map<string, Map<string, { amount_cents: number; method: string | null }>>();
+    for (const row of rows ?? []) {
+      const r = row as Record<string, unknown>;
+      if (r.status !== 'succeeded') continue;
+      const bid = String(r.booking_id ?? '');
+      const pid = String(r.payer_player_id ?? '');
+      if (!bid || !pid) continue;
+      const stripeId = String(r.stripe_payment_intent_id ?? '');
+      const method = stripeId.startsWith('manual_')
+        ? (stripeId.split('_')[1] ?? null)
+        : 'card'; // Stripe payments are card
+      const bookingMap = txByBookingPlayer.get(bid) ?? new Map();
+      const prev = bookingMap.get(pid) ?? { amount_cents: 0, method: null };
+      bookingMap.set(pid, { amount_cents: prev.amount_cents + (Number(r.amount_cents) || 0), method: prev.method ?? method });
+      txByBookingPlayer.set(bid, bookingMap);
+    }
+
+    const participantsByBooking = new Map<string, Array<Record<string, unknown>>>();
+    if (bookingIds.length > 0) {
+      const { data: bpRows, error: bpError } = await supabase
+        .from('booking_participants')
+        .select(`
+          booking_id,
+          player_id,
+          role,
+          share_amount_cents,
+          payment_status,
+          payment_method,
+          paid_amount_cents,
+          wallet_amount_cents,
+          players ( first_name, last_name, email )
+        `)
+        .in('booking_id', bookingIds);
+
+      if (bpError) {
+        console.error('[payments/club-transactions] booking_participants', bpError);
+      } else {
+        for (const raw of bpRows ?? []) {
+          const bp = raw as Record<string, unknown>;
+          const bid = String(bp.booking_id ?? '');
+          if (!bid) continue;
+          const rawPlayer = bp.players;
+          const player = (Array.isArray(rawPlayer) ? rawPlayer[0] : rawPlayer) as Record<string, unknown> | null;
+          const pid = String(bp.player_id ?? '');
+          // Cross-reference payment_transactions for app/Stripe payments where paid_amount_cents is not stored in booking_participants
+          const txInfo = bid && pid ? txByBookingPlayer.get(bid)?.get(pid) : undefined;
+          const bpPaidCents = Number(bp.paid_amount_cents ?? 0) + Number(bp.wallet_amount_cents ?? 0);
+          // Fallback chain: tx amount → bp paid_amount_cents → share_amount_cents (when payment_status='paid')
+          const txAmount = txInfo?.amount_cents ?? 0;
+          const shareAmount = bp.payment_status === 'paid' ? Number(bp.share_amount_cents ?? 0) : 0;
+          const resolvedPaidCents = txAmount > 0 ? txAmount : (bpPaidCents > 0 ? Number(bp.paid_amount_cents ?? 0) : shareAmount);
+          const resolvedWalletCents = bpPaidCents > 0 ? Number(bp.wallet_amount_cents ?? 0) : 0;
+          // For app (Stripe) payments, method is null in BP but it's always 'card'
+          const resolvedMethod = (bp.payment_method as string | null) ?? txInfo?.method ?? (bp.payment_status === 'paid' ? 'card' : null);
+          const item = {
+            player_id: bp.player_id ?? null,
+            first_name: player?.first_name ?? null,
+            last_name: player?.last_name ?? null,
+            email: player?.email ?? null,
+            role: bp.role ?? null,
+            share_amount_cents: bp.share_amount_cents ?? 0,
+            payment_status: bp.payment_status ?? null,
+            payment_method: resolvedMethod,
+            paid_amount_cents: resolvedPaidCents,
+            wallet_amount_cents: resolvedWalletCents,
+          };
+          const list = participantsByBooking.get(bid) ?? [];
+          list.push(item);
+          participantsByBooking.set(bid, list);
+        }
+      }
+    }
+
     const transactions = (rows ?? []).map((t: Record<string, unknown>) => {
       const rawB = t.bookings;
       const b = (Array.isArray(rawB) ? rawB[0] : rawB) as Record<string, unknown> | null;
@@ -1201,6 +1282,7 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
       const club = (Array.isArray(rawClub) ? rawClub[0] : rawClub) as Record<string, unknown> | null;
       const rawPayer = t.players;
       const payer = (Array.isArray(rawPayer) ? rawPayer[0] : rawPayer) as Record<string, unknown> | null;
+      const bid = typeof t.booking_id === 'string' ? t.booking_id : null;
       return {
         id: t.id,
         amount_cents: t.amount_cents,
@@ -1216,6 +1298,7 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
         payer_first_name: payer?.first_name ?? null,
         payer_last_name: payer?.last_name ?? null,
         payer_email: payer?.email ?? null,
+        participants: bid ? participantsByBooking.get(bid) ?? [] : [],
       };
     });
 
@@ -2105,7 +2188,9 @@ async function processNewMatchPayment(
       timezone,
       total_price_cents,
       currency: 'EUR',
-      status: 'confirmed',
+      reservation_type: 'open_match',
+      // Split-payment: stays pending until all 4 players pay. Full-payment: confirmed immediately.
+      status: isPayFull ? 'confirmed' : 'pending_payment',
       source_channel,
     }])
     .select('id')
@@ -2284,7 +2369,9 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
           timezone,
           total_price_cents,
           currency: 'EUR',
-          status: 'confirmed',
+          reservation_type: 'open_match',
+          // Split-payment: stays pending until all 4 players pay. Full-payment: confirmed immediately.
+          status: isPayFull ? 'confirmed' : 'pending_payment',
           source_channel,
         }])
         .select('id')
