@@ -11,7 +11,7 @@ export async function refreshBookingStatusAfterParticipantPayment(
 ): Promise<void> {
   const { data: booking } = await supabase
     .from('bookings')
-    .select('id, status')
+    .select('id, status, reservation_type')
     .eq('id', bookingId)
     .maybeSingle();
   if (!booking || booking.status === 'cancelled') return;
@@ -26,7 +26,9 @@ export async function refreshBookingStatusAfterParticipantPayment(
 
   if (!parts?.length) return;
 
-  if (matchType === 'matchmaking') {
+  // open_match (app split-payment) and matchmaking both require all 4 players paid
+  const needsAllFour = booking.reservation_type === 'open_match' || matchType === 'matchmaking';
+  if (needsAllFour) {
     const allPaid = parts.length >= 4 && parts.every((p) => p.payment_status === 'paid');
     if (allPaid) {
       await supabase
