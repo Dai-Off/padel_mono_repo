@@ -16,7 +16,8 @@ import {
     Settings,
     Shield,
     UserCircle,
-    BookOpen
+    BookOpen,
+    Trophy,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -68,10 +69,15 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
             ],
         },
         {
-            title: 'Escuela y competición',
+            title: t('menu_torneos'),
+            items: [
+                { id: 'torneos', path: '/torneos', icon: Trophy, label: t('menu_torneos'), color: 'rgb(234, 179, 8)', bgColor: 'rgba(234, 179, 8, 0.08)' },
+            ],
+        },
+        {
+            title: 'Escuela',
             items: [
                 { id: 'escuela', path: '/escuela', icon: Award, label: t('menu_escuela'), color: 'rgb(249, 115, 22)', bgColor: 'rgba(249, 115, 22, 0.06)' },
-                { id: 'torneos', path: '/torneos', icon: Award, label: t('menu_torneos'), color: 'rgb(234, 179, 8)', bgColor: 'rgba(234, 179, 8, 0.06)' },
                 { id: 'contenido-aprendizaje', path: '/contenido-aprendizaje', icon: BookOpen, label: t('menu_learning_content'), color: 'rgb(99, 102, 241)', bgColor: 'rgba(99, 102, 241, 0.06)' },
             ],
         },
