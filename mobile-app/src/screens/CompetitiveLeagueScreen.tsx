@@ -38,7 +38,7 @@ const DEFAULT_FORM: SearchForm = {
   day: 'hoy',
   time: 'tarde',
   preferred_side: 'any',
-  gender: 'mixed',
+  gender: 'any',
   search_area: 'club',
 };
 
@@ -116,23 +116,6 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
     }
   }, []);
 
-  const refreshStatus = useCallback(async () => {
-    const token = session?.access_token ?? null;
-    if (!token) return;
-    const s = await fetchMatchmakingStatus(token);
-    setStatus(s);
-    if (s?.status === 'matched') {
-      const p = await fetchMatchmakingProposal(token);
-      setProposal(p);
-      setStep('found');
-    } else if (s?.status === 'searching') {
-      setStep('queue');
-      setProposal(null);
-    } else {
-      setProposal(null);
-    }
-  }, [session?.access_token]);
-
   const pollStatus = useCallback(async () => {
     const token = session?.access_token ?? null;
     if (!token) return;
@@ -155,6 +138,25 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
       void pollStatus();
     }, 5000);
   }, [clearPollTimer, session?.access_token]);
+
+  const refreshStatus = useCallback(async () => {
+    const token = session?.access_token ?? null;
+    if (!token) return;
+    const s = await fetchMatchmakingStatus(token);
+    setStatus(s);
+    if (s?.status === 'matched') {
+      clearPollTimer();
+      const p = await fetchMatchmakingProposal(token);
+      setProposal(p);
+      setStep('found');
+    } else if (s?.status === 'searching') {
+      setStep('queue');
+      setProposal(null);
+      void pollStatus();
+    } else {
+      setProposal(null);
+    }
+  }, [clearPollTimer, pollStatus, session?.access_token]);
 
   useEffect(() => {
     void fetchMatchmakingLeagueConfig().then(setLeagueRows);
@@ -716,6 +718,7 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
             title="Modalidad"
             sectionIcon="shield-outline"
             options={[
+              { id: 'any', label: 'Cualquiera', iconName: 'ellipse-outline' },
               { id: 'male', label: 'Masculino', iconName: 'person-outline' },
               { id: 'female', label: 'Femenino', iconName: 'woman-outline' },
               { id: 'mixed', label: 'Mixto', iconName: 'people-outline' },
@@ -785,7 +788,13 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
             </View>
             <View style={styles.queuePlayersBox}>
               <Text style={styles.queuePlayersCaption}>Jugadores en cola</Text>
-              <Text style={styles.queuePlayersValue}>144</Text>
+              <Text style={styles.queuePlayersValue}>
+                {status?.searching_in_club_count != null
+                  ? String(status.searching_in_club_count)
+                  : status?.searching_count != null
+                    ? String(status.searching_count)
+                    : '—'}
+              </Text>
             </View>
           </View>
 

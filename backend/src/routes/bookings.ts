@@ -200,6 +200,22 @@ async function hasCourtConflict(params: {
     return { conflict: true, reason: 'Rango horario inválido' };
   }
 
+  const { data: courtRow, error: cMetaErr } = await supabase
+    .from('courts')
+    .select('club_id, is_hidden, status')
+    .eq('id', params.courtId)
+    .maybeSingle();
+  if (cMetaErr) return { conflict: true, reason: cMetaErr.message };
+  if (!courtRow) return { conflict: true, reason: 'Pista no encontrada' };
+  if ((courtRow as { is_hidden?: boolean | null }).is_hidden) {
+    return { conflict: true, reason: 'Esta pista no admite reservas (uso interno)' };
+  }
+  const cStatus = (courtRow as { status?: string | null }).status;
+  if (cStatus && cStatus !== 'operational') {
+    return { conflict: true, reason: 'La pista no está operativa' };
+  }
+  const preClubId = (courtRow as { club_id?: string | null }).club_id;
+
   // 1) Conflicto contra bookings existentes
   let q = supabase
     .from('bookings')
@@ -221,13 +237,7 @@ async function hasCourtConflict(params: {
   }
 
   // 2) Conflicto contra cursos de escuela activos
-  const { data: court, error: cErr } = await supabase
-    .from('courts')
-    .select('club_id')
-    .eq('id', params.courtId)
-    .maybeSingle();
-  if (cErr) return { conflict: true, reason: cErr.message };
-  const clubId = (court as { club_id?: string } | null)?.club_id;
+  const clubId = preClubId ?? null;
   if (!clubId) return { conflict: false };
 
   const dateStr = params.startAt.slice(0, 10);

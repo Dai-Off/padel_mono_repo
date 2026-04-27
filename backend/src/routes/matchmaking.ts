@@ -14,6 +14,35 @@ import {
 import { closeActiveMatchmakingSeason } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 
+async function countActiveSearching(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string | null,
+): Promise<{ total: number; in_club: number | null }> {
+  const nowIso = new Date().toISOString();
+  const orExp = `expires_at.is.null,expires_at.gt.${nowIso}`;
+
+  const { count: total, error: e1 } = await supabase
+    .from('matchmaking_pool')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'searching')
+    .or(orExp);
+  if (e1) console.warn('[matchmaking/status] count total:', e1.message);
+
+  let inClub: number | null = null;
+  if (clubId) {
+    const { count, error: e2 } = await supabase
+      .from('matchmaking_pool')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'searching')
+      .eq('club_id', clubId)
+      .or(orExp);
+    if (e2) console.warn('[matchmaking/status] count club:', e2.message);
+    else inClub = count ?? 0;
+  }
+
+  return { total: total ?? 0, in_club: inClub };
+}
+
 const EXPANSION_KINDS = new Set<string>([
   'side_any',
   'gender_any',
@@ -23,7 +52,17 @@ const EXPANSION_KINDS = new Set<string>([
   'near_group_gender',
 ]);
 
+let lastStatusTriggeredCycleMs = 0;
+const STATUS_MATCHMAKING_CYCLE_THROTTLE_MS = 20_000;
+
 const router = Router();
+
+/** Evita 304/ETag en el cliente: el estado de cola debe verse siempre fresco. */
+router.use((_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  res.set('Pragma', 'no-cache');
+  next();
+});
 
 /**
  * @openapi
@@ -135,7 +174,7 @@ router.post('/join', async (req: Request, res: Response) => {
   }
   const { data: pl, error: e1 } = await supabase
     .from('players')
-    .select('onboarding_completed')
+    .select('onboarding_completed, sex')
     .eq('id', playerId)
     .maybeSingle();
   if (e1) return res.status(500).json({ ok: false, error: e1.message });
@@ -153,9 +192,13 @@ router.post('/join', async (req: Request, res: Response) => {
 
   const side =
     preferred_side && ['drive', 'backhand', 'any'].includes(preferred_side) ? preferred_side : null;
-  const g = typeof gender === 'string' ? gender : 'any';
+  let g = typeof gender === 'string' ? gender : 'any';
   if (!['male', 'female', 'mixed', 'any'].includes(g)) {
     return res.status(400).json({ ok: false, error: 'gender debe ser male, female, mixed o any' });
+  }
+  // mixed exige 2M+2F con sexo en perfil; si `sex` es null el cuarteto nunca pasaba validación biológica
+  if (g === 'mixed' && !(pl as { sex?: string | null }).sex) {
+    g = 'any';
   }
   const { error: insErr } = await supabase.from('matchmaking_pool').insert({
     player_id: playerId,
@@ -174,6 +217,9 @@ router.post('/join', async (req: Request, res: Response) => {
     last_expansion_prompt_at: null,
   });
   if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
+  setImmediate(() => {
+    runMatchmakingCycle().catch((e) => console.warn('[matchmaking] post-join run cycle:', (e as Error).message));
+  });
   return res.json({ ok: true });
 });
 
@@ -202,33 +248,75 @@ router.delete('/leave', async (req: Request, res: Response) => {
  *     tags: [Matchmaking]
  *     summary: Estado en cola / partido propuesto
  *     security: [{ bearerAuth: [] }]
+ *     description: |
+ *       Incluye `searching_count` (búsquedas activas) y, si tu fila tiene `club_id`, `searching_in_club_count`.
+ *       Con `status: searching` el servidor puede disparar un ciclo de emparejamiento throttled (≈20s)
+ *       además del cron, para entornos sin tarea programada.
  *     responses:
  *       200:
  *         content:
  *           application/json:
  *             examples:
  *               ok:
- *                 value: { ok: true, status: not_in_pool, match_id: null }
+ *                 value: { ok: true, status: not_in_pool, match_id: null, searching_count: 3, searching_in_club_count: null }
  */
 router.get('/status', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
-  const blockedUntil = await getMatchmakingBlockUntil(playerId);
-  if (blockedUntil) {
-    return res.json({ ok: true, status: 'blocked', match_id: null, expansion_offer: null, blocked_until: blockedUntil });
-  }
   const supabase = getSupabaseServiceRoleClient();
+  const blockedUntil = await getMatchmakingBlockUntil(playerId);
+
   const { data: row } = await supabase
     .from('matchmaking_pool')
-    .select('status, proposed_match_id, expansion_offer')
+    .select('status, proposed_match_id, expansion_offer, club_id')
     .eq('player_id', playerId)
     .maybeSingle();
-  if (!row) return res.json({ ok: true, status: 'not_in_pool', match_id: null, expansion_offer: null });
+  const myClubId = (row as { club_id?: string | null } | null)?.club_id ?? null;
+  const counts = await countActiveSearching(supabase, myClubId);
+
+  if (blockedUntil) {
+    return res.json({
+      ok: true,
+      status: 'blocked',
+      match_id: null,
+      expansion_offer: null,
+      blocked_until: blockedUntil,
+      searching_count: counts.total,
+      searching_in_club_count: counts.in_club,
+    });
+  }
+
+  if (!row) {
+    return res.json({
+      ok: true,
+      status: 'not_in_pool',
+      match_id: null,
+      expansion_offer: null,
+      searching_count: counts.total,
+      searching_in_club_count: counts.in_club,
+    });
+  }
+
+  const st = (row as { status: string }).status;
+  if (st === 'searching') {
+    const t = Date.now();
+    if (t - lastStatusTriggeredCycleMs >= STATUS_MATCHMAKING_CYCLE_THROTTLE_MS) {
+      lastStatusTriggeredCycleMs = t;
+      setImmediate(() => {
+        runMatchmakingCycle().catch((e) =>
+          console.warn('[matchmaking] status-poll run cycle:', (e as Error).message),
+        );
+      });
+    }
+  }
+
   return res.json({
     ok: true,
-    status: (row as { status: string }).status,
+    status: st,
     match_id: (row as { proposed_match_id: string | null }).proposed_match_id,
     expansion_offer: (row as { expansion_offer?: unknown }).expansion_offer ?? null,
+    searching_count: counts.total,
+    searching_in_club_count: counts.in_club,
   });
 });
 
