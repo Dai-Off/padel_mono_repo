@@ -1,5 +1,18 @@
 import { apiFetchWithAuth } from './api';
 
+export type PaymentParticipant = {
+  player_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  role: 'organizer' | 'guest' | null;
+  share_amount_cents: number;
+  payment_status: 'pending' | 'paid' | null;
+  payment_method: 'cash' | 'card' | 'wallet' | null;
+  paid_amount_cents: number;
+  wallet_amount_cents: number;
+};
+
 export type PaymentTransaction = {
   id: string;
   amount_cents: number;
@@ -15,6 +28,7 @@ export type PaymentTransaction = {
   payer_first_name?: string | null;
   payer_last_name?: string | null;
   payer_email?: string | null;
+  participants?: PaymentParticipant[];
 };
 
 export type CashClosingBookingExpected = {

@@ -333,6 +333,13 @@ const useClubData = (dateOrStr: Date | string) => {
                         if (rawDate !== dateStr) return;
                         const mapped = mapBookings([raw], courtsRef.current)[0];
                         if (!mapped) return;
+                        // When an open_match transitions from pending_payment → confirmed (all 4 paid),
+                        // it won't be in the current list. Force a fresh fetch to get full player data.
+                        if (raw.reservation_type === 'open_match' && raw.status === 'confirmed') {
+                            delete bookingsCache[dateStr];
+                            fetchData();
+                            return;
+                        }
                         setReservations(prev =>
                             prev.map(r => {
                                 if (r.id !== mapped.id) return r;
@@ -491,7 +498,10 @@ function schedulePendingTournamentStartClear(tournamentId: string, expectedSeq: 
 // Pure mapping function — no network calls
 function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
     const courtMap = new Map(courtsData.map(c => [c.id, c.name]));
-    return rawBookings.map((b: any) => {
+    return rawBookings
+        // open_match bookings created by app are invisible until all 4 players pay (status becomes confirmed)
+        .filter((b: any) => !(b.reservation_type === 'open_match' && b.status === 'pending_payment'))
+        .map((b: any) => {
         const start = new Date(b.start_at);
         const organizer = b.players;
         const bookingType = b.reservation_type ?? b.booking_type ?? 'standard';
@@ -504,6 +514,17 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
                     ? `${organizer.first_name} ${organizer.last_name}`
                     : '';
         const isMaintenance = typeof b.notes === 'string' && b.notes.includes('__COURT_MAINTENANCE__');
+
+        // Build a per-player payment map from payment_transactions (authoritative for Stripe/app payments)
+        const txByPlayer = new Map<string, { amount: number; method: string | null }>();
+        for (const t of (b.payment_transactions || []) as any[]) {
+            if (t.status !== 'succeeded' || !t.payer_player_id) continue;
+            const prev = txByPlayer.get(t.payer_player_id) ?? { amount: 0, method: null };
+            const stripeId = typeof t.stripe_payment_intent_id === 'string' ? t.stripe_payment_intent_id : '';
+            const method = stripeId.startsWith('manual_') ? (stripeId.split('_')[1] ?? null) : 'card';
+            txByPlayer.set(t.payer_player_id, { amount: prev.amount + (t.amount_cents ?? 0), method: prev.method ?? method });
+        }
+
         return {
             id: b.id,
             courtId: b.court_id,
@@ -518,31 +539,52 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
             notes: b.notes ?? undefined,
             locationId: 'sede-central',
             totalPrice: b.total_price_cents != null ? b.total_price_cents / 100 : undefined,
-            totalPaidCents: (b.payment_transactions || [])
-                .filter((t: any) => t.status === 'succeeded' && typeof t.stripe_payment_intent_id === 'string' && t.stripe_payment_intent_id.startsWith('manual_'))
-                .reduce((sum: number, t: any) => sum + (t.amount_cents ?? 0), 0),
+            totalPaidCents: (() => {
+                // 1st priority: payment_transactions (Stripe/app payments and manual)
+                const txTotal = Array.from(txByPlayer.values()).reduce((sum, info) => sum + info.amount, 0);
+                if (txTotal > 0) return txTotal;
+                // 2nd priority: booking_participants.paid_amount_cents (manual payments recorded directly)
+                const participants = (b.booking_participants || []) as any[];
+                const bpTotal = participants.reduce((sum: number, p: any) => sum + (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0), 0);
+                if (bpTotal > 0) return bpTotal;
+                // 3rd priority: for app payments, payment_status='paid' + share_amount_cents is the source of truth
+                return participants
+                    .filter((p: any) => p.payment_status === 'paid')
+                    .reduce((sum: number, p: any) => sum + (p.share_amount_cents ?? 0), 0);
+            })(),
             detailedPlayers: (() => {
-                const txByPlayer = new Map<string, { amount: number; method: string | null }>();
-                (b.payment_transactions || [])
-                    .filter((t: any) => t.status === 'succeeded' && typeof t.stripe_payment_intent_id === 'string' && t.stripe_payment_intent_id.startsWith('manual_'))
-                    .forEach((t: any) => {
-                        const method = t.stripe_payment_intent_id.split('_')[1] ?? null;
-                        const prev = txByPlayer.get(t.payer_player_id);
-                        txByPlayer.set(t.payer_player_id, {
-                            amount: (prev?.amount ?? 0) + (t.amount_cents ?? 0),
-                            method: method,
-                        });
-                    });
+                if (bookingType === 'tournament') {
+                    const link = Array.isArray(b.tournament_booking_links) ? b.tournament_booking_links[0] : b.tournament_booking_links;
+                    const tournament = link ? (Array.isArray(link.tournaments) ? link.tournaments[0] : link.tournaments) : null;
+                    const inscriptions: any[] = tournament?.tournament_inscriptions ?? [];
+                    const active = inscriptions.filter((ins: any) => ins.status === 'confirmed' || ins.status === 'pending');
+                    const players: { name: string; isMember: boolean; level: number; paidAmount: number; paymentMethod: null }[] = [];
+                    for (const ins of active) {
+                        const p1 = Array.isArray(ins.players_1) ? ins.players_1[0] : ins.players_1;
+                        const p2 = Array.isArray(ins.players_2) ? ins.players_2[0] : ins.players_2;
+                        if (p1) players.push({ name: `${p1.first_name} ${p1.last_name}`, isMember: false, level: p1.elo_rating ?? 0, paidAmount: 0, paymentMethod: null });
+                        if (p2) players.push({ name: `${p2.first_name} ${p2.last_name}`, isMember: false, level: p2.elo_rating ?? 0, paidAmount: 0, paymentMethod: null });
+                    }
+                    return players;
+                }
                 const participants = (b.booking_participants || []) as any[];
                 if (participants.length === 0 && organizer) {
-                    const tx = txByPlayer.get(b.organizer_player_id);
-                    return [{ name: playerName, isMember: false, level: 0, paidAmount: (tx?.amount ?? 0) / 100, paymentMethod: (tx?.method ?? null) as any }];
+                    // Only organizer, no booking_participants — use payment_transactions
+                    const txInfo = txByPlayer.get(b.organizer_player_id);
+                    return [{ name: playerName, isMember: false, level: 0, paidAmount: (txInfo?.amount ?? 0) / 100, paymentMethod: (txInfo?.method ?? null) as any }];
                 }
                 return participants.map((p: any) => {
                     const pl = Array.isArray(p.players) ? p.players[0] : p.players;
                     const name = pl ? `${pl.first_name} ${pl.last_name}` : '';
-                    const tx = txByPlayer.get(p.player_id);
-                    return { name, isMember: false, level: 0, paidAmount: (tx?.amount ?? 0) / 100, paymentMethod: (tx?.method ?? null) as any };
+                    const txInfo = p.player_id ? txByPlayer.get(p.player_id) : undefined;
+                    const paidFromTx = txInfo ? txInfo.amount / 100 : 0;
+                    const paidFromBp = ((p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0)) / 100;
+                    // Last resort: if payment_status='paid' but no amount recorded anywhere, use share_amount_cents
+                    const paidFromShare = p.payment_status === 'paid' ? ((p.share_amount_cents ?? 0) / 100) : 0;
+                    const paidAmount = paidFromTx > 0 ? paidFromTx : (paidFromBp > 0 ? paidFromBp : paidFromShare);
+                    // For app payments method is null in BP but they always pay via card (Stripe)
+                    const paymentMethod = (p.payment_method ?? txInfo?.method ?? (p.payment_status === 'paid' ? 'card' : null)) as any;
+                    return { name, isMember: false, level: pl?.elo_rating ?? 0, paidAmount, paymentMethod };
                 });
             })(),
             tournamentId: bookingType === 'tournament' ? (tournamentId ?? undefined) : undefined,

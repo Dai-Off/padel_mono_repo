@@ -9,9 +9,12 @@ import {
   Smartphone,
   TrendingUp,
   ChevronDown,
+  Banknote,
+  Wallet,
+  HelpCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { paymentsService, type PaymentTransaction } from '../../services/payments';
+import { paymentsService, type PaymentTransaction, type PaymentParticipant } from '../../services/payments';
 import { useTranslation } from 'react-i18next';
 import { PageSpinner } from '../Layout/PageSpinner';
 
@@ -29,7 +32,34 @@ type Payment = {
   amount: number;
   status: PaymentStatus;
   courtName?: string;
+  participants: PaymentParticipant[];
 };
+
+function participantName(p: PaymentParticipant): string {
+  const full = [p.first_name, p.last_name].filter(Boolean).join(' ').trim();
+  return full || p.email || 'Jugador';
+}
+
+function methodLabel(method: PaymentParticipant['payment_method']): string {
+  if (method === 'cash') return 'Efectivo';
+  if (method === 'card') return 'Tarjeta';
+  if (method === 'wallet') return 'Monedero';
+  return 'Sin pago';
+}
+
+function MethodIcon({ method }: { method: PaymentParticipant['payment_method'] }) {
+  if (method === 'cash') return <Banknote className="w-3.5 h-3.5 text-green-600" />;
+  if (method === 'card') return <CreditCard className="w-3.5 h-3.5 text-[#E31E24]" />;
+  if (method === 'wallet') return <Wallet className="w-3.5 h-3.5 text-blue-600" />;
+  return <HelpCircle className="w-3.5 h-3.5 text-gray-400" />;
+}
+
+function methodBadgeClass(method: PaymentParticipant['payment_method']): string {
+  if (method === 'cash') return 'bg-green-50 text-green-700 border-green-100';
+  if (method === 'card') return 'bg-red-50 text-[#E31E24] border-red-100';
+  if (method === 'wallet') return 'bg-blue-50 text-blue-700 border-blue-100';
+  return 'bg-gray-50 text-gray-500 border-gray-100';
+}
 
 function AnimSection({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
   const ref = useRef(null);
@@ -84,6 +114,7 @@ function toPayment(tx: PaymentTransaction): Payment {
     amount: Math.round((tx.amount_cents ?? 0) / 100),
     status: mapStatus(tx.status),
     courtName: tx.court_name ?? undefined,
+    participants: tx.participants ?? [],
   };
 }
 
@@ -338,22 +369,69 @@ export function ClubPaymentsTab({
             </div>
           ) : filteredPayments.length > 0 ? (
             filteredPayments.map((payment) => (
-              <div key={payment.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5 flex items-center gap-3">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${payment.method === 'TPV' ? 'bg-[#E31E24]/10' : 'bg-blue-50'}`}>
-                  {payment.method === 'TPV' ? <CreditCard className="w-4 h-4 text-[#E31E24]" /> : <Smartphone className="w-4 h-4 text-blue-600" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <p className="text-xs font-bold text-[#1A1A1A] truncate">{payment.client}</p>
-                    <p className="text-xs font-black text-[#1A1A1A]">EUR {payment.amount}</p>
+              <div key={payment.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5">
+                <div className="flex items-center gap-3">
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${payment.method === 'TPV' ? 'bg-[#E31E24]/10' : 'bg-blue-50'}`}>
+                    {payment.method === 'TPV' ? <CreditCard className="w-4 h-4 text-[#E31E24]" /> : <Smartphone className="w-4 h-4 text-blue-600" />}
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] text-gray-400">
-                    <span>{payment.concept}</span>
-                    {payment.courtName && <span>• {payment.courtName}</span>}
-                    <span>• {payment.time}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <p className="text-xs font-bold text-[#1A1A1A] truncate">{payment.client}</p>
+                      <p className="text-xs font-black text-[#1A1A1A]">EUR {payment.amount}</p>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                      <span>{payment.concept}</span>
+                      {payment.courtName && <span>• {payment.courtName}</span>}
+                      <span>• {payment.time}</span>
+                    </div>
                   </div>
+                  <PaymentStatusBadge status={payment.status} />
                 </div>
-                <PaymentStatusBadge status={payment.status} />
+                {payment.participants.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-50">
+                    <p className="text-[9px] font-bold text-gray-400 uppercase tracking-wider mb-2">Desglose por jugador</p>
+                    <div className="space-y-1.5">
+                      {payment.participants.map((participant, idx) => {
+                        const paidCents = (participant.paid_amount_cents ?? 0) + (participant.wallet_amount_cents ?? 0);
+                        const amountCents = paidCents > 0 ? paidCents : participant.share_amount_cents ?? 0;
+                        const amountEur = Math.round(amountCents / 100);
+                        const hasWalletSplit =
+                          (participant.paid_amount_cents ?? 0) > 0 && (participant.wallet_amount_cents ?? 0) > 0;
+                        return (
+                          <div
+                            key={`${payment.id}-${participant.player_id ?? idx}`}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="text-[11px] font-semibold text-[#1A1A1A] truncate">
+                                {participantName(participant)}
+                              </span>
+                              {participant.payment_status === 'pending' && (
+                                <span className="text-[9px] font-bold text-yellow-600">Pendiente</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[9px] font-bold ${methodBadgeClass(
+                                  participant.payment_method,
+                                )}`}
+                              >
+                                <MethodIcon method={participant.payment_method} />
+                                {methodLabel(participant.payment_method)}
+                                {hasWalletSplit && (
+                                  <span className="text-[8px] font-semibold opacity-70">+ Monedero</span>
+                                )}
+                              </span>
+                              <span className="text-[11px] font-black text-[#1A1A1A] tabular-nums">
+                                EUR {amountEur}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             ))
           ) : (

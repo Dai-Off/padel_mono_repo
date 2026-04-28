@@ -93,23 +93,31 @@ export const HoverTooltip: React.FC<HoverTooltipProps> = ({ reservation, anchorE
                     {player.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
                   </div>
                   <span className="text-gray-800 truncate">{player.name}</span>
-                  <span className="text-gray-500 text-[11px] ml-1">({player.isMember ? 'Socio' : 'No socio'})</span>
-                  <span className="text-gray-500 text-[11px] ml-1">(Nivel: {player.level.toFixed(2).replace('.', ',')})</span>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {player.paidAmount > 0 && player.paymentMethod && (
-                    <span className="flex items-center gap-0.5 text-[11px] text-gray-500" title={
-                      player.paymentMethod === 'cash' ? 'Efectivo' : player.paymentMethod === 'card' ? 'Tarjeta' : 'Wallet'
-                    }>
-                      {player.paymentMethod === 'cash' && <Banknote size={12} />}
-                      {player.paymentMethod === 'card' && <CreditCard size={12} />}
-                      {player.paymentMethod === 'wallet' && <Wallet size={12} />}
-                    </span>
+                  {reservation.booking_type !== 'tournament' && (
+                    <>
+                      <span className="text-gray-500 text-[11px] ml-1">({player.isMember ? 'Socio' : 'No socio'})</span>
+                      <span className="text-gray-500 text-[11px] ml-1">(Nivel: {player.level.toFixed(2).replace('.', ',')})</span>
+                    </>
                   )}
-                  <span className={`font-semibold ${player.paidAmount > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
-                    {player.paidAmount > 0 ? `${player.paidAmount.toFixed(2).replace('.', ',')} €` : 'Sin pago'}
-                  </span>
                 </div>
+                {reservation.booking_type === 'tournament' ? (
+                  <span className="text-[11px] font-semibold text-emerald-600 shrink-0">Inscripto</span>
+                ) : (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {player.paidAmount > 0 && player.paymentMethod && (
+                      <span className="flex items-center gap-0.5 text-[11px] text-gray-500" title={
+                        player.paymentMethod === 'cash' ? 'Efectivo' : player.paymentMethod === 'card' ? 'Tarjeta' : 'Wallet'
+                      }>
+                        {player.paymentMethod === 'cash' && <Banknote size={12} />}
+                        {player.paymentMethod === 'card' && <CreditCard size={12} />}
+                        {player.paymentMethod === 'wallet' && <Wallet size={12} />}
+                      </span>
+                    )}
+                    <span className={`font-semibold ${player.paidAmount > 0 ? 'text-emerald-600' : 'text-gray-400'}`}>
+                      {player.paidAmount > 0 ? `${player.paidAmount.toFixed(2).replace('.', ',')} €` : 'Sin pago'}
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
