@@ -5,7 +5,8 @@ import {
 } from 'lucide-react';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { useTranslation } from 'react-i18next';
-import { playerService } from '../../services/player';
+import { clubClientService } from '../../services/clubClients';
+import type { ClubClientTier } from '../../services/clubClients';
 import type { Player } from '../../types/api';
 import { toast } from 'sonner';
 
@@ -59,14 +60,33 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'deleted'>('all');
+  const [tierFilter, setTierFilter] = useState<'all' | ClubClientTier>('all');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
+  const [walletFilter, setWalletFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [schoolFilter, setSchoolFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [bookingsMin, setBookingsMin] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualForm, setManualForm] = useState({ first_name: '', last_name: '', phone: '', email: '' });
 
   const fetchPlayers = useCallback(async () => {
+    if (!clubId) {
+      setPlayers([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const list = await playerService.getAll(undefined, clubId);
+      const list = await clubClientService.list(clubId, {
+        q: searchQuery.trim() || undefined,
+        tier: tierFilter === 'all' ? undefined : tierFilter,
+        created_from: createdFrom || undefined,
+        created_to: createdTo || undefined,
+        has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+        has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
+        bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
+      });
       setPlayers(list ?? []);
     } catch (e) {
       console.error(e);
@@ -74,21 +94,13 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
     } finally {
       setLoading(false);
     }
-  }, [t, clubId]);
+  }, [t, clubId, searchQuery, tierFilter, createdFrom, createdTo, walletFilter, schoolFilter, bookingsMin]);
 
   useEffect(() => {
     fetchPlayers();
   }, [fetchPlayers]);
 
-  const filteredPlayers = players.filter((p) => {
-    const q = searchQuery.toLowerCase().trim();
-    const name = `${p.first_name} ${p.last_name}`.toLowerCase();
-    const email = (p.email ?? '').toLowerCase();
-    const phone = (p.phone ?? '').toLowerCase();
-    const matchSearch = !q || name.includes(q) || email.includes(q) || phone.includes(q);
-    const matchStatus = statusFilter === 'all' || p.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
+  const filteredPlayers = players.filter((p) => statusFilter === 'all' || p.status === statusFilter);
 
   const totalPlayers = players.length;
   const activePlayers = players.filter((p) => p.status === 'active').length;
@@ -96,6 +108,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
 
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!clubId) return;
     const first = manualForm.first_name.trim();
     const last = manualForm.last_name.trim();
     const phone = manualForm.phone.trim();
@@ -106,11 +119,12 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
     }
     setManualSubmitting(true);
     try {
-      await playerService.createManual({
+      await clubClientService.createManual({
+        club_id: clubId,
         first_name: first,
         last_name: last,
         phone,
-        email: email || undefined,
+        email: email || null,
       });
       toast.success(t('players_manual_success'));
       setManualOpen(false);
@@ -189,6 +203,116 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
               {t('players_manual_add')}
             </button>
           </div>
+        </div>
+
+        <div className="-mx-1 mt-3 flex items-end gap-2 overflow-x-auto px-1 pb-1">
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Nivel</span>
+            <div className="flex flex-nowrap items-center gap-1.5">
+              {(['all', 'vip', 'premium', 'standard', 'basic'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setTierFilter(k as 'all' | ClubClientTier)}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                    tierFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                  }`}
+                >
+                  {k === 'all' ? 'Todos' : k === 'vip' ? 'VIP' : k === 'premium' ? 'Premium' : k === 'standard' ? 'Standard' : 'Basic'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Fecha de alta</span>
+            <div className="flex flex-nowrap items-center gap-2">
+              <div className="flex flex-col gap-1">
+                <span className="px-1 text-[9px] font-bold text-gray-400">Desde</span>
+                <input
+                  type="date"
+                  value={createdFrom}
+                  onChange={(e) => setCreatedFrom(e.target.value)}
+                  className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                  aria-label="Alta desde"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="px-1 text-[9px] font-bold text-gray-400">Hasta</span>
+                <input
+                  type="date"
+                  value={createdTo}
+                  onChange={(e) => setCreatedTo(e.target.value)}
+                  className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                  aria-label="Alta hasta"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Monedero</span>
+            <div className="flex flex-nowrap items-center gap-1.5">
+              {(['any', 'yes', 'no'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setWalletFilter(k)}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                    walletFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                  }`}
+                >
+                  {k === 'any' ? 'Todos' : k === 'yes' ? 'Sí' : 'No'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Escuela</span>
+            <div className="flex flex-nowrap items-center gap-1.5">
+              {(['any', 'yes', 'no'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setSchoolFilter(k)}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                    schoolFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                  }`}
+                >
+                  {k === 'any' ? 'Todos' : k === 'yes' ? 'Sí' : 'No'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Reservas</span>
+            <input
+              type="number"
+              min={0}
+              value={bookingsMin}
+              onChange={(e) => setBookingsMin(e.target.value)}
+              className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+              placeholder="≥ 0"
+              aria-label="Reservas mínimo"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTierFilter('all');
+              setCreatedFrom('');
+              setCreatedTo('');
+              setWalletFilter('any');
+              setSchoolFilter('any');
+              setBookingsMin('');
+            }}
+            className="shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
+          >
+            Limpiar filtros
+          </button>
         </div>
       </div>
 

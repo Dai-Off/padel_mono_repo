@@ -30,7 +30,6 @@ import type { Court } from '../../types/court';
 
 // Players
 import { ClubPlayersTab } from '../Players/ClubPlayers';
-import { PlayerProfileTab } from '../Players/PlayerProfileTab';
 // Settings (Editar club / Configuración)
 import { ClubSettingsTab } from '../Settings/ClubSettings';
 
@@ -60,7 +59,6 @@ export const ClubDashboard = () => {
     const isPlayersPage = location.pathname === '/jugadores';
     const isConfigPage = location.pathname === '/configuracion';
     const isPersonalPage = location.pathname === '/personal';
-    const isPlayerProfilePage = location.pathname === '/mi-perfil';
     const isInventoryPage = location.pathname === '/inventario';
     const isSchoolPage = location.pathname === '/escuela';
     const isPaymentsPage = location.pathname === '/pagos';
@@ -134,7 +132,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isPlayerProfilePage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
+        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
             setLoading(false);
             return;
         }
@@ -147,7 +145,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isPlayerProfilePage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -252,8 +250,6 @@ export const ClubDashboard = () => {
                         <ClubSettingsTab initialClub={club} />
                     ) : isPersonalPage ? (
                         <ClubStaffTab clubId={club?.id ?? null} clubResolved={clubResolved} />
-                    ) : isPlayerProfilePage ? (
-                        <PlayerProfileTab />
                     ) : isInventoryPage ? (
                         <InventoryControl clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isSchoolPage ? (

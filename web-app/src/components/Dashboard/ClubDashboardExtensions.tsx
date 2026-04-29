@@ -22,6 +22,7 @@ import {
 import { toast } from 'sonner';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { clubClientService } from '../../services/clubClients';
+import type { ClubClientTier } from '../../services/clubClients';
 import { checkinService, type CheckinBookingItem } from '../../services/checkin';
 import type { Player } from '../../types/api';
 
@@ -290,6 +291,12 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'deleted'>('all');
+  const [tierFilter, setTierFilter] = useState<'all' | ClubClientTier>('all');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
+  const [walletFilter, setWalletFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [schoolFilter, setSchoolFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [bookingsMin, setBookingsMin] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -319,7 +326,15 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
     let cancelled = false;
     const tmr = window.setTimeout(async () => {
       try {
-        const list = await clubClientService.list(clubId, searchQuery.trim() || undefined);
+        const list = await clubClientService.list(clubId, {
+          q: searchQuery.trim() || undefined,
+          tier: tierFilter === 'all' ? undefined : tierFilter,
+          created_from: createdFrom || undefined,
+          created_to: createdTo || undefined,
+          has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+          has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
+          bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
+        });
         if (cancelled) return;
         setPlayers(list ?? []);
       } catch {
@@ -335,7 +350,7 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
       cancelled = true;
       window.clearTimeout(tmr);
     };
-  }, [clubResolved, clubId, searchQuery, t]);
+  }, [clubResolved, clubId, searchQuery, tierFilter, createdFrom, createdTo, walletFilter, schoolFilter, bookingsMin, t]);
 
   const filteredPlayers = useMemo(() => {
     return players.filter((p) => statusFilter === 'all' || p.status === statusFilter);
@@ -388,7 +403,15 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
     void (async () => {
       if (!clubId) return;
       try {
-        const list = await clubClientService.list(clubId, searchQuery.trim() || undefined);
+        const list = await clubClientService.list(clubId, {
+          q: searchQuery.trim() || undefined,
+          tier: tierFilter === 'all' ? undefined : tierFilter,
+          created_from: createdFrom || undefined,
+          created_to: createdTo || undefined,
+          has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+          has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
+          bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
+        });
         setPlayers(list ?? []);
       } catch {
         toast.error(t('crm_fetch_error'));
@@ -399,7 +422,15 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
   const handleExport = async () => {
     if (!clubId) return;
     try {
-      const blob = await clubClientService.exportCsv(clubId, searchQuery.trim() || undefined);
+      const blob = await clubClientService.exportCsv(clubId, {
+        q: searchQuery.trim() || undefined,
+        tier: tierFilter === 'all' ? undefined : tierFilter,
+        created_from: createdFrom || undefined,
+        created_to: createdTo || undefined,
+        has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+        has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
+        bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -603,43 +634,156 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
           </div>
 
           <div className="border-b border-gray-50 bg-gray-50/40 px-5 py-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="relative min-w-0 flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
-                <input
-                  type="text"
-                  placeholder={t('crm_search_placeholder')}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full rounded-2xl border border-gray-100 bg-white py-2.5 pl-10 pr-4 text-xs text-[#1A1A1A] placeholder-gray-300 focus:ring-2 focus:ring-[#E31E24]/20"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {(['all', 'active', 'deleted'] as const).map((s) => (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
+                  <input
+                    type="text"
+                    placeholder={t('crm_search_placeholder')}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full rounded-2xl border border-gray-100 bg-white py-2.5 pl-10 pr-4 text-xs text-[#1A1A1A] placeholder-gray-300 focus:ring-2 focus:ring-[#E31E24]/20"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
+                  {(['all', 'active', 'deleted'] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatusFilter(s)}
+                      className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                        statusFilter === s ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                      }`}
+                    >
+                      {s === 'all' ? t('players_filter_all') : s === 'active' ? t('players_filter_active') : t('players_filter_deleted')}
+                    </button>
+                  ))}
                   <button
-                    key={s}
                     type="button"
-                    onClick={() => setStatusFilter(s)}
-                    className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
-                      statusFilter === s ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
-                    }`}
+                    onClick={selectAllWithEmail}
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
                   >
-                    {s === 'all' ? t('players_filter_all') : s === 'active' ? t('players_filter_active') : t('players_filter_deleted')}
+                    {t('crm_select_all_email')}
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
+                  >
+                    {t('crm_clear_selection')}
+                  </button>
+                </div>
+              </div>
+
+              <div className="-mx-1 flex items-end gap-2 overflow-x-auto px-1 pb-1">
+                <div className="flex flex-col gap-1 shrink-0">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Nivel</span>
+                  <div className="flex flex-nowrap items-center gap-1.5">
+                    {(['all', 'vip', 'premium', 'standard', 'basic'] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setTierFilter(k as 'all' | ClubClientTier)}
+                        className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                          tierFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                        }`}
+                      >
+                        {k === 'all' ? 'Todos' : k === 'vip' ? 'VIP' : k === 'premium' ? 'Premium' : k === 'standard' ? 'Standard' : 'Basic'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 shrink-0">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Fecha de alta</span>
+                  <div className="flex flex-nowrap items-center gap-2">
+                    <div className="flex flex-col gap-1">
+                      <span className="px-1 text-[9px] font-bold text-gray-400">Desde</span>
+                      <input
+                        type="date"
+                        value={createdFrom}
+                        onChange={(e) => setCreatedFrom(e.target.value)}
+                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                        aria-label="Alta desde"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="px-1 text-[9px] font-bold text-gray-400">Hasta</span>
+                      <input
+                        type="date"
+                        value={createdTo}
+                        onChange={(e) => setCreatedTo(e.target.value)}
+                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                        aria-label="Alta hasta"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 shrink-0">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Monedero</span>
+                  <div className="flex flex-nowrap items-center gap-1.5">
+                    {(['any', 'yes', 'no'] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setWalletFilter(k)}
+                        className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                          walletFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                        }`}
+                      >
+                        {k === 'any' ? 'Todos' : k === 'yes' ? 'Sí' : 'No'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 shrink-0">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Escuela</span>
+                  <div className="flex flex-nowrap items-center gap-1.5">
+                    {(['any', 'yes', 'no'] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setSchoolFilter(k)}
+                        className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                          schoolFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                        }`}
+                      >
+                        {k === 'any' ? 'Todos' : k === 'yes' ? 'Sí' : 'No'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1 shrink-0">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Reservas</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={bookingsMin}
+                    onChange={(e) => setBookingsMin(e.target.value)}
+                    className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                    placeholder="≥ 0"
+                    aria-label="Reservas mínimo"
+                  />
+                </div>
+
                 <button
                   type="button"
-                  onClick={selectAllWithEmail}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
+                  onClick={() => {
+                    setTierFilter('all');
+                    setCreatedFrom('');
+                    setCreatedTo('');
+                    setWalletFilter('any');
+                    setSchoolFilter('any');
+                    setBookingsMin('');
+                  }}
+                  className="shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
                 >
-                  {t('crm_select_all_email')}
-                </button>
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
-                >
-                  {t('crm_clear_selection')}
+                  Limpiar filtros
                 </button>
               </div>
             </div>
@@ -942,7 +1086,7 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[10px] font-bold text-gray-500">ELO</label>
+                  <label className="mb-1 block text-[10px] font-bold text-gray-500">Nivel</label>
                   <input
                     value={editForm.elo_rating}
                     onChange={(e) => setEditForm((f) => ({ ...f, elo_rating: e.target.value }))}
