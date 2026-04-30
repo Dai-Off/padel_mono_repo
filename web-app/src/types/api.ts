@@ -13,6 +13,8 @@ export interface Player {
     gender?: 'male' | 'female' | 'other' | null;
     /** Suma de `wallet_transactions` en el club indicado al listar con `club_id` (centavos). */
     wallet_balance_cents?: number;
+    /** true si el jugador tiene reservas de tipo escuela en el club (school_course/group/individual). */
+    has_school_booking?: boolean;
 }
 
 export interface ClubOwner {

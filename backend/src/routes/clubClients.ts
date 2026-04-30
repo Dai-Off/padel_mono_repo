@@ -80,7 +80,49 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, players: data ?? [] });
+
+    const players = data ?? [];
+    const playerIds = players.map((p: Record<string, unknown>) => p.id as string);
+
+    // Wallet balance per player (batch)
+    const walletBalanceMap = new Map<string, number>();
+    if (playerIds.length > 0) {
+      const { data: walletData } = await supabase
+        .from('wallet_transactions')
+        .select('player_id, amount_cents')
+        .eq('club_id', club_id)
+        .in('player_id', playerIds);
+      for (const tx of walletData ?? []) {
+        walletBalanceMap.set(tx.player_id, (walletBalanceMap.get(tx.player_id) ?? 0) + Number(tx.amount_cents || 0));
+      }
+    }
+
+    // School booking flag per player (batch via courts of this club)
+    const schoolPlayerIds = new Set<string>();
+    if (playerIds.length > 0) {
+      const { data: courtsData } = await supabase.from('courts').select('id').eq('club_id', club_id);
+      const courtIds = (courtsData ?? []).map((c: Record<string, unknown>) => c.id as string);
+      if (courtIds.length > 0) {
+        const { data: schoolData } = await supabase
+          .from('bookings')
+          .select('organizer_player_id')
+          .in('reservation_type', ['school_course', 'school_group', 'school_individual'])
+          .in('organizer_player_id', playerIds)
+          .in('court_id', courtIds)
+          .neq('status', 'cancelled');
+        for (const b of schoolData ?? []) {
+          if (b.organizer_player_id) schoolPlayerIds.add(b.organizer_player_id);
+        }
+      }
+    }
+
+    const enriched = players.map((p: Record<string, unknown>) => ({
+      ...p,
+      wallet_balance_cents: walletBalanceMap.get(p.id as string) ?? 0,
+      has_school_booking: schoolPlayerIds.has(p.id as string),
+    }));
+
+    return res.json({ ok: true, players: enriched });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

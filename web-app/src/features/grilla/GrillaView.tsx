@@ -696,6 +696,11 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
+  const isPastDate = useMemo(() => {
+    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const selectedMidnight = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+    return selectedMidnight < todayMidnight;
+  }, [today, selectedDate]);
   const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
 
   const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
@@ -1824,7 +1829,7 @@ function GrillaViewInner() {
                     {/* Heading row with mobile hamburger */}
                     <div className="flex items-center gap-2 mb-1.5">
                       {isMobileDevice && (
-                        <button className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 flex-shrink-0 transition-colors">
+                        <button onClick={() => setIsMenuOpen(true)} className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 flex-shrink-0 transition-colors">
                           <Menu className="w-4 h-4 text-gray-600" />
                         </button>
                       )}
@@ -2174,6 +2179,9 @@ function GrillaViewInner() {
                               isCompactView={false}
                               totalCourts={gridCourts.length}
                               typeColorOverrides={typeColorOverrides}
+                              isPastDate={isPastDate}
+                              isToday={activeChip === 'today'}
+                              nowMinutes={nowMinutes}
                             />
                           ))}
                         </div>
@@ -2232,6 +2240,9 @@ function GrillaViewInner() {
                           onHoverStart={(res, el) => setHoveredTooltip({ res, el })}
                           onHoverEnd={() => setHoveredTooltip(null)}
                           typeColorOverrides={typeColorOverrides}
+                          isPastDate={isPastDate}
+                          isToday={activeChip === 'today'}
+                          nowMinutes={nowMinutes}
                         />
                       ))}
                     </div>

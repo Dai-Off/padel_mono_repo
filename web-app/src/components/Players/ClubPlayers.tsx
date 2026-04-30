@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Users, TrendingUp, Search, Eye, Mail, Phone, Zap, Plus, Loader2, Wallet,
+  BookOpen, Calendar,
 } from 'lucide-react';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { useTranslation } from 'react-i18next';
@@ -64,9 +65,10 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
   const [manualForm, setManualForm] = useState({ first_name: '', last_name: '', phone: '', email: '' });
 
   const fetchPlayers = useCallback(async () => {
+    if (!clubId) return;
     setLoading(true);
     try {
-      const list = await playerService.getAll(undefined, clubId);
+      const list = await playerService.getClubClients(clubId);
       setPlayers(list ?? []);
     } catch (e) {
       console.error(e);
@@ -126,38 +128,24 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-5">
-      <div className="relative overflow-hidden rounded-2xl" style={{ background: 'linear-gradient(160deg, #1A1A1A 0%, #2A2A2A 100%)' }}>
-        <div className="relative z-10 p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <PulseDot color="#5B8DEE" />
-            <span className="text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">{t('players_club_section')}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: t('players_total'), value: String(totalPlayers), icon: <Users className="w-4 h-4" />, color: '#5B8DEE' },
-              { label: t('players_active'), value: String(activePlayers), icon: <TrendingUp className="w-4 h-4" />, color: '#22C55E' },
-              { label: t('players_with_account'), value: String(withAccount), icon: <Zap className="w-4 h-4" />, color: '#F59E0B' },
-            ].map((s, i) => (
-              <motion.div
-                key={i}
-                className="p-3.5 rounded-2xl bg-white/5 border border-white/5"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 + i * 0.06 }}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${s.color}20` }}>
-                    <span style={{ color: s.color }}>{s.icon}</span>
-                  </div>
-                </div>
-                <p className="text-xl font-black text-white">{s.value}</p>
-                <p className="text-[10px] text-white/30 mt-0.5">{s.label}</p>
-              </motion.div>
-            ))}
-          </div>
+      {/* Stats — compact inline strip */}
+      <div className="flex items-center gap-1 px-1">
+        <PulseDot color="#5B8DEE" />
+        <div className="flex items-center gap-4 ml-2">
+          {[
+            { label: t('players_total'), value: totalPlayers },
+            { label: t('players_active'), value: activePlayers },
+            { label: t('players_with_account'), value: withAccount },
+          ].map((s, i) => (
+            <span key={i} className="flex items-center gap-1.5 text-[11px] text-gray-500">
+              <span className="font-bold text-[#1A1A1A]">{s.value}</span>
+              {s.label}
+            </span>
+          ))}
         </div>
       </div>
 
+      {/* Search + status + add */}
       <div className="bg-white rounded-2xl border border-gray-100 p-4">
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="flex-1 relative">
@@ -192,6 +180,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
         </div>
       </div>
 
+      {/* Player list */}
       {loading ? (
         <PageSpinner />
       ) : (
@@ -199,78 +188,86 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
           {filteredPlayers.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm">{t('players_empty')}</div>
           ) : (
-            filteredPlayers.map((player) => (
-              <div
-                key={player.id}
-                className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-[#1A1A1A] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                    {initials(player.first_name, player.last_name)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5 flex-wrap">
-                      <p className="text-xs font-bold text-[#1A1A1A] truncate">
-                        {player.first_name} {player.last_name}
-                      </p>
-                      <span className="px-1.5 py-0.5 rounded-lg bg-purple-50 text-purple-600 text-[9px] font-bold border border-purple-100">
-                        {t('players_level_badge', { n: player.elo_rating })}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <PulseDot color={player.status === 'active' ? '#22C55E' : '#9CA3AF'} />
-                        <span className="text-[9px] text-gray-400">
-                          {player.status === 'active' ? t('players_filter_active') : player.status}
+            filteredPlayers.map((player) => {
+              const hasWallet = typeof player.wallet_balance_cents === 'number' && player.wallet_balance_cents > 0;
+              const hasSchool = player.has_school_booking === true;
+              return (
+                <div key={player.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-[#1A1A1A] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+                      {initials(player.first_name, player.last_name)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                        <p className="text-xs font-bold text-[#1A1A1A] truncate">
+                          {player.first_name} {player.last_name}
+                        </p>
+                        <span className="px-1.5 py-0.5 rounded-lg bg-purple-50 text-purple-600 text-[9px] font-bold border border-purple-100">
+                          {t('players_level_badge', { n: player.elo_rating })}
+                        </span>
+                        {hasWallet && (
+                          <span className="px-1.5 py-0.5 rounded-lg bg-emerald-50 text-emerald-600 text-[9px] font-bold border border-emerald-100 flex items-center gap-0.5">
+                            <Wallet className="w-2.5 h-2.5" /> Monedero
+                          </span>
+                        )}
+                        {hasSchool && (
+                          <span className="px-1.5 py-0.5 rounded-lg bg-orange-50 text-orange-600 text-[9px] font-bold border border-orange-100 flex items-center gap-0.5">
+                            <BookOpen className="w-2.5 h-2.5" /> Escuela
+                          </span>
+                        )}
+                        <div className="flex items-center gap-1">
+                          <PulseDot color={player.status === 'active' ? '#22C55E' : '#9CA3AF'} />
+                          <span className="text-[9px] text-gray-400">
+                            {player.status === 'active' ? t('players_filter_active') : player.status}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-gray-500">
+                        <span className="flex items-center gap-1">
+                          <Phone className="w-3 h-3 shrink-0 text-gray-400" />
+                          {player.phone?.trim() ? player.phone : <span className="text-amber-600/90">{t('players_no_phone')}</span>}
+                        </span>
+                        <span>{player.email ? player.email : t('players_no_email')}</span>
+                        <span className="flex items-center gap-1 text-gray-400">
+                          <Calendar className="w-3 h-3 shrink-0" />
+                          {formatDate(player.created_at)}
                         </span>
                       </div>
+                      {hasWallet && (
+                        <div className="sm:hidden mt-1 flex items-center gap-1.5 text-[10px]">
+                          <Wallet className="w-3 h-3 shrink-0 text-emerald-500" />
+                          <span className="text-gray-400">{t('players_balance_label')}</span>
+                          <span className="font-bold tabular-nums text-emerald-600">
+                            {formatBalanceCents(player.wallet_balance_cents!, currency)}
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-500">
-                      <span className="flex items-center gap-1">
-                        <Phone className="w-3 h-3 shrink-0 text-gray-400" />
-                        {player.phone?.trim() ? player.phone : <span className="text-amber-600/90">{t('players_no_phone')}</span>}
-                      </span>
-                      <span>{player.email ? player.email : t('players_no_email')}</span>
-                    </div>
-                    {clubId && typeof player.wallet_balance_cents === 'number' && (
-                      <div className="sm:hidden mt-1 flex items-center gap-1.5 text-[10px]">
-                        <Wallet className="w-3 h-3 shrink-0 text-gray-400" />
-                        <span className="text-gray-400">{t('players_balance_label')}</span>
-                        <span
-                          className={`font-bold tabular-nums ${
-                            player.wallet_balance_cents < 0 ? 'text-red-600' : 'text-[#1A1A1A]'
-                          }`}
-                        >
-                          {formatBalanceCents(player.wallet_balance_cents, currency)}
+                    {hasWallet && (
+                      <div className="hidden sm:flex flex-col items-end justify-center px-2 min-w-[6.5rem] flex-shrink-0 text-right border-l border-gray-50 pl-3 ml-1">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">{t('players_balance_label')}</span>
+                        <span className="text-xs font-bold tabular-nums text-emerald-600">
+                          {formatBalanceCents(player.wallet_balance_cents!, currency)}
                         </span>
                       </div>
                     )}
+                    <motion.button
+                      type="button"
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => setSelectedPlayer(player)}
+                      className="w-9 h-9 rounded-xl border border-gray-100 flex items-center justify-center hover:bg-gray-50 flex-shrink-0"
+                    >
+                      <Eye className="w-4 h-4 text-gray-400" />
+                    </motion.button>
                   </div>
-                  {clubId && typeof player.wallet_balance_cents === 'number' && (
-                    <div className="hidden sm:flex flex-col items-end justify-center px-2 min-w-[6.5rem] flex-shrink-0 text-right border-l border-gray-50 pl-3 ml-1">
-                      <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wide">{t('players_balance_label')}</span>
-                      <span
-                        className={`text-xs font-bold tabular-nums ${
-                          player.wallet_balance_cents < 0 ? 'text-red-600' : 'text-[#1A1A1A]'
-                        }`}
-                      >
-                        {formatBalanceCents(player.wallet_balance_cents, currency)}
-                      </span>
-                    </div>
-                  )}
-                  <motion.button
-                    type="button"
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => setSelectedPlayer(player)}
-                    className="w-9 h-9 rounded-xl border border-gray-100 flex items-center justify-center hover:bg-gray-50 flex-shrink-0"
-                  >
-                    <Eye className="w-4 h-4 text-gray-400" />
-                  </motion.button>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
 
+      {/* Player detail modal */}
       <AnimatePresence>
         {selectedPlayer && (
           <>
@@ -324,27 +321,25 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                     )}
                     <span className="flex items-center gap-1">
                       <Phone className="w-3 h-3 shrink-0" />
-                      {selectedPlayer.phone?.trim() ? (
-                        selectedPlayer.phone
-                      ) : (
-                        <span className="text-amber-700">{t('players_no_phone')}</span>
-                      )}
+                      {selectedPlayer.phone?.trim() ? selectedPlayer.phone : <span className="text-amber-700">{t('players_no_phone')}</span>}
                     </span>
                     <span className="flex items-center gap-1">
                       <Zap className="w-3 h-3" />
                       {t('players_level_badge', { n: selectedPlayer.elo_rating })}
                     </span>
-                    {clubId && typeof selectedPlayer.wallet_balance_cents === 'number' && (
+                    {typeof selectedPlayer.wallet_balance_cents === 'number' && (
                       <span className="flex items-center gap-1">
                         <Wallet className="w-3 h-3 shrink-0" />
                         {t('players_balance_label')}:{' '}
-                        <span
-                          className={
-                            selectedPlayer.wallet_balance_cents < 0 ? 'text-red-600 font-semibold' : 'text-[#1A1A1A] font-semibold'
-                          }
-                        >
+                        <span className={selectedPlayer.wallet_balance_cents < 0 ? 'text-red-600 font-semibold' : 'text-emerald-600 font-semibold'}>
                           {formatBalanceCents(selectedPlayer.wallet_balance_cents, currency)}
                         </span>
+                      </span>
+                    )}
+                    {selectedPlayer.has_school_booking && (
+                      <span className="flex items-center gap-1 text-orange-500 font-semibold">
+                        <BookOpen className="w-3 h-3" />
+                        Bono escuela activo
                       </span>
                     )}
                   </div>
@@ -355,6 +350,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
         )}
       </AnimatePresence>
 
+      {/* Manual add modal */}
       <AnimatePresence>
         {manualOpen && (
           <>

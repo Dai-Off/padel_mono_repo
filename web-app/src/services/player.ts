@@ -32,6 +32,15 @@ export const playerService = {
         return response.players || [];
     },
 
+    getClubClients: async (clubId: string, query?: string): Promise<Player[]> => {
+        const params = new URLSearchParams({ club_id: clubId });
+        if (query) params.set('q', query);
+        const response = await apiFetchWithAuth<ApiResponse<{ players: Player[] }>>(
+            `/club-clients?${params.toString()}`
+        );
+        return response.players || [];
+    },
+
     getById: async (id: string): Promise<Player> => {
         const response = await apiFetch<ApiResponse<{ player: Player }>>(`/players/${id}`);
         return response.player;
