@@ -46,6 +46,39 @@ function parseBoolParam(v: unknown): boolean | null {
   return null;
 }
 
+async function getWalletBalanceByPlayer(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+  playerIds: string[],
+): Promise<Map<string, number>> {
+  const balances = new Map<string, number>();
+  if (playerIds.length === 0) return balances;
+  for (const pid of playerIds) balances.set(pid, 0);
+  for (const batch of chunk(playerIds, 500)) {
+    const { data: txs, error: txErr } = await supabase
+      .from('wallet_transactions')
+      .select('player_id, amount_cents')
+      .eq('club_id', clubId)
+      .in('player_id', batch)
+      .limit(50000);
+    if (txErr) {
+      const msg = String(txErr.message ?? '').toLowerCase();
+      const code = String((txErr as { code?: string }).code ?? '');
+      if (code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache')) {
+        continue;
+      }
+      throw txErr;
+    }
+    for (const tx of txs ?? []) {
+      const pid = String((tx as { player_id?: string }).player_id ?? '');
+      const amount = Number((tx as { amount_cents?: number }).amount_cents ?? 0);
+      if (!pid || !Number.isFinite(amount)) continue;
+      balances.set(pid, (balances.get(pid) ?? 0) + Math.trunc(amount));
+    }
+  }
+  return balances;
+}
+
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -101,9 +134,12 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
   const club_id = String(req.query.club_id ?? '').trim();
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const tier = (typeof req.query.tier === 'string' ? req.query.tier.trim() : '') as Tier | '';
+  const elo_min = parseIntParam(req.query.elo_min);
+  const elo_max = parseIntParam(req.query.elo_max);
   const created_from = parseIsoDateParam(req.query.created_from);
   const created_to = parseIsoDateParam(req.query.created_to);
   const has_wallet = parseBoolParam(req.query.has_wallet);
+  const has_wallet_balance = parseBoolParam(req.query.has_wallet_balance);
   const has_school = parseBoolParam(req.query.has_school);
   const bookings_min = parseIntParam(req.query.bookings_min);
   const bookings_max = parseIntParam(req.query.bookings_max);
@@ -131,6 +167,8 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
       query = query.gte('elo_rating', r.elo_min);
       if (r.elo_max != null) query = query.lte('elo_rating', r.elo_max);
     }
+    if (elo_min !== null) query = query.gte('elo_rating', elo_min);
+    if (elo_max !== null) query = query.lte('elo_rating', elo_max);
 
     if (q) {
       const esc = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
@@ -283,6 +321,21 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
       }
     }
 
+    if (playerIds.length > 0) {
+      const currentIds = players.map((p) => String(p.id));
+      const walletBalances = await getWalletBalanceByPlayer(supabase, club_id, currentIds);
+      players = players
+        .filter((p) => {
+          if (has_wallet_balance === null) return true;
+          const bal = walletBalances.get(String(p.id)) ?? 0;
+          return has_wallet_balance ? bal > 0 : bal <= 0;
+        })
+        .map((p) => ({
+          ...p,
+          wallet_balance_cents: walletBalances.get(String(p.id)) ?? 0,
+        }));
+    }
+
     return res.json({ ok: true, players });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -316,9 +369,12 @@ router.get('/export', requireClubOwnerOrAdmin, async (req: Request, res: Respons
   const club_id = String(req.query.club_id ?? '').trim();
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const tier = (typeof req.query.tier === 'string' ? req.query.tier.trim() : '') as Tier | '';
+  const elo_min = parseIntParam(req.query.elo_min);
+  const elo_max = parseIntParam(req.query.elo_max);
   const created_from = parseIsoDateParam(req.query.created_from);
   const created_to = parseIsoDateParam(req.query.created_to);
   const has_wallet = parseBoolParam(req.query.has_wallet);
+  const has_wallet_balance = parseBoolParam(req.query.has_wallet_balance);
   const has_school = parseBoolParam(req.query.has_school);
   const bookings_min = parseIntParam(req.query.bookings_min);
   const bookings_max = parseIntParam(req.query.bookings_max);
@@ -346,6 +402,8 @@ router.get('/export', requireClubOwnerOrAdmin, async (req: Request, res: Respons
       query = query.gte('elo_rating', r.elo_min);
       if (r.elo_max != null) query = query.lte('elo_rating', r.elo_max);
     }
+    if (elo_min !== null) query = query.gte('elo_rating', elo_min);
+    if (elo_max !== null) query = query.lte('elo_rating', elo_max);
     if (q) {
       const esc = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
       query = query.or(`first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,phone.ilike.%${esc}%`);
@@ -484,6 +542,21 @@ router.get('/export', requireClubOwnerOrAdmin, async (req: Request, res: Respons
           return true;
         });
       }
+    }
+
+    if (rows.length > 0) {
+      const currentIds = rows.map((p) => String(p.id));
+      const walletBalances = await getWalletBalanceByPlayer(supabase, club_id, currentIds);
+      rows = rows
+        .filter((p) => {
+          if (has_wallet_balance === null) return true;
+          const bal = walletBalances.get(String(p.id)) ?? 0;
+          return has_wallet_balance ? bal > 0 : bal <= 0;
+        })
+        .map((p) => ({
+          ...p,
+          wallet_balance_cents: walletBalances.get(String(p.id)) ?? 0,
+        }));
     }
 
     const bom = '\uFEFF';
