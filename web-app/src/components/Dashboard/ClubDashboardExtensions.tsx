@@ -696,7 +696,7 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
                 <div className="flex flex-col gap-1">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Nivel</span>
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Categoría</span>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {(['all', 'vip', 'premium', 'standard', 'basic'] as const).map((k) => (
                       <button
@@ -711,31 +711,23 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                       </button>
                     ))}
                   </div>
-                </div>
-
-                <div className="flex flex-col gap-1">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Fecha de alta</span>
-                  <div className="flex items-center gap-2">
-                    <div className="flex flex-col gap-1">
-                      <span className="px-1 text-[9px] font-bold text-gray-400">Desde</span>
-                      <input
-                        type="date"
-                        value={createdFrom}
-                        onChange={(e) => setCreatedFrom(e.target.value)}
-                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
-                        aria-label="Alta desde"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="px-1 text-[9px] font-bold text-gray-400">Hasta</span>
-                      <input
-                        type="date"
-                        value={createdTo}
-                        onChange={(e) => setCreatedTo(e.target.value)}
-                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
-                        aria-label="Alta hasta"
-                      />
-                    </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <input
+                      type="number"
+                      min={0}
+                      value={eloMin}
+                      onChange={(e) => setEloMin(e.target.value)}
+                      className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                      placeholder="Nivel min"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={eloMax}
+                      onChange={(e) => setEloMax(e.target.value)}
+                      className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                      placeholder="Nivel max"
+                    />
                   </div>
                 </div>
 
@@ -755,10 +747,7 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                       </button>
                     ))}
                   </div>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Saldo</span>
-                  <div className="flex flex-wrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
                     {(['any', 'with_money', 'without_money'] as const).map((k) => (
                       <button
                         key={k}
@@ -768,36 +757,41 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                           walletMoneyFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
                         }`}
                       >
-                        {k === 'any' ? 'Todos' : k === 'with_money' ? 'Con dinero' : 'Sin dinero'}
+                        {k === 'any' ? 'Saldo: todos' : k === 'with_money' ? 'Con dinero' : 'Sin dinero'}
                       </button>
                     ))}
                   </div>
                 </div>
+
                 <div className="flex flex-col gap-1">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">ELO</span>
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Fechas</span>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min={0}
-                      value={eloMin}
-                      onChange={(e) => setEloMin(e.target.value)}
-                      className="w-20 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
-                      placeholder="Min"
-                    />
-                    <input
-                      type="number"
-                      min={0}
-                      value={eloMax}
-                      onChange={(e) => setEloMax(e.target.value)}
-                      className="w-20 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
-                      placeholder="Max"
-                    />
+                    <div className="flex flex-col gap-1">
+                      <span className="px-1 text-[9px] font-bold text-gray-400">Alta desde</span>
+                      <input
+                        type="date"
+                        value={createdFrom}
+                        onChange={(e) => setCreatedFrom(e.target.value)}
+                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                        aria-label="Alta desde"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="px-1 text-[9px] font-bold text-gray-400">Alta hasta</span>
+                      <input
+                        type="date"
+                        value={createdTo}
+                        onChange={(e) => setCreatedTo(e.target.value)}
+                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                        aria-label="Alta hasta"
+                      />
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1 shrink-0">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Escuela</span>
-                  <div className="flex flex-nowrap items-center gap-1.5">
+                <div className="flex flex-col gap-1">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Actividad</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {(['any', 'yes', 'no'] as const).map((k) => (
                       <button
                         key={k}
@@ -807,21 +801,17 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                           schoolFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
                         }`}
                       >
-                        {k === 'any' ? 'Todos' : k === 'yes' ? 'Sí' : 'No'}
+                        {k === 'any' ? 'Escuela: todos' : k === 'yes' ? 'Con escuela' : 'Sin escuela'}
                       </button>
                     ))}
                   </div>
-                </div>
-
-                <div className="flex flex-col gap-1 shrink-0">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Reservas</span>
                   <input
                     type="number"
                     min={0}
                     value={bookingsMin}
                     onChange={(e) => setBookingsMin(e.target.value)}
-                    className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
-                    placeholder="≥ 0"
+                    className="w-28 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A] mt-1"
+                    placeholder="Reservas mín."
                     aria-label="Reservas mínimo"
                   />
                 </div>
