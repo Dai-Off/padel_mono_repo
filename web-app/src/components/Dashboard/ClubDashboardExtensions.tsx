@@ -289,12 +289,16 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
   const { t } = useTranslation();
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'deleted'>('all');
   const [tierFilter, setTierFilter] = useState<'all' | ClubClientTier>('all');
+  const [eloMin, setEloMin] = useState('');
+  const [eloMax, setEloMax] = useState('');
   const [createdFrom, setCreatedFrom] = useState('');
   const [createdTo, setCreatedTo] = useState('');
   const [walletFilter, setWalletFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [walletMoneyFilter, setWalletMoneyFilter] = useState<'any' | 'with_money' | 'without_money'>('any');
   const [schoolFilter, setSchoolFilter] = useState<'any' | 'yes' | 'no'>('any');
   const [bookingsMin, setBookingsMin] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -322,16 +326,20 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (loading) setLoading(true);
+    else setRefreshing(true);
     let cancelled = false;
     const tmr = window.setTimeout(async () => {
       try {
         const list = await clubClientService.list(clubId, {
           q: searchQuery.trim() || undefined,
           tier: tierFilter === 'all' ? undefined : tierFilter,
+          elo_min: eloMin.trim() ? Number(eloMin) : undefined,
+          elo_max: eloMax.trim() ? Number(eloMax) : undefined,
           created_from: createdFrom || undefined,
           created_to: createdTo || undefined,
           has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+          has_wallet_balance: walletMoneyFilter === 'any' ? undefined : walletMoneyFilter === 'with_money',
           has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
           bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
         });
@@ -343,14 +351,17 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
           setPlayers([]);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     }, 320);
     return () => {
       cancelled = true;
       window.clearTimeout(tmr);
     };
-  }, [clubResolved, clubId, searchQuery, tierFilter, createdFrom, createdTo, walletFilter, schoolFilter, bookingsMin, t]);
+  }, [clubResolved, clubId, searchQuery, tierFilter, eloMin, eloMax, createdFrom, createdTo, walletFilter, walletMoneyFilter, schoolFilter, bookingsMin, t]);
 
   const filteredPlayers = useMemo(() => {
     return players.filter((p) => statusFilter === 'all' || p.status === statusFilter);
@@ -406,9 +417,12 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
         const list = await clubClientService.list(clubId, {
           q: searchQuery.trim() || undefined,
           tier: tierFilter === 'all' ? undefined : tierFilter,
+          elo_min: eloMin.trim() ? Number(eloMin) : undefined,
+          elo_max: eloMax.trim() ? Number(eloMax) : undefined,
           created_from: createdFrom || undefined,
           created_to: createdTo || undefined,
           has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+          has_wallet_balance: walletMoneyFilter === 'any' ? undefined : walletMoneyFilter === 'with_money',
           has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
           bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
         });
@@ -425,9 +439,12 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
       const blob = await clubClientService.exportCsv(clubId, {
         q: searchQuery.trim() || undefined,
         tier: tierFilter === 'all' ? undefined : tierFilter,
+        elo_min: eloMin.trim() ? Number(eloMin) : undefined,
+        elo_max: eloMax.trim() ? Number(eloMax) : undefined,
         created_from: createdFrom || undefined,
         created_to: createdTo || undefined,
         has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+        has_wallet_balance: walletMoneyFilter === 'any' ? undefined : walletMoneyFilter === 'with_money',
         has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
         bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
       });
@@ -677,10 +694,10 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                 </div>
               </div>
 
-              <div className="-mx-1 flex items-end gap-2 overflow-x-auto px-1 pb-1">
-                <div className="flex flex-col gap-1 shrink-0">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Nivel</span>
-                  <div className="flex flex-nowrap items-center gap-1.5">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                <div className="flex flex-col gap-1">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Categoría</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {(['all', 'vip', 'premium', 'standard', 'basic'] as const).map((k) => (
                       <button
                         key={k}
@@ -694,37 +711,29 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                       </button>
                     ))}
                   </div>
-                </div>
-
-                <div className="flex flex-col gap-1 shrink-0">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Fecha de alta</span>
-                  <div className="flex flex-nowrap items-center gap-2">
-                    <div className="flex flex-col gap-1">
-                      <span className="px-1 text-[9px] font-bold text-gray-400">Desde</span>
-                      <input
-                        type="date"
-                        value={createdFrom}
-                        onChange={(e) => setCreatedFrom(e.target.value)}
-                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
-                        aria-label="Alta desde"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="px-1 text-[9px] font-bold text-gray-400">Hasta</span>
-                      <input
-                        type="date"
-                        value={createdTo}
-                        onChange={(e) => setCreatedTo(e.target.value)}
-                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
-                        aria-label="Alta hasta"
-                      />
-                    </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <input
+                      type="number"
+                      min={0}
+                      value={eloMin}
+                      onChange={(e) => setEloMin(e.target.value)}
+                      className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                      placeholder="Nivel min"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={eloMax}
+                      onChange={(e) => setEloMax(e.target.value)}
+                      className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                      placeholder="Nivel max"
+                    />
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1 shrink-0">
+                <div className="flex flex-col gap-1">
                   <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Monedero</span>
-                  <div className="flex flex-nowrap items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {(['any', 'yes', 'no'] as const).map((k) => (
                       <button
                         key={k}
@@ -738,11 +747,51 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                       </button>
                     ))}
                   </div>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    {(['any', 'with_money', 'without_money'] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setWalletMoneyFilter(k)}
+                        className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                          walletMoneyFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                        }`}
+                      >
+                        {k === 'any' ? 'Saldo: todos' : k === 'with_money' ? 'Con dinero' : 'Sin dinero'}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="flex flex-col gap-1 shrink-0">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Escuela</span>
-                  <div className="flex flex-nowrap items-center gap-1.5">
+                <div className="flex flex-col gap-1">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Fechas</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-col gap-1">
+                      <span className="px-1 text-[9px] font-bold text-gray-400">Alta desde</span>
+                      <input
+                        type="date"
+                        value={createdFrom}
+                        onChange={(e) => setCreatedFrom(e.target.value)}
+                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                        aria-label="Alta desde"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="px-1 text-[9px] font-bold text-gray-400">Alta hasta</span>
+                      <input
+                        type="date"
+                        value={createdTo}
+                        onChange={(e) => setCreatedTo(e.target.value)}
+                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                        aria-label="Alta hasta"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Actividad</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {(['any', 'yes', 'no'] as const).map((k) => (
                       <button
                         key={k}
@@ -752,21 +801,17 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                           schoolFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
                         }`}
                       >
-                        {k === 'any' ? 'Todos' : k === 'yes' ? 'Sí' : 'No'}
+                        {k === 'any' ? 'Escuela: todos' : k === 'yes' ? 'Con escuela' : 'Sin escuela'}
                       </button>
                     ))}
                   </div>
-                </div>
-
-                <div className="flex flex-col gap-1 shrink-0">
-                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Reservas</span>
                   <input
                     type="number"
                     min={0}
                     value={bookingsMin}
                     onChange={(e) => setBookingsMin(e.target.value)}
-                    className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
-                    placeholder="≥ 0"
+                    className="w-28 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A] mt-1"
+                    placeholder="Reservas mín."
                     aria-label="Reservas mínimo"
                   />
                 </div>
@@ -775,13 +820,16 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                   type="button"
                   onClick={() => {
                     setTierFilter('all');
+                    setEloMin('');
+                    setEloMax('');
                     setCreatedFrom('');
                     setCreatedTo('');
                     setWalletFilter('any');
+                    setWalletMoneyFilter('any');
                     setSchoolFilter('any');
                     setBookingsMin('');
                   }}
-                  className="shrink-0 rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50 h-fit self-end"
                 >
                   Limpiar filtros
                 </button>
@@ -802,6 +850,9 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
             <div className="py-12 text-center text-sm text-gray-400">{t('crm_empty')}</div>
           ) : (
             <div className="divide-y divide-gray-50">
+              {refreshing ? (
+                <p className="px-5 py-2 text-[10px] text-gray-400">Actualizando lista...</p>
+              ) : null}
               {filteredPlayers.map((player) => {
                 const hasEmail = !!(player.email && player.status !== 'deleted');
                 const checked = selectedIds.has(player.id);

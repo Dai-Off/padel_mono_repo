@@ -55,6 +55,10 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
     const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
     const [historyByItem, setHistoryByItem] = useState<Record<string, InventoryMovement[]>>({});
     const [historyLoadingItemId, setHistoryLoadingItemId] = useState<string | null>(null);
+    const [saleModalOpen, setSaleModalOpen] = useState(false);
+    const [salePaymentMethod, setSalePaymentMethod] = useState<'cash' | 'card'>('cash');
+    const [saleLines, setSaleLines] = useState<Array<{ itemId: string; quantity: number }>>([{ itemId: '', quantity: 1 }]);
+    const [saleSubmitting, setSaleSubmitting] = useState(false);
 
     function formatMoneyFromCents(cents: number, currency: string): string {
         const value = (Number.isFinite(cents) ? cents : 0) / 100;
@@ -201,6 +205,12 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
         setItemImageFile(null);
         setItemImagePreviewUrl(null);
         setItemModal({ mode: 'create' });
+    };
+
+    const openSaleModal = () => {
+        setSalePaymentMethod('cash');
+        setSaleLines([{ itemId: '', quantity: 1 }]);
+        setSaleModalOpen(true);
     };
 
     const openEdit = (item: InventoryItem) => {
@@ -374,6 +384,44 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
         }
     };
 
+    const submitSale = async () => {
+        if (!clubId) return;
+        const usableLines = saleLines
+            .map((line) => ({ ...line, quantity: clampInt(line.quantity) }))
+            .filter((line) => line.itemId && line.quantity > 0);
+        if (usableLines.length === 0) {
+            toast.error('Añade al menos un producto con cantidad válida');
+            return;
+        }
+        const saleId = `${Date.now()}`;
+        setSaleSubmitting(true);
+        try {
+            for (const line of usableLines) {
+                const item = items.find((it) => it.id === line.itemId);
+                if (!item) {
+                    throw new Error('Producto no encontrado');
+                }
+                const unitPrice = typeof item.unit_price_cents === 'number' ? item.unit_price_cents : 0;
+                const lineTotal = unitPrice * line.quantity;
+                await inventoryService.createMovement({
+                    club_id: clubId,
+                    item_id: line.itemId,
+                    movement_type: 'out',
+                    quantity: line.quantity,
+                    reason: `SALE|${saleId}|${salePaymentMethod}|${lineTotal}|${item.name}`,
+                    movement_at: new Date().toISOString(),
+                });
+            }
+            toast.success('Venta registrada');
+            setSaleModalOpen(false);
+            await load();
+        } catch (e) {
+            toast.error((e as Error).message || 'No se pudo registrar la venta');
+        } finally {
+            setSaleSubmitting(false);
+        }
+    };
+
     if (!clubResolved) {
         return (
             <div className="flex justify-center py-16">
@@ -396,14 +444,23 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                 <div>
                     <h2 className="text-sm font-bold text-[#1A1A1A]">{t('inventory_management_title')}</h2>
                 </div>
-                <button
-                    type="button"
-                    onClick={openCreate}
-                    className="flex items-center gap-1.5 px-4 py-2.5 bg-[#E31E24] text-white rounded-xl text-xs font-bold hover:opacity-90"
-                >
-                    <Plus className="w-3.5 h-3.5" />
-                    {t('inventory_add_product')}
-                </button>
+                <div className="flex items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={openSaleModal}
+                        className="flex items-center gap-1.5 px-4 py-2.5 bg-[#1A1A1A] text-white rounded-xl text-xs font-bold hover:opacity-90"
+                    >
+                        Cargar venta
+                    </button>
+                    <button
+                        type="button"
+                        onClick={openCreate}
+                        className="flex items-center gap-1.5 px-4 py-2.5 bg-[#E31E24] text-white rounded-xl text-xs font-bold hover:opacity-90"
+                    >
+                        <Plus className="w-3.5 h-3.5" />
+                        {t('inventory_add_product')}
+                    </button>
+                </div>
             </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -900,6 +957,94 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                                 className="px-3.5 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-bold hover:opacity-90"
                             >
                                 Guardar movimiento
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+            {saleModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+                    <div className="w-full max-w-xl rounded-2xl bg-white border border-gray-200 p-5 shadow-xl max-h-[90vh] overflow-y-auto">
+                        <h3 className="text-sm font-bold text-[#1A1A1A] mb-4">Cargar venta</h3>
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-[10px] font-semibold text-gray-500">Forma de pago</label>
+                                <select
+                                    value={salePaymentMethod}
+                                    onChange={(e) => setSalePaymentMethod(e.target.value as 'cash' | 'card')}
+                                    className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                >
+                                    <option value="cash">Efectivo</option>
+                                    <option value="card">Tarjeta</option>
+                                </select>
+                            </div>
+                            {saleLines.map((line, idx) => (
+                                <div key={idx} className="grid grid-cols-12 gap-2 items-end">
+                                    <div className="col-span-8">
+                                        <label className="text-[10px] font-semibold text-gray-500">Producto</label>
+                                        <select
+                                            value={line.itemId}
+                                            onChange={(e) =>
+                                                setSaleLines((prev) => prev.map((l, i) => i === idx ? { ...l, itemId: e.target.value } : l))
+                                            }
+                                            className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                        >
+                                            <option value="">Seleccionar</option>
+                                            {items.filter((it) => getCurrentQty(it) > 0).map((it) => (
+                                                <option key={it.id} value={it.id}>
+                                                    {it.name} (stock {getCurrentQty(it)})
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="col-span-3">
+                                        <label className="text-[10px] font-semibold text-gray-500">Cantidad</label>
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            value={line.quantity}
+                                            onChange={(e) =>
+                                                setSaleLines((prev) => prev.map((l, i) => i === idx ? { ...l, quantity: Number(e.target.value || 1) } : l))
+                                            }
+                                            className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                        />
+                                    </div>
+                                    <div className="col-span-1">
+                                        <button
+                                            type="button"
+                                            onClick={() => setSaleLines((prev) => prev.filter((_, i) => i !== idx))}
+                                            className="w-8 h-8 rounded-lg border border-gray-100 flex items-center justify-center hover:bg-red-50"
+                                            disabled={saleLines.length <= 1}
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                            <button
+                                type="button"
+                                onClick={() => setSaleLines((prev) => [...prev, { itemId: '', quantity: 1 }])}
+                                className="px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700"
+                            >
+                                Añadir producto
+                            </button>
+                        </div>
+                        <div className="flex gap-2 justify-end mt-5">
+                            <button
+                                type="button"
+                                onClick={() => setSaleModalOpen(false)}
+                                className="px-3.5 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700"
+                                disabled={saleSubmitting}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                onClick={submitSale}
+                                className="px-3.5 py-2 rounded-xl bg-[#1A1A1A] text-white text-xs font-bold hover:opacity-90"
+                                disabled={saleSubmitting}
+                            >
+                                {saleSubmitting ? 'Guardando...' : 'Guardar venta'}
                             </button>
                         </div>
                     </div>

@@ -1517,6 +1517,8 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
     const byBooking = new Map<string, BookingExpected>();
     let systemCashTotalCents = 0;
     let systemCardTotalCents = 0;
+    let storeSalesCashCents = 0;
+    let storeSalesCardCents = 0;
 
     const closingCutoffMs = lastClosedAtIso ? new Date(lastClosedAtIso).getTime() : null;
     const filteredRows = ((rows ?? []) as Record<string, unknown>[]).filter((row) => {
@@ -1567,6 +1569,37 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       systemCardTotalCents += b.card_paid_cents;
     }
 
+    const { data: inventorySaleMovements, error: saleMovementsErr } = await supabase
+      .from('inventory_movements')
+      .select('reason, movement_at, created_at')
+      .eq('club_id', clubId)
+      .eq('movement_type', 'out')
+      .gte('movement_at', startUtc.toISOString())
+      .lt('movement_at', endUtc.toISOString())
+      .limit(2000);
+    if (!saleMovementsErr && Array.isArray(inventorySaleMovements)) {
+      for (const movement of inventorySaleMovements) {
+        const reason = typeof (movement as any).reason === 'string' ? (movement as any).reason : '';
+        if (!reason.startsWith('SALE|')) continue;
+        if (closingCutoffMs != null) {
+          const movementAtSource = (movement as any).movement_at ?? (movement as any).created_at;
+          if (typeof movementAtSource === 'string') {
+            const movementMs = new Date(movementAtSource).getTime();
+            if (Number.isFinite(movementMs) && movementMs <= closingCutoffMs) continue;
+          }
+        }
+        const parts = reason.split('|');
+        const method = parts[2];
+        const amountCents = Number(parts[3] ?? 0);
+        if (!Number.isFinite(amountCents) || amountCents <= 0) continue;
+        if (method === 'cash') storeSalesCashCents += Math.trunc(amountCents);
+        if (method === 'card') storeSalesCardCents += Math.trunc(amountCents);
+      }
+    }
+
+    systemCashTotalCents += storeSalesCashCents;
+    systemCardTotalCents += storeSalesCardCents;
+
     const openingOpenedAtMs = openingRecord?.opened_at
       ? new Date(String(openingRecord.opened_at)).getTime()
       : NaN;
@@ -1600,6 +1633,10 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       systemCardTotal_eur: systemCardTotalEur,
       openingCashTotal_cents: effectiveOpeningCashCents,
       openingCashTotal_eur: openingCashEur,
+      storeSalesCash_cents: storeSalesCashCents,
+      storeSalesCard_cents: storeSalesCardCents,
+      storeSalesCash_eur: Math.round((storeSalesCashCents / 100) * 100) / 100,
+      storeSalesCard_eur: Math.round((storeSalesCardCents / 100) * 100) / 100,
       last_closing_at: lastClosedAtIso,
       needs_new_opening_after_closing,
       opening: openingRecord,

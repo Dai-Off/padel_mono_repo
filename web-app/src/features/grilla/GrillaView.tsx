@@ -1063,37 +1063,86 @@ function GrillaViewInner() {
 
   const handleCreateBooking = async (bookingData: any) => {
       try {
-          // Prepare dates (use local-time methods to avoid UTC offset shifting the day)
-          const baseDate = formatDateForInput(selectedDate);
-          const startAt = new Date(`${baseDate}T${bookingData.start_at}`).toISOString();
-          const endAt = new Date(new Date(startAt).getTime() + bookingData.duration_minutes * 60000).toISOString();
+          const recurrenceCount = Math.max(1, Number(bookingData.recurrence_count) || 1);
+          const recurrenceUnit = bookingData.recurrence_unit === 'months' ? 'months' : 'weeks';
+          const includeHolidays = bookingData.include_holidays !== false;
+          const baseDate = new Date(`${formatDateForInput(selectedDate)}T12:00:00`);
+          const createdBookings: any[] = [];
+          const skippedHolidayDates: string[] = [];
 
-          const payload = {
-              ...bookingData,
-              start_at: startAt,
-              end_at: endAt,
-              timezone: 'Europe/Madrid' // Or dynamic
-          };
-
-          const res = await apiFetch<any>('/bookings', {
-              method: 'POST',
-              body: JSON.stringify(payload)
-          });
-
-          if (res.ok) {
-              // Optimistic: insert from response immediately
-              if (res.booking) {
-                  const mapped = mapBookings([res.booking], courts)[0];
-                  if (mapped) {
-                      setReservations(prev =>
-                          prev.some(r => r.id === mapped.id) ? prev : [...prev, mapped]
-                      );
+          for (let i = 0; i < recurrenceCount; i++) {
+              const slotDate = new Date(baseDate);
+              if (recurrenceUnit === 'months') slotDate.setMonth(baseDate.getMonth() + i);
+              else slotDate.setDate(baseDate.getDate() + (i * 7));
+              const dateText = `${slotDate.getFullYear()}-${String(slotDate.getMonth() + 1).padStart(2, '0')}-${String(slotDate.getDate()).padStart(2, '0')}`;
+              if (!includeHolidays && clubId) {
+                  try {
+                      const holidayCheck = await apiFetchWithAuth<any>(`/club-special-dates/check?club_id=${clubId}&date=${dateText}`);
+                      if (holidayCheck.is_holiday === true) {
+                          skippedHolidayDates.push(dateText);
+                          continue;
+                      }
+                  } catch {
+                      // If check fails, continue creation to avoid blocking sales desk flow.
                   }
               }
-              // Background refresh for consistency (non-blocking)
-              refresh();
-          } else {
-              throw new Error(res.error || 'Unknown error');
+              const startAt = new Date(`${dateText}T${bookingData.start_at}`).toISOString();
+              const endAt = new Date(new Date(startAt).getTime() + bookingData.duration_minutes * 60000).toISOString();
+              let totalPriceCents = bookingData.total_price_cents;
+              if (clubId && bookingData.court_id) {
+                  try {
+                      const slotPrice = await apiFetchWithAuth<any>(
+                          `/tariffs/slot-price?club_id=${clubId}&court_id=${bookingData.court_id}&date=${dateText}&slot=${bookingData.start_at}&duration_minutes=${bookingData.duration_minutes}&reservation_type=${bookingData.booking_type || 'standard'}`
+                      );
+                      if (typeof slotPrice.total_price_cents === 'number') {
+                          totalPriceCents = slotPrice.total_price_cents;
+                      }
+                  } catch {
+                      // Keep current total_price_cents as fallback
+                  }
+              }
+
+              const payload = {
+                  ...bookingData,
+                  start_at: startAt,
+                  end_at: endAt,
+                  timezone: 'Europe/Madrid',
+                  total_price_cents: totalPriceCents,
+              };
+              delete payload.recurrence_count;
+              delete payload.recurrence_unit;
+              delete payload.include_holidays;
+
+              const res = await apiFetch<any>('/bookings', {
+                  method: 'POST',
+                  body: JSON.stringify(payload),
+              });
+              if (!res.ok) {
+                  throw new Error(
+                      recurrenceCount > 1
+                          ? `No se pudo crear la reserva #${i + 1}: ${res.error || 'Unknown error'}`
+                          : (res.error || 'Unknown error'),
+                  );
+              }
+              if (res.booking) createdBookings.push(res.booking);
+          }
+
+          if (createdBookings.length > 0) {
+              const mapped = mapBookings(createdBookings, courts);
+              if (mapped.length > 0) {
+                  setReservations(prev => {
+                      const existing = new Set(prev.map(r => r.id));
+                      const additions = mapped.filter(r => !existing.has(r.id));
+                      return additions.length > 0 ? [...prev, ...additions] : prev;
+                  });
+              }
+          }
+          if (createdBookings.length === 0 && skippedHolidayDates.length > 0) {
+              throw new Error('Todas las fechas seleccionadas cayeron en festivo y fueron omitidas.');
+          }
+          refresh();
+          if (skippedHolidayDates.length > 0) {
+              alert(`Se omitieron ${skippedHolidayDates.length} fecha(s) festiva(s): ${skippedHolidayDates.join(', ')}`);
           }
       } catch (err) {
           console.error('Error creating booking:', err);
