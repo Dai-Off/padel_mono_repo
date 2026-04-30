@@ -12,7 +12,9 @@ export type MatchmakingLeagueConfigRow = {
 /** Público: etiquetas y umbrales LP por liga (doc. matchmaking leagues). */
 export async function fetchMatchmakingLeagueConfig(): Promise<MatchmakingLeagueConfigRow[] | null> {
   try {
-    const res = await fetch(`${API_URL}/matchmaking/league-config`);
+    const res = await fetch(`${API_URL}/matchmaking/league-config`, {
+      cache: 'no-store' as RequestCache,
+    });
     if (!res.ok) return null;
     const json = (await res.json()) as { ok?: boolean; leagues?: MatchmakingLeagueConfigRow[] };
     if (!json.ok || !Array.isArray(json.leagues)) return null;
@@ -50,6 +52,10 @@ export type MatchmakingStatusResponse = {
     suggested_max_distance_km?: number;
   } | null;
   blocked_until?: string | null;
+  /** En búsqueda (no expirada), conteo total */
+  searching_count?: number;
+  /** Si aplica club en la fila de cola, búsquedas en ese club */
+  searching_in_club_count?: number | null;
 };
 
 export type MatchmakingProposalResponse = {
@@ -90,7 +96,10 @@ export async function joinMatchmaking(
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       },
+      cache: 'no-store' as RequestCache,
       body: JSON.stringify(body),
     });
 
@@ -123,7 +132,12 @@ export async function leaveMatchmaking(
   try {
     const res = await fetch(`${API_URL}/matchmaking/leave`, {
       method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
     });
     if (!res.ok) {
       return { ok: false, error: await parseErrorMessage(res) };
@@ -140,7 +154,12 @@ export async function fetchMatchmakingStatus(
   if (!token) return null;
   try {
     const res = await fetch(`${API_URL}/matchmaking/status`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
     });
     if (!res.ok) return null;
     const json = (await res.json()) as MatchmakingStatusResponse;
@@ -157,7 +176,12 @@ export async function fetchMatchmakingProposal(
   if (!token) return null;
   try {
     const res = await fetch(`${API_URL}/matchmaking/proposal`, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
     });
     if (!res.ok) return null;
     const json = (await res.json()) as MatchmakingProposalResponse;
@@ -179,7 +203,10 @@ export async function rejectMatchmakingProposal(
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       },
+      cache: 'no-store' as RequestCache,
       body: JSON.stringify({ match_id: matchId }),
     });
     if (!res.ok) {
@@ -202,7 +229,10 @@ export async function respondMatchmakingExpansion(
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       },
+      cache: 'no-store' as RequestCache,
       body: JSON.stringify({ accept }),
     });
     if (!res.ok) {

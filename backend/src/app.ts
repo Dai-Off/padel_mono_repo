@@ -9,6 +9,7 @@ import routes from './routes';
 import { webhookHandler } from './routes/payments';
 
 const app = express();
+app.set('etag', false);
 
 app.use(cors());
 app.use(morgan('dev'));

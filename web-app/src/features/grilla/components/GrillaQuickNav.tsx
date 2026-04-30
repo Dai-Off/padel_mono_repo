@@ -55,7 +55,6 @@ function buildSections(isAdmin: boolean): NavSection[] {
       children: [
         { id: 'jugadores', path: '/jugadores', label: 'Jugadores' },
         { id: 'crm', path: '/crm', label: 'CRM' },
-        { id: 'miPerfil', path: '/mi-perfil', label: 'Mi perfil jugador' },
       ],
     },
     {

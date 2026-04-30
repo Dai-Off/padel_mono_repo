@@ -12,6 +12,7 @@ import {
   resolveClubIdForBooking,
 } from '../services/paymentRefundService';
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
+import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
 
 const router = Router();
 
@@ -152,7 +153,34 @@ router.get('/:id', async (req: Request, res: Response) => {
         .maybeSingle();
       if (error) return res.status(500).json({ ok: false, error: error.message });
       if (!data) return res.status(404).json({ ok: false, error: 'Match not found' });
-      return res.json({ ok: true, match: data });
+
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      let out = data;
+      if (token) {
+        const { data: authData, error: authErr } = await supabase.auth.getUser(token);
+        const email =
+          authErr || !authData?.user?.email
+            ? null
+            : String(authData.user.email).trim().toLowerCase();
+        if (email) {
+          const { data: pl } = await supabase.from('players').select('id').eq('email', email).maybeSingle();
+          const playerId = (pl as { id?: string } | null)?.id;
+          const bookingId = (out as { booking_id?: string | null }).booking_id;
+          if (playerId && bookingId) {
+            const repaired = await tryRepairPaidGuestMissingFromMatch(supabase, id, bookingId, playerId);
+            if (repaired) {
+              const { data: d2, error: e2 } = await supabase
+                .from('matches')
+                .select(expandSelect('bookings'))
+                .eq('id', id)
+                .maybeSingle();
+              if (!e2 && d2) out = d2;
+            }
+          }
+        }
+      }
+      return res.json({ ok: true, match: out });
     }
     const { data, error } = await supabase
       .from('matches')

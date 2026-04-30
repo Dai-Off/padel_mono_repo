@@ -17,6 +17,7 @@ import {
   STRIPE_META_SEASON_PASS_ELITE,
 } from '../services/seasonPassService';
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
+import { insertGuestMatchPlayerAfterPayment } from '../services/matchPlayerSlotService';
 import { zonedTimeToUtc } from './learningTimezone';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
@@ -869,16 +870,26 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
           .eq('player_id', participant.player_id)
           .maybeSingle();
         if (!existing) {
-          const slotIdx = meta.slot_index != null ? parseInt(meta.slot_index, 10) : undefined;
-          const team = slotIdx != null ? (slotIdx <= 1 ? 'A' : 'B') : 'A';
-          const { error: errMP } = await supabase.from('match_players').insert({
-            match_id: match.id,
-            player_id: participant.player_id,
-            team,
-            invite_status: 'accepted',
-            slot_index: slotIdx ?? null,
-          });
-          if (errMP) console.error('[payments/webhook] match_players insert failed:', errMP, { match_id: match.id, player_id: participant.player_id, slot_index: slotIdx ?? null });
+          const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
+          const preferred = Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
+          const ins = await insertGuestMatchPlayerAfterPayment(
+            supabase,
+            match.id,
+            participant.player_id,
+            preferred
+          );
+          if (!ins.ok) {
+            console.error('[payments/webhook] match_players guest insert failed:', ins.error, ins.code, {
+              match_id: match.id,
+              player_id: participant.player_id,
+            });
+          } else if (ins.reassigned) {
+            console.warn('[payments/webhook] slot reassigned (race):', {
+              match_id: match.id,
+              player_id: participant.player_id,
+              used: ins.slot_index,
+            });
+          }
         }
       }
     }
@@ -2576,16 +2587,26 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
           .eq('player_id', participant.player_id)
           .maybeSingle();
         if (!existing) {
-          const slotIdx = meta.slot_index != null ? parseInt(meta.slot_index, 10) : undefined;
-          const team = slotIdx != null ? (slotIdx <= 1 ? 'A' : 'B') : 'A';
-          const { error: errMP } = await supabase.from('match_players').insert({
-            match_id: match.id,
-            player_id: participant.player_id,
-            team,
-            invite_status: 'accepted',
-            slot_index: slotIdx ?? null,
-          });
-          if (errMP) console.error('[payments/confirm-client] match_players insert failed:', errMP, { match_id: match.id, player_id: participant.player_id, slot_index: slotIdx ?? null });
+          const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
+          const preferred = Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
+          const ins = await insertGuestMatchPlayerAfterPayment(
+            supabase,
+            match.id,
+            participant.player_id,
+            preferred
+          );
+          if (!ins.ok) {
+            console.error('[payments/confirm-client] match_players guest insert failed:', ins.error, ins.code, {
+              match_id: match.id,
+              player_id: participant.player_id,
+            });
+          } else if (ins.reassigned) {
+            console.warn('[payments/confirm-client] slot reassigned (race):', {
+              match_id: match.id,
+              player_id: participant.player_id,
+              used: ins.slot_index,
+            });
+          }
         }
       }
     }

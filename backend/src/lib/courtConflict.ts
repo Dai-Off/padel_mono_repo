@@ -1,12 +1,31 @@
 import { getSupabaseServiceRoleClient } from './supabase';
 import { findTournamentConflict } from './tournamentConflicts';
+import { dayKeyInTz, zonedTimeToUtc } from '../routes/learningTimezone';
 
 export const MATCH_DRAFT_LOCK_MARKER = '__MATCH_DRAFT_LOCK__';
 
-function dateToWeekday(d: Date): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
-  const idx = d.getUTCDay();
-  if (idx === 0) return 'sun';
-  return (['mon', 'tue', 'wed', 'thu', 'fri', 'sat'][idx - 1] as 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat');
+/** IANA zone for escuela/Reservas when `clubs` no trae columna; alineado con `matchmaking` y `bookings`. */
+const DEFAULT_CLUB_TIMEZONE = 'Europe/Madrid';
+
+function shortWeekdayCodeInTimeZone(d: Date, timeZone: string): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
+  const s = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(d);
+  const m: Record<string, 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun'> = {
+    Mon: 'mon',
+    Tue: 'tue',
+    Wed: 'wed',
+    Thu: 'thu',
+    Fri: 'fri',
+    Sat: 'sat',
+    Sun: 'sun',
+  };
+  return m[s] ?? 'mon';
+}
+
+function padTimeToHms(t: string): string {
+  const t2 = t.trim();
+  if (/^\d{1,2}:\d{2}:\d{2}$/.test(t2)) return t2;
+  if (/^\d{1,2}:\d{2}$/.test(t2)) return `${t2}:00`;
+  return '12:00:00';
 }
 
 /** Returns true if the booking is a match-draft lock whose expiry has passed (treat as cancelled). */
@@ -51,8 +70,13 @@ export async function hasCourtConflict(courtId: string, startAt: string, endAt: 
   const clubId = (court as { club_id?: string } | null)?.club_id;
   if (!clubId) return null;
 
-  const dateStr = startAt.slice(0, 10);
-  const weekday = dateToWeekday(new Date(`${dateStr}T00:00:00Z`));
+  // Escuela: `start_time`/`end_time` son hora reloj del club; el slot es UTC. Antes se mezclaban
+  // minutos UTC (slice del ISO) con minutos "locales" y el día de la semana en UTC, generando
+  // falsos positivos (p. ej. pista libre en el panel y bloqueada en matchmaking).
+  const clubTz = DEFAULT_CLUB_TIMEZONE;
+  const dayKey = dayKeyInTz(new Date(startAt), clubTz);
+  const slotWeekday = shortWeekdayCodeInTimeZone(new Date(startAt), clubTz);
+
   const { data: courses, error: scErr } = await supabase
     .from('club_school_courses')
     .select('id, starts_on, ends_on, is_active')
@@ -63,7 +87,7 @@ export async function hasCourtConflict(courtId: string, startAt: string, endAt: 
   const validCourseIds = (courses ?? [])
     .filter(
       (c: { starts_on?: string; ends_on?: string }) =>
-        (!c.starts_on || dateStr >= c.starts_on) && (!c.ends_on || dateStr <= c.ends_on)
+        (!c.starts_on || dayKey >= c.starts_on) && (!c.ends_on || dayKey <= c.ends_on),
     )
     .map((c: { id: string }) => c.id);
   if (validCourseIds.length) {
@@ -71,15 +95,13 @@ export async function hasCourtConflict(courtId: string, startAt: string, endAt: 
       .from('club_school_course_days')
       .select('course_id, weekday, start_time, end_time')
       .in('course_id', validCourseIds)
-      .eq('weekday', weekday);
+      .eq('weekday', slotWeekday);
     if (dayErr) return dayErr.message;
 
-    const reqStartMin = Number(startAt.slice(11, 13)) * 60 + Number(startAt.slice(14, 16));
-    const reqEndMin = Number(endAt.slice(11, 13)) * 60 + Number(endAt.slice(14, 16));
     const courseOverlap = (days ?? []).some((d: { start_time: string; end_time: string }) => {
-      const s = Number(String(d.start_time).slice(0, 2)) * 60 + Number(String(d.start_time).slice(3, 5));
-      const e = Number(String(d.end_time).slice(0, 2)) * 60 + Number(String(d.end_time).slice(3, 5));
-      return reqStartMin < e && reqEndMin > s;
+      const cStart = zonedTimeToUtc(`${dayKey}T${padTimeToHms(d.start_time)}`, clubTz).getTime();
+      const cEnd = zonedTimeToUtc(`${dayKey}T${padTimeToHms(d.end_time)}`, clubTz).getTime();
+      return startMs < cEnd && endMs > cStart;
     });
     if (courseOverlap) return 'La pista está ocupada por un curso de escuela en ese horario';
   }
