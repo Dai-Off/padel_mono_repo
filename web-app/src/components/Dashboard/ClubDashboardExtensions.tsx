@@ -22,6 +22,7 @@ import {
 import { toast } from 'sonner';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { clubClientService } from '../../services/clubClients';
+import type { ClubClientTier } from '../../services/clubClients';
 import { checkinService, type CheckinBookingItem } from '../../services/checkin';
 import type { Player } from '../../types/api';
 
@@ -288,8 +289,18 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
   const { t } = useTranslation();
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'deleted'>('all');
+  const [tierFilter, setTierFilter] = useState<'all' | ClubClientTier>('all');
+  const [eloMin, setEloMin] = useState('');
+  const [eloMax, setEloMax] = useState('');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
+  const [walletFilter, setWalletFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [walletMoneyFilter, setWalletMoneyFilter] = useState<'any' | 'with_money' | 'without_money'>('any');
+  const [schoolFilter, setSchoolFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [bookingsMin, setBookingsMin] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -315,11 +326,23 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (loading) setLoading(true);
+    else setRefreshing(true);
     let cancelled = false;
     const tmr = window.setTimeout(async () => {
       try {
-        const list = await clubClientService.list(clubId, searchQuery.trim() || undefined);
+        const list = await clubClientService.list(clubId, {
+          q: searchQuery.trim() || undefined,
+          tier: tierFilter === 'all' ? undefined : tierFilter,
+          elo_min: eloMin.trim() ? Number(eloMin) : undefined,
+          elo_max: eloMax.trim() ? Number(eloMax) : undefined,
+          created_from: createdFrom || undefined,
+          created_to: createdTo || undefined,
+          has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+          has_wallet_balance: walletMoneyFilter === 'any' ? undefined : walletMoneyFilter === 'with_money',
+          has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
+          bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
+        });
         if (cancelled) return;
         setPlayers(list ?? []);
       } catch {
@@ -328,14 +351,17 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
           setPlayers([]);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     }, 320);
     return () => {
       cancelled = true;
       window.clearTimeout(tmr);
     };
-  }, [clubResolved, clubId, searchQuery, t]);
+  }, [clubResolved, clubId, searchQuery, tierFilter, eloMin, eloMax, createdFrom, createdTo, walletFilter, walletMoneyFilter, schoolFilter, bookingsMin, t]);
 
   const filteredPlayers = useMemo(() => {
     return players.filter((p) => statusFilter === 'all' || p.status === statusFilter);
@@ -388,7 +414,18 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
     void (async () => {
       if (!clubId) return;
       try {
-        const list = await clubClientService.list(clubId, searchQuery.trim() || undefined);
+        const list = await clubClientService.list(clubId, {
+          q: searchQuery.trim() || undefined,
+          tier: tierFilter === 'all' ? undefined : tierFilter,
+          elo_min: eloMin.trim() ? Number(eloMin) : undefined,
+          elo_max: eloMax.trim() ? Number(eloMax) : undefined,
+          created_from: createdFrom || undefined,
+          created_to: createdTo || undefined,
+          has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+          has_wallet_balance: walletMoneyFilter === 'any' ? undefined : walletMoneyFilter === 'with_money',
+          has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
+          bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
+        });
         setPlayers(list ?? []);
       } catch {
         toast.error(t('crm_fetch_error'));
@@ -399,7 +436,18 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
   const handleExport = async () => {
     if (!clubId) return;
     try {
-      const blob = await clubClientService.exportCsv(clubId, searchQuery.trim() || undefined);
+      const blob = await clubClientService.exportCsv(clubId, {
+        q: searchQuery.trim() || undefined,
+        tier: tierFilter === 'all' ? undefined : tierFilter,
+        elo_min: eloMin.trim() ? Number(eloMin) : undefined,
+        elo_max: eloMax.trim() ? Number(eloMax) : undefined,
+        created_from: createdFrom || undefined,
+        created_to: createdTo || undefined,
+        has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+        has_wallet_balance: walletMoneyFilter === 'any' ? undefined : walletMoneyFilter === 'with_money',
+        has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
+        bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -603,43 +651,187 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
           </div>
 
           <div className="border-b border-gray-50 bg-gray-50/40 px-5 py-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="relative min-w-0 flex-1">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
-                <input
-                  type="text"
-                  placeholder={t('crm_search_placeholder')}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full rounded-2xl border border-gray-100 bg-white py-2.5 pl-10 pr-4 text-xs text-[#1A1A1A] placeholder-gray-300 focus:ring-2 focus:ring-[#E31E24]/20"
-                />
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {(['all', 'active', 'deleted'] as const).map((s) => (
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-300" />
+                  <input
+                    type="text"
+                    placeholder={t('crm_search_placeholder')}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full rounded-2xl border border-gray-100 bg-white py-2.5 pl-10 pr-4 text-xs text-[#1A1A1A] placeholder-gray-300 focus:ring-2 focus:ring-[#E31E24]/20"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 lg:justify-end">
+                  {(['all', 'active', 'deleted'] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setStatusFilter(s)}
+                      className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                        statusFilter === s ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                      }`}
+                    >
+                      {s === 'all' ? t('players_filter_all') : s === 'active' ? t('players_filter_active') : t('players_filter_deleted')}
+                    </button>
+                  ))}
                   <button
-                    key={s}
                     type="button"
-                    onClick={() => setStatusFilter(s)}
-                    className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
-                      statusFilter === s ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
-                    }`}
+                    onClick={selectAllWithEmail}
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
                   >
-                    {s === 'all' ? t('players_filter_all') : s === 'active' ? t('players_filter_active') : t('players_filter_deleted')}
+                    {t('crm_select_all_email')}
                   </button>
-                ))}
+                  <button
+                    type="button"
+                    onClick={clearSelection}
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
+                  >
+                    {t('crm_clear_selection')}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+                <div className="flex flex-col gap-1">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Categoría</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(['all', 'vip', 'premium', 'standard', 'basic'] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setTierFilter(k as 'all' | ClubClientTier)}
+                        className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                          tierFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                        }`}
+                      >
+                        {k === 'all' ? 'Todos' : k === 'vip' ? 'VIP' : k === 'premium' ? 'Premium' : k === 'standard' ? 'Standard' : 'Basic'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <input
+                      type="number"
+                      min={0}
+                      value={eloMin}
+                      onChange={(e) => setEloMin(e.target.value)}
+                      className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                      placeholder="Nivel min"
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      value={eloMax}
+                      onChange={(e) => setEloMax(e.target.value)}
+                      className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                      placeholder="Nivel max"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Monedero</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(['any', 'yes', 'no'] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setWalletFilter(k)}
+                        className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                          walletFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                        }`}
+                      >
+                        {k === 'any' ? 'Todos' : k === 'yes' ? 'Sí' : 'No'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                    {(['any', 'with_money', 'without_money'] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setWalletMoneyFilter(k)}
+                        className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                          walletMoneyFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                        }`}
+                      >
+                        {k === 'any' ? 'Saldo: todos' : k === 'with_money' ? 'Con dinero' : 'Sin dinero'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Fechas</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-col gap-1">
+                      <span className="px-1 text-[9px] font-bold text-gray-400">Alta desde</span>
+                      <input
+                        type="date"
+                        value={createdFrom}
+                        onChange={(e) => setCreatedFrom(e.target.value)}
+                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                        aria-label="Alta desde"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <span className="px-1 text-[9px] font-bold text-gray-400">Alta hasta</span>
+                      <input
+                        type="date"
+                        value={createdTo}
+                        onChange={(e) => setCreatedTo(e.target.value)}
+                        className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                        aria-label="Alta hasta"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Actividad</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {(['any', 'yes', 'no'] as const).map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setSchoolFilter(k)}
+                        className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                          schoolFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                        }`}
+                      >
+                        {k === 'any' ? 'Escuela: todos' : k === 'yes' ? 'Con escuela' : 'Sin escuela'}
+                      </button>
+                    ))}
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={bookingsMin}
+                    onChange={(e) => setBookingsMin(e.target.value)}
+                    className="w-28 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A] mt-1"
+                    placeholder="Reservas mín."
+                    aria-label="Reservas mínimo"
+                  />
+                </div>
+
                 <button
                   type="button"
-                  onClick={selectAllWithEmail}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
+                  onClick={() => {
+                    setTierFilter('all');
+                    setEloMin('');
+                    setEloMax('');
+                    setCreatedFrom('');
+                    setCreatedTo('');
+                    setWalletFilter('any');
+                    setWalletMoneyFilter('any');
+                    setSchoolFilter('any');
+                    setBookingsMin('');
+                  }}
+                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50 h-fit self-end"
                 >
-                  {t('crm_select_all_email')}
-                </button>
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
-                >
-                  {t('crm_clear_selection')}
+                  Limpiar filtros
                 </button>
               </div>
             </div>
@@ -658,6 +850,9 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
             <div className="py-12 text-center text-sm text-gray-400">{t('crm_empty')}</div>
           ) : (
             <div className="divide-y divide-gray-50">
+              {refreshing ? (
+                <p className="px-5 py-2 text-[10px] text-gray-400">Actualizando lista...</p>
+              ) : null}
               {filteredPlayers.map((player) => {
                 const hasEmail = !!(player.email && player.status !== 'deleted');
                 const checked = selectedIds.has(player.id);
@@ -942,7 +1137,7 @@ export function ClubDashboardExtensions({ clubId, clubResolved }: Props) {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[10px] font-bold text-gray-500">ELO</label>
+                  <label className="mb-1 block text-[10px] font-bold text-gray-500">Nivel</label>
                   <input
                     value={editForm.elo_rating}
                     onChange={(e) => setEditForm((f) => ({ ...f, elo_rating: e.target.value }))}

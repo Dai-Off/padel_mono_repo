@@ -16,11 +16,12 @@ import { LearningContentView } from './components/Learning/LearningContentView';
 import { AdminLearningPage } from './components/Admin/Learning/AdminLearningPage';
 import { authService } from './services/auth';
 import { Toaster } from 'sonner';
+import { ErrorBoundary } from './components/Layout/ErrorBoundary';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const session = authService.getSession();
   if (!session) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  return <ErrorBoundary>{children}</ErrorBoundary>;
 };
 
 function App() {
@@ -103,7 +104,7 @@ function App() {
           path="/mi-perfil"
           element={
             <ProtectedRoute>
-              <ClubDashboard />
+              <Navigate to="/crm" replace />
             </ProtectedRoute>
           }
         />

@@ -15,7 +15,6 @@ import {
     Star,
     Settings,
     Shield,
-    UserCircle,
     BookOpen,
     Trophy,
 } from 'lucide-react';
@@ -57,7 +56,6 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin }) 
             items: [
                 { id: 'jugadores', path: '/jugadores', icon: Users, label: t('menu_jugadores'), color: 'rgb(20, 184, 166)', bgColor: 'rgba(20, 184, 166, 0.06)' },
                 { id: 'crm', path: '/crm', icon: MessageSquare, label: t('menu_crm'), color: 'rgb(59, 130, 246)', bgColor: 'rgba(59, 130, 246, 0.06)' },
-                { id: 'miPerfil', path: '/mi-perfil', icon: UserCircle, label: t('menu_mi_perfil'), color: 'rgb(14, 165, 233)', bgColor: 'rgba(14, 165, 233, 0.08)' },
             ],
         },
         {

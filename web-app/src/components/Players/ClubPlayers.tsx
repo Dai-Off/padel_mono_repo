@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Users, TrendingUp, Search, Eye, Mail, Phone, Zap, Plus, Loader2, Wallet,
@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { useTranslation } from 'react-i18next';
-import { playerService } from '../../services/player';
+import { clubClientService } from '../../services/clubClients';
+import type { ClubClientTier } from '../../services/clubClients';
 import type { Player } from '../../types/api';
 import { toast } from 'sonner';
 
@@ -57,40 +58,68 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
   const { t } = useTranslation();
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const firstLoadRef = useRef(true);
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'deleted'>('all');
+  const [tierFilter, setTierFilter] = useState<'all' | ClubClientTier>('all');
+  const [eloMin, setEloMin] = useState('');
+  const [eloMax, setEloMax] = useState('');
+  const [createdFrom, setCreatedFrom] = useState('');
+  const [createdTo, setCreatedTo] = useState('');
+  const [walletFilter, setWalletFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [walletMoneyFilter, setWalletMoneyFilter] = useState<'any' | 'with_money' | 'without_money'>('any');
+  const [schoolFilter, setSchoolFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [bookingsMin, setBookingsMin] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualForm, setManualForm] = useState({ first_name: '', last_name: '', phone: '', email: '' });
 
   const fetchPlayers = useCallback(async () => {
+<<<<<<< HEAD
     if (!clubId) return;
     setLoading(true);
     try {
       const list = await playerService.getClubClients(clubId);
+=======
+    if (!clubId) {
+      setPlayers([]);
+      setLoading(false);
+      return;
+    }
+    if (firstLoadRef.current) setLoading(true);
+    else setRefreshing(true);
+    try {
+      const list = await clubClientService.list(clubId, {
+        q: searchQuery.trim() || undefined,
+        tier: tierFilter === 'all' ? undefined : tierFilter,
+        elo_min: eloMin.trim() ? Number(eloMin) : undefined,
+        elo_max: eloMax.trim() ? Number(eloMax) : undefined,
+        created_from: createdFrom || undefined,
+        created_to: createdTo || undefined,
+        has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
+        has_wallet_balance: walletMoneyFilter === 'any' ? undefined : walletMoneyFilter === 'with_money',
+        has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
+        bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
+      });
+>>>>>>> 977126c9ec1400c13369e3daa110c02c8a2b1473
       setPlayers(list ?? []);
     } catch (e) {
       console.error(e);
       toast.error(t('players_fetch_error'));
     } finally {
+      firstLoadRef.current = false;
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [t, clubId]);
+  }, [t, clubId, searchQuery, tierFilter, eloMin, eloMax, createdFrom, createdTo, walletFilter, walletMoneyFilter, schoolFilter, bookingsMin]);
 
   useEffect(() => {
     fetchPlayers();
   }, [fetchPlayers]);
 
-  const filteredPlayers = players.filter((p) => {
-    const q = searchQuery.toLowerCase().trim();
-    const name = `${p.first_name} ${p.last_name}`.toLowerCase();
-    const email = (p.email ?? '').toLowerCase();
-    const phone = (p.phone ?? '').toLowerCase();
-    const matchSearch = !q || name.includes(q) || email.includes(q) || phone.includes(q);
-    const matchStatus = statusFilter === 'all' || p.status === statusFilter;
-    return matchSearch && matchStatus;
-  });
+  const filteredPlayers = players.filter((p) => statusFilter === 'all' || p.status === statusFilter);
 
   const totalPlayers = players.length;
   const activePlayers = players.filter((p) => p.status === 'active').length;
@@ -98,6 +127,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
 
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!clubId) return;
     const first = manualForm.first_name.trim();
     const last = manualForm.last_name.trim();
     const phone = manualForm.phone.trim();
@@ -108,11 +138,12 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
     }
     setManualSubmitting(true);
     try {
-      await playerService.createManual({
+      await clubClientService.createManual({
+        club_id: clubId,
         first_name: first,
         last_name: last,
         phone,
-        email: email || undefined,
+        email: email || null,
       });
       toast.success(t('players_manual_success'));
       setManualOpen(false);
@@ -178,6 +209,147 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
             </button>
           </div>
         </div>
+
+        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
+          <div className="flex flex-col gap-1">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Categoría</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(['all', 'vip', 'premium', 'standard', 'basic'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setTierFilter(k as 'all' | ClubClientTier)}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                    tierFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                  }`}
+                >
+                  {k === 'all' ? 'Todos' : k === 'vip' ? 'VIP' : k === 'premium' ? 'Premium' : k === 'standard' ? 'Standard' : 'Basic'}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="number"
+                min={0}
+                value={eloMin}
+                onChange={(e) => setEloMin(e.target.value)}
+                className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                placeholder="Nivel min"
+              />
+              <input
+                type="number"
+                min={0}
+                value={eloMax}
+                onChange={(e) => setEloMax(e.target.value)}
+                className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                placeholder="Nivel max"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Monedero</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(['any', 'yes', 'no'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setWalletFilter(k)}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                    walletFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                  }`}
+                >
+                  {k === 'any' ? 'Todos' : k === 'yes' ? 'Sí' : 'No'}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              {(['any', 'with_money', 'without_money'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setWalletMoneyFilter(k)}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                    walletMoneyFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                  }`}
+                >
+                  {k === 'any' ? 'Saldo: todos' : k === 'with_money' ? 'Con dinero' : 'Sin dinero'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Fechas</span>
+            <div className="flex items-center gap-2">
+              <div className="flex flex-col gap-1">
+                <span className="px-1 text-[9px] font-bold text-gray-400">Alta desde</span>
+                <input
+                  type="date"
+                  value={createdFrom}
+                  onChange={(e) => setCreatedFrom(e.target.value)}
+                  className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                  aria-label="Alta desde"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="px-1 text-[9px] font-bold text-gray-400">Alta hasta</span>
+                <input
+                  type="date"
+                  value={createdTo}
+                  onChange={(e) => setCreatedTo(e.target.value)}
+                  className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                  aria-label="Alta hasta"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Actividad</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(['any', 'yes', 'no'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setSchoolFilter(k)}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                    schoolFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                  }`}
+                >
+                  {k === 'any' ? 'Escuela: todos' : k === 'yes' ? 'Con escuela' : 'Sin escuela'}
+                </button>
+              ))}
+            </div>
+            <input
+              type="number"
+              min={0}
+              value={bookingsMin}
+              onChange={(e) => setBookingsMin(e.target.value)}
+              className="w-28 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A] mt-1"
+              placeholder="Reservas mín."
+              aria-label="Reservas mínimo"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTierFilter('all');
+              setCreatedFrom('');
+              setCreatedTo('');
+              setWalletFilter('any');
+              setWalletMoneyFilter('any');
+              setEloMin('');
+              setEloMax('');
+              setSchoolFilter('any');
+              setBookingsMin('');
+            }}
+            className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50 h-fit self-end"
+          >
+            Limpiar filtros
+          </button>
+        </div>
       </div>
 
       {/* Player list */}
@@ -185,6 +357,9 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
         <PageSpinner />
       ) : (
         <div className="space-y-2">
+          {refreshing && (
+            <p className="text-[10px] text-gray-400 px-1">Actualizando lista...</p>
+          )}
           {filteredPlayers.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm">{t('players_empty')}</div>
           ) : (

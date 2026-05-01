@@ -284,9 +284,12 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
       continue;
     }
     const MM_SLOT_MS = 90 * 60 * 1000;
-    const slotStartMs = new Date(rawSlot.start).getTime();
-    const slotEndMs = Math.min(new Date(rawSlot.end).getTime(), slotStartMs + MM_SLOT_MS);
-    const slot = { start: new Date(slotStartMs).toISOString(), end: new Date(slotEndMs).toISOString() };
+    const rangeStartMs = new Date(rawSlot.start).getTime();
+    const rangeEndMs = new Date(rawSlot.end).getTime();
+    if (!Number.isFinite(rangeStartMs) || !Number.isFinite(rangeEndMs) || rangeStartMs + MM_SLOT_MS > rangeEndMs) {
+      if (wantDiag) dNoSlot++;
+      continue;
+    }
 
     const { data: courtList } = await supabase
       .from('courts')
@@ -294,19 +297,29 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
       .eq('club_id', clubId)
       .eq('is_hidden', false)
       .order('id');
+
+    const stepMs = 15 * 60 * 1000;
     let courtId: string | null = null;
-    for (const c of courtList ?? []) {
-      const cid = (c as { id: string }).id;
-      const conflict = await hasCourtConflict(cid, slot.start, slot.end);
-      if (!conflict) {
-        courtId = cid;
-        break;
-      }
-      if (wantDiag && firstCourtConflict == null && typeof conflict === 'string') {
-        firstCourtConflict = conflict.length > 200 ? `${conflict.slice(0, 200)}…` : conflict;
+    let slot: { start: string; end: string } | null = null;
+
+    outer: for (let t = rangeStartMs; t + MM_SLOT_MS <= rangeEndMs; t += stepMs) {
+      const startIso = new Date(t).toISOString();
+      const endIso = new Date(t + MM_SLOT_MS).toISOString();
+      for (const c of courtList ?? []) {
+        const cid = (c as { id: string }).id;
+        const conflict = await hasCourtConflict(cid, startIso, endIso);
+        if (!conflict) {
+          courtId = cid;
+          slot = { start: startIso, end: endIso };
+          if (wantDiag) firstCourtConflict = null;
+          break outer;
+        }
+        if (wantDiag && firstCourtConflict == null && typeof conflict === 'string') {
+          firstCourtConflict = conflict.length > 200 ? `${conflict.slice(0, 200)}…` : conflict;
+        }
       }
     }
-    if (!courtId) {
+    if (!courtId || !slot) {
       if (wantDiag) dNoCourt++;
       continue;
     }

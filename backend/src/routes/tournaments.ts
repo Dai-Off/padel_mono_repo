@@ -240,6 +240,13 @@ function buildUtcIsoFromYmdHm(ymd: string, hm: string): string {
   return `${ymd}T${hm}:00.000Z`;
 }
 
+function mapTournamentDbErrorMessage(errorMessage: string): string {
+  if (errorMessage.includes('tournaments_check1')) {
+    return 'El rango de nivel no es valido: elo_min debe ser menor o igual que elo_max.';
+  }
+  return errorMessage;
+}
+
 async function getPlayerDisplayName(playerId: string): Promise<string> {
   const supabase = getSupabaseServiceRoleClient();
   const { data: pl } = await supabase
@@ -820,7 +827,11 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
     if (posterNorm.mode === 'set') insertRow.poster_url = posterNorm.value;
 
     const { data: tournament, error } = await supabase.from('tournaments').insert(insertRow).select('*').single();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) {
+      const message = mapTournamentDbErrorMessage(error.message);
+      const statusCode = message === error.message ? 500 : 400;
+      return res.status(statusCode).json({ ok: false, error: message });
+    }
 
     if (levelMode === 'multi_division') {
       try {

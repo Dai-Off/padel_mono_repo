@@ -10,17 +10,57 @@ type SendEmailResult = {
   results: { to: string; ok: boolean; error?: string; player_id?: string }[];
 };
 
+export type ClubClientTier = 'vip' | 'premium' | 'standard' | 'basic';
+export type ClubClientFilters = {
+  q?: string;
+  tier?: ClubClientTier;
+  elo_min?: number;
+  elo_max?: number;
+  created_from?: string; // ISO or yyyy-mm-dd (backend accepts ISO-ish)
+  created_to?: string; // ISO or yyyy-mm-dd
+  has_wallet?: boolean;
+  has_wallet_balance?: boolean;
+  has_school?: boolean;
+  bookings_min?: number;
+  bookings_max?: number;
+  bookings_from?: string;
+  bookings_to?: string;
+};
+
+function buildQs(clubId: string, filters?: string | ClubClientFilters): URLSearchParams {
+  const qs = new URLSearchParams({ club_id: clubId });
+  if (!filters) return qs;
+  if (typeof filters === 'string') {
+    if (filters.trim()) qs.set('q', filters.trim());
+    return qs;
+  }
+
+  const f = filters;
+  if (f.q?.trim()) qs.set('q', f.q.trim());
+  if (f.tier) qs.set('tier', f.tier);
+  if (typeof f.elo_min === 'number' && Number.isFinite(f.elo_min)) qs.set('elo_min', String(f.elo_min));
+  if (typeof f.elo_max === 'number' && Number.isFinite(f.elo_max)) qs.set('elo_max', String(f.elo_max));
+  if (f.created_from?.trim()) qs.set('created_from', f.created_from.trim());
+  if (f.created_to?.trim()) qs.set('created_to', f.created_to.trim());
+  if (typeof f.has_wallet === 'boolean') qs.set('has_wallet', f.has_wallet ? '1' : '0');
+  if (typeof f.has_wallet_balance === 'boolean') qs.set('has_wallet_balance', f.has_wallet_balance ? '1' : '0');
+  if (typeof f.has_school === 'boolean') qs.set('has_school', f.has_school ? '1' : '0');
+  if (typeof f.bookings_min === 'number' && Number.isFinite(f.bookings_min)) qs.set('bookings_min', String(f.bookings_min));
+  if (typeof f.bookings_max === 'number' && Number.isFinite(f.bookings_max)) qs.set('bookings_max', String(f.bookings_max));
+  if (f.bookings_from?.trim()) qs.set('bookings_from', f.bookings_from.trim());
+  if (f.bookings_to?.trim()) qs.set('bookings_to', f.bookings_to.trim());
+  return qs;
+}
+
 export const clubClientService = {
-  async list(clubId: string, q?: string): Promise<Player[]> {
-    const qs = new URLSearchParams({ club_id: clubId });
-    if (q?.trim()) qs.set('q', q.trim());
+  async list(clubId: string, filters?: string | ClubClientFilters): Promise<Player[]> {
+    const qs = buildQs(clubId, filters);
     const res = await apiFetchWithAuth<OkPlayers>(`/club-clients?${qs.toString()}`);
     return res.players ?? [];
   },
 
-  async exportCsv(clubId: string, q?: string): Promise<Blob> {
-    const qs = new URLSearchParams({ club_id: clubId });
-    if (q?.trim()) qs.set('q', q.trim());
+  async exportCsv(clubId: string, filters?: string | ClubClientFilters): Promise<Blob> {
+    const qs = buildQs(clubId, filters);
     return apiFetchBlobWithAuth(`/club-clients/export?${qs.toString()}`);
   },
 

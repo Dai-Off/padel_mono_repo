@@ -456,6 +456,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [isMovingToHidden, setIsMovingToHidden] = useState(false);
     const [moveToHiddenError, setMoveToHiddenError] = useState<string | null>(null);
     const [slotPayments, setSlotPayments] = useState<SlotPayment[]>([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
+    const [isMultipleReservation, setIsMultipleReservation] = useState(false);
+    const [recurrenceCount, setRecurrenceCount] = useState(1);
+    const [recurrenceUnit, setRecurrenceUnit] = useState<'weeks' | 'months'>('weeks');
+    const [includeHolidaysInRecurrence, setIncludeHolidaysInRecurrence] = useState(true);
 
     // ─── Helpers de pago ─────────────────────────────────────────────────────
     const fetchWalletBalance = useCallback(async (playerId: string, slotIndex: number) => {
@@ -562,6 +566,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 if (tx) initPayments[i + 1] = { ...defaultSlot(), ...tx };
             });
             setSlotPayments(initPayments);
+            setIsMultipleReservation(false);
+            setRecurrenceCount(1);
+            setRecurrenceUnit('weeks');
+            setIncludeHolidaysInRecurrence(true);
 
             // Fetch wallet balances for all players in edit mode
             if (bd.organizer_player_id) fetchWalletBalance(bd.organizer_player_id, 0);
@@ -576,6 +584,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             setResType('standard');
             setNotes('');
             setConfirmEmail(false);
+            setIsMultipleReservation(false);
+            setRecurrenceCount(1);
+            setRecurrenceUnit('weeks');
+            setIncludeHolidaysInRecurrence(true);
             if (reservation?.startTime) {
                 const [h, m] = reservation.startTime.split(':');
                 setStartHour(h?.padStart(2, '0') || '08');
@@ -786,6 +798,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     source_channel: 'manual',
                     participants: buildParticipants(),
                     send_email: confirmEmail,
+                    recurrence_count: isMultipleReservation ? recurrenceCount : 1,
+                    recurrence_unit: isMultipleReservation ? recurrenceUnit : 'weeks',
+                    include_holidays: includeHolidaysInRecurrence,
                 };
                 await onSave(data);
             }
@@ -1009,12 +1024,49 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             {/* Nº de reservas */}
                             <div className="flex items-center gap-2">
                                 <span className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.fieldNumBookings')}</span>
-                                <select className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]">
-                                    <option>1</option>
-                                    <option>2</option>
-                                    <option>3</option>
-                                    <option>4</option>
-                                </select>
+                                <div className="flex-1 space-y-2">
+                                    <label className="inline-flex items-center gap-2 text-xs text-gray-700 font-medium">
+                                        <input
+                                            type="checkbox"
+                                            checked={isMultipleReservation}
+                                            onChange={(e) => setIsMultipleReservation(e.target.checked)}
+                                            className="w-4 h-4 accent-[#006A6A]"
+                                        />
+                                        Reserva múltiple
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <select
+                                            value={recurrenceUnit}
+                                            onChange={(e) => setRecurrenceUnit(e.target.value as 'weeks' | 'months')}
+                                            disabled={!isMultipleReservation}
+                                            className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A] disabled:bg-gray-100 disabled:text-gray-400"
+                                        >
+                                            <option value="weeks">Semanas</option>
+                                            <option value="months">Meses</option>
+                                        </select>
+                                        <select
+                                            value={recurrenceCount}
+                                            onChange={(e) => setRecurrenceCount(Math.max(1, Number(e.target.value) || 1))}
+                                            disabled={!isMultipleReservation}
+                                            className="w-24 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A] disabled:bg-gray-100 disabled:text-gray-400"
+                                        >
+                                            {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                                                <option key={n} value={n}>{n}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    {isMultipleReservation && (
+                                        <label className="inline-flex items-center gap-2 text-xs text-gray-700 font-medium">
+                                            <input
+                                                type="checkbox"
+                                                checked={includeHolidaysInRecurrence}
+                                                onChange={(e) => setIncludeHolidaysInRecurrence(e.target.checked)}
+                                                className="w-4 h-4 accent-[#006A6A]"
+                                            />
+                                            Reservar también en fechas festivas
+                                        </label>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Cliente */}
