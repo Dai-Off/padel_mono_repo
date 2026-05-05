@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -10,11 +11,6 @@ router.use(attachAuthContext);
 const ITEM_FIELDS =
   'id, club_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, created_at, updated_at';
 const MOVEMENT_FIELDS = 'id, club_id, item_id, movement_type, quantity, reason, movement_at, created_at';
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
 
 function isMissingRelationError(message: string): boolean {
   const m = message.toLowerCase();
@@ -43,10 +39,10 @@ const BUCKET = 'inventory-images';
  * GET /inventario/items
  * Lista productos y calcula stock actual a partir de inventory_movements.
  */
-router.get('/items', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/items', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id?.trim()) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -107,7 +103,7 @@ router.get('/items', requireClubOwnerOrAdmin, async (req: Request, res: Response
  * POST /inventario/items
  * Crea un producto (inventario_item).
  */
-router.post('/items', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/items', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url } = req.body ?? {};
   const clubIdStr = String(club_id ?? '').trim();
   const nameStr = String(name ?? '').trim();
@@ -117,7 +113,7 @@ router.post('/items', requireClubOwnerOrAdmin, async (req: Request, res: Respons
   const currencyStr = String(currency ?? 'EUR').trim() || 'EUR';
 
   if (!clubIdStr || !nameStr) return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
-  if (!canAccessClub(req, clubIdStr)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubIdStr, 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   if (!Number.isFinite(priceCents) || priceCents < 0) return res.status(400).json({ ok: false, error: 'unit_price_cents inválido' });
   if (!Number.isFinite(lowThreshold) || lowThreshold < 0) return res.status(400).json({ ok: false, error: 'low_stock_threshold inválido' });
 
@@ -152,13 +148,13 @@ router.post('/items', requireClubOwnerOrAdmin, async (req: Request, res: Respons
  * PUT /inventario/items/{id}
  * Actualiza un producto.
  */
-router.put('/items/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/items/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: existing } = await supabase.from('inventory_items').select('club_id').eq('id', id).maybeSingle();
     if (!existing) return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
-    if (!canAccessClub(req, String((existing as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((existing as any).club_id), 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   } catch {
     return res.status(500).json({ ok: false, error: 'Error al verificar producto' });
   }
@@ -207,13 +203,13 @@ router.put('/items/:id', requireClubOwnerOrAdmin, async (req: Request, res: Resp
  * DELETE /inventario/items/{id}
  * Elimina un producto.
  */
-router.delete('/items/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.delete('/items/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: existing } = await supabase.from('inventory_items').select('club_id').eq('id', id).maybeSingle();
     if (!existing) return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
-    if (!canAccessClub(req, String((existing as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((existing as any).club_id), 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
     const { error } = await supabase.from('inventory_items').delete().eq('id', id);
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -227,11 +223,11 @@ router.delete('/items/:id', requireClubOwnerOrAdmin, async (req: Request, res: R
  * GET /inventario/movements
  * Lista movimientos del inventario (para auditoría).
  */
-router.get('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/movements', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   const item_id = req.query.item_id as string | undefined;
   if (!club_id?.trim()) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -255,7 +251,7 @@ router.get('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Resp
  * POST /inventario/movements
  * Crea un movimiento de stock (entrada/salida).
  */
-router.post('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/movements', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, item_id, movement_type, quantity, reason, movement_at } = req.body ?? {};
 
   const clubIdStr = String(club_id ?? '').trim();
@@ -266,7 +262,7 @@ router.post('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Res
   if (!clubIdStr || !itemIdStr) return res.status(400).json({ ok: false, error: 'club_id y item_id son obligatorios' });
   if (typeStr !== 'in' && typeStr !== 'out') return res.status(400).json({ ok: false, error: 'movement_type debe ser in u out' });
   if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ ok: false, error: 'quantity debe ser un número > 0' });
-  if (!canAccessClub(req, clubIdStr)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubIdStr, 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   let movementAtIso: string | null = null;
   if (movement_at != null && String(movement_at).trim()) {
@@ -346,7 +342,7 @@ router.post('/movements', requireClubOwnerOrAdmin, async (req: Request, res: Res
  * POST /inventario/items/{id}/image
  * Sube una imagen para un producto y actualiza `image_url`.
  */
-router.post('/items/:id/image', requireClubOwnerOrAdmin, upload.single('file'), async (req: Request, res: Response) => {
+router.post('/items/:id/image', requireClubOwnerOrAdminOrPortalStaff, upload.single('file'), async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     if (!req.file) return res.status(400).json({ ok: false, error: 'No se envió ningún archivo (campo "file")' });
@@ -355,7 +351,7 @@ router.post('/items/:id/image', requireClubOwnerOrAdmin, upload.single('file'), 
     const { data: existing, error: existingErr } = await supabase.from('inventory_items').select('club_id').eq('id', id).maybeSingle();
     if (existingErr) return res.status(500).json({ ok: false, error: existingErr.message });
     if (!existing) return res.status(404).json({ ok: false, error: 'Producto no encontrado' });
-    if (!canAccessClub(req, String((existing as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((existing as any).club_id), 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
     const buffer = req.file.buffer ?? (req.file as unknown as { buffer?: Buffer }).buffer;
     if (!buffer || !Buffer.isBuffer(buffer)) return res.status(500).json({ ok: false, error: 'No se pudo leer el archivo' });

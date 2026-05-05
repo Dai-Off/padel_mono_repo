@@ -1,15 +1,22 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { attachAuthContext } from '../middleware/attachAuthContext';
+import { requireAuthUser } from '../middleware/requireAuthUser';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
+router.use(attachAuthContext);
 
 const FIELDS = 'id, club_id, name, description, category, price_to_pay, balance_to_add, physical_item, validity_days, is_active, created_at, updated_at';
 
 // ─── GET /bonuses?club_id= ───────────────────────────────────────────────────
 // Lista todos los bonos de un club (activos e inactivos para el admin).
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requireAuthUser, async (req: Request, res: Response) => {
     const { club_id } = req.query as Record<string, string>;
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es requerido' });
+    if (!canAccessClub(req, club_id, 'grilla')) {
+        return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
 
     try {
         const supabase = getSupabaseServiceRoleClient();
@@ -28,11 +35,14 @@ router.get('/', async (req: Request, res: Response) => {
 
 // ─── POST /bonuses ────────────────────────────────────────────────────────────
 // Crea un nuevo bono.
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireAuthUser, async (req: Request, res: Response) => {
     const { club_id, name, description, category, price_to_pay, balance_to_add, physical_item, validity_days } = req.body ?? {};
 
     if (!club_id || !name || price_to_pay === undefined || balance_to_add === undefined) {
         return res.status(400).json({ ok: false, error: 'club_id, name, price_to_pay y balance_to_add son requeridos' });
+    }
+    if (!canAccessClub(req, String(club_id), 'grilla')) {
+        return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
     if (typeof price_to_pay !== 'number' || typeof balance_to_add !== 'number') {
@@ -69,7 +79,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 // ─── PUT /bonuses/:id ─────────────────────────────────────────────────────────
 // Actualiza un bono existente.
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', requireAuthUser, async (req: Request, res: Response) => {
     const { id } = req.params;
     const { name, description, category, price_to_pay, balance_to_add, physical_item, validity_days, is_active } = req.body ?? {};
 
@@ -96,6 +106,11 @@ router.put('/:id', async (req: Request, res: Response) => {
 
     try {
         const supabase = getSupabaseServiceRoleClient();
+        const { data: existing } = await supabase.from('bonuses').select('club_id').eq('id', id).maybeSingle();
+        const cid = (existing as { club_id?: string } | null)?.club_id;
+        if (!cid || !canAccessClub(req, cid, 'grilla')) {
+            return res.status(403).json({ ok: false, error: 'No tienes acceso a este bono' });
+        }
         const { data, error } = await supabase
             .from('bonuses')
             .update(updates)
@@ -112,11 +127,16 @@ router.put('/:id', async (req: Request, res: Response) => {
 
 // ─── PATCH /bonuses/:id/toggle ────────────────────────────────────────────────
 // Toggle rápido de is_active (baja/alta lógica).
-router.patch('/:id/toggle', async (req: Request, res: Response) => {
+router.patch('/:id/toggle', requireAuthUser, async (req: Request, res: Response) => {
     const { id } = req.params;
 
     try {
         const supabase = getSupabaseServiceRoleClient();
+        const { data: bonusRow } = await supabase.from('bonuses').select('club_id').eq('id', id).maybeSingle();
+        const bcid = (bonusRow as { club_id?: string } | null)?.club_id;
+        if (!bcid || !canAccessClub(req, bcid, 'grilla')) {
+            return res.status(403).json({ ok: false, error: 'No tienes acceso a este bono' });
+        }
 
         // Leer estado actual
         const { data: current, error: readErr } = await supabase

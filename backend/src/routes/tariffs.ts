@@ -1,15 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
 
 function parsePrice(input: unknown): number | null {
   const n = Number(input);
@@ -19,10 +15,10 @@ function parsePrice(input: unknown): number | null {
 
 // ----------------- DEFAULTS (must precede /:id) -----------------
 
-router.get('/defaults', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/defaults', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
@@ -34,10 +30,10 @@ router.get('/defaults', requireClubOwnerOrAdmin, async (req: Request, res: Respo
   return res.json({ ok: true, defaults: data ?? { club_id, weekday_tariff_id: null, weekend_tariff_id: null } });
 });
 
-router.put('/defaults', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/defaults', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, weekday_tariff_id, weekend_tariff_id } = req.body ?? {};
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, String(club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, String(club_id), 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
@@ -59,10 +55,10 @@ router.put('/defaults', requireClubOwnerOrAdmin, async (req: Request, res: Respo
 
 // ----------------- DAY OVERRIDES (must precede /:id) -----------------
 
-router.get('/overrides', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/overrides', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const from = req.query.from as string | undefined;
   const to = req.query.to as string | undefined;
@@ -81,12 +77,12 @@ router.get('/overrides', requireClubOwnerOrAdmin, async (req: Request, res: Resp
   return res.json({ ok: true, overrides: data ?? [] });
 });
 
-router.put('/overrides', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/overrides', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, date, tariff_id, label, source } = req.body ?? {};
   if (!club_id || !date || !tariff_id) {
     return res.status(400).json({ ok: false, error: 'club_id, date y tariff_id son obligatorios' });
   }
-  if (!canAccessClub(req, String(club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, String(club_id), 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const srcValue = source === 'holiday' ? 'holiday' : 'manual';
 
@@ -110,11 +106,11 @@ router.put('/overrides', requireClubOwnerOrAdmin, async (req: Request, res: Resp
   return res.json({ ok: true, override: data });
 });
 
-router.delete('/overrides', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.delete('/overrides', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   const date = req.query.date as string | undefined;
   if (!club_id || !date) return res.status(400).json({ ok: false, error: 'club_id y date son obligatorios' });
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const supabase = getSupabaseServiceRoleClient();
   const { error } = await supabase
@@ -126,12 +122,12 @@ router.delete('/overrides', requireClubOwnerOrAdmin, async (req: Request, res: R
   return res.json({ ok: true });
 });
 
-router.post('/overrides/bulk-holidays', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/overrides/bulk-holidays', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, tariff_id, dates } = req.body ?? {};
   if (!club_id || !tariff_id || !Array.isArray(dates) || dates.length === 0) {
     return res.status(400).json({ ok: false, error: 'club_id, tariff_id y dates son obligatorios' });
   }
-  if (!canAccessClub(req, String(club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, String(club_id), 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const rows = dates
     .map((d: unknown) => {
@@ -318,14 +314,14 @@ router.get('/slot-price', async (req: Request, res: Response) => {
 // ----------------- RESOLVED CALENDAR -----------------
 // GET /tariffs/calendar?club_id=X&year=YYYY&month=MM (1-12)
 
-router.get('/calendar', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/calendar', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   const yearStr = req.query.year as string | undefined;
   const monthStr = req.query.month as string | undefined;
   if (!club_id || !yearStr || !monthStr) {
     return res.status(400).json({ ok: false, error: 'club_id, year y month son obligatorios' });
   }
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const year = Number(yearStr);
   const month = Number(monthStr);
@@ -455,7 +451,7 @@ router.get('/schedule', async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   const date    = req.query.date    as string | undefined;
   if (!club_id || !date) return res.status(400).json({ ok: false, error: 'club_id y date son obligatorios' });
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
@@ -469,10 +465,10 @@ router.get('/schedule', async (req: Request, res: Response) => {
 });
 
 // PUT /tariffs/schedule — replace all slots for a date (delete-then-insert)
-router.put('/schedule', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/schedule', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, date, slots } = req.body ?? {};
   if (!club_id || !date) return res.status(400).json({ ok: false, error: 'club_id y date son obligatorios' });
-  if (!canAccessClub(req, String(club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, String(club_id), 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   if (!Array.isArray(slots)) return res.status(400).json({ ok: false, error: 'slots debe ser un array' });
 
   const supabase = getSupabaseServiceRoleClient();
@@ -509,12 +505,12 @@ router.put('/schedule', requireClubOwnerOrAdmin, async (req: Request, res: Respo
 });
 
 // POST /tariffs/schedule/repeat — copy source_date schedule to target_dates
-router.post('/schedule/repeat', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/schedule/repeat', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, source_date, target_dates } = req.body ?? {};
   if (!club_id || !source_date || !Array.isArray(target_dates) || target_dates.length === 0) {
     return res.status(400).json({ ok: false, error: 'club_id, source_date y target_dates son obligatorios' });
   }
-  if (!canAccessClub(req, String(club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, String(club_id), 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const supabase = getSupabaseServiceRoleClient();
 
@@ -559,14 +555,14 @@ router.post('/schedule/repeat', requireClubOwnerOrAdmin, async (req: Request, re
 });
 
 // DELETE /tariffs/schedule/month?club_id=X&year=YYYY&month=M — reset full month
-router.delete('/schedule/month', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.delete('/schedule/month', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id  = req.query.club_id  as string | undefined;
   const yearStr  = req.query.year     as string | undefined;
   const monthStr = req.query.month    as string | undefined;
   if (!club_id || !yearStr || !monthStr) {
     return res.status(400).json({ ok: false, error: 'club_id, year y month son obligatorios' });
   }
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const year  = Number(yearStr);
   const month = Number(monthStr);
@@ -597,10 +593,10 @@ router.delete('/schedule/month', requireClubOwnerOrAdmin, async (req: Request, r
 
 
 
-router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const supabase = getSupabaseServiceRoleClient();
   const { data, error } = await supabase
@@ -615,7 +611,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
 router.post('/', async (req: Request, res: Response) => {
   const { club_id, name, price_cents, is_blocking } = req.body ?? {};
   if (!club_id || !name) return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
-  if (!canAccessClub(req, String(club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, String(club_id), 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const price = parsePrice(price_cents);
   if (price === null) return res.status(400).json({ ok: false, error: 'price_cents inválido' });
@@ -649,7 +645,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     .eq('id', id)
     .single();
   if (exErr || !existing) return res.status(404).json({ ok: false, error: 'Tarifa no encontrada' });
-  if (!canAccessClub(req, existing.club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, existing.club_id, 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (name !== undefined) patch.name = String(name).trim();
@@ -677,7 +673,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
     .eq('id', id)
     .single();
   if (exErr || !existing) return res.status(404).json({ ok: false, error: 'Tarifa no encontrada' });
-  if (!canAccessClub(req, existing.club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, existing.club_id, 'finanzas')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const { error } = await supabase.from('club_tariffs').delete().eq('id', id);
   if (error) return res.status(500).json({ ok: false, error: error.message });

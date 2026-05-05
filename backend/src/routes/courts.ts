@@ -1,10 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireAuthUser } from '../middleware/requireAuthUser';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 import { normalizeStoredVisibilityWindows } from '../lib/courtVisibility';
 import { getAvailableCourtIds } from '../lib/courtConflict';
+import { canAccessClub, isClubOwnerOrAdmin, portalClubIdsWithAnyPermission } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -12,9 +13,10 @@ router.use(attachAuthContext);
 const FIELDS =
   'id, created_at, club_id, name, indoor, glass_type, status, lighting, last_maintenance, display_order, is_hidden, visibility_windows';
 
-function canAccessCourtClub(req: Request, clubId: string): boolean {
+function canSeeCourtsForClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
+  if (req.authContext?.allowedClubIds?.includes(clubId)) return true;
+  return canAccessClub(req, clubId, ['grilla', 'escuela']);
 }
 
 /**
@@ -58,8 +60,15 @@ router.get('/', async (req: Request, res: Response) => {
       if (club_id && !req.authContext.allowedClubIds.includes(club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
       if (club_id) q = q.eq('club_id', club_id);
     } else {
-      if (club_id) q = q.eq('club_id', club_id);
-      q = q.eq('is_hidden', false);
+      const portalIds = portalClubIdsWithAnyPermission(req, ['grilla', 'escuela', 'club.manage']);
+      if (portalIds.length) {
+        q = q.in('club_id', portalIds);
+        if (club_id && !portalIds.includes(club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+        if (club_id) q = q.eq('club_id', club_id);
+      } else {
+        if (club_id) q = q.eq('club_id', club_id);
+        q = q.eq('is_hidden', false);
+      }
     }
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -73,12 +82,12 @@ router.get('/', async (req: Request, res: Response) => {
  * PUT /courts/reorder — guardar orden de pistas de un club (dueño/admin).
  * Body: { club_id, court_ids: string[] } — court_ids = todos los ids del club en el orden deseado.
  */
-router.put('/reorder', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/reorder', requireAuthUser, async (req: Request, res: Response) => {
   const { club_id, court_ids } = req.body ?? {};
   if (!club_id || !Array.isArray(court_ids) || court_ids.length === 0) {
     return res.status(400).json({ ok: false, error: 'club_id y court_ids (array no vacío) son obligatorios' });
   }
-  if (!canAccessCourtClub(req, club_id)) {
+  if (!isClubOwnerOrAdmin(req, club_id)) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
   const ids = court_ids.map((x: unknown) => String(x)).filter(Boolean);
@@ -135,7 +144,7 @@ router.get('/available', async (req: Request, res: Response) => {
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs - startMs < 30 * 60 * 1000) {
     return res.status(400).json({ ok: false, error: 'El rango horario debe ser válido y de al menos 30 minutos' });
   }
-  if (!canAccessCourtClub(req, club_id)) {
+  if (!canSeeCourtsForClub(req, club_id)) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
   try {
@@ -187,7 +196,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Pista no encontrada' });
     const row = data as { is_hidden?: boolean; club_id: string };
-    if (row.is_hidden && !canAccessCourtClub(req, row.club_id)) {
+    if (row.is_hidden && !canSeeCourtsForClub(req, row.club_id)) {
       return res.status(404).json({ ok: false, error: 'Pista no encontrada' });
     }
     return res.json({ ok: true, court: data });
@@ -226,12 +235,12 @@ router.get('/:id', async (req: Request, res: Response) => {
  *       201: { description: Creada }
  *       400: { description: visibility_windows inválido }
  */
-router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/', requireAuthUser, async (req: Request, res: Response) => {
   const { club_id, name, indoor, glass_type, lighting, last_maintenance, is_hidden, visibility_windows } = req.body ?? {};
   if (!club_id || !name || !String(name).trim()) {
     return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
   }
-  if (!canAccessCourtClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!isClubOwnerOrAdmin(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   const winNorm = normalizeStoredVisibilityWindows(visibility_windows);
   if (!winNorm.ok) return res.status(400).json({ ok: false, error: winNorm.error });
   try {
@@ -303,12 +312,12 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
  *       200: { description: Actualizada }
  *       400: { description: visibility_windows inválido }
  */
-router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/:id', requireAuthUser, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: existing } = await supabase.from('courts').select('club_id').eq('id', id).maybeSingle();
-    if (!existing || !canAccessCourtClub(req, (existing as { club_id: string }).club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a esta pista' });
+    if (!existing || !isClubOwnerOrAdmin(req, (existing as { club_id: string }).club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a esta pista' });
   } catch {
     return res.status(500).json({ ok: false, error: 'Error al verificar pista' });
   }
@@ -345,12 +354,12 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
   }
 });
 
-router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.delete('/:id', requireAuthUser, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: existing } = await supabase.from('courts').select('club_id, is_hidden').eq('id', id).maybeSingle();
-    if (!existing || !canAccessCourtClub(req, (existing as { club_id: string }).club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a esta pista' });
+    if (!existing || !isClubOwnerOrAdmin(req, (existing as { club_id: string }).club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a esta pista' });
 
     if (!(existing as { is_hidden: boolean }).is_hidden) {
       return res.status(400).json({ ok: false, error: 'Solo se pueden eliminar físicamente las pistas ocultas.' });

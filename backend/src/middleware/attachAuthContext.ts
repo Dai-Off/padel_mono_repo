@@ -8,11 +8,21 @@ function getToken(req: Request): string | null {
   return raw.trim() || null;
 }
 
+export interface PortalMembership {
+  club_id: string;
+  club_portal_role_id: string;
+  role_name: string;
+  role_slug: string;
+  permissions: string[];
+}
+
 export interface AuthContext {
   userId: string;
   clubOwnerId?: string;
   adminId?: string;
   allowedClubIds: string[];
+  /** Personal del club con rol configurable (no dueño). */
+  portalMemberships: PortalMembership[];
 }
 
 declare global {
@@ -45,6 +55,7 @@ export async function attachAuthContext(req: Request, _res: Response, next: Next
     const ctx: AuthContext = {
       userId: user.id,
       allowedClubIds: [],
+      portalMemberships: [],
     };
     const { data: owner } = await supabase
       .from('club_owners')
@@ -65,6 +76,44 @@ export async function attachAuthContext(req: Request, _res: Response, next: Next
       .eq('auth_user_id', user.id)
       .maybeSingle();
     if (admin) ctx.adminId = admin.id;
+
+    const { data: memberRows, error: memErr } = await supabase
+      .from('club_portal_members')
+      .select('club_id, club_portal_role_id')
+      .eq('auth_user_id', user.id);
+    if (memErr && !memErr.message.includes('does not exist')) {
+      console.error('[attachAuthContext] club_portal_members:', memErr.message);
+    }
+    const members =
+      !memErr || memErr.message.includes('does not exist')
+        ? ([] as { club_id: string; club_portal_role_id: string }[])
+        : ((memberRows ?? []) as { club_id: string; club_portal_role_id: string }[]);
+    if (members.length > 0) {
+      const roleIds = [...new Set(members.map((m) => m.club_portal_role_id))];
+      const [{ data: roleRows }, { data: permRows }] = await Promise.all([
+        supabase.from('club_portal_roles').select('id, name, slug').in('id', roleIds),
+        supabase.from('club_portal_role_permissions').select('role_id, permission_key').in('role_id', roleIds),
+      ]);
+      const roleById = new Map(
+        ((roleRows ?? []) as { id: string; name: string; slug: string }[]).map((r) => [r.id, r])
+      );
+      const permsByRole = new Map<string, string[]>();
+      for (const p of (permRows ?? []) as { role_id: string; permission_key: string }[]) {
+        const list = permsByRole.get(p.role_id) ?? [];
+        list.push(p.permission_key);
+        permsByRole.set(p.role_id, list);
+      }
+      for (const m of members) {
+        const role = roleById.get(m.club_portal_role_id);
+        ctx.portalMemberships.push({
+          club_id: m.club_id,
+          club_portal_role_id: m.club_portal_role_id,
+          role_name: role?.name ?? 'Rol',
+          role_slug: role?.slug ?? '',
+          permissions: permsByRole.get(m.club_portal_role_id) ?? [],
+        });
+      }
+    }
 
     req.authContext = ctx;
   } catch {

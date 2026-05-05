@@ -1,16 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { planPromotionRelegation } from '../services/leaguePromotionService';
 
 const router = Router();
 router.use(attachAuthContext);
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
 
 const ENTRY_PLAYER_EMBED = 'player1:players!league_division_teams_player_id_1_fkey(id, first_name, last_name, email, elo_rating, avatar_url), player2:players!league_division_teams_player_id_2_fkey(id, first_name, last_name, email, elo_rating, avatar_url)';
 const ENTRY_SELECT = `id, division_id, team_label, sort_order, player_id_1, player_id_2, ${ENTRY_PLAYER_EMBED}`;
@@ -67,10 +63,10 @@ function normalizeSeason(s: any) {
  *       400: { description: Falta club_id }
  *       403: { description: Sin acceso al club }
  */
-router.get('/seasons', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/seasons', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const clubId = String(req.query.club_id ?? '').trim();
   if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
+  if (!canAccessClub(req, clubId, 'torneos')) return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
 
   const supabase = getSupabaseServiceRoleClient();
   const { data: seasons, error } = await supabase
@@ -120,12 +116,12 @@ router.get('/seasons', requireClubOwnerOrAdmin, async (req: Request, res: Respon
  *       400: { description: Datos inválidos }
  *       403: { description: Sin acceso al club }
  */
-router.post('/seasons', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/seasons', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const clubId = String(req.body?.club_id ?? '').trim();
   const name = String(req.body?.name ?? '').trim();
   const mode = req.body?.mode === 'pairs' ? 'pairs' : 'individual';
   if (!clubId || !name) return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
+  if (!canAccessClub(req, clubId, 'torneos')) return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
 
   const supabase = getSupabaseServiceRoleClient();
   const { data: season, error } = await supabase
@@ -193,7 +189,7 @@ router.post('/seasons', requireClubOwnerOrAdmin, async (req: Request, res: Respo
  *       404: { description: Temporada no encontrada }
  *       409: { description: Jugador ya inscrito en esta temporada }
  */
-router.post('/seasons/:seasonId/entries', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/seasons/:seasonId/entries', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const seasonId = req.params.seasonId;
   const divisionId = String(req.body?.division_id ?? '').trim();
   const playerId1 = String(req.body?.player_id_1 ?? '').trim();
@@ -209,7 +205,7 @@ router.post('/seasons/:seasonId/entries', requireClubOwnerOrAdmin, async (req: R
     .maybeSingle();
   if (seasonErr) return res.status(500).json({ ok: false, error: seasonErr.message });
   if (!season) return res.status(404).json({ ok: false, error: 'Temporada no encontrada' });
-  if (!canAccessClub(req, String((season as any).club_id))) {
+  if (!canAccessClub(req, String((season as any).club_id), 'torneos')) {
     return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
   }
   if ((season as any).closed) {
@@ -312,7 +308,7 @@ router.post('/seasons/:seasonId/entries', requireClubOwnerOrAdmin, async (req: R
  *       403: { description: Sin acceso al club }
  *       404: { description: Entrada no encontrada }
  */
-router.delete('/entries/:entryId', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.delete('/entries/:entryId', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const entryId = req.params.entryId;
   const supabase = getSupabaseServiceRoleClient();
 
@@ -335,7 +331,7 @@ router.delete('/entries/:entryId', requireClubOwnerOrAdmin, async (req: Request,
       .select('club_id')
       .eq('id', (div as any).season_id)
       .maybeSingle();
-    if (season && !canAccessClub(req, String((season as any).club_id))) {
+    if (season && !canAccessClub(req, String((season as any).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
     }
   }
@@ -360,7 +356,7 @@ router.delete('/entries/:entryId', requireClubOwnerOrAdmin, async (req: Request,
  *     responses:
  *       200: { description: Partidos de la temporada }
  */
-router.get('/seasons/:seasonId/matches', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/seasons/:seasonId/matches', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const seasonId = req.params.seasonId;
   const supabase = getSupabaseServiceRoleClient();
 
@@ -370,7 +366,7 @@ router.get('/seasons/:seasonId/matches', requireClubOwnerOrAdmin, async (req: Re
     .eq('id', seasonId)
     .maybeSingle();
   if (!season) return res.status(404).json({ ok: false, error: 'Temporada no encontrada' });
-  if (!canAccessClub(req, String((season as any).club_id))) {
+  if (!canAccessClub(req, String((season as any).club_id), 'torneos')) {
     return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
   }
 
@@ -420,7 +416,7 @@ router.get('/seasons/:seasonId/matches', requireClubOwnerOrAdmin, async (req: Re
  *       400: { description: Datos inválidos }
  *       403: { description: Sin acceso al club }
  */
-router.post('/seasons/:seasonId/matches', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/seasons/:seasonId/matches', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const seasonId = req.params.seasonId;
   const divisionId = String(req.body?.division_id ?? '').trim();
   const entryAId = String(req.body?.entry_a_id ?? '').trim();
@@ -443,7 +439,7 @@ router.post('/seasons/:seasonId/matches', requireClubOwnerOrAdmin, async (req: R
     .eq('id', seasonId)
     .maybeSingle();
   if (!season) return res.status(404).json({ ok: false, error: 'Temporada no encontrada' });
-  if (!canAccessClub(req, String((season as any).club_id))) {
+  if (!canAccessClub(req, String((season as any).club_id), 'torneos')) {
     return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
   }
 
@@ -501,7 +497,7 @@ router.post('/seasons/:seasonId/matches', requireClubOwnerOrAdmin, async (req: R
  *       400: { description: Datos inválidos }
  *       404: { description: Partido no encontrado }
  */
-router.post('/matches/:matchId/result', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/matches/:matchId/result', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const matchId = req.params.matchId;
   const winnerEntryId = String(req.body?.winner_entry_id ?? '').trim();
   const sets = Array.isArray(req.body?.sets) ? req.body.sets : [];
@@ -525,7 +521,7 @@ router.post('/matches/:matchId/result', requireClubOwnerOrAdmin, async (req: Req
     .select('club_id')
     .eq('id', (match as any).season_id)
     .maybeSingle();
-  if (season && !canAccessClub(req, String((season as any).club_id))) {
+  if (season && !canAccessClub(req, String((season as any).club_id), 'torneos')) {
     return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
   }
 
@@ -583,7 +579,7 @@ router.post('/matches/:matchId/result', requireClubOwnerOrAdmin, async (req: Req
  *       403: { description: Sin acceso al club }
  *       404: { description: Temporada no encontrada }
  */
-router.post('/seasons/:seasonId/close-and-promote', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/seasons/:seasonId/close-and-promote', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const seasonId = req.params.seasonId;
   const supabase = getSupabaseServiceRoleClient();
 
@@ -594,7 +590,7 @@ router.post('/seasons/:seasonId/close-and-promote', requireClubOwnerOrAdmin, asy
     .maybeSingle();
   if (seasonErr) return res.status(500).json({ ok: false, error: seasonErr.message });
   if (!season) return res.status(404).json({ ok: false, error: 'Temporada no encontrada' });
-  if (!canAccessClub(req, String((season as { club_id: string }).club_id))) {
+  if (!canAccessClub(req, String((season as { club_id: string }).club_id), 'torneos')) {
     return res.status(403).json({ ok: false, error: 'Sin acceso al club' });
   }
   if ((season as { closed: boolean }).closed) {

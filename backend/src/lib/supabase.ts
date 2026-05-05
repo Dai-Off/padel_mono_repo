@@ -2,7 +2,6 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 let supabaseClient: SupabaseClient | null = null;
 let anonClient: SupabaseClient | null = null;
-let serviceRoleClient: SupabaseClient | null = null;
 
 export const getSupabaseClient = (): SupabaseClient => {
   if (supabaseClient) return supabaseClient;
@@ -43,8 +42,6 @@ export const getSupabaseAnonClient = (): SupabaseClient => {
 };
 
 export const getSupabaseServiceRoleClient = (): SupabaseClient => {
-  if (serviceRoleClient) return serviceRoleClient;
-
   const url = (process.env.SUPABASE_URL || '').trim();
   const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
@@ -53,12 +50,14 @@ export const getSupabaseServiceRoleClient = (): SupabaseClient => {
     throw new Error('Missing env SUPABASE_SERVICE_ROLE_KEY');
   }
 
-  serviceRoleClient = createClient(url, serviceRoleKey, {
+  // IMPORTANT:
+  // Do not reuse a singleton for service-role client because some auth flows
+  // call signIn/refresh and can attach a user session to the client instance.
+  // A fresh client per call avoids leaking auth state and unexpected RLS errors.
+  return createClient(url, serviceRoleKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
-
-  return serviceRoleClient;
 };

@@ -1,16 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
-router.use(requireClubOwnerOrAdmin);
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
+router.use(requireClubOwnerOrAdminOrPortalStaff);
 
 /**
  * POST /pricing-rules/seed-defaults
@@ -40,7 +36,7 @@ router.post('/seed-defaults', async (req: Request, res: Response) => {
   if (!club_id || !String(club_id).trim()) {
     return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   }
-  if (!canAccessClub(req, String(club_id))) {
+  if (!canAccessClub(req, String(club_id), 'grilla')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 
@@ -128,4 +124,3 @@ router.post('/seed-defaults', async (req: Request, res: Response) => {
 });
 
 export default router;
-

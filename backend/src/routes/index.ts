@@ -41,6 +41,7 @@ import tariffsRouter from "./tariffs";
 import seasonPassRouter from "./seasonPass";
 import publicRouter from "./public";
 import availabilityRouter from "./availability";
+import clubPortalRouter from "./clubPortal";
 
 
 const router = Router();
@@ -94,6 +95,7 @@ router.use("/tariffs", tariffsRouter);
 router.use("/season-pass", seasonPassRouter);
 router.use("/public", publicRouter);
 router.use("/availability", availabilityRouter);
+router.use("/club-portal", clubPortalRouter);
 
 
 export default router;

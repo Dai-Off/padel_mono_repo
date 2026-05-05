@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -11,11 +12,6 @@ function getToken(req: Request): string | null {
   const raw = typeof authHeader === 'string' ? authHeader : '';
   if (raw.startsWith('Bearer ')) return raw.slice(7).trim();
   return raw.trim() || null;
-}
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
 }
 
 type ReviewRow = {
@@ -91,10 +87,10 @@ async function resolvePlayerIdFromToken(token: string): Promise<string | null> {
  *       401: { description: Sin token }
  *       403: { description: Sin acceso al club }
  */
-router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = String(req.query.club_id ?? '').trim();
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) {
+  if (!canAccessClub(req, club_id, 'gestion')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 

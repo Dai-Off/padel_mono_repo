@@ -19,6 +19,7 @@ import {
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import { insertGuestMatchPlayerAfterPayment } from '../services/matchPlayerSlotService';
 import { zonedTimeToUtc } from './learningTimezone';
+import { canAccessClub } from '../lib/clubAccess';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
@@ -1085,8 +1086,7 @@ export async function listTransactionsHandler(req: Request, res: Response): Prom
 }
 
 function canAccessClubForPayments(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
+  return canAccessClub(req, clubId, 'finanzas');
 }
 
 /**

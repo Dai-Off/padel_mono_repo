@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
+import { requireAuthUser } from '../middleware/requireAuthUser';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -47,13 +49,16 @@ router.get('/check', async (req: Request, res: Response) => {
   });
 });
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireAuthUser, async (req: Request, res: Response) => {
   const { club_id, date, type, reason } = req.body ?? {};
   if (!club_id || !date || !type) {
     return res.status(400).json({ ok: false, error: 'club_id, date y type son obligatorios' });
   }
   if (!['holiday', 'non_working'].includes(type)) {
     return res.status(400).json({ ok: false, error: 'type debe ser "holiday" o "non_working"' });
+  }
+  if (!canAccessClub(req, String(club_id), 'grilla')) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 
   const supabase = getSupabaseServiceRoleClient();
@@ -71,9 +76,14 @@ router.post('/', async (req: Request, res: Response) => {
   return res.status(201).json({ ok: true, entry: data });
 });
 
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requireAuthUser, async (req: Request, res: Response) => {
   const { id } = req.params;
   const supabase = getSupabaseServiceRoleClient();
+  const { data: row } = await supabase.from('club_special_dates').select('club_id').eq('id', id).maybeSingle();
+  const cid = (row as { club_id?: string } | null)?.club_id;
+  if (!cid || !canAccessClub(req, cid, 'grilla')) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este registro' });
+  }
   const { error } = await supabase.from('club_special_dates').delete().eq('id', id);
   if (error) return res.status(500).json({ ok: false, error: error.message });
   return res.json({ ok: true });

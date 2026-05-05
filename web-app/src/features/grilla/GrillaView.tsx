@@ -52,6 +52,7 @@ import { schoolCoursesService } from '../../services/schoolCourses';
 import { authService } from '../../services/auth';
 import { getSupabaseClient } from '../../lib/supabase';
 import { listSpecialDates } from '../../services/clubSpecialDates';
+import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
 
 import './grilla.css';
 
@@ -697,6 +698,7 @@ function GrillaViewInner() {
     return '';
   }, [today, selectedDate]);
   const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
+  const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(clubId);
 
   const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
   useEffect(() => {
@@ -1760,7 +1762,9 @@ function GrillaViewInner() {
             </div>
           </header>
         )}
-        <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
+        <div className="hidden md:block">
+          <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+        </div>
 
         {/* ── Single Court View Navigation (Conditionally Rendered) ── */}
         {focusedCourtId && (
@@ -2403,6 +2407,7 @@ function GrillaViewInner() {
         onClose={() => setIsMenuOpen(false)}
         clubName={portalClubName || t('header.clubName')}
         isAdmin={isAdmin}
+        portalMenuPermissionKeys={portalMenuPermissionKeys}
       />
     </ZoomContext.Provider>
   );

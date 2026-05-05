@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { findTournamentConflict } from '../lib/tournamentConflicts';
 import { sendClubCrmEmail, sendInviteEmail } from '../lib/mailer';
@@ -36,6 +36,7 @@ import {
   refundStripeTournamentPaymentForPlayer,
   refundStripeTournamentPaymentTransactions,
 } from '../services/paymentRefundService';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -77,11 +78,6 @@ const TOURNAMENT_PUBLIC_LIST_SELECT = [
 
 /** Detalle público: todo lo anterior + metadatos y pistas vinculadas. */
 const TOURNAMENT_PUBLIC_DETAIL_SELECT = `${TOURNAMENT_PUBLIC_LIST_SELECT}, cancelled_at, cancelled_reason, closed_at, created_by_player_id, tournament_courts(court_id)`;
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
 
 async function findCourtConflict(params: {
   clubId: string;
@@ -546,10 +542,10 @@ async function resolveOrganizerPlayerId(req: Request, clubId: string): Promise<s
  *                 value: { ok: true, tournaments: [] }
  *       403: { description: Sin acceso al club }
  */
-router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const clubId = String(req.query.club_id ?? '').trim();
   if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
@@ -620,7 +616,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
  *       200: { description: Detalle encontrado }
  *       404: { description: Torneo no encontrado }
  */
-router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const id = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -631,7 +627,7 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
@@ -756,14 +752,14 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
  *       400: { description: prizes inválido }
  *       409: { description: Conflicto de canchas/horario }
  */
-router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const body = req.body ?? {};
   const clubId = String(body.club_id ?? '').trim();
   const courtIds = Array.isArray(body.court_ids) ? body.court_ids.map(String) : [];
   if (!clubId || !body.start_at || !body.duration_min || !body.max_players || !courtIds.length) {
     return res.status(400).json({ ok: false, error: 'club_id, start_at, duration_min, max_players y court_ids son obligatorios' });
   }
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   const genderParsed = tournamentGenderFromBody(body.gender);
   if (genderParsed === false) {
     return res.status(400).json({ ok: false, error: 'gender debe ser male, female, mixed, null u omitirse' });
@@ -965,7 +961,7 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
  *       409:
  *         description: Todos los horarios entran en conflicto
  */
-router.post('/recurring', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/recurring', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const body = req.body ?? {};
   const clubId = String(body.club_id ?? '').trim();
   const courtIds = Array.isArray(body.court_ids) ? body.court_ids.map(String) : [];
@@ -982,7 +978,7 @@ router.post('/recurring', requireClubOwnerOrAdmin, async (req: Request, res: Res
   if (startDate > endDate) {
     return res.status(400).json({ ok: false, error: 'start_date no puede ser mayor a end_date' });
   }
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   const genderParsed = tournamentGenderFromBody(body.gender);
   if (genderParsed === false) {
     return res.status(400).json({ ok: false, error: 'gender debe ser male, female, mixed, null u omitirse' });
@@ -1165,7 +1161,7 @@ router.post('/recurring', requireClubOwnerOrAdmin, async (req: Request, res: Res
  *       400: { description: gender o prizes inválido }
  *       409: { description: Conflicto de canchas/horario }
  */
-router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const id = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -1177,7 +1173,7 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
     if (!existing) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
     const clubId = String((existing as { club_id: string }).club_id);
-    if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, clubId, 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     if (String((existing as { status: string }).status) === 'cancelled') {
       return res.status(400).json({ ok: false, error: 'No se puede editar un torneo cancelado' });
     }
@@ -1358,13 +1354,13 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
  *       403: { description: Sin permisos }
  *       404: { description: Torneo no encontrado }
  */
-router.post('/:id/poster/upload', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/poster/upload', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as any).club_id))) {
+    if (!canAccessClub(req, String((tournament as any).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
@@ -1426,7 +1422,7 @@ router.post('/:id/poster/upload', requireClubOwnerOrAdmin, async (req: Request, 
  *     responses:
  *       200: { description: Torneo cancelado }
  */
-router.post('/:id/cancel', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/cancel', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const id = req.params.id;
   const reason = req.body?.reason != null ? String(req.body.reason) : null;
   try {
@@ -1438,7 +1434,7 @@ router.post('/:id/cancel', requireClubOwnerOrAdmin, async (req: Request, res: Re
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     if (String((tournament as { status: string }).status) === 'cancelled') {
@@ -1528,7 +1524,7 @@ router.post('/:id/cancel', requireClubOwnerOrAdmin, async (req: Request, res: Re
  *     responses:
  *       200: { description: Participación confirmada }
  */
-router.post('/:id/join-owner', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/join-owner', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   if (!req.authContext?.userId) return res.status(401).json({ ok: false, error: 'Token requerido' });
   try {
@@ -1539,7 +1535,7 @@ router.post('/:id/join-owner', requireClubOwnerOrAdmin, async (req: Request, res
       .eq('id', tournamentId)
       .maybeSingle();
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
@@ -1663,7 +1659,7 @@ router.post('/:id/join-owner', requireClubOwnerOrAdmin, async (req: Request, res
  *       404: { description: Torneo o jugador no encontrado }
  *       409: { description: Sin cupo o jugador ya inscripto }
  */
-router.post('/:id/participants', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/participants', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const playerId = String(req.body?.player_id ?? '').trim();
   if (!playerId) return res.status(400).json({ ok: false, error: 'player_id es obligatorio' });
@@ -1676,7 +1672,7 @@ router.post('/:id/participants', requireClubOwnerOrAdmin, async (req: Request, r
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     if (String((tournament as { status: string }).status) !== 'open') {
@@ -1801,7 +1797,7 @@ router.post('/:id/participants', requireClubOwnerOrAdmin, async (req: Request, r
  *       400: { description: División no pertenece al torneo }
  *       404: { description: No encontrado }
  */
-router.put('/:id/inscriptions/:inscriptionId/division', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/:id/inscriptions/:inscriptionId/division', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const inscriptionId = req.params.inscriptionId;
   const divisionIdRaw = req.body?.division_id;
@@ -1814,7 +1810,7 @@ router.put('/:id/inscriptions/:inscriptionId/division', requireClubOwnerOrAdmin,
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     if (String((tournament as { level_mode?: string }).level_mode ?? 'single_band') !== 'multi_division') {
@@ -1874,7 +1870,7 @@ router.put('/:id/inscriptions/:inscriptionId/division', requireClubOwnerOrAdmin,
  *       404: { description: Torneo o inscripción no encontrados }
  *       403: { description: Sin acceso al club }
  */
-router.delete('/:id/inscriptions/:inscriptionId', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.delete('/:id/inscriptions/:inscriptionId', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const inscriptionId = req.params.inscriptionId;
   try {
@@ -1886,7 +1882,7 @@ router.delete('/:id/inscriptions/:inscriptionId', requireClubOwnerOrAdmin, async
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
@@ -1972,7 +1968,7 @@ router.delete('/:id/inscriptions/:inscriptionId', requireClubOwnerOrAdmin, async
  *       403: { description: Sin acceso al club }
  *       404: { description: Torneo o inscripción no encontrada }
  */
-router.post('/:id/inscriptions/swap-singles', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/inscriptions/swap-singles', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const aId = String(req.body?.inscription_id_a ?? '').trim();
   const bId = String(req.body?.inscription_id_b ?? '').trim();
@@ -1988,7 +1984,7 @@ router.post('/:id/inscriptions/swap-singles', requireClubOwnerOrAdmin, async (re
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     if (!['individual', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode ?? 'individual'))) {
@@ -2097,7 +2093,7 @@ router.post('/:id/inscriptions/swap-singles', requireClubOwnerOrAdmin, async (re
  *       403: { description: Sin acceso al club }
  *       404: { description: Torneo no encontrado }
  */
-router.put('/:id/inscriptions/singles-pairing', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/:id/inscriptions/singles-pairing', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const raw = req.body?.assignments;
   if (!Array.isArray(raw) || raw.length === 0) {
@@ -2119,7 +2115,7 @@ router.put('/:id/inscriptions/singles-pairing', requireClubOwnerOrAdmin, async (
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     if (!['individual', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode ?? 'individual'))) {
@@ -2253,7 +2249,7 @@ router.put('/:id/inscriptions/singles-pairing', requireClubOwnerOrAdmin, async (
  *       404: { description: No encontrado }
  *       409: { description: Jugador ya inscrito }
  */
-router.post('/:id/inscriptions/:inscriptionId/assign-partner', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/inscriptions/:inscriptionId/assign-partner', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const inscriptionId = req.params.inscriptionId;
   const partnerId = String(req.body?.player_id ?? '').trim();
@@ -2267,7 +2263,7 @@ router.post('/:id/inscriptions/:inscriptionId/assign-partner', requireClubOwnerO
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     if (!['pair', 'both'].includes(String((tournament as { registration_mode?: string }).registration_mode))) {
@@ -2383,13 +2379,13 @@ router.post('/:id/inscriptions/:inscriptionId/assign-partner', requireClubOwnerO
  *     responses:
  *       200: { description: Mensajes }
  */
-router.get('/:id/chat', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/:id/chat', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const id = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament } = await supabase.from('tournaments').select('club_id').eq('id', id).maybeSingle();
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     const { data, error } = await supabase
@@ -2424,7 +2420,7 @@ router.get('/:id/chat', requireClubOwnerOrAdmin, async (req: Request, res: Respo
  *     responses:
  *       200: { description: Mensaje enviado }
  */
-router.post('/:id/chat', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/chat', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const id = req.params.id;
   const message = String(req.body?.message ?? '').trim();
   if (!message) return res.status(400).json({ ok: false, error: 'message es obligatorio' });
@@ -2433,7 +2429,7 @@ router.post('/:id/chat', requireClubOwnerOrAdmin, async (req: Request, res: Resp
     const supabase = getSupabaseServiceRoleClient();
     const { data: tournament } = await supabase.from('tournaments').select('club_id').eq('id', id).maybeSingle();
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
@@ -2997,7 +2993,7 @@ router.post('/:id/entry-requests', async (req: Request, res: Response) => {
  *       403: { description: Sin acceso al club }
  *       404: { description: Torneo no encontrado }
  */
-router.get('/:id/entry-requests', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/:id/entry-requests', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -3008,7 +3004,7 @@ router.get('/:id/entry-requests', requireClubOwnerOrAdmin, async (req: Request, 
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     const { data: rows, error } = await supabase
@@ -3070,7 +3066,7 @@ router.get('/:id/entry-requests', requireClubOwnerOrAdmin, async (req: Request, 
  *               full:
  *                 value: { ok: false, error: "El torneo ya está lleno…", code: "tournament_full" }
  */
-router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const requestId = req.params.requestId;
   try {
@@ -3084,7 +3080,7 @@ router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdmin, a
       .maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     if (String((tournament as { status: string }).status) !== 'open') {
@@ -3249,7 +3245,7 @@ router.post('/:id/entry-requests/:requestId/approve', requireClubOwnerOrAdmin, a
  *       403: { description: Sin acceso }
  *       404: { description: No encontrado }
  */
-router.post('/:id/entry-requests/:requestId/reject', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/entry-requests/:requestId/reject', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const requestId = req.params.requestId;
   const responseMessage = String(req.body?.message ?? '').trim() || null;
@@ -3261,7 +3257,7 @@ router.post('/:id/entry-requests/:requestId/reject', requireClubOwnerOrAdmin, as
     const { data: tournament, error: tErr } = await supabase.from('tournaments').select('id, club_id').eq('id', tournamentId).maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     const { data: reqRow, error: rErr } = await supabase
@@ -3317,7 +3313,7 @@ router.post('/:id/entry-requests/:requestId/reject', requireClubOwnerOrAdmin, as
  *       403: { description: Sin acceso }
  *       404: { description: No encontrado }
  */
-router.post('/:id/entry-requests/:requestId/dismiss', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/entry-requests/:requestId/dismiss', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const requestId = req.params.requestId;
   try {
@@ -3325,7 +3321,7 @@ router.post('/:id/entry-requests/:requestId/dismiss', requireClubOwnerOrAdmin, a
     const { data: tournament, error: tErr } = await supabase.from('tournaments').select('id, club_id').eq('id', tournamentId).maybeSingle();
     if (tErr) return res.status(500).json({ ok: false, error: tErr.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     const { data: reqRow, error: rErr } = await supabase
@@ -3874,7 +3870,7 @@ router.post('/:id/chat/player', async (req: Request, res: Response) => {
  *       403: { description: Sin permisos sobre el club }
  *       404: { description: Torneo no encontrado }
  */
-router.post('/:id/competition/setup', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/competition/setup', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const body = req.body ?? {};
   const format = String(body.format ?? '').trim() as CompetitionFormat;
@@ -3885,7 +3881,7 @@ router.post('/:id/competition/setup', requireClubOwnerOrAdmin, async (req: Reque
     const supabase = getSupabaseServiceRoleClient();
     const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
     if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((t as any).club_id), 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     await setupTournamentCompetition({
       tournamentId,
       format,
@@ -3923,13 +3919,13 @@ router.post('/:id/competition/setup', requireClubOwnerOrAdmin, async (req: Reque
  *       403: { description: Sin permisos }
  *       404: { description: Torneo no encontrado }
  */
-router.post('/:id/competition/generate', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/competition/generate', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
     if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((t as any).club_id), 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     const data = await generateTournamentFixtures(tournamentId);
     return res.json({ ok: true, ...data });
   } catch (err) {
@@ -3980,13 +3976,13 @@ router.post('/:id/competition/generate', requireClubOwnerOrAdmin, async (req: Re
  *       403: { description: Sin permisos }
  *       404: { description: Torneo no encontrado }
  */
-router.post('/:id/competition/generate-manual', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/competition/generate-manual', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
     if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((t as any).club_id), 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     const teamKeys = Array.isArray(req.body?.team_keys) ? req.body.team_keys.map((x: unknown) => String(x)) : [];
     const data = await generateTournamentFixturesManual(tournamentId, teamKeys);
     return res.json({ ok: true, ...data });
@@ -4021,13 +4017,13 @@ router.post('/:id/competition/generate-manual', requireClubOwnerOrAdmin, async (
  *       403: { description: Sin permisos }
  *       404: { description: Torneo no encontrado }
  */
-router.post('/:id/competition/reset', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/competition/reset', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
     if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((t as any).club_id), 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     await resetTournamentCompetition(tournamentId);
     return res.json({ ok: true });
   } catch (err) {
@@ -4090,7 +4086,7 @@ router.post('/:id/competition/reset', requireClubOwnerOrAdmin, async (req: Reque
  *       404: { description: Torneo no encontrado }
  *       409: { description: Conflicto de horario/cancha }
  */
-router.put('/:id/competition/schedule-round1', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/:id/competition/schedule-round1', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -4100,7 +4096,7 @@ router.put('/:id/competition/schedule-round1', requireClubOwnerOrAdmin, async (r
       .eq('id', tournamentId)
       .maybeSingle();
     if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((t as any).club_id), 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     if (String((t as any).competition_format ?? '') !== 'single_elim') {
       return res.status(400).json({ ok: false, error: 'Solo disponible para eliminación directa' });
     }
@@ -4217,13 +4213,13 @@ router.put('/:id/competition/schedule-round1', requireClubOwnerOrAdmin, async (r
  *       403: { description: Sin permisos }
  *       404: { description: Torneo no encontrado }
  */
-router.get('/:id/competition/admin-view', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/:id/competition/admin-view', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
     if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((t as any).club_id), 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     const view = await getCompetitionView(tournamentId);
     return res.json({ ok: true, ...view });
   } catch (err) {
@@ -4269,13 +4265,13 @@ router.get('/:id/competition/admin-view', requireClubOwnerOrAdmin, async (req: R
  *       403: { description: Sin permisos }
  *       404: { description: Torneo no encontrado }
  */
-router.get('/:id/pairing-tiebreak-stats', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/:id/pairing-tiebreak-stats', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
     if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((t as any).club_id), 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     const stats = await computePairingTiebreakStatsForClub(String((t as any).club_id), tournamentId);
     return res.json({ ok: true, stats });
   } catch (err) {
@@ -4412,14 +4408,14 @@ router.post('/:id/matches/:matchId/result/player', async (req: Request, res: Res
  *       403: { description: Sin permisos }
  *       404: { description: Torneo no encontrado }
  */
-router.post('/:id/matches/:matchId/result', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/matches/:matchId/result', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const matchId = req.params.matchId;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
     if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((t as any).club_id), 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     const result = await saveMatchResult({
       tournamentId,
       matchId,
@@ -4479,13 +4475,13 @@ router.post('/:id/matches/:matchId/result', requireClubOwnerOrAdmin, async (req:
  *       403: { description: Sin permisos }
  *       404: { description: Torneo no encontrado }
  */
-router.put('/:id/podium', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/:id/podium', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: t } = await supabase.from('tournaments').select('id,club_id').eq('id', tournamentId).maybeSingle();
     if (!t) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((t as any).club_id))) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, String((t as any).club_id), 'torneos')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     const podiumRows = Array.isArray(req.body?.podium) ? req.body.podium : [];
     await saveManualPodium({
       tournamentId,

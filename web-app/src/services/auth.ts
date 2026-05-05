@@ -65,4 +65,9 @@ export const authService = {
         meCache = null;
         meInFlight = null;
     },
+
+    clearMeCache: () => {
+        meCache = null;
+        meInFlight = null;
+    },
 };

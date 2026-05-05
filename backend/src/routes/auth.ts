@@ -327,19 +327,259 @@ router.get('/me', async (req: Request, res: Response) => {
     if (owner) roles.club_owner_id = owner.id;
     const { data: admin } = await supabase.from('admins').select('id').eq('auth_user_id', user.id).maybeSingle();
     if (admin) roles.admin_id = admin.id;
-    let clubs: unknown[] = [];
+    const clubMap = new Map<string, Record<string, unknown>>();
     if (owner) {
       const { data: clubsData } = await supabase
         .from('clubs')
         .select('id, name, city, logo_url')
         .eq('owner_id', owner.id);
-      clubs = clubsData ?? [];
+      for (const c of clubsData ?? []) {
+        const row = c as Record<string, unknown>;
+        if (row.id) clubMap.set(String(row.id), row);
+      }
     }
+
+    const portal_memberships: {
+      club_id: string;
+      club_portal_role_id: string;
+      role_name: string;
+      role_slug: string;
+      permissions: string[];
+    }[] = [];
+
+    const { data: portalMemberRows, error: pmErr } = await supabase
+      .from('club_portal_members')
+      .select('club_id, club_portal_role_id')
+      .eq('auth_user_id', user.id);
+    if (pmErr && !pmErr.message.includes('does not exist')) {
+      console.error('[auth/me] club_portal_members:', pmErr.message);
+    }
+    const portalMembersList =
+      pmErr?.message?.includes('does not exist') ? [] : ((portalMemberRows ?? []) as { club_id: string; club_portal_role_id: string }[]);
+    if (portalMembersList.length > 0) {
+      const members = portalMembersList;
+      const roleIds = [...new Set(members.map((m) => m.club_portal_role_id))];
+      const [{ data: roleRows }, { data: permRows }] = await Promise.all([
+        supabase.from('club_portal_roles').select('id, name, slug').in('id', roleIds),
+        supabase.from('club_portal_role_permissions').select('role_id, permission_key').in('role_id', roleIds),
+      ]);
+      const roleById = new Map(
+        ((roleRows ?? []) as { id: string; name: string; slug: string }[]).map((r) => [r.id, r])
+      );
+      const permsByRole = new Map<string, string[]>();
+      for (const p of (permRows ?? []) as { role_id: string; permission_key: string }[]) {
+        const list = permsByRole.get(p.role_id) ?? [];
+        list.push(p.permission_key);
+        permsByRole.set(p.role_id, list);
+      }
+      for (const m of members) {
+        const role = roleById.get(m.club_portal_role_id);
+        portal_memberships.push({
+          club_id: m.club_id,
+          club_portal_role_id: m.club_portal_role_id,
+          role_name: role?.name ?? 'Rol',
+          role_slug: role?.slug ?? '',
+          permissions: permsByRole.get(m.club_portal_role_id) ?? [],
+        });
+      }
+      const portalClubIds = [...new Set(members.map((m) => m.club_id))];
+      const missing = portalClubIds.filter((id) => !clubMap.has(id));
+      if (missing.length) {
+        const { data: extraClubs } = await supabase
+          .from('clubs')
+          .select('id, name, city, logo_url')
+          .in('id', missing);
+        for (const c of extraClubs ?? []) {
+          const row = c as Record<string, unknown>;
+          if (row.id) clubMap.set(String(row.id), row);
+        }
+      }
+    }
+
     return res.json({
       ok: true,
       user: { id: user.id, email: user.email, user_metadata: user.user_metadata },
       roles,
-      clubs,
+      clubs: [...clubMap.values()],
+      portal_memberships,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// POST /auth/accept-club-portal-invite — vincular cuenta autenticada a club (email debe coincidir con la invitación).
+router.post('/accept-club-portal-invite', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization ?? req.headers['Authorization'];
+  const raw = typeof authHeader === 'string' ? authHeader : '';
+  const tokenAuth = raw.startsWith('Bearer ') ? raw.slice(7).trim() : raw.trim() || null;
+  const { token } = req.body ?? {};
+  const inviteToken = String(token ?? '').trim();
+  if (!tokenAuth) {
+    return res.status(401).json({ ok: false, error: 'Inicia sesión y envía Authorization: Bearer <access_token>.' });
+  }
+  if (!inviteToken) return res.status(400).json({ ok: false, error: 'token es obligatorio' });
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error: uErr } = await supabase.auth.getUser(tokenAuth);
+    if (uErr || !user?.id || !user.email) {
+      return res.status(401).json({ ok: false, error: 'Sesión inválida. Vuelve a iniciar sesión.' });
+    }
+    const emailUser = String(user.email).trim().toLowerCase();
+    const tokenHash = hashInviteToken(inviteToken);
+    const { data: inv, error: invErr } = await supabase
+      .from('club_portal_invites')
+      .select('id, club_id, email, club_portal_role_id, expires_at, accepted_at, revoked_at')
+      .eq('token_hash', tokenHash)
+      .maybeSingle();
+    if (invErr?.message?.includes('does not exist')) {
+      return res.status(503).json({ ok: false, error: 'Migración de portal no aplicada en la base de datos.' });
+    }
+    if (invErr) return res.status(500).json({ ok: false, error: invErr.message });
+    if (!inv) return res.status(400).json({ ok: false, error: 'Enlace inválido' });
+    const row = inv as {
+      id: string;
+      club_id: string;
+      email: string;
+      club_portal_role_id: string;
+      expires_at: string;
+      accepted_at: string | null;
+      revoked_at: string | null;
+    };
+    if (row.revoked_at) return res.status(400).json({ ok: false, error: 'Invitación revocada' });
+    if (row.accepted_at) return res.status(400).json({ ok: false, error: 'Invitación ya utilizada' });
+    if (new Date(row.expires_at) < new Date()) return res.status(400).json({ ok: false, error: 'El enlace ha expirado' });
+    if (String(row.email).trim().toLowerCase() !== emailUser) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Debes iniciar sesión con el mismo email al que se envió la invitación.',
+      });
+    }
+    const { data: clubRow } = await supabase.from('clubs').select('id, owner_id').eq('id', row.club_id).maybeSingle();
+    if (!clubRow) return res.status(400).json({ ok: false, error: 'Club no encontrado' });
+    const ownerId = (clubRow as { owner_id?: string }).owner_id;
+    let ownerAuthId: string | null = null;
+    if (ownerId) {
+      const { data: co } = await supabase.from('club_owners').select('auth_user_id').eq('id', ownerId).maybeSingle();
+      ownerAuthId = (co as { auth_user_id?: string | null } | null)?.auth_user_id ?? null;
+    }
+    if (ownerAuthId && ownerAuthId === user.id) {
+      return res.status(400).json({ ok: false, error: 'Como dueño del club ya tienes acceso completo; no necesitas aceptar esta invitación.' });
+    }
+    const { error: upsertErr } = await supabase.from('club_portal_members').upsert(
+      {
+        club_id: row.club_id,
+        auth_user_id: user.id,
+        club_portal_role_id: row.club_portal_role_id,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'club_id,auth_user_id' }
+    );
+    if (upsertErr) return res.status(500).json({ ok: false, error: upsertErr.message });
+    await supabase.from('club_portal_invites').update({ accepted_at: new Date().toISOString() }).eq('id', row.id);
+    return res.json({ ok: true, club_id: row.club_id });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// POST /auth/register-from-club-portal-invite — crea cuenta (email invitado), inicia sesión y acepta invitación.
+router.post('/register-from-club-portal-invite', async (req: Request, res: Response) => {
+  const { token, password, name } = req.body ?? {};
+  const inviteToken = String(token ?? '').trim();
+  const passwordStr = String(password ?? '');
+  const displayName = String(name ?? '').trim();
+  if (!inviteToken || !passwordStr) {
+    return res.status(400).json({ ok: false, error: 'token y password son obligatorios' });
+  }
+  if (passwordStr.length < 6) {
+    return res.status(400).json({ ok: false, error: 'La contraseña debe tener al menos 6 caracteres' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const tokenHash = hashInviteToken(inviteToken);
+    const { data: inv, error: invErr } = await supabase
+      .from('club_portal_invites')
+      .select('id, club_id, email, club_portal_role_id, expires_at, accepted_at, revoked_at')
+      .eq('token_hash', tokenHash)
+      .maybeSingle();
+    if (invErr?.message?.includes('does not exist')) {
+      return res.status(503).json({ ok: false, error: 'Migración de portal no aplicada en la base de datos.' });
+    }
+    if (invErr) return res.status(500).json({ ok: false, error: invErr.message });
+    if (!inv) return res.status(400).json({ ok: false, error: 'Enlace inválido' });
+    const row = inv as {
+      id: string;
+      club_id: string;
+      email: string;
+      club_portal_role_id: string;
+      expires_at: string;
+      accepted_at: string | null;
+      revoked_at: string | null;
+    };
+    if (row.revoked_at) return res.status(400).json({ ok: false, error: 'Invitación revocada' });
+    if (row.accepted_at) return res.status(400).json({ ok: false, error: 'Invitación ya utilizada' });
+    if (new Date(row.expires_at) < new Date()) return res.status(400).json({ ok: false, error: 'El enlace ha expirado' });
+
+    const emailStr = String(row.email).trim().toLowerCase();
+    const { data: created, error: createErr } = await supabase.auth.admin.createUser({
+      email: emailStr,
+      password: passwordStr,
+      email_confirm: true,
+      user_metadata: displayName ? { full_name: displayName } : undefined,
+    });
+    if (createErr) {
+      const msg = createErr.message.toLowerCase();
+      if (msg.includes('already registered') || msg.includes('already exists')) {
+        return res.status(409).json({
+          ok: false,
+          error: 'Este email ya tiene cuenta. Inicia sesión y acepta la invitación.',
+        });
+      }
+      return res.status(400).json({ ok: false, error: createErr.message });
+    }
+    const authUserId = created.user?.id;
+    if (!authUserId) return res.status(500).json({ ok: false, error: 'No se pudo crear el usuario.' });
+
+    const { error: upsertErr } = await supabase.from('club_portal_members').upsert(
+      {
+        club_id: row.club_id,
+        auth_user_id: authUserId,
+        club_portal_role_id: row.club_portal_role_id,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'club_id,auth_user_id' }
+    );
+    if (upsertErr) return res.status(500).json({ ok: false, error: upsertErr.message });
+    await supabase.from('club_portal_invites').update({ accepted_at: new Date().toISOString() }).eq('id', row.id);
+
+    const { data: loginData, error: loginErr } = await supabase.auth.signInWithPassword({
+      email: emailStr,
+      password: passwordStr,
+    });
+    if (loginErr || !loginData.session || !loginData.user) {
+      return res.status(201).json({
+        ok: true,
+        user: created.user
+          ? { id: created.user.id, email: created.user.email, user_metadata: created.user.user_metadata }
+          : null,
+        session: null,
+        club_id: row.club_id,
+      });
+    }
+    return res.status(201).json({
+      ok: true,
+      user: {
+        id: loginData.user.id,
+        email: loginData.user.email,
+        user_metadata: loginData.user.user_metadata,
+      },
+      session: {
+        access_token: loginData.session.access_token,
+        refresh_token: loginData.session.refresh_token,
+        expires_at: loginData.session.expires_at,
+      },
+      club_id: row.club_id,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
