@@ -400,9 +400,17 @@ export function PartidoDetailScreen({
           team === 'A'
             ? payload.sets.map((s) => ({ a: s.us, b: s.them }))
             : payload.sets.map((s) => ({ a: s.them, b: s.us }));
+        // Calcular quién ganó cada set
+        const usSets = payload.sets.filter((s) => s.us > s.them).length;
+        const themSets = payload.sets.filter((s) => s.them > s.us).length;
+        const isDraw = usSets === themSets;
+
         const scoreRes = await submitMatchScore(
           partido.id,
-          { sets: apiSets, match_end_reason: 'completed' },
+          {
+            sets: apiSets,
+            match_end_reason: isDraw ? "draw" : "completed",
+          },
           token
         );
         if (!scoreRes.ok && scoreRes.status !== 409) {
@@ -432,9 +440,11 @@ export function PartidoDetailScreen({
   const bottomReserve = insets.bottom + (showFinishBar ? 100 : bottomBarNeedsStack ? 148 : 88);
   const canPressCta =
     playerContextResolved &&
-    selectedSlotIndex != null &&
-    !isInMatch &&
     !joinBusy &&
+    !isInMatch &&
+    firstFreeIndex >= 0 &&
+    selectedSlotIndex != null &&
+    !partido.scoreStatus &&
     matchPhase !== 'past';
 
   const canPressMatchmakingPay =
@@ -844,13 +854,15 @@ export function PartidoDetailScreen({
             ) : (
               <View style={styles.ctaTextWrap}>
                 <Text style={styles.ctaText}>
-                  {isInMatch
-                    ? 'Ya estás en el partido'
-                    : firstFreeIndex < 0
-                      ? 'No hay plazas libres'
-                      : selectedSlotIndex == null
-                        ? 'Selecciona una plaza para continuar'
-                        : `Reservar plaza - ${partido.pricePerPlayer}`}
+                  {partido.scoreStatus
+                    ? 'Partido finalizado'
+                    : isInMatch
+                      ? 'Ya estás en el partido'
+                      : firstFreeIndex < 0
+                        ? 'No hay plazas libres'
+                        : selectedSlotIndex == null
+                          ? 'Selecciona una plaza para continuar'
+                          : `Reservar plaza - ${partido.pricePerPlayer}`}
                 </Text>
               </View>
             )}

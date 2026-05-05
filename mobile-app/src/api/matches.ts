@@ -10,6 +10,7 @@ export type Match = {
   gender: string | null;
   competitive: boolean;
   status: string;
+  score_status?: 'pending' | 'confirmed' | 'disputed' | null;
   type?: string | null;
 };
 
@@ -265,7 +266,7 @@ export async function fetchMatchById(
 
 export type SubmitMatchScoreBody = {
   sets: Array<{ a: number; b: number }>;
-  match_end_reason?: 'completed' | 'retired' | 'timeout';
+  match_end_reason?: 'completed' | 'retired' | 'timeout' | 'draw';
   retired_team?: 'A' | 'B';
 };
 

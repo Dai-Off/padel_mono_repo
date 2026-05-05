@@ -63,6 +63,7 @@ export type PartidoItem = {
   matchType?: string | null;
   matchStatus?: string;
   bookingStatus?: string;
+  scoreStatus?: 'pending' | 'confirmed' | 'disputed' | null;
 };
 
 type PartidosScreenProps = {
