@@ -234,12 +234,44 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
-    const result = (questions || []).map((q: any) => ({
-      ...q,
-      club_id: q.created_by_club,
-      club_name: (q.clubs as any)?.name ?? null,
-      clubs: undefined,
-    }));
+    // JOIN con learning_puzzles para preguntas type='puzzle'.
+    const puzzleIds = (questions || []).filter((q: any) => q.type === 'puzzle').map((q: any) => q.id);
+    const puzzleByQuestion = new Map<string, any>();
+    if (puzzleIds.length > 0) {
+      const { data: puzzles, error: puzzleErr } = await supabase
+        .from('learning_puzzles')
+        .select('*')
+        .in('question_id', puzzleIds);
+      if (puzzleErr) return res.status(500).json({ ok: false, error: puzzleErr.message });
+      for (const p of puzzles ?? []) puzzleByQuestion.set(p.question_id, p);
+    }
+
+    const result = (questions || []).map((q: any) => {
+      const base = {
+        ...q,
+        club_id: q.created_by_club,
+        club_name: (q.clubs as any)?.name ?? null,
+        clubs: undefined,
+      };
+      if (q.type === 'puzzle') {
+        const p = puzzleByQuestion.get(q.id);
+        return {
+          ...base,
+          content: p
+            ? {
+                schema_version: p.schema_version,
+                statement: p.statement,
+                court_position: p.court_position,
+                general_explanation: p.general_explanation,
+                initial_frame: p.initial_frame,
+                options: p.options,
+              }
+            : q.content,
+          puzzle: p ?? null,
+        };
+      }
+      return base;
+    });
 
     return res.json({ ok: true, data: result });
   } catch (err) {

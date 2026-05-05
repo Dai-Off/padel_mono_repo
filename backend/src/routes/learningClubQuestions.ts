@@ -80,15 +80,8 @@ router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Res
   try {
     const { club_id, type, level, area, video_url, content } = req.body ?? {};
 
-    // club_id es obligatorio para owners de club. Admins globales pueden crearlas
-    // como "oficiales WeMatch" omitiéndolo (created_by_club queda NULL en BD).
-    const isGlobalAdmin = !!req.authContext?.adminId;
-    if (!club_id && !isGlobalAdmin) {
-      return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-    }
-    if (club_id && !canAccessClub(req, club_id)) {
-      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
-    }
+    if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
     if (!VALID_QUESTION_TYPES.includes(type)) {
       return res.status(400).json({ ok: false, error: `type debe ser uno de: ${VALID_QUESTION_TYPES.join(', ')}` });
@@ -117,7 +110,7 @@ router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Res
         has_video: hasVideo,
         video_url: hasVideo ? video_url : null,
         content: isPuzzle ? {} : content,
-        created_by_club: club_id ?? null,
+        created_by_club: club_id,
         is_active: true,
       })
       .select('*')
@@ -338,7 +331,22 @@ router.get('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Resp
       const byQuestion = new Map((puzzles ?? []).map((p) => [p.question_id, p]));
       for (const row of rows) {
         if (row.type === 'puzzle') {
-          (row as Record<string, unknown>).puzzle = byQuestion.get(row.id) ?? null;
+          const p = byQuestion.get(row.id);
+          if (p) {
+            // Mergear árbol en content para uniformidad con el resto de tipos.
+            (row as Record<string, unknown>).content = {
+              schema_version: p.schema_version,
+              statement: p.statement,
+              court_position: p.court_position,
+              general_explanation: p.general_explanation,
+              initial_frame: p.initial_frame,
+              options: p.options,
+            };
+            // Exponer metadata extra (id propio, thumbnail_url) por si el editor lo necesita.
+            (row as Record<string, unknown>).puzzle = p;
+          } else {
+            (row as Record<string, unknown>).puzzle = null;
+          }
         }
       }
     }

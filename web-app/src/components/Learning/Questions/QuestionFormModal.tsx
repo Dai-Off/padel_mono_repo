@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Plus, Trash2, Upload, Video } from 'lucide-react';
+import { X, Plus, Trash2, Upload, Video, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService, validateVideo, VIDEO_LIMITS } from '../../../services/learningContent';
@@ -14,10 +14,32 @@ import type {
   MultiSelectContent,
   MatchColumnsContent,
   OrderSequenceContent,
+  PuzzleContent,
 } from '../../../types/learningContent';
 
-const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'];
+const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence', 'puzzle'];
 const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'mental', 'rules'];
+
+// Plantilla mínima válida para un puzzle nuevo (cumple validatePuzzleContent del backend).
+const PUZZLE_TEMPLATE: PuzzleContent = {
+  schema_version: 1,
+  statement: 'Describe la situación táctica del puzzle aquí.',
+  court_position: 'both',
+  initial_frame: {
+    players: [
+      { id: 1, team: 1, x: 3, y: 15 },
+      { id: 2, team: 1, x: 7, y: 15 },
+      { id: 3, team: 2, x: 3, y: 5 },
+      { id: 4, team: 2, x: 7, y: 5 },
+    ],
+    ball: { x: 5, y: 12 },
+  },
+  options: [
+    { id: 1, text: 'Opción A', explanation: 'Explicación de la opción A', points: 2 },
+    { id: 2, text: 'Opción B', explanation: 'Explicación de la opción B', points: 1 },
+    { id: 3, text: 'Opción C', explanation: 'Explicación de la opción C', points: 0 },
+  ],
+};
 
 // Estado por defecto del contenido según tipo
 function defaultContent(type: QuestionType): QuestionContent {
@@ -32,6 +54,8 @@ function defaultContent(type: QuestionType): QuestionContent {
       return { pairs: [{ left: '', right: '' }, { left: '', right: '' }, { left: '', right: '' }] } as MatchColumnsContent;
     case 'order_sequence':
       return { steps: ['', '', ''] } as OrderSequenceContent;
+    case 'puzzle':
+      return { ...PUZZLE_TEMPLATE } as PuzzleContent;
   }
 }
 
@@ -135,6 +159,15 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
         if (c.steps.some((s) => !s.trim())) return t('learning_field_step');
         return null;
       }
+      case 'puzzle': {
+        // Validación ligera client-side: el backend hace validación completa.
+        const c = content as PuzzleContent;
+        if (!c?.statement || c.statement.trim().length < 8) return 'El enunciado del puzzle debe tener al menos 8 caracteres';
+        if (!c.initial_frame?.players || c.initial_frame.players.length < 2) return 'El puzzle necesita al menos 2 jugadores';
+        if (!Array.isArray(c.options) || c.options.length < 2) return 'El puzzle necesita al menos 2 opciones';
+        if (c.options.filter((o) => o.points === 2).length !== 1) return 'Debe haber exactamente 1 opción correcta (points=2)';
+        return null;
+      }
     }
     return null;
   };
@@ -146,10 +179,10 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
 
     setSaving(true);
     try {
-      // Si hay un archivo nuevo, subirlo primero
-      let finalVideoUrl = videoUrl;
+      // Los puzzles no llevan video. Para el resto de tipos, subir si hay archivo nuevo.
+      let finalVideoUrl = type === 'puzzle' ? null : videoUrl;
 
-      if (videoFile) {
+      if (type !== 'puzzle' && videoFile) {
         setUploading(true);
         finalVideoUrl = await learningContentService.uploadQuestionVideo(clubId, videoFile);
         setUploading(false);
@@ -244,7 +277,8 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
             </div>
           </div>
 
-          {/* Video */}
+          {/* Video — no aplica para puzzles */}
+          {type !== 'puzzle' && (
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">
               {t('learning_field_video')}
@@ -296,6 +330,7 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
               className="hidden"
             />
           </div>
+          )}
 
           {/* Separador */}
           <div className="border-t border-gray-100" />
@@ -334,6 +369,12 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
               content={content as OrderSequenceContent}
               onChange={(c) => setContent(c)}
               t={t}
+            />
+          )}
+          {type === 'puzzle' && (
+            <PuzzleFields
+              content={content as PuzzleContent}
+              onChange={(c) => setContent(c)}
             />
           )}
 
@@ -550,6 +591,61 @@ function MatchColumnsFields({ content, onChange, t }: { content: MatchColumnsCon
             )}
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// Editor JSON provisional para puzzles. Sprint 3 lo reemplaza por editor visual con react-konva.
+function PuzzleFields({ content, onChange }: { content: PuzzleContent; onChange: (c: PuzzleContent) => void }) {
+  const [raw, setRaw] = useState(() => JSON.stringify(content, null, 2));
+  const [parseError, setParseError] = useState<string | null>(null);
+
+  const handleChange = (text: string) => {
+    setRaw(text);
+    try {
+      const parsed = JSON.parse(text) as PuzzleContent;
+      setParseError(null);
+      onChange(parsed);
+    } catch (e) {
+      setParseError((e as Error).message);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-100">
+        <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+        <div className="text-[11px] text-amber-700 leading-relaxed">
+          <strong>Editor JSON provisional.</strong> El editor visual interactivo (drag&amp;drop de jugadores,
+          pelota, flechas) llegará en próximas iteraciones. Por ahora puedes pegar/editar el árbol del puzzle
+          como JSON. Schema en <code className="px-1 rounded bg-amber-100">docs/learning/Puzzles/IMPLEMENTATION_PLAN.md §1</code>.
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="text-[10px] font-bold text-gray-500 uppercase">Contenido del puzzle (JSON)</label>
+          <button
+            type="button"
+            onClick={() => handleChange(JSON.stringify(PUZZLE_TEMPLATE, null, 2))}
+            className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700"
+          >
+            Restaurar plantilla
+          </button>
+        </div>
+        <textarea
+          value={raw}
+          onChange={(e) => handleChange(e.target.value)}
+          rows={20}
+          spellCheck={false}
+          className={`w-full rounded-xl border px-3 py-2 text-xs font-mono leading-relaxed resize-y ${
+            parseError ? 'border-red-300 bg-red-50' : 'border-gray-200'
+          }`}
+        />
+        {parseError && (
+          <p className="text-[10px] text-red-500 mt-1">JSON inválido: {parseError}</p>
+        )}
       </div>
     </div>
   );
