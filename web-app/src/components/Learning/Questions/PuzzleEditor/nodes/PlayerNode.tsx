@@ -12,16 +12,17 @@ interface Props {
   onSelect: () => void;
   onChange: (next: PuzzlePlayer) => void;
   snapToGrid: boolean;
+  draggable: boolean;
 }
 
-export function PlayerNode({ player, scale, selected, onSelect, onChange, snapToGrid }: Props) {
-  // El sprite "back" representa al equipo del usuario (mira hacia la red, espalda al espectador).
-  // El sprite "face" se usa para el equipo rival arriba (mira hacia el espectador).
+export function PlayerNode({ player, scale, selected, onSelect, onChange, snapToGrid, draggable }: Props) {
+  // Sprite "back" para el equipo del usuario (mira hacia la red, espalda al espectador).
+  // Sprite "face" para el rival arriba (mira hacia el espectador).
   const isUserTeam = player.team === 1;
   const src = isUserTeam ? '/puzzles/player-white-back.png' : '/puzzles/player-white-face.png';
   const [image] = useImage(src);
 
-  // Tamaño visual del jugador: 3.5 × radius en metros, expresado en píxeles.
+  // Tamaño visual del jugador = 3.5 × radius en metros.
   const sizePx = m2px(courtConfig.player.radius * 3.5, scale);
 
   const handleDragEnd = (e: KonvaEventObject<DragEvent>) => {
@@ -33,7 +34,6 @@ export function PlayerNode({ player, scale, selected, onSelect, onChange, snapTo
       xMeters = snap(xMeters);
       yMeters = snap(yMeters);
     }
-    // Reposicionar el nodo a la posición snapeada (visual).
     e.target.position({
       x: m2px(xMeters, scale) - sizePx / 2,
       y: m2px(yMeters, scale) - sizePx / 2,
@@ -48,7 +48,7 @@ export function PlayerNode({ player, scale, selected, onSelect, onChange, snapTo
     <Group
       x={cxPx - sizePx / 2}
       y={cyPx - sizePx / 2}
-      draggable
+      draggable={draggable}
       onDragEnd={handleDragEnd}
       onClick={onSelect}
       onTap={onSelect}
@@ -64,9 +64,9 @@ export function PlayerNode({ player, scale, selected, onSelect, onChange, snapTo
         />
       )}
       {image ? (
-        <KonvaImage image={image} width={sizePx} height={sizePx} listening={false} />
+        // listening true para que el Group tenga hit area y el drag funcione.
+        <KonvaImage image={image} width={sizePx} height={sizePx} />
       ) : (
-        // Fallback mientras carga la imagen
         <Circle
           x={sizePx / 2}
           y={sizePx / 2}
@@ -74,10 +74,8 @@ export function PlayerNode({ player, scale, selected, onSelect, onChange, snapTo
           fill={isUserTeam ? '#ffffff' : '#1a1a1a'}
           stroke="#000"
           strokeWidth={1}
-          listening={false}
         />
       )}
-      {/* Etiqueta con id para referencia visual */}
       <Text
         x={0}
         y={sizePx + 2}

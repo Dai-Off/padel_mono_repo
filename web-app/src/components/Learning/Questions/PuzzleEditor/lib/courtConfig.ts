@@ -4,12 +4,17 @@
 
 export const courtConfig = {
   surface: { width: 10, height: 20, color: '#3b82f6' },
+  // Margen exterior incluido en court.svg (paredes/postes). El SVG tiene
+  // viewBox 1080×2080 con la pista 1000×2000 dentro y 40 unidades = 0.4m
+  // de margen alrededor. Renderizamos todo el SVG, las posiciones de
+  // jugadores/pelota se desplazan internamente por outerMargin.
+  outerMargin: 0.4,
   line:    { color: '#ffffff', width: 0.07 },
   net:     { y: 10, color: '#d0d0d0', borderColor: '#1a1a1a' },
-  serviceLines: { topY: 3, bottomY: 17 },           // y = f − 17 / y = 17
+  serviceLines: { topY: 3, bottomY: 17 },
   centerServiceLine: { x: 5, fromY: 2.6, toY: 17.4 },
-  player:  { radius: 0.6 },                          // tamaño visual = 3.5 × radius
-  ball:    { radius: 0.4, color: '#daf843' },
+  player:  { radius: 0.6 },
+  ball:    { radius: 0.4 },
   optionBadge: { radius: 0.9 },
 } as const;
 
