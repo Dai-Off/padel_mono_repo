@@ -88,9 +88,13 @@ function buildTeammateList(partido: PartidoItem, currentPlayerId: string | null)
 }
 
 function isValidCompletedPadelSet(us: number, them: number): boolean {
-  if (!Number.isInteger(us) || !Number.isInteger(them) || us < 0 || them < 0 || us === them) return false;
+  if (!Number.isInteger(us) || !Number.isInteger(them) || us < 0 || them < 0) return false;
   const max = Math.max(us, them);
   const min = Math.min(us, them);
+  
+  // Permitir empate en juegos (ej. 6-6)
+  if (us === them) return us <= 7;
+
   if (max === 6) return min <= 4;
   if (max === 7) return min === 5 || min === 6;
   return false;
@@ -105,26 +109,29 @@ function validateCompletedPadelMatch(sets: Array<{ us: number; them: number }>):
 
   let usWins = 0;
   let themWins = 0;
+  let draws = 0;
   for (const s of sets) {
     if (s.us > s.them) usWins += 1;
-    else themWins += 1;
+    else if (s.them > s.us) themWins += 1;
+    else draws += 1;
   }
+
+  // Permitir empate en sets (ej. 1-1)
+  if (usWins === themWins) return null;
 
   if (sets.length === 2) {
     if (!((usWins === 2 && themWins === 0) || (themWins === 2 && usWins === 0))) {
-      return 'Con 2 sets, el resultado debe quedar 2-0.';
+      return 'Con 2 sets, el resultado debe quedar 2-0 o 1-1.';
     }
     return null;
   }
 
   // Aquí sets.length === 3
-  const firstWinner = sets[0].us > sets[0].them ? 'US' : 'THEM';
-  const secondWinner = sets[1].us > sets[1].them ? 'US' : 'THEM';
-  if (firstWinner === secondWinner) {
+  const firstWinner = sets[0].us > sets[0].them ? 'US' : sets[0].them > sets[0].us ? 'THEM' : 'DRAW';
+  const secondWinner = sets[1].us > sets[1].them ? 'US' : sets[1].them > sets[1].us ? 'THEM' : 'DRAW';
+  
+  if (firstWinner !== 'DRAW' && firstWinner === secondWinner) {
     return 'Si los dos primeros sets los gana el mismo equipo, no puede haber tercer set.';
-  }
-  if (!((usWins === 2 && themWins === 1) || (themWins === 2 && usWins === 1))) {
-    return 'Con 3 sets, el resultado final debe ser 2-1.';
   }
   return null;
 }

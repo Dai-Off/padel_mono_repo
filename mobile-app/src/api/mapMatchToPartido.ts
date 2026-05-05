@@ -118,7 +118,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
         ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
         : fullName[0]?.toUpperCase() ?? '?';
     const level = playerLevelLine(p);
-    slots[idx] = { name: fullName, initial, level, isFree: false };
+    slots[idx] = { id: p.id, name: fullName, initial, level, isFree: false };
   });
   const players = slots;
 

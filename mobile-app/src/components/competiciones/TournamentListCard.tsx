@@ -109,6 +109,11 @@ export function TournamentListCard({ row, onPress }: TournamentListCardProps) {
               <View style={styles.chip}>
                 <Text style={styles.chipMutedText}>👥 {spotsLabel}</Text>
               </View>
+              {confirmed >= (row.max_players ?? 0) && (
+                <View style={[styles.chip, styles.chipClosed]}>
+                  <Text style={styles.chipClosedText}>COMPLETO</Text>
+                </View>
+              )}
             </View>
           </View>
         </View>
@@ -236,6 +241,16 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     color: '#d1d5db',
+    textTransform: 'uppercase',
+  },
+  chipClosed: {
+    backgroundColor: 'rgba(239,68,68,0.2)',
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  chipClosedText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#F87171',
     textTransform: 'uppercase',
   },
 });

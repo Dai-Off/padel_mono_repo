@@ -833,6 +833,7 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
     if (!row) return 'Inscribirme';
     const price = formatTournamentInscriptionPrice(row.price_cents, row.currency ?? 'EUR');
     if (myStatus === 'confirmed' || myStatus === 'pending') return 'Cancelar inscripción';
+    if (remaining <= 0) return 'Torneo Completo';
     if (requestStatus === 'pending') return 'Solicitud pendiente';
     if (requestStatus === 'rejected') return 'Solicitud rechazada';
     if (requestStatus === 'approved' && (row.price_cents ?? 0) > 0) return `Inscribirme — ${price}`;

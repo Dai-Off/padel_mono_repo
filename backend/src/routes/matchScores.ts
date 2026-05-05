@@ -27,8 +27,9 @@ function parseSets(body: unknown): ScoreSet[] | null {
   return out;
 }
 
-function isValidCompletedPadelSet(a: number, b: number): boolean {
-  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0 || a === b) return false;
+function isValidCompletedPadelSet(a: number, b: number, allowTie = false): boolean {
+  if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) return false;
+  if (a === b) return allowTie && a <= 7;
   const max = Math.max(a, b);
   const min = Math.min(a, b);
   if (max === 6) return min <= 4;
@@ -36,15 +37,20 @@ function isValidCompletedPadelSet(a: number, b: number): boolean {
   return false;
 }
 
-function isValidCompletedPadelMatch(sets: ScoreSet[]): boolean {
-  if (sets.length < 2 || sets.length > 3) return false;
-  if (!sets.every((s) => isValidCompletedPadelSet(s.a, s.b))) return false;
+function isValidCompletedPadelMatch(sets: ScoreSet[], matchEndReason?: string): boolean {
+  if (sets.length < 1 || sets.length > 3) return false;
+  const isDraw = matchEndReason === 'draw';
+  if (!sets.every((s) => isValidCompletedPadelSet(s.a, s.b, isDraw))) return false;
+
+  if (isDraw) return true;
+
+  if (sets.length < 2) return false;
 
   let winsA = 0;
   let winsB = 0;
   for (const s of sets) {
     if (s.a > s.b) winsA += 1;
-    else winsB += 1;
+    else if (s.b > s.a) winsB += 1;
   }
 
   if (sets.length === 2) {
@@ -115,7 +121,7 @@ async function firstSubmission(matchId: string) {
  *                     b: { type: number }
  *               match_end_reason:
  *                 type: string
- *                 enum: [completed, retired, timeout]
+ *                 enum: [completed, retired, timeout, draw]
  *               retired_team:
  *                 type: string
  *                 enum: [A, B]
@@ -153,16 +159,22 @@ router.post('/:id/score', async (req: Request, res: Response) => {
   const matchEndReason = req.body?.match_end_reason as string | undefined;
   const retiredTeam = req.body?.retired_team as string | undefined;
   const mer =
-    matchEndReason && ['completed', 'retired', 'timeout'].includes(matchEndReason)
+    matchEndReason && ['completed', 'retired', 'timeout', 'draw'].includes(matchEndReason)
       ? matchEndReason
       : 'completed';
   const rt =
     mer === 'retired' && retiredTeam && ['A', 'B'].includes(retiredTeam) ? retiredTeam : null;
-  if (mer === 'completed' && !isValidCompletedPadelMatch(sets)) {
+  if (mer === 'completed' && !isValidCompletedPadelMatch(sets, mer)) {
     return res.status(400).json({
       ok: false,
       error:
         'Marcador inválido para pádel (best-of-3). Usa sets válidos: 6-0..6-4, 7-5 o 7-6.',
+    });
+  }
+  if (mer === 'draw' && !isValidCompletedPadelMatch(sets, mer)) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Marcador de empate inválido.',
     });
   }
 

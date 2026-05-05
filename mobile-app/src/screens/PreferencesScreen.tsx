@@ -224,7 +224,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
 
   useEffect(() => {
     let mounted = true;
-    fetchClubAvailabilityForCreate()
+    fetchClubAvailabilityForCreate(token)
       .then((clubs) => {
         if (!mounted || clubs.length === 0) return;
         const mapped = clubs

@@ -83,6 +83,8 @@ type PartidoDetailScreenProps = {
   onBack: () => void;
   /** Tras evaluar el partido: ir al tab inicio (y cerrar modal desde el padre). */
   onGoHome?: () => void;
+  /** Abre el perfil público de un jugador */
+  onOpenPublicProfile?: (playerId: string) => void;
 };
 
 function PulseDot() {
@@ -98,6 +100,7 @@ export function PartidoDetailScreen({
   partido: initialPartido,
   onBack,
   onGoHome,
+  onOpenPublicProfile,
 }: PartidoDetailScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -700,6 +703,7 @@ export function PartidoDetailScreen({
                         }
                         joining={joiningSlotIndex === i}
                         selected={selectedSlotIndex === i}
+                        onOpenPublicProfile={onOpenPublicProfile}
                       />
                     ))}
                   </View>
@@ -721,6 +725,7 @@ export function PartidoDetailScreen({
                           }
                           joining={joiningSlotIndex === slotIdx}
                           selected={selectedSlotIndex === slotIdx}
+                          onOpenPublicProfile={onOpenPublicProfile}
                         />
                       );
                     })}
@@ -919,11 +924,13 @@ function PlayerSlotDetail({
   onJoin,
   joining,
   selected,
+  onOpenPublicProfile,
 }: {
   player: PartidoPlayer;
   onJoin?: () => void;
   joining?: boolean;
   selected?: boolean;
+  onOpenPublicProfile?: (playerId: string) => void;
 }) {
   if (player.isFree) {
     return (
@@ -951,7 +958,10 @@ function PlayerSlotDetail({
   }
   return (
     <View style={styles.plSlot}>
-      <View style={styles.plFill}>
+      <Pressable 
+        onPress={() => player.id && onOpenPublicProfile?.(player.id)}
+        style={({ pressed }) => [styles.plFill, pressed && styles.pressed]}
+      >
         {player.avatar ? (
           <Image source={{ uri: player.avatar }} style={styles.plAvatar} />
         ) : (
@@ -959,10 +969,12 @@ function PlayerSlotDetail({
             {(player.initial ?? player.name?.slice(0, 2) ?? '?').toUpperCase()}
           </Text>
         )}
-      </View>
-      <Text style={styles.plName} numberOfLines={1}>
-        {player.name || 'Jugador'}
-      </Text>
+      </Pressable>
+      <Pressable onPress={() => player.id && onOpenPublicProfile?.(player.id)}>
+        <Text style={styles.plName} numberOfLines={1}>
+          {player.name || 'Jugador'}
+        </Text>
+      </Pressable>
       <View style={styles.plLevel}>
         <Text style={styles.plLevelText}>{player.level.replace(/\./g, ',')}</Text>
       </View>

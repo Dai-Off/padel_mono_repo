@@ -21,6 +21,7 @@ import { lineHeightFor, theme } from '../theme';
 
 export type PartidoMode = 'competitivo' | 'amistoso';
 export type PartidoPlayer = {
+  id?: string;
   name: string;
   avatar?: string;
   initial?: string;
