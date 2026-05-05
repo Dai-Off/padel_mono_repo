@@ -180,6 +180,22 @@ export async function sendMatchmakingExpansionNudge(params: {
   });
 }
 
+export async function sendClubPortalInviteEmail(
+  to: string,
+  clubName: string,
+  inviteUrl: string
+): Promise<{ sent: boolean; error?: string }> {
+  const subject = `Invitación al panel del club — ${clubName}`;
+  const html = `
+    <p>Hola,</p>
+    <p>Has sido invitado/a al panel de gestión de <strong>${escapeHtml(clubName)}</strong> en WeMatch.</p>
+    <p><a href="${escapeHtml(inviteUrl)}" style="color:#E31E24;font-weight:bold;">Aceptar invitación</a></p>
+    <p>Si aún no tienes cuenta, regístrate en el panel con <strong>el mismo correo</strong> que recibió esta invitación; luego vuelve a abrir el enlace o pégalo en el navegador tras iniciar sesión.</p>
+    <p>El enlace caduca en 7 días.</p>
+  `;
+  return sendMailSmtp(to, subject, html);
+}
+
 export async function sendStaffAccountEmail(
   to: string,
   staffName: string,

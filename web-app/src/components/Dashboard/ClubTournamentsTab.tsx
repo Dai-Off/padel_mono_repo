@@ -1157,14 +1157,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       setCompetitionResultsEntry(view.tournament?.match_rules?.results_entry === 'players' ? 'players' : 'organizer');
       setGroupSize(String((view.tournament?.standings_rules?.group_size as number | undefined) ?? 4));
       setQualifiersPerGroup(String((view.tournament?.standings_rules?.qualifiers_per_group as number | undefined) ?? 2));
-      const maxFromPodium = (view.podium ?? []).reduce((m, r) => Math.max(m, r.position), 0);
-      const nextSlots = Math.max(1, Math.min(3, maxFromPodium || 1));
-      setPodiumVisibleSlots(nextSlots);
-      const next: Record<number, string> = { 1: '', 2: '', 3: '' };
-      for (const row of view.podium ?? []) {
-        if (row.position >= 1 && row.position <= 3) next[row.position] = row.team_id;
-      }
-      setPodiumDraftByPos(next);
     } catch {
       if (gen !== competitionFetchGenRef.current) return;
       setCompetition(null);

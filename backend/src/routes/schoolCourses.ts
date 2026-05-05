@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -29,11 +30,6 @@ const LEVELS: Level[] = [
 
 const COURSE_FIELDS =
   'id, club_id, name, sport, level, staff_id, court_id, price_cents, capacity, is_active, starts_on, ends_on, created_at, updated_at';
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
 
 function validHHMM(v: string): boolean {
   return /^\d{2}:\d{2}$/.test(v) && Number(v.slice(0, 2)) <= 23 && Number(v.slice(3, 5)) <= 59;
@@ -184,7 +180,7 @@ async function ensureCourseRelations(
   courtId: string
 ): Promise<string | null> {
   const supabase = getSupabaseServiceRoleClient();
-  if (!canAccessClub(req, clubId)) return 'No tienes acceso a este club';
+  if (!canAccessClub(req, clubId, 'escuela')) return 'No tienes acceso a este club';
 
   const { data: staffRow, error: staffErr } = await supabase
     .from('club_staff')
@@ -251,12 +247,12 @@ async function ensureCourseRelations(
  *       400: { description: Validación }
  *       403: { description: Sin acceso al club }
  */
-router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const clubId = String(req.query.club_id ?? '').trim();
   const sport = String(req.query.sport ?? '').trim();
   const level = String(req.query.level ?? '').trim();
   if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   if (sport && !SPORTS.includes(sport as Sport)) {
     return res.status(400).json({ ok: false, error: 'sport inválido' });
   }
@@ -362,11 +358,11 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
  *     400: { description: Validación }
  *     403: { description: Sin acceso al club }
  */
-router.get('/slots', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/slots', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const clubId = String(req.query.club_id ?? '').trim();
   const date = String(req.query.date ?? '').trim();
   if (!clubId || !date) return res.status(400).json({ ok: false, error: 'club_id y date son obligatorios' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ ok: false, error: 'date debe ser YYYY-MM-DD' });
 
   const jsDate = new Date(`${date}T00:00:00Z`);
@@ -461,7 +457,7 @@ router.get('/slots', requireClubOwnerOrAdmin, async (req: Request, res: Response
  *       403: { description: Sin acceso }
  *       404: { description: No encontrado }
  */
-router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -475,7 +471,7 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
 
     const clubId = (course as any).club_id as string;
-    if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+    if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
 
     const [daysRes, staffRes, courtRes, enrollCountRes] = await Promise.all([
       supabase
@@ -565,7 +561,7 @@ router.get('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
  *       400: { description: Validación }
  *       403: { description: Sin acceso al club }
  */
-router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const {
     club_id,
     name,
@@ -698,7 +694,7 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
  *       403: { description: Sin acceso al club }
  *       404: { description: No encontrado }
  */
-router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -710,7 +706,7 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
     if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
     if (!existing) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
     const clubId = (existing as { club_id: string }).club_id;
-    if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+    if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
 
     const {
       name,
@@ -881,7 +877,7 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
  *       403: { description: Sin acceso }
  *       404: { description: No encontrado }
  */
-router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.delete('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -893,7 +889,7 @@ router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Respons
     if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
     if (!existing) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
     const clubId = (existing as { club_id: string }).club_id;
-    if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+    if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
     await supabase.from('club_school_course_days').delete().eq('course_id', id);
     await supabase.from('club_school_course_enrollments').delete().eq('course_id', id);
     const { error: delErr } = await supabase.from('club_school_courses').delete().eq('id', id);
@@ -934,7 +930,7 @@ router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Respons
  *       403: { description: Sin acceso }
  *       409: { description: Sin cupos o alumno duplicado }
  */
-router.post('/:id/enrollments', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { player_id, student_name, student_email, student_phone } = req.body ?? {};
   try {
@@ -946,7 +942,7 @@ router.post('/:id/enrollments', requireClubOwnerOrAdmin, async (req: Request, re
       .maybeSingle();
     if (cErr) return res.status(500).json({ ok: false, error: cErr.message });
     if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
-    if (!canAccessClub(req, (course as any).club_id)) {
+    if (!canAccessClub(req, (course as any).club_id, 'escuela')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
     }
 

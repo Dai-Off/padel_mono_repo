@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
-router.use(requireClubOwnerOrAdmin);
+router.use(requireClubOwnerOrAdminOrPortalStaff);
 
 const RESERVATION_TYPES = [
   'standard', 'open_match', 'pozo', 'fixed_recurring',
@@ -13,17 +14,12 @@ const RESERVATION_TYPES = [
   'tournament', 'blocked',
 ] as const;
 
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
-
 router.get('/', async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id?.trim()) {
     return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   }
-  if (!canAccessClub(req, club_id.trim())) {
+  if (!canAccessClub(req, club_id.trim(), 'finanzas')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 
@@ -60,7 +56,7 @@ router.put('/', async (req: Request, res: Response) => {
   if (!club_id?.trim()) {
     return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   }
-  if (!canAccessClub(req, String(club_id).trim())) {
+  if (!canAccessClub(req, String(club_id).trim(), 'finanzas')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
   if (!prices || typeof prices !== 'object') {
