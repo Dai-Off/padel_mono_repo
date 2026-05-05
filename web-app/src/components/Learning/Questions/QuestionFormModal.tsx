@@ -90,6 +90,8 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
     setType(newType);
     // Siempre resetear contenido al cambiar tipo (el contenido anterior no es compatible)
     setContent(defaultContent(newType));
+    // Los puzzles son siempre tácticos por definición.
+    if (newType === 'puzzle') setArea('tactics');
   };
 
   const [dragging, setDragging] = useState(false);
@@ -244,20 +246,22 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
             </select>
           </div>
 
-          {/* Área y Nivel */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_area')}</label>
-              <select
-                value={area}
-                onChange={(e) => setArea(e.target.value as QuestionArea)}
-                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-              >
-                {QUESTION_AREAS.map((qa) => (
-                  <option key={qa} value={qa}>{t(`learning_area_${qa}`)}</option>
-                ))}
-              </select>
-            </div>
+          {/* Área y Nivel — los puzzles son siempre tácticos, ocultamos el selector de área */}
+          <div className={type === 'puzzle' ? '' : 'grid grid-cols-2 gap-3'}>
+            {type !== 'puzzle' && (
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_area')}</label>
+                <select
+                  value={area}
+                  onChange={(e) => setArea(e.target.value as QuestionArea)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                >
+                  {QUESTION_AREAS.map((qa) => (
+                    <option key={qa} value={qa}>{t(`learning_area_${qa}`)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_level')}</label>
               <input

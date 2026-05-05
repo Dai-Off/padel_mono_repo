@@ -78,7 +78,8 @@ function validateQuestionContent(type: string, content: unknown): string | null 
 // POST /questions
 router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   try {
-    const { club_id, type, level, area, video_url, content } = req.body ?? {};
+    const { club_id, type, level, video_url, content } = req.body ?? {};
+    let { area } = req.body ?? {};
 
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
     if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -86,6 +87,8 @@ router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Res
     if (!VALID_QUESTION_TYPES.includes(type)) {
       return res.status(400).json({ ok: false, error: `type debe ser uno de: ${VALID_QUESTION_TYPES.join(', ')}` });
     }
+    // Los puzzles son siempre tácticos por definición — forzar el área.
+    if (type === 'puzzle') area = 'tactics';
     if (!VALID_AREAS.includes(area)) {
       return res.status(400).json({ ok: false, error: `area debe ser uno de: ${VALID_AREAS.join(', ')}` });
     }
@@ -176,6 +179,8 @@ router.put('/questions/:id', requireClubOwnerOrAdmin, async (req: Request, res: 
       }
       updates.area = area;
     }
+    // Si la pregunta resultante es de tipo puzzle, forzar area='tactics' (independientemente de lo enviado).
+    if (effectiveType === 'puzzle') updates.area = 'tactics';
     if (level !== undefined) {
       if (typeof level !== 'number' || level < 0) {
         return res.status(400).json({ ok: false, error: 'level debe ser un número >= 0' });
