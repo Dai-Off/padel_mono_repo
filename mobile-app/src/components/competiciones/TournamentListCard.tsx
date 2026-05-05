@@ -111,7 +111,7 @@ export function TournamentListCard({ row, onPress }: TournamentListCardProps) {
               </View>
               {confirmed >= (row.max_players ?? 0) && (
                 <View style={[styles.chip, styles.chipClosed]}>
-                  <Text style={styles.chipClosedText}>COMPLETO</Text>
+                  <Text style={styles.chipClosedText}>CERRADO</Text>
                 </View>
               )}
             </View>

@@ -211,35 +211,32 @@ export function MainApp() {
         />
       );
     }
-    if (showPublicProfile && selectedPublicPlayerId) {
+    if ((showPublicProfile && selectedPublicPlayerId) || affinityPublicProfileId) {
+      const pid = affinityPublicProfileId || selectedPublicPlayerId || '';
+      const isFromAffinity = !!affinityPublicProfileId;
+
       return (
         <PublicProfileScreen
-          playerId={selectedPublicPlayerId}
+          playerId={pid}
           onBack={() => {
             setShowPublicProfile(false);
-            setSelectedPublicPlayerId(null);
+            if (isFromAffinity) {
+              setAffinityPublicProfileId(null);
+              setAffinityReopenSignal((s) => s + 1);
+            } else {
+              setSelectedPublicPlayerId(null);
+            }
           }}
-          onChatPress={(pid, name) => {
+          onChatPress={(chatPid, name) => {
             setShowPublicProfile(false);
-            setSelectedPublicPlayerId(null);
-            setShowMessages(true);
-            setMessagesPeer({ id: pid, displayName: name, avatarUrl: null });
-          }}
-        />
-      );
-    }
-    if (affinityPublicProfileId) {
-      return (
-        <PublicProfileScreen
-          playerId={affinityPublicProfileId}
-          onBack={() => {
-            setAffinityPublicProfileId(null);
-            setAffinityReopenSignal((s) => s + 1);
-          }}
-          onChatPress={(pid, name) => {
-            setAffinityPublicProfileId(null);
-            setShowMessages(true);
-            setMessagesPeer({ id: pid, displayName: name, avatarUrl: null });
+            if (isFromAffinity) {
+              setAffinityPublicProfileId(null);
+              setAffinityDmPeer({ id: chatPid, displayName: name, avatarUrl: null });
+            } else {
+              setSelectedPublicPlayerId(null);
+              setShowMessages(true);
+              setMessagesPeer({ id: chatPid, displayName: name, avatarUrl: null });
+            }
           }}
         />
       );
@@ -326,7 +323,10 @@ export function MainApp() {
               setSelectedPublicPlayerId(pid);
               setShowPublicProfile(true);
             }}
-            onOpenAffinityPublicProfile={(pid) => setAffinityPublicProfileId(pid)}
+            onOpenAffinityPublicProfile={(pid) => {
+              setAffinityPublicProfileId(pid);
+              setShowPublicProfile(true);
+            }}
           />
         );
       case 'pistas':
@@ -515,7 +515,7 @@ export function MainApp() {
               showMessages ||
               !!affinityDmPeer ||
               showPublicProfile ||
-              !!affinityPublicProfileId ||
+              affinityPublicProfileId !== null ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos')
             }
@@ -543,7 +543,7 @@ export function MainApp() {
             !showCompetitiveLeague &&
             !showSeasonPass &&
             !showPublicProfile &&
-            !affinityPublicProfileId && (
+            affinityPublicProfileId === null && (
             <View style={styles.bottomBar}>
               <BottomNavbar activeTab={(showProfile || showPublicProfile) ? null : activeTab} onTabChange={handleTabChange} />
             </View>
