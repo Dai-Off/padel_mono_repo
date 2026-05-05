@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Plus, Trash2, Upload, Video, AlertTriangle } from 'lucide-react';
+import { X, Plus, Trash2, Upload, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService, validateVideo, VIDEO_LIMITS } from '../../../services/learningContent';
+import { PuzzleEditor } from './PuzzleEditor/PuzzleEditor';
 import type {
   Question,
   QuestionType,
@@ -214,12 +215,13 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
     }
   };
 
+  const isPuzzle = type === 'puzzle';
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
+    <div className={`fixed inset-0 z-50 bg-black/40 flex items-center justify-center overflow-y-auto px-4 ${isPuzzle ? 'py-6' : 'py-20'}`}>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white rounded-2xl w-full max-w-lg shadow-xl"
+        className={`bg-white rounded-2xl w-full shadow-xl ${isPuzzle ? 'max-w-6xl' : 'max-w-lg'}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
@@ -376,7 +378,7 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
             />
           )}
           {type === 'puzzle' && (
-            <PuzzleFields
+            <PuzzleEditor
               content={content as PuzzleContent}
               onChange={(c) => setContent(c)}
             />
@@ -595,61 +597,6 @@ function MatchColumnsFields({ content, onChange, t }: { content: MatchColumnsCon
             )}
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-// Editor JSON provisional para puzzles. Sprint 3 lo reemplaza por editor visual con react-konva.
-function PuzzleFields({ content, onChange }: { content: PuzzleContent; onChange: (c: PuzzleContent) => void }) {
-  const [raw, setRaw] = useState(() => JSON.stringify(content, null, 2));
-  const [parseError, setParseError] = useState<string | null>(null);
-
-  const handleChange = (text: string) => {
-    setRaw(text);
-    try {
-      const parsed = JSON.parse(text) as PuzzleContent;
-      setParseError(null);
-      onChange(parsed);
-    } catch (e) {
-      setParseError((e as Error).message);
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-100">
-        <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
-        <div className="text-[11px] text-amber-700 leading-relaxed">
-          <strong>Editor JSON provisional.</strong> El editor visual interactivo (drag&amp;drop de jugadores,
-          pelota, flechas) llegará en próximas iteraciones. Por ahora puedes pegar/editar el árbol del puzzle
-          como JSON. Schema en <code className="px-1 rounded bg-amber-100">docs/learning/Puzzles/IMPLEMENTATION_PLAN.md §1</code>.
-        </div>
-      </div>
-
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <label className="text-[10px] font-bold text-gray-500 uppercase">Contenido del puzzle (JSON)</label>
-          <button
-            type="button"
-            onClick={() => handleChange(JSON.stringify(PUZZLE_TEMPLATE, null, 2))}
-            className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700"
-          >
-            Restaurar plantilla
-          </button>
-        </div>
-        <textarea
-          value={raw}
-          onChange={(e) => handleChange(e.target.value)}
-          rows={20}
-          spellCheck={false}
-          className={`w-full rounded-xl border px-3 py-2 text-xs font-mono leading-relaxed resize-y ${
-            parseError ? 'border-red-300 bg-red-50' : 'border-gray-200'
-          }`}
-        />
-        {parseError && (
-          <p className="text-[10px] text-red-500 mt-1">JSON inválido: {parseError}</p>
-        )}
       </div>
     </div>
   );
