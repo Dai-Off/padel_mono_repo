@@ -9,6 +9,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Switch,
   Text,
@@ -39,6 +40,7 @@ import { toDateStringLocal as localCalendarYmd } from "../utils/dateLocal";
 import { useSlotPrice } from "../hooks/useSlotPrice";
 
 const DURATION_MIN = 60;
+const DURATION_MAX = 90;
 
 type ClubDetailScreenProps = {
   court: SearchCourtResult;
@@ -183,6 +185,8 @@ interface CourtCardDynamicProps {
   reserving: boolean;
   onReservar: (c: Court, finalPriceCents: number) => void;
   token?: string;
+  duration: number;
+  onToggleDuration: () => void;
 }
 
 function CourtCardDynamic({
@@ -196,13 +200,15 @@ function CourtCardDynamic({
   reserving,
   onReservar,
   token,
+  duration,
+  onToggleDuration,
 }: CourtCardDynamicProps) {
   const { priceData, loading } = useSlotPrice({
     clubId,
     courtId: court.id,
     date: selectedDateStr,
     slot: isExpanded && selectedTimeSlot ? selectedTimeSlot : undefined,
-    durationMinutes: DURATION_MIN,
+    durationMinutes: duration,
     reservationType: "standard",
     token,
   });
@@ -243,13 +249,14 @@ function CourtCardDynamic({
       {isExpanded && (
         <View style={styles.courtCardActions}>
           <Pressable
+            onPress={onToggleDuration}
             style={({ pressed }) => [
               styles.courtPriceBtn,
               pressed && styles.pressed,
             ]}
           >
             <Text style={styles.courtPriceAmount}>{getPriceDisplay()}</Text>
-            <Text style={styles.courtPriceDuration}>{DURATION_MIN} min</Text>
+            <Text style={styles.courtPriceDuration}>{duration} min</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [
@@ -303,6 +310,7 @@ export function ClubDetailScreen({
   const [clubCourts, setClubCourts] = useState<Court[]>([]);
   const [scheduleText, setScheduleText] = useState<string | null>(null);
   const [clubCourtsLoading, setClubCourtsLoading] = useState(true);
+  const [duration, setDuration] = useState(DURATION_MIN);
 
   const loadClubData = useCallback(async () => {
     setClubCourtsLoading(true);
@@ -410,8 +418,6 @@ export function ClubDetailScreen({
   const loadTimeSlotsForDate = useCallback(
     async (date: Date) => {
       setTimeSlotsLoading(true);
-      setRawTimeSlotsUnion([]);
-      setRawSlotsByCourt({});
       try {
         const dateStr = localCalendarYmd(date);
         const slotsPerCourt: Record<string, string[]> = {};
@@ -441,7 +447,7 @@ export function ClubDetailScreen({
         const availability = await fetchAvailableSlots({
           clubId: court.clubId,
           date: dateStr,
-          durationMinutes: DURATION_MIN,
+          durationMinutes: duration,
           token: session?.access_token,
         });
 
@@ -466,17 +472,20 @@ export function ClubDetailScreen({
         setTimeSlotsLoading(false);
       }
     },
-    [court.clubId, session?.access_token],
+    [court.clubId, session?.access_token, duration],
   );
 
   useEffect(() => {
+    // Solo reseteamos selección si cambia de día o de pestaña, NO si cambia de duración
+    setSelectedTimeSlot(null);
+    setExpandedCourtId(null);
+  }, [selectedDateIndex, activeTab]);
+
+  useEffect(() => {
     if (activeTab === "Reservar") {
-      // Al cambiar de día, limpiamos horario seleccionado y pista expandida
-      setSelectedTimeSlot(null);
-      setExpandedCourtId(null);
       loadTimeSlotsForDate(selectedDate);
     }
-  }, [activeTab, selectedDate, loadTimeSlotsForDate]);
+  }, [activeTab, selectedDate, loadTimeSlotsForDate, duration]);
 
   useEffect(() => {
     if (session?.access_token) {
@@ -526,7 +535,7 @@ export function ClubDetailScreen({
       // Parse as local time (no Z suffix) so JS converts correctly to UTC when sending to backend
       const startDate = new Date(`${dateStr}T${selectedTimeSlot}:00`);
       const start_at = startDate.toISOString();
-      const endDate = new Date(startDate.getTime() + DURATION_MIN * 60 * 1000);
+      const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
       const end_at = endDate.toISOString();
       const totalPriceCents = Math.max(finalPriceCents, 100);
 
@@ -615,14 +624,14 @@ export function ClubDetailScreen({
           selectedDate,
           selectedTimeSlot,
         ),
-        duration: `${DURATION_MIN} min`,
+        duration: `${duration} min`,
         priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
         matchVisibility: "private",
         clubId: court.clubId,
         courtId: c.id,
         date: localCalendarYmd(selectedDate),
         slot: selectedTimeSlot,
-        durationMinutes: DURATION_MIN,
+        durationMinutes: duration,
       });
     },
     [
@@ -639,6 +648,7 @@ export function ClubDetailScreen({
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
       <View style={styles.header}>
         <Pressable
           onPress={onClose}
@@ -938,6 +948,10 @@ export function ClubDetailScreen({
                         token={session?.access_token}
                         reserving={reserving}
                         onReservar={handleReservar}
+                        duration={duration}
+                        onToggleDuration={() =>
+                          setDuration((prev) => (prev === 60 ? 90 : 60))
+                        }
                       />
                     ));
                   })()
