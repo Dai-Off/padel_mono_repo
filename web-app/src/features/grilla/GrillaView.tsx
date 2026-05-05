@@ -174,9 +174,10 @@ const useClubData = (dateOrStr: Date | string) => {
         }
 
         const query = clubId ? `/bookings?date=${date}&club_id=${clubId}` : `/bookings?date=${date}`;
-        const [bRes, schoolSlots] = await Promise.all([
+        const [bRes, schoolSlots, privateSlots] = await Promise.all([
           apiFetchWithAuth<any>(query),
           clubId ? schoolCoursesService.slots(clubId, date) : Promise.resolve([]),
+          clubId ? schoolCoursesService.slotsPrivate(clubId, date) : Promise.resolve([]),
         ]);
         const raw = bRes.bookings || [];
         const schoolAsBookings = schoolSlots.map((slot) => ({
@@ -190,7 +191,18 @@ const useClubData = (dateOrStr: Date | string) => {
           notes: `${slot.course_name}${slot.staff_name ? ` - ${slot.staff_name}` : ''}`,
           players: { first_name: 'Curso', last_name: slot.course_name },
         }));
-        const merged = [...raw, ...schoolAsBookings];
+        const privateAsBookings = privateSlots.map((slot) => ({
+          id: `school-private-slot-${slot.id}`,
+          court_id: slot.court_id,
+          start_at: `${date}T${slot.start_time}:00`,
+          end_at: `${date}T${slot.end_time}:00`,
+          status: 'confirmed',
+          reservation_type: 'school_individual',
+          source_channel: 'system',
+          notes: `Clase particular${slot.student_name ? ` - ${slot.student_name}` : ''}`,
+          players: { first_name: 'Clase', last_name: slot.student_name ?? 'particular' },
+        }));
+        const merged = [...raw, ...schoolAsBookings, ...privateAsBookings];
         putBookingsCache(date, merged);
         return mapBookings(merged, courtsData);
     }, [clubId]);
@@ -204,9 +216,10 @@ const useClubData = (dateOrStr: Date | string) => {
             if (ds === skipDate) continue; // ese día ya lo cargó fetchData
             if (bookingsCache[ds] && Date.now() - bookingsCache[ds].ts < CACHE_TTL) continue;
             try {
-                const [bRes, schoolSlots] = await Promise.all([
+                const [bRes, schoolSlots, privateSlots] = await Promise.all([
                     apiFetchWithAuth<any>(`/bookings?date=${ds}&club_id=${clubId}`),
                     schoolCoursesService.slots(clubId, ds),
+                    schoolCoursesService.slotsPrivate(clubId, ds),
                 ]);
                 const schoolAsBookings = schoolSlots.map((slot: any) => ({
                     id: `school-slot-${slot.id}`,
@@ -219,7 +232,18 @@ const useClubData = (dateOrStr: Date | string) => {
                     notes: `${slot.course_name}${slot.staff_name ? ` - ${slot.staff_name}` : ''}`,
                     players: { first_name: 'Curso', last_name: slot.course_name },
                 }));
-                putBookingsCache(ds, [...(bRes.bookings || []), ...schoolAsBookings]);
+                const privateAsBookings = privateSlots.map((slot: any) => ({
+                    id: `school-private-slot-${slot.id}`,
+                    court_id: slot.court_id,
+                    start_at: `${ds}T${slot.start_time}:00`,
+                    end_at: `${ds}T${slot.end_time}:00`,
+                    status: 'confirmed',
+                    reservation_type: 'school_individual',
+                    source_channel: 'system',
+                    notes: `Clase particular${slot.student_name ? ` - ${slot.student_name}` : ''}`,
+                    players: { first_name: 'Clase', last_name: slot.student_name ?? 'particular' },
+                }));
+                putBookingsCache(ds, [...(bRes.bookings || []), ...schoolAsBookings, ...privateAsBookings]);
             } catch { /* silent */ }
         }
     }, [clubId]);
@@ -868,6 +892,12 @@ function GrillaViewInner() {
           setSelectedSchoolCourseId(courseId);
           return;
       }
+      if (res.booking_type === 'school_individual' || res.id.startsWith('school-private-slot-')) {
+          setSelectedSchoolCourseId(null);
+          setSelectedModalReservationId(null);
+          setEditingBookingData(null);
+          return;
+      }
 
       setSelectedSchoolCourseId(null);
       if (!res.id.startsWith('new-')) {
@@ -1375,7 +1405,7 @@ function GrillaViewInner() {
 
     const reservation = reservations.find(r => r.id === active.id);
     if (!reservation) return;
-    if (reservation.id.startsWith('school-slot-')) return;
+    if (reservation.id.startsWith('school-slot-') || reservation.id.startsWith('school-private-slot-')) return;
 
     const newCourtId = over.id as string;
 

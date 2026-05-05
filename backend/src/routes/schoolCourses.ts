@@ -932,7 +932,7 @@ router.delete('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
  */
 router.post('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { player_id, student_name, student_email, student_phone } = req.body ?? {};
+  const { player_id, student_name, student_email, student_phone, fee_cents } = req.body ?? {};
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: course, error: cErr } = await supabase
@@ -973,12 +973,118 @@ router.post('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req
         student_name: student_name ? String(student_name) : null,
         student_email: student_email ? String(student_email) : null,
         student_phone: student_phone ? String(student_phone) : null,
+        fee_cents: Number.isFinite(Number(fee_cents)) ? Math.max(0, Math.round(Number(fee_cents))) : 0,
         status: 'active',
       })
-      .select('id, course_id, player_id, student_name, student_email, student_phone, status, created_at, updated_at')
+      .select('id, course_id, player_id, student_name, student_email, student_phone, fee_cents, status, created_at, updated_at')
       .single();
     if (insErr) return res.status(500).json({ ok: false, error: insErr.message });
     return res.status(201).json({ ok: true, enrollment: created });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+router.get('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: course, error: cErr } = await supabase
+      .from('club_school_courses')
+      .select('id, club_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (cErr) return res.status(500).json({ ok: false, error: cErr.message });
+    if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
+    if (!canAccessClub(req, (course as any).club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+
+    const { data: enrollments, error } = await supabase
+      .from('club_school_course_enrollments')
+      .select('id, course_id, player_id, student_name, student_email, student_phone, fee_cents, status, created_at, updated_at')
+      .eq('course_id', id)
+      .order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    const playerIds = (enrollments ?? []).map((e: any) => e.player_id).filter(Boolean);
+    const playersById = new Map<string, any>();
+    if (playerIds.length) {
+      const { data: players } = await supabase
+        .from('players')
+        .select('id, first_name, last_name, email')
+        .in('id', playerIds);
+      for (const p of players ?? []) playersById.set((p as any).id, p);
+    }
+    const out = (enrollments ?? []).map((e: any) => ({
+      ...e,
+      player: e.player_id ? playersById.get(e.player_id) ?? null : null,
+    }));
+    return res.json({ ok: true, enrollments: out });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+router.put('/:id/enrollments/:enrollmentId', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const { id, enrollmentId } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: course, error: cErr } = await supabase
+      .from('club_school_courses')
+      .select('id, club_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (cErr) return res.status(500).json({ ok: false, error: cErr.message });
+    if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
+    if (!canAccessClub(req, (course as any).club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+
+    const update: Record<string, unknown> = {};
+    if (req.body?.fee_cents !== undefined) {
+      const fee = Number(req.body.fee_cents);
+      if (!Number.isFinite(fee) || fee < 0) return res.status(400).json({ ok: false, error: 'fee_cents inválido' });
+      update.fee_cents = Math.round(fee);
+    }
+    if (req.body?.status !== undefined) {
+      const st = String(req.body.status);
+      if (!['active', 'cancelled'].includes(st)) return res.status(400).json({ ok: false, error: 'status inválido' });
+      update.status = st;
+    }
+    if (req.body?.student_name !== undefined) update.student_name = req.body.student_name || null;
+    if (req.body?.student_email !== undefined) update.student_email = req.body.student_email || null;
+    if (req.body?.student_phone !== undefined) update.student_phone = req.body.student_phone || null;
+
+    const { data, error } = await supabase
+      .from('club_school_course_enrollments')
+      .update(update)
+      .eq('id', enrollmentId)
+      .eq('course_id', id)
+      .select('id, course_id, player_id, student_name, student_email, student_phone, fee_cents, status, created_at, updated_at')
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, enrollment: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+router.delete('/:id/enrollments/:enrollmentId', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const { id, enrollmentId } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: course, error: cErr } = await supabase
+      .from('club_school_courses')
+      .select('id, club_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (cErr) return res.status(500).json({ ok: false, error: cErr.message });
+    if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
+    if (!canAccessClub(req, (course as any).club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+    const { error } = await supabase
+      .from('club_school_course_enrollments')
+      .update({ status: 'cancelled' })
+      .eq('id', enrollmentId)
+      .eq('course_id', id);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
