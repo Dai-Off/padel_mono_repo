@@ -5,54 +5,68 @@ import type { PuzzleBall } from '../../../types/puzzle';
 
 type Props = {
   ball: PuzzleBall;
-  cxPx: number;          // posición central destino (en px del Stage interior)
+  // Posición central destino (en px del Stage interior).
+  cxPx: number;
   cyPx: number;
   sizePx: number;
   durationMs: number;
 };
 
 export function AnimatedBall({ ball, cxPx, cyPx, sizePx, durationMs }: Props) {
-  // progress 0→1 conduce toda la animación: posición lineal + scale parabólica + rotate.
+  // Posición top-left del bounding box de la pelota.
+  const targetX = cxPx - sizePx / 2;
+  const targetY = cyPx - sizePx / 2;
+
+  // Posición animada (top-left). Se anima con timing al cambiar el target.
+  const xy = useRef(new Animated.ValueXY({ x: targetX, y: targetY })).current;
+  // Progreso 0→1 sincronizado con la transición, conduce scale/rotate (efectos parabólicos).
   const progress = useRef(new Animated.Value(1)).current;
-  // Trackeamos la posición previa para interpolar de start→end en cada cambio.
-  const startRef = useRef({ x: cxPx, y: cyPx });
-  const endRef = useRef({ x: cxPx, y: cyPx });
+  // Spin angle final para esta animación; se decide al disparar (random necesita azar).
+  const spinDegRef = useRef(0);
   const initialized = useRef(false);
 
   useEffect(() => {
     if (!initialized.current) {
-      startRef.current = { x: cxPx, y: cyPx };
-      endRef.current = { x: cxPx, y: cyPx };
+      xy.setValue({ x: targetX, y: targetY });
       progress.setValue(1);
       initialized.current = true;
       return;
     }
-    // start = donde estaba el último frame final; end = nuevo target.
-    startRef.current = endRef.current;
-    endRef.current = { x: cxPx, y: cyPx };
+
+    // Decidir spin para esta animación.
+    spinDegRef.current =
+      ball.spin === 'clockwise'
+        ? 360
+        : ball.spin === 'counter-clockwise'
+          ? -360
+          : ball.spin === 'random'
+            ? (Math.random() < 0.5 ? -1 : 1) * 270
+            : 0;
+
     progress.setValue(0);
 
-    const isArc = ball.shot_type === 'lob' || ball.shot_type === 'chiquita';
-    const easing = isArc ? Easing.linear : Easing.out(Easing.cubic);
+    Animated.parallel([
+      Animated.timing(xy, {
+        toValue: { x: targetX, y: targetY },
+        duration: durationMs,
+        // Lob/chiquita: lineal para que el arco fingido (scale) tenga su pico
+        // exactamente en el medio de la trayectoria.
+        easing:
+          ball.shot_type === 'lob' || ball.shot_type === 'chiquita'
+            ? Easing.linear
+            : Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: durationMs,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [targetX, targetY, ball.shot_type, ball.spin, durationMs, xy, progress]);
 
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: durationMs,
-      easing,
-      useNativeDriver: true,
-    }).start();
-  }, [cxPx, cyPx, ball.shot_type, ball.spin, durationMs, progress]);
-
-  const halfSize = sizePx / 2;
-  const startX = startRef.current.x - halfSize;
-  const startY = startRef.current.y - halfSize;
-  const endX = endRef.current.x - halfSize;
-  const endY = endRef.current.y - halfSize;
-
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [startX, endX] });
-  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [startY, endY] });
-
-  // Lob: la pelota sube alto (scale máxima en t=0.5). Chiquita: sube poco. Sin shot: sin scale.
+  // Lob: pico de scale 2.5 a t=0.5. Chiquita: pico 1.25. Sin shot: scale 1.
   const isLob = ball.shot_type === 'lob';
   const isChiquita = ball.shot_type === 'chiquita';
   const scaleMax = isLob ? 2.5 : isChiquita ? 1.25 : 1;
@@ -61,18 +75,10 @@ export function AnimatedBall({ ball, cxPx, cyPx, sizePx, durationMs }: Props) {
     outputRange: [1, scaleMax, 1],
   });
 
-  // Spin: rota durante el viaje. random = giro aleatorio decidido al inicio.
-  const spinDeg =
-    ball.spin === 'clockwise'
-      ? 360
-      : ball.spin === 'counter-clockwise'
-        ? -360
-        : ball.spin === 'random'
-          ? (initialized.current ? (Math.random() < 0.5 ? -1 : 1) * 270 : 0)
-          : 0;
+  // Rotate de 0deg a spinDeg. Si no hay spin, queda fijo en 0.
   const rotate = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: ['0deg', `${spinDeg}deg`],
+    outputRange: ['0deg', `${spinDegRef.current}deg`],
   });
 
   return (
@@ -83,7 +89,12 @@ export function AnimatedBall({ ball, cxPx, cyPx, sizePx, durationMs }: Props) {
         {
           width: sizePx,
           height: sizePx,
-          transform: [{ translateX }, { translateY }, { scale }, { rotate }],
+          transform: [
+            { translateX: xy.x },
+            { translateY: xy.y },
+            { scale },
+            { rotate },
+          ],
         },
       ]}
     >
