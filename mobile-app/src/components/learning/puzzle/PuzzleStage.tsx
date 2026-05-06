@@ -24,10 +24,13 @@ export function PuzzleStage({ frame, animate = true }: Props) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const win = useWindowDimensions();
 
-  // Calcular dimensiones del Stage limitadas por pantalla. Se reserva el resto
-  // para enunciado/opciones/confirmar de modo que todo entre sin scroll.
-  const maxH = win.height * 0.62;                // 62% del alto disponible
-  const maxW = Math.min(win.width - 24, 440);    // 12px de margen lateral, tope 440
+  // Calcular dimensiones del Stage. Se reserva un alto fijo para los demás
+  // elementos verticales del visor (header lección, statement, bocadillo,
+  // barra de acciones y márgenes) y la pista usa el resto. Más robusto que un
+  // % fijo: se adapta a pantallas pequeñas/grandes y a statements de 2-3 líneas.
+  const RESERVED_H = 340;
+  const maxH = Math.max(260, win.height - RESERVED_H);
+  const maxW = Math.min(win.width - 24, 440);
   const widthFromHeight = maxH * STAGE_ASPECT;
   const stageW = Math.min(maxW, widthFromHeight);
   const stageH = stageW / STAGE_ASPECT;
