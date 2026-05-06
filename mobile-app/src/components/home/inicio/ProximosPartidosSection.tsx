@@ -16,6 +16,8 @@ import { PartidoOpenCard } from '../../partido/PartidoOpenCard';
 import { INICIO_PAD_H } from './constants';
 import { INICIO_ENTER_EASING } from './inicioMotion';
 import { androidReadableText } from './textStyles';
+import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
+import { OPENWEATHER_API_KEY } from '../../../config';
 
 const CARD_RADIUS = 12;
 /** Máximo por slide; el real se acota al ancho de pantalla menos padding del home. */
@@ -98,20 +100,22 @@ function ProximoCard({
   item,
   onPress,
   fullWidth,
+  theme,
 }: {
   item: PartidoItem;
   onPress: () => void;
   fullWidth: boolean;
+  theme: any;
 }) {
   return (
     <View style={[styles.cardShell, fullWidth && styles.cardShellFull]}>
       <PartidoOpenCard item={item} onPress={onPress} fullWidth={fullWidth} />
       <LinearGradient
         pointerEvents="none"
-        colors={[...GRADIENT_BR_ORANGE_FADE.colors]}
-        locations={[...GRADIENT_BR_ORANGE_FADE.locations]}
-        start={GRADIENT_BR_ORANGE_FADE.start}
-        end={GRADIENT_BR_ORANGE_FADE.end}
+        colors={[`rgba(${theme.orb1Color}, 0.1)`, 'transparent']}
+        locations={[0, 0.85]} // Difuminado total a lo largo de la tarjeta
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0.5 }}
         style={styles.cardGlowOverlay}
       />
     </View>
@@ -123,6 +127,7 @@ export function ProximosPartidosSection({
   loading,
   onPartidoPress,
 }: Props) {
+  const theme = useAmbientTheme(OPENWEATHER_API_KEY);
   const insets = useSafeAreaInsets();
   const { width: windowW } = useWindowDimensions();
   const usableW = windowW - INICIO_PAD_H * 2;
@@ -168,10 +173,10 @@ export function ProximosPartidosSection({
           <CarouselItemEnter index={0} width={carouselCardW}>
             <Pressable style={[styles.skeletonCard, { width: carouselCardW }]} disabled>
               <LinearGradient
-                colors={[...GRADIENT_BR_ORANGE_FADE.colors]}
-                locations={[...GRADIENT_BR_ORANGE_FADE.locations]}
-                start={GRADIENT_BR_ORANGE_FADE.start}
-                end={GRADIENT_BR_ORANGE_FADE.end}
+                colors={[`rgba(${theme.orb1Color}, 0.1)`, 'transparent']}
+                locations={[0, 0.85]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0.5 }}
                 style={StyleSheet.absoluteFill}
               />
               <View style={styles.skeletonLineLg} />
@@ -195,15 +200,16 @@ export function ProximosPartidosSection({
             },
           ]}
         >
-          {items.map((item, index) => (
-            <CarouselItemEnter key={item.id} index={index} width={cardWidth}>
-              <ProximoCard
-                item={item}
-                fullWidth={items.length === 1}
-                onPress={() => onPartidoPress?.(item)}
-              />
-            </CarouselItemEnter>
-          ))}
+            {items.map((item, index) => (
+              <CarouselItemEnter key={item.id} index={index} width={cardWidth}>
+                <ProximoCard
+                  item={item}
+                  fullWidth={items.length === 1}
+                  onPress={() => onPartidoPress?.(item)}
+                  theme={theme}
+                />
+              </CarouselItemEnter>
+            ))}
         </ScrollView>
       )}
     </View>

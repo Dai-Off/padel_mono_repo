@@ -14,6 +14,9 @@ import Svg, {
 const BRAND_RGB = '241, 143, 52';
 const PURPLE_RGB = '139, 92, 246';
 
+import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
+import { OPENWEATHER_API_KEY } from '../../../config';
+
 /** RNG determinista (sin `Math.random` en render). */
 function mulberry32(seed: number) {
   return () => {
@@ -213,10 +216,12 @@ function WhiteSpeckParticle({
   W,
   H,
   cfg,
+  speedMultiplier = 1,
 }: {
   W: number;
   H: number;
   cfg: SmallCfg;
+  speedMultiplier?: number;
 }) {
   const p = useRef(new Animated.Value(0)).current;
 
@@ -227,7 +232,7 @@ function WhiteSpeckParticle({
       p.setValue(0);
       Animated.timing(p, {
         toValue: 1,
-        duration: cfg.duration,
+        duration: cfg.duration / speedMultiplier,
         easing: Easing.inOut(Easing.sin),
         useNativeDriver: true,
       }).start(({ finished }) => {
@@ -398,6 +403,7 @@ function GridLayer({ W, H }: { W: number; H: number }) {
  */
 export function InicioAmbientBackground() {
   const { width: W, height: H } = useWindowDimensions();
+  const theme = useAmbientTheme(OPENWEATHER_API_KEY);
 
   const rngA = useMemo(() => mulberry32(PARTICLE_SEED), []);
   const rngB = useMemo(() => mulberry32(PARTICLE_SEED + 1), []);
@@ -413,7 +419,7 @@ export function InicioAmbientBackground() {
 
   return (
     <View style={styles.root} pointerEvents="none">
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0F0F0F' }]} />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.bgTint }]} />
 
       <DriftingGradientOrb
         orbKey="a"
@@ -428,10 +434,10 @@ export function InicioAmbientBackground() {
         ty1={H * 0.78}
         ty2={-250}
         stops={[
-          { pct: 0, color: `rgb(${BRAND_RGB})`, opacity: 0.12 },
-          { pct: 42, color: `rgb(${BRAND_RGB})`, opacity: 0.03 },
-          { pct: 78, color: `rgb(${BRAND_RGB})`, opacity: 0 },
-          { pct: 100, color: '#0F0F0F', opacity: 0 },
+          { pct: 0, color: `rgb(${theme.orb1Color})`, opacity: 0.12 * theme.glowOpacity },
+          { pct: 42, color: `rgb(${theme.orb1Color})`, opacity: 0.03 * theme.glowOpacity },
+          { pct: 78, color: `rgb(${theme.orb1Color})`, opacity: 0 },
+          { pct: 100, color: theme.bgTint, opacity: 0 },
         ]}
       />
       <DriftingGradientOrb
@@ -447,10 +453,10 @@ export function InicioAmbientBackground() {
         ty1={-300}
         ty2={H * 0.55}
         stops={[
-          { pct: 0, color: `rgb(${BRAND_RGB})`, opacity: 0.1 },
-          { pct: 48, color: `rgb(${BRAND_RGB})`, opacity: 0.028 },
-          { pct: 80, color: `rgb(${BRAND_RGB})`, opacity: 0 },
-          { pct: 100, color: '#0F0F0F', opacity: 0 },
+          { pct: 0, color: `rgb(${theme.orb2Color})`, opacity: 0.1 * theme.glowOpacity },
+          { pct: 48, color: `rgb(${theme.orb2Color})`, opacity: 0.028 * theme.glowOpacity },
+          { pct: 80, color: `rgb(${theme.orb2Color})`, opacity: 0 },
+          { pct: 100, color: theme.bgTint, opacity: 0 },
         ]}
       />
       <DriftingGradientOrb
@@ -466,15 +472,15 @@ export function InicioAmbientBackground() {
         ty1={H * 0.82}
         ty2={-200}
         stops={[
-          { pct: 0, color: `rgb(${PURPLE_RGB})`, opacity: 0.07 },
-          { pct: 45, color: `rgb(${PURPLE_RGB})`, opacity: 0.02 },
-          { pct: 78, color: `rgb(${PURPLE_RGB})`, opacity: 0 },
-          { pct: 100, color: '#0F0F0F', opacity: 0 },
+          { pct: 0, color: `rgb(${theme.orb3Color})`, opacity: 0.07 * theme.glowOpacity },
+          { pct: 45, color: `rgb(${theme.orb3Color})`, opacity: 0.02 * theme.glowOpacity },
+          { pct: 78, color: `rgb(${theme.orb3Color})`, opacity: 0 },
+          { pct: 100, color: theme.bgTint, opacity: 0 },
         ]}
       />
 
       {smallCfgs.map((cfg, i) => (
-        <WhiteSpeckParticle key={`w-${i}`} W={W} H={H} cfg={cfg} />
+        <WhiteSpeckParticle key={`w-${i}`} W={W} H={H} cfg={cfg} speedMultiplier={theme.particleSpeed} />
       ))}
       {mediumCfgs.map((cfg, i) => (
         <AmbientGlowOrb key={`m-${i}`} W={W} H={H} cfg={cfg} gradId={`inicioGlowM_${i}`} />
