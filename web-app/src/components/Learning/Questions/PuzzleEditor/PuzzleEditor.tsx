@@ -4,6 +4,7 @@ import { PuzzleStage, type SelectedItem } from './PuzzleStage';
 import { MetaPanel } from './panels/MetaPanel';
 import { OptionsPanel } from './panels/OptionsPanel';
 import { FramesTabs } from './panels/FramesTabs';
+import { RevealFramePanel } from './panels/RevealFramePanel';
 import { cloneFrame, interpolateFrames, type ActiveFrameKey } from './lib/frames';
 import type {
   PuzzleBall,
@@ -86,7 +87,7 @@ export function PuzzleEditor({ content, onChange }: Props) {
     if (!opt || opt.reveal_frame) return;
     next[optionIdx] = {
       ...opt,
-      reveal_frame: { ...cloneFrame(content.initial_frame), duration_ms: 800 },
+      reveal_frame: { ...cloneFrame(content.initial_frame), duration_ms: 1500 },
     } as PuzzleOption;
     onChange({ ...content, options: next });
     setActiveFrame(opt.id);
@@ -113,7 +114,7 @@ export function PuzzleEditor({ content, onChange }: Props) {
     if (!opt?.reveal_frame) return;
     const from = content.initial_frame;
     const to = opt.reveal_frame;
-    const duration = Math.max(200, opt.reveal_frame.duration_ms ?? 800);
+    const duration = Math.max(200, opt.reveal_frame.duration_ms ?? 1500);
     const start = performance.now();
 
     setSelected(null);
@@ -201,6 +202,16 @@ export function PuzzleEditor({ content, onChange }: Props) {
       {/* Paneles laterales */}
       <div className="space-y-4 overflow-y-auto pr-1">
         <MetaPanel content={content} onChange={onChange} />
+        {activeFrame !== 'initial' && (
+          <>
+            <div className="border-t border-gray-100" />
+            <RevealFramePanel
+              content={content}
+              activeFrame={activeFrame}
+              onChange={onChange}
+            />
+          </>
+        )}
         <div className="border-t border-gray-100" />
         <OptionsPanel content={content} onChange={onChange} />
       </div>

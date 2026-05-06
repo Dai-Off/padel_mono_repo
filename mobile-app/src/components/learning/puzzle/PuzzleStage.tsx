@@ -30,7 +30,7 @@ export function PuzzleStage({ frame, animate = true }: Props) {
 
   const playerWidthPx = size ? ((courtConfig.player.radius * 3.5) / STAGE_H_M) * size.h : 0;
   const ballSidePx = size ? ((courtConfig.ball.radius * 2) / STAGE_H_M) * size.h : 0;
-  const durationMs = frame.duration_ms ?? 800;
+  const durationMs = frame.duration_ms ?? 1500;
 
   return (
     <View style={styles.wrapper}>
