@@ -2,29 +2,19 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 
 type Db = ReturnType<typeof getSupabaseServiceRoleClient>;
 
-function teamFromSlot(slot: number): 'A' | 'B' {
-  return slot <= 1 ? 'A' : 'B';
-}
-
-function takenSlotsFromRows(rows: { slot_index?: number | null }[] | null | undefined): Set<number> {
-  const taken = new Set<number>();
-  for (const r of rows ?? []) {
-    const s = r.slot_index;
-    if (s != null && s >= 0 && s <= 3) taken.add(s);
-  }
-  return taken;
-}
-
-function firstFreeSlot(taken: Set<number>): number | null {
-  for (let i = 0; i < 4; i++) {
-    if (!taken.has(i)) return i;
-  }
-  return null;
-}
+/**
+ * Resultado de la RPC `claim_match_slot` definida en la DB.
+ */
+type ClaimSlotResult =
+  | { ok: true; slot_index: number; reassigned: boolean }
+  | { ok: false; error: string; code: string };
 
 /**
  * Tras pago exitoso de un guest: inserta en `match_players` en un cupo libre.
- * Si el slot preferido (metadata Stripe) ya fue tomado por carrera, usa el primer libre 0-3.
+ *
+ * Utiliza la RPC `claim_match_slot` que adquiere un advisory lock por match_id,
+ * garantizando asignación atómica sin race conditions aunque dos jugadores
+ * intenten unirse al mismo slot simultáneamente.
  */
 export async function insertGuestMatchPlayerAfterPayment(
   supabase: Db,
@@ -34,80 +24,33 @@ export async function insertGuestMatchPlayerAfterPayment(
 ): Promise<
   { ok: true; slot_index: number; reassigned: boolean } | { ok: false; error: string; code: string }
 > {
-  const { data: already } = await supabase
-    .from('match_players')
-    .select('slot_index')
-    .eq('match_id', matchId)
-    .eq('player_id', playerId)
-    .maybeSingle();
-  if (already) {
-    const s = (already as { slot_index?: number | null }).slot_index;
-    const idx = s != null && s >= 0 && s <= 3 ? s : 0;
-    return { ok: true, slot_index: idx, reassigned: false };
-  }
-
-  const { data: slotRows, error: slotErr } = await supabase
-    .from('match_players')
-    .select('slot_index')
-    .eq('match_id', matchId);
-  if (slotErr) {
-    return { ok: false, error: slotErr.message, code: 'read_slots' };
-  }
-  const taken = takenSlotsFromRows(slotRows as { slot_index?: number | null }[]);
-  if (taken.size >= 4) {
-    return { ok: false, error: 'El partido no tiene plazas libres', code: 'match_full' };
-  }
-
   const pref =
-    preferredSlot != null && Number.isFinite(preferredSlot)
+    preferredSlot != null && Number.isFinite(Number(preferredSlot))
       ? Math.trunc(Number(preferredSlot))
       : null;
-  const preferOk = pref != null && pref >= 0 && pref <= 3 && !taken.has(pref);
-  const resolved = preferOk ? pref : firstFreeSlot(taken);
-  if (resolved == null) {
-    return { ok: false, error: 'No hay slot disponible', code: 'no_slot' };
-  }
-  const reassigned = !preferOk;
 
-  const team = teamFromSlot(resolved);
-  const { error: err } = await supabase.from('match_players').insert({
-    match_id: matchId,
-    player_id: playerId,
-    team,
-    invite_status: 'accepted',
-    slot_index: resolved,
+  const { data, error } = await supabase.rpc('claim_match_slot', {
+    p_match_id: matchId,
+    p_player_id: playerId,
+    p_preferred: pref,
   });
 
-  if (err) {
-    const isUnique =
-      (err as { code?: string }).code === '23505' || String(err.message).toLowerCase().includes('duplicate');
-    if (isUnique) {
-      const { data: again } = await supabase
-        .from('match_players')
-        .select('slot_index')
-        .eq('match_id', matchId);
-      const taken2 = takenSlotsFromRows(again as { slot_index?: number | null }[]);
-      const free = firstFreeSlot(taken2);
-      if (free == null) {
-        return { ok: false, error: 'El partido completó durante el pago', code: 'match_full' };
-      }
-      const team2 = teamFromSlot(free);
-      const { error: err2 } = await supabase.from('match_players').insert({
-        match_id: matchId,
-        player_id: playerId,
-        team: team2,
-        invite_status: 'accepted',
-        slot_index: free,
-      });
-      if (err2) {
-        return { ok: false, error: err2.message, code: 'insert_failed' };
-      }
-      return { ok: true, slot_index: free, reassigned: true };
-    }
-    return { ok: false, error: err.message, code: 'insert_failed' };
+  if (error) {
+    console.error('[matchPlayerSlotService] RPC claim_match_slot error:', error);
+    return { ok: false, error: error.message, code: 'rpc_error' };
   }
 
-  return { ok: true, slot_index: resolved, reassigned };
+  const result = data as ClaimSlotResult;
+
+  if (!result.ok) {
+    console.warn('[matchPlayerSlotService] claim_match_slot failed:', result.error, result.code, {
+      matchId,
+      playerId,
+      preferredSlot: pref,
+    });
+  }
+
+  return result;
 }
 
 /**

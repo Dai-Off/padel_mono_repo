@@ -301,6 +301,63 @@ export async function searchPlayers(
   }
 }
 
+export type PublicPlayerProfile = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  avatarUrl: string | null;
+  gender: string | null;
+  eloRating: number | null;
+  sp: number;
+  fiabilidad: number | null;
+  mmWins: number;
+  mmLosses: number;
+  mmDraws: number;
+  liga: string | null;
+  mmPeakLiga: string | null;
+  coachAssessment: any | null; // Reuse types if needed, but any for simplicity here
+  recentMatches: any[];
+};
+
+/** Obtiene el perfil público de cualquier jugador. */
+export async function fetchPublicPlayerProfile(
+  playerId: string,
+  token?: string | null
+): Promise<PublicPlayerProfile | null> {
+  try {
+    const res = await fetch(`${API_URL}/players/${playerId}/public-profile`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    const json = await res.json();
+    if (!res.ok || !json.ok || !json.player) return null;
+
+    const p = json.player;
+    return {
+      id: p.id,
+      firstName: p.first_name ?? null,
+      lastName: p.last_name ?? null,
+      avatarUrl: p.avatar_url ?? null,
+      gender: p.gender ?? null,
+      eloRating: p.elo_rating ?? null,
+      sp: p.sp ?? 0,
+      fiabilidad: p.fiabilidad ?? null,
+      mmWins: p.mm_wins ?? 0,
+      mmLosses: p.mm_losses ?? 0,
+      mmDraws: p.mm_draws ?? 0,
+      liga: p.liga ?? null,
+      mmPeakLiga: p.mm_peak_liga ?? null,
+      coachAssessment: p.coach_assessment ?? null,
+      recentMatches: p.recent_matches ?? [],
+    };
+  } catch (err) {
+    console.error("fetchPublicPlayerProfile:", err);
+    return null;
+  }
+}
+
 export async function fetchFirstPlayerId(): Promise<string | null> {
   try {
     const res = await fetch(`${API_URL}/players`, {

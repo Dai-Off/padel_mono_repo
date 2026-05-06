@@ -88,9 +88,13 @@ function buildTeammateList(partido: PartidoItem, currentPlayerId: string | null)
 }
 
 function isValidCompletedPadelSet(us: number, them: number): boolean {
-  if (!Number.isInteger(us) || !Number.isInteger(them) || us < 0 || them < 0 || us === them) return false;
+  if (!Number.isInteger(us) || !Number.isInteger(them) || us < 0 || them < 0) return false;
   const max = Math.max(us, them);
   const min = Math.min(us, them);
+  
+  // Permitir empate en juegos (ej. 6-6)
+  if (us === them) return us <= 7;
+
   if (max === 6) return min <= 4;
   if (max === 7) return min === 5 || min === 6;
   return false;
@@ -100,31 +104,34 @@ function validateCompletedPadelMatch(sets: Array<{ us: number; them: number }>):
   if (sets.length < 2) return 'Debes cargar al menos 2 sets.';
   if (sets.length > 3) return 'Solo se permiten hasta 3 sets.';
   if (!sets.every((s) => isValidCompletedPadelSet(s.us, s.them))) {
-    return 'Set inválido. Solo valen 6-0..6-4, 7-5 o 7-6.';
+    return 'Set inválido. Usa 6-0..6-4, 7-5, 7-6 o empates (ej. 5-5, 6-6).';
   }
 
   let usWins = 0;
   let themWins = 0;
+  let draws = 0;
   for (const s of sets) {
     if (s.us > s.them) usWins += 1;
-    else themWins += 1;
+    else if (s.them > s.us) themWins += 1;
+    else draws += 1;
   }
+
+  // Permitir empate en sets (ej. 1-1)
+  if (usWins === themWins) return null;
 
   if (sets.length === 2) {
     if (!((usWins === 2 && themWins === 0) || (themWins === 2 && usWins === 0))) {
-      return 'Con 2 sets, el resultado debe quedar 2-0.';
+      return 'Con 2 sets, el resultado debe quedar 2-0 o 1-1.';
     }
     return null;
   }
 
   // Aquí sets.length === 3
-  const firstWinner = sets[0].us > sets[0].them ? 'US' : 'THEM';
-  const secondWinner = sets[1].us > sets[1].them ? 'US' : 'THEM';
-  if (firstWinner === secondWinner) {
+  const firstWinner = sets[0].us > sets[0].them ? 'US' : sets[0].them > sets[0].us ? 'THEM' : 'DRAW';
+  const secondWinner = sets[1].us > sets[1].them ? 'US' : sets[1].them > sets[1].us ? 'THEM' : 'DRAW';
+  
+  if (firstWinner !== 'DRAW' && firstWinner === secondWinner) {
     return 'Si los dos primeros sets los gana el mismo equipo, no puede haber tercer set.';
-  }
-  if (!((usWins === 2 && themWins === 1) || (themWins === 2 && usWins === 1))) {
-    return 'Con 3 sets, el resultado final debe ser 2-1.';
   }
   return null;
 }
@@ -134,6 +141,7 @@ function winnerFromCompletedSetRow(row: { us: string; them: string }): 'US' | 'T
   const them = parseInt(row.them, 10);
   if (Number.isNaN(us) || Number.isNaN(them)) return null;
   if (!isValidCompletedPadelSet(us, them)) return null;
+  if (us === them) return null;
   return us > them ? 'US' : 'THEM';
 }
 
@@ -167,7 +175,10 @@ export function MatchEvaluationFlow({
   const shouldShowThirdSet = useMemo(() => {
     const winner1 = winnerFromCompletedSetRow(sets[0] ?? { us: '', them: '' });
     const winner2 = winnerFromCompletedSetRow(sets[1] ?? { us: '', them: '' });
-    return winner1 != null && winner2 != null && winner1 !== winner2;
+    // Si no hay ganador claro en alguno (empate), permitimos 3er set si el usuario quiere seguir cargando, 
+    // pero la lógica estándar es si son distintos y ninguno es null.
+    if (winner1 && winner2 && winner1 !== winner2) return true;
+    return false;
   }, [sets]);
   const visibleSets = useMemo(() => sets.slice(0, shouldShowThirdSet ? 3 : 2), [sets, shouldShowThirdSet]);
 

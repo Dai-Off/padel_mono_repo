@@ -12,10 +12,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
-import { ACCENT } from './constants';
 import { androidReadableText } from './textStyles';
 import { useStreak } from '../../../hooks/useDailyLesson';
 import { ScalePressable } from './ScalePressable';
+import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
+import { OPENWEATHER_API_KEY } from '../../../config';
 
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -72,18 +73,18 @@ function mondayFirstWeekdayIndexInZone(timeZone: string, ref: Date = new Date())
 }
 
 /** Halo naranja (equiv. `blur-md bg-orange-500` en X7 `DailyLessonWidget`). */
-function DailyLessonIconBackdropSvg() {
+function DailyLessonIconBackdropSvg({ color }: { color: string }) {
   const gid = useId().replace(/:/g, '_');
   const gradId = `dl_glow_${gid}`;
-  const size = 78;
+  const size = 120; // Aumentamos tamaño para suavizar
   const r = size / 2;
   return (
     <Svg width={size} height={size} pointerEvents="none">
       <Defs>
         <RadialGradient id={gradId} cx="40%" cy="36%" rx="58%" ry="58%">
-          <Stop offset="0%" stopColor="rgb(249,115,22)" stopOpacity={0.52} />
-          <Stop offset="48%" stopColor="rgb(241,143,52)" stopOpacity={0.18} />
-          <Stop offset="100%" stopColor="rgb(241,143,52)" stopOpacity={0} />
+          <Stop offset="0%" stopColor={color} stopOpacity={0.52} />
+          <Stop offset="48%" stopColor={color} stopOpacity={0.18} />
+          <Stop offset="100%" stopColor={color} stopOpacity={0} />
         </RadialGradient>
       </Defs>
       <Circle cx={r} cy={r} r={r} fill={`url(#${gradId})`} />
@@ -139,6 +140,11 @@ export function DailyLessonCard({
     TIMEZONE,
     streakRefreshKey,
   );
+  const theme = useAmbientTheme(OPENWEATHER_API_KEY);
+  const color1 = `rgb(${theme.orb1Color})`;
+  const color2 = `rgb(${theme.orb2Color})`;
+  const color3 = `rgb(${theme.orb3Color})`;
+
   const [cardW, setCardW] = useState(0);
 
   const glowPhase = useRef(new Animated.Value(0)).current;
@@ -382,9 +388,9 @@ export function DailyLessonCard({
     [ctaNudge]
   );
 
-  /** Igual que X7 widget (estado animado rojo/naranja), sin rama verde. */
-  const baseGradient = ['rgba(227,30,36,0.15)', 'rgba(15,15,15,0.95)', 'rgba(249,115,22,0.1)'] as const;
-  const morphGradient = ['rgba(249,115,22,0.1)', 'rgba(227,30,36,0.18)', 'rgba(15,15,15,0.95)'] as const;
+  /** Igual que X7 widget (estado animado), ahora dinámico con el tema ambiental. */
+  const baseGradient = [`rgba(${theme.orb1Color},0.15)`, theme.bgTint, `rgba(${theme.orb2Color},0.1)`] as const;
+  const morphGradient = [`rgba(${theme.orb2Color},0.1)`, `rgba(${theme.orb3Color},0.18)`, theme.bgTint] as const;
 
   const onCardLayout = (e: LayoutChangeEvent) => {
     setCardW(e.nativeEvent.layout.width);
@@ -406,7 +412,7 @@ export function DailyLessonCard({
       >
         <LinearGradient
           colors={baseGradient}
-          locations={[0, 0.4, 1]}
+          locations={[0, 0.6, 1]} // Movido el centro para ser más fluido
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={StyleSheet.absoluteFill}
@@ -414,7 +420,7 @@ export function DailyLessonCard({
         <Animated.View style={[StyleSheet.absoluteFill, { opacity: overlayOpacity }]} pointerEvents="none">
           <LinearGradient
             colors={morphGradient}
-            locations={[0, 0.4, 1]}
+            locations={[0, 0.6, 1]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={StyleSheet.absoluteFill}
@@ -465,10 +471,10 @@ export function DailyLessonCard({
                     { opacity: glowOpacity, transform: [{ scale: glowScale }] },
                   ]}
                 >
-                  <DailyLessonIconBackdropSvg />
+                  <DailyLessonIconBackdropSvg color={color1} />
                 </Animated.View>
                 <LinearGradient
-                  colors={['#f97316', ACCENT]}
+                  colors={[`rgba(${theme.orb1Color},1)`, color1]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                   style={styles.iconBox}
@@ -498,16 +504,16 @@ export function DailyLessonCard({
 
             {completedToday ? (
               <View style={styles.hechaBadge}>
-                <Ionicons name="checkmark-circle" size={12} color={ACCENT} />
-                <Text style={styles.hechaText}>Hecha</Text>
+                <Ionicons name="checkmark-circle" size={12} color={color1} />
+                <Text style={[styles.hechaText, { color: color1 }]}>Hecha</Text>
               </View>
             ) : (
               <Animated.View
                 collapsable={false}
                 style={[styles.ctaRow, { transform: [{ translateX: ctaTx }] }]}
               >
-                <Text style={styles.ctaInline}>Empezar</Text>
-                <Ionicons name="chevron-forward" size={14} color={ACCENT} />
+                <Text style={[styles.ctaInline, { color: color1 }]}>Empezar</Text>
+                <Ionicons name="chevron-forward" size={14} color={color1} />
               </Animated.View>
             )}
           </View>
@@ -519,7 +525,7 @@ export function DailyLessonCard({
                 <Text style={styles.streakText}>{currentStreak} días de racha</Text>
               </View>
             ) : null}
-            <Text style={[styles.bonusText, { color: bonusFromStreak.color }]}>
+            <Text style={[styles.bonusText, { color: color2 }]}>
               Bonus {bonusFromStreak.label}
             </Text>
           </View>
@@ -550,7 +556,7 @@ export function DailyLessonCard({
                       styles.dayCell,
                       isCarousel && styles.dayCellCarousel,
                       (status === 'completed' || status === 'completed_today') && styles.dayCellCompleted,
-                      status === 'today' && styles.dayCellToday,
+                      status === 'today' && [styles.dayCellToday, { borderColor: `rgba(${theme.orb1Color},0.4)` }],
                     ]}
                   >
                     {(status === 'completed' || status === 'completed_today') && (
@@ -651,8 +657,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: -16,
     top: -16,
-    width: 78,
-    height: 78,
+    width: 120,
+    height: 120,
   },
   iconBox: {
     width: 36,
@@ -686,15 +692,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: 'rgba(249,115,22,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.28)',
+    borderColor: 'rgba(255,255,255,0.1)',
     flexShrink: 0,
   },
   hechaText: androidReadableText({
     fontSize: 10,
     fontWeight: '900',
-    color: ACCENT,
   }),
   ctaRow: {
     flexDirection: 'row',
@@ -705,7 +710,6 @@ const styles = StyleSheet.create({
   ctaInline: androidReadableText({
     fontSize: 12,
     fontWeight: '700',
-    color: ACCENT,
   }),
   streakRow: {
     flexDirection: 'row',
@@ -768,8 +772,8 @@ const styles = StyleSheet.create({
   },
   /** `bg-orange-500` en X7 (Tailwind orange-500 = #f97316). */
   dayCellCompleted: {
-    backgroundColor: '#F97316',
-    borderColor: '#F97316',
+    backgroundColor: '#F18F34', // Mantenemos un tono naranja para racha o podríamos usar color1
+    borderColor: '#F18F34',
   },
   /** `bg-white/[0.08] border-white/[0.15] ring-[#F18F34]/40` → borde acento visible. */
   dayCellToday: {

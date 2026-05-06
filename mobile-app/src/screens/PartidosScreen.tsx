@@ -65,6 +65,7 @@ function passesPartidoFilters(
 
 export type PartidoMode = 'competitivo' | 'amistoso';
 export type PartidoPlayer = {
+  id?: string;
   name: string;
   avatar?: string;
   initial?: string;
@@ -106,6 +107,7 @@ export type PartidoItem = {
   matchType?: string | null;
   matchStatus?: string;
   bookingStatus?: string;
+  scoreStatus?: 'pending' | 'confirmed' | 'disputed' | null;
   /** Deporte de la pista (padel, tenis, pickleball…) */
   courtSport?: string;
 };

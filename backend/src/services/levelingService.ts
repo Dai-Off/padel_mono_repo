@@ -35,7 +35,7 @@ export function calcScoreMargin(sets: ScoreSet[]): number {
 export function detectComeback(
   sets: ScoreSet[],
   winnerTeam: 'A' | 'B',
-  matchEndReason: 'completed' | 'retired' | 'timeout'
+  matchEndReason: 'completed' | 'retired' | 'timeout' | 'draw'
 ): boolean {
   if (matchEndReason !== 'completed' || sets.length < 2) return false;
   if (sets[0].a === sets[0].b) return false;
@@ -45,10 +45,10 @@ export function detectComeback(
 
 export function determineOutcome(
   sets: ScoreSet[],
-  matchEndReason: 'completed' | 'retired' | 'timeout',
+  matchEndReason: 'completed' | 'retired' | 'timeout' | 'draw',
   retiredTeam?: 'A' | 'B' | null
 ): { ranks: [number, number]; winnerTeam: 'A' | 'B' | null } {
-  if (matchEndReason === 'timeout') {
+  if (matchEndReason === 'timeout' || matchEndReason === 'draw') {
     return { ranks: [1, 1], winnerTeam: null };
   }
   if (matchEndReason === 'retired') {
@@ -204,7 +204,7 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
 
   const sets = parseSets(match.sets);
   const matchIsMm = match.type === 'matchmaking';
-  const endReason = (match.match_end_reason ?? 'completed') as 'completed' | 'retired' | 'timeout';
+  const endReason = (match.match_end_reason ?? 'completed') as 'completed' | 'retired' | 'timeout' | 'draw';
   const retiredTeam = (match.retired_team as 'A' | 'B' | null) ?? null;
   const { ranks, winnerTeam } = determineOutcome(sets, endReason, retiredTeam);
 

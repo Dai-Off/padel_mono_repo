@@ -11,8 +11,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import type { PartidoItem, PartidoPlayer } from "../../screens/PartidosScreen";
 
-const ACCENT = "#F18F34";
-const ACCENT_END = "#E95F32";
+import { useAmbientTheme } from "../../hooks/useAmbientTheme";
+import { OPENWEATHER_API_KEY } from "../../config";
 
 const PLACEHOLDER_URIS = [
   "https://images.unsplash.com/photo-1554068865-24cecd4e34b8?w=400&h=300&fit=crop",
@@ -64,7 +64,7 @@ type Props = {
   fullWidth?: boolean;
 };
 
-function PlayerFace({ player }: { player: PartidoPlayer }) {
+function PlayerFace({ player, colors }: { player: PartidoPlayer; colors: [string, string] }) {
   if (player.isFree) {
     return (
       <View style={styles.slotFree}>
@@ -74,7 +74,7 @@ function PlayerFace({ player }: { player: PartidoPlayer }) {
   }
   return (
     <LinearGradient
-      colors={[ACCENT, ACCENT_END]}
+      colors={colors}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.slotFill}
@@ -92,6 +92,10 @@ function PlayerFace({ player }: { player: PartidoPlayer }) {
 
 /** Tarjeta alineada al listado web (imagen + meta + slots horizontales). */
 export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
+  const theme = useAmbientTheme(OPENWEATHER_API_KEY);
+  const color1 = `rgb(${theme.orb1Color})`;
+  const color2 = `rgb(${theme.orb2Color})`;
+
   const { datePart, timePart } = splitDateTime(item.dateTime);
   const uri = item.venueImage ?? pickPlaceholderUri(item.id);
   const libres = countFree(item.players);
@@ -106,7 +110,7 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
       ]}
     >
       <LinearGradient
-        colors={["rgba(255,255,255,0.07)", "rgba(255,255,255,0.03)"]}
+        colors={["rgba(255,255,255,0.04)", "rgba(255,255,255,0.01)"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={StyleSheet.absoluteFill}
@@ -165,10 +169,10 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
               contentContainerStyle={styles.slotsRow}
             >
               {item.players.map((p, i) => (
-                <PlayerFace key={i} player={p} />
+                <PlayerFace key={i} player={p} colors={[color1, color2]} />
               ))}
               {libres > 0 ? (
-                <Text style={styles.libresTxt}>{libres} libres</Text>
+                <Text style={[styles.libresTxt, { color: color1 }]}>{libres} libres</Text>
               ) : null}
             </ScrollView>
           </View>
@@ -293,9 +297,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
-    backgroundColor: "rgba(255,255,255,0.1)",
+    backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
+    borderColor: "rgba(255,255,255,0.06)",
   },
   badgeBand: {
     alignSelf: "stretch",
@@ -354,7 +358,6 @@ const styles = StyleSheet.create({
   libresTxt: {
     fontSize: 9,
     fontWeight: "800",
-    color: ACCENT,
     marginLeft: 4,
     alignSelf: "center",
     flexShrink: 0,

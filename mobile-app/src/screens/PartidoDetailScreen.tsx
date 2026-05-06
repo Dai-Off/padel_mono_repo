@@ -83,6 +83,8 @@ type PartidoDetailScreenProps = {
   onBack: () => void;
   /** Tras evaluar el partido: ir al tab inicio (y cerrar modal desde el padre). */
   onGoHome?: () => void;
+  /** Abre el perfil público de un jugador */
+  onOpenPublicProfile?: (playerId: string) => void;
 };
 
 function PulseDot() {
@@ -98,6 +100,7 @@ export function PartidoDetailScreen({
   partido: initialPartido,
   onBack,
   onGoHome,
+  onOpenPublicProfile,
 }: PartidoDetailScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -397,9 +400,17 @@ export function PartidoDetailScreen({
           team === 'A'
             ? payload.sets.map((s) => ({ a: s.us, b: s.them }))
             : payload.sets.map((s) => ({ a: s.them, b: s.us }));
+        // Calcular quién ganó cada set
+        const usSets = payload.sets.filter((s) => s.us > s.them).length;
+        const themSets = payload.sets.filter((s) => s.them > s.us).length;
+        const isDraw = usSets === themSets;
+
         const scoreRes = await submitMatchScore(
           partido.id,
-          { sets: apiSets, match_end_reason: 'completed' },
+          {
+            sets: apiSets,
+            match_end_reason: isDraw ? "draw" : "completed",
+          },
           token
         );
         if (!scoreRes.ok && scoreRes.status !== 409) {
@@ -429,9 +440,11 @@ export function PartidoDetailScreen({
   const bottomReserve = insets.bottom + (showFinishBar ? 100 : bottomBarNeedsStack ? 148 : 88);
   const canPressCta =
     playerContextResolved &&
-    selectedSlotIndex != null &&
-    !isInMatch &&
     !joinBusy &&
+    !isInMatch &&
+    firstFreeIndex >= 0 &&
+    selectedSlotIndex != null &&
+    !partido.scoreStatus &&
     matchPhase !== 'past';
 
   const canPressMatchmakingPay =
@@ -700,6 +713,7 @@ export function PartidoDetailScreen({
                         }
                         joining={joiningSlotIndex === i}
                         selected={selectedSlotIndex === i}
+                        onOpenPublicProfile={onOpenPublicProfile}
                       />
                     ))}
                   </View>
@@ -721,6 +735,7 @@ export function PartidoDetailScreen({
                           }
                           joining={joiningSlotIndex === slotIdx}
                           selected={selectedSlotIndex === slotIdx}
+                          onOpenPublicProfile={onOpenPublicProfile}
                         />
                       );
                     })}
@@ -839,13 +854,15 @@ export function PartidoDetailScreen({
             ) : (
               <View style={styles.ctaTextWrap}>
                 <Text style={styles.ctaText}>
-                  {isInMatch
-                    ? 'Ya estás en el partido'
-                    : firstFreeIndex < 0
-                      ? 'No hay plazas libres'
-                      : selectedSlotIndex == null
-                        ? 'Selecciona una plaza para continuar'
-                        : `Reservar plaza - ${partido.pricePerPlayer}`}
+                  {partido.scoreStatus
+                    ? 'Partido finalizado'
+                    : isInMatch
+                      ? 'Ya estás en el partido'
+                      : firstFreeIndex < 0
+                        ? 'No hay plazas libres'
+                        : selectedSlotIndex == null
+                          ? 'Selecciona una plaza para continuar'
+                          : `Reservar plaza - ${partido.pricePerPlayer}`}
                 </Text>
               </View>
             )}
@@ -919,11 +936,13 @@ function PlayerSlotDetail({
   onJoin,
   joining,
   selected,
+  onOpenPublicProfile,
 }: {
   player: PartidoPlayer;
   onJoin?: () => void;
   joining?: boolean;
   selected?: boolean;
+  onOpenPublicProfile?: (playerId: string) => void;
 }) {
   if (player.isFree) {
     return (
@@ -951,7 +970,10 @@ function PlayerSlotDetail({
   }
   return (
     <View style={styles.plSlot}>
-      <View style={styles.plFill}>
+      <Pressable 
+        onPress={() => player.id && onOpenPublicProfile?.(player.id)}
+        style={({ pressed }) => [styles.plFill, pressed && styles.pressed]}
+      >
         {player.avatar ? (
           <Image source={{ uri: player.avatar }} style={styles.plAvatar} />
         ) : (
@@ -959,10 +981,12 @@ function PlayerSlotDetail({
             {(player.initial ?? player.name?.slice(0, 2) ?? '?').toUpperCase()}
           </Text>
         )}
-      </View>
-      <Text style={styles.plName} numberOfLines={1}>
-        {player.name || 'Jugador'}
-      </Text>
+      </Pressable>
+      <Pressable onPress={() => player.id && onOpenPublicProfile?.(player.id)}>
+        <Text style={styles.plName} numberOfLines={1}>
+          {player.name || 'Jugador'}
+        </Text>
+      </Pressable>
       <View style={styles.plLevel}>
         <Text style={styles.plLevelText}>{player.level.replace(/\./g, ',')}</Text>
       </View>

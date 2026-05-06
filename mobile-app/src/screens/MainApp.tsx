@@ -39,6 +39,7 @@ import { DirectMessageThreadScreen } from './DirectMessageThreadScreen';
 import { CompetitiveLeagueScreen } from './CompetitiveLeagueScreen';
 import { SeasonPassScreen } from './SeasonPassScreen';
 import { PreferencesScreen } from './PreferencesScreen';
+import { PublicProfileScreen } from './PublicProfileScreen';
 import type { EducationalCourse } from '../api/dailyLessons';
 import type { PublicCourse } from '../api/schoolCourses';
 
@@ -67,8 +68,16 @@ export function MainApp() {
   const [showCommunity, setShowCommunity] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [messagesPeer, setMessagesPeer] = useState<MessagePeerNav | null>(null);
+  /** DM abierto directamente desde IA Afinidad — back vuelve al modal de resultados */
+  const [affinityDmPeer, setAffinityDmPeer] = useState<MessagePeerNav | null>(null);
+  /** Incrementar para que HomeScreen reabra el modal de IA Afinidad */
+  const [affinityReopenSignal, setAffinityReopenSignal] = useState(0);
   const [showCompetitiveLeague, setShowCompetitiveLeague] = useState(false);
   const [showSeasonPass, setShowSeasonPass] = useState(false);
+  const [showPublicProfile, setShowPublicProfile] = useState(false);
+  const [selectedPublicPlayerId, setSelectedPublicPlayerId] = useState<string | null>(null);
+  /** Perfil público abierto desde IA Afinidad — back reabre el modal */
+  const [affinityPublicProfileId, setAffinityPublicProfileId] = useState<string | null>(null);
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
@@ -160,7 +169,10 @@ export function MainApp() {
     }
     if (showPreferences) {
       return (
-        <PreferencesScreen onBack={() => setShowPreferences(false)} />
+        <PreferencesScreen onBack={() => {
+          setShowPreferences(false);
+          setShowProfile(true);
+        }} />
       );
     }
     if (showCommunity) {
@@ -184,6 +196,48 @@ export function MainApp() {
             setMessagesPeer(null);
           }}
           onSelectPeer={setMessagesPeer}
+        />
+      );
+    }
+    // DM abierto desde IA Afinidad: back va directo al Home y reabre el modal
+    if (affinityDmPeer) {
+      return (
+        <DirectMessageThreadScreen
+          peer={affinityDmPeer}
+          onBack={() => {
+            setAffinityDmPeer(null);
+            setAffinityReopenSignal((s) => s + 1);
+          }}
+        />
+      );
+    }
+    if ((showPublicProfile && selectedPublicPlayerId) || affinityPublicProfileId) {
+      const pid = affinityPublicProfileId || selectedPublicPlayerId || '';
+      const isFromAffinity = !!affinityPublicProfileId;
+
+      return (
+        <PublicProfileScreen
+          playerId={pid}
+          onBack={() => {
+            setShowPublicProfile(false);
+            if (isFromAffinity) {
+              setAffinityPublicProfileId(null);
+              setAffinityReopenSignal((s) => s + 1);
+            } else {
+              setSelectedPublicPlayerId(null);
+            }
+          }}
+          onChatPress={(chatPid, name) => {
+            setShowPublicProfile(false);
+            if (isFromAffinity) {
+              setAffinityPublicProfileId(null);
+              setAffinityDmPeer({ id: chatPid, displayName: name, avatarUrl: null });
+            } else {
+              setSelectedPublicPlayerId(null);
+              setShowMessages(true);
+              setMessagesPeer({ id: chatPid, displayName: name, avatarUrl: null });
+            }
+          }}
         />
       );
     }
@@ -231,6 +285,10 @@ export function MainApp() {
             setSelectedPartido(null);
             setActiveTab('inicio');
           }}
+          onOpenPublicProfile={(pid) => {
+            setSelectedPublicPlayerId(pid);
+            setShowPublicProfile(true);
+          }}
         />
       );
     }
@@ -257,6 +315,17 @@ export function MainApp() {
             onOpenMessageThread={(peer) => {
               setMessagesPeer(peer);
               setShowMessages(true);
+            }}
+            onOpenAffinityThread={(peer) => setAffinityDmPeer(peer)}
+            affinityReopenSignal={affinityReopenSignal}
+            onAffinityReopened={() => setAffinityReopenSignal(0)}
+            onOpenPublicProfile={(pid) => {
+              setSelectedPublicPlayerId(pid);
+              setShowPublicProfile(true);
+            }}
+            onOpenAffinityPublicProfile={(pid) => {
+              setAffinityPublicProfileId(pid);
+              setShowPublicProfile(true);
             }}
           />
         );
@@ -301,8 +370,10 @@ export function MainApp() {
     !selectedEducationalCourse &&
     !selectedPublicCourse &&
     !showMessages &&
+    !affinityDmPeer &&
     !showCompetitiveLeague &&
-    !showSeasonPass;
+    !showSeasonPass &&
+    !showPublicProfile;
 
   const customHeader =
     bookingSuccessData != null ||
@@ -316,8 +387,11 @@ export function MainApp() {
     crearPartidoFlow.open ||
     showDailyLesson ||
     showCourses ||
+    showMessages ||
+    !!affinityDmPeer ||
     selectedEducationalCourse != null ||
-    selectedPublicCourse != null
+    selectedPublicCourse != null ||
+    showPublicProfile
       ? undefined
       : activeTab === 'tienda'
           ? (
@@ -380,7 +454,7 @@ export function MainApp() {
   const layoutBackgroundColor =
     bookingSuccessData != null
       ? '#000000'
-      : showMessages
+      : showMessages || !!affinityDmPeer
         ? '#0A0A0A'
         : showPreferences
           ? '#0F0F0F'
@@ -394,7 +468,9 @@ export function MainApp() {
               ? '#0F0F0F'
               : showProfile
                 ? '#0F0F0F'
-                : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
+                : showPublicProfile || !!affinityPublicProfileId
+                  ? '#0F0F0F'
+                  : showMainTabs && (activeTab === 'inicio' || activeTab === 'partidos')
                   ? '#000000'
                   : showMainTabs && (activeTab === 'pistas' || activeTab === 'tienda' || activeTab === 'torneos')
                     ? '#0F0F0F'
@@ -437,6 +513,9 @@ export function MainApp() {
               selectedEducationalCourse != null ||
               selectedPublicCourse != null ||
               showMessages ||
+              !!affinityDmPeer ||
+              showPublicProfile ||
+              affinityPublicProfileId !== null ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos')
             }
@@ -460,10 +539,13 @@ export function MainApp() {
             !selectedEducationalCourse &&
             !selectedPublicCourse &&
             !showMessages &&
+            !affinityDmPeer &&
             !showCompetitiveLeague &&
-            !showSeasonPass && (
+            !showSeasonPass &&
+            !showPublicProfile &&
+            affinityPublicProfileId === null && (
             <View style={styles.bottomBar}>
-              <BottomNavbar activeTab={showProfile ? null : activeTab} onTabChange={handleTabChange} />
+              <BottomNavbar activeTab={(showProfile || showPublicProfile) ? null : activeTab} onTabChange={handleTabChange} />
             </View>
           )}
         </View>

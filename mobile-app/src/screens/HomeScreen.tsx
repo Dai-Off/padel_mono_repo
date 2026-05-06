@@ -66,6 +66,22 @@ type HomeScreenProps = {
   onOpenCompetitiveLeague?: () => void;
   onOpenSeasonPass?: () => void;
   onOpenMessageThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
+  /** Abre un DM sin pasar por la lista de chats (usado por IA Afinidad) */
+  onOpenAffinityThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
+  /** Incrementar desde MainApp para que el modal de IA Afinidad se reabra al volver del chat */
+  affinityReopenSignal?: number;
+  /** Llamar tras consumir la señal para que no vuelva a dispararse en cambios de tab */
+  onAffinityReopened?: () => void;
+  /** Abre el perfil público de un jugador */
+  onOpenPublicProfile?: (playerId: string) => void;
+  /** Abre perfil público desde IA Afinidad — reabre modal al volver */
+  onOpenAffinityPublicProfile?: (playerId: string) => void;
+};
+
+/** Caché a nivel de módulo para que affinityResponse y los IDs enviados sobrevivan al desmonte/remonte de HomeScreen */
+const _affinityCache = { 
+  response: null as string | null,
+  sentIds: new Set<string>()
 };
 
 export function HomeScreen({
@@ -77,6 +93,11 @@ export function HomeScreen({
   onOpenCompetitiveLeague,
   onOpenSeasonPass,
   onOpenMessageThread,
+  onOpenAffinityThread,
+  affinityReopenSignal = 0,
+  onAffinityReopened,
+  onOpenPublicProfile,
+  onOpenAffinityPublicProfile,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session, refreshAccessToken } = useAuth();
@@ -89,10 +110,32 @@ export function HomeScreen({
   const [myPlayerProfile, setMyPlayerProfile] = useState<MyPlayerProfile | null>(null);
   const [affinityModalVisible, setAffinityModalVisible] = useState(false);
   const [affinityLoading, setAffinityLoading] = useState(false);
-  const [affinityResponse, setAffinityResponse] = useState<string | null>(null);
+  // Inicializar desde caché para sobrevivir remounts (ej. al volver del chat de IA Afinidad)
+  const [affinityResponse, _setAffinityResponse] = useState<string | null>(() => _affinityCache.response);
+  const setAffinityResponse = (r: string | null) => {
+    _affinityCache.response = r;
+    _setAffinityResponse(r);
+  };
   const [affinityError, setAffinityError] = useState<string | null>(null);
+  const [affinitySentIds, setAffinitySentIds] = useState<Set<string>>(() => _affinityCache.sentIds);
+  
+  const updateAffinitySentIds = (newSet: Set<string>) => {
+    _affinityCache.sentIds = newSet;
+    setAffinitySentIds(newSet);
+  };
   const [seasonPassMe, setSeasonPassMe] = useState<SeasonPassMeOk | null>(null);
   const [seasonPassLoading, setSeasonPassLoading] = useState(false);
+
+  // Cuando el usuario vuelve del chat de IA Afinidad, reabrir el modal con los resultados del caché
+  useEffect(() => {
+    if (affinityReopenSignal > 0 && _affinityCache.response) {
+      _setAffinityResponse(_affinityCache.response);
+      setAffinityModalVisible(true);
+      // Consumir la señal para que cambios de tab no vuelvan a abrir el modal
+      onAffinityReopened?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [affinityReopenSignal]);
 
   const loadMatches = useCallback(async () => {
     setMatchesLoading(true);
@@ -329,7 +372,8 @@ export function HomeScreen({
           <IAAfinidadCard
             onPress={() => {
               setAffinityError(null);
-              setAffinityResponse(null);
+              // No resetear la respuesta si ya hay resultados — al volver del chat
+              // el modal los mostrará directamente sin tener que buscar de nuevo.
               setAffinityModalVisible(true);
             }}
           />
@@ -353,11 +397,26 @@ export function HomeScreen({
         loading={affinityLoading}
         responseText={affinityResponse}
         errorText={affinityError}
-        onClose={() => setAffinityModalVisible(false)}
+        onClose={() => {
+          setAffinityModalVisible(false);
+          // Usuario conforme con resultados: limpiar caché y estado
+          // para que no reaparezca al cambiar de tab
+          _affinityCache.response = null;
+          _affinityCache.sentIds = new Set();
+          _setAffinityResponse(null);
+          setAffinitySentIds(new Set());
+        }}
+        sentIds={affinitySentIds}
+        onSentIdsChange={updateAffinitySentIds}
         onSubmit={handleAffinitySearch}
         onDirectMessageSent={(target) => {
+          // Usa el hilo directo de afinidad: back vuelve al modal de resultados
+          // en vez de pasar por la lista de chats.
+          onOpenAffinityThread?.(target);
+        }}
+        onPlayerPress={(pid) => {
           setAffinityModalVisible(false);
-          onOpenMessageThread?.(target);
+          onOpenAffinityPublicProfile?.(pid);
         }}
       />
 
