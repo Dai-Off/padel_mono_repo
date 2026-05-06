@@ -87,7 +87,6 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
     const { t, i18n } = useTranslation();
     const [status, setStatus] = useState<Status>('loading');
     const [saving, setSaving] = useState(false);
-    const [isAdmin, setIsAdmin] = useState(false);
     const [clubs, setClubs] = useState<Club[]>([]);
     const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
     const [form, setForm] = useState({
@@ -138,17 +137,21 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                 const me = await authService.getMe();
                 if (cancelled) return;
                 const admin = me.ok && !!me.roles?.admin_id;
-                const ownerId = me.ok && me.roles?.club_owner_id ? me.roles.club_owner_id : null;
+                const oid = me.ok && me.roles?.club_owner_id ? me.roles.club_owner_id : null;
 
                 let list: Club[] = [];
-                if (admin) {
+                const clubsFromMe = me.ok && Array.isArray(me.clubs) ? (me.clubs as Club[]) : [];
+                if (clubsFromMe.length > 0) {
+                    list = clubsFromMe;
+                } else if (admin) {
                     list = (await clubService.getAll()) ?? [];
-                } else if (ownerId) {
-                    list = (await clubService.getAll(ownerId)) ?? [];
+                } else if (oid) {
+                    list = (await clubService.getAll(oid)) ?? [];
+                } else {
+                    list = (await clubService.getAll()) ?? [];
                 }
                 if (cancelled) return;
 
-                setIsAdmin(admin);
                 const clubsList = Array.isArray(list) && list.length > 0 ? list : (initialClub ? [initialClub] : []);
                 setClubs(clubsList);
                 const first = clubsList[0] ?? initialClub ?? null;
@@ -212,7 +215,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
         }
     };
 
-    const showPanel = isAdmin && clubs.length >= 1;
+    const showClubSwitcherAside = clubs.length > 1;
 
     if (status === 'loading') {
         return <PageSpinner />;
@@ -235,7 +238,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
             <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className={`space-y-5 ${showPanel ? 'lg:flex-1 min-w-0' : 'w-full'}`}
+                className={`space-y-5 ${showClubSwitcherAside ? 'lg:flex-1 min-w-0' : 'w-full'}`}
             >
                 <h2 className="text-sm font-bold text-[#1A1A1A]">{t('club_settings_title')}</h2>
 
@@ -375,7 +378,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                 </form>
             </motion.div>
 
-            {showPanel && (
+            {showClubSwitcherAside && (
                 <motion.aside
                     initial={{ opacity: 0, x: 10 }}
                     animate={{ opacity: 1, x: 0 }}

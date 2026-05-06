@@ -1,11 +1,30 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 
 /**
  * Public routes accessible by authenticated players (not restricted to club owner/admin).
  * Requires a valid Bearer token (any authenticated user), but no role check.
  */
 const router = Router();
+
+/**
+ * GET /public/reservation-online?club_id=
+ * Mapa allow_online por tipo (para app antes de reservar). Sin autenticación.
+ */
+router.get('/reservation-online', async (req: Request, res: Response) => {
+  const club_id = req.query.club_id as string | undefined;
+  if (!club_id?.trim()) {
+    return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const allow_online = await fetchAllowOnlineByType(supabase, club_id.trim());
+    return res.json({ ok: true, club_id: club_id.trim(), allow_online });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
 
 /**
  * GET /public/slot-price

@@ -45,6 +45,10 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
         type: '' as string,
         court: '' as string,
         payment: '' as string,
+        bookingStatus: '' as string,
+        client: '' as string,
+        priceMin: '' as string,
+        priceMax: '' as string,
         timeFrom: '' as string,
         timeTo: '' as string,
     });
@@ -221,6 +225,9 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
     const filteredMatches = matches.filter(m => {
         const booking = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
         if (!booking) return true;
+        const organizer = booking.players;
+        const organizerName = `${organizer?.first_name ?? ''} ${organizer?.last_name ?? ''}`.trim().toLowerCase();
+        const totalPrice = booking.total_price_cents ? booking.total_price_cents / 100 : 0;
 
         if (filters.type) {
             const matchType = m.type === 'tournament_division' ? 'americano' : (m.competitive ? 'competitivo' : 'amistoso');
@@ -233,12 +240,21 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
         }
 
         if (filters.payment) {
-            const totalPrice = booking.total_price_cents ? booking.total_price_cents / 100 : 0;
             const txs = booking.payment_transactions || [];
             const totalPaid = txs.reduce((acc: number, pt: any) => pt.status === 'succeeded' ? acc + (pt.amount_cents || 0) : acc, 0) / 100;
             const isPaid = totalPaid >= totalPrice && totalPrice > 0;
             if (filters.payment === 'paid' && !isPaid) return false;
             if (filters.payment === 'pending' && isPaid) return false;
+        }
+        if (filters.bookingStatus && booking.status !== filters.bookingStatus) return false;
+        if (filters.client && !organizerName.includes(filters.client.trim().toLowerCase())) return false;
+        if (filters.priceMin) {
+            const min = Number(filters.priceMin);
+            if (Number.isFinite(min) && totalPrice < min) return false;
+        }
+        if (filters.priceMax) {
+            const max = Number(filters.priceMax);
+            if (Number.isFinite(max) && totalPrice > max) return false;
         }
 
         if (filters.timeFrom) {
@@ -253,7 +269,17 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
         return true;
     });
 
-    const clearFilters = () => setFilters({ type: '', court: '', payment: '', timeFrom: '', timeTo: '' });
+    const clearFilters = () => setFilters({
+        type: '',
+        court: '',
+        payment: '',
+        bookingStatus: '',
+        client: '',
+        priceMin: '',
+        priceMax: '',
+        timeFrom: '',
+        timeTo: '',
+    });
 
     const formatTime = (isoString: string) => {
         const d = new Date(isoString);
@@ -277,6 +303,13 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
         n.setDate(n.getDate() + 1);
         return n;
     });
+
+    const handleDateInputChange = (value: string) => {
+        if (!value) return;
+        const parsed = new Date(`${value}T12:00:00`);
+        if (Number.isNaN(parsed.getTime())) return;
+        setCurrentDate(parsed);
+    };
 
     const getDisplayDate = () => {
         const d = new Date();
@@ -343,6 +376,13 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                             <ChevronRight className="w-4 h-4" />
                         </button>
                     </div>
+                    <input
+                        type="date"
+                        value={currentDateStr}
+                        onChange={(e) => handleDateInputChange(e.target.value)}
+                        className="hidden sm:block px-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A]"
+                        aria-label="Filtrar por fecha"
+                    />
                     <button
                         onClick={() => onBackToGrid ? onBackToGrid() : navigate(`/grilla?date=${currentDateStr}`)}
                         title="Ver en la grilla"
@@ -382,6 +422,15 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
             {showFilters && (
                 <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex flex-wrap items-end gap-2 shrink-0">
                     <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Fecha</label>
+                        <input
+                            type="date"
+                            value={currentDateStr}
+                            onChange={e => handleDateInputChange(e.target.value)}
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[130px]"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
                         <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Tipo</label>
                         <select
                             value={filters.type}
@@ -418,6 +467,51 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                             <option value="paid">Completado</option>
                             <option value="pending">Pendiente</option>
                         </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Estado</label>
+                        <select
+                            value={filters.bookingStatus}
+                            onChange={e => setFilters(f => ({ ...f, bookingStatus: e.target.value }))}
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
+                        >
+                            <option value="">Todos</option>
+                            <option value="confirmed">Confirmada</option>
+                            <option value="pending_payment">Pendiente pago</option>
+                            <option value="cancelled">Cancelada</option>
+                        </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Cliente</label>
+                        <input
+                            type="text"
+                            value={filters.client}
+                            onChange={e => setFilters(f => ({ ...f, client: e.target.value }))}
+                            placeholder="Nombre"
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Precio min</label>
+                        <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={filters.priceMin}
+                            onChange={e => setFilters(f => ({ ...f, priceMin: e.target.value }))}
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[85px]"
+                        />
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Precio max</label>
+                        <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={filters.priceMax}
+                            onChange={e => setFilters(f => ({ ...f, priceMax: e.target.value }))}
+                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[85px]"
+                        />
                     </div>
                     <div className="flex flex-col gap-0.5">
                         <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Hora desde</label>

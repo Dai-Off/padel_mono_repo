@@ -27,7 +27,6 @@ import { PageSpinner } from '../Layout/PageSpinner';
 import {
   tournamentsService,
   type CompetitionMatch,
-  type CompetitionPodiumRow,
   type CompetitionSet,
   type CompetitionView,
   type TournamentChatMessage,
@@ -661,9 +660,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [competitionResultsEntry, setCompetitionResultsEntry] = useState<'organizer' | 'players'>('organizer');
   const [groupSize, setGroupSize] = useState('4');
   const [qualifiersPerGroup, setQualifiersPerGroup] = useState('2');
-  const [podiumDraftByPos, setPodiumDraftByPos] = useState<Record<number, string>>({});
-  /** 1 = solo campeón; 2 o 3 = puestos extra opcionales en la UI. */
-  const [podiumVisibleSlots, setPodiumVisibleSlots] = useState(1);
   const [generateModeOpen, setGenerateModeOpen] = useState(false);
   const [pairingGateMessage, setPairingGateMessage] = useState<string | null>(null);
   const [pairingManageOpen, setPairingManageOpen] = useState(false);
@@ -1161,14 +1157,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       setCompetitionResultsEntry(view.tournament?.match_rules?.results_entry === 'players' ? 'players' : 'organizer');
       setGroupSize(String((view.tournament?.standings_rules?.group_size as number | undefined) ?? 4));
       setQualifiersPerGroup(String((view.tournament?.standings_rules?.qualifiers_per_group as number | undefined) ?? 2));
-      const maxFromPodium = (view.podium ?? []).reduce((m, r) => Math.max(m, r.position), 0);
-      const nextSlots = Math.max(1, Math.min(3, maxFromPodium || 1));
-      setPodiumVisibleSlots(nextSlots);
-      const next: Record<number, string> = { 1: '', 2: '', 3: '' };
-      for (const row of view.podium ?? []) {
-        if (row.position >= 1 && row.position <= 3) next[row.position] = row.team_id;
-      }
-      setPodiumDraftByPos(next);
     } catch {
       if (gen !== competitionFetchGenRef.current) return;
       setCompetition(null);
@@ -2508,128 +2496,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       );
                     })}
                   </div>
-                </div>
-
-                <div className="rounded-xl border border-gray-200 p-3">
-                  <p className="text-xs font-semibold text-[#1A1A1A] mb-1">{t('tournament_podium_manual_title')}</p>
-                  <p className="text-[11px] text-gray-500 mb-2">{t('tournament_podium_manual_hint')}</p>
-                  <div className="flex flex-col gap-2">
-                    {(() => {
-                      const prizeList =
-                        competition && Array.isArray(competition.tournament?.prizes) && competition.tournament.prizes.length > 0
-                          ? competition.tournament.prizes
-                          : Array.isArray(selected?.prizes) && selected.prizes.length > 0
-                            ? selected.prizes
-                            : null;
-                      const placeholders = [
-                        prizeList?.[0]?.label?.trim() || t('tournament_podium_placeholder_first'),
-                        prizeList?.[1]?.label?.trim() || t('tournament_podium_placeholder_second'),
-                        prizeList?.[2]?.label?.trim() || t('tournament_podium_placeholder_third'),
-                      ];
-                      return Array.from({ length: podiumVisibleSlots }, (_, i) => {
-                        const pos = i + 1;
-                        return (
-                          <select
-                            key={pos}
-                            value={podiumDraftByPos[pos] ?? ''}
-                            onChange={(e) =>
-                              setPodiumDraftByPos((prev) => ({
-                                ...prev,
-                                [pos]: e.target.value,
-                              }))
-                            }
-                            className="rounded-xl border border-gray-200 px-3 py-2 text-xs w-full md:max-w-md"
-                          >
-                            <option value="">{placeholders[i]}</option>
-                            {(competition?.teams ?? []).map((tm) => (
-                              <option key={`p${pos}-${tm.id}`} value={tm.id}>
-                                {tm.name}
-                              </option>
-                            ))}
-                          </select>
-                        );
-                      });
-                    })()}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {podiumVisibleSlots < 2 && (
-                      <button
-                        type="button"
-                        onClick={() => setPodiumVisibleSlots(2)}
-                        className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-[11px] font-semibold text-[#1A1A1A] hover:bg-gray-50"
-                      >
-                        {t('tournament_podium_add_second')}
-                      </button>
-                    )}
-                    {podiumVisibleSlots === 2 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPodiumVisibleSlots(3);
-                        }}
-                        className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-[11px] font-semibold text-[#1A1A1A] hover:bg-gray-50"
-                      >
-                        {t('tournament_podium_add_third')}
-                      </button>
-                    )}
-                    {podiumVisibleSlots === 3 && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPodiumDraftByPos((prev) => ({ ...prev, 3: '' }));
-                            setPodiumVisibleSlots(2);
-                          }}
-                          className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
-                        >
-                          {t('tournament_podium_remove_third')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPodiumDraftByPos((prev) => ({ ...prev, 2: '', 3: '' }));
-                            setPodiumVisibleSlots(1);
-                          }}
-                          className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
-                        >
-                          {t('tournament_podium_champion_only')}
-                        </button>
-                      </>
-                    )}
-                    {podiumVisibleSlots === 2 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPodiumDraftByPos((prev) => ({ ...prev, 2: '' }));
-                          setPodiumVisibleSlots(1);
-                        }}
-                        className="px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-[11px] font-semibold text-gray-700 hover:bg-gray-50"
-                      >
-                        {t('tournament_podium_remove_second')}
-                      </button>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      if (!selected) return;
-                      const payload: CompetitionPodiumRow[] = [];
-                      for (let pos = 1; pos <= podiumVisibleSlots; pos++) {
-                        const tid = (podiumDraftByPos[pos] ?? '').trim();
-                        if (tid) payload.push({ position: pos, team_id: tid });
-                      }
-                      try {
-                        await tournamentsService.savePodium(selected.id, payload);
-                        await reloadCompetitionView(selected.id);
-                        toast.success(t('tournament_podium_saved'));
-                      } catch (e) {
-                        toast.error((e as Error).message || t('tournament_podium_save_error'));
-                      }
-                    }}
-                    className="mt-3 px-3 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-semibold"
-                  >
-                    {t('tournament_podium_save')}
-                  </button>
                 </div>
 
                 <div className="rounded-xl border border-gray-200 p-3 bg-gray-50">

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -18,9 +18,54 @@ import { PartidoOpenCardSkeleton } from '../components/partido/PartidoOpenCardSk
 import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
 import type { MatchListPhase } from '../domain/matchLifecycle';
 import { lineHeightFor, theme } from '../theme';
+import { Ionicons } from '@expo/vector-icons';
+
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+function startOfDayIso(d: Date): string {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  return x.toISOString();
+}
+
+function endOfDayIso(d: Date): string {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+  return x.toISOString();
+}
+
+function dayLabel(d: Date): string {
+  const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  return `${days[d.getDay()]} ${d.getDate()}/${d.getMonth() + 1}`;
+}
+
+type SportFilter = 'all' | 'padel' | 'tenis' | 'pickleball' | 'otro';
+
+function passesPartidoFilters(
+  p: PartidoItem,
+  sportFilter: SportFilter,
+  fillFilter: 'all' | 'free' | 'full',
+  statusFilter: 'all' | 'cancelled' | 'live' | 'past'
+): boolean {
+  const sport = (p.courtSport ?? 'padel').toLowerCase();
+  if (sportFilter === 'otro') {
+    if (sport === 'padel' || sport === 'tenis' || sport === 'pickleball') return false;
+  } else if (sportFilter !== 'all' && sport !== sportFilter) return false;
+  const filled = (p.players ?? []).filter((x) => !x.isFree).length;
+  if (fillFilter === 'free' && filled >= 4) return false;
+  if (fillFilter === 'full' && filled < 4) return false;
+  if (statusFilter === 'cancelled' && p.matchStatus !== 'cancelled') return false;
+  if (statusFilter === 'live' && p.matchPhase !== 'live') return false;
+  if (statusFilter === 'past' && p.matchPhase !== 'past') return false;
+  if (statusFilter === 'all' && p.matchStatus === 'cancelled') return false;
+  return true;
+}
 
 export type PartidoMode = 'competitivo' | 'amistoso';
 export type PartidoPlayer = {
+  id?: string;
   name: string;
   avatar?: string;
   initial?: string;
@@ -62,6 +107,9 @@ export type PartidoItem = {
   matchType?: string | null;
   matchStatus?: string;
   bookingStatus?: string;
+  scoreStatus?: 'pending' | 'confirmed' | 'disputed' | null;
+  /** Deporte de la pista (padel, tenis, pickleball…) */
+  courtSport?: string;
 };
 
 type PartidosScreenProps = {
@@ -83,24 +131,36 @@ export function PartidosScreen({
   const { session } = useAuth();
   const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
   const [locationModalVisible, setLocationModalVisible] = useState(false);
-  const [openPartidos, setOpenPartidos] = useState<PartidoItem[]>([]);
-  const [myPartidos, setMyPartidos] = useState<PartidoItem[]>([]);
+  const [openRaw, setOpenRaw] = useState<PartidoItem[]>([]);
+  const [myRaw, setMyRaw] = useState<PartidoItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dayOffset, setDayOffset] = useState(0);
+  const [sportFilter, setSportFilter] = useState<SportFilter>('all');
+  const [fillFilter, setFillFilter] = useState<'all' | 'free' | 'full'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'cancelled' | 'live' | 'past'>('all');
 
   const loadPartidos = useCallback(async () => {
     setLoading(true);
     const token = session?.access_token ?? null;
+    const useDay = dayOffset !== 0;
+    const dayDate = addDays(new Date(), dayOffset);
     const [playerId, matches] = await Promise.all([
       token ? fetchMyPlayerId(token) : Promise.resolve(null),
-      fetchMatches({ expand: true, token }),
+      fetchMatches({
+        expand: true,
+        token,
+        activeOnly: !useDay,
+        dateFrom: useDay ? startOfDayIso(dayDate) : undefined,
+        dateTo: useDay ? endOfDayIso(dayDate) : undefined,
+      }),
     ]);
     setOrganizerPlayerId(playerId);
     const allPartidos = matches
       .map(mapMatchToPartido)
       .filter((p): p is PartidoItem => p != null)
-      .filter((p) => p.matchPhase !== 'past');
-    setOpenPartidos(allPartidos.filter((p) => p.visibility !== 'private'));
-    setMyPartidos(
+      .filter((p) => useDay || p.matchPhase !== 'past');
+    setOpenRaw(allPartidos.filter((p) => p.visibility !== 'private'));
+    setMyRaw(
       allPartidos.filter(
         (p) =>
           p.visibility === 'private' &&
@@ -109,7 +169,21 @@ export function PartidosScreen({
       )
     );
     setLoading(false);
-  }, [session?.access_token]);
+  }, [session?.access_token, dayOffset]);
+
+  const openPartidos = useMemo(
+    () => openRaw.filter((p) => passesPartidoFilters(p, sportFilter, fillFilter, statusFilter)),
+    [openRaw, sportFilter, fillFilter, statusFilter]
+  );
+
+  const myPartidos = useMemo(
+    () => myRaw.filter((p) => passesPartidoFilters(p, sportFilter, fillFilter, statusFilter)),
+    [myRaw, sportFilter, fillFilter, statusFilter]
+  );
+
+  const dayDateDisplay = useMemo(() => addDays(new Date(), dayOffset), [dayOffset]);
+  const maxDayAhead = 21;
+  const maxDayBack = -7;
 
   useEffect(() => {
     loadPartidos();
@@ -128,6 +202,92 @@ export function PartidosScreen({
         <Text style={styles.sectionSubtitle}>
           Estos partidos reflejan tu búsqueda y nivel
         </Text>
+      </View>
+
+      <View style={styles.toolbar}>
+        <View style={styles.dayRow}>
+          <View style={styles.daySide}>
+            {dayOffset !== 0 ? (
+              <Pressable onPress={() => setDayOffset(0)} style={styles.hoyPill}>
+                <Text style={styles.hoyPillText}>Hoy</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <View style={styles.dayCenter}>
+            <Pressable
+              hitSlop={8}
+              onPress={() => setDayOffset((d) => Math.max(maxDayBack, d - 1))}
+              style={styles.dayArrow}
+            >
+              <Ionicons name="chevron-back" size={22} color="#e5e7eb" />
+            </Pressable>
+            <Text style={styles.dayTitle} numberOfLines={1}>
+              {dayOffset === 0 ? 'Próximos' : dayLabel(dayDateDisplay)}
+            </Text>
+            <Pressable
+              hitSlop={8}
+              onPress={() => setDayOffset((d) => Math.min(maxDayAhead, d + 1))}
+              style={styles.dayArrow}
+            >
+              <Ionicons name="chevron-forward" size={22} color="#e5e7eb" />
+            </Pressable>
+          </View>
+          <View style={styles.daySide} />
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          {(
+            [
+              ['all', 'Todos deportes'],
+              ['padel', 'Pádel'],
+              ['tenis', 'Tenis'],
+              ['pickleball', 'Pickleball'],
+              ['otro', 'Otro'],
+            ] as const
+          ).map(([v, label]) => (
+            <Pressable
+              key={v}
+              onPress={() => setSportFilter(v)}
+              style={[styles.chip, sportFilter === v && styles.chipOn]}
+            >
+              <Text style={[styles.chipText, sportFilter === v && styles.chipTextOn]}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          {(
+            [
+              ['all', 'Plazas: todas'],
+              ['free', 'Con hueco'],
+              ['full', 'Completos'],
+            ] as const
+          ).map(([v, label]) => (
+            <Pressable
+              key={v}
+              onPress={() => setFillFilter(v)}
+              style={[styles.chip, fillFilter === v && styles.chipOn]}
+            >
+              <Text style={[styles.chipText, fillFilter === v && styles.chipTextOn]}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+          {(
+            [
+              ['all', 'Activos'],
+              ['live', 'En curso'],
+              ['past', 'Jugados'],
+              ['cancelled', 'Cancelados'],
+            ] as const
+          ).map(([v, label]) => (
+            <Pressable
+              key={v}
+              onPress={() => setStatusFilter(v)}
+              style={[styles.chip, statusFilter === v && styles.chipOn]}
+            >
+              <Text style={[styles.chipText, statusFilter === v && styles.chipTextOn]}>{label}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
       </View>
       <View style={styles.list}>
         {loading ? (
@@ -263,6 +423,55 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
+  toolbar: {
+    paddingHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.lg,
+    gap: 10,
+  },
+  dayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  daySide: { width: 72, justifyContent: 'center' },
+  dayCenter: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  dayTitle: {
+    minWidth: 100,
+    textAlign: 'center',
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#f9fafb',
+  },
+  dayArrow: { padding: 4 },
+  hoyPill: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  hoyPillText: { fontSize: 12, fontWeight: '600', color: '#f9fafb' },
+  chipsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 },
+  chip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  chipOn: {
+    backgroundColor: 'rgba(241, 143, 52, 0.25)',
+    borderColor: 'rgba(241, 143, 52, 0.55)',
+  },
+  chipText: { fontSize: 12, color: '#d1d5db', fontWeight: '500' },
+  chipTextOn: { color: '#fff', fontWeight: '700' },
   sectionSubtitle: {
     fontSize: 12,
     lineHeight: lineHeightFor(12),

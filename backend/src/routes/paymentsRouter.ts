@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import {
   createIntentHandler,
   createIntentForNewMatchHandler,
@@ -22,12 +22,12 @@ const router = Router();
 router.use(attachAuthContext);
 
 router.get('/transactions', listTransactionsHandler);
-router.get('/club-transactions', requireClubOwnerOrAdmin, listClubTransactionsHandler);
-router.get('/cash-closing/expected', requireClubOwnerOrAdmin, cashClosingExpectedHandler);
-router.get('/cash-opening/today', requireClubOwnerOrAdmin, getCashOpeningForDayHandler);
-router.post('/cash-opening/records', requireClubOwnerOrAdmin, createCashOpeningRecordHandler);
-router.get('/cash-closing/records', requireClubOwnerOrAdmin, listCashClosingRecordsHandler);
-router.post('/cash-closing/records', requireClubOwnerOrAdmin, createCashClosingRecordHandler);
+router.get('/club-transactions', requireClubOwnerOrAdminOrPortalStaff, listClubTransactionsHandler);
+router.get('/cash-closing/expected', requireClubOwnerOrAdminOrPortalStaff, cashClosingExpectedHandler);
+router.get('/cash-opening/today', requireClubOwnerOrAdminOrPortalStaff, getCashOpeningForDayHandler);
+router.post('/cash-opening/records', requireClubOwnerOrAdminOrPortalStaff, createCashOpeningRecordHandler);
+router.get('/cash-closing/records', requireClubOwnerOrAdminOrPortalStaff, listCashClosingRecordsHandler);
+router.post('/cash-closing/records', requireClubOwnerOrAdminOrPortalStaff, createCashClosingRecordHandler);
 router.post('/customer-portal', customerPortalHandler);
 router.post('/create-intent', createIntentHandler);
 router.post('/create-intent-for-new-match', createIntentForNewMatchHandler);

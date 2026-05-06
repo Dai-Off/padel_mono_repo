@@ -107,6 +107,8 @@ export function ClubCashClosingTab({
   const [expectedBookings, setExpectedBookings] = useState<CashClosingBookingExpected[]>([]);
   const [systemCashTotal, setSystemCashTotal] = useState(0);
   const [systemCardTotal, setSystemCardTotal] = useState(0);
+  const [storeSalesCashTotal, setStoreSalesCashTotal] = useState(0);
+  const [storeSalesCardTotal, setStoreSalesCardTotal] = useState(0);
   const [loadingExpected, setLoadingExpected] = useState(true);
   const [saving, setSaving] = useState(false);
   const [operativeDate, setOperativeDate] = useState(localDateYmd());
@@ -188,6 +190,8 @@ export function ClubCashClosingTab({
         setExpectedBookings(expected.bookings ?? []);
         setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
         setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
+        setStoreSalesCashTotal(expected.storeSalesCash_eur ?? 0);
+        setStoreSalesCardTotal(expected.storeSalesCard_eur ?? 0);
         setOpeningRecord(opening.opening ?? null);
         setNeedsNewOpeningAfterClosing(expected.needs_new_opening_after_closing === true);
 
@@ -211,6 +215,8 @@ export function ClubCashClosingTab({
         setExpectedBookings([]);
         setSystemCashTotal(0);
         setSystemCardTotal(0);
+        setStoreSalesCashTotal(0);
+        setStoreSalesCardTotal(0);
         toast.error((e as Error).message || t('payments_load_error'));
       } finally {
         if (!cancelled) setLoadingExpected(false);
@@ -243,6 +249,8 @@ export function ClubCashClosingTab({
       setExpectedBookings(refreshedExpected.bookings ?? []);
       setSystemCashTotal(refreshedExpected.systemCashTotal_eur ?? 0);
       setSystemCardTotal(refreshedExpected.systemCardTotal_eur ?? 0);
+      setStoreSalesCashTotal(refreshedExpected.storeSalesCash_eur ?? 0);
+      setStoreSalesCardTotal(refreshedExpected.storeSalesCard_eur ?? 0);
       setNeedsNewOpeningAfterClosing(refreshedExpected.needs_new_opening_after_closing === true);
       setCashBreakdown(emptyBreakdown);
       setCardTotal('');
@@ -281,6 +289,8 @@ export function ClubCashClosingTab({
       setExpectedBookings(expected.bookings ?? []);
       setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
       setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
+      setStoreSalesCashTotal(expected.storeSalesCash_eur ?? 0);
+      setStoreSalesCardTotal(expected.storeSalesCard_eur ?? 0);
       setNeedsNewOpeningAfterClosing(expected.needs_new_opening_after_closing === true);
       setEmployeeId(saved.staff_id ?? '');
       setOpeningCashTotal('');
@@ -539,6 +549,11 @@ export function ClubCashClosingTab({
               <p className="text-[12px] font-bold text-[#1A1A1A]">
                 Físico: €{systemCashTotal.toFixed(2)} • Tarjeta: €{systemCardTotal.toFixed(2)}
               </p>
+              {(storeSalesCashTotal > 0 || storeSalesCardTotal > 0) && (
+                <p className="text-[10px] text-gray-500 mt-1">
+                  Tienda: €{storeSalesCashTotal.toFixed(2)} efectivo • €{storeSalesCardTotal.toFixed(2)} tarjeta
+                </p>
+              )}
             </div>
           </div>
         </div>

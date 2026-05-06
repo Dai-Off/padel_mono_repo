@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { generateInviteToken, hashInviteToken } from '../lib/inviteToken';
 import { buildTournamentInviteUrl } from '../lib/env';
@@ -10,11 +11,6 @@ import { playerMeetsTournamentGender } from '../lib/tournamentGender';
 
 const router = Router();
 router.use(attachAuthContext);
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
 
 function validEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((s || '').trim());
@@ -60,7 +56,7 @@ function validEmail(s: string): boolean {
  *       200: { description: Invitaciones creadas }
  *       409: { description: Sin cupos disponibles }
  */
-router.post('/:id/invites', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:id/invites', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const tournamentId = req.params.id;
   const invites = Array.isArray(req.body?.invites) ? req.body.invites : [];
   if (!invites.length) return res.status(400).json({ ok: false, error: 'invites es obligatorio' });
@@ -73,7 +69,7 @@ router.post('/:id/invites', requireClubOwnerOrAdmin, async (req: Request, res: R
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!tournament) return res.status(404).json({ ok: false, error: 'Torneo no encontrado' });
-    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id))) {
+    if (!canAccessClub(req, String((tournament as { club_id: string }).club_id), 'torneos')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
     if (String((tournament as { status: string }).status) !== 'open') {

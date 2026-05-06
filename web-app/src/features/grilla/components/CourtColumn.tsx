@@ -25,6 +25,10 @@ interface Props {
     compactPxPerMinute?: number;
     totalCourts?: number;
     typeColorOverrides?: Record<string, string>;
+    /** Día de la grilla respecto a hoy: celdas libres pasadas se muestran en gris. */
+    gridDayKind?: 'past' | 'today' | 'future';
+    /** Minutos desde medianoche (hora local); solo aplica con gridDayKind === 'today'. */
+    nowMinutes?: number;
 }
 
 // Split "Pista 2 CENTRAL" → { main: "PISTA 2", sub: "CENTRAL" }
@@ -39,7 +43,27 @@ function parseCourtName(name: string): { main: string; sub?: string } {
     return { main: mainParts, sub };
 }
 
-export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, recentlyDroppedId, onReservationClick, onFreeSlotClick, onHeaderClick, onHeaderHover, isMaintenanceBlocked, onHoverStart, onHoverEnd, isFocusedMode, isCurrentlyFocused, isCompactView, compactPxPerMinute, totalCourts, typeColorOverrides }) => {
+export const CourtColumn: React.FC<Props> = ({
+    court,
+    reservations,
+    dragGhost,
+    recentlyDroppedId,
+    onReservationClick,
+    onFreeSlotClick,
+    onHeaderClick,
+    onHeaderHover,
+    isMaintenanceBlocked,
+    onHoverStart,
+    onHoverEnd,
+    isFocusedMode,
+    isCurrentlyFocused,
+    isCompactView,
+    compactPxPerMinute,
+    totalCourts,
+    typeColorOverrides,
+    gridDayKind = 'future',
+    nowMinutes = 0,
+}) => {
     const { tData } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
     const isSmallZoom = !isCompactView && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
@@ -187,18 +211,20 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
                             const displayH = h >= 24 ? h - 24 : h;
                             const timeStr = `${displayH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 
-                            const isUnavailable = blockStartMins < 8 * 60 || blockStartMins >= 23 * 60;
+                            const isPastFree =
+                                gridDayKind === 'past' ||
+                                (gridDayKind === 'today' && blockStartMins < nowMinutes);
 
                             const manyCourts = totalCourts && totalCourts > 10;
 
                             return (
                                 <div
                                     key={`free-${i}-${b}`}
-                                    onClick={() => onFreeSlotClick?.(court.id, court.name, timeStr, isUnavailable)}
+                                    onClick={() => onFreeSlotClick?.(court.id, court.name, timeStr, isPastFree)}
                                     className={clsx(
                                         "absolute inset-x-0 border-b z-0 flex items-center justify-center transition-colors",
-                                        isUnavailable
-                                            ? "bg-[#e0e0e0] border-white cursor-pointer hover:bg-[#d0d0d0]"
+                                        isPastFree
+                                            ? "bg-[#e0e0e0] border-white cursor-not-allowed opacity-95"
                                             : "bg-[#ade88f] border-white cursor-pointer hover:bg-[#93db72]"
                                     )}
                                     style={{
@@ -211,7 +237,7 @@ export const CourtColumn: React.FC<Props> = ({ court, reservations, dragGhost, r
                                         isCompactView
                                             ? (manyCourts ? "text-[7.5px] -ml-0.5 tracking-tighter" : "text-[7px]")
                                             : isSmallZoom ? "text-[13px]" : "text-[8px]",
-                                        isUnavailable ? "text-[#919191]" : "text-[#919191]"
+                                        "text-[#919191]"
                                     )}>
                                         {timeStr}
                                     </span>

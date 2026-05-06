@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
-import { canAccessClub } from './learningHelpers';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 
@@ -23,7 +23,7 @@ async function getCourseForClubEdit(
 
   if (error) return { error: error.message, status: 500 };
   if (!course) return { error: 'Curso no encontrado', status: 404 };
-  if (!canAccessClub(req, course.club_id)) {
+  if (!canAccessClub(req, course.club_id, 'escuela')) {
     return { error: 'No tienes acceso a este club', status: 403 };
   }
   if (requireDraft && course.status !== 'draft') {
@@ -37,11 +37,11 @@ async function getCourseForClubEdit(
 // ---------------------------------------------------------------------------
 
 // GET /club-courses?club_id=...
-router.get('/club-courses', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/club-courses', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const club_id = req.query.club_id as string | undefined;
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-    if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
     const supabase = getSupabaseServiceRoleClient();
 
@@ -80,7 +80,7 @@ router.get('/club-courses', requireClubOwnerOrAdmin, async (req: Request, res: R
 });
 
 // GET /club-courses/:id — detalle de curso con lecciones
-router.get('/club-courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/club-courses/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const result = await getCourseForClubEdit(req, req.params.id, false);
     if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
@@ -101,12 +101,12 @@ router.get('/club-courses/:id', requireClubOwnerOrAdmin, async (req: Request, re
 });
 
 // POST /courses
-router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/courses', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const { club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id } = req.body ?? {};
 
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-    if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     if (!title || typeof title !== 'string' || !title.trim()) {
       return res.status(400).json({ ok: false, error: 'title es obligatorio' });
     }
@@ -142,7 +142,7 @@ router.post('/courses', requireClubOwnerOrAdmin, async (req: Request, res: Respo
 });
 
 // PUT /courses/:id
-router.put('/courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/courses/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const result = await getCourseForClubEdit(req, req.params.id, true);
     if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
@@ -198,7 +198,7 @@ router.put('/courses/:id', requireClubOwnerOrAdmin, async (req: Request, res: Re
 // ---------------------------------------------------------------------------
 
 // POST /courses/:id/lessons
-router.post('/courses/:id/lessons', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/courses/:id/lessons', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const result = await getCourseForClubEdit(req, req.params.id, true);
     if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
@@ -241,7 +241,7 @@ router.post('/courses/:id/lessons', requireClubOwnerOrAdmin, async (req: Request
 });
 
 // PUT /courses/:id/lessons/:lessonId
-router.put('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const result = await getCourseForClubEdit(req, req.params.id, true);
     if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
@@ -291,7 +291,7 @@ router.put('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdmin, async (req
 });
 
 // DELETE /courses/:id/lessons/:lessonId
-router.delete('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.delete('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const result = await getCourseForClubEdit(req, req.params.id, true);
     if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });
@@ -338,7 +338,7 @@ router.delete('/courses/:id/lessons/:lessonId', requireClubOwnerOrAdmin, async (
 });
 
 // POST /courses/:id/submit
-router.post('/courses/:id/submit', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/courses/:id/submit', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const result = await getCourseForClubEdit(req, req.params.id, true);
     if ('error' in result) return res.status(result.status).json({ ok: false, error: result.error });

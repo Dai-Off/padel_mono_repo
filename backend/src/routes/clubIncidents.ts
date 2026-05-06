@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 import { getClubClientPlayerIds } from '../lib/clubClientPlayers';
 
 const router = Router();
@@ -9,11 +10,6 @@ router.use(attachAuthContext);
 
 const INCIDENT_TYPES = new Set(['late_cancel', 'no_show', 'damage', 'complaint']);
 const SEVERITIES = new Set(['low', 'medium', 'high']);
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
 
 function monthRangeUTC(year: number, month0: number): { start: string; end: string } {
   const start = new Date(Date.UTC(year, month0, 1, 0, 0, 0, 0));
@@ -164,10 +160,10 @@ type IncidentRow = {
  *       401: { description: Sin token }
  *       403: { description: Sin acceso al club }
  */
-router.get('/summary', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/summary', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = String(req.query.club_id ?? '').trim();
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) {
+  if (!canAccessClub(req, club_id, 'gestion')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 
@@ -431,7 +427,7 @@ router.get('/summary', requireClubOwnerOrAdmin, async (req: Request, res: Respon
  *       401: { description: Sin token }
  *       403: { description: Sin acceso }
  */
-router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = String(req.query.club_id ?? '').trim();
   const incident_type = typeof req.query.incident_type === 'string' ? req.query.incident_type.trim() : '';
   const severity = typeof req.query.severity === 'string' ? req.query.severity.trim() : '';
@@ -441,7 +437,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
   if (limit > 500) limit = 500;
 
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) {
+  if (!canAccessClub(req, club_id, 'gestion')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
   if (incident_type && !INCIDENT_TYPES.has(incident_type)) {
@@ -596,7 +592,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
  *       401: { description: Sin token }
  *       403: { description: Sin permisos o acceso al club }
  */
-router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   if (!req.authContext) {
     return res.status(401).json({ ok: false, error: 'Token requerido' });
   }
@@ -635,7 +631,7 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
     return res.status(400).json({ ok: false, error: 'cost_cents debe ser un entero >= 0' });
   }
 
-  if (!canAccessClub(req, club_id)) {
+  if (!canAccessClub(req, club_id, 'gestion')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 

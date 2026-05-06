@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import {
@@ -13,8 +13,9 @@ import {
   ClipboardList,
   Trophy,
 } from 'lucide-react';
+import { portalMenuItemAllowed } from '../../../lib/portalNavPermissions';
 
-type NavChild = { id: string; path: string; label: string; queryParam?: string };
+type NavChild = { id: string; path: string; label: string; queryParam?: string; search?: string };
 type NavSection = {
   id: string;
   label: string;
@@ -55,7 +56,6 @@ function buildSections(isAdmin: boolean): NavSection[] {
       children: [
         { id: 'jugadores', path: '/jugadores', label: 'Jugadores' },
         { id: 'crm', path: '/crm', label: 'CRM' },
-        { id: 'miPerfil', path: '/mi-perfil', label: 'Mi perfil jugador' },
       ],
     },
     {
@@ -119,6 +119,7 @@ function buildSections(isAdmin: boolean): NavSection[] {
       icon: Settings,
       children: [
         { id: 'configuracion', path: '/configuracion', label: 'Configuración del club' },
+        { id: 'equipoRoles', path: '/equipo-portal', label: 'Gestión de personal' },
         { id: 'onboarding', path: '/onboarding', label: 'Asistente inicial' },
       ],
     }
@@ -127,7 +128,11 @@ function buildSections(isAdmin: boolean): NavSection[] {
   return sections;
 }
 
-function isChildActive(pathname: string, menuParam: string | null, child: NavChild): boolean {
+function isChildActive(
+  pathname: string,
+  menuParam: string | null,
+  child: NavChild
+): boolean {
   if (child.path === '/grilla') {
     if (pathname !== '/grilla') return false;
     if (child.queryParam === 'reservas') return menuParam === 'reservas';
@@ -140,11 +145,21 @@ function isChildActive(pathname: string, menuParam: string | null, child: NavChi
   return pathname === child.path;
 }
 
-function isSectionActive(pathname: string, menuParam: string | null, section: NavSection): boolean {
-  return section.children.some(c => isChildActive(pathname, menuParam, c));
+function isSectionActive(
+  pathname: string,
+  menuParam: string | null,
+  section: NavSection
+): boolean {
+  return section.children.some((c) => isChildActive(pathname, menuParam, c));
 }
 
-export function GrillaQuickNav({ isAdmin }: { isAdmin: boolean }) {
+export function GrillaQuickNav({
+  isAdmin,
+  portalMenuPermissionKeys,
+}: {
+  isAdmin: boolean;
+  portalMenuPermissionKeys?: string[] | null;
+}) {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
@@ -162,7 +177,16 @@ export function GrillaQuickNav({ isAdmin }: { isAdmin: boolean }) {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
-  const sections = buildSections(isAdmin);
+  const sections = useMemo(() => {
+    const built = buildSections(isAdmin);
+    if (portalMenuPermissionKeys == null) return built;
+    return built
+      .map((sec) => ({
+        ...sec,
+        children: sec.children.filter((c) => portalMenuItemAllowed(c.id, portalMenuPermissionKeys)),
+      }))
+      .filter((sec) => sec.children.length > 0);
+  }, [isAdmin, portalMenuPermissionKeys]);
 
   const go = (child: NavChild) => {
     if (child.path === '/grilla' && child.queryParam) {

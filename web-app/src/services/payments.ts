@@ -50,6 +50,10 @@ export type CashClosingExpected = {
   systemCardTotal_eur: number;
   openingCashTotal_cents?: number;
   openingCashTotal_eur?: number;
+  storeSalesCash_cents?: number;
+  storeSalesCard_cents?: number;
+  storeSalesCash_eur?: number;
+  storeSalesCard_eur?: number;
   /** Último cierre del día (ISO). */
   last_closing_at?: string | null;
   /** Tras un cierre, hace falta una apertura posterior para contar efectivo inicial en el esperado. */

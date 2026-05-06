@@ -81,6 +81,27 @@ function formatDateTimeForBookingConfirm(dateStr: string, time: string): string 
   return `${dayName}, ${dayNum} ${month} · ${time}`;
 }
 
+type WeMatchSportFilter = 'padel' | 'tenis' | 'pickleball' | 'otro';
+type CerramientoFilter = 'any' | 'indoor' | 'outdoor';
+
+const SPORT_FILTER_OPTIONS: { id: WeMatchSportFilter; label: string }[] = [
+  { id: 'padel', label: 'Pádel' },
+  { id: 'tenis', label: 'Tenis' },
+  { id: 'pickleball', label: 'Pickleball' },
+  { id: 'otro', label: 'Otro' },
+];
+
+function sportLabelUi(s?: string): string {
+  const k = (s ?? 'padel').toLowerCase();
+  const map: Record<string, string> = {
+    padel: 'Pádel',
+    tenis: 'Tenis',
+    pickleball: 'Pickleball',
+    otro: 'Otro',
+  };
+  return map[k] ?? k;
+}
+
 function getInitials(fullName?: string | null, email?: string): string {
   if (fullName?.trim()) {
     const parts = fullName.trim().split(/\s+/);
@@ -110,6 +131,8 @@ export function CrearPartidoLocationSheet({
   const [clubs, setClubs] = useState<ClubDisplay[]>([]);
   const [clubsLoading, setClubsLoading] = useState(false);
   const [clubsError, setClubsError] = useState<string | null>(null);
+  const [filterSport, setFilterSport] = useState<WeMatchSportFilter>('padel');
+  const [filterCerramiento, setFilterCerramiento] = useState<CerramientoFilter>('any');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -129,7 +152,12 @@ export function CrearPartidoLocationSheet({
     setClubsLoading(true);
     setClubsError(null);
     try {
-      const data = await fetchClubAvailabilityForCreate(session?.access_token);
+      const indoor =
+        filterCerramiento === 'indoor' ? true : filterCerramiento === 'outdoor' ? false : undefined;
+      const data = await fetchClubAvailabilityForCreate(session?.access_token, {
+        sport: filterSport,
+        indoor,
+      });
       setClubs(data);
     } catch {
       setClubsError('No se pudo cargar la disponibilidad');
@@ -137,7 +165,7 @@ export function CrearPartidoLocationSheet({
     } finally {
       setClubsLoading(false);
     }
-  }, [session?.access_token]);
+  }, [session?.access_token, filterSport, filterCerramiento]);
 
   useEffect(() => {
     const active = presentation === 'fullscreen' || visible;
@@ -398,9 +426,11 @@ export function CrearPartidoLocationSheet({
                 >
                   <Ionicons name="arrow-back" size={20} color={theme.auth.text} />
                 </Pressable>
-                <Text style={styles.headerClubsTitle} numberOfLines={1}>
-                  Encontrar nuevos partidos
-                </Text>
+                <View style={styles.headerClubsTitleWrap}>
+                  <Text style={styles.headerClubsTitle} numberOfLines={2}>
+                    Encontrar nuevos partidos
+                  </Text>
+                </View>
                 <View style={styles.headerClubsRightSpacer} />
               </View>
             ) : step === 'clubs' ? (
@@ -458,24 +488,72 @@ export function CrearPartidoLocationSheet({
           </View>
 
           {step === 'clubs' && presentation === 'fullscreen' && (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.clubsFiltersScroll}
-              contentContainerStyle={styles.clubsFiltersRow}
-            >
-              <View style={styles.clubsFilterIconBtn}>
-                <Ionicons name="location-outline" size={16} color={theme.auth.textMuted} />
-              </View>
-              <View style={styles.clubsFilterChipStatic} accessibilityRole="text">
-                <Text style={styles.clubsFilterChipText}>Pádel</Text>
-              </View>
-              <View style={styles.clubsFilterChipStatic} accessibilityRole="text">
-                <Text style={styles.clubsFilterChipText}>
-                  {clubsLoading ? 'Clubes' : `${clubs.length} club${clubs.length === 1 ? '' : 'es'}`}
-                </Text>
-              </View>
-            </ScrollView>
+            <View style={styles.clubsFiltersColumn}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.clubsFiltersScrollRow}
+                contentContainerStyle={styles.clubsFiltersRow}
+              >
+                <View style={styles.clubsFilterIconBtn}>
+                  <Ionicons name="location-outline" size={16} color={theme.auth.textMuted} />
+                </View>
+                {SPORT_FILTER_OPTIONS.map((opt) => {
+                  const selected = filterSport === opt.id;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      onPress={() => setFilterSport(opt.id)}
+                      style={({ pressed }) => [
+                        styles.clubsFilterChipStatic,
+                        selected && styles.clubsFilterChipSelected,
+                        pressed && styles.pressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                    >
+                      <Text style={styles.clubsFilterChipText}>{opt.label}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.clubsFiltersScrollRow}
+                contentContainerStyle={styles.clubsFiltersRow}
+              >
+                {(
+                  [
+                    { id: 'any' as const, label: 'Todas' },
+                    { id: 'indoor' as const, label: 'Interior' },
+                    { id: 'outdoor' as const, label: 'Exterior' },
+                  ] as const
+                ).map((opt) => {
+                  const selected = filterCerramiento === opt.id;
+                  return (
+                    <Pressable
+                      key={opt.id}
+                      onPress={() => setFilterCerramiento(opt.id)}
+                      style={({ pressed }) => [
+                        styles.clubsFilterChipStatic,
+                        selected && styles.clubsFilterChipSelected,
+                        pressed && styles.pressed,
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                    >
+                      <Text style={styles.clubsFilterChipText}>{opt.label}</Text>
+                    </Pressable>
+                  );
+                })}
+                <View style={styles.clubsFilterChipStatic} accessibilityRole="text">
+                  <Text style={styles.clubsFilterChipTextMuted}>
+                    {clubsLoading ? '…' : `${clubs.length} club${clubs.length === 1 ? '' : 'es'}`}
+                  </Text>
+                </View>
+              </ScrollView>
+            </View>
           )}
 
           {step === 'pista_externa' ? (
@@ -667,6 +745,10 @@ export function CrearPartidoLocationSheet({
                   )}
                   <View style={styles.configClubInfo}>
                     <Text style={styles.configClubName} numberOfLines={1}>{selectedClub.clubName}</Text>
+                    <Text style={styles.configCourtLine} numberOfLines={2}>
+                      {selectedSlot.courtName} · {sportLabelUi(selectedSlot.courtSport)} ·{' '}
+                      {selectedSlot.courtIndoor ? 'Interior' : 'Exterior'}
+                    </Text>
                     <View style={styles.configClubMeta}>
                       <Ionicons name="time-outline" size={12} color="#6b7280" />
                       <Text style={styles.configClubMetaText}>
@@ -733,7 +815,7 @@ export function CrearPartidoLocationSheet({
                   </View>
                   <Text style={[styles.clubsStateTitle, styles.clubsStateTitleDark]}>Sin pistas</Text>
                   <Text style={[styles.clubsStateSub, styles.clubsStateSubDark]}>
-                    No se encontraron clubes con pistas. Añade clubs y courts en la base de datos.
+                    No hay huecos con estos filtros. Prueba otro deporte o interior/exterior.
                   </Text>
                 </View>
               </View>
@@ -805,6 +887,9 @@ export function CrearPartidoLocationSheet({
                               >
                                 <Text style={styles.slotTimeGlass}>{slot.time}</Text>
                                 <Text style={styles.slotDurationGlass}>{slot.duration}</Text>
+                                <Text style={styles.slotMetaGlass} numberOfLines={1}>
+                                  {sportLabelUi(slot.courtSport)} · {slot.courtIndoor ? 'Int.' : 'Ext.'}
+                                </Text>
                               </Pressable>
                             ))}
                           </ScrollView>
@@ -1019,29 +1104,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerClubsTitle: {
+  headerClubsTitleWrap: {
     flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 6,
+    justifyContent: 'center',
+  },
+  headerClubsTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
     color: theme.auth.text,
     textAlign: 'center',
-    paddingHorizontal: 8,
   },
   headerClubsRightSpacer: {
     width: 40,
     height: 40,
   },
-  /** Franja de filtros bajo header (clubes fullscreen): gap-2 px-5 pb-4 */
-  clubsFiltersScroll: {
+  clubsFiltersColumn: {
     width: '100%',
-    maxHeight: 52,
+    marginBottom: 8,
+    gap: 8,
+    flexShrink: 0,
+  },
+  clubsFiltersScrollRow: {
+    width: '100%',
+    flexGrow: 0,
+    flexShrink: 0,
   },
   clubsFiltersRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingHorizontal: theme.spacing.lg,
-    paddingBottom: 16,
+    paddingVertical: 4,
   },
   clubsFilterIconBtn: {
     padding: 10,
@@ -1078,6 +1173,15 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.xs,
     fontWeight: '600',
     color: theme.auth.text,
+  },
+  clubsFilterChipTextMuted: {
+    fontSize: theme.fontSize.xs,
+    fontWeight: '600',
+    color: theme.auth.textMuted,
+  },
+  clubsFilterChipSelected: {
+    borderColor: theme.auth.accent,
+    backgroundColor: 'rgba(241, 143, 52, 0.18)',
   },
   headerTitle: {
     flex: 1,
@@ -1367,6 +1471,14 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#9ca3af',
     marginTop: 2,
+  },
+  slotMetaGlass: {
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginTop: 4,
+    maxWidth: 72,
+    textAlign: 'center',
   },
   noSlotsTextGlass: {
     fontSize: theme.fontSize.xs,
@@ -1776,6 +1888,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#1A1A1A',
+  },
+  configCourtLine: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4b5563',
+    marginTop: 4,
+    lineHeight: 15,
   },
   configClubMeta: {
     flexDirection: 'row',

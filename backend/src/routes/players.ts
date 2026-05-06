@@ -997,6 +997,62 @@ router.get('/', async (req: Request, res: Response) => {
 
 /**
  * @openapi
+ * /players/{id}/public-profile:
+ *   get:
+ *     tags: [Players]
+ *     summary: Perfil público de otro jugador (MVP)
+ *     description: Retorna solo datos públicos (nombre, avatar, elo, radar, liga mm, record) para visualización social.
+ *     responses:
+ *       200: { description: Perfil público cargado }
+ *       404: { description: Jugador no encontrado }
+ */
+router.get('/:id/public-profile', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: player, error: pErr } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, avatar_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (pErr) return res.status(500).json({ ok: false, error: pErr.message });
+    if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+
+    const wl = await fetchPlayerMatchmakingWl(supabase, id);
+    const publicData = toPublicPlayer(player as Row);
+
+    // Radar / Coach Assessment
+    const { data: coach } = await supabase
+      .from('coach_assessments')
+      .select('level_number, level_name, skills, strengths, improvements, recommendation')
+      .eq('player_id', id)
+      .maybeSingle();
+
+    // Últimos partidos (resumen)
+    const { data: recentMatches } = await supabase
+      .from('match_players')
+      .select('match_id, result, matches:matches!match_players_match_id_fkey(start_at, match_type)')
+      .eq('player_id', id)
+      .order('created_at', { ascending: false })
+      .limit(10);
+
+    return res.json({
+      ok: true,
+      player: {
+        ...publicData,
+        ...wl,
+        coach_assessment: coach || null,
+        recent_matches: recentMatches || []
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
  * /players/{id}:
  *   get:
  *     tags: [Players]

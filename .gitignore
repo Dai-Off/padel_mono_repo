@@ -1,2 +1,3 @@
 # Claude Code local settings (may contain secrets)
 .claude/settings.local.json
+.vscode/settings.json

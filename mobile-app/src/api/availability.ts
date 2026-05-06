@@ -8,6 +8,8 @@ export type AvailabilitySlot = {
 export type CourtAvailability = {
   court_id: string;
   court_name: string;
+  /** Present on multi-club responses; single-club queries include it per court row. */
+  club_id: string;
   free_slots: AvailabilitySlot[];
 };
 

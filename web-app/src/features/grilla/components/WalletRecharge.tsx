@@ -22,6 +22,7 @@ interface Bonus {
 }
 
 type PaymentMethod = 'cash' | 'card' | 'prize';
+type WalletMode = 'money' | 'classes';
 
 interface WalletRechargeProps {
     clubId: string | null;
@@ -59,6 +60,8 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
 
     // Payment
     const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
+    const [walletMode, setWalletMode] = useState<WalletMode>('money');
+    const [classSessionsText, setClassSessionsText] = useState('5');
     const [notes, setNotes] = useState('');
 
     // Submit
@@ -82,6 +85,7 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
             setSelectedBonus(null); setBonusEnabled(false);
             setAmountText('');
             setPaymentMethod('cash'); setNotes('');
+            setWalletMode('money'); setClassSessionsText('5');
             setSubmitting(false); setSuccess(false); setError(null);
             setAltaOpen(false); setBonusListExpanded(true);
         }
@@ -189,34 +193,54 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
     // Premio → importe en caja forzado a 0
     const priceToPay = paymentMethod === 'prize' ? 0 : amountCents;
 
-    const isValid = selectedPlayer && amountCents > 0;
+    const classSessions = Math.max(0, Math.trunc(Number(classSessionsText || '0')));
+    const isValidMoney = walletMode === 'money' && selectedPlayer && amountCents > 0;
+    const isValidClasses = walletMode === 'classes' && selectedPlayer && classSessions >= 1;
+    const isValid = isValidMoney || isValidClasses;
 
     // ── Submit ──
     const handleSubmit = async () => {
         if (!selectedPlayer || !clubId || !isValid) return;
         setSubmitting(true); setError(null); setSuccess(false);
 
-        const methodLabel = paymentMethod === 'cash' ? 'Efectivo' : paymentMethod === 'card' ? 'Tarjeta' : 'Premio';
-        const bonusPart = selectedBonus ? ` + Bono "${selectedBonus.name}" (+${fmt(bonusExtraCents)}€)` : '';
-
         try {
-            await apiFetchWithAuth<any>('/wallet/transactions', {
-                method: 'POST',
-                body: JSON.stringify({
-                    player_id: selectedPlayer.id,
-                    club_id: clubId,
-                    amount_cents: totalToWallet,
-                    concept: `Recarga ${fmt(amountCents)}€${bonusPart} — ${methodLabel}`,
-                    type: 'credit',
-                    notes: notes.trim() || null,
-                }),
-            });
-            await fetchBalance(selectedPlayer.id);
-            setSuccess(true);
-            setSelectedBonus(null);
-            setBonusEnabled(false);
-            setAmountText('');
-            setNotes('');
+            if (walletMode === 'classes') {
+                const priceCents = paymentMethod === 'prize' ? 0 : Math.max(0, amountCents);
+                await apiFetchWithAuth<any>('/class-bonos/purchase', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        club_id: clubId,
+                        player_id: selectedPlayer.id,
+                        total_classes: classSessions,
+                        price_cents: priceCents,
+                        payment_method: paymentMethod,
+                        notes: notes.trim() || null,
+                    }),
+                });
+                setSuccess(true);
+                setAmountText('');
+                setNotes('');
+            } else {
+                const methodLabel = paymentMethod === 'cash' ? 'Efectivo' : paymentMethod === 'card' ? 'Tarjeta' : 'Premio';
+                const bonusPart = selectedBonus ? ` + Bono "${selectedBonus.name}" (+${fmt(bonusExtraCents)}€)` : '';
+                await apiFetchWithAuth<any>('/wallet/transactions', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        player_id: selectedPlayer.id,
+                        club_id: clubId,
+                        amount_cents: totalToWallet,
+                        concept: `Recarga ${fmt(amountCents)}€${bonusPart} — ${methodLabel}`,
+                        type: 'credit',
+                        notes: notes.trim() || null,
+                    }),
+                });
+                await fetchBalance(selectedPlayer.id);
+                setSuccess(true);
+                setSelectedBonus(null);
+                setBonusEnabled(false);
+                setAmountText('');
+                setNotes('');
+            }
         } catch (err: any) {
             setError(err?.message || 'Error al procesar recarga');
         } finally {
@@ -250,8 +274,8 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                             <Wallet size={17} className="text-white" />
                         </div>
                         <div>
-                            <h2 className="font-bold text-sm">Recarga de Wallet</h2>
-                            <p className="text-[10px] text-white/70">Cargar saldo al monedero del cliente</p>
+                            <h2 className="font-bold text-sm">Wallet / clases</h2>
+                            <p className="text-[10px] text-white/70">Monedero o pack de clases</p>
                         </div>
                     </div>
                     <button onClick={onClose} className="p-1.5 hover:bg-white/20 rounded-lg transition-colors">
@@ -347,7 +371,39 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
 
                     {selectedPlayer && (
                         <>
+                            <div className="flex rounded-xl border border-gray-200 overflow-hidden">
+                                <button
+                                    type="button"
+                                    onClick={() => setWalletMode('money')}
+                                    className={`flex-1 py-2 text-[11px] font-bold ${walletMode === 'money' ? 'bg-[#00726b] text-white' : 'bg-white text-gray-600'}`}
+                                >
+                                    Monedero
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setWalletMode('classes')}
+                                    className={`flex-1 py-2 text-[11px] font-bold ${walletMode === 'classes' ? 'bg-[#00726b] text-white' : 'bg-white text-gray-600'}`}
+                                >
+                                    Pack clases
+                                </button>
+                            </div>
+
+                            {walletMode === 'classes' ? (
+                            <div>
+                                <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">2. Nº de clases del pack</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={classSessionsText}
+                                    onChange={e => setClassSessionsText(e.target.value)}
+                                    className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm font-bold"
+                                />
+                                <p className="text-[10px] text-gray-400 mt-1">Opcional: importe cobrado (€) abajo; con «Premio» queda a 0 €.</p>
+                            </div>
+                            ) : null}
+
                             {/* ── Step 2: Amount field ── */}
+                            {walletMode === 'money' ? (
                             <div>
                                 <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">2. Saldo a cargar</label>
                                 <div className="relative">
@@ -362,8 +418,24 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                                 </div>
                                 <p className="text-[10px] text-gray-400 mt-1">Importe que paga el cliente en caja</p>
                             </div>
+                            ) : (
+                            <div>
+                                <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide mb-1.5 block">3. Precio del pack (€)</label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold text-sm">€</span>
+                                    <input
+                                        type="number" min="0" step="0.01"
+                                        value={amountText}
+                                        onChange={e => setAmountText(e.target.value)}
+                                        placeholder="0 = premio"
+                                        className="w-full pl-8 pr-3 py-2.5 border border-gray-300 rounded-xl text-base font-bold"
+                                    />
+                                </div>
+                            </div>
+                            )}
 
                             {/* ── Step 3: Bonus toggle (optional) ── */}
+                            {walletMode === 'money' ? (
                             <div>
                                 <div className="flex items-center justify-between mb-2">
                                     <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">3. Aplicar bono (opcional)</label>
@@ -469,9 +541,10 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                                     </div>
                                 )}
                             </div>
+                            ) : null}
 
                             {/* ── Step 4: Payment method ── */}
-                            <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide block">4. Método de pago</label>
+                            <label className="text-[11px] font-bold text-gray-500 uppercase tracking-wide block">{walletMode === 'money' ? '4' : '4'}. Método de pago</label>
                             <div className="grid grid-cols-3 gap-2">
                                 {([
                                     { key: 'cash' as const, icon: Banknote, label: 'Efectivo', color: 'emerald' },
@@ -518,7 +591,7 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                     )}
 
                     {/* ── Confirmation summary ── */}
-                    {selectedPlayer && amountCents > 0 && (
+                    {selectedPlayer && walletMode === 'money' && amountCents > 0 && (
                         <div className="bg-white border border-gray-200 rounded-xl p-3 space-y-2">
                             <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Resumen de operación</p>
 
@@ -578,6 +651,13 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                             <AlertCircle size={14} /> {error}
                         </div>
                     )}
+
+                    {selectedPlayer && walletMode === 'classes' && isValidClasses && (
+                        <div className="bg-white border border-gray-200 rounded-xl p-3 text-xs text-gray-600">
+                            <p className="font-bold text-gray-800 mb-1">Resumen pack</p>
+                            <p>{classSessions} clase(s) · cobro {paymentMethod === 'prize' ? '0 € (premio)' : `${fmt(amountCents)} €`}</p>
+                        </div>
+                    )}
                 </div>
 
                 {/* ── Footer: submit button ── */}
@@ -590,7 +670,9 @@ export const WalletRecharge: React.FC<WalletRechargeProps> = ({ clubId, isOpen, 
                         >
                             {submitting
                                 ? 'Procesando...'
-                                : `Confirmar Recarga — ${fmt(totalToWallet)} € en Wallet`
+                                : walletMode === 'classes'
+                                    ? `Registrar pack — ${classSessions} clase(s)`
+                                    : `Confirmar Recarga — ${fmt(totalToWallet)} € en Wallet`
                             }
                         </button>
                     </div>

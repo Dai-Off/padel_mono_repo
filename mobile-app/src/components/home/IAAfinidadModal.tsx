@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -232,6 +232,10 @@ type IAAfinidadModalProps = {
   onClose: () => void;
   onSubmit: (prompt: string) => void;
   onDirectMessageSent?: (target: { id: string; displayName: string; avatarUrl: string | null }) => void;
+  sentIds?: Set<string>;
+  onSentIdsChange?: (newSet: Set<string>) => void;
+  /** Abre el perfil público de un jugador */
+  onPlayerPress?: (playerId: string) => void;
 };
 
 function OptionSection({
@@ -274,16 +278,23 @@ function OptionSection({
 function CandidateCard({
   candidate,
   onMessagePress,
+  onPlayerPress,
   sending,
+  sent,
 }: {
   candidate: MatchCandidate;
   onMessagePress: (candidate: MatchCandidate) => void;
+  onPlayerPress?: (candidate: MatchCandidate) => void;
   sending: boolean;
+  sent: boolean;
 }) {
   return (
     <View style={styles.candidateCard}>
       <View style={styles.candidateHeader}>
-        <View style={styles.avatarWrap}>
+        <Pressable 
+          onPress={() => onPlayerPress?.(candidate)}
+          style={({ pressed }) => [styles.avatarWrap, pressed && { opacity: 0.7 }]}
+        >
           <View style={styles.avatarGlow} />
           <View style={styles.avatar}>
             <Text style={styles.avatarInitial}>{candidate.name.charAt(0)}</Text>
@@ -291,10 +302,12 @@ function CandidateCard({
           <View style={styles.onlineDot}>
             <View style={styles.onlineInnerDot} />
           </View>
-        </View>
+        </Pressable>
         <View style={styles.candidateHeaderContent}>
           <View style={styles.candidateTitleRow}>
-            <Text style={styles.candidateName} numberOfLines={1}>{candidate.name}</Text>
+            <Pressable onPress={() => onPlayerPress?.(candidate)} style={{ flex: 1 }}>
+              <Text style={styles.candidateName} numberOfLines={1}>{candidate.name}</Text>
+            </Pressable>
             <View style={styles.percentPill}>
               <Ionicons name="sparkles" size={12} color="#F18F34" />
               <Text style={styles.percentText}>{candidate.matchPercent}%</Text>
@@ -320,8 +333,8 @@ function CandidateCard({
       </View>
 
       <View style={styles.tagsWrap}>
-        {candidate.tags.map((tag) => (
-          <View key={`${candidate.id}-${tag}`} style={styles.tagPill}>
+        {candidate.tags.map((tag, tagIdx) => (
+          <View key={`${candidate.id}-${tagIdx}-${tag}`} style={styles.tagPill}>
             <Text style={styles.tagText}>{tag}</Text>
           </View>
         ))}
@@ -334,23 +347,30 @@ function CandidateCard({
         </Text>
       </View>
 
-      <Pressable style={[styles.messageBtn, sending && { opacity: 0.7 }]} onPress={() => onMessagePress(candidate)} disabled={sending}>
-        <LinearGradient
-          colors={['#F18F34', '#E95F32']}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={styles.messageBtnGradient}
-        >
-          {sending ? (
-            <Animated.View>
-              <Ionicons name="hourglass-outline" size={16} color="#fff" />
-            </Animated.View>
-          ) : (
-            <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
-          )}
-          <Text style={styles.messageBtnText}>{sending ? 'Enviando...' : 'Enviar mensaje'}</Text>
-        </LinearGradient>
-      </Pressable>
+      {sent ? (
+        <View style={styles.messageBtnSent}>
+          <Ionicons name="checkmark-circle" size={16} color="#4ADE80" />
+          <Text style={styles.messageBtnSentText}>Mensaje enviado</Text>
+        </View>
+      ) : (
+        <Pressable style={[styles.messageBtn, sending && { opacity: 0.7 }]} onPress={() => onMessagePress(candidate)} disabled={sending}>
+          <LinearGradient
+            colors={['#F18F34', '#E95F32']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.messageBtnGradient}
+          >
+            {sending ? (
+              <Animated.View>
+                <Ionicons name="hourglass-outline" size={16} color="#fff" />
+              </Animated.View>
+            ) : (
+              <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
+            )}
+            <Text style={styles.messageBtnText}>{sending ? 'Enviando...' : 'Enviar mensaje'}</Text>
+          </LinearGradient>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -363,6 +383,9 @@ export function IAAfinidadModal({
   onClose,
   onSubmit,
   onDirectMessageSent,
+  sentIds = new Set(),
+  onSentIdsChange,
+  onPlayerPress,
 }: IAAfinidadModalProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -377,6 +400,13 @@ export function IAAfinidadModal({
   const isFormComplete = completedSteps === GROUPS.length;
   const [showResults, setShowResults] = useState(false);
   const [sendingCandidateId, setSendingCandidateId] = useState<string | null>(null);
+  
+  // Sincronizar con props para persistencia
+  const [sentCandidateIds, setSentCandidateIds] = useState<Set<string>>(sentIds);
+  useEffect(() => {
+    setSentCandidateIds(sentIds);
+  }, [sentIds]);
+
   const isFormView = !loading && !showResults;
   const parsedCandidates = useMemo(
     () => (responseText ? parseCandidatesFromResponse(responseText) : []),
@@ -415,7 +445,11 @@ export function IAAfinidadModal({
       }
 
       const targetName = [exact.first_name, exact.last_name].filter(Boolean).join(' ').trim() || candidate.name;
-      onClose();
+      // Marcar candidato como enviado para que al volver del chat se muestre el estado
+      const newSet = new Set([...sentCandidateIds, candidate.id]);
+      setSentCandidateIds(newSet);
+      onSentIdsChange?.(newSet);
+      // Abrir el hilo de chat (el usuario puede darle back y volver a los resultados)
       onDirectMessageSent?.({
         id: exact.id,
         displayName: targetName,
@@ -423,6 +457,37 @@ export function IAAfinidadModal({
       });
     } finally {
       setSendingCandidateId(null);
+    }
+  };
+
+  const handlePlayerPress = async (candidate: MatchCandidate) => {
+    if (!token) {
+      Alert.alert('Perfil', 'Inicia sesión para ver perfiles.');
+      return;
+    }
+
+    try {
+      const search = await searchPlayers(candidate.name, token);
+      if (!search.ok || search.players.length === 0) {
+        Alert.alert('Perfil', `No se encontró a "${candidate.name}".`);
+        return;
+      }
+
+      const expected = normalizeText(candidate.name);
+      const exact =
+        search.players.find((p) => {
+          const full = normalizeText([p.first_name, p.last_name].filter(Boolean).join(' '));
+          return full === expected;
+        }) ??
+        search.players.find((p) => {
+          const full = normalizeText([p.first_name, p.last_name].filter(Boolean).join(' '));
+          return full.includes(expected) || expected.includes(full);
+        }) ??
+        search.players[0];
+
+      onPlayerPress?.(exact.id);
+    } catch (err) {
+      console.error('Error resolving player for profile:', err);
     }
   };
   const ringA = useRef(new Animated.Value(0)).current;
@@ -525,9 +590,17 @@ export function IAAfinidadModal({
 
   useEffect(() => {
     if (!visible) return;
+    // Si hay resultados previos (ej. al volver del chat), mostrarlos directamente
+    // sin resetear el formulario ni los candidatos ya enviados
+    if (responseText) {
+      setShowResults(true);
+      return;
+    }
+    // Primera apertura o después de buscar nuevamente
     setSelections(DEFAULT_SELECTIONS);
     setShowResults(false);
-  }, [visible]);
+    setSentCandidateIds(new Set());
+  }, [visible, responseText]);
 
   const prompt = useMemo(() => {
     const getLabel = (groupId: OptionGroup['id'], selectedId: string): string => {
@@ -714,7 +787,9 @@ export function IAAfinidadModal({
                         key={candidate.id}
                         candidate={candidate}
                         onMessagePress={handleCandidateMessage}
+                        onPlayerPress={handlePlayerPress}
                         sending={sendingCandidateId === candidate.id}
+                        sent={sentCandidateIds.has(candidate.id)}
                       />
                     ))
                   ) : (
@@ -731,6 +806,9 @@ export function IAAfinidadModal({
                   onPress={() => {
                     setSelections(DEFAULT_SELECTIONS);
                     setShowResults(false);
+                    const empty = new Set<string>();
+                    setSentCandidateIds(empty);
+                    onSentIdsChange?.(empty);
                   }}
                 >
                   <Ionicons name="sparkles" size={18} color="#d1d5db" />
@@ -1311,5 +1389,21 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 999,
     backgroundColor: '#F18F34',
+  },
+  messageBtnSent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: 'rgba(74,222,128,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.25)',
+  },
+  messageBtnSentText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4ADE80',
   },
 });

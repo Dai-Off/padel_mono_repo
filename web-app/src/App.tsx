@@ -5,6 +5,7 @@ import { ResetPassword } from './components/Auth/ResetPassword';
 import { EmailConfirmed } from './components/Auth/EmailConfirmed';
 import { ClubRegistration } from './components/Registration/ClubRegistration';
 import { RegistroClubInvite } from './components/Registration/RegistroClubInvite';
+import { ClubPortalInviteAccept } from './components/Auth/ClubPortalInviteAccept';
 import { ClubDashboard } from './components/Dashboard/ClubDashboard';
 import { ManagerOnboarding } from './components/Onboarding/ManagerOnboarding';
 import { AdminPanel } from './components/Admin/AdminPanel';
@@ -16,11 +17,12 @@ import { LearningContentView } from './components/Learning/LearningContentView';
 import { AdminLearningPage } from './components/Admin/Learning/AdminLearningPage';
 import { authService } from './services/auth';
 import { Toaster } from 'sonner';
+import { ErrorBoundary } from './components/Layout/ErrorBoundary';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const session = authService.getSession();
   if (!session) return <Navigate to="/login" replace />;
-  return <>{children}</>;
+  return <ErrorBoundary>{children}</ErrorBoundary>;
 };
 
 function App() {
@@ -34,6 +36,7 @@ function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/registro" element={<ClubRegistration />} />
         <Route path="/registro-club" element={<RegistroClubInvite />} />
+        <Route path="/invitacion-equipo" element={<ClubPortalInviteAccept />} />
 
         <Route
           path="/admin"
@@ -92,6 +95,14 @@ function App() {
           }
         />
         <Route
+          path="/equipo-portal"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/personal"
           element={
             <ProtectedRoute>
@@ -103,7 +114,7 @@ function App() {
           path="/mi-perfil"
           element={
             <ProtectedRoute>
-              <ClubDashboard />
+              <Navigate to="/crm" replace />
             </ProtectedRoute>
           }
         />

@@ -12,6 +12,8 @@ import {
   resolveClubIdForBooking,
 } from '../services/paymentRefundService';
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
+import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
+import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 
 const router = Router();
 
@@ -23,10 +25,10 @@ const SELECT_ONE =
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team,
           ${bookingRel} (
-            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
+            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type,
             payment_transactions (amount_cents, status),
             courts (
-              id, club_id, name, indoor, glass_type,
+              id, club_id, name, indoor, glass_type, sport,
               clubs (id, name, address, city)
             )
           ),
@@ -49,6 +51,18 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
  *       - in: query
  *         name: expand
  *         schema: { type: string, enum: ['1', 'true'] }
+ *       - in: query
+ *         name: active_only
+ *         description: Solo partidos con reserva activa (end_at futuro) y match no cancelado/finalizado.
+ *         schema: { type: string, enum: ['1', 'true', '0', 'false'] }
+ *       - in: query
+ *         name: date_from
+ *         description: ISO8601; filtra por bookings.start_at >= date_from (con expand).
+ *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: date_to
+ *         description: ISO8601; filtra por bookings.start_at <= date_to (con expand).
+ *         schema: { type: string, format: date-time }
  *     responses:
  *       200:
  *         content:
@@ -61,6 +75,8 @@ router.get('/', async (req: Request, res: Response) => {
   const expand = req.query.expand === '1' || req.query.expand === 'true';
   /** Solo partidos no jugados aún: end_at futuro y estado distinto de cancelado/finalizado. Query param explícito para no romper clientes que listan histórico. */
   const active_only = req.query.active_only === '1' || req.query.active_only === 'true';
+  const date_from = req.query.date_from as string | undefined;
+  const date_to = req.query.date_to as string | undefined;
   try {
     await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
@@ -77,8 +93,15 @@ router.get('/', async (req: Request, res: Response) => {
           .order('start_at', { ascending: true, foreignTable: 'bookings' })
           .limit(100);
       } else {
-        q = q.order('created_at', { ascending: false }).limit(50);
+        q = q.limit(200);
+        if (date_from || date_to) {
+          q = q.order('start_at', { ascending: true, foreignTable: 'bookings' });
+        } else {
+          q = q.order('created_at', { ascending: false });
+        }
       }
+      if (date_from) q = q.gte('bookings.start_at', date_from);
+      if (date_to) q = q.lte('bookings.start_at', date_to);
       if (booking_id) q = q.eq('booking_id', booking_id);
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -152,7 +175,34 @@ router.get('/:id', async (req: Request, res: Response) => {
         .maybeSingle();
       if (error) return res.status(500).json({ ok: false, error: error.message });
       if (!data) return res.status(404).json({ ok: false, error: 'Match not found' });
-      return res.json({ ok: true, match: data });
+
+      const authHeader = req.headers.authorization;
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+      let out = data;
+      if (token) {
+        const { data: authData, error: authErr } = await supabase.auth.getUser(token);
+        const email =
+          authErr || !authData?.user?.email
+            ? null
+            : String(authData.user.email).trim().toLowerCase();
+        if (email) {
+          const { data: pl } = await supabase.from('players').select('id').eq('email', email).maybeSingle();
+          const playerId = (pl as { id?: string } | null)?.id;
+          const bookingId = (out as { booking_id?: string | null }).booking_id;
+          if (playerId && bookingId) {
+            const repaired = await tryRepairPaidGuestMissingFromMatch(supabase, id, bookingId, playerId);
+            if (repaired) {
+              const { data: d2, error: e2 } = await supabase
+                .from('matches')
+                .select(expandSelect('bookings'))
+                .eq('id', id)
+                .maybeSingle();
+              if (!e2 && d2) out = d2;
+            }
+          }
+        }
+      }
+      return res.json({ ok: true, match: out });
     }
     const { data, error } = await supabase
       .from('matches')
@@ -253,6 +303,16 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     }
 
     const supabase = getSupabaseServiceRoleClient();
+    const { data: courtClubRow } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
+    const clubForOnline = (courtClubRow as { club_id?: string } | null)?.club_id;
+    const sch = ['mobile', 'web', 'manual', 'system'].includes(source_channel) ? source_channel : 'web';
+    if (clubForOnline) {
+      const allowMap = await fetchAllowOnlineByType(supabase, clubForOnline);
+      const gate = assertReservationTypeAllowedOnline(allowMap, 'open_match', sch);
+      if (!gate.ok) {
+        return res.status(403).json({ ok: false, error: gate.error });
+      }
+    }
     const type = bodyType === 'matchmaking' ? 'matchmaking' : 'open';
     const isCompetitive = competitive !== false;
     let eloMinIns = elo_min != null ? Number(elo_min) : null;

@@ -160,6 +160,25 @@ export async function joinPublicTournament(
   }
 }
 
+export async function joinTournamentAsPair(
+  tournamentId: string,
+  teammateEmail: string,
+  token: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(`${API_URL}/tournaments/${encodeURIComponent(tournamentId)}/join-pair`, {
+      method: 'POST',
+      headers: headers(token),
+      body: JSON.stringify({ teammate_email: teammateEmail }),
+    });
+    const json = (await res.json()) as { ok?: boolean; error?: string };
+    if (res.ok && json.ok) return { ok: true };
+    return { ok: false, error: json.error ?? 'No se pudo completar la inscripción por parejas' };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
 /** Baja del torneo (inscripción pending o confirmed). */
 export async function leaveTournament(
   tournamentId: string,

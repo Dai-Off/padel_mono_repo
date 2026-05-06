@@ -6,6 +6,7 @@ import { attachAuthContext } from '../middleware/attachAuthContext';
 import { findTournamentConflict } from '../lib/tournamentConflicts';
 import { isExpiredMatchLock, MATCH_DRAFT_LOCK_MARKER, getAvailableCourtIds } from '../lib/courtConflict';
 import { refundStripeBookingPaymentTransactions } from '../services/paymentRefundService';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -102,11 +103,6 @@ async function checkWalletBalances(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
-
 /** When a grilla booking linked to a tournament changes time/court, align torneo + hermanas en pista. */
 async function propagateTournamentFromBookingUpdate(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
@@ -200,6 +196,22 @@ async function hasCourtConflict(params: {
     return { conflict: true, reason: 'Rango horario inválido' };
   }
 
+  const { data: courtRow, error: cMetaErr } = await supabase
+    .from('courts')
+    .select('club_id, is_hidden, status')
+    .eq('id', params.courtId)
+    .maybeSingle();
+  if (cMetaErr) return { conflict: true, reason: cMetaErr.message };
+  if (!courtRow) return { conflict: true, reason: 'Pista no encontrada' };
+  if ((courtRow as { is_hidden?: boolean | null }).is_hidden) {
+    return { conflict: true, reason: 'Esta pista no admite reservas (uso interno)' };
+  }
+  const cStatus = (courtRow as { status?: string | null }).status;
+  if (cStatus && cStatus !== 'operational') {
+    return { conflict: true, reason: 'La pista no está operativa' };
+  }
+  const preClubId = (courtRow as { club_id?: string | null }).club_id;
+
   // 1) Conflicto contra bookings existentes
   let q = supabase
     .from('bookings')
@@ -221,13 +233,7 @@ async function hasCourtConflict(params: {
   }
 
   // 2) Conflicto contra cursos de escuela activos
-  const { data: court, error: cErr } = await supabase
-    .from('courts')
-    .select('club_id')
-    .eq('id', params.courtId)
-    .maybeSingle();
-  if (cErr) return { conflict: true, reason: cErr.message };
-  const clubId = (court as { club_id?: string } | null)?.club_id;
+  const clubId = preClubId ?? null;
   if (!clubId) return { conflict: false };
 
   const dateStr = params.startAt.slice(0, 10);
@@ -591,7 +597,7 @@ router.get('/checkin/today', async (req: Request, res: Response) => {
   if (!req.authContext) return res.status(401).json({ ok: false, error: 'Token requerido' });
   const clubId = String(req.query.club_id ?? '').trim();
   if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'grilla')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   const dateStr = String(req.query.date ?? '').trim() || new Date().toISOString().slice(0, 10);
   const startUtc = new Date(`${dateStr}T00:00:00.000Z`);
   if (Number.isNaN(startUtc.getTime())) {
@@ -730,7 +736,7 @@ router.post('/:id/start-turn', async (req: Request, res: Response) => {
     const rawCourt = (bookingRef as any).courts;
     const court = Array.isArray(rawCourt) ? rawCourt[0] : rawCourt;
     const clubId = String(court?.club_id ?? '');
-    if (!clubId || !canAccessClub(req, clubId)) {
+    if (!clubId || !canAccessClub(req, clubId, 'grilla')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
