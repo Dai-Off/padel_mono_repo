@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { ExplanationCard } from '../ExplanationCard';
 import { PuzzleStage } from './PuzzleStage';
 import type { PuzzleContent, PuzzleFrame, PuzzleOption } from '../../../types/puzzle';
 
@@ -32,29 +31,17 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
     onAnswered(correct, { option_id: selected.id });
   };
 
-  const tierStyle = (opt: PuzzleOption) => {
-    if (!confirmed) {
-      return selected?.id === opt.id ? styles.optionSelected : styles.option;
-    }
-    if (opt.points === 2) return styles.optionCorrect;
-    if (selected?.id === opt.id) return styles.optionIncorrect;
-    return styles.option;
+  // Color del badge de cada opción según estado (igual color-scheme que en TestClassic).
+  const badgeStyle = (opt: PuzzleOption) => {
+    if (!confirmed) return selected?.id === opt.id ? styles.badgeSelected : styles.badge;
+    if (opt.points === 2) return styles.badgeCorrect;
+    if (selected?.id === opt.id) return styles.badgeIncorrect;
+    return styles.badge;
   };
-
-  const tierLetterStyle = (opt: PuzzleOption) => {
-    if (!confirmed) {
-      return selected?.id === opt.id ? styles.letterSelected : styles.letter;
-    }
-    if (opt.points === 2) return styles.letterCorrect;
-    if (selected?.id === opt.id) return styles.letterIncorrect;
-    return styles.letter;
-  };
-
-  const tierTextStyle = (opt: PuzzleOption) => {
-    if (!confirmed) return styles.optionText;
-    if (opt.points === 2) return styles.optionTextCorrect;
-    if (selected?.id === opt.id) return styles.optionTextIncorrect;
-    return styles.optionText;
+  const badgeTextStyle = (opt: PuzzleOption) => {
+    if (!confirmed) return selected?.id === opt.id ? styles.badgeTextActive : styles.badgeText;
+    if (opt.points === 2 || selected?.id === opt.id) return styles.badgeTextActive;
+    return styles.badgeText;
   };
 
   return (
@@ -63,164 +50,191 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
 
       <PuzzleStage frame={displayedFrame} />
 
-      <View style={styles.options}>
-        {content.options.map((opt) => {
-          const letter = String.fromCharCode(64 + opt.id);
-          const showCorrectIcon = confirmed && opt.points === 2;
-          const showWrongIcon = confirmed && selected?.id === opt.id && opt.points !== 2;
-          return (
-            <Pressable
-              key={opt.id}
-              onPress={() => handleSelect(opt)}
-              disabled={confirmed}
-              style={({ pressed }) => [tierStyle(opt), !confirmed && pressed && styles.pressed]}
+      {/* Texto del bocadillo: cambia según la fase */}
+      <View style={styles.bubble}>
+        {!selected && !confirmed && (
+          <Text style={styles.bubbleHint}>Selecciona A, B o C abajo y luego confirma.</Text>
+        )}
+        {selected && !confirmed && (
+          <>
+            <Text style={styles.bubbleLabel}>
+              {String.fromCharCode(64 + selected.id)} · {selected.text}
+            </Text>
+            <Text style={styles.bubbleHint}>Pulsa Confirmar para ver el resultado.</Text>
+          </>
+        )}
+        {confirmed && selected && (
+          <>
+            <Text
+              style={[
+                styles.bubbleLabel,
+                selected.points === 2 ? styles.colorCorrect : styles.colorIncorrect,
+              ]}
             >
-              <View style={tierLetterStyle(opt)}>
-                {showCorrectIcon ? (
-                  <Ionicons name="checkmark" size={14} color="#fff" />
-                ) : showWrongIcon ? (
-                  <Ionicons name="close" size={14} color="#fff" />
-                ) : (
-                  <Text style={confirmed && (opt.points === 2 || selected?.id === opt.id) ? styles.letterTextActive : styles.letterText}>
-                    {letter}
-                  </Text>
-                )}
-              </View>
-              <Text style={tierTextStyle(opt)}>{opt.text}</Text>
-            </Pressable>
-          );
-        })}
+              {String.fromCharCode(64 + selected.id)} · {selected.text}
+            </Text>
+            {selected.explanation ? (
+              <Text style={styles.bubbleExplanation}>{selected.explanation}</Text>
+            ) : null}
+            {selected.points !== 2 && correctOption ? (
+              <Text style={styles.bubbleCorrectHint}>
+                Correcta: {String.fromCharCode(64 + correctOption.id)} — {correctOption.text}
+              </Text>
+            ) : null}
+            {content.general_explanation ? (
+              <Text style={styles.bubbleExplanation}>{content.general_explanation}</Text>
+            ) : null}
+          </>
+        )}
       </View>
 
-      {!confirmed && (
-        <Pressable
-          onPress={handleConfirm}
-          disabled={!selected}
-          style={({ pressed }) => [
-            styles.confirmBtn,
-            !selected && styles.confirmBtnDisabled,
-            selected && pressed && styles.confirmBtnPressed,
-          ]}
-        >
-          <Text style={selected ? styles.confirmTextActive : styles.confirmText}>Confirmar</Text>
-        </Pressable>
-      )}
-
-      {confirmed && selected?.explanation && (
-        <ExplanationCard explanation={selected.explanation} />
-      )}
-      {confirmed && content.general_explanation && (
-        <ExplanationCard explanation={content.general_explanation} />
-      )}
-      {/* Por si el cliente quiere mostrar la correcta cuando falló: el árbol ya la trae. */}
-      {confirmed && selected && selected.points !== 2 && correctOption && (
-        <View style={styles.correctHint}>
-          <Ionicons name="bulb-outline" size={14} color="#10B981" />
-          <Text style={styles.correctHintText}>
-            La opción correcta era {String.fromCharCode(64 + correctOption.id)}: {correctOption.text}
-          </Text>
+      {/* Barra inferior: A/B/C en horizontal + Confirmar */}
+      <View style={styles.actionBar}>
+        <View style={styles.optionsRow}>
+          {content.options.map((opt) => {
+            const letter = String.fromCharCode(64 + opt.id);
+            const showCorrect = confirmed && opt.points === 2;
+            const showWrong = confirmed && selected?.id === opt.id && opt.points !== 2;
+            return (
+              <Pressable
+                key={opt.id}
+                onPress={() => handleSelect(opt)}
+                disabled={confirmed}
+                style={({ pressed }) => [badgeStyle(opt), !confirmed && pressed && styles.pressed]}
+              >
+                {showCorrect ? (
+                  <Ionicons name="checkmark" size={18} color="#fff" />
+                ) : showWrong ? (
+                  <Ionicons name="close" size={18} color="#fff" />
+                ) : (
+                  <Text style={badgeTextStyle(opt)}>{letter}</Text>
+                )}
+              </Pressable>
+            );
+          })}
         </View>
-      )}
+
+        {!confirmed && (
+          <Pressable
+            onPress={handleConfirm}
+            disabled={!selected}
+            style={({ pressed }) => [
+              styles.confirmBtn,
+              !selected && styles.confirmBtnDisabled,
+              selected && pressed && styles.confirmBtnPressed,
+            ]}
+          >
+            <Text style={selected ? styles.confirmTextActive : styles.confirmText}>Confirmar</Text>
+          </Pressable>
+        )}
+      </View>
     </View>
   );
 }
+
+const BADGE_SIZE = 44;
 
 const styles = StyleSheet.create({
   statement: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 17,
-    lineHeight: 24,
-    marginBottom: 16,
+    fontSize: 14,
+    lineHeight: 19,
+    marginBottom: 8,
   },
-  options: {
-    gap: 12,
-    marginTop: 16,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
+  // Bocadillo de texto contextual
+  bubble: {
+    marginTop: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    gap: 12,
+    minHeight: 56,
   },
-  optionSelected: {
+  bubbleHint: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  bubbleLabel: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 2,
+  },
+  bubbleExplanation: {
+    color: '#D1D5DB',
+    fontSize: 12,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  bubbleCorrectHint: {
+    color: '#10B981',
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 4,
+    fontWeight: '600',
+  },
+  colorCorrect: { color: '#10B981' },
+  colorIncorrect: { color: '#EF4444' },
+  // Barra de acción inferior
+  actionBar: {
+    marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    gap: 12,
+    gap: 10,
   },
-  optionCorrect: {
+  optionsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: 'rgba(16,185,129,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.3)',
-    gap: 12,
+    gap: 8,
   },
-  optionIncorrect: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
-    backgroundColor: 'rgba(239,68,68,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
-    gap: 12,
-  },
-  pressed: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  letter: {
-    width: 36,
-    height: 36,
+  badge: {
+    width: BADGE_SIZE,
+    height: BADGE_SIZE,
     borderRadius: 12,
     backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  letterSelected: {
-    width: 36,
-    height: 36,
+  badgeSelected: {
+    width: BADGE_SIZE,
+    height: BADGE_SIZE,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: '#1F2937',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  letterCorrect: {
-    width: 36,
-    height: 36,
+  badgeCorrect: {
+    width: BADGE_SIZE,
+    height: BADGE_SIZE,
     borderRadius: 12,
     backgroundColor: '#10B981',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  letterIncorrect: {
-    width: 36,
-    height: 36,
+  badgeIncorrect: {
+    width: BADGE_SIZE,
+    height: BADGE_SIZE,
     borderRadius: 12,
     backgroundColor: '#EF4444',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  letterText: { color: '#6B7280', fontSize: 14, fontWeight: '700' },
-  letterTextActive: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  optionText: { flex: 1, color: '#D1D5DB', fontSize: 13, lineHeight: 18 },
-  optionTextCorrect: { flex: 1, color: '#10B981', fontSize: 13, lineHeight: 18 },
-  optionTextIncorrect: { flex: 1, color: '#EF4444', fontSize: 13, lineHeight: 18 },
+  badgeText: { color: '#9CA3AF', fontSize: 16, fontWeight: '800' },
+  badgeTextActive: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  pressed: { opacity: 0.7 },
   confirmBtn: {
-    marginTop: 20,
-    padding: 14,
-    borderRadius: 16,
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     alignItems: 'center',
     backgroundColor: '#F18F34',
   },
@@ -228,16 +242,4 @@ const styles = StyleSheet.create({
   confirmBtnPressed: { opacity: 0.85 },
   confirmText: { color: '#6B7280', fontSize: 14, fontWeight: '700' },
   confirmTextActive: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  correctHint: {
-    marginTop: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(16,185,129,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(16,185,129,0.18)',
-  },
-  correctHintText: { flex: 1, color: '#10B981', fontSize: 12, lineHeight: 16 },
 });

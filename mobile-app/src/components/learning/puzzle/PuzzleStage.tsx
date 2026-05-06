@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LayoutChangeEvent, StyleSheet, View } from 'react-native';
+import { LayoutChangeEvent, StyleSheet, View, useWindowDimensions } from 'react-native';
 import Court from '../../../../assets/puzzles/court.svg';
 import { AnimatedPlayer, StaticPlayer } from './AnimatedPlayer';
 import { AnimatedBall, StaticBall } from './AnimatedBall';
@@ -22,6 +22,15 @@ type Props = {
 
 export function PuzzleStage({ frame, animate = true }: Props) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const win = useWindowDimensions();
+
+  // Calcular dimensiones del Stage limitadas por pantalla. Se reserva el resto
+  // para enunciado/opciones/confirmar de modo que todo entre sin scroll.
+  const maxH = win.height * 0.5;                 // 50% del alto disponible
+  const maxW = Math.min(win.width - 24, 380);    // 12px de margen lateral, tope 380
+  const widthFromHeight = maxH * STAGE_ASPECT;
+  const stageW = Math.min(maxW, widthFromHeight);
+  const stageH = stageW / STAGE_ASPECT;
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
@@ -33,7 +42,7 @@ export function PuzzleStage({ frame, animate = true }: Props) {
   const durationMs = frame.duration_ms ?? 1500;
 
   return (
-    <View style={styles.wrapper}>
+    <View style={[styles.wrapper, { width: stageW, height: stageH }]}>
       <View style={styles.stage} onLayout={onLayout}>
         {/* Pista de fondo (incluye paredes y márgenes). */}
         <Court width="100%" height="100%" preserveAspectRatio="xMidYMid meet" />
@@ -87,16 +96,13 @@ export function PuzzleStage({ frame, animate = true }: Props) {
 
 const styles = StyleSheet.create({
   wrapper: {
-    width: '100%',
-    aspectRatio: STAGE_ASPECT,
     alignSelf: 'center',
-    maxWidth: 420,
   },
   stage: {
     flex: 1,
     position: 'relative',
     overflow: 'hidden',
     borderRadius: 12,
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#0d0d10',
   },
 });
