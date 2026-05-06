@@ -16,10 +16,10 @@ interface Props {
 }
 
 export function PlayerNode({ player, scale, selected, onSelect, onChange, snapToGrid, draggable }: Props) {
-  // Sprite "back" para el equipo del usuario (mira hacia la red, espalda al espectador).
-  // Sprite "face" para el rival arriba (mira hacia el espectador).
+  // Silueta "back" para el equipo del usuario (mira hacia la red, espalda al espectador).
+  // Silueta "front" para el rival arriba (mira hacia el espectador).
   const isUserTeam = player.team === 1;
-  const src = isUserTeam ? '/puzzles/player-white-back.png' : '/puzzles/player-white-face.png';
+  const src = isUserTeam ? '/puzzles/player_back.svg' : '/puzzles/player_front.svg';
   const [image] = useImage(src);
 
   // Tamaño visual del jugador = 3.5 × radius en metros.
