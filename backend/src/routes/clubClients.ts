@@ -42,6 +42,40 @@ function parseBoolParam(v: unknown): boolean | null {
   return null;
 }
 
+async function getClubPlayerSegmentsMap(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+  playerIds: string[],
+): Promise<Map<string, { segment_slug: string; discount_percent: number }>> {
+  const out = new Map<string, { segment_slug: string; discount_percent: number }>();
+  if (playerIds.length === 0) return out;
+  for (const batch of chunk(playerIds, 500)) {
+    const { data, error } = await supabase
+      .from('club_player_segments')
+      .select('player_id, segment_slug, discount_percent')
+      .eq('club_id', clubId)
+      .in('player_id', batch)
+      .limit(5000);
+    if (error) {
+      const msg = String(error.message ?? '').toLowerCase();
+      const code = String((error as { code?: string }).code ?? '');
+      if (code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache')) {
+        return new Map();
+      }
+      throw error;
+    }
+    for (const row of data ?? []) {
+      const pid = String((row as { player_id?: string }).player_id ?? '');
+      if (!pid) continue;
+      out.set(pid, {
+        segment_slug: String((row as { segment_slug?: string }).segment_slug ?? 'standard'),
+        discount_percent: Math.trunc(Number((row as { discount_percent?: number }).discount_percent ?? 0)),
+      });
+    }
+  }
+  return out;
+}
+
 async function getWalletBalanceByPlayer(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
   clubId: string,
@@ -121,7 +155,17 @@ function csvEscape(v: string | number | null | undefined): string {
  *           application/json:
  *             example:
  *               ok: true
- *               players: [{ id: "uuid", first_name: "Ana", last_name: "López", email: "a@b.com", phone: "+34…", elo_rating: 1200, status: "active" }]
+ *               players:
+ *                 - id: "uuid"
+ *                   first_name: "Ana"
+ *                   last_name: "López"
+ *                   email: "a@b.com"
+ *                   phone: "+34…"
+ *                   elo_rating: 1200
+ *                   status: "active"
+ *                   wallet_balance_cents: 0
+ *                   segment_slug: "standard"
+ *                   discount_percent: 0
  *       400: { description: Falta club_id }
  *       401: { description: Sin token }
  *       403: { description: Sin acceso al club }
@@ -320,16 +364,29 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
     if (playerIds.length > 0) {
       const currentIds = players.map((p) => String(p.id));
       const walletBalances = await getWalletBalanceByPlayer(supabase, club_id, currentIds);
+      let segmentMap = new Map<string, { segment_slug: string; discount_percent: number }>();
+      try {
+        segmentMap = await getClubPlayerSegmentsMap(supabase, club_id, currentIds);
+      } catch {
+        segmentMap = new Map();
+      }
       players = players
         .filter((p) => {
           if (has_wallet_balance === null) return true;
           const bal = walletBalances.get(String(p.id)) ?? 0;
           return has_wallet_balance ? bal > 0 : bal <= 0;
         })
-        .map((p) => ({
-          ...p,
-          wallet_balance_cents: walletBalances.get(String(p.id)) ?? 0,
-        }));
+        .map((p) => {
+          const pid = String(p.id);
+          const seg = segmentMap.get(pid);
+          return {
+            ...p,
+            wallet_balance_cents: walletBalances.get(pid) ?? 0,
+            ...(seg
+              ? { segment_slug: seg.segment_slug, discount_percent: seg.discount_percent }
+              : { segment_slug: 'standard', discount_percent: 0 }),
+          };
+        });
     }
 
     return res.json({ ok: true, players });

@@ -77,6 +77,108 @@ router.post('/', requireAuthUser, async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * @openapi
+ * /bonuses/{id}/gift-to-player:
+ *   post:
+ *     tags: [Bonos]
+ *     summary: Regalar bono a un jugador (monedero y/o pack clases)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [player_id]
+ *             properties:
+ *               player_id: { type: string, format: uuid }
+ *               class_sessions: { type: integer, minimum: 1, description: Solo si category=clases }
+ *           examples:
+ *             wallet:
+ *               value: { player_id: "00000000-0000-4000-8000-000000000001" }
+ *             clases:
+ *               value: { player_id: "00000000-0000-4000-8000-000000000001", class_sessions: 5 }
+ *     responses:
+ *       201: { description: Creado (wallet y/o class_bono) }
+ *       400: { description: Falta player_id }
+ *       403: { description: Sin acceso al club del bono }
+ *       404: { description: Bono no encontrado }
+ */
+// ─── POST /bonuses/:id/gift-to-player ─────────────────────────────────────────
+// Regala el bono a un jugador (crédito monedero y/o pack de clases).
+router.post('/:id/gift-to-player', requireAuthUser, async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { player_id, class_sessions } = req.body ?? {};
+    if (!player_id) return res.status(400).json({ ok: false, error: 'player_id es obligatorio' });
+
+    try {
+        const supabase = getSupabaseServiceRoleClient();
+        const { data: bonus, error: readErr } = await supabase
+            .from('bonuses')
+            .select(FIELDS)
+            .eq('id', id)
+            .maybeSingle();
+        if (readErr || !bonus) return res.status(404).json({ ok: false, error: 'Bono no encontrado' });
+        const cid = (bonus as { club_id: string }).club_id;
+        if (!canAccessClub(req, cid, 'grilla')) {
+            return res.status(403).json({ ok: false, error: 'No tienes acceso a este bono' });
+        }
+
+        const balanceToAdd = Number((bonus as { balance_to_add?: number }).balance_to_add ?? 0);
+        const category = String((bonus as { category?: string }).category ?? 'monedero');
+        const name = String((bonus as { name?: string }).name ?? 'Bono');
+
+        const out: { wallet?: unknown; class_bono?: unknown } = {};
+
+        if (balanceToAdd > 0) {
+            const { data: tx, error: txErr } = await supabase
+                .from('wallet_transactions')
+                .insert({
+                    player_id: String(player_id),
+                    club_id: cid,
+                    amount_cents: balanceToAdd,
+                    concept: `Bono regalo: ${name}`,
+                    type: 'credit',
+                    notes: `bonus_id=${id}`,
+                })
+                .select()
+                .single();
+            if (txErr) return res.status(500).json({ ok: false, error: txErr.message });
+            out.wallet = tx;
+        }
+
+        if (category === 'clases') {
+            const sessions = Math.max(1, Math.trunc(Number(class_sessions ?? 1)));
+            if (Number.isFinite(sessions)) {
+                const { data: cb, error: cbErr } = await supabase
+                    .from('class_bonos')
+                    .insert({
+                        player_id: String(player_id),
+                        club_id: cid,
+                        total_classes: sessions,
+                        remaining_classes: sessions,
+                        price_cents: 0,
+                        currency: 'EUR',
+                        status: 'active',
+                    })
+                    .select()
+                    .single();
+                if (!cbErr) out.class_bono = cb;
+            }
+        }
+
+        return res.status(201).json({ ok: true, ...out });
+    } catch (err) {
+        return res.status(500).json({ ok: false, error: (err as Error).message });
+    }
+});
+
 // ─── PUT /bonuses/:id ─────────────────────────────────────────────────────────
 // Actualiza un bono existente.
 router.put('/:id', requireAuthUser, async (req: Request, res: Response) => {

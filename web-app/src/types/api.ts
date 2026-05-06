@@ -13,6 +13,9 @@ export interface Player {
     gender?: 'male' | 'female' | 'other' | null;
     /** Suma de `wallet_transactions` en el club indicado al listar con `club_id` (centavos). */
     wallet_balance_cents?: number;
+    /** Segmento CRM en el club (tarifas con descuento). */
+    segment_slug?: string;
+    discount_percent?: number;
 }
 
 export interface ClubOwner {
