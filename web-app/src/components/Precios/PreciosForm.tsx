@@ -38,6 +38,7 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
   const [saving, setSaving] = useState(false);
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [colors, setColors] = useState<Record<string, string>>({});
+  const [allowOnline, setAllowOnline] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const colorInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -47,21 +48,24 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
     setLoading(true);
     setError(null);
     const controller = new AbortController();
-    apiFetchWithAuth<{ ok: boolean; prices?: Record<string, { price_per_hour_cents: number; color?: string | null }> }>(
-      `/reservation-type-prices?club_id=${encodeURIComponent(clubId)}`,
-      { signal: controller.signal }
-    )
+    apiFetchWithAuth<{
+      ok: boolean;
+      prices?: Record<string, { price_per_hour_cents: number; color?: string | null; allow_online?: boolean }>;
+    }>(`/reservation-type-prices?club_id=${encodeURIComponent(clubId)}`, { signal: controller.signal })
       .then((res) => {
         if (cancelled) return;
         if (!res?.ok || !res.prices) { setPrices({}); return; }
         const nextPrices: Record<string, number> = {};
         const nextColors: Record<string, string> = {};
+        const nextAllow: Record<string, boolean> = {};
         for (const type of RESERVATION_TYPES) {
           nextPrices[type] = res.prices?.[type]?.price_per_hour_cents ?? 0;
           nextColors[type] = res.prices?.[type]?.color ?? DEFAULT_COLORS[type] ?? '#6b7280';
+          nextAllow[type] = res.prices?.[type]?.allow_online ?? (type === 'standard' || type === 'open_match');
         }
         setPrices(nextPrices);
         setColors(nextColors);
+        setAllowOnline(nextAllow);
       })
       .catch((err) => {
         if (cancelled || err?.name === 'AbortError') return;
@@ -87,7 +91,7 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
     try {
       const res = await apiFetchWithAuth<{ ok: boolean }>('/reservation-type-prices', {
         method: 'PUT',
-        body: JSON.stringify({ club_id: clubId, prices, colors }),
+        body: JSON.stringify({ club_id: clubId, prices, colors, allow_online: allowOnline }),
       });
       if (res?.ok) {
         toast.success(t('save_success'));
@@ -108,15 +112,29 @@ export function PreciosForm({ clubId }: PreciosFormProps) {
     <div className="bg-white rounded-2xl border border-gray-100 p-5">
       {error && <p className="text-xs text-red-500 mb-3">{error}</p>}
       <form onSubmit={handleSave} className="space-y-3">
+        <p className="text-[11px] text-gray-500">
+          «Online» = el jugador puede reservar este tipo desde la app/web. Pista privada y partido abierto suelen estar activos; el resto suele ser solo recepción.
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {RESERVATION_TYPES.map((type) => {
             const currentColor = colors[type] ?? DEFAULT_COLORS[type] ?? '#6b7280';
             return (
-              <div key={type} className="flex items-center gap-2">
+              <div key={type} className="flex items-center gap-2 flex-wrap">
                 <label className="text-[11px] font-medium text-gray-600 w-36 shrink-0 truncate">
                   {t(`reservation_type_${type}`)}
                 </label>
-                <div className="flex-1 flex items-center gap-1.5">
+                <label className="flex items-center gap-1 text-[10px] text-gray-500 shrink-0 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={allowOnline[type] ?? false}
+                    onChange={(e) =>
+                      setAllowOnline((prev) => ({ ...prev, [type]: e.target.checked }))
+                    }
+                    className="rounded border-gray-300"
+                  />
+                  Online
+                </label>
+                <div className="flex-1 flex items-center gap-1.5 min-w-[140px]">
                   <input
                     type="color"
                     ref={(el) => { colorInputRefs.current[type] = el; }}

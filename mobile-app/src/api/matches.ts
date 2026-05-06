@@ -10,6 +10,7 @@ export type Match = {
   gender: string | null;
   competitive: boolean;
   status: string;
+  score_status?: 'pending' | 'confirmed' | 'disputed' | null;
   type?: string | null;
 };
 
@@ -38,6 +39,7 @@ export type MatchEnriched = Match & {
     total_price_cents: number;
     currency: string;
     status?: string;
+    reservation_type?: string | null;
     court_id: string;
     courts?: {
       id: string;
@@ -45,6 +47,7 @@ export type MatchEnriched = Match & {
       name?: string;
       indoor?: boolean;
       glass_type?: string;
+      sport?: string | null;
       clubs?: { id: string; name: string; address: string; city: string } | null;
     } | null;
   } | null;
@@ -66,10 +69,14 @@ type FetchMatchesOptions = {
    * Por defecto true para listados en la app.
    */
   activeOnly?: boolean;
+  /** ISO inicio (inclusive) para filtrar por `bookings.start_at` (requiere expand). */
+  dateFrom?: string;
+  /** ISO fin (inclusive) para filtrar por `bookings.start_at`. */
+  dateTo?: string;
 };
 
 export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<MatchEnriched[]> {
-  const { bookingId, expand = true, token, activeOnly = true } = options;
+  const { bookingId, expand = true, token, activeOnly = true, dateFrom, dateTo } = options;
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -78,6 +85,8 @@ export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<M
   if (bookingId) url.searchParams.set('booking_id', bookingId);
   if (expand) url.searchParams.set('expand', '1');
   if (activeOnly) url.searchParams.set('active_only', '1');
+  if (dateFrom) url.searchParams.set('date_from', dateFrom);
+  if (dateTo) url.searchParams.set('date_to', dateTo);
 
   try {
     const res = await fetch(url.toString(), { headers });
@@ -265,7 +274,7 @@ export async function fetchMatchById(
 
 export type SubmitMatchScoreBody = {
   sets: Array<{ a: number; b: number }>;
-  match_end_reason?: 'completed' | 'retired' | 'timeout';
+  match_end_reason?: 'completed' | 'retired' | 'timeout' | 'draw';
   retired_team?: 'A' | 'B';
 };
 

@@ -14,6 +14,14 @@ export type SlotForCreate = {
   dateLabel: string;
   minPriceCents: number;
   minPriceFormatted: string;
+  courtSport?: string;
+  courtIndoor?: boolean;
+};
+
+export type ClubAvailabilityFilters = {
+  sport?: string;
+  /** Sin definir = todas; true/false = interior / exterior */
+  indoor?: boolean;
 };
 
 export type ClubDisplay = {
@@ -65,6 +73,8 @@ function toSlots(r: SearchCourtResult, dateStr: string, dateLabel: string): Slot
     dateLabel,
     minPriceCents: r.minPriceCents || 0,
     minPriceFormatted: r.minPriceFormatted || '-',
+    courtSport: (r.sport ?? 'padel').toLowerCase(),
+    courtIndoor: !!r.indoor,
   }));
 }
 
@@ -116,8 +126,17 @@ function mergeByClub(todayResults: SearchCourtResult[], tomorrowResults: SearchC
   return Array.from(byClub.values()).sort((a, b) => a.clubName.localeCompare(b.clubName));
 }
 
+function courtMetaFromPrices(prices: SearchCourtResult[]): Map<string, { sport: string; indoor: boolean }> {
+  const m = new Map<string, { sport: string; indoor: boolean }>();
+  for (const p of prices) {
+    m.set(p.id, { sport: (p.sport ?? 'padel').toLowerCase(), indoor: !!p.indoor });
+  }
+  return m;
+}
+
 export async function fetchClubAvailabilityForCreate(
-  token: string | null | undefined
+  token: string | null | undefined,
+  filters?: ClubAvailabilityFilters
 ): Promise<ClubDisplay[]> {
   const now = new Date();
   const today = toDateStringLocal(now);
@@ -125,10 +144,14 @@ export async function fetchClubAvailabilityForCreate(
   tomorrowD.setDate(tomorrowD.getDate() + 1);
   const tomorrow = toDateStringLocal(tomorrowD);
 
+  const searchExtra: { indoor?: boolean; sport?: string } = {};
+  if (filters?.indoor !== undefined) searchExtra.indoor = filters.indoor;
+  if (filters?.sport?.trim()) searchExtra.sport = filters.sport.trim().toLowerCase();
+
   // Obtenemos precios (sin token necesario)
   const [todayPrices, tomorrowPrices] = await Promise.all([
-    fetchSearchCourts({ dateFrom: today, dateTo: today }),
-    fetchSearchCourts({ dateFrom: tomorrow, dateTo: tomorrow }),
+    fetchSearchCourts({ dateFrom: today, dateTo: today, ...searchExtra }),
+    fetchSearchCourts({ dateFrom: tomorrow, dateTo: tomorrow, ...searchExtra }),
   ]);
 
   // Obtenemos disponibilidad real (requiere token)
@@ -162,21 +185,27 @@ export async function fetchClubAvailabilityForCreate(
   ]);
 
   const finalResults: ClubDisplay[] = [];
+  const metaByCourt = courtMetaFromPrices([...todayPrices, ...tomorrowPrices]);
 
   for (const clubId of clubIds) {
     const meta = clubMetadata.get(clubId)!;
     const location = meta.distanceKm != null ? `${meta.distanceKm}km · ${meta.city}` : meta.city;
+    const todayCourtIdsForClub = new Set(todayPrices.filter((p) => p.clubId === clubId).map((p) => p.id));
+    const tomorrowCourtIdsForClub = new Set(tomorrowPrices.filter((p) => p.clubId === clubId).map((p) => p.id));
     
     const dates = [];
 
     // Hoy
     if (day1Res.ok) {
       const slots: SlotForCreate[] = [];
-      const clubCourts = day1Res.results.filter(r => (r as any).club_id === clubId);
+      const clubCourts = day1Res.results.filter(
+        (r) => r.club_id === clubId && todayCourtIdsForClub.has(r.court_id)
+      );
       for (const courtRes of clubCourts) {
         const filteredTimes = filterSlotsStartingAfterNow(today, courtRes.free_slots.map(s => s.start), now);
         for (const time of filteredTimes) {
           const p = todayPrices.find(r => r.id === courtRes.court_id);
+          const cm = metaByCourt.get(courtRes.court_id);
           slots.push({
             time,
             duration: '90min',
@@ -185,7 +214,9 @@ export async function fetchClubAvailabilityForCreate(
             dateStr: today,
             dateLabel: 'Hoy',
             minPriceCents: p?.minPriceCents ?? 0,
-            minPriceFormatted: p?.minPriceFormatted ?? '-'
+            minPriceFormatted: p?.minPriceFormatted ?? '-',
+            courtSport: cm?.sport ?? 'padel',
+            courtIndoor: cm?.indoor ?? false,
           });
         }
       }
@@ -207,11 +238,14 @@ export async function fetchClubAvailabilityForCreate(
     if (day2Res.ok) {
       const slots: SlotForCreate[] = [];
       const tomorrowLabel = formatDateLabel(tomorrow);
-      const clubCourts = day2Res.results.filter(r => (r as any).club_id === clubId);
+      const clubCourts = day2Res.results.filter(
+        (r) => r.club_id === clubId && tomorrowCourtIdsForClub.has(r.court_id)
+      );
       for (const courtRes of clubCourts) {
         const filteredTimes = filterSlotsStartingAfterNow(tomorrow, courtRes.free_slots.map(s => s.start), now);
         for (const time of filteredTimes) {
           const p = tomorrowPrices.find(r => r.id === courtRes.court_id);
+          const cm = metaByCourt.get(courtRes.court_id);
           slots.push({
             time,
             duration: '90min',
@@ -220,7 +254,9 @@ export async function fetchClubAvailabilityForCreate(
             dateStr: tomorrow,
             dateLabel: tomorrowLabel,
             minPriceCents: p?.minPriceCents ?? 0,
-            minPriceFormatted: p?.minPriceFormatted ?? '-'
+            minPriceFormatted: p?.minPriceFormatted ?? '-',
+            courtSport: cm?.sport ?? 'padel',
+            courtIndoor: cm?.indoor ?? false,
           });
         }
       }

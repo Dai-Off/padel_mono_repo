@@ -13,6 +13,31 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
   const [selected, setSelected] = useState<PuzzleOption | null>(null);
   const [confirmed, setConfirmed] = useState(false);
 
+  // Defensa contra content malformado (puzzle sin árbol mergeado, p. ej. fila huérfana
+  // en learning_puzzles): renderizar mensaje en lugar de crashear.
+  const hasValidContent =
+    content &&
+    Array.isArray(content.options) &&
+    content.options.length > 0 &&
+    content.initial_frame &&
+    Array.isArray(content.initial_frame.players) &&
+    content.initial_frame.ball;
+
+  if (!hasValidContent) {
+    return (
+      <View>
+        <Text style={styles.statement}>
+          {content?.statement ?? 'Puzzle no disponible.'}
+        </Text>
+        <View style={styles.bubble}>
+          <Text style={styles.bubbleHint}>
+            El contenido de este puzzle está incompleto. Salta al siguiente.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   const correctOption = content.options.find((o) => o.points === 2) ?? null;
 
   // Frame mostrado: si hay una opción seleccionada con reveal_frame → ese frame

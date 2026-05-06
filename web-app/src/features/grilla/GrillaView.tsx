@@ -52,6 +52,7 @@ import { schoolCoursesService } from '../../services/schoolCourses';
 import { authService } from '../../services/auth';
 import { getSupabaseClient } from '../../lib/supabase';
 import { listSpecialDates } from '../../services/clubSpecialDates';
+import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
 
 import './grilla.css';
 
@@ -173,9 +174,10 @@ const useClubData = (dateOrStr: Date | string) => {
         }
 
         const query = clubId ? `/bookings?date=${date}&club_id=${clubId}` : `/bookings?date=${date}`;
-        const [bRes, schoolSlots] = await Promise.all([
+        const [bRes, schoolSlots, privateSlots] = await Promise.all([
           apiFetchWithAuth<any>(query),
           clubId ? schoolCoursesService.slots(clubId, date) : Promise.resolve([]),
+          clubId ? schoolCoursesService.slotsPrivate(clubId, date) : Promise.resolve([]),
         ]);
         const raw = bRes.bookings || [];
         const schoolAsBookings = schoolSlots.map((slot) => ({
@@ -189,7 +191,18 @@ const useClubData = (dateOrStr: Date | string) => {
           notes: `${slot.course_name}${slot.staff_name ? ` - ${slot.staff_name}` : ''}`,
           players: { first_name: 'Curso', last_name: slot.course_name },
         }));
-        const merged = [...raw, ...schoolAsBookings];
+        const privateAsBookings = privateSlots.map((slot) => ({
+          id: `school-private-slot-${slot.id}`,
+          court_id: slot.court_id,
+          start_at: `${date}T${slot.start_time}:00`,
+          end_at: `${date}T${slot.end_time}:00`,
+          status: 'confirmed',
+          reservation_type: 'school_individual',
+          source_channel: 'system',
+          notes: `Clase particular${slot.student_name ? ` - ${slot.student_name}` : ''}`,
+          players: { first_name: 'Clase', last_name: slot.student_name ?? 'particular' },
+        }));
+        const merged = [...raw, ...schoolAsBookings, ...privateAsBookings];
         putBookingsCache(date, merged);
         return mapBookings(merged, courtsData);
     }, [clubId]);
@@ -203,9 +216,10 @@ const useClubData = (dateOrStr: Date | string) => {
             if (ds === skipDate) continue; // ese día ya lo cargó fetchData
             if (bookingsCache[ds] && Date.now() - bookingsCache[ds].ts < CACHE_TTL) continue;
             try {
-                const [bRes, schoolSlots] = await Promise.all([
+                const [bRes, schoolSlots, privateSlots] = await Promise.all([
                     apiFetchWithAuth<any>(`/bookings?date=${ds}&club_id=${clubId}`),
                     schoolCoursesService.slots(clubId, ds),
+                    schoolCoursesService.slotsPrivate(clubId, ds),
                 ]);
                 const schoolAsBookings = schoolSlots.map((slot: any) => ({
                     id: `school-slot-${slot.id}`,
@@ -218,7 +232,18 @@ const useClubData = (dateOrStr: Date | string) => {
                     notes: `${slot.course_name}${slot.staff_name ? ` - ${slot.staff_name}` : ''}`,
                     players: { first_name: 'Curso', last_name: slot.course_name },
                 }));
-                putBookingsCache(ds, [...(bRes.bookings || []), ...schoolAsBookings]);
+                const privateAsBookings = privateSlots.map((slot: any) => ({
+                    id: `school-private-slot-${slot.id}`,
+                    court_id: slot.court_id,
+                    start_at: `${ds}T${slot.start_time}:00`,
+                    end_at: `${ds}T${slot.end_time}:00`,
+                    status: 'confirmed',
+                    reservation_type: 'school_individual',
+                    source_channel: 'system',
+                    notes: `Clase particular${slot.student_name ? ` - ${slot.student_name}` : ''}`,
+                    players: { first_name: 'Clase', last_name: slot.student_name ?? 'particular' },
+                }));
+                putBookingsCache(ds, [...(bRes.bookings || []), ...schoolAsBookings, ...privateAsBookings]);
             } catch { /* silent */ }
         }
     }, [clubId]);
@@ -696,7 +721,18 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
+
+  const gridDayKind = useMemo<'past' | 'today' | 'future'>(() => {
+    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const selectedMidnight = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+    const diffDays = Math.round((selectedMidnight.getTime() - todayMidnight.getTime()) / 86400000);
+    if (diffDays < 0) return 'past';
+    if (diffDays === 0) return 'today';
+    return 'future';
+  }, [today, selectedDate]);
+
   const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
+  const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(clubId);
 
   const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
   useEffect(() => {
@@ -763,6 +799,7 @@ function GrillaViewInner() {
       const n = new Date();
       setNowMinutes(n.getHours() * 60 + n.getMinutes());
     };
+    tick();
     const id = setInterval(tick, 60000);
     return () => clearInterval(id);
   }, []);
@@ -864,6 +901,12 @@ function GrillaViewInner() {
           setSelectedModalReservationId(null);
           setEditingBookingData(null);
           setSelectedSchoolCourseId(courseId);
+          return;
+      }
+      if (res.booking_type === 'school_individual' || res.id.startsWith('school-private-slot-')) {
+          setSelectedSchoolCourseId(null);
+          setSelectedModalReservationId(null);
+          setEditingBookingData(null);
           return;
       }
 
@@ -1373,7 +1416,7 @@ function GrillaViewInner() {
 
     const reservation = reservations.find(r => r.id === active.id);
     if (!reservation) return;
-    if (reservation.id.startsWith('school-slot-')) return;
+    if (reservation.id.startsWith('school-slot-') || reservation.id.startsWith('school-private-slot-')) return;
 
     const newCourtId = over.id as string;
 
@@ -1760,7 +1803,9 @@ function GrillaViewInner() {
             </div>
           </header>
         )}
-        <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
+        <div className="hidden md:block">
+          <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+        </div>
 
         {/* ── Single Court View Navigation (Conditionally Rendered) ── */}
         {focusedCourtId && (
@@ -1873,7 +1918,11 @@ function GrillaViewInner() {
                     {/* Heading row with mobile hamburger */}
                     <div className="flex items-center gap-2 mb-1.5">
                       {isMobileDevice && (
-                        <button className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 flex-shrink-0 transition-colors">
+                        <button
+                          onClick={() => setIsMenuOpen(true)}
+                          className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 flex-shrink-0 transition-colors"
+                          aria-label="Abrir menú"
+                        >
                           <Menu className="w-4 h-4 text-gray-600" />
                         </button>
                       )}
@@ -2200,6 +2249,8 @@ function GrillaViewInner() {
                               key={`col-${court.id}-${focusedCourtId}`}
                               court={court}
                               reservations={reservations.filter(r => r.courtId === court.id)}
+                              gridDayKind={gridDayKind}
+                              nowMinutes={nowMinutes}
                               dragGhost={dragState?.courtId === court.id ? dragState : undefined}
                               recentlyDroppedId={recentlyDroppedId}
                               onReservationClick={handleReservationClick}
@@ -2261,6 +2312,8 @@ function GrillaViewInner() {
                           key={`col-${court.id}`}
                           court={court}
                           reservations={reservations.filter(r => r.courtId === court.id)}
+                          gridDayKind={gridDayKind}
+                          nowMinutes={nowMinutes}
                           dragGhost={dragState?.courtId === court.id ? dragState : undefined}
                           recentlyDroppedId={recentlyDroppedId}
                           onReservationClick={handleReservationClick}
@@ -2403,6 +2456,7 @@ function GrillaViewInner() {
         onClose={() => setIsMenuOpen(false)}
         clubName={portalClubName || t('header.clubName')}
         isAdmin={isAdmin}
+        portalMenuPermissionKeys={portalMenuPermissionKeys}
       />
     </ZoomContext.Provider>
   );

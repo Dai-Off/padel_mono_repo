@@ -1,11 +1,13 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
-router.use(requireClubOwnerOrAdmin);
+router.use(requireClubOwnerOrAdminOrPortalStaff);
 
 const RESERVATION_TYPES = [
   'standard', 'open_match', 'pozo', 'fixed_recurring',
@@ -13,17 +15,12 @@ const RESERVATION_TYPES = [
   'tournament', 'blocked',
 ] as const;
 
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
-
 router.get('/', async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id?.trim()) {
     return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   }
-  if (!canAccessClub(req, club_id.trim())) {
+  if (!canAccessClub(req, club_id.trim(), 'finanzas')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 
@@ -36,9 +33,19 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
-    const byType: Record<string, { price_per_hour_cents: number; currency: string; color: string | null }> = {};
+    const allowFallback = await fetchAllowOnlineByType(supabase, club_id.trim());
+
+    const byType: Record<
+      string,
+      { price_per_hour_cents: number; currency: string; color: string | null; allow_online: boolean }
+    > = {};
     for (const t of RESERVATION_TYPES) {
-      byType[t] = { price_per_hour_cents: 0, currency: 'EUR', color: null };
+      byType[t] = {
+        price_per_hour_cents: 0,
+        currency: 'EUR',
+        color: null,
+        allow_online: allowFallback[t] ?? false,
+      };
     }
     for (const r of rows ?? []) {
       if (RESERVATION_TYPES.includes(r.reservation_type as (typeof RESERVATION_TYPES)[number])) {
@@ -46,6 +53,7 @@ router.get('/', async (req: Request, res: Response) => {
           price_per_hour_cents: Number(r.price_per_hour_cents) || 0,
           currency: r.currency ?? 'EUR',
           color: r.color ?? null,
+          allow_online: allowFallback[r.reservation_type] ?? false,
         };
       }
     }
@@ -56,11 +64,11 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 router.put('/', async (req: Request, res: Response) => {
-  const { club_id, prices, colors } = req.body ?? {};
+  const { club_id, prices, colors, allow_online } = req.body ?? {};
   if (!club_id?.trim()) {
     return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   }
-  if (!canAccessClub(req, String(club_id).trim())) {
+  if (!canAccessClub(req, String(club_id).trim(), 'finanzas')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
   if (!prices || typeof prices !== 'object') {
@@ -80,6 +88,9 @@ router.put('/', async (req: Request, res: Response) => {
       const colorHex =
         typeof colorVal === 'string' && /^#[0-9a-fA-F]{6}$/.test(colorVal) ? colorVal : undefined;
 
+      const aoRaw = allow_online?.[type];
+      const allowOnlinePatch = typeof aoRaw === 'boolean' ? { allow_online: aoRaw } : {};
+
       const { error: upsertErr } = await supabase
         .from('reservation_type_prices')
         .upsert(
@@ -89,6 +100,7 @@ router.put('/', async (req: Request, res: Response) => {
             price_per_hour_cents: cents,
             currency: 'EUR',
             updated_at: now,
+            ...allowOnlinePatch,
             ...(colorHex !== undefined ? { color: colorHex } : {}),
           },
           { onConflict: 'club_id,reservation_type' }
@@ -102,12 +114,26 @@ router.put('/', async (req: Request, res: Response) => {
       .select('reservation_type, price_per_hour_cents, currency, color')
       .eq('club_id', clubId);
 
-    const byType: Record<string, { price_per_hour_cents: number; currency: string; color: string | null }> = {};
+    const allowFallback = await fetchAllowOnlineByType(supabase, clubId);
+
+    const byType: Record<
+      string,
+      { price_per_hour_cents: number; currency: string; color: string | null; allow_online: boolean }
+    > = {};
+    for (const t of RESERVATION_TYPES) {
+      byType[t] = {
+        price_per_hour_cents: 0,
+        currency: 'EUR',
+        color: null,
+        allow_online: allowFallback[t] ?? false,
+      };
+    }
     for (const r of rows ?? []) {
       byType[r.reservation_type] = {
         price_per_hour_cents: Number(r.price_per_hour_cents) || 0,
         currency: r.currency ?? 'EUR',
         color: r.color ?? null,
+        allow_online: allowFallback[r.reservation_type] ?? false,
       };
     }
     return res.json({ ok: true, prices: byType });

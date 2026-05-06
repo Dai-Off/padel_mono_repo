@@ -20,6 +20,14 @@ export interface AuthResponse {
     error?: string;
 }
 
+export interface PortalMembershipDto {
+    club_id: string;
+    club_portal_role_id: string;
+    role_name: string;
+    role_slug: string;
+    permissions: string[];
+}
+
 export interface MeResponse {
     ok: boolean;
     user: User;
@@ -27,5 +35,6 @@ export interface MeResponse {
     clubs?: Array<
         { id: string } & Record<string, any>
     >;
+    portal_memberships?: PortalMembershipDto[];
     error?: string;
 }

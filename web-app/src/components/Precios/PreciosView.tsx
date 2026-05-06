@@ -8,6 +8,7 @@ import { Building2, ChevronRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { PreciosForm } from './PreciosForm';
 import { GrillaQuickNav } from '../../features/grilla/components/GrillaQuickNav';
+import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
 
 export function PreciosView() {
   const { t } = useTranslation();
@@ -35,6 +36,8 @@ export function PreciosView() {
           list = (await clubService.getAll()) ?? [];
         } else if (ownerId) {
           list = (await clubService.getAll(ownerId)) ?? [];
+        } else {
+          list = (await clubService.getAll()) ?? [];
         }
         if (cancelled) return;
 
@@ -52,14 +55,23 @@ export function PreciosView() {
 
   const selectedClub = clubs.find((c) => c.id === selectedClubId) ?? null;
   const showClubSwitcher = isAdmin && clubs.length > 1;
+  const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(selectedClubId);
 
   if (loading) {
     return (
       <div className="min-h-screen bg-background text-foreground font-sans">
         <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
-        <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
+        <div className="hidden md:block">
+          <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+        </div>
         <PageSpinner />
-        <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" isAdmin={isAdmin} />
+        <MainMenu
+          isOpen={isMenuOpen}
+          onClose={() => setIsMenuOpen(false)}
+          clubName=""
+          isAdmin={isAdmin}
+          portalMenuPermissionKeys={portalMenuPermissionKeys}
+        />
       </div>
     );
   }
@@ -68,11 +80,19 @@ export function PreciosView() {
     return (
       <div className="min-h-screen bg-background text-foreground font-sans">
         <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
-        <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
+        <div className="hidden md:block">
+          <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+        </div>
         <main className="px-4 sm:px-5 py-12">
           <p className="text-sm text-gray-500 text-center">{t('not_found')}</p>
         </main>
-        <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" isAdmin={isAdmin} />
+        <MainMenu
+          isOpen={isMenuOpen}
+          onClose={() => setIsMenuOpen(false)}
+          clubName=""
+          isAdmin={isAdmin}
+          portalMenuPermissionKeys={portalMenuPermissionKeys}
+        />
       </div>
     );
   }
@@ -83,7 +103,9 @@ export function PreciosView() {
         clubName={selectedClub?.name ?? clubs[0]?.name ?? ''}
         onMenuClick={() => setIsMenuOpen(true)}
       />
-      <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
+      <div className="hidden md:block">
+        <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+      </div>
 
       <main className="px-4 sm:px-5 py-5 pb-20">
         <div className="max-w-2xl mx-auto">
@@ -129,6 +151,7 @@ export function PreciosView() {
         onClose={() => setIsMenuOpen(false)}
         clubName={selectedClub?.name ?? ''}
         isAdmin={isAdmin}
+        portalMenuPermissionKeys={portalMenuPermissionKeys}
       />
     </div>
   );

@@ -15,6 +15,8 @@ export type SearchCourtResult = {
   lng: number | null;
   indoor: boolean;
   glassType: string;
+  /** padel | tenis | pickleball | otro */
+  sport: string;
   imageUrl: string | null;
   distanceKm: number | null;
   minPriceCents: number;
@@ -39,15 +41,20 @@ router.get('/courts', async (req: Request, res: Response) => {
   const dateTo = req.query.date_to as string | undefined;
   const indoor = req.query.indoor as string | undefined;
   const glassType = req.query.glass_type as string | undefined;
+  const sportRaw = (req.query.sport as string | undefined)?.trim().toLowerCase();
+  const allowedSports = new Set(['padel', 'tenis', 'pickleball', 'otro']);
 
   try {
     const supabase = getSupabaseServiceRoleClient();
 
     let courtsQuery = supabase
       .from('courts')
-      .select('id, club_id, name, indoor, glass_type')
+      .select('id, club_id, name, indoor, glass_type, sport')
       .eq('is_hidden', false);
 
+    if (sportRaw && allowedSports.has(sportRaw)) {
+      courtsQuery = courtsQuery.eq('sport', sportRaw);
+    }
     if (indoor === 'true') courtsQuery = courtsQuery.eq('indoor', true);
     else if (indoor === 'false') courtsQuery = courtsQuery.eq('indoor', false);
     if (glassType === 'normal') courtsQuery = courtsQuery.eq('glass_type', 'normal');
@@ -231,6 +238,10 @@ router.get('/courts', async (req: Request, res: Response) => {
 
         const logoUrl = resolvedLogoByClubId.get(club.id) ?? null;
 
+        const sportVal =
+          typeof (court as { sport?: string }).sport === 'string' && (court as { sport: string }).sport.trim()
+            ? String((court as { sport: string }).sport).toLowerCase()
+            : 'padel';
         return [{
           id: court.id,
           clubId: club.id,
@@ -242,6 +253,7 @@ router.get('/courts', async (req: Request, res: Response) => {
           lng: club.lng,
           indoor: court.indoor,
           glassType: court.glass_type,
+          sport: allowedSports.has(sportVal) ? sportVal : 'padel',
           imageUrl: logoUrl,
           distanceKm: null as number | null,
           minPriceCents,

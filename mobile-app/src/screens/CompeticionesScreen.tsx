@@ -496,6 +496,7 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
             ) : (
               <TournamentListCard
                 row={item.row}
+                userElo={myElo}
                 onPress={() => setDetailOpen({ id: item.row.id })}
               />
             )

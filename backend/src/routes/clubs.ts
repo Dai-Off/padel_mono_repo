@@ -3,22 +3,19 @@ import { resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { requireAuthUser } from '../middleware/requireAuthUser';
+import { allPortalClubIds, canAccessClub, canAccessClubAsPortalMember, isClubOwnerOrAdmin } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
-router.use(requireClubOwnerOrAdmin);
 
 const SELECT_LIST =
   'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 const SELECT_ONE =
   'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
-
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const owner_id = req.query.owner_id as string | undefined;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -29,18 +26,26 @@ router.get('/', async (req: Request, res: Response) => {
       .limit(50);
     if (req.authContext?.adminId) {
       if (owner_id) q = q.eq('owner_id', owner_id);
+    } else if (req.authContext?.clubOwnerId && req.authContext?.allowedClubIds?.length) {
+      q = q.in('id', req.authContext.allowedClubIds);
     } else {
-      q = q.in('id', req.authContext?.allowedClubIds ?? []);
+      const portalIds = allPortalClubIds(req);
+      if (!portalIds.length) {
+        return res.json({ ok: true, clubs: [] });
+      }
+      q = q.in('id', portalIds);
     }
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
-    const clubs = await Promise.all((data ?? []).map(async (club) => {
-      const firstPhoto = Array.isArray(club.photo_urls) && club.photo_urls.length > 0 ? club.photo_urls[0] : null;
-      const urlToResolve = firstPhoto || club.logo_url;
-      const resolvedImage = await resolveClubLogoUrlForClient(supabase, urlToResolve);
-      return { ...club, logo_url: resolvedImage };
-    }));
+    const clubs = await Promise.all(
+      (data ?? []).map(async (club) => {
+        const firstPhoto = Array.isArray(club.photo_urls) && club.photo_urls.length > 0 ? club.photo_urls[0] : null;
+        const urlToResolve = firstPhoto || club.logo_url;
+        const resolvedImage = await resolveClubLogoUrlForClient(supabase, urlToResolve);
+        return { ...club, logo_url: resolvedImage };
+      })
+    );
 
     return res.json({ ok: true, clubs });
   } catch (err) {
@@ -48,7 +53,7 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -59,7 +64,9 @@ router.get('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Club not found' });
-    if (!canAccessClub(req, id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClubAsPortalMember(req, id)) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
 
     const firstPhoto = Array.isArray(data.photo_urls) && data.photo_urls.length > 0 ? data.photo_urls[0] : null;
     const urlToResolve = firstPhoto || data.logo_url;
@@ -71,7 +78,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const {
     owner_id,
     fiscal_tax_id,
@@ -140,17 +147,34 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-router.put('/:id', async (req: Request, res: Response) => {
+router.put('/:id', requireAuthUser, async (req: Request, res: Response) => {
   const { id } = req.params;
-  if (!canAccessClub(req, id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!isClubOwnerOrAdmin(req, id) && !canAccessClub(req, id, 'configuracion')) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  }
   const body = req.body ?? {};
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   const allowed = [
-    'fiscal_tax_id', 'fiscal_legal_name', 'name', 'description',
-    'address', 'city', 'postal_code', 'lat', 'lng', 'base_currency',
-    'weekly_schedule', 'schedule_exceptions', 'logo_url', 'photo_urls',
-    'contact_phone', 'contact_email',
-    'notify_new_bookings', 'notify_cancellations', 'notify_maintenance_reminders', 'notify_daily_email_summary',
+    'fiscal_tax_id',
+    'fiscal_legal_name',
+    'name',
+    'description',
+    'address',
+    'city',
+    'postal_code',
+    'lat',
+    'lng',
+    'base_currency',
+    'weekly_schedule',
+    'schedule_exceptions',
+    'logo_url',
+    'photo_urls',
+    'contact_phone',
+    'contact_email',
+    'notify_new_bookings',
+    'notify_cancellations',
+    'notify_maintenance_reminders',
+    'notify_daily_email_summary',
   ];
   for (const key of allowed) {
     if (body[key] === undefined) continue;
@@ -180,9 +204,11 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  if (!canAccessClub(req, id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!req.authContext?.adminId && !req.authContext?.allowedClubIds?.includes(id)) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  }
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { error } = await supabase.from('clubs').delete().eq('id', id);

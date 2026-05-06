@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
     Plus,
     Edit,
@@ -435,6 +436,16 @@ export function ClubStaffTab({ clubId, clubResolved = true }: { clubId: string |
                     <Plus className="w-3.5 h-3.5" />
                     {t('personal_add')}
                 </button>
+            </div>
+
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/90 px-4 py-3 text-[11px] text-blue-950">
+                <p className="font-semibold mb-1">Portal de equipo y permisos</p>
+                <p className="text-blue-900/85 mb-2 leading-snug">
+                    El rol describe la función (recepción, entrenador…). El acceso a módulos (grilla, finanzas, clientes) se ajusta en la pantalla dedicada de gestión de personal.
+                </p>
+                <Link to="/equipo-portal" className="inline-flex text-xs font-bold text-[#E31E24] hover:underline">
+                    Abrir /equipo-portal →
+                </Link>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

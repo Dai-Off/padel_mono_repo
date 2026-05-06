@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 import { hashStaffPassword } from '../lib/staffPassword';
 import { sendStaffAccountEmail } from '../lib/mailer';
 import { getFrontendUrl } from '../lib/env';
@@ -91,11 +92,6 @@ function blocksToDisplay(blocks: ScheduleBlock[]): string | null {
     .join(' · ');
 }
 
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
-
 /**
  * @openapi
  * /club-staff:
@@ -122,12 +118,12 @@ function canAccessClub(req: Request, clubId: string): boolean {
  *       401: { description: Sin token }
  *       403: { description: Sin acceso al club }
  */
-router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = req.query.club_id as string | undefined;
   if (!club_id?.trim()) {
     return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   }
-  if (!canAccessClub(req, club_id)) {
+  if (!canAccessClub(req, club_id, 'gestion')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
   try {
@@ -204,7 +200,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
  *       400: { description: Validación }
  *       403: { description: Sin acceso al club }
  */
-router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, name, role, email, phone, schedule, schedule_blocks, status, password } = req.body ?? {};
   if (!club_id || !String(name ?? '').trim()) {
     return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
@@ -217,7 +213,7 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
   if (!emailStr) {
     return res.status(400).json({ ok: false, error: 'El email es obligatorio para dar de alta al personal' });
   }
-  if (!canAccessClub(req, club_id)) {
+  if (!canAccessClub(req, club_id, 'gestion')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 
@@ -293,7 +289,7 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
  *       403: { description: Sin acceso }
  *       404: { description: No encontrado }
  */
-router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -302,7 +298,7 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
       .select('club_id')
       .eq('id', id)
       .maybeSingle();
-    if (!existing || !canAccessClub(req, (existing as { club_id: string }).club_id)) {
+    if (!existing || !canAccessClub(req, (existing as { club_id: string }).club_id, 'gestion')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este registro' });
     }
   } catch {
@@ -375,7 +371,7 @@ router.put('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) 
  *       403: { description: Sin acceso }
  *       404: { description: No encontrado }
  */
-router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.delete('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -384,7 +380,7 @@ router.delete('/:id', requireClubOwnerOrAdmin, async (req: Request, res: Respons
       .select('club_id')
       .eq('id', id)
       .maybeSingle();
-    if (!existing || !canAccessClub(req, (existing as { club_id: string }).club_id)) {
+    if (!existing || !canAccessClub(req, (existing as { club_id: string }).club_id, 'gestion')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este registro' });
     }
     const { error } = await supabase.from('club_staff').delete().eq('id', id);

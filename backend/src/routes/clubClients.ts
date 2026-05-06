@@ -1,10 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { getClubClientPlayerIds, invalidateClubClientPlayerIdsCache } from '../lib/clubClientPlayers';
 import { sendClubCrmEmail } from '../lib/mailer';
 import { getPlayerClubDebt } from '../lib/players/playerDebt';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -13,11 +14,6 @@ const PLAYER_LIST_FIELDS =
   'id, created_at, first_name, last_name, email, phone, elo_rating, status, auth_user_id';
 
 type Tier = 'vip' | 'premium' | 'standard' | 'basic';
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
 
 function parseIsoDateParam(v: unknown): string | null {
   if (typeof v !== 'string') return null;
@@ -44,6 +40,40 @@ function parseBoolParam(v: unknown): boolean | null {
   if (t === '1' || t === 'true' || t === 'yes' || t === 'y') return true;
   if (t === '0' || t === 'false' || t === 'no' || t === 'n') return false;
   return null;
+}
+
+async function getClubPlayerSegmentsMap(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+  playerIds: string[],
+): Promise<Map<string, { segment_slug: string; discount_percent: number }>> {
+  const out = new Map<string, { segment_slug: string; discount_percent: number }>();
+  if (playerIds.length === 0) return out;
+  for (const batch of chunk(playerIds, 500)) {
+    const { data, error } = await supabase
+      .from('club_player_segments')
+      .select('player_id, segment_slug, discount_percent')
+      .eq('club_id', clubId)
+      .in('player_id', batch)
+      .limit(5000);
+    if (error) {
+      const msg = String(error.message ?? '').toLowerCase();
+      const code = String((error as { code?: string }).code ?? '');
+      if (code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache')) {
+        return new Map();
+      }
+      throw error;
+    }
+    for (const row of data ?? []) {
+      const pid = String((row as { player_id?: string }).player_id ?? '');
+      if (!pid) continue;
+      out.set(pid, {
+        segment_slug: String((row as { segment_slug?: string }).segment_slug ?? 'standard'),
+        discount_percent: Math.trunc(Number((row as { discount_percent?: number }).discount_percent ?? 0)),
+      });
+    }
+  }
+  return out;
 }
 
 async function getWalletBalanceByPlayer(
@@ -125,12 +155,22 @@ function csvEscape(v: string | number | null | undefined): string {
  *           application/json:
  *             example:
  *               ok: true
- *               players: [{ id: "uuid", first_name: "Ana", last_name: "López", email: "a@b.com", phone: "+34…", elo_rating: 1200, status: "active" }]
+ *               players:
+ *                 - id: "uuid"
+ *                   first_name: "Ana"
+ *                   last_name: "López"
+ *                   email: "a@b.com"
+ *                   phone: "+34…"
+ *                   elo_rating: 1200
+ *                   status: "active"
+ *                   wallet_balance_cents: 0
+ *                   segment_slug: "standard"
+ *                   discount_percent: 0
  *       400: { description: Falta club_id }
  *       401: { description: Sin token }
  *       403: { description: Sin acceso al club }
  */
-router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = String(req.query.club_id ?? '').trim();
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const tier = (typeof req.query.tier === 'string' ? req.query.tier.trim() : '') as Tier | '';
@@ -146,7 +186,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
   const bookings_from = parseIsoDateParam(req.query.bookings_from);
   const bookings_to = parseIsoDateParam(req.query.bookings_to);
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'clientes')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -324,16 +364,29 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
     if (playerIds.length > 0) {
       const currentIds = players.map((p) => String(p.id));
       const walletBalances = await getWalletBalanceByPlayer(supabase, club_id, currentIds);
+      let segmentMap = new Map<string, { segment_slug: string; discount_percent: number }>();
+      try {
+        segmentMap = await getClubPlayerSegmentsMap(supabase, club_id, currentIds);
+      } catch {
+        segmentMap = new Map();
+      }
       players = players
         .filter((p) => {
           if (has_wallet_balance === null) return true;
           const bal = walletBalances.get(String(p.id)) ?? 0;
           return has_wallet_balance ? bal > 0 : bal <= 0;
         })
-        .map((p) => ({
-          ...p,
-          wallet_balance_cents: walletBalances.get(String(p.id)) ?? 0,
-        }));
+        .map((p) => {
+          const pid = String(p.id);
+          const seg = segmentMap.get(pid);
+          return {
+            ...p,
+            wallet_balance_cents: walletBalances.get(pid) ?? 0,
+            ...(seg
+              ? { segment_slug: seg.segment_slug, discount_percent: seg.discount_percent }
+              : { segment_slug: 'standard', discount_percent: 0 }),
+          };
+        });
     }
 
     return res.json({ ok: true, players });
@@ -365,7 +418,7 @@ router.get('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) => 
  *       400: { description: Falta club_id }
  *       403: { description: Sin acceso }
  */
-router.get('/export', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/export', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = String(req.query.club_id ?? '').trim();
   const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const tier = (typeof req.query.tier === 'string' ? req.query.tier.trim() : '') as Tier | '';
@@ -381,7 +434,7 @@ router.get('/export', requireClubOwnerOrAdmin, async (req: Request, res: Respons
   const bookings_from = parseIsoDateParam(req.query.bookings_from);
   const bookings_to = parseIsoDateParam(req.query.bookings_to);
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, club_id, 'clientes')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -620,7 +673,7 @@ router.get('/export', requireClubOwnerOrAdmin, async (req: Request, res: Respons
  *       403: { description: Sin acceso al club }
  *       409: { description: Teléfono o email duplicado }
  */
-router.post('/manual', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/manual', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, first_name, last_name, phone, email } = req.body ?? {};
   const clubId = typeof club_id === 'string' ? club_id.trim() : '';
   const firstName = typeof first_name === 'string' ? first_name.trim() : '';
@@ -628,7 +681,7 @@ router.post('/manual', requireClubOwnerOrAdmin, async (req: Request, res: Respon
   const phoneStr = typeof phone === 'string' ? phone.trim() : '';
 
   if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'clientes')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   if (!firstName || !lastName || !phoneStr) {
     return res.status(400).json({ ok: false, error: 'first_name, last_name y phone son obligatorios' });
   }
@@ -750,7 +803,7 @@ router.post('/manual', requireClubOwnerOrAdmin, async (req: Request, res: Respon
  *       403: { description: Sin acceso }
  *       502: { description: Servicio de correo no configurado o error masivo }
  */
-router.post('/send-email', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/send-email', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { club_id, subject, body_html, mode, player_ids } = req.body ?? {};
   const clubId = typeof club_id === 'string' ? club_id.trim() : '';
   const subjectStr = typeof subject === 'string' ? subject.trim() : '';
@@ -758,7 +811,7 @@ router.post('/send-email', requireClubOwnerOrAdmin, async (req: Request, res: Re
   const modeStr = mode === 'all' || mode === 'selected' ? mode : '';
 
   if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'clientes')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   if (!subjectStr || !html.trim()) {
     return res.status(400).json({ ok: false, error: 'subject y body_html son obligatorios' });
   }
@@ -858,13 +911,13 @@ function escapeHtmlSnippet(s: string): string {
  *       403: { description: Sin acceso al club }
  *       404: { description: Jugador no encontrado }
  */
-router.put('/:playerId', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/:playerId', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { playerId } = req.params;
   const { club_id, first_name, last_name, email, phone, elo_rating, status } = req.body ?? {};
   const clubId = typeof club_id === 'string' ? club_id.trim() : '';
 
   if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio en el body' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'clientes')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
   const update: Record<string, unknown> = {};
   if (first_name !== undefined) update.first_name = first_name;
@@ -922,13 +975,13 @@ router.put('/:playerId', requireClubOwnerOrAdmin, async (req: Request, res: Resp
  *         required: true
  *         schema: { type: string, format: uuid }
  */
-router.get('/:playerId/debt', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/:playerId/debt', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const playerId = String(req.params.playerId ?? '').trim();
   const club_id = String(req.query.club_id ?? '').trim();
   if (!playerId || !club_id) {
     return res.status(400).json({ ok: false, error: 'playerId y club_id son obligatorios' });
   }
-  if (!canAccessClub(req, club_id)) {
+  if (!canAccessClub(req, club_id, 'clientes')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
 
@@ -969,14 +1022,14 @@ router.get('/:playerId/debt', requireClubOwnerOrAdmin, async (req: Request, res:
  *               method: { type: string, enum: [cash, card] }
  *               notes: { type: string }
  */
-router.post('/:playerId/debt/settle', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/:playerId/debt/settle', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const playerId = String(req.params.playerId ?? '').trim();
   const { club_id, amount_cents, method, notes } = req.body ?? {};
 
   if (!playerId || !club_id) {
     return res.status(400).json({ ok: false, error: 'playerId y club_id son obligatorios' });
   }
-  if (!canAccessClub(req, String(club_id))) {
+  if (!canAccessClub(req, String(club_id), 'clientes')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
   if (typeof amount_cents !== 'number' || !Number.isInteger(amount_cents) || amount_cents <= 0) {

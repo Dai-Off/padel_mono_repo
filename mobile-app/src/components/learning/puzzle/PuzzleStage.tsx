@@ -24,6 +24,11 @@ export function PuzzleStage({ frame, animate = true }: Props) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const win = useWindowDimensions();
 
+  // Defensa: si el frame está malformado (sin players o sin ball), no renderizamos
+  // actores. Evita crashes ante datos corruptos. PuzzleQuestion ya filtra arriba pero
+  // dejamos el guard aquí también para defensa en profundidad.
+  const validFrame = !!frame && Array.isArray(frame.players) && !!frame.ball;
+
   // Calcular dimensiones del Stage. Se reserva un alto fijo para los demás
   // elementos verticales del visor (header lección, statement, bocadillo,
   // barra de acciones y márgenes) y la pista usa el resto. Más robusto que un
@@ -44,7 +49,7 @@ export function PuzzleStage({ frame, animate = true }: Props) {
   // Más natural que escalar por radius porque los sprites tienen aspect ratio propio.
   const playerWidthPx = size ? size.w * 0.12 : 0;
   const ballSidePx = size ? ((courtConfig.ball.radius * 2) / STAGE_H_M) * size.h : 0;
-  const durationMs = frame.duration_ms ?? 1500;
+  const durationMs = frame?.duration_ms ?? 1500;
 
   return (
     <View style={[styles.wrapper, { width: stageW, height: stageH }]}>
@@ -52,7 +57,7 @@ export function PuzzleStage({ frame, animate = true }: Props) {
         {/* Pista de fondo (incluye paredes y márgenes). */}
         <Court width="100%" height="100%" preserveAspectRatio="xMidYMid meet" />
 
-        {size &&
+        {size && validFrame &&
           frame.players.map((p) => {
             const cxPx = (m2pctX(p.x) / 100) * size.w;
             const cyPx = (m2pctY(p.y) / 100) * size.h;
@@ -76,7 +81,7 @@ export function PuzzleStage({ frame, animate = true }: Props) {
             );
           })}
 
-        {size && (
+        {size && validFrame && (
           animate ? (
             <AnimatedBall
               ball={frame.ball}

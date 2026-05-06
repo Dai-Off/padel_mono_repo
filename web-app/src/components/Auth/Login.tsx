@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, LogIn, Mail, Lock, AlertCircle, Plus } from 'lucide-react';
 import { authService } from '../../services/auth';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
+import { clubPortalService } from '../../services/clubPortal';
 
 export const Login: React.FC = () => {
     const { t } = useTranslation();
@@ -12,8 +13,18 @@ export const Login: React.FC = () => {
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [isInviteRegistering, setIsInviteRegistering] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [registerName, setRegisterName] = useState('');
+    const [registerPassword, setRegisterPassword] = useState('');
+    const [registerPassword2, setRegisterPassword2] = useState('');
+    const [inviteModeLoading, setInviteModeLoading] = useState(false);
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const inviteToken = searchParams.get('invite_token')?.trim() ?? '';
+    const inviteEmailFromQuery = searchParams.get('invite_email')?.trim().toLowerCase() ?? '';
+    const [resolvedInviteEmail, setResolvedInviteEmail] = useState<string>(inviteEmailFromQuery);
+    const isInviteRegisterMode = !!inviteToken && !!resolvedInviteEmail;
 
     useEffect(() => {
         if (sessionStorage.getItem('padel_session_expired')) {
@@ -21,6 +32,38 @@ export const Login: React.FC = () => {
             toast.error(t('session_expired'));
         }
     }, [t]);
+
+    useEffect(() => {
+        if (isInviteRegisterMode && resolvedInviteEmail) {
+            setEmail(resolvedInviteEmail);
+        }
+    }, [resolvedInviteEmail, isInviteRegisterMode]);
+
+    useEffect(() => {
+        if (!inviteToken) return;
+        if (inviteEmailFromQuery) {
+            setResolvedInviteEmail(inviteEmailFromQuery);
+            return;
+        }
+        let cancelled = false;
+        setInviteModeLoading(true);
+        (async () => {
+            try {
+                const data = await clubPortalService.validateInviteToken(inviteToken);
+                if (cancelled || !data?.email) return;
+                setResolvedInviteEmail(String(data.email).trim().toLowerCase());
+            } catch (e) {
+                if (!cancelled) {
+                    toast.error(e instanceof Error ? e.message : 'No se pudo validar la invitación');
+                }
+            } finally {
+                if (!cancelled) setInviteModeLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [inviteEmailFromQuery, inviteToken]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -34,13 +77,21 @@ export const Login: React.FC = () => {
                 toast.success(t('login_success'));
                 try {
                     const me = await authService.getMe();
-                    if (me.ok && me.roles?.admin_id) {
+                    const next = searchParams.get('next');
+                    const safeNext =
+                        next && next.startsWith('/') && !next.startsWith('//') ? next : null;
+                    if (safeNext) {
+                        navigate(safeNext);
+                    } else if (me.ok && me.roles?.admin_id) {
                         navigate('/admin');
                     } else {
                         navigate('/grilla?menu=resumen');
                     }
                 } catch {
-                    navigate('/grilla?menu=resumen');
+                    const next = searchParams.get('next');
+                    const safeNext =
+                        next && next.startsWith('/') && !next.startsWith('//') ? next : null;
+                    navigate(safeNext ?? '/grilla?menu=resumen');
                 }
             } else {
                 setError(t(response.error === 'Email o contraseña incorrectos' ? 'invalid_credentials' : 'login_error'));
@@ -51,6 +102,40 @@ export const Login: React.FC = () => {
             toast.error(t('connection_error'));
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleInviteRegisterSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!inviteToken || !resolvedInviteEmail) return;
+        if (registerPassword.length < 6) {
+            setError('La contraseña debe tener al menos 6 caracteres');
+            return;
+        }
+        if (registerPassword !== registerPassword2) {
+            setError('Las contraseñas no coinciden');
+            return;
+        }
+        setError(null);
+        setIsInviteRegistering(true);
+        try {
+            const res = await clubPortalService.registerFromInvite({
+                token: inviteToken,
+                password: registerPassword,
+                name: registerName.trim() || undefined,
+            });
+            if (!res.ok) {
+                setError(res.error ?? 'No se pudo completar el registro');
+                return;
+            }
+            if (res.session) authService.saveSession(res.session);
+            authService.clearMeCache();
+            toast.success('Cuenta creada y acceso al club activado');
+            navigate('/grilla?menu=resumen');
+        } catch {
+            setError(t('connection_error'));
+        } finally {
+            setIsInviteRegistering(false);
         }
     };
 
@@ -104,18 +189,18 @@ export const Login: React.FC = () => {
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                             >
-                                {t('login_title')}
+                                {isInviteRegisterMode ? 'Completa tu invitación' : t('login_title')}
                             </motion.h1>
                             <motion.p
                                 className="text-xs text-white/40 mt-2"
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                             >
-                                {t('login_subtitle')}
+                                {isInviteRegisterMode ? 'Crea tu cuenta con el correo invitado para acceder al club' : t('login_subtitle')}
                             </motion.p>
                         </div>
 
-                        <form className="space-y-5" onSubmit={handleSubmit}>
+                        <form className="space-y-5" onSubmit={isInviteRegisterMode ? handleInviteRegisterSubmit : handleSubmit}>
                             {/* Email Field */}
                             <div>
                                 <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-2">
@@ -127,6 +212,7 @@ export const Login: React.FC = () => {
                                         required
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
+                                        readOnly={isInviteRegisterMode}
                                         className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
                                         placeholder={t('email_placeholder')}
                                     />
@@ -134,7 +220,64 @@ export const Login: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Password Field */}
+                            {/* Password Fields */}
+                            {isInviteRegisterMode ? (
+                                <>
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-2">
+                                            Nombre (opcional)
+                                        </label>
+                                        <div className="relative">
+                                            <input
+                                                type="text"
+                                                value={registerName}
+                                                onChange={(e) => setRegisterName(e.target.value)}
+                                                className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
+                                                placeholder="Tu nombre"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-2">
+                                            {t('password_label')}
+                                        </label>
+                                        <div className="relative">
+                                            <input
+                                                type={showPassword ? "text" : "password"}
+                                                required
+                                                value={registerPassword}
+                                                onChange={(e) => setRegisterPassword(e.target.value)}
+                                                className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
+                                                placeholder={t('password_placeholder')}
+                                            />
+                                            <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPassword(!showPassword)}
+                                                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60 transition-colors"
+                                            >
+                                                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider mb-2">
+                                            Repetir contraseña
+                                        </label>
+                                        <div className="relative">
+                                            <input
+                                                type={showPassword ? "text" : "password"}
+                                                required
+                                                value={registerPassword2}
+                                                onChange={(e) => setRegisterPassword2(e.target.value)}
+                                                className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
+                                                placeholder="Repite tu contraseña"
+                                            />
+                                            <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
                             <div>
                                 <div className="flex items-center justify-between mb-2">
                                     <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider">
@@ -163,6 +306,7 @@ export const Login: React.FC = () => {
                                     </button>
                                 </div>
                             </div>
+                            )}
 
                             <AnimatePresence>
                                 {error && (
@@ -180,17 +324,21 @@ export const Login: React.FC = () => {
 
                             <motion.button
                                 type="submit"
-                                disabled={isLoading}
+                                disabled={isLoading || isInviteRegistering}
                                 className="w-full relative overflow-hidden py-4 rounded-2xl text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                                 style={{ background: 'linear-gradient(135deg, rgb(227, 30, 36) 0%, rgb(192, 26, 32) 100%)' }}
                                 whileHover={{ scale: 1.02 }}
                                 whileTap={{ scale: 0.98 }}
                             >
-                                {isLoading && (
+                                {(isLoading || isInviteRegistering) && (
                                     <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
                                 )}
                                 <LogIn className="w-4 h-4 relative z-10" />
-                                <span className="relative z-10">{isLoading ? t('logging_in') : t('login_button')}</span>
+                                <span className="relative z-10">
+                                    {isInviteRegisterMode
+                                        ? (isInviteRegistering ? 'Creando cuenta...' : 'Crear cuenta y aceptar invitación')
+                                        : (isLoading ? t('logging_in') : t('login_button'))}
+                                </span>
                                 <motion.div
                                     className="absolute inset-0 opacity-30"
                                     style={{ background: 'linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent)' }}
@@ -200,6 +348,14 @@ export const Login: React.FC = () => {
                             </motion.button>
                         </form>
 
+                        {inviteModeLoading && inviteToken && !isInviteRegisterMode && (
+                            <div className="text-xs text-white/70 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+                                Validando invitación...
+                            </div>
+                        )}
+
+                        {!isInviteRegisterMode && !inviteModeLoading && (
+                            <>
                         <div className="flex items-center gap-3 my-6">
                             <div className="flex-1 h-px bg-white/20" />
                             <span className="w-8 h-8 rounded-full border border-white/20 flex items-center justify-center text-white/40 text-xs">o</span>
@@ -221,6 +377,8 @@ export const Login: React.FC = () => {
                         >
                             {t('cancel')}
                         </button>
+                            </>
+                        )}
                     </div>
                 </div>
             </motion.div>

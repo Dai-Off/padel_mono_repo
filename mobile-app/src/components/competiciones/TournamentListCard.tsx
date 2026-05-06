@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   Image,
   Platform,
@@ -26,9 +27,10 @@ const ACCENT = '#F18F34';
 type TournamentListCardProps = {
   row: PublicTournamentRow;
   onPress?: () => void;
+  userElo?: number | null;
 };
 
-export function TournamentListCard({ row, onPress }: TournamentListCardProps) {
+export function TournamentListCard({ row, onPress, userElo }: TournamentListCardProps) {
   const title = tournamentTitle(row);
   const uri = placeholderImageForId(row.id);
   const formatKey = inferTournamentFormatKey(row.description);
@@ -41,6 +43,15 @@ export function TournamentListCard({ row, onPress }: TournamentListCardProps) {
   const spotsLabel = `${confirmed}/${row.max_players}`;
   const priceLabel = formatTournamentInscriptionPrice(row.price_cents, row.currency ?? 'EUR');
   const registrationPair = row.registration_mode === 'pair';
+
+  const eloMismatch = useMemo(() => {
+    if (userElo == null) return false;
+    const min = row.elo_min != null ? Number(row.elo_min) : null;
+    const max = row.elo_max != null ? Number(row.elo_max) : null;
+    if (min != null && userElo < min) return true;
+    if (max != null && userElo > max) return true;
+    return false;
+  }, [userElo, row.elo_min, row.elo_max]);
 
   return (
     <Pressable
@@ -109,6 +120,16 @@ export function TournamentListCard({ row, onPress }: TournamentListCardProps) {
               <View style={styles.chip}>
                 <Text style={styles.chipMutedText}>👥 {spotsLabel}</Text>
               </View>
+              {confirmed >= (row.max_players ?? 0) && (
+                <View style={[styles.chip, styles.chipClosed]}>
+                  <Text style={styles.chipClosedText}>CERRADO</Text>
+                </View>
+              )}
+              {eloMismatch && (
+                <View style={[styles.chip, styles.chipError]}>
+                  <Text style={styles.chipErrorText}>Nivel no compatible</Text>
+                </View>
+              )}
             </View>
           </View>
         </View>
@@ -236,6 +257,26 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '700',
     color: '#d1d5db',
+    textTransform: 'uppercase',
+  },
+  chipClosed: {
+    backgroundColor: 'rgba(239,68,68,0.2)',
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  chipClosedText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#F87171',
+    textTransform: 'uppercase',
+  },
+  chipError: {
+    backgroundColor: 'rgba(239,68,68,0.2)',
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  chipErrorText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#F87171',
     textTransform: 'uppercase',
   },
 });

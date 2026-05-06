@@ -52,12 +52,15 @@ import { ClubTournamentsTab } from './ClubTournamentsTab';
 import { ClubIncidentsTab } from './ClubIncidentsTab';
 import { ClubSpecialDatesTab } from './ClubSpecialDatesTab';
 import { GrillaQuickNav } from '../../features/grilla/components/GrillaQuickNav';
+import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
+import { ClubPortalRolesView } from '../Settings/ClubPortalRolesView';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
     const location = useLocation();
     const isPlayersPage = location.pathname === '/jugadores';
     const isConfigPage = location.pathname === '/configuracion';
+    const isPortalRolesPage = location.pathname === '/equipo-portal';
     const isPersonalPage = location.pathname === '/personal';
     const isInventoryPage = location.pathname === '/inventario';
     const isSchoolPage = location.pathname === '/escuela';
@@ -100,6 +103,8 @@ export const ClubDashboard = () => {
                     clubs = await clubService.getAll();
                 } else if (ownerId) {
                     clubs = await clubService.getAll(ownerId);
+                } else {
+                    clubs = await clubService.getAll();
                 }
                 if (cancelled) return;
                 const first = Array.isArray(clubs) && clubs.length > 0 ? clubs[0] : null;
@@ -115,6 +120,8 @@ export const ClubDashboard = () => {
         })();
         return () => { cancelled = true; };
     }, []);
+
+    const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(club?.id);
 
     const [courts, setCourts] = useState<Court[]>([]);
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -132,7 +139,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
+        if (isPlayersPage || isConfigPage || isPortalRolesPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
             setLoading(false);
             return;
         }
@@ -145,7 +152,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isPortalRolesPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -222,9 +229,17 @@ export const ClubDashboard = () => {
         return (
             <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
                 <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
-                <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
+                <div className="hidden md:block">
+                    <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+                </div>
                 <PageSpinner />
-                <MainMenu isOpen={isMenuOpen} onClose={() => setIsMenuOpen(false)} clubName="" isAdmin={isAdmin} />
+                <MainMenu
+                    isOpen={isMenuOpen}
+                    onClose={() => setIsMenuOpen(false)}
+                    clubName=""
+                    isAdmin={isAdmin}
+                    portalMenuPermissionKeys={portalMenuPermissionKeys}
+                />
             </div>
         );
     }
@@ -232,7 +247,9 @@ export const ClubDashboard = () => {
     return (
         <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
             <PortalTealHeader clubName={club?.name ?? ''} onMenuClick={() => setIsMenuOpen(true)} />
-            <div className="hidden md:block"><GrillaQuickNav isAdmin={isAdmin} /></div>
+            <div className="hidden md:block">
+                <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+            </div>
 
             <main className="px-4 sm:px-5 py-5 pb-20">
                 <div className="max-w-7xl mx-auto space-y-6">
@@ -248,6 +265,8 @@ export const ClubDashboard = () => {
                         <ClubTournamentsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isConfigPage ? (
                         <ClubSettingsTab initialClub={club} />
+                    ) : isPortalRolesPage ? (
+                        <ClubPortalRolesView initialClub={club} />
                     ) : isPersonalPage ? (
                         <ClubStaffTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isInventoryPage ? (
@@ -334,6 +353,7 @@ export const ClubDashboard = () => {
                 onClose={() => setIsMenuOpen(false)}
                 clubName={club?.name ?? ''}
                 isAdmin={isAdmin}
+                portalMenuPermissionKeys={portalMenuPermissionKeys}
             />
 
             {!isInventoryPage && isFormOpen && (

@@ -61,7 +61,7 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     if (questionsRes.error) return res.status(500).json({ ok: false, error: questionsRes.error.message });
     if (historyRes.error) return res.status(500).json({ ok: false, error: historyRes.error.message });
 
-    const questions = (questionsRes.data ?? []) as QuestionRow[];
+    let questions = (questionsRes.data ?? []) as QuestionRow[];
     const history = (historyRes.data ?? []) as HistoryEntry[];
 
     if (questions.length === 0) {
@@ -77,6 +77,7 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
         .in('question_id', puzzleIds);
       if (puzzleErr) return res.status(500).json({ ok: false, error: puzzleErr.message });
       const byQ = new Map((puzzles ?? []).map((p) => [String(p.question_id), p]));
+      const orphans: string[] = [];
       for (const q of questions) {
         if (q.type === 'puzzle') {
           const p = byQ.get(String(q.id));
@@ -89,8 +90,16 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
               initial_frame: p.initial_frame,
               options: p.options,
             };
+          } else {
+            orphans.push(q.id);
           }
         }
+      }
+      // Excluir puzzles huérfanos (sin fila en learning_puzzles): el cliente
+      // crashearía al intentar renderizarlos sin initial_frame ni options.
+      if (orphans.length > 0) {
+        console.warn('[daily-lesson] Puzzles huérfanos excluidos:', orphans);
+        questions = questions.filter((q) => !orphans.includes(q.id));
       }
     }
 

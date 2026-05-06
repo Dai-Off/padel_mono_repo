@@ -27,7 +27,3 @@ export function requireOnboarding(player: { onboarding_completed: boolean }): st
   return null;
 }
 
-export function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}

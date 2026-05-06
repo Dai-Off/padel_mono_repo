@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
-import { requireClubOwnerOrAdmin } from '../middleware/requireClubOwnerOrAdmin';
-import { canAccessClub } from './learningHelpers';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { canAccessClub } from '../lib/clubAccess';
 import { validatePuzzleContent, buildPuzzleRow } from '../lib/puzzleValidator';
 
 const router = Router();
@@ -76,13 +76,13 @@ function validateQuestionContent(type: string, content: unknown): string | null 
 // ---------------------------------------------------------------------------
 
 // POST /questions
-router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const { club_id, type, level, video_url, content } = req.body ?? {};
     let { area } = req.body ?? {};
 
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-    if (!canAccessClub(req, club_id)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
     if (!VALID_QUESTION_TYPES.includes(type)) {
       return res.status(400).json({ ok: false, error: `type debe ser uno de: ${VALID_QUESTION_TYPES.join(', ')}` });
@@ -145,7 +145,7 @@ router.post('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Res
 });
 
 // PUT /questions/:id
-router.put('/questions/:id', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
     const questionId = req.params.id;
@@ -158,7 +158,7 @@ router.put('/questions/:id', requireClubOwnerOrAdmin, async (req: Request, res: 
 
     if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
     if (!existing) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
-    if (!canAccessClub(req, existing.created_by_club)) {
+    if (!canAccessClub(req, existing.created_by_club, 'escuela')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
@@ -230,6 +230,11 @@ router.put('/questions/:id', requireClubOwnerOrAdmin, async (req: Request, res: 
       return res.json({ ok: true, data: { ...data, puzzle } });
     }
 
+    // Si la pregunta cambió de puzzle a otro tipo, borrar la fila huérfana en learning_puzzles.
+    if (existing.type === 'puzzle' && effectiveType !== 'puzzle') {
+      await supabase.from('learning_puzzles').delete().eq('question_id', questionId);
+    }
+
     return res.json({ ok: true, data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -237,7 +242,7 @@ router.put('/questions/:id', requireClubOwnerOrAdmin, async (req: Request, res: 
 });
 
 // PATCH /questions/:id/deactivate
-router.patch('/questions/:id/deactivate', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.patch('/questions/:id/deactivate', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
     const questionId = req.params.id;
@@ -250,7 +255,7 @@ router.patch('/questions/:id/deactivate', requireClubOwnerOrAdmin, async (req: R
 
     if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
     if (!existing) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
-    if (!canAccessClub(req, existing.created_by_club)) {
+    if (!canAccessClub(req, existing.created_by_club, 'escuela')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
@@ -267,7 +272,7 @@ router.patch('/questions/:id/deactivate', requireClubOwnerOrAdmin, async (req: R
 });
 
 // PATCH /questions/:id/activate
-router.patch('/questions/:id/activate', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.patch('/questions/:id/activate', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
     const questionId = req.params.id;
@@ -280,7 +285,7 @@ router.patch('/questions/:id/activate', requireClubOwnerOrAdmin, async (req: Req
 
     if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
     if (!existing) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
-    if (!canAccessClub(req, existing.created_by_club)) {
+    if (!canAccessClub(req, existing.created_by_club, 'escuela')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
@@ -297,11 +302,11 @@ router.patch('/questions/:id/activate', requireClubOwnerOrAdmin, async (req: Req
 });
 
 // GET /questions
-router.get('/questions', requireClubOwnerOrAdmin, async (req: Request, res: Response) => {
+router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const clubId = req.query.club_id as string;
     if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio como query param' });
-    if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
     const supabase = getSupabaseServiceRoleClient();
     let query = supabase

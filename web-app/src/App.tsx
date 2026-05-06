@@ -5,6 +5,7 @@ import { ResetPassword } from './components/Auth/ResetPassword';
 import { EmailConfirmed } from './components/Auth/EmailConfirmed';
 import { ClubRegistration } from './components/Registration/ClubRegistration';
 import { RegistroClubInvite } from './components/Registration/RegistroClubInvite';
+import { ClubPortalInviteAccept } from './components/Auth/ClubPortalInviteAccept';
 import { ClubDashboard } from './components/Dashboard/ClubDashboard';
 import { ManagerOnboarding } from './components/Onboarding/ManagerOnboarding';
 import { AdminPanel } from './components/Admin/AdminPanel';
@@ -35,6 +36,7 @@ function App() {
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/registro" element={<ClubRegistration />} />
         <Route path="/registro-club" element={<RegistroClubInvite />} />
+        <Route path="/invitacion-equipo" element={<ClubPortalInviteAccept />} />
 
         <Route
           path="/admin"
@@ -86,6 +88,14 @@ function App() {
         />
         <Route
           path="/configuracion"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/equipo-portal"
           element={
             <ProtectedRoute>
               <ClubDashboard />

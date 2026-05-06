@@ -22,6 +22,9 @@ import clubStaffRouter from "./clubStaff";
 import reservationTypePricesRouter from "./reservationTypePrices";
 import inventoryRouter from "./inventory";
 import schoolCoursesRouter from "./schoolCourses";
+import schoolPrivateLessonsRouter from "./schoolPrivateLessons";
+import schoolFeeRulesRouter from "./schoolFeeRules";
+import schoolPaymentsRouter from "./schoolPayments";
 import clubClientsRouter from "./clubClients";
 import clubReviewsRouter from "./clubReviews";
 import clubIncidentsRouter from "./clubIncidents";
@@ -41,6 +44,9 @@ import tariffsRouter from "./tariffs";
 import seasonPassRouter from "./seasonPass";
 import publicRouter from "./public";
 import availabilityRouter from "./availability";
+import clubPortalRouter from "./clubPortal";
+import classBonosRouter from "./classBonos";
+import clubPlayerSegmentsRouter from "./clubPlayerSegments";
 
 
 const router = Router();
@@ -75,6 +81,9 @@ router.use("/club-staff", clubStaffRouter);
 router.use("/reservation-type-prices", reservationTypePricesRouter);
 router.use("/inventario", inventoryRouter);
 router.use("/school-courses", schoolCoursesRouter);
+router.use("/school-private-lessons", schoolPrivateLessonsRouter);
+router.use("/school-fee-rules", schoolFeeRulesRouter);
+router.use("/school-payments", schoolPaymentsRouter);
 router.use("/club-clients", clubClientsRouter);
 router.use("/club-reviews", clubReviewsRouter);
 router.use("/club-incidents", clubIncidentsRouter);
@@ -94,6 +103,9 @@ router.use("/tariffs", tariffsRouter);
 router.use("/season-pass", seasonPassRouter);
 router.use("/public", publicRouter);
 router.use("/availability", availabilityRouter);
+router.use("/club-portal", clubPortalRouter);
+router.use("/class-bonos", classBonosRouter);
+router.use("/club-player-segments", clubPlayerSegmentsRouter);
 
 
 export default router;

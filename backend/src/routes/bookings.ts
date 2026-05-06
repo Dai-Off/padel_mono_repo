@@ -6,6 +6,7 @@ import { attachAuthContext } from '../middleware/attachAuthContext';
 import { findTournamentConflict } from '../lib/tournamentConflicts';
 import { isExpiredMatchLock, MATCH_DRAFT_LOCK_MARKER, getAvailableCourtIds } from '../lib/courtConflict';
 import { refundStripeBookingPaymentTransactions } from '../services/paymentRefundService';
+import { canAccessClub } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -101,11 +102,6 @@ async function checkWalletBalances(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-
-function canAccessClub(req: Request, clubId: string): boolean {
-  if (req.authContext?.adminId) return true;
-  return req.authContext?.allowedClubIds?.includes(clubId) ?? false;
-}
 
 /** When a grilla booking linked to a tournament changes time/court, align torneo + hermanas en pista. */
 async function propagateTournamentFromBookingUpdate(
@@ -601,7 +597,7 @@ router.get('/checkin/today', async (req: Request, res: Response) => {
   if (!req.authContext) return res.status(401).json({ ok: false, error: 'Token requerido' });
   const clubId = String(req.query.club_id ?? '').trim();
   if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, clubId)) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  if (!canAccessClub(req, clubId, 'grilla')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   const dateStr = String(req.query.date ?? '').trim() || new Date().toISOString().slice(0, 10);
   const startUtc = new Date(`${dateStr}T00:00:00.000Z`);
   if (Number.isNaN(startUtc.getTime())) {
@@ -740,7 +736,7 @@ router.post('/:id/start-turn', async (req: Request, res: Response) => {
     const rawCourt = (bookingRef as any).courts;
     const court = Array.isArray(rawCourt) ? rawCourt[0] : rawCourt;
     const clubId = String(court?.club_id ?? '');
-    if (!clubId || !canAccessClub(req, clubId)) {
+    if (!clubId || !canAccessClub(req, clubId, 'grilla')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 

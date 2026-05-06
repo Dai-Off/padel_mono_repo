@@ -24,6 +24,7 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
         defaultValues: court || {
             name: '',
             club_id: '',
+            sport: 'padel',
             indoor: false,
             glass_type: 'normal',
             status: 'operational',
@@ -70,7 +71,7 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
 
     useEffect(() => {
         if (court) {
-            reset({ ...court, is_hidden: Boolean(court.is_hidden) });
+            reset({ ...court, is_hidden: Boolean(court.is_hidden), sport: court.sport ?? 'padel' });
         }
     }, [court, reset]);
 
@@ -141,6 +142,21 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
                             className="w-full px-4 py-3.5 rounded-2xl border border-border-subtle focus:outline-none focus:ring-4 focus:ring-brand/5 focus:border-brand bg-[#FAFAFA] text-sm font-semibold transition-all"
                         />
                         {errors.name && <span className="text-[10px] text-error font-bold px-1">{errors.name.message}</span>}
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider px-1">
+                            Deporte
+                        </label>
+                        <select
+                            {...register('sport')}
+                            className="w-full px-4 py-3.5 rounded-2xl border border-border-subtle focus:outline-none focus:ring-4 focus:ring-brand/5 focus:border-brand bg-[#FAFAFA] text-sm font-semibold transition-all appearance-none cursor-pointer"
+                        >
+                            <option value="padel">Pádel</option>
+                            <option value="tenis">Tenis</option>
+                            <option value="pickleball">Pickleball</option>
+                            <option value="otro">Otro</option>
+                        </select>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">
