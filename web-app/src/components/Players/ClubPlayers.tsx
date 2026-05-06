@@ -6,6 +6,7 @@ import {
 import { PageSpinner } from '../Layout/PageSpinner';
 import { useTranslation } from 'react-i18next';
 import { clubClientService } from '../../services/clubClients';
+import { apiFetchWithAuth } from '../../services/api';
 import type { ClubClientTier } from '../../services/clubClients';
 import type { Player } from '../../types/api';
 import { toast } from 'sonner';
@@ -38,6 +39,8 @@ function formatDate(iso: string): string {
     return '';
   }
 }
+
+const SEGMENT_SLUGS = ['standard', 'staff', 'admin', 'vip', 'sponsor', 'coach'] as const;
 
 function formatBalanceCents(cents: number, currency: string): string {
   const code = (currency || 'EUR').trim() || 'EUR';
@@ -74,6 +77,9 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
   const [manualOpen, setManualOpen] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualForm, setManualForm] = useState({ first_name: '', last_name: '', phone: '', email: '' });
+  const [segmentSlug, setSegmentSlug] = useState<string>('standard');
+  const [segmentDiscount, setSegmentDiscount] = useState('0');
+  const [segmentSaving, setSegmentSaving] = useState(false);
 
   const fetchPlayers = useCallback(async () => {
     if (!clubId) {
@@ -111,11 +117,49 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
     fetchPlayers();
   }, [fetchPlayers]);
 
+  useEffect(() => {
+    if (!selectedPlayer) return;
+    setSegmentSlug(selectedPlayer.segment_slug ?? 'standard');
+    setSegmentDiscount(String(selectedPlayer.discount_percent ?? 0));
+  }, [selectedPlayer?.id, selectedPlayer?.segment_slug, selectedPlayer?.discount_percent]);
+
   const filteredPlayers = players.filter((p) => statusFilter === 'all' || p.status === statusFilter);
 
   const totalPlayers = players.length;
   const activePlayers = players.filter((p) => p.status === 'active').length;
   const withAccount = players.filter((p) => p.auth_user_id).length;
+
+  const handleSaveSegment = async () => {
+    if (!clubId || !selectedPlayer) return;
+    const dp = Math.min(100, Math.max(0, Math.trunc(Number(segmentDiscount) || 0)));
+    setSegmentSaving(true);
+    try {
+      await apiFetchWithAuth<{ ok: boolean; segment?: { segment_slug: string; discount_percent: number } }>(
+        '/club-player-segments',
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            club_id: clubId,
+            player_id: selectedPlayer.id,
+            segment_slug: segmentSlug,
+            discount_percent: dp,
+          }),
+        }
+      );
+      setPlayers((prev) =>
+        prev.map((p) =>
+          p.id === selectedPlayer.id ? { ...p, segment_slug: segmentSlug, discount_percent: dp } : p
+        )
+      );
+      setSelectedPlayer((p) => (p ? { ...p, segment_slug: segmentSlug, discount_percent: dp } : null));
+      toast.success('Tipo de cliente actualizado');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al guardar';
+      toast.error(msg);
+    } finally {
+      setSegmentSaving(false);
+    }
+  };
 
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -517,6 +561,46 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                       </span>
                     )}
                   </div>
+                  {clubId && (
+                    <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Tipo de cliente y descuento</p>
+                      <p className="text-[10px] text-gray-400 leading-snug">
+                        Afecta al cálculo de tarifa con jugador indicado (segmento y % de descuento en el club).
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <select
+                          value={segmentSlug}
+                          onChange={(e) => setSegmentSlug(e.target.value)}
+                          className="flex-1 min-w-[140px] rounded-xl border border-gray-100 px-3 py-2 text-xs font-medium text-[#1A1A1A]"
+                        >
+                          {SEGMENT_SLUGS.map((s) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={segmentDiscount}
+                            onChange={(e) => setSegmentDiscount(e.target.value)}
+                            className="w-20 rounded-xl border border-gray-100 px-2 py-2 text-xs tabular-nums"
+                          />
+                          <span className="text-[10px] text-gray-400">%</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={segmentSaving}
+                        onClick={() => void handleSaveSegment()}
+                        className="w-full py-2.5 rounded-xl bg-[#1A1A1A] text-white text-xs font-bold disabled:opacity-50"
+                      >
+                        {segmentSaving ? 'Guardando…' : 'Guardar segmento'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </motion.div>

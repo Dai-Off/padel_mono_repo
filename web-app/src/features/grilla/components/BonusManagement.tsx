@@ -1,6 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { X, Plus, Gift, Tag, Package, Calendar, ToggleLeft, ToggleRight, Pencil, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { X, Plus, Gift, Tag, Package, Calendar, ToggleLeft, ToggleRight, Pencil, ChevronDown, UserRound, Search } from 'lucide-react';
 import { apiFetchWithAuth } from '../../../services/api';
+import { clubClientService } from '../../../services/clubClients';
+import type { Player } from '../../../types/api';
+import { toast } from 'sonner';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 
 interface Bonus {
@@ -52,6 +55,16 @@ export const BonusManagement: React.FC<BonusManagementProps> = ({ clubId, isOpen
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [filterCategory, setFilterCategory] = useState<string>('all');
+    const [giftFor, setGiftFor] = useState<Bonus | null>(null);
+    const [giftRecipient, setGiftRecipient] = useState<Player | null>(null);
+    const [giftSearchQuery, setGiftSearchQuery] = useState('');
+    const [giftSearchResults, setGiftSearchResults] = useState<Player[]>([]);
+    const [giftSearchOpen, setGiftSearchOpen] = useState(false);
+    const [giftSearchBusy, setGiftSearchBusy] = useState(false);
+    const giftSearchRef = useRef<HTMLDivElement>(null);
+    const [giftClassSessions, setGiftClassSessions] = useState('1');
+    const [giftBusy, setGiftBusy] = useState(false);
+    const [giftError, setGiftError] = useState<string | null>(null);
 
     const fetchBonuses = useCallback(async () => {
         if (!clubId) return;
@@ -69,6 +82,45 @@ export const BonusManagement: React.FC<BonusManagementProps> = ({ clubId, isOpen
     useEffect(() => {
         if (isOpen) fetchBonuses();
     }, [isOpen, fetchBonuses]);
+
+    useEffect(() => {
+        if (!giftFor || !clubId) return;
+        const q = giftSearchQuery.trim();
+        if (q.length < 2) {
+            setGiftSearchResults([]);
+            setGiftSearchOpen(false);
+            return;
+        }
+        let cancelled = false;
+        const t = window.setTimeout(async () => {
+            setGiftSearchBusy(true);
+            try {
+                const list = await clubClientService.list(clubId, { q });
+                if (cancelled) return;
+                setGiftSearchResults(list);
+                setGiftSearchOpen(true);
+            } catch {
+                if (!cancelled) setGiftSearchResults([]);
+            } finally {
+                if (!cancelled) setGiftSearchBusy(false);
+            }
+        }, 320);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(t);
+        };
+    }, [giftSearchQuery, giftFor, clubId]);
+
+    useEffect(() => {
+        if (!giftFor) return;
+        const onDoc = (e: MouseEvent) => {
+            if (giftSearchRef.current && !giftSearchRef.current.contains(e.target as Node)) {
+                setGiftSearchOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+    }, [giftFor]);
 
     const openCreate = () => {
         setEditingId(null);
@@ -174,6 +226,45 @@ export const BonusManagement: React.FC<BonusManagementProps> = ({ clubId, isOpen
     const categoryIcon = (cat: string) => CATEGORIES.find(c => c.value === cat)?.icon ?? '🎁';
 
     const formatCents = (cents: number) => (cents / 100).toFixed(2);
+
+    const openGift = (b: Bonus) => {
+        setGiftFor(b);
+        setGiftRecipient(null);
+        setGiftSearchQuery('');
+        setGiftSearchResults([]);
+        setGiftSearchOpen(false);
+        setGiftClassSessions('1');
+        setGiftError(null);
+    };
+
+    const submitGift = async () => {
+        if (!giftFor) return;
+        const pid = giftRecipient?.id?.trim();
+        if (!pid) {
+            setGiftError('Busca por nombre o teléfono y selecciona un cliente del club.');
+            return;
+        }
+        setGiftBusy(true);
+        setGiftError(null);
+        try {
+            const body: Record<string, unknown> = { player_id: pid };
+            if (giftFor.category === 'clases') {
+                const n = Math.max(1, Math.trunc(Number(giftClassSessions) || 1));
+                body.class_sessions = n;
+            }
+            await apiFetchWithAuth(`/bonuses/${giftFor.id}/gift-to-player`, {
+                method: 'POST',
+                body: JSON.stringify(body),
+            });
+            toast.success('Regalo aplicado al jugador');
+            setGiftFor(null);
+        } catch (e: unknown) {
+            setGiftError(e instanceof Error ? e.message : 'No se pudo aplicar el regalo');
+        } finally {
+            setGiftBusy(false);
+        }
+    };
+
     const bonusPercent = (b: Bonus) => {
         if (b.price_to_pay === 0) return '∞';
         return Math.round(((b.balance_to_add - b.price_to_pay) / b.price_to_pay) * 100);
@@ -301,6 +392,14 @@ export const BonusManagement: React.FC<BonusManagementProps> = ({ clubId, isOpen
 
                                             {/* Actions */}
                                             <div className="flex items-center gap-1.5 flex-shrink-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openGift(bonus)}
+                                                    className="p-1.5 text-gray-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                                                    title="Regalar a jugador"
+                                                >
+                                                    <UserRound className="w-3.5 h-3.5" />
+                                                </button>
                                                 <button
                                                     onClick={() => openEdit(bonus)}
                                                     className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -479,6 +578,133 @@ export const BonusManagement: React.FC<BonusManagementProps> = ({ clubId, isOpen
                     </div>
                 )}
             </div>
+
+            {giftFor && (
+                <div className="absolute inset-0 z-[20] flex items-center justify-center bg-black/40 p-4">
+                    <div className="w-full max-w-sm rounded-2xl bg-white border border-gray-200 shadow-xl p-5 space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                            <div>
+                                <h3 className="text-sm font-bold text-gray-800">Regalar bono</h3>
+                                <p className="text-[11px] text-gray-500 mt-0.5">{giftFor.name}</p>
+                            </div>
+                            <button
+                                type="button"
+                                className="p-1 rounded-lg hover:bg-gray-100 text-gray-400"
+                                onClick={() => !giftBusy && setGiftFor(null)}
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+                        <p className="text-[11px] text-gray-600">
+                            Se acredita <strong>{formatCents(giftFor.balance_to_add)} €</strong> al monedero del club.
+                            {giftFor.category === 'clases' ? ' Además se crea un bono de clases.' : null}
+                        </p>
+                        <div ref={giftSearchRef} className="relative space-y-1.5">
+                            <label className="text-[10px] font-semibold text-gray-500">Cliente del club</label>
+                            {!clubId ? (
+                                <p className="text-[11px] text-amber-700">No hay club seleccionado; no se puede buscar clientes.</p>
+                            ) : giftRecipient ? (
+                                <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-violet-200 bg-violet-50">
+                                    <div className="min-w-0">
+                                        <p className="text-xs font-bold text-gray-900 truncate">
+                                            {giftRecipient.first_name} {giftRecipient.last_name}
+                                        </p>
+                                        <p className="text-[10px] text-gray-500 truncate">
+                                            {giftRecipient.phone?.trim() || giftRecipient.email || '—'}
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        className="shrink-0 p-1 rounded-lg hover:bg-violet-100 text-violet-700"
+                                        onClick={() => {
+                                            setGiftRecipient(null);
+                                            setGiftSearchQuery('');
+                                        }}
+                                    >
+                                        <X className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="relative">
+                                        <input
+                                            type="text"
+                                            className="w-full rounded-xl border border-gray-200 px-3 py-2 pr-9 text-xs"
+                                            value={giftSearchQuery}
+                                            onChange={(e) => setGiftSearchQuery(e.target.value)}
+                                            onFocus={() => giftSearchQuery.trim().length >= 2 && giftSearchResults.length > 0 && setGiftSearchOpen(true)}
+                                            placeholder="Nombre o teléfono (mín. 2 caracteres)…"
+                                            autoComplete="off"
+                                        />
+                                        <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                    </div>
+                                    {giftSearchBusy && (
+                                        <p className="text-[10px] text-gray-400">Buscando…</p>
+                                    )}
+                                    {giftSearchOpen && giftSearchResults.length > 0 && (
+                                        <div className="absolute z-50 left-0 right-0 mt-1 max-h-44 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+                                            {giftSearchResults.map((p) => (
+                                                <button
+                                                    key={p.id}
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 border-b border-gray-50 last:border-0 hover:bg-gray-50"
+                                                    onClick={() => {
+                                                        setGiftRecipient(p);
+                                                        setGiftSearchOpen(false);
+                                                        setGiftSearchQuery('');
+                                                        setGiftError(null);
+                                                    }}
+                                                >
+                                                    <span className="text-xs font-semibold text-gray-900">
+                                                        {p.first_name} {p.last_name}
+                                                    </span>
+                                                    <span className="block text-[10px] text-gray-500 truncate">
+                                                        {p.phone?.trim() || p.email || '—'}
+                                                    </span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {giftSearchOpen && !giftSearchBusy && giftSearchQuery.trim().length >= 2 && giftSearchResults.length === 0 && (
+                                        <p className="text-[10px] text-gray-500">No hay coincidencias en clientes del club.</p>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                        {giftFor.category === 'clases' && (
+                            <div>
+                                <label className="text-[10px] font-semibold text-gray-500">Sesiones en pack</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                                    value={giftClassSessions}
+                                    onChange={(e) => setGiftClassSessions(e.target.value)}
+                                />
+                            </div>
+                        )}
+                        {giftError && <p className="text-[11px] text-red-600 font-medium">{giftError}</p>}
+                        <div className="flex gap-2 justify-end pt-1">
+                            <button
+                                type="button"
+                                disabled={giftBusy}
+                                className="px-3 py-2 text-xs font-bold rounded-xl border border-gray-200 text-gray-600"
+                                onClick={() => setGiftFor(null)}
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="button"
+                                disabled={giftBusy}
+                                className="px-4 py-2 text-xs font-bold rounded-xl bg-violet-600 text-white disabled:opacity-50"
+                                onClick={() => void submitGift()}
+                            >
+                                {giftBusy ? 'Aplicando…' : 'Aplicar regalo'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

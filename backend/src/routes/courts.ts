@@ -11,7 +11,15 @@ const router = Router();
 router.use(attachAuthContext);
 
 const FIELDS =
-  'id, created_at, club_id, name, indoor, glass_type, status, lighting, last_maintenance, display_order, is_hidden, visibility_windows';
+  'id, created_at, club_id, name, indoor, glass_type, sport, status, lighting, last_maintenance, display_order, is_hidden, visibility_windows';
+
+function normalizeCourtSport(input: unknown): string {
+  const s = String(input ?? 'padel')
+    .trim()
+    .toLowerCase();
+  if (s === 'padel' || s === 'tenis' || s === 'pickleball' || s === 'otro') return s;
+  return 'padel';
+}
 
 function canSeeCourtsForClub(req: Request, clubId: string): boolean {
   if (req.authContext?.adminId) return true;
@@ -224,6 +232,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  *               name: { type: string }
  *               indoor: { type: boolean }
  *               glass_type: { type: string, enum: [normal, panoramic] }
+ *               sport: { type: string, enum: [padel, tenis, pickleball, otro] }
  *               lighting: { type: boolean }
  *               last_maintenance: { type: string, format: date, nullable: true }
  *               is_hidden: { type: boolean, description: 'Excluida de búsqueda pública' }
@@ -236,7 +245,8 @@ router.get('/:id', async (req: Request, res: Response) => {
  *       400: { description: visibility_windows inválido }
  */
 router.post('/', requireAuthUser, async (req: Request, res: Response) => {
-  const { club_id, name, indoor, glass_type, lighting, last_maintenance, is_hidden, visibility_windows } = req.body ?? {};
+  const { club_id, name, indoor, glass_type, sport, lighting, last_maintenance, is_hidden, visibility_windows } =
+    req.body ?? {};
   if (!club_id || !name || !String(name).trim()) {
     return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
   }
@@ -258,6 +268,7 @@ router.post('/', requireAuthUser, async (req: Request, res: Response) => {
       name: String(name).trim(),
       indoor: Boolean(indoor),
       glass_type: glass_type === 'panoramic' ? 'panoramic' : 'normal',
+      sport: normalizeCourtSport(sport),
       display_order: nextOrder,
     };
     if (lighting !== undefined) row.lighting = Boolean(lighting);
@@ -321,11 +332,14 @@ router.put('/:id', requireAuthUser, async (req: Request, res: Response) => {
   } catch {
     return res.status(500).json({ ok: false, error: 'Error al verificar pista' });
   }
-  const { name, indoor, glass_type, status, lighting, last_maintenance, is_hidden, visibility_windows } = req.body ?? {};
+  const { name, indoor, glass_type, sport, status, lighting, last_maintenance, is_hidden, visibility_windows } = req.body ?? {};
   const update: Record<string, unknown> = {};
   if (name !== undefined) update.name = String(name).trim();
   if (indoor !== undefined) update.indoor = Boolean(indoor);
   if (glass_type !== undefined) update.glass_type = glass_type === 'panoramic' ? 'panoramic' : 'normal';
+  if (sport !== undefined) {
+    update.sport = normalizeCourtSport(sport);
+  }
   if (status !== undefined) update.status = status === 'maintenance' ? 'maintenance' : 'operational';
   if (lighting !== undefined) update.lighting = Boolean(lighting);
   if (last_maintenance !== undefined) update.last_maintenance = last_maintenance ?? null;
