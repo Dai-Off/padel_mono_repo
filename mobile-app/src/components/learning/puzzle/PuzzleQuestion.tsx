@@ -15,9 +15,9 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
 
   const correctOption = content.options.find((o) => o.points === 2) ?? null;
 
-  // Frame mostrado: si confirmamos y la opción tiene reveal_frame → ese frame; sino el inicial.
-  const displayedFrame: PuzzleFrame =
-    confirmed && selected?.reveal_frame ? selected.reveal_frame : content.initial_frame;
+  // Frame mostrado: si hay una opción seleccionada con reveal_frame → ese frame
+  // (anima al seleccionar Y al deseleccionar). Si no, el frame inicial.
+  const displayedFrame: PuzzleFrame = selected?.reveal_frame ?? content.initial_frame;
 
   const handleSelect = (opt: PuzzleOption) => {
     if (confirmed) return;

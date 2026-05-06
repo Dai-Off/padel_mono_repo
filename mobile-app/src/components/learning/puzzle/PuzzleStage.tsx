@@ -26,8 +26,8 @@ export function PuzzleStage({ frame, animate = true }: Props) {
 
   // Calcular dimensiones del Stage limitadas por pantalla. Se reserva el resto
   // para enunciado/opciones/confirmar de modo que todo entre sin scroll.
-  const maxH = win.height * 0.5;                 // 50% del alto disponible
-  const maxW = Math.min(win.width - 24, 380);    // 12px de margen lateral, tope 380
+  const maxH = win.height * 0.62;                // 62% del alto disponible
+  const maxW = Math.min(win.width - 24, 440);    // 12px de margen lateral, tope 440
   const widthFromHeight = maxH * STAGE_ASPECT;
   const stageW = Math.min(maxW, widthFromHeight);
   const stageH = stageW / STAGE_ASPECT;
@@ -37,7 +37,9 @@ export function PuzzleStage({ frame, animate = true }: Props) {
     setSize({ w: width, h: height });
   };
 
-  const playerWidthPx = size ? ((courtConfig.player.radius * 3.5) / STAGE_H_M) * size.h : 0;
+  // Ancho visual del jugador como fracción del ancho de la pista (~12% del ancho).
+  // Más natural que escalar por radius porque los sprites tienen aspect ratio propio.
+  const playerWidthPx = size ? size.w * 0.12 : 0;
   const ballSidePx = size ? ((courtConfig.ball.radius * 2) / STAGE_H_M) * size.h : 0;
   const durationMs = frame.duration_ms ?? 1500;
 
