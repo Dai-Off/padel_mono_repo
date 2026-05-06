@@ -41,6 +41,7 @@ import {
   fetchTournamentPlayerAgenda,
   fetchTournamentDetailForScreen,
   joinPublicTournament,
+  joinTournamentAsPair,
   leaveTournament,
   sendTournamentChatMessage,
   submitTournamentEntryRequest,
@@ -371,6 +372,7 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
   const [confirmationModalData, setConfirmationModalData] =
     useState<BookingConfirmationData | null>(null);
   const [entryRequestMessage, setEntryRequestMessage] = useState('');
+  const [teammateEmail, setTeammateEmail] = useState('');
   const prevMyStatusRef = useRef<string | null>(null);
   const prevEntryStatusRef = useRef<string | null>(null);
   const shownApprovedEntryRequestRef = useRef<Set<string>>(new Set());
@@ -751,6 +753,62 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
     }
   };
 
+  const handleJoinPair = async () => {
+    if (!row || !session?.access_token) return;
+    const email = teammateEmail.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      Alert.alert('Email de pareja', 'Introduce un email válido para tu compañero.');
+      return;
+    }
+
+    try {
+      setJoining(true);
+      const r = await joinTournamentAsPair(row.id, email, session.access_token);
+      if (r.ok) {
+        Alert.alert(
+          'Invitación enviada',
+          'Hemos enviado una invitación a tu compañero. Cuando acepte, ambos estaréis inscritos.'
+        );
+        setTeammateEmail('');
+        await load({ silent: true });
+      } else {
+        // Si el error es de ELO o similar, el backend devuelve el mensaje descriptivo
+        Alert.alert('No se pudo invitar', r.error);
+        
+        // Si el error indica que no cumple requisitos, sugerimos enviar solicitud manual (si aplica)
+        const canRequest = /elo|género|genero|categor/i.test(r.error.toLowerCase());
+        if (canRequest) {
+          Alert.alert(
+            'Requisitos no cumplidos',
+            `${r.error}\n\n¿Quieres enviar una solicitud al organizador para que revise vuestra situación?`,
+            [
+              { text: 'No', style: 'cancel' },
+              {
+                text: 'Enviar solicitud',
+                onPress: () => {
+                  const msg = `Hola! Me gustaría inscribirme con mi pareja (${email}) aunque no cumplamos el requisito automático: ${r.error}`;
+                  void (async () => {
+                    const req = await submitTournamentEntryRequest(row.id, msg, session.access_token);
+                    if (req.ok) {
+                      Alert.alert('Solicitud enviada', 'El organizador revisará vuestro caso.');
+                      await load({ silent: true });
+                    } else {
+                      Alert.alert('Error', req.error);
+                    }
+                  })();
+                }
+              }
+            ]
+          );
+        }
+      }
+    } catch (e) {
+      Alert.alert('Error', 'No se pudo procesar la invitación por parejas.');
+    } finally {
+      setJoining(false);
+    }
+  };
+
   const handleLeave = () => {
     if (!row || !session?.access_token) {
       Alert.alert('Inicia sesión', 'Necesitas una cuenta para gestionar tu inscripción.');
@@ -827,7 +885,11 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
       })();
       return;
     }
-    void handleJoin();
+    if (row.registration_mode === 'pair') {
+      void handleJoinPair();
+    } else {
+      void handleJoin();
+    }
   };
 
   const ctaLabel = useMemo(() => {
@@ -1495,6 +1557,20 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
           },
         ]}
       >
+        {row.registration_mode === 'pair' && !hasActiveInscription && isTournamentStatusOpen(row.status) && remaining > 0 && (
+          <View style={{ marginBottom: 12 }}>
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginBottom: 6, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>Email de tu pareja</Text>
+            <TextInput
+              value={teammateEmail}
+              onChangeText={setTeammateEmail}
+              placeholder="compañero@email.com"
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              style={styles.chatInput}
+            />
+          </View>
+        )}
         <TouchableOpacity
           activeOpacity={0.88}
           onPress={handleCtaPress}
