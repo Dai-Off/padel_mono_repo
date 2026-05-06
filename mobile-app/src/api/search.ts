@@ -11,6 +11,8 @@ export type SearchCourtResult = {
   lng: number | null;
   indoor: boolean;
   glassType: string;
+  /** padel | tenis | pickleball | otro */
+  sport?: string;
   imageUrl: string | null;
   distanceKm: number | null;
   minPriceCents: number;
@@ -23,17 +25,19 @@ type FetchSearchCourtsOptions = {
   dateTo?: string;
   indoor?: boolean;
   glassType?: string;
+  sport?: string;
 };
 
 export async function fetchSearchCourts(
   options: FetchSearchCourtsOptions = {}
 ): Promise<SearchCourtResult[]> {
-  const { dateFrom, dateTo, indoor, glassType } = options;
+  const { dateFrom, dateTo, indoor, glassType, sport } = options;
   const url = new URL(`${API_URL}/search/courts`);
   if (dateFrom) url.searchParams.set('date_from', dateFrom);
   if (dateTo) url.searchParams.set('date_to', dateTo);
   if (indoor !== undefined) url.searchParams.set('indoor', String(indoor));
   if (glassType) url.searchParams.set('glass_type', glassType);
+  if (sport?.trim()) url.searchParams.set('sport', sport.trim().toLowerCase());
 
   try {
     const res = await fetch(url.toString(), {

@@ -88,8 +88,9 @@ export function applySearchCourtFilters(
     out = out.filter((c) => c.distanceKm == null || c.distanceKm <= maxKm);
   }
 
-  if (filters.sport && filters.sport !== 'padel') {
-    return [];
+  if (filters.sport) {
+    const want = filters.sport.toLowerCase();
+    out = out.filter((c) => (c.sport ?? 'padel').toLowerCase() === want);
   }
 
   return out;

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { canAccessClub } from '../lib/clubAccess';
@@ -179,6 +180,8 @@ router.get('/slot-price', async (req: Request, res: Response) => {
   const VALID_TYPES = ['standard', 'open_match', 'pozo', 'fixed_recurring', 'school_group', 'school_individual', 'flat_rate', 'tournament', 'blocked'];
   const rawType = req.query.reservation_type as string | undefined;
   const reservationType = VALID_TYPES.includes(rawType ?? '') ? rawType! : 'open_match';
+  const sourceChannelQ = req.query.source_channel as string | undefined;
+  const playerIdForDiscount = req.query.player_id as string | undefined;
 
   if (!club_id || !court_id || !date || !slot) {
     return res.status(400).json({ ok: false, error: 'club_id, court_id, date y slot son obligatorios' });
@@ -297,6 +300,27 @@ router.get('/slot-price', async (req: Request, res: Response) => {
   const usedSourcesArr = Array.from(usedSources);
   const dominantSource = usedSourcesArr.length > 1 ? 'mixed' : (usedSourcesArr[0] ?? 'none');
 
+  const allowMap = await fetchAllowOnlineByType(supabase, club_id);
+  const onlineGate = assertReservationTypeAllowedOnline(allowMap, reservationType, sourceChannelQ);
+
+  let discountedTotal = totalPriceCents;
+  let discount_percent_applied = 0;
+  if (playerIdForDiscount?.trim()) {
+    const { data: seg, error: segErr } = await supabase
+      .from('club_player_segments')
+      .select('discount_percent')
+      .eq('club_id', club_id)
+      .eq('player_id', playerIdForDiscount.trim())
+      .maybeSingle();
+    if (!segErr && seg) {
+      const dp = Number((seg as { discount_percent?: number }).discount_percent ?? 0);
+      if (Number.isFinite(dp) && dp > 0 && dp <= 100) {
+        discount_percent_applied = Math.trunc(dp);
+        discountedTotal = Math.round(totalPriceCents * (1 - discount_percent_applied / 100));
+      }
+    }
+  }
+
   return res.json({
     ok: true,
     club_id,
@@ -305,9 +329,13 @@ router.get('/slot-price', async (req: Request, res: Response) => {
     slot,
     duration_minutes: durationMinutes,
     reservation_type: reservationType,
-    total_price_cents: totalPriceCents,
+    total_price_cents: discountedTotal,
+    total_price_before_discount_cents: totalPriceCents,
+    discount_percent_applied,
+    online_booking_allowed: onlineGate.ok,
+    online_booking_block_reason: onlineGate.ok ? null : onlineGate.error,
     source: dominantSource,
-    breakdown
+    breakdown,
   });
 });
 

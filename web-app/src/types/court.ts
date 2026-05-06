@@ -10,6 +10,8 @@ export interface Court {
     club_id: string;
     display_order?: number;
     name: string;
+    /** Deporte principal de la pista (filtros app / tarifas). */
+    sport?: 'padel' | 'tenis' | 'pickleball' | 'otro' | string;
     indoor: boolean;
     glass_type: string;
     status: 'operational' | 'maintenance' | 'closed';

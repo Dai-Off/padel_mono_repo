@@ -49,6 +49,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   const city = club?.city ?? '';
   const address = club?.address ?? '';
   const courtName = court?.name ?? undefined;
+  const courtSport = (court?.sport && String(court.sport).trim() !== '' ? String(court.sport) : 'padel').toLowerCase();
   const indoor = court?.indoor ?? false;
   const glassType = court?.glass_type ?? 'normal';
   const courtType = [
@@ -150,5 +151,6 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     venueAddress: address || undefined,
     courtName,
     courtType,
+    courtSport,
   };
 }

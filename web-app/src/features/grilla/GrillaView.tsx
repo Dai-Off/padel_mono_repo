@@ -721,6 +721,16 @@ function GrillaViewInner() {
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
   }, [today, selectedDate]);
+
+  const gridDayKind = useMemo<'past' | 'today' | 'future'>(() => {
+    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const selectedMidnight = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
+    const diffDays = Math.round((selectedMidnight.getTime() - todayMidnight.getTime()) / 86400000);
+    if (diffDays < 0) return 'past';
+    if (diffDays === 0) return 'today';
+    return 'future';
+  }, [today, selectedDate]);
+
   const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
   const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(clubId);
 
@@ -789,6 +799,7 @@ function GrillaViewInner() {
       const n = new Date();
       setNowMinutes(n.getHours() * 60 + n.getMinutes());
     };
+    tick();
     const id = setInterval(tick, 60000);
     return () => clearInterval(id);
   }, []);
@@ -1907,7 +1918,11 @@ function GrillaViewInner() {
                     {/* Heading row with mobile hamburger */}
                     <div className="flex items-center gap-2 mb-1.5">
                       {isMobileDevice && (
-                        <button className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 flex-shrink-0 transition-colors">
+                        <button
+                          onClick={() => setIsMenuOpen(true)}
+                          className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 flex-shrink-0 transition-colors"
+                          aria-label="Abrir menú"
+                        >
                           <Menu className="w-4 h-4 text-gray-600" />
                         </button>
                       )}
@@ -2234,6 +2249,8 @@ function GrillaViewInner() {
                               key={`col-${court.id}-${focusedCourtId}`}
                               court={court}
                               reservations={reservations.filter(r => r.courtId === court.id)}
+                              gridDayKind={gridDayKind}
+                              nowMinutes={nowMinutes}
                               dragGhost={dragState?.courtId === court.id ? dragState : undefined}
                               recentlyDroppedId={recentlyDroppedId}
                               onReservationClick={handleReservationClick}
@@ -2295,6 +2312,8 @@ function GrillaViewInner() {
                           key={`col-${court.id}`}
                           court={court}
                           reservations={reservations.filter(r => r.courtId === court.id)}
+                          gridDayKind={gridDayKind}
+                          nowMinutes={nowMinutes}
                           dragGhost={dragState?.courtId === court.id ? dragState : undefined}
                           recentlyDroppedId={recentlyDroppedId}
                           onReservationClick={handleReservationClick}

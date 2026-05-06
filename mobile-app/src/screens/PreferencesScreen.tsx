@@ -252,7 +252,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [token]);
 
   const dirty = useMemo(() => !preferencesEqual(base, prefs), [base, prefs]);
 

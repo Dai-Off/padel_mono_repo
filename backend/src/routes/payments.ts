@@ -20,6 +20,7 @@ import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import { insertGuestMatchPlayerAfterPayment } from '../services/matchPlayerSlotService';
 import { zonedTimeToUtc } from './learningTimezone';
 import { canAccessClub } from '../lib/clubAccess';
+import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
@@ -169,6 +170,19 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
 
     const totalCents = Number(total_price_cents);
     const isPayFull = pay_full === true || pay_full === 'true' || pay_full === 1;
+    const reservation_type = isPayFull ? 'standard' : 'open_match';
+    const sch0 = ['mobile', 'web', 'manual', 'system'].includes(source_channel) ? source_channel : 'mobile';
+    const { data: courtForClub } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
+    const clubIdRule = (courtForClub as { club_id?: string } | null)?.club_id;
+    if (clubIdRule) {
+      const allowMap = await fetchAllowOnlineByType(supabase, clubIdRule);
+      const gate = assertReservationTypeAllowedOnline(allowMap, reservation_type, sch0);
+      if (!gate.ok) {
+        res.status(403).json({ ok: false, error: gate.error });
+        return;
+      }
+    }
+
     const amountCents = isPayFull ? totalCents : Math.ceil(totalCents / 4);
     if (isPayFull && amountCents < 100) {
       res.status(400).json({ ok: false, error: 'El monto mínimo es 1€' });
@@ -191,9 +205,8 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       visibility: visibility === 'public' ? 'public' : 'private',
       competitive: competitive !== false ? '1' : '0',
       gender: gender ?? 'any',
-      source_channel: ['mobile', 'web', 'manual', 'system'].includes(source_channel)
-        ? source_channel
-        : 'mobile',
+      source_channel: sch0,
+      reservation_type,
     };
     if (elo_min != null) metadata.elo_min = String(elo_min);
     if (elo_max != null) metadata.elo_max = String(elo_max);
@@ -2198,6 +2211,12 @@ async function processNewMatchPayment(
   const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
     ? meta.source_channel
     : 'mobile';
+  const reservation_type =
+    meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
+      ? meta.reservation_type
+      : meta.pay_full === '1'
+        ? 'standard'
+        : 'open_match';
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents <= 0) return;
 
@@ -2223,6 +2242,17 @@ async function processNewMatchPayment(
     return;
   }
 
+  const { data: courtRowGate } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
+  const clubGate = (courtRowGate as { club_id?: string } | null)?.club_id;
+  if (clubGate) {
+    const allowMap = await fetchAllowOnlineByType(supabase, clubGate);
+    const gate = assertReservationTypeAllowedOnline(allowMap, reservation_type, source_channel);
+    if (!gate.ok) {
+      console.error('[payments/webhook] reservation type not allowed online', gate.error, pi.id);
+      return;
+    }
+  }
+
   const isPayFull = meta.pay_full === '1';
   const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
 
@@ -2236,7 +2266,7 @@ async function processNewMatchPayment(
       timezone,
       total_price_cents,
       currency: 'EUR',
-      reservation_type: 'open_match',
+      reservation_type,
       // Split-payment: stays pending until all 4 players pay. Full-payment: confirmed immediately.
       status: isPayFull ? 'confirmed' : 'pending_payment',
       source_channel,
@@ -2405,6 +2435,24 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       }
 
       const isPayFull = meta.pay_full === '1';
+      const reservation_type =
+        meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
+          ? meta.reservation_type
+          : isPayFull
+            ? 'standard'
+            : 'open_match';
+
+      const { data: courtRowGate2 } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
+      const clubGate2 = (courtRowGate2 as { club_id?: string } | null)?.club_id;
+      if (clubGate2) {
+        const allowMap2 = await fetchAllowOnlineByType(supabase, clubGate2);
+        const gate2 = assertReservationTypeAllowedOnline(allowMap2, reservation_type, source_channel);
+        if (!gate2.ok) {
+          res.status(403).json({ ok: false, error: gate2.error });
+          return;
+        }
+      }
+
       const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
 
       const { data: booking, error: errBooking } = await supabase
@@ -2417,7 +2465,7 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
           timezone,
           total_price_cents,
           currency: 'EUR',
-          reservation_type: 'open_match',
+          reservation_type,
           // Split-payment: stays pending until all 4 players pay. Full-payment: confirmed immediately.
           status: isPayFull ? 'confirmed' : 'pending_payment',
           source_channel,
