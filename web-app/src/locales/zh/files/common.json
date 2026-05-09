@@ -700,6 +700,7 @@
     "learning_type_multi_select": "多选题",
     "learning_type_match_columns": "配对题",
     "learning_type_order_sequence": "排序题",
+    "learning_type_puzzle": "Puzzle",
 
     "learning_area_technique": "技术",
     "learning_area_tactics": "战术",

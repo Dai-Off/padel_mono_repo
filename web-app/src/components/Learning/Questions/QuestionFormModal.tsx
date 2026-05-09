@@ -4,6 +4,7 @@ import { X, Plus, Trash2, Upload, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService, validateVideo, VIDEO_LIMITS } from '../../../services/learningContent';
+import { PuzzleEditor } from './PuzzleEditor/PuzzleEditor';
 import type {
   Question,
   QuestionType,
@@ -14,10 +15,32 @@ import type {
   MultiSelectContent,
   MatchColumnsContent,
   OrderSequenceContent,
+  PuzzleContent,
 } from '../../../types/learningContent';
 
-const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'];
+const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence', 'puzzle'];
 const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'mental', 'rules'];
+
+// Plantilla mínima válida para un puzzle nuevo (cumple validatePuzzleContent del backend).
+const PUZZLE_TEMPLATE: PuzzleContent = {
+  schema_version: 1,
+  statement: 'Describe la situación táctica del puzzle aquí.',
+  court_position: 'both',
+  initial_frame: {
+    players: [
+      { id: 1, team: 1, x: 3, y: 15 },
+      { id: 2, team: 1, x: 7, y: 15 },
+      { id: 3, team: 2, x: 3, y: 5 },
+      { id: 4, team: 2, x: 7, y: 5 },
+    ],
+    ball: { x: 5, y: 12 },
+  },
+  options: [
+    { id: 1, text: 'Opción A', explanation: 'Explicación de la opción A', points: 2 },
+    { id: 2, text: 'Opción B', explanation: 'Explicación de la opción B', points: 1 },
+    { id: 3, text: 'Opción C', explanation: 'Explicación de la opción C', points: 0 },
+  ],
+};
 
 // Estado por defecto del contenido según tipo
 function defaultContent(type: QuestionType): QuestionContent {
@@ -32,6 +55,8 @@ function defaultContent(type: QuestionType): QuestionContent {
       return { pairs: [{ left: '', right: '' }, { left: '', right: '' }, { left: '', right: '' }] } as MatchColumnsContent;
     case 'order_sequence':
       return { steps: ['', '', ''] } as OrderSequenceContent;
+    case 'puzzle':
+      return { ...PUZZLE_TEMPLATE } as PuzzleContent;
   }
 }
 
@@ -66,6 +91,8 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
     setType(newType);
     // Siempre resetear contenido al cambiar tipo (el contenido anterior no es compatible)
     setContent(defaultContent(newType));
+    // Los puzzles son siempre tácticos por definición.
+    if (newType === 'puzzle') setArea('tactics');
   };
 
   const [dragging, setDragging] = useState(false);
@@ -135,6 +162,15 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
         if (c.steps.some((s) => !s.trim())) return t('learning_field_step');
         return null;
       }
+      case 'puzzle': {
+        // Validación ligera client-side: el backend hace validación completa.
+        const c = content as PuzzleContent;
+        if (!c?.statement || c.statement.trim().length < 8) return 'El enunciado del puzzle debe tener al menos 8 caracteres';
+        if (!c.initial_frame?.players || c.initial_frame.players.length < 2) return 'El puzzle necesita al menos 2 jugadores';
+        if (!Array.isArray(c.options) || c.options.length < 2) return 'El puzzle necesita al menos 2 opciones';
+        if (c.options.filter((o) => o.points === 2).length !== 1) return 'Debe haber exactamente 1 opción correcta (points=2)';
+        return null;
+      }
     }
     return null;
   };
@@ -146,10 +182,10 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
 
     setSaving(true);
     try {
-      // Si hay un archivo nuevo, subirlo primero
-      let finalVideoUrl = videoUrl;
+      // Los puzzles no llevan video. Para el resto de tipos, subir si hay archivo nuevo.
+      let finalVideoUrl = type === 'puzzle' ? null : videoUrl;
 
-      if (videoFile) {
+      if (type !== 'puzzle' && videoFile) {
         setUploading(true);
         finalVideoUrl = await learningContentService.uploadQuestionVideo(clubId, videoFile);
         setUploading(false);
@@ -179,12 +215,13 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
     }
   };
 
+  const isPuzzle = type === 'puzzle';
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
+    <div className={`fixed inset-0 z-50 bg-black/40 flex items-center justify-center overflow-y-auto px-4 ${isPuzzle ? 'py-6' : 'py-20'}`}>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white rounded-2xl w-full max-w-lg shadow-xl"
+        className={`bg-white rounded-2xl w-full shadow-xl ${isPuzzle ? 'max-w-6xl' : 'max-w-lg'}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-gray-100">
@@ -211,20 +248,22 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
             </select>
           </div>
 
-          {/* Área y Nivel */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_area')}</label>
-              <select
-                value={area}
-                onChange={(e) => setArea(e.target.value as QuestionArea)}
-                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-              >
-                {QUESTION_AREAS.map((qa) => (
-                  <option key={qa} value={qa}>{t(`learning_area_${qa}`)}</option>
-                ))}
-              </select>
-            </div>
+          {/* Área y Nivel — los puzzles son siempre tácticos, ocultamos el selector de área */}
+          <div className={type === 'puzzle' ? '' : 'grid grid-cols-2 gap-3'}>
+            {type !== 'puzzle' && (
+              <div>
+                <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_area')}</label>
+                <select
+                  value={area}
+                  onChange={(e) => setArea(e.target.value as QuestionArea)}
+                  className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                >
+                  {QUESTION_AREAS.map((qa) => (
+                    <option key={qa} value={qa}>{t(`learning_area_${qa}`)}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_level')}</label>
               <input
@@ -244,7 +283,8 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
             </div>
           </div>
 
-          {/* Video */}
+          {/* Video — no aplica para puzzles */}
+          {type !== 'puzzle' && (
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">
               {t('learning_field_video')}
@@ -296,6 +336,7 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
               className="hidden"
             />
           </div>
+          )}
 
           {/* Separador */}
           <div className="border-t border-gray-100" />
@@ -334,6 +375,12 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
               content={content as OrderSequenceContent}
               onChange={(c) => setContent(c)}
               t={t}
+            />
+          )}
+          {type === 'puzzle' && (
+            <PuzzleEditor
+              content={content as PuzzleContent}
+              onChange={(c) => setContent(c)}
             />
           )}
 
