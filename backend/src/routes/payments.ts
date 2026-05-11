@@ -1098,6 +1098,115 @@ export async function listTransactionsHandler(req: Request, res: Response): Prom
   }
 }
 
+/**
+ * @openapi
+ * /payments/pending-bookings:
+ *   get:
+ *     tags: [Payments]
+ *     summary: Reservas pendientes de pago del jugador
+ *     description: Lista reservas del jugador autenticado en estado `pending_payment` para permitir pago posterior desde la app.
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   bookings:
+ *                     - booking_id: "uuid"
+ *                       participant_id: "uuid"
+ *                       start_at: "2026-05-09T18:00:00.000Z"
+ *                       end_at: "2026-05-09T19:30:00.000Z"
+ *                       total_price_cents: 3200
+ *                       amount_due_cents: 3200
+ *                       currency: "EUR"
+ *                       court_name: "Pista 1"
+ *                       club_name: "Club Demo"
+ *       401: { description: Token inválido o faltante }
+ */
+export async function listPendingBookingsHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+    const { data: player } = await supabase
+      .from('players')
+      .select('id')
+      .eq('email', user.email.trim().toLowerCase())
+      .maybeSingle();
+    if (!player) {
+      res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+      return;
+    }
+
+    const { data: rows, error } = await supabase
+      .from('bookings')
+      .select(`
+        id,
+        start_at,
+        end_at,
+        total_price_cents,
+        currency,
+        status,
+        courts(name, clubs(name)),
+        booking_participants(id, player_id, role, share_amount_cents, payment_status)
+      `)
+      .eq('organizer_player_id', player.id)
+      .eq('status', 'pending_payment')
+      .is('deleted_at', null)
+      .order('start_at', { ascending: true })
+      .limit(100);
+
+    if (error) {
+      res.status(500).json({ ok: false, error: error.message });
+      return;
+    }
+
+    const bookings = (rows ?? []).map((row: any) => {
+      const participants = Array.isArray(row.booking_participants) ? row.booking_participants : [];
+      const organizerParticipant =
+        participants.find((p: any) => p.role === 'organizer' && p.player_id === player.id) ??
+        participants.find((p: any) => p.player_id === player.id) ??
+        null;
+      const share = Number(organizerParticipant?.share_amount_cents ?? 0);
+      const total = Number(row.total_price_cents ?? 0);
+      const amountDue = share > 0 ? share : total;
+      const rawCourt = row.courts;
+      const court = Array.isArray(rawCourt) ? rawCourt[0] : rawCourt;
+      const rawClub = court?.clubs;
+      const club = Array.isArray(rawClub) ? rawClub[0] : rawClub;
+      return {
+        booking_id: row.id,
+        participant_id: organizerParticipant?.id ?? null,
+        start_at: row.start_at,
+        end_at: row.end_at,
+        total_price_cents: total,
+        amount_due_cents: Math.max(0, amountDue),
+        currency: row.currency ?? 'EUR',
+        court_name: court?.name ?? null,
+        club_name: club?.name ?? null,
+      };
+    }).filter((b) => b.participant_id);
+
+    res.json({ ok: true, bookings });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
 function canAccessClubForPayments(req: Request, clubId: string): boolean {
   return canAccessClub(req, clubId, 'finanzas');
 }

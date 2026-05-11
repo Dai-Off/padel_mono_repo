@@ -6,6 +6,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clubService, type Club } from '../../services/club';
 import { authService } from '../../services/auth';
+import { clubSportsService } from '../../services/clubSports';
+import type { ClubSport } from '../../types/clubSports';
 
 interface CourtFormProps {
     court?: Court;
@@ -20,7 +22,7 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
     const [isAdmin, setIsAdmin] = useState(false);
     const [clubsReady, setClubsReady] = useState(false);
 
-    const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<Partial<Court>>({
+    const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<Partial<Court>>({
         defaultValues: court || {
             name: '',
             club_id: '',
@@ -31,11 +33,15 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
             lighting: true,
             last_maintenance: new Date().toISOString().split('T')[0],
             is_hidden: false,
+            allow_payment_after_play: false,
         }
     });
 
     const [windowsText, setWindowsText] = useState('');
     const [windowsError, setWindowsError] = useState('');
+    const [sports, setSports] = useState<ClubSport[]>([]);
+    const selectedClubId = watch('club_id');
+    const selectedSport = watch('sport');
 
     useEffect(() => {
         if (court?.visibility_windows != null && Array.isArray(court.visibility_windows)) {
@@ -74,6 +80,30 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
             reset({ ...court, is_hidden: Boolean(court.is_hidden), sport: court.sport ?? 'padel' });
         }
     }, [court, reset]);
+
+    useEffect(() => {
+        const clubId = selectedClubId || court?.club_id;
+        if (!clubId) {
+            setSports([]);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const data = await clubSportsService.getAll(clubId);
+                if (!cancelled) {
+                    const active = data.filter((sport) => sport.is_active);
+                    setSports(active);
+                    if (!selectedSport && active.length > 0) {
+                        setValue('sport', active[0].slug);
+                    }
+                }
+            } catch {
+                if (!cancelled) setSports([]);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [selectedClubId, selectedSport, court?.club_id, setValue]);
 
     const submitCourt = useCallback((data: Partial<Court>) => {
         setWindowsError('');
@@ -152,10 +182,17 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
                             {...register('sport')}
                             className="w-full px-4 py-3.5 rounded-2xl border border-border-subtle focus:outline-none focus:ring-4 focus:ring-brand/5 focus:border-brand bg-[#FAFAFA] text-sm font-semibold transition-all appearance-none cursor-pointer"
                         >
-                            <option value="padel">Pádel</option>
-                            <option value="tenis">Tenis</option>
-                            <option value="pickleball">Pickleball</option>
-                            <option value="otro">Otro</option>
+                            {sports.length === 0 ? (
+                                <>
+                                    <option value="padel">Pádel</option>
+                                </>
+                            ) : (
+                                sports.map((sport) => (
+                                    <option key={sport.id} value={sport.slug}>
+                                        {sport.name}
+                                    </option>
+                                ))
+                            )}
                         </select>
                     </div>
 
@@ -227,6 +264,19 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
                         </div>
                         <label className="relative inline-flex items-center cursor-pointer shrink-0">
                             <input type="checkbox" {...register('is_hidden')} className="sr-only peer" />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand" />
+                        </label>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-[#FAFAFA] rounded-2xl border border-border-subtle">
+                        <div className="space-y-0.5 pr-2">
+                            <span className="text-sm font-bold text-primary">Permitir pagar después</span>
+                            <p className="text-[10px] text-muted-foreground font-medium leading-snug">
+                                Si está activo, en la app móvil se puede reservar esta pista sin pago inmediato.
+                            </p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                            <input type="checkbox" {...register('allow_payment_after_play')} className="sr-only peer" />
                             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand" />
                         </label>
                     </div>

@@ -95,6 +95,14 @@ function App() {
           }
         />
         <Route
+          path="/deportes"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/equipo-portal"
           element={
             <ProtectedRoute>
@@ -151,7 +159,7 @@ function App() {
           }
         />
         <Route
-          path="/crm"
+          path="/chats"
           element={
             <ProtectedRoute>
               <ClubDashboard />

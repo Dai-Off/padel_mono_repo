@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { useStripe } from "../stripe";
+import { API_URL } from "../config";
 import { Ionicons } from "@expo/vector-icons";
 import type { SearchCourtResult } from "../api/search";
 import { fetchSearchCourts } from "../api/search";
@@ -172,6 +173,50 @@ function formatDateTimeForConfirmation(date: Date, time: string): string {
   const dayNum = d.getDate();
   const month = months[d.getMonth()] ?? "";
   return `${dayName}, ${dayNum} ${month} · ${time}`;
+}
+
+async function createPayLaterBooking(params: {
+  courtId: string;
+  organizerPlayerId: string;
+  startAtIso: string;
+  endAtIso: string;
+  totalPriceCents: number;
+  token: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${API_URL}/bookings`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        court_id: params.courtId,
+        organizer_player_id: params.organizerPlayerId,
+        start_at: params.startAtIso,
+        end_at: params.endAtIso,
+        total_price_cents: params.totalPriceCents,
+        booking_type: "standard",
+        source_channel: "mobile",
+        status: "pending_payment",
+        participants: [
+          {
+            player_id: params.organizerPlayerId,
+            role: "organizer",
+            share_amount_cents: params.totalPriceCents,
+            paid_amount_cents: 0,
+            wallet_amount_cents: 0,
+            payment_method: null,
+          },
+        ],
+      }),
+    });
+    const json = (await res.json()) as { ok?: boolean; error?: string };
+    if (!res.ok || !json.ok) return { ok: false, error: json.error ?? "No se pudo crear la reserva" };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 }
 
 interface CourtCardDynamicProps {
@@ -530,7 +575,24 @@ export function ClubDetailScreen({
         return;
       }
 
-      setReserving(true);
+      const shouldOfferPayLater = c.allow_payment_after_play === true;
+      const askPayLaterChoice = () =>
+        new Promise<"pay_now" | "pay_later" | "cancel">((resolve) => {
+          if (!shouldOfferPayLater) {
+            resolve("pay_now");
+            return;
+          }
+          Alert.alert(
+            "Forma de pago",
+            "Esta pista permite reservar sin pagar ahora. ¿Quieres pagar ahora o después del turno?",
+            [
+              { text: "Cancelar", style: "cancel", onPress: () => resolve("cancel") },
+              { text: "Pagar después", onPress: () => resolve("pay_later") },
+              { text: "Pagar ahora", onPress: () => resolve("pay_now") },
+            ],
+          );
+        });
+
       const dateStr = localCalendarYmd(selectedDate);
       // Parse as local time (no Z suffix) so JS converts correctly to UTC when sending to backend
       const startDate = new Date(`${dateStr}T${selectedTimeSlot}:00`);
@@ -538,6 +600,41 @@ export function ClubDetailScreen({
       const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
       const end_at = endDate.toISOString();
       const totalPriceCents = Math.max(finalPriceCents, 100);
+      const payChoice = await askPayLaterChoice();
+      if (payChoice === "cancel") return;
+      setReserving(true);
+
+      if (payChoice === "pay_later") {
+        const created = await createPayLaterBooking({
+          courtId: c.id,
+          organizerPlayerId,
+          startAtIso: start_at,
+          endAtIso: end_at,
+          totalPriceCents,
+          token: session.access_token,
+        });
+        setReserving(false);
+        if (!created.ok) {
+          Alert.alert("Error", created.error ?? "No se pudo reservar sin pago");
+          return;
+        }
+        await loadTimeSlotsForDate(selectedDate);
+        setExpandedCourtId(null);
+        setConfirmationModalData({
+          courtName: c.name,
+          clubName: court.clubName,
+          dateTimeFormatted: formatDateTimeForConfirmation(selectedDate, selectedTimeSlot),
+          duration: `${duration} min`,
+          priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
+          matchVisibility: "private",
+          clubId: court.clubId,
+          courtId: c.id,
+          date: localCalendarYmd(selectedDate),
+          slot: selectedTimeSlot,
+          durationMinutes: duration,
+        });
+        return;
+      }
 
       const intentRes = await createIntentForNewMatch(
         {

@@ -62,13 +62,14 @@ export function PreciosView() {
       <div className="min-h-screen bg-background text-foreground font-sans">
         <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
         <div className="hidden md:block">
-          <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+          <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} clubId={selectedClubId} />
         </div>
         <PageSpinner />
         <MainMenu
           isOpen={isMenuOpen}
           onClose={() => setIsMenuOpen(false)}
           clubName=""
+          clubId={selectedClubId}
           isAdmin={isAdmin}
           portalMenuPermissionKeys={portalMenuPermissionKeys}
         />
@@ -81,7 +82,7 @@ export function PreciosView() {
       <div className="min-h-screen bg-background text-foreground font-sans">
         <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
         <div className="hidden md:block">
-          <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+          <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} clubId={selectedClubId} />
         </div>
         <main className="px-4 sm:px-5 py-12">
           <p className="text-sm text-gray-500 text-center">{t('not_found')}</p>
@@ -90,6 +91,7 @@ export function PreciosView() {
           isOpen={isMenuOpen}
           onClose={() => setIsMenuOpen(false)}
           clubName=""
+          clubId={selectedClubId}
           isAdmin={isAdmin}
           portalMenuPermissionKeys={portalMenuPermissionKeys}
         />
@@ -104,7 +106,7 @@ export function PreciosView() {
         onMenuClick={() => setIsMenuOpen(true)}
       />
       <div className="hidden md:block">
-        <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+        <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} clubId={selectedClubId} />
       </div>
 
       <main className="px-4 sm:px-5 py-5 pb-20">
@@ -150,6 +152,7 @@ export function PreciosView() {
         isOpen={isMenuOpen}
         onClose={() => setIsMenuOpen(false)}
         clubName={selectedClub?.name ?? ''}
+        clubId={selectedClubId}
         isAdmin={isAdmin}
         portalMenuPermissionKeys={portalMenuPermissionKeys}
       />
