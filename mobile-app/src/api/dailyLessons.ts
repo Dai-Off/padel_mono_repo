@@ -9,7 +9,8 @@ export type QuestionType =
   | 'true_false'
   | 'multi_select'
   | 'match_columns'
-  | 'order_sequence';
+  | 'order_sequence'
+  | 'puzzle';
 
 export type QuestionArea = 'technique' | 'tactics' | 'physical' | 'mental_vocabulary';
 

@@ -6,19 +6,21 @@ import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 import { normalizeStoredVisibilityWindows } from '../lib/courtVisibility';
 import { getAvailableCourtIds } from '../lib/courtConflict';
 import { canAccessClub, isClubOwnerOrAdmin, portalClubIdsWithAnyPermission } from '../lib/clubAccess';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { insertClubChatMention } from '../lib/clubChatMentions';
 
 const router = Router();
 router.use(attachAuthContext);
 
 const FIELDS =
-  'id, created_at, club_id, name, indoor, glass_type, sport, status, lighting, last_maintenance, display_order, is_hidden, visibility_windows';
+  'id, created_at, club_id, name, indoor, glass_type, sport, status, lighting, last_maintenance, display_order, is_hidden, visibility_windows, allow_payment_after_play';
 
 function normalizeCourtSport(input: unknown): string {
   const s = String(input ?? 'padel')
     .trim()
     .toLowerCase();
-  if (s === 'padel' || s === 'tenis' || s === 'pickleball' || s === 'otro') return s;
-  return 'padel';
+  if (!s) return 'padel';
+  return s;
 }
 
 function canSeeCourtsForClub(req: Request, clubId: string): boolean {
@@ -175,6 +177,160 @@ router.get('/available', async (req: Request, res: Response) => {
   }
 });
 
+const COURT_CHAT_BODY_MAX = 2000;
+
+function canAccessCourtChat(req: Request, clubId: string): boolean {
+  return canAccessClub(req, clubId, ['grilla', 'clientes']);
+}
+
+async function resolveCourtChatAuthorName(supabase: ReturnType<typeof getSupabaseServiceRoleClient>, authUserId: string): Promise<string> {
+  let authorName = 'Staff';
+  const { data: owner } = await supabase.from('club_owners').select('name').eq('auth_user_id', authUserId).maybeSingle();
+  if (owner?.name) authorName = owner.name as string;
+  const { data: player } = await supabase.from('players').select('first_name, last_name').eq('auth_user_id', authUserId).maybeSingle();
+  if (player) {
+    const fn = String((player as { first_name?: string }).first_name || '').trim();
+    const ln = String((player as { last_name?: string }).last_name || '').trim();
+    authorName = `${fn} ${ln}`.trim() || authorName;
+  }
+  return authorName;
+}
+
+/**
+ * @openapi
+ * /courts/{id}/chat:
+ *   get:
+ *     tags: [Courts]
+ *     summary: Mensajes del chat de la pista (portal)
+ *     description: Lista mensajes del chat asociado a una cancha. Requiere permiso de grilla o clientes en el club.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Lista de mensajes
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, messages: [{ id: "…", created_at: "…", author_user_id: "…", author_name: "Ana", message: "Hola" }] }
+ *       401: { description: Token requerido }
+ *       403: { description: Sin acceso al club }
+ *       404: { description: Pista no encontrada }
+ */
+router.get('/:id/chat', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: court } = await supabase.from('courts').select('id, club_id').eq('id', id).maybeSingle();
+    if (!court) return res.status(404).json({ ok: false, error: 'Pista no encontrada' });
+    const clubId = String((court as { club_id: string }).club_id);
+    if (!canAccessCourtChat(req, clubId)) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    const { data, error } = await supabase
+      .from('court_chat_messages')
+      .select('id, created_at, author_user_id, author_name, message')
+      .eq('court_id', id)
+      .order('created_at', { ascending: true })
+      .limit(200);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, messages: data ?? [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /courts/{id}/chat:
+ *   post:
+ *     tags: [Courts]
+ *     summary: Enviar mensaje al chat de la pista (portal)
+ *     description: |
+ *       Si el texto incluye la mención `@club`, se registra una fila en notificaciones del club
+ *       (consultar GET /clubs/{id}/chat-mentions).
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [message]
+ *             properties:
+ *               message: { type: string, example: "¿Hay pelotas nuevas? @club" }
+ *     responses:
+ *       200:
+ *         description: Mensaje creado
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, message: { id: "…", created_at: "…", author_user_id: "…", author_name: "Ana", message: "Hola" } }
+ *       400: { description: message vacío o demasiado largo }
+ *       401: { description: Token requerido }
+ *       403: { description: Sin acceso al club }
+ *       404: { description: Pista no encontrada }
+ */
+router.post('/:id/chat', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const message = String(req.body?.message ?? '').trim();
+  if (!message) return res.status(400).json({ ok: false, error: 'message es obligatorio' });
+  if (message.length > COURT_CHAT_BODY_MAX) {
+    return res.status(400).json({ ok: false, error: `El mensaje debe tener como máximo ${COURT_CHAT_BODY_MAX} caracteres` });
+  }
+  if (!req.authContext?.userId) return res.status(401).json({ ok: false, error: 'Token requerido' });
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: court } = await supabase.from('courts').select('id, club_id').eq('id', id).maybeSingle();
+    if (!court) return res.status(404).json({ ok: false, error: 'Pista no encontrada' });
+    const clubId = String((court as { club_id: string }).club_id);
+    if (!canAccessCourtChat(req, clubId)) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const authorName = await resolveCourtChatAuthorName(supabase, req.authContext.userId);
+    const { data, error } = await supabase
+      .from('court_chat_messages')
+      .insert({
+        court_id: id,
+        author_user_id: req.authContext.userId,
+        author_name: authorName,
+        message,
+      })
+      .select('id, created_at, author_user_id, author_name, message')
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    try {
+      await insertClubChatMention(supabase, {
+        clubId,
+        sourceType: 'court',
+        courtId: id,
+        sourceMessageId: data.id as string,
+        authorUserId: req.authContext.userId,
+        authorName,
+        message,
+      });
+    } catch (mentionErr) {
+      console.error('club_chat_mention (court):', mentionErr);
+    }
+
+    return res.json({ ok: true, message: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 /**
  * @openapi
  * /courts/{id}:
@@ -232,10 +388,11 @@ router.get('/:id', async (req: Request, res: Response) => {
  *               name: { type: string }
  *               indoor: { type: boolean }
  *               glass_type: { type: string, enum: [normal, panoramic] }
- *               sport: { type: string, enum: [padel, tenis, pickleball, otro] }
+ *               sport: { type: string, description: 'Slug de deporte (ej: padel, tenis, pickleball)' }
  *               lighting: { type: boolean }
  *               last_maintenance: { type: string, format: date, nullable: true }
  *               is_hidden: { type: boolean, description: 'Excluida de búsqueda pública' }
+ *               allow_payment_after_play: { type: boolean, description: 'Permite reservar sin pago inmediato en app móvil' }
  *               visibility_windows:
  *                 type: array
  *                 nullable: true
@@ -245,7 +402,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  *       400: { description: visibility_windows inválido }
  */
 router.post('/', requireAuthUser, async (req: Request, res: Response) => {
-  const { club_id, name, indoor, glass_type, sport, lighting, last_maintenance, is_hidden, visibility_windows } =
+  const { club_id, name, indoor, glass_type, sport, lighting, last_maintenance, is_hidden, visibility_windows, allow_payment_after_play } =
     req.body ?? {};
   if (!club_id || !name || !String(name).trim()) {
     return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
@@ -274,6 +431,7 @@ router.post('/', requireAuthUser, async (req: Request, res: Response) => {
     if (lighting !== undefined) row.lighting = Boolean(lighting);
     if (last_maintenance !== undefined) row.last_maintenance = last_maintenance ?? null;
     if (is_hidden !== undefined) row.is_hidden = Boolean(is_hidden);
+    if (allow_payment_after_play !== undefined) row.allow_payment_after_play = Boolean(allow_payment_after_play);
     if (visibility_windows !== undefined) row.visibility_windows = winNorm.value;
     const { data, error } = await supabase
       .from('courts')
@@ -318,6 +476,7 @@ router.post('/', requireAuthUser, async (req: Request, res: Response) => {
  *               status: { type: string, enum: [operational, maintenance] }
  *               lighting: { type: boolean }
  *               is_hidden: { type: boolean }
+ *               allow_payment_after_play: { type: boolean }
  *               visibility_windows: { type: array, nullable: true }
  *     responses:
  *       200: { description: Actualizada }
@@ -332,7 +491,7 @@ router.put('/:id', requireAuthUser, async (req: Request, res: Response) => {
   } catch {
     return res.status(500).json({ ok: false, error: 'Error al verificar pista' });
   }
-  const { name, indoor, glass_type, sport, status, lighting, last_maintenance, is_hidden, visibility_windows } = req.body ?? {};
+  const { name, indoor, glass_type, sport, status, lighting, last_maintenance, is_hidden, visibility_windows, allow_payment_after_play } = req.body ?? {};
   const update: Record<string, unknown> = {};
   if (name !== undefined) update.name = String(name).trim();
   if (indoor !== undefined) update.indoor = Boolean(indoor);
@@ -344,6 +503,7 @@ router.put('/:id', requireAuthUser, async (req: Request, res: Response) => {
   if (lighting !== undefined) update.lighting = Boolean(lighting);
   if (last_maintenance !== undefined) update.last_maintenance = last_maintenance ?? null;
   if (is_hidden !== undefined) update.is_hidden = Boolean(is_hidden);
+  if (allow_payment_after_play !== undefined) update.allow_payment_after_play = Boolean(allow_payment_after_play);
   if (visibility_windows !== undefined) {
     const winNorm = normalizeStoredVisibilityWindows(visibility_windows);
     if (!winNorm.ok) return res.status(400).json({ ok: false, error: winNorm.error });

@@ -12,8 +12,10 @@ import {
   CreditCard,
   ClipboardList,
   Trophy,
+  MessageCircle,
 } from 'lucide-react';
 import { portalMenuItemAllowed } from '../../../lib/portalNavPermissions';
+import { useClubChatMentionsCount } from '../../../hooks/useClubChatMentionsCount';
 
 type NavChild = { id: string; path: string; label: string; queryParam?: string; search?: string };
 type NavSection = {
@@ -55,7 +57,6 @@ function buildSections(isAdmin: boolean): NavSection[] {
       icon: Users,
       children: [
         { id: 'jugadores', path: '/jugadores', label: 'Jugadores' },
-        { id: 'crm', path: '/crm', label: 'CRM' },
       ],
     },
     {
@@ -114,11 +115,20 @@ function buildSections(isAdmin: boolean): NavSection[] {
       ],
     },
     {
+      id: 'chats',
+      label: 'Chats',
+      icon: MessageCircle,
+      children: [
+        { id: 'chats', path: '/chats', label: 'Chats' },
+      ],
+    },
+    {
       id: 'config',
       label: 'Configuración',
       icon: Settings,
       children: [
         { id: 'configuracion', path: '/configuracion', label: 'Configuración del club' },
+        { id: 'deportes', path: '/deportes', label: 'Deportes' },
         { id: 'equipoRoles', path: '/equipo-portal', label: 'Gestión de personal' },
         { id: 'onboarding', path: '/onboarding', label: 'Asistente inicial' },
       ],
@@ -156,9 +166,11 @@ function isSectionActive(
 export function GrillaQuickNav({
   isAdmin,
   portalMenuPermissionKeys,
+  clubId,
 }: {
   isAdmin: boolean;
   portalMenuPermissionKeys?: string[] | null;
+  clubId?: string | null;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -166,6 +178,8 @@ export function GrillaQuickNav({
   const menuParam = searchParams.get('menu');
   const [openSection, setOpenSection] = useState<string | null>(null);
   const navRef = useRef<HTMLElement>(null);
+  const chatMentionsCount = useClubChatMentionsCount(clubId);
+  const showChatsMentionBadge = chatMentionsCount > 0;
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -244,14 +258,21 @@ export function GrillaQuickNav({
                         type="button"
                         onClick={() => go(child)}
                         className={clsx(
-                          'w-full text-left px-4 py-2 text-[12px] transition-colors flex items-center gap-2',
+                          'w-full text-left px-4 py-2 text-[12px] transition-colors flex items-center justify-between gap-2',
                           childActive
                             ? 'bg-[#00726b]/5 text-[#00726b] font-bold'
                             : 'text-gray-700 hover:bg-gray-50 font-medium'
                         )}
                       >
-                        {childActive && <span className="w-1.5 h-1.5 rounded-full bg-[#00726b] flex-shrink-0" />}
-                        {child.label}
+                        <span className="flex min-w-0 items-center gap-2">
+                          {childActive && <span className="w-1.5 h-1.5 rounded-full bg-[#00726b] flex-shrink-0" />}
+                          <span className="truncate">{child.label}</span>
+                        </span>
+                        {child.id === 'chats' && showChatsMentionBadge ? (
+                          <span className="flex-shrink-0 min-w-[18px] h-[18px] px-0.5 flex items-center justify-center rounded-full bg-[#E31E24] text-[10px] font-bold text-white">
+                            1
+                          </span>
+                        ) : null}
                       </button>
                     );
                   })}

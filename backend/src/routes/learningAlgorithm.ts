@@ -203,6 +203,16 @@ export function checkAnswer(type: string, content: Record<string, unknown>, sele
       return selectedAnswer.every((val, idx) => val === idx);
     }
 
+    case 'puzzle': {
+      // Cliente envía { option_id: 1|2|3 }. Correcta = la opción con points=2.
+      const options = (content as { options?: { id: number; points: number }[] }).options;
+      if (!Array.isArray(options)) return false;
+      const sel = selectedAnswer as { option_id?: number } | null;
+      const optionId = sel?.option_id;
+      const opt = options.find((o) => o.id === optionId);
+      return !!opt && opt.points === 2;
+    }
+
     default:
       return false;
   }
@@ -223,6 +233,11 @@ export function getCorrectAnswer(type: string, content: Record<string, unknown>)
     case 'order_sequence': {
       const steps = (content as { steps: unknown[] }).steps;
       return Array.from({ length: steps.length }, (_, i) => i);
+    }
+    case 'puzzle': {
+      const options = (content as { options?: { id: number; points: number }[] }).options;
+      const correct = options?.find((o) => o.points === 2);
+      return correct ? { correct_option_id: correct.id } : null;
     }
     default:
       return null;

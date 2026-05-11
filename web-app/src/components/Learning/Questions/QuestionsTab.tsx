@@ -7,11 +7,15 @@ import { learningContentService } from '../../../services/learningContent';
 import { QuestionFormModal } from './QuestionFormModal';
 import type { Question, QuestionType, QuestionArea } from '../../../types/learningContent';
 
-const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'];
+const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence', 'puzzle'];
 const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'mental', 'rules'];
 
 // Extraer texto legible del contenido de la pregunta
 function extractPreview(q: Question): string {
+  if (q.type === 'puzzle') {
+    const c = q.content as { statement?: string };
+    return c.statement ?? '—';
+  }
   const c = q.content;
   if ('question' in c && typeof c.question === 'string') return c.question;
   if ('statement' in c && typeof c.statement === 'string') return c.statement;
