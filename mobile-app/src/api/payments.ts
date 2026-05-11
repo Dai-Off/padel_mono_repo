@@ -104,6 +104,24 @@ export type FetchTransactionsResponse = {
   error?: string;
 };
 
+export type PendingBookingPayment = {
+  booking_id: string;
+  participant_id: string;
+  start_at: string;
+  end_at: string;
+  total_price_cents: number;
+  amount_due_cents: number;
+  currency: string;
+  court_name: string | null;
+  club_name: string | null;
+};
+
+export type FetchPendingBookingsResponse = {
+  ok?: boolean;
+  bookings?: PendingBookingPayment[];
+  error?: string;
+};
+
 export type CustomerPortalResponse = {
   ok?: boolean;
   url?: string;
@@ -141,6 +159,22 @@ export async function fetchTransactions(
     });
     const json = (await res.json()) as FetchTransactionsResponse;
     if (!res.ok) return { ok: false, error: json.error ?? 'Error al cargar transacciones' };
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+export async function fetchPendingBookings(
+  token: string | null | undefined
+): Promise<FetchPendingBookingsResponse> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/payments/pending-bookings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const json = (await res.json()) as FetchPendingBookingsResponse;
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al cargar pagos pendientes' };
     return json;
   } catch {
     return { ok: false, error: 'Error de conexión' };

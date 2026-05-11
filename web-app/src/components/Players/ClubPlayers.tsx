@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  X, Users, TrendingUp, Search, Eye, Mail, Phone, Zap, Plus, Loader2, Wallet,
+  X, Users, TrendingUp, Search, Eye, Mail, Phone, Zap, Plus, Loader2, Wallet, Send, Square, CheckSquare,
 } from 'lucide-react';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { useTranslation } from 'react-i18next';
@@ -51,6 +51,18 @@ function formatBalanceCents(cents: number, currency: string): string {
   }
 }
 
+/** Plain text → safe HTML body for the email API (line breaks become <br />). */
+function plainMessageToEmailHtml(text: string): string {
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+  return `<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.6">${escaped
+    .split(/\r?\n/)
+    .join('<br />')}</div>`;
+}
+
 type ClubPlayersTabProps = {
   clubId: string | null;
   currency?: string;
@@ -72,14 +84,25 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
   const [createdTo, setCreatedTo] = useState('');
   const [walletFilter, setWalletFilter] = useState<'any' | 'yes' | 'no'>('any');
   const [walletMoneyFilter, setWalletMoneyFilter] = useState<'any' | 'with_money' | 'without_money'>('any');
+  const [balanceMinEur, setBalanceMinEur] = useState('');
+  const [balanceMaxEur, setBalanceMaxEur] = useState('');
   const [schoolFilter, setSchoolFilter] = useState<'any' | 'yes' | 'no'>('any');
   const [bookingsMin, setBookingsMin] = useState('');
+  const [currentBookingFilter, setCurrentBookingFilter] = useState<'any' | 'yes' | 'no'>('any');
+  const [tournamentFilter, setTournamentFilter] = useState<'any' | 'yes' | 'no'>('any');
   const [manualOpen, setManualOpen] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualForm, setManualForm] = useState({ first_name: '', last_name: '', phone: '', email: '' });
   const [segmentSlug, setSegmentSlug] = useState<string>('standard');
   const [segmentDiscount, setSegmentDiscount] = useState('0');
   const [segmentSaving, setSegmentSaving] = useState(false);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailMode, setEmailMode] = useState<'selected' | 'all'>('selected');
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [emailSubmitting, setEmailSubmitting] = useState(false);
 
   const fetchPlayers = useCallback(async () => {
     if (!clubId) {
@@ -90,6 +113,8 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
     if (firstLoadRef.current) setLoading(true);
     else setRefreshing(true);
     try {
+      const balanceMin = balanceMinEur.trim() ? Math.round(Number(balanceMinEur) * 100) : undefined;
+      const balanceMax = balanceMaxEur.trim() ? Math.round(Number(balanceMaxEur) * 100) : undefined;
       const list = await clubClientService.list(clubId, {
         q: searchQuery.trim() || undefined,
         tier: tierFilter === 'all' ? undefined : tierFilter,
@@ -99,8 +124,12 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
         created_to: createdTo || undefined,
         has_wallet: walletFilter === 'any' ? undefined : walletFilter === 'yes',
         has_wallet_balance: walletMoneyFilter === 'any' ? undefined : walletMoneyFilter === 'with_money',
+        balance_min_cents: Number.isFinite(balanceMin as number) ? balanceMin : undefined,
+        balance_max_cents: Number.isFinite(balanceMax as number) ? balanceMax : undefined,
         has_school: schoolFilter === 'any' ? undefined : schoolFilter === 'yes',
         bookings_min: bookingsMin.trim() ? Number(bookingsMin) : undefined,
+        has_current_booking: currentBookingFilter === 'any' ? undefined : currentBookingFilter === 'yes',
+        has_tournament: tournamentFilter === 'any' ? undefined : tournamentFilter === 'yes',
       });
       setPlayers(list ?? []);
     } catch (e) {
@@ -111,7 +140,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
       setLoading(false);
       setRefreshing(false);
     }
-  }, [t, clubId, searchQuery, tierFilter, eloMin, eloMax, createdFrom, createdTo, walletFilter, walletMoneyFilter, schoolFilter, bookingsMin]);
+  }, [t, clubId, searchQuery, tierFilter, eloMin, eloMax, createdFrom, createdTo, walletFilter, walletMoneyFilter, balanceMinEur, balanceMaxEur, schoolFilter, bookingsMin, currentBookingFilter, tournamentFilter]);
 
   useEffect(() => {
     fetchPlayers();
@@ -128,6 +157,74 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
   const totalPlayers = players.length;
   const activePlayers = players.filter((p) => p.status === 'active').length;
   const withAccount = players.filter((p) => p.auth_user_id).length;
+  const withEmailCount = filteredPlayers.filter((p) => p.email && p.status !== 'deleted').length;
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllWithEmail = () => {
+    const next = new Set<string>();
+    for (const p of filteredPlayers) {
+      if (p.email && p.status !== 'deleted') next.add(p.id);
+    }
+    setSelectedIds(next);
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const openEmail = (mode: 'selected' | 'all') => {
+    setEmailMode(mode);
+    setEmailSubject('');
+    setEmailBody(`${t('crm_email_greeting')}\n\n`);
+    setEmailOpen(true);
+  };
+
+  const submitEmail = async () => {
+    if (!clubId || !emailSubject.trim() || !emailBody.trim()) {
+      toast.error(t('crm_email_required'));
+      return;
+    }
+    if (emailMode === 'selected' && selectedIds.size === 0) {
+      toast.error(t('crm_select_at_least_one'));
+      return;
+    }
+    setEmailSubmitting(true);
+    try {
+      const res = await clubClientService.sendEmail({
+        club_id: clubId,
+        subject: emailSubject.trim(),
+        body_html: plainMessageToEmailHtml(emailBody),
+        mode: emailMode,
+        player_ids: emailMode === 'selected' ? [...selectedIds] : undefined,
+      });
+      if (res.failed_count === 0) {
+        toast.success(t('crm_email_ok', { n: res.sent_count }));
+      } else {
+        toast.warning(t('crm_email_partial', { ok: res.sent_count, fail: res.failed_count }));
+      }
+      setEmailOpen(false);
+    } catch (e: unknown) {
+      const msg = e && typeof e === 'object' && 'message' in e ? String((e as { message: string }).message) : t('error_occurred');
+      toast.error(msg);
+    } finally {
+      setEmailSubmitting(false);
+    }
+  };
+
+  const sendOneEmail = (p: Player) => {
+    if (!p.email) {
+      toast.error(t('crm_no_email'));
+      return;
+    }
+    setSelectedIds(new Set([p.id]));
+    openEmail('selected');
+  };
 
   const handleSaveSegment = async () => {
     if (!clubId || !selectedPlayer) return;
@@ -201,7 +298,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
             <PulseDot color="#5B8DEE" />
             <span className="text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">{t('players_club_section')}</span>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {[
               { label: t('players_total'), value: String(totalPlayers), icon: <Users className="w-4 h-4" />, color: '#5B8DEE' },
               { label: t('players_active'), value: String(activePlayers), icon: <TrendingUp className="w-4 h-4" />, color: '#22C55E' },
@@ -239,7 +336,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
               className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs text-[#1A1A1A] placeholder-gray-300 focus:ring-2 focus:ring-[#E31E24]/30"
             />
           </div>
-          <div className="flex gap-1.5 items-center">
+          <div className="flex gap-1.5 items-center flex-wrap">
             {(['all', 'active', 'deleted'] as const).map((s) => (
               <button
                 key={s}
@@ -251,8 +348,26 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
             ))}
             <button
               type="button"
+              onClick={() => openEmail('all')}
+              className="ml-1 flex items-center gap-1.5 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A] hover:bg-gray-50"
+            >
+              <Send className="w-3 h-3" />
+              {t('crm_email_massive')}
+            </button>
+            {selectedIds.size > 0 && (
+              <button
+                type="button"
+                onClick={() => openEmail('selected')}
+                className="flex items-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-[10px] font-bold text-[#1A1A1A] hover:bg-gray-100"
+              >
+                <Mail className="w-3 h-3" />
+                {t('crm_email_selection_short')} ({selectedIds.size})
+              </button>
+            )}
+            <button
+              type="button"
               onClick={() => setManualOpen(true)}
-              className="ml-2 flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold bg-[#E31E24] text-white hover:opacity-90"
+              className="ml-1 flex items-center gap-1.5 px-3 py-2 rounded-xl text-[10px] font-bold bg-[#E31E24] text-white hover:opacity-90"
             >
               <Plus className="w-3.5 h-3.5" />
               {t('players_manual_add')}
@@ -260,9 +375,36 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
           </div>
         </div>
 
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={selectAllWithEmail}
+            className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
+          >
+            {t('crm_select_all_email')}
+          </button>
+          {selectedIds.size > 0 && (
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-[10px] font-bold text-gray-600 hover:bg-gray-50"
+            >
+              {t('crm_clear_selection')}
+            </button>
+          )}
+          {withEmailCount > 0 && (
+            <span className="px-1 text-[10px] text-gray-400">
+              {t('crm_stat_with_email')}: {withEmailCount}
+            </span>
+          )}
+        </div>
+
         <div className="mt-3 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2">
           <div className="flex flex-col gap-1">
-            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Categoría</span>
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Nivel</span>
+            {/*
+              Categorías VIP/Premium/Standard/Basic ocultas a petición del usuario.
+              Se mantiene el state `tierFilter` por si se vuelve a habilitar.
             <div className="flex flex-wrap items-center gap-1.5">
               {(['all', 'vip', 'premium', 'standard', 'basic'] as const).map((k) => (
                 <button
@@ -277,7 +419,8 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                 </button>
               ))}
             </div>
-            <div className="flex items-center gap-2 mt-1">
+            */}
+            <div className="flex items-center gap-2">
               <input
                 type="number"
                 min={0}
@@ -326,6 +469,26 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                   {k === 'any' ? 'Saldo: todos' : k === 'with_money' ? 'Con dinero' : 'Sin dinero'}
                 </button>
               ))}
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="number"
+                step="0.01"
+                value={balanceMinEur}
+                onChange={(e) => setBalanceMinEur(e.target.value)}
+                className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                placeholder={`Saldo min ${currency}`}
+                aria-label="Saldo mínimo"
+              />
+              <input
+                type="number"
+                step="0.01"
+                value={balanceMaxEur}
+                onChange={(e) => setBalanceMaxEur(e.target.value)}
+                className="w-24 rounded-xl border border-gray-100 bg-white px-3 py-2 text-[10px] font-bold text-[#1A1A1A]"
+                placeholder={`Saldo max ${currency}`}
+                aria-label="Saldo máximo"
+              />
             </div>
           </div>
 
@@ -382,6 +545,38 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
             />
           </div>
 
+          <div className="flex flex-col gap-1">
+            <span className="px-1 text-[9px] font-bold uppercase tracking-wide text-gray-400">Reservas y torneos</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(['any', 'yes', 'no'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setCurrentBookingFilter(k)}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                    currentBookingFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                  }`}
+                >
+                  {k === 'any' ? 'Reserva: todos' : k === 'yes' ? 'Con reserva actual' : 'Sin reserva actual'}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+              {(['any', 'yes', 'no'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setTournamentFilter(k)}
+                  className={`rounded-xl px-3 py-2 text-[10px] font-bold transition-all ${
+                    tournamentFilter === k ? 'bg-[#1A1A1A] text-white' : 'bg-white text-[#1A1A1A] ring-1 ring-gray-100'
+                  }`}
+                >
+                  {k === 'any' ? 'Torneo: todos' : k === 'yes' ? 'En torneo' : 'Sin torneo'}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={() => {
@@ -390,10 +585,14 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
               setCreatedTo('');
               setWalletFilter('any');
               setWalletMoneyFilter('any');
+              setBalanceMinEur('');
+              setBalanceMaxEur('');
               setEloMin('');
               setEloMax('');
               setSchoolFilter('any');
               setBookingsMin('');
+              setCurrentBookingFilter('any');
+              setTournamentFilter('any');
             }}
             className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-[10px] font-bold text-gray-600 hover:bg-gray-50 h-fit self-end"
           >
@@ -412,12 +611,24 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
           {filteredPlayers.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm">{t('players_empty')}</div>
           ) : (
-            filteredPlayers.map((player) => (
+            filteredPlayers.map((player) => {
+              const hasEmail = !!(player.email && player.status !== 'deleted');
+              const checked = selectedIds.has(player.id);
+              return (
               <div
                 key={player.id}
                 className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5"
               >
                 <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => hasEmail && toggleSelect(player.id)}
+                    disabled={!hasEmail}
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-gray-100 text-gray-400 hover:bg-gray-50 disabled:opacity-30"
+                    aria-label="Seleccionar cliente"
+                  >
+                    {checked ? <CheckSquare className="h-3.5 w-3.5 text-[#E31E24]" /> : <Square className="h-3.5 w-3.5" />}
+                  </button>
                   <div className="w-10 h-10 rounded-xl bg-[#1A1A1A] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
                     {initials(player.first_name, player.last_name)}
                   </div>
@@ -469,17 +680,28 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                       </span>
                     </div>
                   )}
-                  <motion.button
-                    type="button"
-                    whileTap={{ scale: 0.9 }}
-                    onClick={() => setSelectedPlayer(player)}
-                    className="w-9 h-9 rounded-xl border border-gray-100 flex items-center justify-center hover:bg-gray-50 flex-shrink-0"
-                  >
-                    <Eye className="w-4 h-4 text-gray-400" />
-                  </motion.button>
+                  <div className="flex flex-shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => sendOneEmail(player)}
+                      className="w-9 h-9 rounded-xl border border-gray-100 flex items-center justify-center hover:bg-gray-50"
+                      title={t('crm_send_one')}
+                    >
+                      <Mail className="w-4 h-4 text-gray-400" />
+                    </button>
+                    <motion.button
+                      type="button"
+                      whileTap={{ scale: 0.9 }}
+                      onClick={() => setSelectedPlayer(player)}
+                      className="w-9 h-9 rounded-xl border border-gray-100 flex items-center justify-center hover:bg-gray-50"
+                    >
+                      <Eye className="w-4 h-4 text-gray-400" />
+                    </motion.button>
+                  </div>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </div>
       )}
@@ -699,6 +921,71 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {emailOpen && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !emailSubmitting && setEmailOpen(false)}
+              className="fixed inset-0 z-50 bg-black/40"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed left-1/2 top-1/2 z-50 mx-4 max-h-[90vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-gray-100 bg-white p-5 shadow-xl"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-bold text-[#1A1A1A]">{t('crm_email_modal_title')}</h3>
+                <button
+                  type="button"
+                  onClick={() => !emailSubmitting && setEmailOpen(false)}
+                  className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-50"
+                >
+                  <X className="h-4 w-4 text-gray-400" />
+                </button>
+              </div>
+              <p className="mb-2 text-[10px] text-gray-500">
+                {emailMode === 'all' ? t('crm_email_mode_all') : t('crm_email_mode_selected', { n: selectedIds.size })}
+              </p>
+              <p className="mb-3 text-[10px] leading-relaxed text-gray-400">{t('crm_email_message_tip')}</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-[10px] font-bold text-gray-500">{t('crm_subject')}</label>
+                  <input
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    className="w-full rounded-xl border border-gray-100 px-3 py-2.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-bold text-gray-500">{t('crm_email_message')}</label>
+                  <textarea
+                    value={emailBody}
+                    onChange={(e) => setEmailBody(e.target.value)}
+                    rows={8}
+                    placeholder={t('crm_email_message_placeholder')}
+                    className="w-full rounded-xl border border-gray-100 px-3 py-2.5 text-xs placeholder:text-gray-300"
+                  />
+                </div>
+                <motion.button
+                  type="button"
+                  disabled={emailSubmitting}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => void submitEmail()}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-gray-100 bg-[#1A1A1A] py-2.5 text-xs font-bold text-white"
+                >
+                  {emailSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  {t('crm_send')}
+                </motion.button>
+              </div>
             </motion.div>
           </>
         )}

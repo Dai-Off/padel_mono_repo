@@ -7,6 +7,7 @@ export type Court = {
   indoor: boolean;
   glass_type: string;
   status?: string;
+  allow_payment_after_play?: boolean;
 };
 
 export async function fetchCourtsByClubId(clubId: string): Promise<Court[]> {

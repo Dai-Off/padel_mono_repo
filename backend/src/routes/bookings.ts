@@ -7,6 +7,8 @@ import { findTournamentConflict } from '../lib/tournamentConflicts';
 import { isExpiredMatchLock, MATCH_DRAFT_LOCK_MARKER, getAvailableCourtIds } from '../lib/courtConflict';
 import { refundStripeBookingPaymentTransactions } from '../services/paymentRefundService';
 import { canAccessClub } from '../lib/clubAccess';
+import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
+import { insertClubChatMention } from '../lib/clubChatMentions';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -538,6 +540,188 @@ router.get('/', async (req: Request, res: Response) => {
     // Filter out match draft locks — they're ephemeral soft-locks from the match creation modal
     const filtered = (data ?? []).filter((b: any) => !(b.reservation_type === 'blocked' && typeof b.notes === 'string' && b.notes.includes(MATCH_DRAFT_LOCK_MARKER)));
     return res.json({ ok: true, bookings: filtered });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// ─── Chat por turno (booking) ────────────────────────────────────────────────
+
+const BOOKING_CHAT_BODY_MAX = 2000;
+
+function canAccessBookingChat(req: Request, clubId: string): boolean {
+  return canAccessClub(req, clubId, ['grilla', 'clientes']);
+}
+
+async function resolveBookingChatAuthorName(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  authUserId: string,
+): Promise<string> {
+  let authorName = 'Staff';
+  const { data: owner } = await supabase
+    .from('club_owners')
+    .select('name')
+    .eq('auth_user_id', authUserId)
+    .maybeSingle();
+  if (owner?.name) authorName = owner.name as string;
+  const { data: player } = await supabase
+    .from('players')
+    .select('first_name, last_name')
+    .eq('auth_user_id', authUserId)
+    .maybeSingle();
+  if (player) {
+    const fn = String((player as { first_name?: string }).first_name || '').trim();
+    const ln = String((player as { last_name?: string }).last_name || '').trim();
+    authorName = `${fn} ${ln}`.trim() || authorName;
+  }
+  return authorName;
+}
+
+async function loadBookingChatContext(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  bookingId: string,
+): Promise<{ clubId: string } | null> {
+  const { data } = await supabase
+    .from('bookings')
+    .select('id, court_id, courts(club_id)')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (!data) return null;
+  const clubId = String((data as { courts?: { club_id?: string } }).courts?.club_id ?? '');
+  if (!clubId) return null;
+  return { clubId };
+}
+
+/**
+ * @openapi
+ * /bookings/{id}/chat:
+ *   get:
+ *     tags: [Bookings]
+ *     summary: Mensajes del chat de un turno (portal)
+ *     description: |
+ *       Lista mensajes del chat asociado a una reserva (turno). Cada turno tiene su propio chat,
+ *       agrupado por pista + fecha + hora. Requiere permiso de grilla o clientes en el club.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Lista de mensajes
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, messages: [{ id: "…", created_at: "…", author_user_id: "…", author_name: "Ana", message: "Hola" }] }
+ *       401: { description: Token requerido }
+ *       403: { description: Sin acceso al club }
+ *       404: { description: Reserva no encontrada }
+ */
+router.get('/:id/chat', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const ctx = await loadBookingChatContext(supabase, id);
+    if (!ctx) return res.status(404).json({ ok: false, error: 'Reserva no encontrada' });
+    if (!canAccessBookingChat(req, ctx.clubId)) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    const { data, error } = await supabase
+      .from('booking_chat_messages')
+      .select('id, created_at, author_user_id, author_name, message')
+      .eq('booking_id', id)
+      .order('created_at', { ascending: true })
+      .limit(200);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, messages: data ?? [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /bookings/{id}/chat:
+ *   post:
+ *     tags: [Bookings]
+ *     summary: Enviar mensaje al chat de un turno (portal)
+ *     description: |
+ *       Si el texto incluye la mención `@club`, se registra una fila en notificaciones del club
+ *       (consultar GET /clubs/{id}/chat-mentions).
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [message]
+ *             properties:
+ *               message: { type: string, example: "¿Hay pelotas nuevas? @club" }
+ *     responses:
+ *       200:
+ *         description: Mensaje creado
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, message: { id: "…", created_at: "…", author_user_id: "…", author_name: "Ana", message: "Hola" } }
+ *       400: { description: message vacío o demasiado largo }
+ *       401: { description: Token requerido }
+ *       403: { description: Sin acceso al club }
+ *       404: { description: Reserva no encontrada }
+ */
+router.post('/:id/chat', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const message = String(req.body?.message ?? '').trim();
+  if (!message) return res.status(400).json({ ok: false, error: 'message es obligatorio' });
+  if (message.length > BOOKING_CHAT_BODY_MAX) {
+    return res.status(400).json({ ok: false, error: `El mensaje debe tener como máximo ${BOOKING_CHAT_BODY_MAX} caracteres` });
+  }
+  if (!req.authContext?.userId) return res.status(401).json({ ok: false, error: 'Token requerido' });
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const ctx = await loadBookingChatContext(supabase, id);
+    if (!ctx) return res.status(404).json({ ok: false, error: 'Reserva no encontrada' });
+    if (!canAccessBookingChat(req, ctx.clubId)) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const authorName = await resolveBookingChatAuthorName(supabase, req.authContext.userId);
+    const { data, error } = await supabase
+      .from('booking_chat_messages')
+      .insert({
+        booking_id: id,
+        author_user_id: req.authContext.userId,
+        author_name: authorName,
+        message,
+      })
+      .select('id, created_at, author_user_id, author_name, message')
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    try {
+      await insertClubChatMention(supabase, {
+        clubId: ctx.clubId,
+        sourceType: 'booking',
+        bookingId: id,
+        sourceMessageId: data.id as string,
+        authorUserId: req.authContext.userId,
+        authorName,
+        message,
+      });
+    } catch (mentionErr) {
+      console.error('club_chat_mention (booking):', mentionErr);
+    }
+
+    return res.json({ ok: true, message: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

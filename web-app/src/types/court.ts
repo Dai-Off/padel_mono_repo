@@ -18,6 +18,7 @@ export interface Court {
     lighting?: boolean;
     last_maintenance?: string | null;
     is_hidden?: boolean;
+    allow_payment_after_play?: boolean;
     visibility_windows?: CourtVisibilityWindow[] | null;
 }
 
