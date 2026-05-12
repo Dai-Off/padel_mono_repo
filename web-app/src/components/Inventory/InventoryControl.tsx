@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Edit, Minus, Package, Plus, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
-import type { InventoryItem, InventoryMovement, InventoryMovementType } from '../../types/inventory';
+import type { InventoryCategory, InventoryItem, InventoryMovement, InventoryMovementType } from '../../types/inventory';
 import { inventoryService } from '../../services/inventory';
 import { useTranslation } from 'react-i18next';
 
@@ -12,27 +13,35 @@ function clampInt(n: number): number {
 
 export function InventoryControl({ clubId, clubResolved = true }: { clubId: string | null; clubResolved?: boolean }) {
     const { t } = useTranslation();
+    const navigate = useNavigate();
     const [items, setItems] = useState<InventoryItem[]>([]);
+    const [categories, setCategories] = useState<InventoryCategory[]>([]);
     const [loading, setLoading] = useState(false);
 
     const [itemModal, setItemModal] = useState<null | { mode: 'create' | 'edit'; item?: InventoryItem }>(null);
     const [itemForm, setItemForm] = useState<{
         name: string;
+        categoryId: string;
         sku: string;
         unit: string;
         status: 'active' | 'inactive';
         unitPrice: string;
         currency: string;
+        initialStock: string;
         lowStockThreshold: string;
     }>({
         name: '',
+        categoryId: '',
         sku: '',
         unit: '',
         status: 'active',
         unitPrice: '0',
         currency: 'EUR',
+        initialStock: '0',
         lowStockThreshold: '0',
     });
+    const [newCategoryName, setNewCategoryName] = useState('');
+    const [categorySubmitting, setCategorySubmitting] = useState(false);
 
     const [itemImageFile, setItemImageFile] = useState<File | null>(null);
     const [itemImagePreviewUrl, setItemImagePreviewUrl] = useState<string | null>(null);
@@ -84,6 +93,11 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
         return typeof item.current_quantity === 'number' ? item.current_quantity : 0;
     }
 
+    function getItemCategoryName(item: InventoryItem): string | null {
+        const nested = Array.isArray(item.inventory_categories) ? item.inventory_categories[0] : item.inventory_categories;
+        return nested?.name ?? categories.find((category) => category.id === item.category_id)?.name ?? null;
+    }
+
     function movementDateLabel(movement: InventoryMovement): string {
         const src = movement.movement_at ?? movement.created_at;
         if (!src) return '-';
@@ -102,11 +116,16 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
         if (!clubId) return;
         setLoading(true);
         try {
-            const data = await inventoryService.listItems(clubId);
+            const [data, categoryData] = await Promise.all([
+                inventoryService.listItems(clubId),
+                inventoryService.listCategories(clubId),
+            ]);
             setItems(data);
+            setCategories(categoryData);
         } catch (e) {
             toast.error((e as Error).message || 'Error al cargar inventario');
             setItems([]);
+            setCategories([]);
         } finally {
             setLoading(false);
         }
@@ -195,11 +214,13 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
     const openCreate = () => {
         setItemForm({
             name: '',
+            categoryId: '',
             sku: '',
             unit: '',
             status: 'active',
             unitPrice: '0',
             currency: 'EUR',
+            initialStock: '0',
             lowStockThreshold: '0',
         });
         setItemImageFile(null);
@@ -208,19 +229,19 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
     };
 
     const openSaleModal = () => {
-        setSalePaymentMethod('cash');
-        setSaleLines([{ itemId: '', quantity: 1 }]);
-        setSaleModalOpen(true);
+        navigate('/carrito');
     };
 
     const openEdit = (item: InventoryItem) => {
         setItemForm({
             name: item.name ?? '',
+            categoryId: item.category_id ?? '',
             sku: item.sku ?? '',
             unit: item.unit ?? '',
             status: item.status,
             unitPrice: item.unit_price_cents != null ? String((item.unit_price_cents / 100).toFixed(2)).replace(/\.00$/, '') : '0',
             currency: item.currency ?? 'EUR',
+            initialStock: '0',
             lowStockThreshold: item.low_stock_threshold != null ? String(item.low_stock_threshold) : '0',
         });
         setItemImageFile(null);
@@ -250,11 +271,19 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
             if (!Number.isFinite(n) || n < 0) return 0;
             return Math.trunc(n);
         })();
+        const initialStockInt = (() => {
+            const raw = itemForm.initialStock.trim();
+            if (!raw) return 0;
+            const n = parseInt(raw, 10);
+            if (!Number.isFinite(n) || n < 0) return 0;
+            return Math.trunc(n);
+        })();
 
         try {
             if (itemModal?.mode === 'create') {
                 const created = await inventoryService.createItem({
                     club_id: clubId,
+                    category_id: itemForm.categoryId || null,
                     name,
                     sku: itemForm.sku.trim() || null,
                     unit: itemForm.unit.trim() || null,
@@ -262,6 +291,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                     unit_price_cents: unitPriceCents,
                     currency: itemForm.currency || 'EUR',
                     low_stock_threshold: lowStockThresholdInt,
+                    initial_stock: initialStockInt,
                     image_url: null,
                 });
 
@@ -277,6 +307,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                 await load();
             } else if (itemModal?.mode === 'edit' && itemModal.item) {
                 const updated = await inventoryService.updateItem(itemModal.item.id, {
+                    category_id: itemForm.categoryId || null,
                     name,
                     sku: itemForm.sku.trim() || null,
                     unit: itemForm.unit.trim() || null,
@@ -313,6 +344,27 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
             toast.success('Eliminado');
         } catch (e) {
             toast.error((e as Error).message || 'Error al eliminar');
+        }
+    };
+
+    const submitCategory = async () => {
+        if (!clubId) return;
+        const name = newCategoryName.trim();
+        if (!name) {
+            toast.error('Nombre de categoría obligatorio');
+            return;
+        }
+        setCategorySubmitting(true);
+        try {
+            const category = await inventoryService.createCategory({ club_id: clubId, name });
+            setCategories((prev) => [...prev, category].sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })));
+            setItemForm((form) => ({ ...form, categoryId: category.id }));
+            setNewCategoryName('');
+            toast.success('Categoría creada');
+        } catch (e) {
+            toast.error((e as Error).message || 'Error al crear categoría');
+        } finally {
+            setCategorySubmitting(false);
         }
     };
 
@@ -450,7 +502,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                         onClick={openSaleModal}
                         className="flex items-center gap-1.5 px-4 py-2.5 bg-[#1A1A1A] text-white rounded-xl text-xs font-bold hover:opacity-90"
                     >
-                        Cargar venta
+                        Abrir carrito
                     </button>
                     <button
                         type="button"
@@ -589,6 +641,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
 
                                         <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
                                             {item.sku ? <span>SKU: {item.sku}</span> : null}
+                                            {getItemCategoryName(item) ? <span>Categoría: {getItemCategoryName(item)}</span> : null}
                                             {item.unit ? <span>Unidad: {item.unit}</span> : null}
                                             <span>{item.status === 'active' ? 'Activo' : 'Inactivo'}</span>
                                             {threshold > 0 ? <span>Límite bajo: {threshold}</span> : null}
@@ -736,6 +789,35 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                                     onChange={(e) => setItemForm((f) => ({ ...f, name: e.target.value }))}
                                 />
                             </div>
+                            <div>
+                                <label className="text-[10px] font-semibold text-gray-500">Categoría</label>
+                                <select
+                                    className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                    value={itemForm.categoryId}
+                                    onChange={(e) => setItemForm((f) => ({ ...f, categoryId: e.target.value }))}
+                                >
+                                    <option value="">Sin categoría</option>
+                                    {categories.map((category) => (
+                                        <option key={category.id} value={category.id}>{category.name}</option>
+                                    ))}
+                                </select>
+                                <div className="mt-2 flex gap-2">
+                                    <input
+                                        className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs"
+                                        value={newCategoryName}
+                                        onChange={(e) => setNewCategoryName(e.target.value)}
+                                        placeholder="Nueva categoría (ej: Bebidas)"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={submitCategory}
+                                        disabled={categorySubmitting}
+                                        className="px-3 py-2 rounded-xl bg-[#0B5B7A] text-white text-xs font-bold disabled:opacity-50"
+                                    >
+                                        Crear
+                                    </button>
+                                </div>
+                            </div>
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="text-[10px] font-semibold text-gray-500">SKU (opcional)</label>
@@ -778,15 +860,27 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-[10px] font-semibold text-gray-500">Stock bajo (umbral)</label>
+                                    <label className="text-[10px] font-semibold text-gray-500">Stock inicial</label>
                                     <input
                                         inputMode="numeric"
                                         className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                                        value={itemForm.lowStockThreshold}
-                                        onChange={(e) => setItemForm((f) => ({ ...f, lowStockThreshold: e.target.value }))}
-                                        placeholder="Ej: 5"
+                                        value={itemForm.initialStock}
+                                        onChange={(e) => setItemForm((f) => ({ ...f, initialStock: e.target.value }))}
+                                        placeholder="Ej: 22"
+                                        disabled={itemModal.mode === 'edit'}
                                     />
                                 </div>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-semibold text-gray-500">Alerta stock bajo (umbral)</label>
+                                <input
+                                    inputMode="numeric"
+                                    className="mt-0.5 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                                    value={itemForm.lowStockThreshold}
+                                    onChange={(e) => setItemForm((f) => ({ ...f, lowStockThreshold: e.target.value }))}
+                                    placeholder="Ej: 5"
+                                />
                             </div>
 
                             <div>
