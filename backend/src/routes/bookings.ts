@@ -9,6 +9,8 @@ import { refundStripeBookingPaymentTransactions } from '../services/paymentRefun
 import { canAccessClub } from '../lib/clubAccess';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { insertClubChatMention } from '../lib/clubChatMentions';
+import { zonedDayRangeUtcIso } from '../lib/zonedDayBounds';
+import { ensureOpenMatchRecordForBooking } from '../lib/matchFromBookingSync';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -217,7 +219,7 @@ async function hasCourtConflict(params: {
   // 1) Conflicto contra bookings existentes
   let q = supabase
     .from('bookings')
-    .select('id, start_at, end_at, status, notes')
+    .select('id, start_at, end_at, status, notes, reservation_type')
     .eq('court_id', params.courtId)
     .neq('status', 'cancelled')
     .is('deleted_at', null);
@@ -494,11 +496,40 @@ router.post('/block-maintenance', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * @openapi
+ * /bookings:
+ *   get:
+ *     tags: [Bookings]
+ *     summary: Listar reservas
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: court_id
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: organizer_player_id
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: date
+ *         description: YYYY-MM-DD; día civil en `time_zone` (no medianoche UTC).
+ *         schema: { type: string, example: "2026-05-12" }
+ *       - in: query
+ *         name: time_zone
+ *         description: IANA (por defecto Europe/Madrid).
+ *         schema: { type: string, example: "Europe/Madrid" }
+ *     responses:
+ *       200:
+ *         description: OK
+ */
 router.get('/', async (req: Request, res: Response) => {
   const court_id = req.query.court_id as string | undefined;
   const club_id = req.query.club_id as string | undefined;
   const organizer_player_id = req.query.organizer_player_id as string | undefined;
   const date = req.query.date as string | undefined; // YYYY-MM-DD
+  const time_zone = String(req.query.time_zone ?? 'Europe/Madrid').trim() || 'Europe/Madrid';
   try {
     const supabase = getSupabaseServiceRoleClient();
 
@@ -528,11 +559,12 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (organizer_player_id) q = q.eq('organizer_player_id', organizer_player_id);
     if (date) {
-      // Filter bookings whose start falls within the given calendar day (UTC)
-      const nextDay = new Date(date + 'T00:00:00Z');
-      nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-      const nextDayStr = nextDay.toISOString().split('T')[0];
-      q = q.gte('start_at', `${date}T00:00:00Z`).lt('start_at', `${nextDayStr}T00:00:00Z`);
+      try {
+        const { start, endExclusive } = zonedDayRangeUtcIso(date, time_zone);
+        q = q.gte('start_at', start).lt('start_at', endExclusive);
+      } catch {
+        return res.status(400).json({ ok: false, error: 'date o time_zone invalida' });
+      }
     }
     q = q.neq('status', 'cancelled').is('deleted_at', null);
     const { data, error } = await q;
@@ -1222,6 +1254,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const { data: finalBooking } = await supabase.from('bookings').select(SELECT_ONE).eq('id', booking.id).maybeSingle();
+    await ensureOpenMatchRecordForBooking(supabase, booking.id);
     return res.status(201).json({ ok: true, booking: finalBooking ?? booking });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -1422,6 +1455,7 @@ router.put('/:id', async (req: Request, res: Response) => {
               console.error('[PUT /bookings] propagate tournament:', e);
             }
           }
+          await ensureOpenMatchRecordForBooking(supabase, id);
           return res.json({ ok: true, booking: bookingOut });
         }
       }
@@ -1437,6 +1471,7 @@ router.put('/:id', async (req: Request, res: Response) => {
         console.error('[PUT /bookings] propagate tournament:', e);
       }
     }
+    await ensureOpenMatchRecordForBooking(supabase, id);
     return res.json({ ok: true, booking: bookingOut });
   } catch (err) {
     console.error(`[PUT /bookings/${id}] Unhandled error:`, (err as Error).message, (err as Error).stack);

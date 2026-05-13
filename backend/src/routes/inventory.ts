@@ -9,7 +9,8 @@ const router = Router();
 router.use(attachAuthContext);
 
 const ITEM_FIELDS =
-  'id, club_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, created_at, updated_at';
+  'id, club_id, category_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, quick_sale_enabled, created_at, updated_at, inventory_categories(id, name)';
+const CATEGORY_FIELDS = 'id, club_id, name, created_at, updated_at';
 const MOVEMENT_FIELDS = 'id, club_id, item_id, movement_type, quantity, reason, movement_at, created_at';
 
 function isMissingRelationError(message: string): boolean {
@@ -17,11 +18,14 @@ function isMissingRelationError(message: string): boolean {
   return (
     (m.includes('relation') && m.includes('does not exist')) ||
     m.includes('does not exist') ||
-    m.includes('no such table')
+    m.includes('no such table') ||
+    m.includes('schema cache') ||
+    (m.includes('could not find') && m.includes('relationship'))
   );
 }
 
 type InventoryMovementType = 'in' | 'out';
+type InventorySaleLineInput = { item_id?: string; quantity?: number; name?: string; unit_price_cents?: number };
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -34,6 +38,123 @@ const upload = multer({
 });
 
 const BUCKET = 'inventory-images';
+
+/**
+ * @openapi
+ * /inventario/categories:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Listar categorías de inventario
+ *     description: Devuelve las categorías creadas para un club, ordenadas por nombre.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *         description: ID del club
+ *     responses:
+ *       200:
+ *         description: Categorías encontradas
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   categories:
+ *                     - id: "11111111-1111-1111-1111-111111111111"
+ *                       club_id: "22222222-2222-2222-2222-222222222222"
+ *                       name: "Bebidas"
+ *       400: { description: club_id obligatorio }
+ *       403: { description: Sin acceso al club }
+ *       500: { description: Error interno }
+ */
+router.get('/categories', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const club_id = req.query.club_id as string | undefined;
+  if (!club_id?.trim()) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+  if (!canAccessClub(req, club_id, 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('inventory_categories')
+      .select(CATEGORY_FIELDS)
+      .eq('club_id', club_id)
+      .order('name', { ascending: true });
+    if (error) {
+      if (isMissingRelationError(error.message)) return res.status(503).json({ ok: false, error: 'Tabla inventory_categories no existe.' });
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+    return res.json({ ok: true, categories: data ?? [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /inventario/categories:
+ *   post:
+ *     tags: [Inventory]
+ *     summary: Crear categoría de inventario
+ *     description: Crea una categoría para clasificar productos del carrito e inventario.
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_id, name]
+ *             properties:
+ *               club_id: { type: string, format: uuid, description: ID del club }
+ *               name: { type: string, example: "Grips", description: Nombre visible de la categoría }
+ *           examples:
+ *             create:
+ *               value:
+ *                 club_id: "22222222-2222-2222-2222-222222222222"
+ *                 name: "Bebidas"
+ *     responses:
+ *       201:
+ *         description: Categoría creada
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   category:
+ *                     id: "11111111-1111-1111-1111-111111111111"
+ *                     club_id: "22222222-2222-2222-2222-222222222222"
+ *                     name: "Bebidas"
+ *       400: { description: club_id y name obligatorios }
+ *       403: { description: Sin acceso al club }
+ *       500: { description: Error interno }
+ */
+router.post('/categories', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const { club_id, name } = req.body ?? {};
+  const clubIdStr = String(club_id ?? '').trim();
+  const nameStr = String(name ?? '').trim();
+  if (!clubIdStr || !nameStr) return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
+  if (!canAccessClub(req, clubIdStr, 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('inventory_categories')
+      .insert({ club_id: clubIdStr, name: nameStr })
+      .select(CATEGORY_FIELDS)
+      .single();
+    if (error) {
+      if (isMissingRelationError(error.message)) return res.status(503).json({ ok: false, error: 'Tabla inventory_categories no existe.' });
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+    return res.status(201).json({ ok: true, category: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
 
 /**
  * GET /inventario/items
@@ -104,21 +225,26 @@ router.get('/items', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, 
  * Crea un producto (inventario_item).
  */
 router.post('/items', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
-  const { club_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url } = req.body ?? {};
+  const { club_id, category_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, initial_stock, quick_sale_enabled } =
+    req.body ?? {};
   const clubIdStr = String(club_id ?? '').trim();
+  const categoryIdStr = category_id == null || !String(category_id).trim() ? null : String(category_id).trim();
   const nameStr = String(name ?? '').trim();
 
   const priceCents = Number(unit_price_cents ?? 0);
   const lowThreshold = Number(low_stock_threshold ?? 0);
+  const initialStock = Number(initial_stock ?? 0);
   const currencyStr = String(currency ?? 'EUR').trim() || 'EUR';
 
   if (!clubIdStr || !nameStr) return res.status(400).json({ ok: false, error: 'club_id y name son obligatorios' });
   if (!canAccessClub(req, clubIdStr, 'gestion')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   if (!Number.isFinite(priceCents) || priceCents < 0) return res.status(400).json({ ok: false, error: 'unit_price_cents inválido' });
   if (!Number.isFinite(lowThreshold) || lowThreshold < 0) return res.status(400).json({ ok: false, error: 'low_stock_threshold inválido' });
+  if (!Number.isFinite(initialStock) || initialStock < 0) return res.status(400).json({ ok: false, error: 'initial_stock inválido' });
 
   const row: Record<string, unknown> = {
     club_id: clubIdStr,
+    category_id: categoryIdStr,
     name: nameStr,
     sku: sku != null && String(sku).trim() ? String(sku).trim() : null,
     unit: unit != null && String(unit).trim() ? String(unit).trim() : null,
@@ -127,6 +253,7 @@ router.post('/items', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
     currency: currencyStr,
     low_stock_threshold: Math.trunc(lowThreshold),
     image_url: image_url == null || !String(image_url).trim() ? null : String(image_url).trim(),
+    quick_sale_enabled: quick_sale_enabled === true || quick_sale_enabled === 'true',
   };
 
   try {
@@ -137,6 +264,19 @@ router.post('/items', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
         return res.status(503).json({ ok: false, error: 'Tabla inventory_items no existe. Aplica la migración en Supabase.' });
       }
       return res.status(500).json({ ok: false, error: error.message });
+    }
+    const initialStockInt = Math.trunc(initialStock);
+    if (initialStockInt > 0) {
+      const { error: movementErr } = await supabase.from('inventory_movements').insert({
+        club_id: clubIdStr,
+        item_id: (data as { id: string }).id,
+        movement_type: 'in',
+        quantity: initialStockInt,
+        reason: 'Stock inicial',
+        movement_at: new Date().toISOString(),
+      });
+      if (movementErr) return res.status(500).json({ ok: false, error: movementErr.message });
+      return res.status(201).json({ ok: true, item: { ...(data as Record<string, unknown>), current_quantity: initialStockInt } });
     }
     return res.status(201).json({ ok: true, item: data });
   } catch (err) {
@@ -159,9 +299,10 @@ router.put('/items/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
     return res.status(500).json({ ok: false, error: 'Error al verificar producto' });
   }
 
-  const { name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url } = req.body ?? {};
+  const { name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, category_id, quick_sale_enabled } = req.body ?? {};
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (name !== undefined) update.name = String(name).trim();
+  if (category_id !== undefined) update.category_id = category_id == null || !String(category_id).trim() ? null : String(category_id).trim();
   if (sku !== undefined) update.sku = sku == null || !String(sku).trim() ? null : String(sku).trim();
   if (unit !== undefined) update.unit = unit == null || !String(unit).trim() ? null : String(unit).trim();
   if (status !== undefined) update.status = status === 'inactive' ? 'inactive' : 'active';
@@ -181,6 +322,9 @@ router.put('/items/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
   }
   if (image_url !== undefined) {
     update.image_url = image_url == null || !String(image_url).trim() ? null : String(image_url).trim();
+  }
+  if (quick_sale_enabled !== undefined) {
+    update.quick_sale_enabled = quick_sale_enabled === true || quick_sale_enabled === 'true';
   }
 
   if (Object.keys(update).length === 1) return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
@@ -333,6 +477,277 @@ router.post('/movements', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
     }
 
     return res.status(201).json({ ok: true, movement: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /inventario/sales:
+ *   post:
+ *     tags: [Inventory]
+ *     summary: Registrar venta de carrito asociada a un turno
+ *     description: |
+ *       Registra una compra posterior a la reserva, asociada a un jugador/cliente y a un turno ya existente.
+ *       No modifica el monto ni el estado de pago de la reserva. Las líneas de inventario descuentan stock
+ *       y las líneas excepcionales se registran solo como importe de venta de tienda para arqueo de caja.
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_id, booking_id, player_id, payment_method, lines]
+ *             properties:
+ *               club_id: { type: string, format: uuid, description: ID del club }
+ *               booking_id: { type: string, format: uuid, description: Turno al que se asocia la compra }
+ *               player_id: { type: string, format: uuid, description: Jugador/cliente que realizó la compra }
+ *               payment_method:
+ *                 type: string
+ *                 enum: [cash, card]
+ *                 description: Método de cobro de la compra extra
+ *               lines:
+ *                 type: array
+ *                 minItems: 1
+ *                 items:
+ *                   type: object
+ *                   required: [quantity]
+ *                   properties:
+ *                     item_id: { type: string, format: uuid, description: Producto de inventario; si no se envía, es una venta excepcional }
+ *                     name: { type: string, description: Nombre de venta excepcional, example: "Venta excepcional" }
+ *                     unit_price_cents: { type: integer, minimum: 0, description: Precio unitario para venta excepcional }
+ *                     quantity: { type: integer, minimum: 1, example: 2 }
+ *           examples:
+ *             saleWithInventoryAndCustomLine:
+ *               value:
+ *                 club_id: "11111111-1111-1111-1111-111111111111"
+ *                 booking_id: "22222222-2222-2222-2222-222222222222"
+ *                 player_id: "33333333-3333-3333-3333-333333333333"
+ *                 payment_method: "cash"
+ *                 lines:
+ *                   - item_id: "44444444-4444-4444-4444-444444444444"
+ *                     quantity: 1
+ *                   - name: "Producto excepcional"
+ *                     unit_price_cents: 500
+ *                     quantity: 1
+ *     responses:
+ *       201:
+ *         description: Venta registrada y stock descontado
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   sale:
+ *                     id: "1715440000000"
+ *                     booking_id: "22222222-2222-2222-2222-222222222222"
+ *                     player_id: "33333333-3333-3333-3333-333333333333"
+ *                     payment_method: "cash"
+ *                     total_cents: 250
+ *                     currency: "EUR"
+ *       400: { description: Datos inválidos, jugador fuera del turno, precio inválido o stock insuficiente }
+ *       401: { description: Token requerido }
+ *       403: { description: Sin acceso al club }
+ *       404: { description: Turno o producto no encontrado }
+ *       500: { description: Error interno }
+ */
+router.post('/sales', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const { club_id, booking_id, player_id, payment_method, lines } = req.body ?? {};
+  const clubIdStr = String(club_id ?? '').trim();
+  const bookingIdStr = String(booking_id ?? '').trim();
+  const playerIdStr = String(player_id ?? '').trim();
+  const methodStr = String(payment_method ?? '').trim();
+  const rawLines = Array.isArray(lines) ? lines as InventorySaleLineInput[] : [];
+
+  if (!clubIdStr || !bookingIdStr || !playerIdStr) {
+    return res.status(400).json({ ok: false, error: 'club_id, booking_id y player_id son obligatorios' });
+  }
+  if (methodStr !== 'cash' && methodStr !== 'card') {
+    return res.status(400).json({ ok: false, error: 'payment_method debe ser cash o card' });
+  }
+  if (!canAccessClub(req, clubIdStr, 'gestion')) {
+    return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+  }
+
+  const saleLines = rawLines
+    .map((line) => ({
+      item_id: String(line.item_id ?? '').trim(),
+      quantity: Math.trunc(Number(line.quantity ?? 0)),
+      name: String(line.name ?? '').trim(),
+      unit_price_cents: Math.trunc(Number(line.unit_price_cents ?? 0)),
+    }))
+    .filter((line) => line.quantity > 0 && (line.item_id || line.name));
+
+  if (saleLines.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Añade al menos un producto con cantidad válida' });
+  }
+  const inventorySaleLines = saleLines.filter((line) => line.item_id);
+  const customSaleLines = saleLines.filter((line) => !line.item_id);
+  for (const line of customSaleLines) {
+    if (!line.name) return res.status(400).json({ ok: false, error: 'Nombre obligatorio para venta excepcional' });
+    if (!Number.isFinite(line.unit_price_cents) || line.unit_price_cents <= 0) {
+      return res.status(400).json({ ok: false, error: 'Precio inválido para venta excepcional' });
+    }
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+
+    const { data: booking, error: bookingErr } = await supabase
+      .from('bookings')
+      .select('id, status, organizer_player_id, currency, courts(club_id), booking_participants(player_id)')
+      .eq('id', bookingIdStr)
+      .maybeSingle();
+
+    if (bookingErr) return res.status(500).json({ ok: false, error: bookingErr.message });
+    if (!booking) return res.status(404).json({ ok: false, error: 'Turno no encontrado' });
+
+    const court = Array.isArray((booking as any).courts) ? (booking as any).courts[0] : (booking as any).courts;
+    if (String(court?.club_id ?? '') !== clubIdStr) {
+      return res.status(400).json({ ok: false, error: 'El turno no pertenece a este club' });
+    }
+    if (String((booking as any).status ?? '') === 'cancelled') {
+      return res.status(400).json({ ok: false, error: 'No se puede asociar una venta a un turno cancelado' });
+    }
+
+    const participantIds = new Set<string>();
+    if ((booking as any).organizer_player_id) participantIds.add(String((booking as any).organizer_player_id));
+    for (const participant of (booking as any).booking_participants ?? []) {
+      if (participant?.player_id) participantIds.add(String(participant.player_id));
+    }
+    if (!participantIds.has(playerIdStr)) {
+      return res.status(400).json({ ok: false, error: 'El jugador seleccionado no figura en ese turno' });
+    }
+
+    const quantitiesByItem = new Map<string, number>();
+    for (const line of inventorySaleLines) {
+      quantitiesByItem.set(line.item_id, (quantitiesByItem.get(line.item_id) ?? 0) + line.quantity);
+    }
+    const itemIds = [...quantitiesByItem.keys()];
+
+    let itemRows: any[] = [];
+    if (itemIds.length > 0) {
+      const { data, error: itemErr } = await supabase
+        .from('inventory_items')
+        .select('id, club_id, name, status, unit_price_cents, currency')
+        .eq('club_id', clubIdStr)
+        .in('id', itemIds);
+
+      if (itemErr) {
+        if (isMissingRelationError(itemErr.message)) return res.status(503).json({ ok: false, error: 'Tabla inventory_items no existe.' });
+        return res.status(500).json({ ok: false, error: itemErr.message });
+      }
+      itemRows = data ?? [];
+    }
+    if ((itemRows ?? []).length !== itemIds.length) {
+      return res.status(404).json({ ok: false, error: 'Uno o más productos no existen' });
+    }
+
+    const itemById = new Map((itemRows ?? []).map((item: any) => [String(item.id), item]));
+    const inactive = [...itemById.values()].find((item: any) => item.status !== 'active');
+    if (inactive) return res.status(400).json({ ok: false, error: `Producto inactivo: ${inactive.name}` });
+
+    let movementRows: any[] = [];
+    if (itemIds.length > 0) {
+      const { data, error: movementErr } = await supabase
+        .from('inventory_movements')
+        .select('item_id, movement_type, quantity')
+        .eq('club_id', clubIdStr)
+        .in('item_id', itemIds);
+
+      if (movementErr) {
+        if (isMissingRelationError(movementErr.message)) return res.status(503).json({ ok: false, error: 'Tabla inventory_movements no existe.' });
+        return res.status(500).json({ ok: false, error: movementErr.message });
+      }
+      movementRows = data ?? [];
+    }
+
+    const stockByItem = new Map<string, number>();
+    for (const movement of movementRows ?? []) {
+      const itemId = String((movement as any).item_id ?? '');
+      const qty = Math.trunc(Number((movement as any).quantity ?? 0));
+      if (!itemId || !Number.isFinite(qty)) continue;
+      const sign = String((movement as any).movement_type ?? '') === 'out' ? -1 : 1;
+      stockByItem.set(itemId, (stockByItem.get(itemId) ?? 0) + sign * qty);
+    }
+
+    for (const [itemId, qty] of quantitiesByItem) {
+      const available = stockByItem.get(itemId) ?? 0;
+      if (available < qty) {
+        const item = itemById.get(itemId) as any;
+        return res.status(400).json({ ok: false, error: `Stock insuficiente para ${item?.name ?? 'producto'} (${available} disponible)` });
+      }
+    }
+
+    const saleId = `${Date.now()}`;
+    const movementAt = new Date().toISOString();
+    let totalCents = 0;
+    let customTotalCents = 0;
+    let currency = String((booking as any).currency ?? 'EUR') || 'EUR';
+
+    const movementInserts = [...quantitiesByItem.entries()].map(([itemId, quantity]) => {
+      const item = itemById.get(itemId) as any;
+      const unitPrice = Math.max(0, Math.trunc(Number(item.unit_price_cents ?? 0)));
+      const lineTotal = unitPrice * quantity;
+      totalCents += lineTotal;
+      currency = String(item.currency ?? currency) || currency;
+      return {
+        club_id: clubIdStr,
+        item_id: itemId,
+        movement_type: 'out',
+        quantity,
+        reason: `SALE|${saleId}|${methodStr}|${lineTotal}|${String(item.name ?? '').replace(/\|/g, ' ')}|booking:${bookingIdStr}|player:${playerIdStr}`,
+        movement_at: movementAt,
+      };
+    });
+
+    for (const line of customSaleLines) {
+      const lineTotal = line.unit_price_cents * line.quantity;
+      totalCents += lineTotal;
+      customTotalCents += lineTotal;
+    }
+
+    let inserted: unknown[] = [];
+    if (movementInserts.length > 0) {
+      const { data, error: insertErr } = await supabase
+        .from('inventory_movements')
+        .insert(movementInserts)
+        .select(MOVEMENT_FIELDS);
+
+      if (insertErr) {
+        if (isMissingRelationError(insertErr.message)) return res.status(503).json({ ok: false, error: 'Tabla inventory_movements no existe.' });
+        return res.status(500).json({ ok: false, error: insertErr.message });
+      }
+      inserted = data ?? [];
+    }
+
+    if (customTotalCents > 0) {
+      const { error: txErr } = await supabase.from('payment_transactions').insert({
+        booking_id: bookingIdStr,
+        payer_player_id: playerIdStr,
+        amount_cents: customTotalCents,
+        currency,
+        stripe_payment_intent_id: `STORE_SALE_${methodStr}_${saleId}`,
+        status: 'succeeded',
+      });
+      if (txErr) return res.status(500).json({ ok: false, error: txErr.message });
+    }
+
+    return res.status(201).json({
+      ok: true,
+      sale: {
+        id: saleId,
+        booking_id: bookingIdStr,
+        player_id: playerIdStr,
+        payment_method: methodStr,
+        total_cents: totalCents,
+        currency,
+        movements: inserted ?? [],
+      },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

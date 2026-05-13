@@ -30,9 +30,13 @@ export async function fetchOnboardingNext(
   token: string,
   answers: OnboardingAnswerPayload[],
 ): Promise<OnboardingNextState> {
-  const qs = encodeURIComponent(JSON.stringify(answers));
-  const res = await fetch(`${API_URL}/players/onboarding/next?answers=${qs}`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const res = await fetch(`${API_URL}/players/onboarding/next`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ answers }),
   });
   const json = (await res.json()) as NextResponse;
   if (!res.ok || !json.ok || !json.state) {

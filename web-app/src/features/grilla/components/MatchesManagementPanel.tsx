@@ -15,6 +15,7 @@ import {
     LayoutGrid,
 } from 'lucide-react';
 import { apiFetchWithAuth } from '../../../services/api';
+import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
 import { CreateMatchModal } from './CreateMatchModal';
 import { PlayerSearch } from './ReservationModal';
 
@@ -65,7 +66,9 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
         try {
             const [matchesRes, bookingsRes] = await Promise.all([
                 apiFetchWithAuth<any>(`/matches?active_only=true&expand=true`),
-                apiFetchWithAuth<any>(`/bookings?date=${currentDateStr}&club_id=${clubId}`)
+                apiFetchWithAuth<any>(
+                    `/bookings?date=${encodeURIComponent(currentDateStr)}&club_id=${encodeURIComponent(clubId)}&time_zone=${encodeURIComponent(browserIanaTimeZone())}`,
+                ),
             ]);
 
             const allMatches: any[] = [];

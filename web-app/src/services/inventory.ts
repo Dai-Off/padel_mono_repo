@@ -1,10 +1,24 @@
 import { apiFetchWithAuth, getApiBase } from './api';
 import type { ApiResponse } from '../types/api';
-import type { InventoryItem, InventoryMovement, InventoryMovementType } from '../types/inventory';
+import type { InventoryCategory, InventoryItem, InventoryMovement, InventoryMovementType } from '../types/inventory';
 
 type ApiOk<T> = T & { ok: true };
 
 export const inventoryService = {
+    listCategories: async (clubId: string): Promise<InventoryCategory[]> => {
+        const q = new URLSearchParams({ club_id: clubId });
+        const res = await apiFetchWithAuth<ApiOk<{ categories: InventoryCategory[] }>>(`/inventario/categories?${q}`);
+        return res.categories ?? [];
+    },
+
+    createCategory: async (body: { club_id: string; name: string }): Promise<InventoryCategory> => {
+        const res = await apiFetchWithAuth<ApiOk<{ category: InventoryCategory }>>('/inventario/categories', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+        return res.category;
+    },
+
     listItems: async (clubId: string): Promise<InventoryItem[]> => {
         const q = new URLSearchParams({ club_id: clubId });
         const res = await apiFetchWithAuth<ApiOk<{ items: InventoryItem[] }>>(`/inventario/items?${q}`);
@@ -13,6 +27,7 @@ export const inventoryService = {
 
     createItem: async (body: {
         club_id: string;
+        category_id?: string | null;
         name: string;
         sku?: string | null;
         unit?: string | null;
@@ -20,7 +35,9 @@ export const inventoryService = {
         unit_price_cents?: number;
         currency?: string;
         low_stock_threshold?: number;
+        initial_stock?: number;
         image_url?: string | null;
+        quick_sale_enabled?: boolean;
     }): Promise<InventoryItem> => {
         const res = await apiFetchWithAuth<ApiOk<{ item: InventoryItem }>>('/inventario/items', {
             method: 'POST',
@@ -32,7 +49,19 @@ export const inventoryService = {
     updateItem: async (
         id: string,
         body: Partial<
-            Pick<InventoryItem, 'name' | 'sku' | 'unit' | 'status' | 'unit_price_cents' | 'currency' | 'low_stock_threshold' | 'image_url'>
+            Pick<
+                InventoryItem,
+                | 'category_id'
+                | 'name'
+                | 'sku'
+                | 'unit'
+                | 'status'
+                | 'unit_price_cents'
+                | 'currency'
+                | 'low_stock_threshold'
+                | 'image_url'
+                | 'quick_sale_enabled'
+            >
         >
     ): Promise<InventoryItem> => {
         const res = await apiFetchWithAuth<ApiOk<{ item: InventoryItem }>>(`/inventario/items/${id}`, {
@@ -66,6 +95,20 @@ export const inventoryService = {
         if (params.item_id) q.set('item_id', params.item_id);
         const res = await apiFetchWithAuth<ApiOk<{ movements: InventoryMovement[] }>>(`/inventario/movements?${q}`);
         return res.movements ?? [];
+    },
+
+    createSale: async (body: {
+        club_id: string;
+        booking_id: string;
+        player_id: string;
+        payment_method: 'cash' | 'card';
+        lines: Array<{ item_id?: string; quantity: number; name?: string; unit_price_cents?: number }>;
+    }): Promise<{ id: string; total_cents: number; currency: string }> => {
+        const res = await apiFetchWithAuth<ApiOk<{ sale: { id: string; total_cents: number; currency: string } }>>('/inventario/sales', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+        return res.sale;
     },
 
     uploadItemImage: async (itemId: string, file: File): Promise<{ url: string }> => {

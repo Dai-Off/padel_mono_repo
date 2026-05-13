@@ -14,6 +14,7 @@ import {
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
 import { apiFetchWithAuth } from '../../../services/api';
+import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
 import { reservationTypePricesService } from '../../../services/reservationTypePrices';
 import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
@@ -803,7 +804,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             const newEnd = new Date(newStart.getTime() + duration * 60000);
             try {
                 const courtId = editingBookingData.court_id;
-                const bRes = await apiFetchWithAuth<any>(`/bookings?court_id=${courtId}&date=${dateBase}`);
+                const tz = encodeURIComponent(browserIanaTimeZone());
+                const bRes = await apiFetchWithAuth<any>(
+                    `/bookings?court_id=${encodeURIComponent(courtId)}&date=${encodeURIComponent(dateBase)}&time_zone=${tz}`,
+                );
                 const conflicts = (bRes.bookings || []).filter((b: any) => {
                     if (b.id === editingBookingData.id) return false;
                     const bStart = new Date(b.start_at);

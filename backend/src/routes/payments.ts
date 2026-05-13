@@ -1664,11 +1664,19 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       const court = (Array.isArray(rawCourts) ? rawCourts[0] : rawCourts) as Record<string, unknown> | null;
 
       const stripeRef = r.stripe_payment_intent_id as string | null;
+      const isStoreSaleTx = typeof stripeRef === 'string' && stripeRef.startsWith('STORE_SALE_');
       const sourceChannel = (b.source_channel as string | null) ?? null;
       const isCash =
-        (typeof stripeRef === 'string' && stripeRef.startsWith('CASH_')) || sourceChannel === 'manual';
+        (typeof stripeRef === 'string' && stripeRef.startsWith('CASH_')) ||
+        (typeof stripeRef === 'string' && stripeRef.startsWith('STORE_SALE_cash_')) ||
+        sourceChannel === 'manual';
 
       const amount = typeof r.amount_cents === 'number' ? r.amount_cents : 0;
+      if (isStoreSaleTx) {
+        if (isCash) storeSalesCashCents += amount;
+        else storeSalesCardCents += amount;
+        continue;
+      }
 
       const cur = byBooking.get(bookingId) ?? {
         booking_id: bookingId,

@@ -143,6 +143,14 @@ function App() {
           }
         />
         <Route
+          path="/carrito"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/escuela"
           element={
             <ProtectedRoute>
