@@ -3,7 +3,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { getClubClientPlayerIds, invalidateClubClientPlayerIdsCache } from '../lib/clubClientPlayers';
-import { sendClubCrmEmail } from '../lib/mailer';
+import { sendClubCrmEmail, syncPlayerVector } from '../lib/mailer';
 import { getPlayerClubDebt } from '../lib/players/playerDebt';
 import { canAccessClub } from '../lib/clubAccess';
 
@@ -1076,6 +1076,9 @@ router.put('/:playerId', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Player not found' });
+
+    syncPlayerVector(playerId).catch((e) => console.error('[CRM PUT player] sync-player-vector failed:', playerId, e));
+
     return res.json({ ok: true, player: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

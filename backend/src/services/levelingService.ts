@@ -1,5 +1,6 @@
 import { rating, rate, predictWin } from 'openskill';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { syncPlayerVector } from '../lib/mailer';
 import { computeMatchmakingLeagueUpdates, type MmLeagueRow } from './matchmakingLeagueEconomy';
 import { getActiveMatchmakingSeasonId } from './matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from './matchmakingLeagueConfigService';
@@ -381,6 +382,10 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
   });
 
   if (rpcErr) throw new Error(rpcErr.message);
+
+  for (const pid of Object.keys(playerUpdates)) {
+    syncPlayerVector(pid).catch((e) => console.error('[levelingPipeline] sync-player-vector failed:', pid, e));
+  }
 }
 
 export async function applyFriendlyPlayCounts(matchId: string): Promise<void> {
@@ -414,5 +419,6 @@ export async function applyFriendlyPlayCounts(matchId: string): Promise<void> {
       .update({ matches_played_friendly: cur + 1, updated_at: now })
       .eq('id', pid);
     if (e4) throw new Error(e4.message);
+    syncPlayerVector(pid).catch((e) => console.error('[friendlyPlayCounts] sync-player-vector failed:', pid, e));
   }
 }
