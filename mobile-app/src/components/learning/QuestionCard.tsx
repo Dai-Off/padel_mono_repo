@@ -7,6 +7,8 @@ import { TrueFalseQuestion } from './TrueFalseQuestion';
 import { MultiSelectQuestion } from './MultiSelectQuestion';
 import { OrderSequenceQuestion } from './OrderSequenceQuestion';
 import { MatchColumnsQuestion } from './MatchColumnsQuestion';
+import { PuzzleQuestion } from './puzzle/PuzzleQuestion';
+import type { PuzzleContent } from '../../types/puzzle';
 
 type Props = {
   question: DailyLessonQuestion;
@@ -57,6 +59,13 @@ export function QuestionCard({ question, onAnswered, onReplayVideo }: Props) {
         return (
           <MatchColumnsQuestion
             content={c as { pairs: { left: string; right: string }[]; explanation?: string }}
+            onAnswered={handleAnswered}
+          />
+        );
+      case 'puzzle':
+        return (
+          <PuzzleQuestion
+            content={c as unknown as PuzzleContent}
             onAnswered={handleAnswered}
           />
         );

@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { canAccessClub } from '../lib/clubAccess';
+import { validatePuzzleContent, buildPuzzleRow } from '../lib/puzzleValidator';
 
 const router = Router();
 
@@ -9,7 +10,7 @@ const router = Router();
 // Constants and validation
 // ---------------------------------------------------------------------------
 
-const VALID_QUESTION_TYPES = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'] as const;
+const VALID_QUESTION_TYPES = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence', 'puzzle'] as const;
 const VALID_AREAS = ['technique', 'tactics', 'physical', 'mental', 'rules'] as const;
 
 function validateQuestionContent(type: string, content: unknown): string | null {
@@ -59,6 +60,12 @@ function validateQuestionContent(type: string, content: unknown): string | null 
         return 'Cada step debe ser un string no vacío';
       return null;
     }
+    case 'puzzle': {
+      // Para puzzles, el `content` recibido es el árbol completo (statement + initial_frame
+      // + options + meta). Lo valida el helper dedicado. El árbol se persiste en la tabla
+      // learning_puzzles vía JOIN 1:1, no en learning_questions.content.
+      return validatePuzzleContent(content);
+    }
     default:
       return `Tipo de pregunta desconocido: ${type}`;
   }
@@ -71,7 +78,8 @@ function validateQuestionContent(type: string, content: unknown): string | null 
 // POST /questions
 router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
-    const { club_id, type, level, area, video_url, content } = req.body ?? {};
+    const { club_id, type, level, video_url, content } = req.body ?? {};
+    let { area } = req.body ?? {};
 
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
     if (!canAccessClub(req, club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -79,6 +87,8 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
     if (!VALID_QUESTION_TYPES.includes(type)) {
       return res.status(400).json({ ok: false, error: `type debe ser uno de: ${VALID_QUESTION_TYPES.join(', ')}` });
     }
+    // Los puzzles son siempre tácticos por definición — forzar el área.
+    if (type === 'puzzle') area = 'tactics';
     if (!VALID_AREAS.includes(area)) {
       return res.status(400).json({ ok: false, error: `area debe ser uno de: ${VALID_AREAS.join(', ')}` });
     }
@@ -89,9 +99,12 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
     const contentError = validateQuestionContent(type, content);
     if (contentError) return res.status(400).json({ ok: false, error: contentError });
 
-    const hasVideo = !!video_url && typeof video_url === 'string';
+    const isPuzzle = type === 'puzzle';
+    const hasVideo = !isPuzzle && !!video_url && typeof video_url === 'string';
     const supabase = getSupabaseServiceRoleClient();
-    const { data, error } = await supabase
+
+    // 1. Insert en learning_questions. Para puzzles, content queda vacío; el árbol va en learning_puzzles.
+    const { data: question, error } = await supabase
       .from('learning_questions')
       .insert({
         type,
@@ -99,7 +112,7 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
         area,
         has_video: hasVideo,
         video_url: hasVideo ? video_url : null,
-        content,
+        content: isPuzzle ? {} : content,
         created_by_club: club_id,
         is_active: true,
       })
@@ -107,7 +120,25 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
       .single();
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.status(201).json({ ok: true, data });
+
+    // 2. Si es puzzle, insert en learning_puzzles con el árbol del content recibido.
+    if (isPuzzle && question) {
+      const puzzleRow = buildPuzzleRow(content as Record<string, unknown>, question.id);
+      const { data: puzzle, error: puzzleErr } = await supabase
+        .from('learning_puzzles')
+        .insert(puzzleRow)
+        .select('*')
+        .single();
+
+      if (puzzleErr) {
+        // Rollback manual: borramos la pregunta para no dejar registros huérfanos.
+        await supabase.from('learning_questions').delete().eq('id', question.id);
+        return res.status(500).json({ ok: false, error: `Fallo al guardar puzzle: ${puzzleErr.message}` });
+      }
+      return res.status(201).json({ ok: true, data: { ...question, puzzle } });
+    }
+
+    return res.status(201).json({ ok: true, data: question });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -148,6 +179,8 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
       }
       updates.area = area;
     }
+    // Si la pregunta resultante es de tipo puzzle, forzar area='tactics' (independientemente de lo enviado).
+    if (effectiveType === 'puzzle') updates.area = 'tactics';
     if (level !== undefined) {
       if (typeof level !== 'number' || level < 0) {
         return res.status(400).json({ ok: false, error: 'level debe ser un número >= 0' });
@@ -158,10 +191,18 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
       updates.video_url = video_url || null;
       updates.has_video = !!video_url;
     }
+    const isPuzzle = effectiveType === 'puzzle';
+    let puzzleContent: Record<string, unknown> | null = null;
+
     if (content !== undefined) {
       const contentError = validateQuestionContent(effectiveType, content);
       if (contentError) return res.status(400).json({ ok: false, error: contentError });
-      updates.content = content;
+      if (isPuzzle) {
+        puzzleContent = content as Record<string, unknown>;
+        updates.content = {}; // árbol va a learning_puzzles
+      } else {
+        updates.content = content;
+      }
     }
 
     if (Object.keys(updates).length === 0) {
@@ -176,6 +217,24 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
       .single();
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    // Si era puzzle y se mandó content, upsert en learning_puzzles.
+    if (isPuzzle && puzzleContent) {
+      const puzzleRow = buildPuzzleRow(puzzleContent, String(questionId));
+      const { data: puzzle, error: puzzleErr } = await supabase
+        .from('learning_puzzles')
+        .upsert(puzzleRow, { onConflict: 'question_id' })
+        .select('*')
+        .single();
+      if (puzzleErr) return res.status(500).json({ ok: false, error: `Fallo al actualizar puzzle: ${puzzleErr.message}` });
+      return res.json({ ok: true, data: { ...data, puzzle } });
+    }
+
+    // Si la pregunta cambió de puzzle a otro tipo, borrar la fila huérfana en learning_puzzles.
+    if (existing.type === 'puzzle' && effectiveType !== 'puzzle') {
+      await supabase.from('learning_puzzles').delete().eq('question_id', questionId);
+    }
+
     return res.json({ ok: true, data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -269,7 +328,40 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, data: data ?? [] });
+
+    const rows = data ?? [];
+    const puzzleQuestionIds = rows.filter((r) => r.type === 'puzzle').map((r) => r.id);
+
+    if (puzzleQuestionIds.length > 0) {
+      const { data: puzzles, error: puzzleErr } = await supabase
+        .from('learning_puzzles')
+        .select('*')
+        .in('question_id', puzzleQuestionIds);
+      if (puzzleErr) return res.status(500).json({ ok: false, error: puzzleErr.message });
+      const byQuestion = new Map((puzzles ?? []).map((p) => [p.question_id, p]));
+      for (const row of rows) {
+        if (row.type === 'puzzle') {
+          const p = byQuestion.get(row.id);
+          if (p) {
+            // Mergear árbol en content para uniformidad con el resto de tipos.
+            (row as Record<string, unknown>).content = {
+              schema_version: p.schema_version,
+              statement: p.statement,
+              court_position: p.court_position,
+              general_explanation: p.general_explanation,
+              initial_frame: p.initial_frame,
+              options: p.options,
+            };
+            // Exponer metadata extra (id propio, thumbnail_url) por si el editor lo necesita.
+            (row as Record<string, unknown>).puzzle = p;
+          } else {
+            (row as Record<string, unknown>).puzzle = null;
+          }
+        }
+      }
+    }
+
+    return res.json({ ok: true, data: rows });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

@@ -38,39 +38,60 @@ export function ProfileScreen({ onBack, onMenuPress, onPreferencesPress }: Profi
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [activeSport, setActiveSport] = useState('Pádel');
   const [activeLogroTab, setActiveLogroTab] = useState('Todos');
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
   const [assessment, setAssessment] = useState<CoachAssessment | null>(null);
   const [peerInsight, setPeerInsight] = useState<PeerFeedbackInsight | null>(null);
 
-  useEffect(() => {
-    if (session?.access_token) {
-      fetchMyPlayerProfile(session.access_token).then((p) => {
+  const loadProfile = React.useCallback(async (token: string, isInitial = false, attempt = 0) => {
+    if (isInitial) setProfileLoading(true);
+    try {
+      const p = await fetchMyPlayerProfile(token);
+      if (p) {
         setProfile(p);
-        if (p?.id) {
-          fetchMyPeerFeedbackInsight(session.access_token, p.id).then(setPeerInsight);
-        }
-      });
-      fetchMyCoachAssessment(session.access_token).then(setAssessment);
+        fetchMyPeerFeedbackInsight(token, p.id).then(setPeerInsight).catch(() => {});
+      } else if (attempt < 2) {
+        setTimeout(() => loadProfile(token, false, attempt + 1), 1500);
+      }
+    } catch {
+      if (attempt < 2) {
+        setTimeout(() => loadProfile(token, false, attempt + 1), 1500);
+      }
+    } finally {
+      if (isInitial) setProfileLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    const isInitial = profile === null;
+    loadProfile(session.access_token, isInitial);
+    fetchMyCoachAssessment(session.access_token).then(setAssessment).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token]);
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
-  const displayName = profile ? `${profile.firstName} ${profile.lastName}` : 'Cargando...';
+  const displayName = profile
+    ? `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim()
+    : profileLoading ? 'Cargando...' : '—';
 
   const needsLevelOnboarding = profile != null && profile.onboardingCompleted === false;
 
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
-    fetchMyPlayerProfile(session.access_token).then((p) => {
-      setProfile(p);
-      if (p?.id) {
-        fetchMyPeerFeedbackInsight(session.access_token, p.id).then(setPeerInsight);
-      }
-    });
-    fetchMyCoachAssessment(session.access_token).then(setAssessment);
+    loadProfile(session.access_token, false);
+    fetchMyCoachAssessment(session.access_token).then(setAssessment).catch(() => {});
   };
+
+  if (profileLoading) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <ActivityIndicator size="large" color="#F18F34" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -129,8 +150,8 @@ export function ProfileScreen({ onBack, onMenuPress, onPreferencesPress }: Profi
             </View>
             <View style={styles.profileHeader}>
               <View style={styles.avatarContainer}>
-                <LinearGradient 
-                  colors={['#F18F34', '#E95F32']} 
+                <LinearGradient
+                  colors={['#F18F34', '#E95F32']}
                   style={styles.avatar}
                 >
                   <Text style={styles.avatarText}>{initials}</Text>
@@ -148,7 +169,7 @@ export function ProfileScreen({ onBack, onMenuPress, onPreferencesPress }: Profi
             {/* Stats Row */}
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
-                <Text style={styles.statValue}>{profile?.matchesPlayedMatchmaking ?? 0}</Text>
+                <Text style={styles.statValue}>{profile?.matchesPlayedTotal ?? 0}</Text>
                 <Text style={styles.statLabel}>PARTIDOS</Text>
               </View>
               <View style={styles.statDivider} />
@@ -755,5 +776,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: '#fff',
+  },
+  centered: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
   },
 });

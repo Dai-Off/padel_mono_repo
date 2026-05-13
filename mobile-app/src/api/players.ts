@@ -19,6 +19,8 @@ type MeResponse = {
     liga?: string | null;
     lps?: number | null;
     mm_peak_liga?: string | null;
+    matches_played_competitive?: number | null;
+    matches_played_friendly?: number | null;
     matches_played_matchmaking?: number | null;
     fiabilidad?: number | null;
     mm_wins?: number | null;
@@ -67,7 +69,7 @@ export type MyPlayerProfile = {
   liga: string | null;
   lps: number | null;
   mmPeakLiga: string | null;
-  matchesPlayedMatchmaking: number | null;
+  matchesPlayedTotal: number;
   fiabilidad: number | null;
   mmWins: number;
   mmLosses: number;
@@ -117,8 +119,12 @@ export async function fetchMyPlayerProfile(
           : Number(String(rawElo).trim());
     const rawLps = json.player.lps;
     const lpsNum = rawLps == null ? null : Number(rawLps);
+    const rawMpc = json.player.matches_played_competitive;
+    const rawMpf = json.player.matches_played_friendly;
     const rawMpm = json.player.matches_played_matchmaking;
-    const mpmNum = rawMpm == null ? null : Number(rawMpm);
+    const mpcNum = rawMpc == null ? 0 : Math.max(0, Math.round(Number(rawMpc)));
+    const mpfNum = rawMpf == null ? 0 : Math.max(0, Math.round(Number(rawMpf)));
+    const mpmNum = rawMpm == null ? 0 : Math.max(0, Math.round(Number(rawMpm)));
     const rawFiab = json.player.fiabilidad;
     const fiabNum = rawFiab == null ? null : Number(rawFiab);
     const parseInt0 = (v: unknown): number => {
@@ -185,10 +191,7 @@ export async function fetchMyPlayerProfile(
         String(json.player.mm_peak_liga).trim() !== ""
           ? String(json.player.mm_peak_liga)
           : null,
-      matchesPlayedMatchmaking:
-        mpmNum != null && !Number.isNaN(mpmNum)
-          ? Math.max(0, Math.round(mpmNum))
-          : null,
+      matchesPlayedTotal: mpcNum + mpfNum + mpmNum,
       fiabilidad:
         fiabNum != null && !Number.isNaN(fiabNum)
           ? Math.max(0, Math.min(100, Math.round(fiabNum)))
@@ -212,7 +215,8 @@ export async function fetchMyPlayerProfile(
       },
       onboardingCompleted: json.player.onboarding_completed !== false,
     };
-  } catch {
+  } catch (err) {
+    console.error("[fetchMyPlayerProfile]", err);
     return null;
   }
 }
@@ -322,7 +326,7 @@ export type PublicPlayerProfile = {
 /** Obtiene el perfil público de cualquier jugador. */
 export async function fetchPublicPlayerProfile(
   playerId: string,
-  token?: string | null
+  token?: string | null,
 ): Promise<PublicPlayerProfile | null> {
   try {
     const res = await fetch(`${API_URL}/players/${playerId}/public-profile`, {

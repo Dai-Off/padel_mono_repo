@@ -559,11 +559,9 @@ router.patch('/me', async (req: Request, res: Response) => {
       }
     }
 
-    if (prefsNorm.hasAny) {
-      const syncRes = await syncPlayerVector(playerId);
-      if (!syncRes.sent) {
-        console.error('[PATCH /players/me] sync-player-vector failed:', syncRes.error ?? 'unknown');
-      }
+    const syncRes = await syncPlayerVector(playerId);
+    if (!syncRes.sent) {
+      console.error('[PATCH /players/me] sync-player-vector failed:', syncRes.error ?? 'unknown');
     }
 
     const wl = await fetchPlayerMatchmakingWl(supabase, playerId);
@@ -835,6 +833,8 @@ router.post('/onboarding', async (req: Request, res: Response) => {
 
   // Sincronizar coach_assessments con el nuevo onboarding para que el radar se renderice siempre.
   await upsertCoachAssessmentFromOnboarding(supabase, playerId, finalElo);
+
+  syncPlayerVector(playerId).catch((e) => console.error('[onboarding] sync-player-vector failed:', playerId, e));
 
   return res.json({ ok: true, elo_rating: finalElo, message: 'Nivel inicial asignado' });
 });

@@ -196,12 +196,47 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ ok: false, error: 'No se pudo iniciar sesión' });
     }
 
+    // Fallback: si el usuario no tiene fila en players (registro fuera del flujo normal), crearla.
+    const authUser = data.user!;
+    const emailStr2 = String(authUser.email ?? '').trim().toLowerCase();
+    if (emailStr2) {
+      const { data: existingPlayer } = await supabase
+        .from('players')
+        .select('id')
+        .or(`auth_user_id.eq.${authUser.id},email.eq.${emailStr2}`)
+        .neq('status', 'deleted')
+        .maybeSingle();
+
+      if (!existingPlayer) {
+        const fullName = String(authUser.user_metadata?.full_name ?? '').trim();
+        const nameParts = fullName ? fullName.split(/\s+/) : [];
+        const { data: created } = await supabase
+          .from('players')
+          .insert([{
+            first_name: nameParts[0] || 'Usuario',
+            last_name: nameParts.slice(1).join(' ') || '',
+            email: emailStr2,
+            status: 'active',
+            auth_user_id: authUser.id,
+          }])
+          .select('id')
+          .maybeSingle();
+        if (created?.id) {
+          await assignActiveMatchmakingSeasonIfNull(supabase, created.id as string);
+          syncPlayerVector(created.id as string).catch((e) =>
+            console.error('[login] sync-player-vector failed:', e),
+          );
+          console.log('[login] Player row created for auth user without player:', authUser.id);
+        }
+      }
+    }
+
     return res.json({
       ok: true,
       user: {
-        id: data.user?.id,
-        email: data.user?.email,
-        user_metadata: data.user?.user_metadata,
+        id: authUser.id,
+        email: authUser.email,
+        user_metadata: authUser.user_metadata,
       },
       session: {
         access_token: data.session.access_token,
