@@ -653,9 +653,55 @@ router.post('/manual', async (req: Request, res: Response) => {
 /**
  * @openapi
  * /players/onboarding/next:
+ *   post:
+ *     tags: [Players]
+ *     summary: Siguiente paso del cuestionario (body JSON; preferible al GET con query larga)
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               answers:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     question_key: { type: string }
+ *                     value: {}
+ *     responses:
+ *       200:
+ *         description: Estado siguiente
+ *         content:
+ *           application/json:
+ *             example: { ok: true, state: { type: 'complete' } }
+ *       401: { description: Sin token }
+ *       500: { description: Error interno }
+ */
+router.post('/onboarding/next', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  try {
+    let answers: OnboardingAnswer[] = [];
+    if (Array.isArray(req.body?.answers)) {
+      answers = req.body.answers as OnboardingAnswer[];
+    }
+    const state = await getNextQuestionState(answers);
+    return res.json({ ok: true, state });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ ok: false, error: message });
+  }
+});
+
+/**
+ * @openapi
+ * /players/onboarding/next:
  *   get:
  *     tags: [Players]
- *     summary: Obtener la siguiente pregunta del cuestionario
+ *     summary: Obtener la siguiente pregunta (respuestas en query; preferir POST para muchas respuestas)
  *     security: [{ bearerAuth: [] }]
  */
 router.get('/onboarding/next', async (req: Request, res: Response) => {
@@ -733,13 +779,14 @@ router.post('/onboarding', async (req: Request, res: Response) => {
 
   // Calculos
   const eloPhase1 = await calcEloPhase1(phase1Ans);
-  const p1Val = phase1Ans.find(a => a.question_key === 'p1')?.value;
-  
+  const p1Raw = phase1Ans.find((a) => a.question_key === 'p1')?.value;
+  const p1Val = typeof p1Raw === 'number' ? p1Raw : Number(p1Raw);
+
   let finalElo = eloPhase1;
   let pool = null;
   let phase2Score = null;
 
-  if (p1Val >= 2) {
+  if (Number.isFinite(p1Val) && p1Val >= 2) {
     // Aplica fase 2
     pool = await getPhase2Pool(eloPhase1);
     const p2Result = await calcPhase2Result(phase2Ans);

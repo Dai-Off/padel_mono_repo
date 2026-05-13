@@ -10,8 +10,10 @@ create table if not exists public.inventory_categories (
 alter table if exists public.inventory_categories enable row level security;
 
 alter table if exists public.inventory_items
-  add column if not exists category_id uuid references public.inventory_categories(id) on delete set null,
-  drop column if exists quick_sale_enabled;
+  add column if not exists category_id uuid references public.inventory_categories(id) on delete set null;
+
+alter table if exists public.inventory_items
+  add column if not exists quick_sale_enabled boolean not null default false;
 
 create index if not exists idx_inventory_categories_club_id
   on public.inventory_categories (club_id);

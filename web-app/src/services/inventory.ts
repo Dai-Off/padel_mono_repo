@@ -37,6 +37,7 @@ export const inventoryService = {
         low_stock_threshold?: number;
         initial_stock?: number;
         image_url?: string | null;
+        quick_sale_enabled?: boolean;
     }): Promise<InventoryItem> => {
         const res = await apiFetchWithAuth<ApiOk<{ item: InventoryItem }>>('/inventario/items', {
             method: 'POST',
@@ -48,7 +49,19 @@ export const inventoryService = {
     updateItem: async (
         id: string,
         body: Partial<
-            Pick<InventoryItem, 'category_id' | 'name' | 'sku' | 'unit' | 'status' | 'unit_price_cents' | 'currency' | 'low_stock_threshold' | 'image_url'>
+            Pick<
+                InventoryItem,
+                | 'category_id'
+                | 'name'
+                | 'sku'
+                | 'unit'
+                | 'status'
+                | 'unit_price_cents'
+                | 'currency'
+                | 'low_stock_threshold'
+                | 'image_url'
+                | 'quick_sale_enabled'
+            >
         >
     ): Promise<InventoryItem> => {
         const res = await apiFetchWithAuth<ApiOk<{ item: InventoryItem }>>(`/inventario/items/${id}`, {

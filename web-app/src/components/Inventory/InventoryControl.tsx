@@ -29,6 +29,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
         currency: string;
         initialStock: string;
         lowStockThreshold: string;
+        quickSaleEnabled: boolean;
     }>({
         name: '',
         categoryId: '',
@@ -39,6 +40,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
         currency: 'EUR',
         initialStock: '0',
         lowStockThreshold: '0',
+        quickSaleEnabled: false,
     });
     const [newCategoryName, setNewCategoryName] = useState('');
     const [categorySubmitting, setCategorySubmitting] = useState(false);
@@ -222,6 +224,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
             currency: 'EUR',
             initialStock: '0',
             lowStockThreshold: '0',
+            quickSaleEnabled: false,
         });
         setItemImageFile(null);
         setItemImagePreviewUrl(null);
@@ -243,6 +246,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
             currency: item.currency ?? 'EUR',
             initialStock: '0',
             lowStockThreshold: item.low_stock_threshold != null ? String(item.low_stock_threshold) : '0',
+            quickSaleEnabled: item.quick_sale_enabled === true,
         });
         setItemImageFile(null);
         setItemImagePreviewUrl(item.image_url ?? null);
@@ -293,6 +297,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                     low_stock_threshold: lowStockThresholdInt,
                     initial_stock: initialStockInt,
                     image_url: null,
+                    quick_sale_enabled: itemForm.quickSaleEnabled,
                 });
 
                 if (itemImageFile) {
@@ -315,6 +320,7 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                     unit_price_cents: unitPriceCents,
                     currency: itemForm.currency || 'EUR',
                     low_stock_threshold: lowStockThresholdInt,
+                    quick_sale_enabled: itemForm.quickSaleEnabled,
                 });
 
                 if (itemImageFile) {
@@ -644,6 +650,9 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                                             {getItemCategoryName(item) ? <span>Categoría: {getItemCategoryName(item)}</span> : null}
                                             {item.unit ? <span>Unidad: {item.unit}</span> : null}
                                             <span>{item.status === 'active' ? 'Activo' : 'Inactivo'}</span>
+                                            {item.quick_sale_enabled === true ? (
+                                                <span className="text-[#0B5B7A] font-bold">Venta rápida</span>
+                                            ) : null}
                                             {threshold > 0 ? <span>Límite bajo: {threshold}</span> : null}
                                         </div>
 
@@ -847,6 +856,18 @@ export function InventoryControl({ clubId, clubResolved = true }: { clubId: stri
                                     <option value="inactive">Inactivo</option>
                                 </select>
                             </div>
+
+                            <label className="flex items-center gap-2 cursor-pointer rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
+                                <input
+                                    type="checkbox"
+                                    checked={itemForm.quickSaleEnabled}
+                                    onChange={(e) => setItemForm((f) => ({ ...f, quickSaleEnabled: e.target.checked }))}
+                                    className="h-4 w-4 rounded border-gray-300"
+                                />
+                                <span className="text-xs font-semibold text-[#1A1A1A]">
+                                    Venta rápida — aparece en el carrito al inicio (con stock)
+                                </span>
+                            </label>
 
                             <div className="grid grid-cols-2 gap-3">
                                 <div>

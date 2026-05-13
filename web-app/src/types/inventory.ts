@@ -20,6 +20,7 @@ export interface InventoryItem {
     unit_price_cents?: number;
     currency?: string;
     low_stock_threshold?: number;
+    quick_sale_enabled?: boolean;
     image_url?: string | null;
     created_at?: string;
     updated_at?: string;

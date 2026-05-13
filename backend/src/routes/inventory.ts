@@ -9,7 +9,7 @@ const router = Router();
 router.use(attachAuthContext);
 
 const ITEM_FIELDS =
-  'id, club_id, category_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, created_at, updated_at, inventory_categories(id, name)';
+  'id, club_id, category_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, quick_sale_enabled, created_at, updated_at, inventory_categories(id, name)';
 const CATEGORY_FIELDS = 'id, club_id, name, created_at, updated_at';
 const MOVEMENT_FIELDS = 'id, club_id, item_id, movement_type, quantity, reason, movement_at, created_at';
 
@@ -18,7 +18,9 @@ function isMissingRelationError(message: string): boolean {
   return (
     (m.includes('relation') && m.includes('does not exist')) ||
     m.includes('does not exist') ||
-    m.includes('no such table')
+    m.includes('no such table') ||
+    m.includes('schema cache') ||
+    (m.includes('could not find') && m.includes('relationship'))
   );
 }
 
@@ -223,7 +225,8 @@ router.get('/items', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, 
  * Crea un producto (inventario_item).
  */
 router.post('/items', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
-  const { club_id, category_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, initial_stock } = req.body ?? {};
+  const { club_id, category_id, name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, initial_stock, quick_sale_enabled } =
+    req.body ?? {};
   const clubIdStr = String(club_id ?? '').trim();
   const categoryIdStr = category_id == null || !String(category_id).trim() ? null : String(category_id).trim();
   const nameStr = String(name ?? '').trim();
@@ -250,6 +253,7 @@ router.post('/items', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
     currency: currencyStr,
     low_stock_threshold: Math.trunc(lowThreshold),
     image_url: image_url == null || !String(image_url).trim() ? null : String(image_url).trim(),
+    quick_sale_enabled: quick_sale_enabled === true || quick_sale_enabled === 'true',
   };
 
   try {
@@ -295,7 +299,7 @@ router.put('/items/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
     return res.status(500).json({ ok: false, error: 'Error al verificar producto' });
   }
 
-  const { name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, category_id } = req.body ?? {};
+  const { name, sku, unit, status, unit_price_cents, currency, low_stock_threshold, image_url, category_id, quick_sale_enabled } = req.body ?? {};
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (name !== undefined) update.name = String(name).trim();
   if (category_id !== undefined) update.category_id = category_id == null || !String(category_id).trim() ? null : String(category_id).trim();
@@ -318,6 +322,9 @@ router.put('/items/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
   }
   if (image_url !== undefined) {
     update.image_url = image_url == null || !String(image_url).trim() ? null : String(image_url).trim();
+  }
+  if (quick_sale_enabled !== undefined) {
+    update.quick_sale_enabled = quick_sale_enabled === true || quick_sale_enabled === 'true';
   }
 
   if (Object.keys(update).length === 1) return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });

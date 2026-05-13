@@ -209,13 +209,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
 
     // Compute current slot ISO range
     const slotRange = useMemo(() => {
-        const startTotalMin = parseInt(startHour) * 60 + parseInt(startMinute);
-        const endTotalMin = startTotalMin + duration;
-        const endH = String(Math.floor(endTotalMin / 60) % 24).padStart(2, '0');
-        const endM = String(endTotalMin % 60).padStart(2, '0');
+        const startAt = new Date(`${bookingDate}T${String(startHour).padStart(2, '0')}:${startMinute}:00`);
+        const endAt = new Date(startAt.getTime() + duration * 60000);
         return {
-            start_at: `${bookingDate}T${startHour}:${startMinute}:00`,
-            end_at: `${bookingDate}T${endH}:${endM}:00`,
+            start_at: startAt.toISOString(),
+            end_at: endAt.toISOString(),
         };
     }, [bookingDate, startHour, startMinute, duration]);
 
@@ -393,17 +391,14 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
                 await releaseBlock(blockId);
                 setBlockId(null);
             }
+            const startAtIso = new Date(`${bookingDate}T${String(startHour).padStart(2, '0')}:${startMinute}:00`).toISOString();
+            const endAtIso = new Date(new Date(startAtIso).getTime() + duration * 60000).toISOString();
             // Create booking
             const bookingData = {
                 court_id: selectedCourtId,
                 organizer_player_id: organizer.id,
-                start_at: `${bookingDate}T${startHour}:${startMinute}:00`,
-                end_at: (() => {
-                    const startTotalMin = parseInt(startHour) * 60 + parseInt(startMinute) + duration;
-                    const endH = String(Math.floor(startTotalMin / 60) % 24).padStart(2, '0');
-                    const endM = String(startTotalMin % 60).padStart(2, '0');
-                    return `${bookingDate}T${endH}:${endM}:00`;
-                })(),
+                start_at: startAtIso,
+                end_at: endAtIso,
                 total_price_cents: totalPriceCents,
                 status: computedStatus,
                 notes: matchVisibility === 'public' ? 'Partido abierto' : 'Partido privado',
@@ -420,9 +415,12 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
 
             if (!bkRes.ok) throw new Error(bkRes.error || 'Error al crear reserva');
 
+            const bookingId = bkRes.booking?.id ?? bkRes.id;
+            if (!bookingId) throw new Error('Respuesta de reserva inválida');
+
             // Create match
             const matchData = {
-                booking_id: bkRes.booking.id,
+                booking_id: bookingId,
                 visibility: matchVisibility,
                 gender: matchGender,
                 competitive: isCompetitive,
@@ -434,7 +432,12 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
                 body: JSON.stringify(matchData)
             });
 
-            if (!mtRes.ok) throw new Error(mtRes.error || 'Error al crear el partido asociado');
+            if (!mtRes.ok) {
+                try {
+                    await apiFetchWithAuth<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
+                } catch { /* best effort rollback */ }
+                throw new Error(mtRes.error || 'Error al crear el partido asociado');
+            }
 
             onClose();
         } catch (err: any) {

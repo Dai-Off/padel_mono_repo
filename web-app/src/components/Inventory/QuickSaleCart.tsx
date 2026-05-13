@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { inventoryService } from '../../services/inventory';
 import { playerService } from '../../services/player';
 import { apiFetchWithAuth } from '../../services/api';
+import { browserIanaTimeZone } from '../../lib/browserTimeZone';
 import type { Player } from '../../types/api';
 import type { InventoryCategory, InventoryItem } from '../../types/inventory';
 
@@ -58,6 +59,10 @@ function bookingTimeLabel(booking: BookingOption): string {
 
 function cartLineKey(line: CartLine): string {
     return line.itemId ?? line.customId ?? '';
+}
+
+function isQuickSaleItem(item: InventoryItem): boolean {
+    return item.quick_sale_enabled === true;
 }
 
 export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string | null; clubResolved?: boolean }) {
@@ -135,7 +140,11 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
         let cancelled = false;
         (async () => {
             try {
-                const q = new URLSearchParams({ club_id: clubId, date: todayIsoDate() });
+                const q = new URLSearchParams({
+                    club_id: clubId,
+                    date: todayIsoDate(),
+                    time_zone: browserIanaTimeZone(),
+                });
                 const res = await apiFetchWithAuth<{ ok: true; bookings: any[] }>(`/bookings?${q}`);
                 if (cancelled) return;
                 const options = (res.bookings ?? [])
@@ -172,6 +181,10 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     const itemById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
     const saleItems = useMemo(() => {
         const normalizedSearch = searchText.trim().toLowerCase();
+        const searching = normalizedSearch.length > 0;
+        const browsingCategory = showProductCatalog && selectedCategoryId !== 'todos';
+        const showAllMatching = searching || browsingCategory;
+
         return items
             .filter((item) => item.status === 'active' && getCurrentQty(item) > 0)
             .filter((item) => selectedCategoryId === 'todos' || item.category_id === selectedCategoryId)
@@ -179,8 +192,9 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                 if (!normalizedSearch) return true;
                 return item.name.toLowerCase().includes(normalizedSearch) || (item.sku ?? '').toLowerCase().includes(normalizedSearch);
             })
+            .filter((item) => showAllMatching || isQuickSaleItem(item))
             .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
-    }, [items, searchText, selectedCategoryId]);
+    }, [items, searchText, selectedCategoryId, showProductCatalog]);
 
     const cartTotalCents = cartLines.reduce((sum, line) => {
         if (line.itemId) {
@@ -391,7 +405,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                         ref={searchInputRef}
                         value={searchText}
                         onChange={(e) => setSearchText(e.target.value)}
-                        placeholder="Buscar producto de venta rápida"
+                        placeholder="Buscar en todo el catálogo (nombre o SKU)"
                         className="w-full bg-transparent text-sm outline-none placeholder:text-gray-400"
                     />
                 </div>
@@ -402,7 +416,14 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                     </div>
                 ) : saleItems.length === 0 ? (
                     <div className="rounded-2xl border border-dashed border-gray-300 bg-white/60 p-8 text-center text-sm text-gray-500 mt-4">
-                        No hay productos activos con stock disponible.
+                        {searchText.trim() || (showProductCatalog && selectedCategoryId !== 'todos') ? (
+                            <>No hay productos que coincidan con la búsqueda o la categoría.</>
+                        ) : (
+                            <span>
+                                No hay productos de venta rápida con stock. Marcálos en Inventario o abrí «Productos» y filtrá por
+                                categoría, o buscá por nombre arriba.
+                            </span>
+                        )}
                     </div>
                 ) : (
                     <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
