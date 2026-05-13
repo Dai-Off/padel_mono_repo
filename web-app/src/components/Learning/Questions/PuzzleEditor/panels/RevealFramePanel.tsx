@@ -30,18 +30,24 @@ const DURATION_MAX = 3000;
 const DURATION_STEP = 100;
 
 export function RevealFramePanel({ content, activeFrame, onChange }: Props) {
-  const opt = content.options.find((o) => o.id === activeFrame);
-  const frame = opt?.reveal_frame;
-  if (!frame) return null;
+  const { optionId, phase } = activeFrame;
+  const opt = content.options.find((o) => o.id === optionId);
+  const frame = phase === 'select' ? opt?.select_frame : opt?.confirmation_frame;
+  if (!opt || !frame) return null;
 
-  const letter = String.fromCharCode(64 + activeFrame);
+  const letter = String.fromCharCode(64 + optionId);
+  const frameLabel = phase === 'select' ? 'select' : 'confirmation';
 
   const updateFrame = (patch: Partial<PuzzleFrame> | ((f: PuzzleFrame) => PuzzleFrame)) => {
     const newFrame = typeof patch === 'function' ? patch(frame) : { ...frame, ...patch };
     onChange({
       ...content,
       options: content.options.map((o) =>
-        o.id === activeFrame ? { ...o, reveal_frame: newFrame } : o,
+        o.id === optionId
+          ? phase === 'select'
+            ? { ...o, select_frame: newFrame }
+            : { ...o, confirmation_frame: newFrame }
+          : o,
       ),
     });
   };
@@ -53,7 +59,7 @@ export function RevealFramePanel({ content, activeFrame, onChange }: Props) {
   return (
     <div className="space-y-3">
       <h4 className="text-[10px] font-bold text-gray-500 uppercase">
-        Animación del frame {letter}
+        Frame {frameLabel} de la opción {letter}
       </h4>
 
       {/* Duración */}

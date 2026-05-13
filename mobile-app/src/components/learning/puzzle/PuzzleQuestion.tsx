@@ -38,11 +38,17 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
     );
   }
 
-  const correctOption = content.options.find((o) => o.points === 2) ?? null;
+  const correctOption = content.options.find((o) => o.is_correct) ?? null;
 
-  // Frame mostrado: si hay una opción seleccionada con reveal_frame → ese frame
-  // (anima al seleccionar Y al deseleccionar). Si no, el frame inicial.
-  const displayedFrame: PuzzleFrame = selected?.reveal_frame ?? content.initial_frame;
+  // Frame mostrado: 3-frame flow.
+  //   init       (selected === null)           → initial_frame
+  //   select     (selected !== null && !confirmed) → selected.select_frame
+  //   confirmed  (selected !== null && confirmed)  → selected.confirmation_frame
+  // Si alguno de los frames de la opción falta, caemos al siguiente disponible.
+  const displayedFrame: PuzzleFrame =
+    confirmed && selected?.confirmation_frame
+      ? selected.confirmation_frame
+      : selected?.select_frame ?? selected?.confirmation_frame ?? content.initial_frame;
 
   const handleSelect = (opt: PuzzleOption) => {
     if (confirmed) return;
@@ -52,20 +58,19 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
   const handleConfirm = () => {
     if (!selected || confirmed) return;
     setConfirmed(true);
-    const correct = selected.points === 2;
-    onAnswered(correct, { option_id: selected.id });
+    onAnswered(selected.is_correct, { option_id: selected.id });
   };
 
   // Color del badge de cada opción según estado (igual color-scheme que en TestClassic).
   const badgeStyle = (opt: PuzzleOption) => {
     if (!confirmed) return selected?.id === opt.id ? styles.badgeSelected : styles.badge;
-    if (opt.points === 2) return styles.badgeCorrect;
+    if (opt.is_correct) return styles.badgeCorrect;
     if (selected?.id === opt.id) return styles.badgeIncorrect;
     return styles.badge;
   };
   const badgeTextStyle = (opt: PuzzleOption) => {
     if (!confirmed) return selected?.id === opt.id ? styles.badgeTextActive : styles.badgeText;
-    if (opt.points === 2 || selected?.id === opt.id) return styles.badgeTextActive;
+    if (opt.is_correct || selected?.id === opt.id) return styles.badgeTextActive;
     return styles.badgeText;
   };
 
@@ -73,7 +78,13 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
     <View>
       <Text style={styles.statement}>{content.statement}</Text>
 
-      <PuzzleStage frame={displayedFrame} />
+      <PuzzleStage
+        frame={displayedFrame}
+        state={confirmed ? 'confirmed' : selected ? 'select' : 'init'}
+        options={content.options}
+        selectedOptionId={selected?.id ?? null}
+        onSelectOption={handleSelect}
+      />
 
       {/* Texto del bocadillo: cambia según la fase */}
       <View style={styles.bubble}>
@@ -93,7 +104,7 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
             <Text
               style={[
                 styles.bubbleLabel,
-                selected.points === 2 ? styles.colorCorrect : styles.colorIncorrect,
+                selected.is_correct ? styles.colorCorrect : styles.colorIncorrect,
               ]}
             >
               {String.fromCharCode(64 + selected.id)} · {selected.text}
@@ -101,13 +112,10 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
             {selected.explanation ? (
               <Text style={styles.bubbleExplanation}>{selected.explanation}</Text>
             ) : null}
-            {selected.points !== 2 && correctOption ? (
+            {!selected.is_correct && correctOption ? (
               <Text style={styles.bubbleCorrectHint}>
                 Correcta: {String.fromCharCode(64 + correctOption.id)} — {correctOption.text}
               </Text>
-            ) : null}
-            {content.general_explanation ? (
-              <Text style={styles.bubbleExplanation}>{content.general_explanation}</Text>
             ) : null}
           </>
         )}
@@ -118,8 +126,8 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
         <View style={styles.optionsRow}>
           {content.options.map((opt) => {
             const letter = String.fromCharCode(64 + opt.id);
-            const showCorrect = confirmed && opt.points === 2;
-            const showWrong = confirmed && selected?.id === opt.id && opt.points !== 2;
+            const showCorrect = confirmed && opt.is_correct;
+            const showWrong = confirmed && selected?.id === opt.id && !opt.is_correct;
             return (
               <Pressable
                 key={opt.id}

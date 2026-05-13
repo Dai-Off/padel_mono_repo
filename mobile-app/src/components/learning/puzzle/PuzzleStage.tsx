@@ -3,13 +3,15 @@ import { LayoutChangeEvent, StyleSheet, View, useWindowDimensions } from 'react-
 import Court from '../../../../assets/puzzles/court.svg';
 import { AnimatedPlayer, StaticPlayer } from './AnimatedPlayer';
 import { AnimatedBall, StaticBall } from './AnimatedBall';
+import { Shapes, type PuzzleStateKey } from './Shapes';
+import { Badges } from './Badges';
 import {
   STAGE_ASPECT,
   courtConfig,
   m2pctX,
   m2pctY,
 } from './lib/courtConfig';
-import type { PuzzleFrame } from '../../../types/puzzle';
+import type { PuzzleFrame, PuzzleOption } from '../../../types/puzzle';
 
 const STAGE_H_M = 20 + 2 * courtConfig.outerMargin;
 
@@ -18,9 +20,25 @@ type Props = {
   // Cuando es false, los actores se renderizan en posición fija sin animar
   // (útil para el render inicial estático antes de confirmar).
   animate?: boolean;
+  // Estado actual del puzzle: gobierna el filtrado de shapes con
+  // visible_only_after_confirmation. Default 'init' para que no se vean spoilers
+  // cuando el caller no lo pasa.
+  state?: PuzzleStateKey;
+  // Si se pasan options + onSelectOption, se renderiza la capa de badges A/B/C
+  // en pista. Si no se pasan, la capa se omite (caller solo quiere visor).
+  options?: PuzzleOption[];
+  selectedOptionId?: 1 | 2 | 3 | null;
+  onSelectOption?: (opt: PuzzleOption) => void;
 };
 
-export function PuzzleStage({ frame, animate = true }: Props) {
+export function PuzzleStage({
+  frame,
+  animate = true,
+  state = 'init',
+  options,
+  selectedOptionId = null,
+  onSelectOption,
+}: Props) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const win = useWindowDimensions();
 
@@ -57,6 +75,11 @@ export function PuzzleStage({ frame, animate = true }: Props) {
         {/* Pista de fondo (incluye paredes y márgenes). */}
         <Court width="100%" height="100%" preserveAspectRatio="xMidYMid meet" />
 
+        {/* Capa de shapes: entre court y players. */}
+        {size && validFrame && (
+          <Shapes frame={frame} state={state} widthPx={size.w} heightPx={size.h} />
+        )}
+
         {size && validFrame &&
           frame.players.map((p) => {
             const cxPx = (m2pctX(p.x) / 100) * size.w;
@@ -69,6 +92,7 @@ export function PuzzleStage({ frame, animate = true }: Props) {
                 cyPx={cyPx}
                 widthPx={playerWidthPx}
                 durationMs={durationMs}
+                puzzleState={state}
               />
             ) : (
               <StaticPlayer
@@ -77,6 +101,7 @@ export function PuzzleStage({ frame, animate = true }: Props) {
                 cxPx={cxPx}
                 cyPx={cyPx}
                 widthPx={playerWidthPx}
+                puzzleState={state}
               />
             );
           })}
@@ -98,6 +123,18 @@ export function PuzzleStage({ frame, animate = true }: Props) {
               sizePx={ballSidePx}
             />
           )
+        )}
+
+        {/* Capa de badges A/B/C en pista. Encima de players/ball. */}
+        {size && options && onSelectOption && (
+          <Badges
+            options={options}
+            selectedId={selectedOptionId}
+            confirmed={state === 'confirmed'}
+            onSelect={onSelectOption}
+            widthPx={size.w}
+            heightPx={size.h}
+          />
         )}
       </View>
     </View>

@@ -5,6 +5,8 @@ import { MetaPanel } from './panels/MetaPanel';
 import { OptionsPanel } from './panels/OptionsPanel';
 import { FramesTabs } from './panels/FramesTabs';
 import { RevealFramePanel } from './panels/RevealFramePanel';
+import { ShapesToolbar } from './panels/ShapesToolbar';
+import { ShapeInspector } from './panels/ShapeInspector';
 import { cloneFrame, interpolateFrames, type ActiveFrameKey } from './lib/frames';
 import type {
   PuzzleBall,
@@ -12,12 +14,15 @@ import type {
   PuzzleFrame,
   PuzzleOption,
   PuzzlePlayer,
+  PuzzleShape,
 } from '../../../../types/learningContent';
 
 interface Props {
   content: PuzzleContent;
   onChange: (next: PuzzleContent) => void;
 }
+
+type Phase = 'select' | 'confirm';
 
 export function PuzzleEditor({ content, onChange }: Props) {
   const [selected, setSelected] = useState<SelectedItem>(null);
@@ -28,12 +33,13 @@ export function PuzzleEditor({ content, onChange }: Props) {
   const [previewFrame, setPreviewFrame] = useState<PuzzleFrame | null>(null);
   const previewRafRef = useRef<number | null>(null);
 
-  // Si la opción activa pierde su reveal_frame (porque la borraron), volver a initial.
+  // Si la opción activa pierde su frame, volver a 'initial'.
   useEffect(() => {
-    if (activeFrame !== 'initial') {
-      const opt = content.options.find((o) => o.id === activeFrame);
-      if (!opt?.reveal_frame) setActiveFrame('initial');
-    }
+    if (activeFrame === 'initial') return;
+    const opt = content.options.find((o) => o.id === activeFrame.optionId);
+    const hasFrame =
+      activeFrame.phase === 'select' ? !!opt?.select_frame : !!opt?.confirmation_frame;
+    if (!hasFrame) setActiveFrame('initial');
   }, [content.options, activeFrame]);
 
   // Limpieza del rAF al desmontar.
@@ -47,23 +53,31 @@ export function PuzzleEditor({ content, onChange }: Props) {
 
   const getActiveFrame = (): PuzzleFrame => {
     if (activeFrame === 'initial') return content.initial_frame;
-    const opt = content.options.find((o) => o.id === activeFrame);
-    return opt?.reveal_frame ?? content.initial_frame;
+    const opt = content.options.find((o) => o.id === activeFrame.optionId);
+    const frame =
+      activeFrame.phase === 'select' ? opt?.select_frame : opt?.confirmation_frame;
+    return frame ?? content.initial_frame;
   };
 
   const writeActiveFrame = (mut: (f: PuzzleFrame) => PuzzleFrame) => {
     if (activeFrame === 'initial') {
       onChange({ ...content, initial_frame: mut(content.initial_frame) });
-    } else {
-      onChange({
-        ...content,
-        options: content.options.map((o) =>
-          o.id === activeFrame && o.reveal_frame
-            ? { ...o, reveal_frame: mut(o.reveal_frame) }
-            : o,
-        ),
-      });
+      return;
     }
+    const { optionId, phase } = activeFrame;
+    onChange({
+      ...content,
+      options: content.options.map((o) => {
+        if (o.id !== optionId) return o;
+        if (phase === 'select' && o.select_frame) {
+          return { ...o, select_frame: mut(o.select_frame) };
+        }
+        if (phase === 'confirm' && o.confirmation_frame) {
+          return { ...o, confirmation_frame: mut(o.confirmation_frame) };
+        }
+        return o;
+      }),
+    });
   };
 
   const updatePlayer = (next: PuzzlePlayer) => {
@@ -78,64 +92,132 @@ export function PuzzleEditor({ content, onChange }: Props) {
   };
 
   // ---------------------------------------------------------------------------
-  // Reveal frames: añadir / eliminar
+  // Shapes del frame activo: añadir, borrar, editar.
   // ---------------------------------------------------------------------------
 
-  const addRevealFrame = (optionIdx: number) => {
-    const next = [...content.options];
-    const opt = next[optionIdx];
-    if (!opt || opt.reveal_frame) return;
-    next[optionIdx] = {
-      ...opt,
-      reveal_frame: { ...cloneFrame(content.initial_frame), duration_ms: 1500 },
-    } as PuzzleOption;
-    onChange({ ...content, options: next });
-    setActiveFrame(opt.id);
-    setSelected(null);
+  const addShape = (shape: PuzzleShape) => {
+    writeActiveFrame((f) => ({
+      ...f,
+      shapes: [...(f.shapes ?? []), shape],
+    }));
+    setSelected({ kind: 'shape', id: shape.id });
   };
 
-  const removeRevealFrame = (optionIdx: number) => {
+  const removeShape = (id: string) => {
+    writeActiveFrame((f) => ({
+      ...f,
+      shapes: (f.shapes ?? []).filter((s) => s.id !== id),
+    }));
+    if (selected?.kind === 'shape' && selected.id === id) setSelected(null);
+  };
+
+  const updateShape = (next: PuzzleShape) => {
+    writeActiveFrame((f) => ({
+      ...f,
+      shapes: (f.shapes ?? []).map((s) => (s.id === next.id ? next : s)),
+    }));
+  };
+
+  // ---------------------------------------------------------------------------
+  // Add / remove frames por opción y fase
+  // ---------------------------------------------------------------------------
+
+  const addFrame = (optionIdx: number, phase: Phase) => {
     const next = [...content.options];
     const opt = next[optionIdx];
     if (!opt) return;
-    const { reveal_frame: _omit, ...rest } = opt;
-    void _omit;
-    next[optionIdx] = rest as PuzzleOption;
+    // Si ya existe la otra fase, clonamos de ahí; si no, del initial_frame.
+    const source: PuzzleFrame =
+      phase === 'select'
+        ? opt.select_frame ?? opt.confirmation_frame ?? content.initial_frame
+        : opt.confirmation_frame ?? opt.select_frame ?? content.initial_frame;
+    const cloned: PuzzleFrame = { ...cloneFrame(source), duration_ms: source.duration_ms ?? 1500 };
+
+    next[optionIdx] = (
+      phase === 'select'
+        ? { ...opt, select_frame: cloned }
+        : { ...opt, confirmation_frame: cloned }
+    ) as PuzzleOption;
     onChange({ ...content, options: next });
-    if (activeFrame === opt.id) setActiveFrame('initial');
+    setActiveFrame({ optionId: opt.id, phase });
+    setSelected(null);
+  };
+
+  const removeFrame = (optionIdx: number, phase: Phase) => {
+    const next = [...content.options];
+    const opt = next[optionIdx];
+    if (!opt) return;
+    if (phase === 'select') {
+      const { select_frame: _omit, ...rest } = opt;
+      void _omit;
+      next[optionIdx] = rest as PuzzleOption;
+    } else {
+      const { confirmation_frame: _omit, ...rest } = opt;
+      void _omit;
+      next[optionIdx] = rest as PuzzleOption;
+    }
+    onChange({ ...content, options: next });
+    if (
+      activeFrame !== 'initial' &&
+      activeFrame.optionId === opt.id &&
+      activeFrame.phase === phase
+    ) {
+      setActiveFrame('initial');
+    }
   };
 
   // ---------------------------------------------------------------------------
-  // Preview animado
+  // Preview animado: initial → select → confirm (encadenado).
   // ---------------------------------------------------------------------------
 
   const runPreview = (optionIdx: number) => {
     const opt = content.options[optionIdx];
-    if (!opt?.reveal_frame) return;
-    const from = content.initial_frame;
-    const to = opt.reveal_frame;
-    const duration = Math.max(200, opt.reveal_frame.duration_ms ?? 1500);
-    const start = performance.now();
+    if (!opt) return;
+    const stages: { from: PuzzleFrame; to: PuzzleFrame; duration: number }[] = [];
+    if (opt.select_frame) {
+      stages.push({
+        from: content.initial_frame,
+        to: opt.select_frame,
+        duration: Math.max(200, opt.select_frame.duration_ms ?? 1500),
+      });
+    }
+    if (opt.confirmation_frame) {
+      stages.push({
+        from: opt.select_frame ?? content.initial_frame,
+        to: opt.confirmation_frame,
+        duration: Math.max(200, opt.confirmation_frame.duration_ms ?? 1500),
+      });
+    }
+    if (stages.length === 0) return;
 
     setSelected(null);
+    let stageIdx = 0;
+    let stageStart = performance.now();
 
-    const tick = () => {
-      const elapsed = performance.now() - start;
-      const t = Math.min(1, elapsed / duration);
-      // Easing ease-out cúbico para que la transición se sienta natural.
+    const tick = (now: number) => {
+      const stage = stages[stageIdx];
+      const elapsed = now - stageStart;
+      const t = Math.min(1, elapsed / stage.duration);
       const eased = 1 - Math.pow(1 - t, 3);
-      setPreviewFrame(interpolateFrames(from, to, eased));
-      if (t >= 1) {
-        // Mantener el frame final visible un instante y luego salir del preview.
+      setPreviewFrame(interpolateFrames(stage.from, stage.to, eased));
+      if (t < 1) {
+        previewRafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+      // Stage actual terminado: pasar al siguiente o cerrar.
+      if (stageIdx < stages.length - 1) {
+        stageIdx++;
+        stageStart = now;
+        previewRafRef.current = requestAnimationFrame(tick);
+      } else {
+        // Mantener el último frame medio segundo y salir.
         previewRafRef.current = window.setTimeout(() => {
           setPreviewFrame(null);
           previewRafRef.current = null;
         }, 600) as unknown as number;
-      } else {
-        previewRafRef.current = requestAnimationFrame(tick);
       }
     };
-    setPreviewFrame(from);
+    setPreviewFrame(stages[0].from);
     previewRafRef.current = requestAnimationFrame(tick);
   };
 
@@ -146,6 +228,11 @@ export function PuzzleEditor({ content, onChange }: Props) {
   const previewing = previewFrame !== null;
   const frameToShow = previewing ? previewFrame! : getActiveFrame();
 
+  const activeLetter =
+    activeFrame !== 'initial' ? String.fromCharCode(64 + activeFrame.optionId) : null;
+  const activePhaseLabel =
+    activeFrame !== 'initial' ? (activeFrame.phase === 'select' ? 'select' : 'confirmation') : null;
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4 h-[70vh] min-h-[600px]">
       {/* Canvas + controles */}
@@ -155,8 +242,8 @@ export function PuzzleEditor({ content, onChange }: Props) {
             content={content}
             active={activeFrame}
             onSelect={setActiveFrame}
-            onAddRevealFrame={addRevealFrame}
-            onRemoveRevealFrame={removeRevealFrame}
+            onAddFrame={addFrame}
+            onRemoveFrame={removeFrame}
             onPreview={runPreview}
             previewing={previewing}
           />
@@ -188,13 +275,23 @@ export function PuzzleEditor({ content, onChange }: Props) {
             onBallChange={updateBall}
             snapToGrid={snapToGrid}
             draggable={!previewing}
+            options={content.options}
+            onOptionChange={(next) =>
+              onChange({
+                ...content,
+                options: content.options.map((o) => (o.id === next.id ? next : o)),
+              })
+            }
+            showConfirmShapes={
+              activeFrame !== 'initial' && activeFrame.phase === 'confirm'
+            }
           />
         </div>
 
         {activeFrame !== 'initial' && !previewing && (
           <p className="text-[10px] text-amber-600 mt-2">
-            Estás editando el frame de revelación de la opción {String.fromCharCode(64 + activeFrame)}.
-            Mueve los jugadores y la pelota a la posición final tras confirmar esta opción.
+            Estás editando el frame <strong>{activePhaseLabel}</strong> de la opción {activeLetter}.
+            Mueve los jugadores y la pelota a la posición que tendrá esta fase.
           </p>
         )}
       </div>
@@ -212,6 +309,24 @@ export function PuzzleEditor({ content, onChange }: Props) {
             />
           </>
         )}
+        <div className="border-t border-gray-100" />
+        <ShapesToolbar
+          shapes={frameToShow.shapes ?? []}
+          selectedShapeId={selected?.kind === 'shape' ? selected.id : null}
+          onSelectShape={(id) => setSelected(id ? { kind: 'shape', id } : null)}
+          onAdd={addShape}
+          onRemove={removeShape}
+        />
+        {selected?.kind === 'shape' &&
+          (() => {
+            const shape = (frameToShow.shapes ?? []).find((s) => s.id === selected.id);
+            return shape ? (
+              <>
+                <div className="border-t border-gray-100" />
+                <ShapeInspector shape={shape} onChange={updateShape} />
+              </>
+            ) : null;
+          })()}
         <div className="border-t border-gray-100" />
         <OptionsPanel content={content} onChange={onChange} />
       </div>

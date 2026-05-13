@@ -6,12 +6,6 @@ interface Props {
   onChange: (next: PuzzleContent) => void;
 }
 
-const POINT_LABELS: Record<0 | 1 | 2, { label: string; color: string }> = {
-  0: { label: 'Mala (0)', color: 'bg-red-50 text-red-600 border-red-200' },
-  1: { label: 'Parcial (1)', color: 'bg-amber-50 text-amber-600 border-amber-200' },
-  2: { label: 'Correcta (2)', color: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
-};
-
 function nextOptionId(existing: PuzzleOption[]): 1 | 2 | 3 {
   const used = new Set(existing.map((o) => o.id));
   for (const id of [1, 2, 3] as const) if (!used.has(id)) return id;
@@ -30,7 +24,7 @@ export function OptionsPanel({ content, onChange }: Props) {
       id: nextOptionId(content.options),
       text: '',
       explanation: '',
-      points: 0,
+      is_correct: false,
     };
     onChange({ ...content, options: [...content.options, newOpt] });
   };
@@ -40,21 +34,20 @@ export function OptionsPanel({ content, onChange }: Props) {
     onChange({ ...content, options: content.options.filter((_, i) => i !== idx) });
   };
 
-  const setPoints = (idx: number, points: 0 | 1 | 2) => {
-    if (points === 2) {
-      // Solo puede haber una correcta. Si marcamos otra, las demás bajan a 1 si eran 2.
-      const options = content.options.map((o, i) => {
-        if (i === idx) return { ...o, points: 2 } as PuzzleOption;
-        if (o.points === 2) return { ...o, points: 1 } as PuzzleOption;
-        return o;
-      });
-      onChange({ ...content, options });
-    } else {
-      updateOption(idx, { points });
+  // Solo una opción puede ser correcta. Al marcarla, las otras se desmarcan.
+  const setIsCorrect = (idx: number, isCorrect: boolean) => {
+    if (!isCorrect) {
+      updateOption(idx, { is_correct: false });
+      return;
     }
+    const options = content.options.map((o, i) => ({
+      ...o,
+      is_correct: i === idx,
+    }));
+    onChange({ ...content, options });
   };
 
-  const correctCount = content.options.filter((o) => o.points === 2).length;
+  const correctCount = content.options.filter((o) => o.is_correct).length;
 
   return (
     <div className="space-y-3">
@@ -74,7 +67,7 @@ export function OptionsPanel({ content, onChange }: Props) {
 
       {correctCount !== 1 && (
         <div className="text-[10px] text-red-500 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
-          Debe haber exactamente 1 opción correcta (points = 2). Actual: {correctCount}.
+          Debe haber exactamente 1 opción marcada como correcta. Actual: {correctCount}.
         </div>
       )}
 
@@ -112,25 +105,18 @@ export function OptionsPanel({ content, onChange }: Props) {
                 placeholder="Explicación (se muestra al confirmar la respuesta)"
                 className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs resize-none"
               />
-              <div className="flex gap-1.5">
-                {([0, 1, 2] as const).map((p) => {
-                  const meta = POINT_LABELS[p];
-                  const active = opt.points === p;
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setPoints(idx, p)}
-                      className={`flex-1 px-2 py-1.5 rounded-xl text-[10px] font-bold border transition-all flex items-center justify-center gap-1 ${
-                        active ? meta.color : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
-                      }`}
-                    >
-                      {active && p === 2 && <Check className="w-3 h-3" />}
-                      {meta.label}
-                    </button>
-                  );
-                })}
-              </div>
+              <button
+                type="button"
+                onClick={() => setIsCorrect(idx, !opt.is_correct)}
+                className={`w-full px-3 py-1.5 rounded-xl text-[10px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                  opt.is_correct
+                    ? 'bg-emerald-50 text-emerald-600 border-emerald-200'
+                    : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                {opt.is_correct && <Check className="w-3 h-3" />}
+                {opt.is_correct ? 'Correcta' : 'Marcar como correcta'}
+              </button>
             </div>
           );
         })}

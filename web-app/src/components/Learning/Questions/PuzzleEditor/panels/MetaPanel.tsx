@@ -47,18 +47,6 @@ export function MetaPanel({ content, onChange }: Props) {
         </div>
       </div>
 
-      <div>
-        <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">
-          Explicación general <span className="text-gray-300 font-normal">(opcional)</span>
-        </label>
-        <textarea
-          value={content.general_explanation ?? ''}
-          onChange={(e) => onChange({ ...content, general_explanation: e.target.value || undefined })}
-          rows={2}
-          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-none"
-          placeholder="Texto que se muestra tras confirmar (independiente de la opción elegida)"
-        />
-      </div>
     </div>
   );
 }

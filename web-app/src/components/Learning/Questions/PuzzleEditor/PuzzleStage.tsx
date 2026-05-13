@@ -3,13 +3,21 @@ import { Stage, Layer, Group } from 'react-konva';
 import { CourtBackground } from './nodes/CourtBackground';
 import { PlayerNode } from './nodes/PlayerNode';
 import { BallNode } from './nodes/BallNode';
+import { ShapeNode } from './nodes/ShapeNode';
+import { BadgeNode } from './nodes/BadgeNode';
 import { computeScale, m2px, type ScaleInfo } from './lib/coords';
 import { courtConfig } from './lib/courtConfig';
-import type { PuzzleBall, PuzzleFrame, PuzzlePlayer } from '../../../../types/learningContent';
+import type {
+  PuzzleBall,
+  PuzzleFrame,
+  PuzzleOption,
+  PuzzlePlayer,
+} from '../../../../types/learningContent';
 
 export type SelectedItem =
   | { kind: 'player'; id: number }
   | { kind: 'ball' }
+  | { kind: 'shape'; id: string }
   | null;
 
 interface Props {
@@ -21,9 +29,27 @@ interface Props {
   snapToGrid: boolean;
   // Cuando está en preview, los nodos no son draggable y no se selecciona nada.
   draggable: boolean;
+  // Opciones del puzzle. Si vienen, se renderizan los badges A/B/C en pista
+  // (draggable para reposicionar). Si no, la capa se omite.
+  options?: PuzzleOption[];
+  onOptionChange?: (next: PuzzleOption) => void;
+  // Si la fase activa del editor es 'confirm', se muestran también las shapes
+  // con visible_only_after_confirmation. En 'initial' y 'select' se filtran.
+  showConfirmShapes?: boolean;
 }
 
-export function PuzzleStage({ frame, selected, onSelect, onPlayerChange, onBallChange, snapToGrid, draggable }: Props) {
+export function PuzzleStage({
+  frame,
+  selected,
+  onSelect,
+  onPlayerChange,
+  onBallChange,
+  snapToGrid,
+  draggable,
+  options,
+  onOptionChange,
+  showConfirmShapes = false,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState<ScaleInfo | null>(null);
 
@@ -57,6 +83,18 @@ export function PuzzleStage({ frame, selected, onSelect, onPlayerChange, onBallC
           <Layer listening={false}>
             <CourtBackground scale={scale} />
           </Layer>
+
+          {/* Capa de shapes (no interactiva, filtrada por vOAC). */}
+          <Layer listening={false}>
+            <Group x={innerOffsetPx} y={innerOffsetPx}>
+              {(frame.shapes ?? [])
+                .filter((s) => showConfirmShapes || !s.visible_only_after_confirmation)
+                .map((s) => (
+                  <ShapeNode key={s.id} shape={s} scale={scale} />
+                ))}
+            </Group>
+          </Layer>
+
           <Layer>
             <Group x={innerOffsetPx} y={innerOffsetPx}>
               {frame.players.map((p) => (
@@ -82,6 +120,24 @@ export function PuzzleStage({ frame, selected, onSelect, onPlayerChange, onBallC
               />
             </Group>
           </Layer>
+
+          {/* Capa de badges A/B/C (encima de players/ball). */}
+          {options && onOptionChange && (
+            <Layer>
+              <Group x={innerOffsetPx} y={innerOffsetPx}>
+                {options.map((opt) => (
+                  <BadgeNode
+                    key={opt.id}
+                    option={opt}
+                    scale={scale}
+                    onChange={onOptionChange}
+                    snapToGrid={snapToGrid}
+                    draggable={draggable}
+                  />
+                ))}
+              </Group>
+            </Layer>
+          )}
         </Stage>
       )}
     </div>

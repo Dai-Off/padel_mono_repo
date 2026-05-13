@@ -23,12 +23,12 @@ const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'men
 
 // Plantilla mínima válida para un puzzle nuevo (cumple validatePuzzleContent del backend).
 const PUZZLE_TEMPLATE: PuzzleContent = {
-  schema_version: 1,
+  schema_version: 2,
   statement: 'Describe la situación táctica del puzzle aquí.',
   court_position: 'both',
   initial_frame: {
     players: [
-      { id: 1, team: 1, x: 3, y: 15 },
+      { id: 1, team: 1, x: 3, y: 15, is_user: true },
       { id: 2, team: 1, x: 7, y: 15 },
       { id: 3, team: 2, x: 3, y: 5 },
       { id: 4, team: 2, x: 7, y: 5 },
@@ -36,9 +36,9 @@ const PUZZLE_TEMPLATE: PuzzleContent = {
     ball: { x: 5, y: 12 },
   },
   options: [
-    { id: 1, text: 'Opción A', explanation: 'Explicación de la opción A', points: 2 },
-    { id: 2, text: 'Opción B', explanation: 'Explicación de la opción B', points: 1 },
-    { id: 3, text: 'Opción C', explanation: 'Explicación de la opción C', points: 0 },
+    { id: 1, text: 'Opción A', explanation: 'Explicación de la opción A', is_correct: true },
+    { id: 2, text: 'Opción B', explanation: 'Explicación de la opción B', is_correct: false },
+    { id: 3, text: 'Opción C', explanation: 'Explicación de la opción C', is_correct: false },
   ],
 };
 
@@ -166,9 +166,9 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
         // Validación ligera client-side: el backend hace validación completa.
         const c = content as PuzzleContent;
         if (!c?.statement || c.statement.trim().length < 8) return 'El enunciado del puzzle debe tener al menos 8 caracteres';
-        if (!c.initial_frame?.players || c.initial_frame.players.length < 2) return 'El puzzle necesita al menos 2 jugadores';
+        if (!c.initial_frame?.players || c.initial_frame.players.length < 1) return 'El puzzle necesita al menos 1 jugador';
         if (!Array.isArray(c.options) || c.options.length < 2) return 'El puzzle necesita al menos 2 opciones';
-        if (c.options.filter((o) => o.points === 2).length !== 1) return 'Debe haber exactamente 1 opción correcta (points=2)';
+        if (c.options.filter((o) => o.is_correct).length !== 1) return 'Debe haber exactamente 1 opción marcada como correcta';
         return null;
       }
     }

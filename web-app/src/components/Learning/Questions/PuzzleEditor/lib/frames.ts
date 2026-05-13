@@ -3,8 +3,24 @@
 
 import type { PuzzleBall, PuzzleFrame, PuzzlePlayer } from '../../../../../types/learningContent';
 
-/** Frame activo en el editor. 'initial' o id de opción 1/2/3 (su reveal_frame). */
-export type ActiveFrameKey = 'initial' | 1 | 2 | 3;
+/**
+ * Frame activo en el editor.
+ *   - 'initial'                                  → initial_frame del puzzle
+ *   - { optionId: 1|2|3, phase: 'select' }       → options[i].select_frame
+ *   - { optionId: 1|2|3, phase: 'confirm' }      → options[i].confirmation_frame
+ */
+export type ActiveFrameKey =
+  | 'initial'
+  | { optionId: 1 | 2 | 3; phase: 'select' | 'confirm' };
+
+export function isInitialFrame(key: ActiveFrameKey): key is 'initial' {
+  return key === 'initial';
+}
+
+export function frameKeyEq(a: ActiveFrameKey, b: ActiveFrameKey): boolean {
+  if (a === 'initial' || b === 'initial') return a === b;
+  return a.optionId === b.optionId && a.phase === b.phase;
+}
 
 export function cloneFrame(f: PuzzleFrame): PuzzleFrame {
   return {
