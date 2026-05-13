@@ -16,8 +16,11 @@ export function parseHashParams(): { access_token?: string; refresh_token?: stri
   const hash = window.location.hash?.slice(1) || '';
   const params: Record<string, string> = {};
   hash.split('&').forEach((part) => {
-    const [k, v] = part.split('=');
-    if (k && v) params[decodeURIComponent(k)] = decodeURIComponent(v);
+    const eqIdx = part.indexOf('=');
+    if (eqIdx === -1) return;
+    const k = decodeURIComponent(part.slice(0, eqIdx));
+    const v = decodeURIComponent(part.slice(eqIdx + 1));
+    if (k && v) params[k] = v;
   });
   return params;
 }

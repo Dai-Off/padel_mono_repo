@@ -51,6 +51,7 @@ import { apiFetch, apiFetchWithAuth } from '../../services/api';
 import { schoolCoursesService } from '../../services/schoolCourses';
 import { authService } from '../../services/auth';
 import { getSupabaseClient } from '../../lib/supabase';
+import { browserIanaTimeZone } from '../../lib/browserTimeZone';
 import { listSpecialDates } from '../../services/clubSpecialDates';
 import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
 
@@ -173,7 +174,10 @@ const useClubData = (dateOrStr: Date | string) => {
             return mapBookings(cached.data, courtsData);
         }
 
-        const query = clubId ? `/bookings?date=${date}&club_id=${clubId}` : `/bookings?date=${date}`;
+        const tz = encodeURIComponent(browserIanaTimeZone());
+        const query = clubId
+            ? `/bookings?date=${encodeURIComponent(date)}&club_id=${encodeURIComponent(clubId)}&time_zone=${tz}`
+            : `/bookings?date=${encodeURIComponent(date)}&time_zone=${tz}`;
         const [bRes, schoolSlots, privateSlots] = await Promise.all([
           apiFetchWithAuth<any>(query),
           clubId ? schoolCoursesService.slots(clubId, date) : Promise.resolve([]),
@@ -217,7 +221,9 @@ const useClubData = (dateOrStr: Date | string) => {
             if (bookingsCache[ds] && Date.now() - bookingsCache[ds].ts < CACHE_TTL) continue;
             try {
                 const [bRes, schoolSlots, privateSlots] = await Promise.all([
-                    apiFetchWithAuth<any>(`/bookings?date=${ds}&club_id=${clubId}`),
+                    apiFetchWithAuth<any>(
+                        `/bookings?date=${encodeURIComponent(ds)}&club_id=${encodeURIComponent(clubId)}&time_zone=${encodeURIComponent(browserIanaTimeZone())}`,
+                    ),
                     schoolCoursesService.slots(clubId, ds),
                     schoolCoursesService.slotsPrivate(clubId, ds),
                 ]);
@@ -524,8 +530,14 @@ function schedulePendingTournamentStartClear(tournamentId: string, expectedSeq: 
 function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
     const courtMap = new Map(courtsData.map(c => [c.id, c.name]));
     return rawBookings
-        // open_match bookings created by app are invisible until all 4 players pay (status becomes confirmed)
-        .filter((b: any) => !(b.reservation_type === 'open_match' && b.status === 'pending_payment'))
+        .filter(
+            (b: any) =>
+                !(
+                    b.reservation_type === 'open_match' &&
+                    b.status === 'pending_payment' &&
+                    (b.source_channel === 'web' || b.source_channel === 'mobile')
+                ),
+        )
         .map((b: any) => {
         const start = new Date(b.start_at);
         const organizer = b.players;
@@ -1155,7 +1167,7 @@ function GrillaViewInner() {
                       court_id: courtId,
                       start_at: startAt,
                       end_at: endAt,
-                      timezone: 'Europe/Madrid',
+                      timezone: browserIanaTimeZone(),
                       total_price_cents: totalPriceCents,
                   };
                   delete payload.court_ids;

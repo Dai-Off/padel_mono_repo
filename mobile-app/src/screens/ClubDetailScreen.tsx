@@ -378,7 +378,7 @@ export function ClubDetailScreen({
 
   const loadClubPartidos = useCallback(async () => {
     setPartidosLoading(true);
-    const matches = await fetchMatches({ expand: true });
+    const matches = await fetchMatches({ expand: true, clubId: court.clubId });
     const filtered = matches
       .filter((m) => matchBelongsToClub(m, court.clubId))
       .map(mapMatchToPartido)

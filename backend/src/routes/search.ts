@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { zonedDayRangeUtcIso } from '../lib/zonedDayBounds';
 
 const router = Router();
 
@@ -111,7 +112,16 @@ router.get('/courts', async (req: Request, res: Response) => {
       .from('reservation_type_prices')
       .select('club_id, reservation_type, price_per_hour_cents')
       .in('club_id', clubIds)
-      .eq('reservation_type', 'standard');
+      .in('reservation_type', ['standard', 'open_match']);
+
+    const minRtByClub = new Map<string, number>();
+    for (const r of rtPrices ?? []) {
+      const cid = (r as { club_id: string }).club_id;
+      const cents = Number((r as { price_per_hour_cents?: number }).price_per_hour_cents) || 0;
+      if (cents <= 0) continue;
+      const prev = minRtByClub.get(cid);
+      if (prev == null || cents < prev) minRtByClub.set(cid, cents);
+    }
 
     let bookingsQuery = supabase
       .from('bookings')
@@ -128,10 +138,25 @@ router.get('/courts', async (req: Request, res: Response) => {
     const isoDow = jsDow === 0 ? 7 : jsDow; // 1..7
 
     if (dateFrom) {
-      bookingsQuery = bookingsQuery.gte('start_at', `${dateFrom}T00:00:00Z`);
-    }
-    if (dateTo) {
-      bookingsQuery = bookingsQuery.lte('start_at', `${dateTo}T23:59:59Z`);
+      const dayEnd = dateTo ?? dateFrom;
+      try {
+        const { start: rangeStart } = zonedDayRangeUtcIso(dateFrom, 'Europe/Madrid');
+        const { endExclusive: rangeEnd } = zonedDayRangeUtcIso(dayEnd, 'Europe/Madrid');
+        bookingsQuery = bookingsQuery.gte('start_at', rangeStart).lt('start_at', rangeEnd);
+      } catch {
+        bookingsQuery = bookingsQuery.gte('start_at', `${dateFrom}T00:00:00Z`);
+        if (dateTo) {
+          const nextDay = new Date(dateTo + 'T00:00:00Z');
+          nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+          const nextDayStr = nextDay.toISOString().split('T')[0];
+          bookingsQuery = bookingsQuery.lt('start_at', `${nextDayStr}T00:00:00Z`);
+        } else {
+          const nextDay = new Date(dateFrom + 'T00:00:00Z');
+          nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+          const nextDayStr = nextDay.toISOString().split('T')[0];
+          bookingsQuery = bookingsQuery.lt('start_at', `${nextDayStr}T00:00:00Z`);
+        }
+      }
     }
 
     const { data: bookings, error: bookingsError } = await bookingsQuery;
@@ -214,8 +239,8 @@ router.get('/courts', async (req: Request, res: Response) => {
         const timeSlots: string[] = [];
         
         // Base price from reservation_type_prices if available
-        const clubRtPrice = (rtPrices ?? []).find(p => p.club_id === court.club_id);
-        let minPriceCents = clubRtPrice?.price_per_hour_cents ?? 0;
+        const clubRtMin = minRtByClub.get(court.club_id) ?? 0;
+        let minPriceCents = clubRtMin;
 
         for (const rule of rules) {
           for (let min = rule.startMin; min < rule.endMin; min += 60) {
@@ -234,7 +259,7 @@ router.get('/courts', async (req: Request, res: Response) => {
           }
         }
 
-        const minPriceFormatted = minPriceCents ? `${Math.round(minPriceCents / 100)}€` : '-';
+        const minPriceFormatted = minPriceCents ? `${(minPriceCents / 100).toFixed(2).replace('.', ',')}€` : '-';
 
         const logoUrl = resolvedLogoByClubId.get(club.id) ?? null;
 
