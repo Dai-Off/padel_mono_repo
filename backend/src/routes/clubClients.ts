@@ -3,7 +3,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { getClubClientPlayerIds, invalidateClubClientPlayerIdsCache } from '../lib/clubClientPlayers';
-import { sendClubCrmEmail } from '../lib/mailer';
+import { sendClubCrmEmail, syncPlayerVector } from '../lib/mailer';
 import { getPlayerClubDebt } from '../lib/players/playerDebt';
 import { canAccessClub } from '../lib/clubAccess';
 
@@ -115,6 +115,94 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+/** Devuelve los player_ids con al menos una reserva en curso o futura (no cancelada) en el club. */
+async function getPlayersWithCurrentBooking(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+  playerIds: string[],
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (playerIds.length === 0) return out;
+  const nowIso = new Date().toISOString();
+  const { data: courts, error: cErr } = await supabase.from('courts').select('id').eq('club_id', clubId).limit(2000);
+  if (cErr) throw cErr;
+  const courtIds = (courts ?? []).map((c) => String((c as { id: string }).id)).filter(Boolean);
+  if (courtIds.length === 0) return out;
+
+  const { data: bookings, error: bErr } = await supabase
+    .from('bookings')
+    .select('id')
+    .in('court_id', courtIds)
+    .gte('end_at', nowIso)
+    .neq('status', 'cancelled')
+    .is('deleted_at', null)
+    .limit(20000);
+  if (bErr) throw bErr;
+  const bookingIds = (bookings ?? []).map((b) => String((b as { id: string }).id)).filter(Boolean);
+  if (bookingIds.length === 0) return out;
+
+  for (const bookingBatch of chunk(bookingIds, 300)) {
+    for (const playerBatch of chunk(playerIds, 500)) {
+      const { data: parts, error: pErr } = await supabase
+        .from('booking_participants')
+        .select('player_id')
+        .in('booking_id', bookingBatch)
+        .in('player_id', playerBatch)
+        .limit(20000);
+      if (pErr) throw pErr;
+      for (const row of parts ?? []) {
+        const pid = String((row as { player_id: string | null }).player_id ?? '');
+        if (pid) out.add(pid);
+      }
+    }
+  }
+  return out;
+}
+
+/** Devuelve los player_ids inscritos en algún torneo activo (no cancelado/expirado) del club. */
+async function getPlayersWithActiveTournament(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+  playerIds: string[],
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (playerIds.length === 0) return out;
+  const { data: tournaments, error: tErr } = await supabase.from('tournaments').select('id').eq('club_id', clubId).limit(2000);
+  if (tErr) {
+    const msg = String(tErr.message ?? '').toLowerCase();
+    const code = String((tErr as { code?: string }).code ?? '');
+    if (code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache')) return out;
+    throw tErr;
+  }
+  const tournamentIds = (tournaments ?? []).map((t) => String((t as { id: string }).id)).filter(Boolean);
+  if (tournamentIds.length === 0) return out;
+
+  for (const tournamentBatch of chunk(tournamentIds, 300)) {
+    for (const playerBatch of chunk(playerIds, 500)) {
+      const { data: inscriptions, error: iErr } = await supabase
+        .from('tournament_inscriptions')
+        .select('player_id_1, player_id_2, status')
+        .in('tournament_id', tournamentBatch)
+        .not('status', 'in', '("cancelled","expired")')
+        .limit(20000);
+      if (iErr) {
+        const msg = String(iErr.message ?? '').toLowerCase();
+        const code = String((iErr as { code?: string }).code ?? '');
+        if (code === '42P01' || msg.includes('does not exist') || msg.includes('schema cache')) return out;
+        throw iErr;
+      }
+      const playerSet = new Set(playerBatch);
+      for (const row of inscriptions ?? []) {
+        const p1 = String((row as { player_id_1?: string | null }).player_id_1 ?? '');
+        const p2 = String((row as { player_id_2?: string | null }).player_id_2 ?? '');
+        if (p1 && playerSet.has(p1)) out.add(p1);
+        if (p2 && playerSet.has(p2)) out.add(p2);
+      }
+    }
+  }
+  return out;
+}
+
 function tierToEloRange(tier: Tier): { elo_min: number; elo_max: number | null } {
   if (tier === 'vip') return { elo_min: 1750, elo_max: null };
   if (tier === 'premium') return { elo_min: 1550, elo_max: 1749 };
@@ -148,6 +236,22 @@ function csvEscape(v: string | number | null | undefined): string {
  *         name: q
  *         schema: { type: string }
  *         description: Buscar por nombre o teléfono (opcional; no por email)
+ *       - in: query
+ *         name: balance_min_cents
+ *         schema: { type: integer }
+ *         description: Filtra clientes con saldo de monedero >= a este valor (céntimos).
+ *       - in: query
+ *         name: balance_max_cents
+ *         schema: { type: integer }
+ *         description: Filtra clientes con saldo de monedero <= a este valor (céntimos).
+ *       - in: query
+ *         name: has_current_booking
+ *         schema: { type: boolean }
+ *         description: Si es true, solo clientes con una reserva en curso o futura no cancelada en el club.
+ *       - in: query
+ *         name: has_tournament
+ *         schema: { type: boolean }
+ *         description: Si es true, solo clientes inscritos en algún torneo activo del club.
  *     responses:
  *       200:
  *         description: Lista de jugadores
@@ -180,11 +284,15 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
   const created_to = parseIsoDateParam(req.query.created_to);
   const has_wallet = parseBoolParam(req.query.has_wallet);
   const has_wallet_balance = parseBoolParam(req.query.has_wallet_balance);
+  const balance_min_cents = parseIntParam(req.query.balance_min_cents);
+  const balance_max_cents = parseIntParam(req.query.balance_max_cents);
   const has_school = parseBoolParam(req.query.has_school);
   const bookings_min = parseIntParam(req.query.bookings_min);
   const bookings_max = parseIntParam(req.query.bookings_max);
   const bookings_from = parseIsoDateParam(req.query.bookings_from);
   const bookings_to = parseIsoDateParam(req.query.bookings_to);
+  const has_current_booking = parseBoolParam(req.query.has_current_booking);
+  const has_tournament = parseBoolParam(req.query.has_tournament);
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   if (!canAccessClub(req, club_id, 'clientes')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
@@ -372,9 +480,11 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
       }
       players = players
         .filter((p) => {
-          if (has_wallet_balance === null) return true;
           const bal = walletBalances.get(String(p.id)) ?? 0;
-          return has_wallet_balance ? bal > 0 : bal <= 0;
+          if (has_wallet_balance !== null && (has_wallet_balance ? !(bal > 0) : !(bal <= 0))) return false;
+          if (balance_min_cents !== null && bal < balance_min_cents) return false;
+          if (balance_max_cents !== null && bal > balance_max_cents) return false;
+          return true;
         })
         .map((p) => {
           const pid = String(p.id);
@@ -387,6 +497,24 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
               : { segment_slug: 'standard', discount_percent: 0 }),
           };
         });
+    }
+
+    if (has_current_booking !== null && players.length > 0) {
+      const currentIds = players.map((p) => String(p.id));
+      const withBooking = await getPlayersWithCurrentBooking(supabase, club_id, currentIds);
+      players = players.filter((p) => {
+        const has = withBooking.has(String(p.id));
+        return has_current_booking ? has : !has;
+      });
+    }
+
+    if (has_tournament !== null && players.length > 0) {
+      const currentIds = players.map((p) => String(p.id));
+      const withTournament = await getPlayersWithActiveTournament(supabase, club_id, currentIds);
+      players = players.filter((p) => {
+        const has = withTournament.has(String(p.id));
+        return has_tournament ? has : !has;
+      });
     }
 
     return res.json({ ok: true, players });
@@ -948,6 +1076,9 @@ router.put('/:playerId', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Player not found' });
+
+    syncPlayerVector(playerId).catch((e) => console.error('[CRM PUT player] sync-player-vector failed:', playerId, e));
+
     return res.json({ ok: true, player: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

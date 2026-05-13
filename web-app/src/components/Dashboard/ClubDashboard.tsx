@@ -45,21 +45,24 @@ import { InventoryControl } from '../Inventory/InventoryControl';
 import { ClubSchoolTab } from '../School/ClubSchoolTab';
 import { ClubPaymentsTab } from '../Payments/ClubPayments';
 import { ClubCheckinTab } from './ClubDashboardExtensions';
+
 import { ClubCashClosingTab } from '../CashClosing/ClubCashClosing';
-import { ClubDashboardExtensions } from './ClubDashboardExtensions';
 import { ClubReviewsTab } from './ClubReviewsTab';
 import { ClubTournamentsTab } from './ClubTournamentsTab';
 import { ClubIncidentsTab } from './ClubIncidentsTab';
 import { ClubSpecialDatesTab } from './ClubSpecialDatesTab';
+import { ClubChatsTab } from '../Chats/ClubChatsTab';
 import { GrillaQuickNav } from '../../features/grilla/components/GrillaQuickNav';
 import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
 import { ClubPortalRolesView } from '../Settings/ClubPortalRolesView';
+import { ClubSportsTab } from '../Settings/ClubSportsTab';
 
 export const ClubDashboard = () => {
     const { t } = useTranslation();
     const location = useLocation();
     const isPlayersPage = location.pathname === '/jugadores';
     const isConfigPage = location.pathname === '/configuracion';
+    const isSportsPage = location.pathname === '/deportes';
     const isPortalRolesPage = location.pathname === '/equipo-portal';
     const isPersonalPage = location.pathname === '/personal';
     const isInventoryPage = location.pathname === '/inventario';
@@ -68,7 +71,7 @@ export const ClubDashboard = () => {
     const isCheckinPage = location.pathname === '/checkIn';
     const isTorneosPage = location.pathname === '/torneos' || location.pathname.startsWith('/torneos/');
     const isCashClosingPage = location.pathname === '/cierreCaja';
-    const isCrmPage = location.pathname === '/crm';
+    const isChatsPage = location.pathname === '/chats';
     const isResenasPage = location.pathname === '/resenas';
     const isIncidenciasPage = location.pathname === '/incidencias';
     const isFechasEspecialesPage = location.pathname === '/fechas-especiales';
@@ -121,7 +124,8 @@ export const ClubDashboard = () => {
         return () => { cancelled = true; };
     }, []);
 
-    const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(club?.id);
+    const clubId = club?.id ?? null;
+    const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(clubId);
 
     const [courts, setCourts] = useState<Court[]>([]);
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -139,7 +143,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isPortalRolesPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isCrmPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
+        if (isPlayersPage || isConfigPage || isSportsPage || isPortalRolesPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isChatsPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
             setLoading(false);
             return;
         }
@@ -152,7 +156,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isPortalRolesPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isCrmPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isSportsPage, isPortalRolesPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isChatsPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -225,18 +229,19 @@ export const ClubDashboard = () => {
     };
 
     // Evita spinner doble en pantallas donde el tab ya se encarga del loader (CRM y Reseñas).
-    if (!club && loading && !isResenasPage && !isCrmPage && !isIncidenciasPage && !isFechasEspecialesPage) {
+    if (!club && loading && !isResenasPage && !isIncidenciasPage && !isFechasEspecialesPage && !isChatsPage) {
         return (
             <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
                 <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
                 <div className="hidden md:block">
-                    <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+                    <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} clubId={clubId} />
                 </div>
                 <PageSpinner />
                 <MainMenu
                     isOpen={isMenuOpen}
                     onClose={() => setIsMenuOpen(false)}
                     clubName=""
+                    clubId={null}
                     isAdmin={isAdmin}
                     portalMenuPermissionKeys={portalMenuPermissionKeys}
                 />
@@ -248,7 +253,7 @@ export const ClubDashboard = () => {
         <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
             <PortalTealHeader clubName={club?.name ?? ''} onMenuClick={() => setIsMenuOpen(true)} />
             <div className="hidden md:block">
-                <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} />
+                <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} clubId={clubId} />
             </div>
 
             <main className="px-4 sm:px-5 py-5 pb-20">
@@ -259,12 +264,14 @@ export const ClubDashboard = () => {
                         <ClubReviewsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isIncidenciasPage ? (
                         <ClubIncidentsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
-                    ) : isCrmPage ? (
-                        <ClubDashboardExtensions clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isChatsPage ? (
+                        <ClubChatsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isTorneosPage ? (
                         <ClubTournamentsTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isConfigPage ? (
                         <ClubSettingsTab initialClub={club} />
+                    ) : isSportsPage ? (
+                        <ClubSportsTab initialClub={club} />
                     ) : isPortalRolesPage ? (
                         <ClubPortalRolesView initialClub={club} />
                     ) : isPersonalPage ? (
@@ -352,6 +359,7 @@ export const ClubDashboard = () => {
                 isOpen={isMenuOpen}
                 onClose={() => setIsMenuOpen(false)}
                 clubName={club?.name ?? ''}
+                clubId={club?.id ?? null}
                 isAdmin={isAdmin}
                 portalMenuPermissionKeys={portalMenuPermissionKeys}
             />

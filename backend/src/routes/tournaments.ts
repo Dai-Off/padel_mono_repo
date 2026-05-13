@@ -18,6 +18,7 @@ import { playerMeetsTournamentGender, tournamentGenderFromBody } from '../lib/to
 import { parsePrizesFromBody, sumPrizeCents, type TournamentPrizeEntry } from '../lib/tournamentPrizes';
 import { buildTournamentInviteUrl } from '../lib/env';
 import { normalizePosterUrl } from '../lib/tournamentPosterUrl';
+import { insertClubChatMention } from '../lib/clubChatMentions';
 import {
   assertPlayerMaySubmitMatchResult,
   computeStandings,
@@ -2407,6 +2408,7 @@ router.get('/:id/chat', requireClubOwnerOrAdminOrPortalStaff, async (req: Reques
  *   post:
  *     tags: [Tournaments]
  *     summary: Enviar mensaje al chat del torneo
+ *     description: Si el texto incluye `@club`, se registra en GET /clubs/{clubId}/chat-mentions.
  *     security: [{ bearerAuth: [] }]
  *     requestBody:
  *       required: true
@@ -2454,6 +2456,19 @@ router.post('/:id/chat', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
       .select('id, created_at, author_user_id, author_name, message')
       .single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
+    try {
+      await insertClubChatMention(supabase, {
+        clubId: String((tournament as { club_id: string }).club_id),
+        sourceType: 'tournament',
+        tournamentId: id,
+        sourceMessageId: data.id as string,
+        authorUserId: req.authContext.userId,
+        authorName,
+        message,
+      });
+    } catch (mentionErr) {
+      console.error('club_chat_mention (tournament staff):', mentionErr);
+    }
     return res.json({ ok: true, message: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -3761,7 +3776,7 @@ router.get('/:id/chat/player', async (req: Request, res: Response) => {
  *   post:
  *     tags: [Tournaments]
  *     summary: Enviar mensaje al chat como jugador
- *     description: Permite escribir chat si el torneo es público o si el jugador participa en el torneo.
+ *     description: Permite escribir chat si el torneo es público o si el jugador participa en el torneo. Si el texto incluye `@club`, se registra en GET /clubs/{clubId}/chat-mentions.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
@@ -3810,6 +3825,20 @@ router.post('/:id/chat/player', async (req: Request, res: Response) => {
       .select('id, created_at, author_user_id, author_name, message')
       .single();
     if (error) return res.status(500).json({ ok: false, error: error.message });
+    try {
+      const clubId = String((ctx.tournament as { club_id: string }).club_id);
+      await insertClubChatMention(supabase, {
+        clubId,
+        sourceType: 'tournament',
+        tournamentId,
+        sourceMessageId: data.id as string,
+        authorUserId: auth.playerId,
+        authorName,
+        message,
+      });
+    } catch (mentionErr) {
+      console.error('club_chat_mention (tournament player):', mentionErr);
+    }
     return res.json({ ok: true, message: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

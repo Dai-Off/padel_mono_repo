@@ -8,6 +8,7 @@ import {
   createIntentForSeasonPassEliteHandler,
   confirmClientHandler,
   listTransactionsHandler,
+  listPendingBookingsHandler,
   listClubTransactionsHandler,
   cashClosingExpectedHandler,
   getCashOpeningForDayHandler,
@@ -22,6 +23,7 @@ const router = Router();
 router.use(attachAuthContext);
 
 router.get('/transactions', listTransactionsHandler);
+router.get('/pending-bookings', listPendingBookingsHandler);
 router.get('/club-transactions', requireClubOwnerOrAdminOrPortalStaff, listClubTransactionsHandler);
 router.get('/cash-closing/expected', requireClubOwnerOrAdminOrPortalStaff, cashClosingExpectedHandler);
 router.get('/cash-opening/today', requireClubOwnerOrAdminOrPortalStaff, getCashOpeningForDayHandler);

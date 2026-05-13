@@ -10,7 +10,7 @@ import {
     Users,
     Award,
     DollarSign,
-    MessageSquare,
+    MessageCircle,
     AlertCircle,
     Star,
     Settings,
@@ -21,22 +21,26 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { portalMenuItemAllowed } from '../../lib/portalNavPermissions';
+import { useClubChatMentionsCount } from '../../hooks/useClubChatMentionsCount';
 
 interface MainMenuProps {
     isOpen: boolean;
     onClose: () => void;
     clubName: string;
+    /** Club actual (menciones @club en badge de Chats). */
+    clubId?: string | null;
     isAdmin?: boolean;
     /** null = acceso completo (dueño o admin). Array = permisos del rol de portal para el club actual. */
     portalMenuPermissionKeys?: string[] | null;
 }
 
-export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin, portalMenuPermissionKeys }) => {
+export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isAdmin, portalMenuPermissionKeys }) => {
     const { t } = useTranslation();
     const location = useLocation();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
     const grillaMenu = searchParams.get('menu');
+    const chatMentionsCount = useClubChatMentionsCount(clubId);
 
     const menuSections = useMemo(() => {
         const adminItem = isAdmin
@@ -59,7 +63,6 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin, po
                 title: 'Clientes',
                 items: [
                     { id: 'jugadores', path: '/jugadores', icon: Users, label: t('menu_jugadores'), color: 'rgb(20, 184, 166)', bgColor: 'rgba(20, 184, 166, 0.06)' },
-                    { id: 'crm', path: '/crm', icon: MessageSquare, label: t('menu_crm'), color: 'rgb(59, 130, 246)', bgColor: 'rgba(59, 130, 246, 0.06)' },
                 ],
             },
             {
@@ -93,9 +96,16 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin, po
                 ],
             },
             {
+                title: 'Chats',
+                items: [
+                    { id: 'chats', path: '/chats', icon: MessageCircle, label: 'Chats', color: 'rgb(79, 70, 229)', bgColor: 'rgba(79, 70, 229, 0.08)' },
+                ],
+            },
+            {
                 title: t('menu_configuracion'),
                 items: [
                     { id: 'configuracion', path: '/configuracion', icon: Settings, label: 'Configuración del club', color: 'rgb(107, 114, 128)', bgColor: 'rgba(107, 114, 128, 0.06)' },
+                    { id: 'deportes', path: '/deportes', icon: Trophy, label: 'Deportes', color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.08)' },
                     {
                         id: 'equipoRoles',
                         path: '/equipo-portal',
@@ -116,6 +126,8 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin, po
             }))
             .filter((section) => section.items.length > 0);
     }, [isAdmin, portalMenuPermissionKeys, t]);
+
+    const showChatsMentionBadge = chatMentionsCount > 0;
 
     const handleItemClick = (item: { path: string; id: string }) => {
         if (item.path === '/grilla' && (item.id === 'resumen' || item.id === 'reservas')) {
@@ -165,6 +177,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin, po
                                             const isActive = isGrillaEntry
                                                 ? location.pathname === '/grilla' && grillaMenu === item.id
                                                 : location.pathname === item.path;
+                                            const showChatsBadge = item.id === 'chats' && showChatsMentionBadge;
                                             return (
                                                 <motion.button
                                                     key={itemIdx}
@@ -177,7 +190,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin, po
                                                         }`}
                                                 >
                                                     <div
-                                                        className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                                                        className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 relative"
                                                         style={{
                                                             backgroundColor: isActive ? 'rgba(255,255,255,0.1)' : item.bgColor
                                                         }}
@@ -186,12 +199,17 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, isAdmin, po
                                                             className="w-5 h-5"
                                                             style={{ color: isActive ? '#FFF' : item.color }}
                                                         />
+                                                        {showChatsBadge && (
+                                                            <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-0.5 flex items-center justify-center rounded-full bg-[#E31E24] text-[10px] font-bold text-white border-2 border-white shadow-sm">
+                                                                1
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                    <span className={`text-sm ${isActive ? 'font-bold' : 'font-semibold'}`}>
+                                                    <span className={`text-sm flex-1 text-left ${isActive ? 'font-bold' : 'font-semibold'}`}>
                                                         {item.label}
                                                     </span>
                                                     {isActive && (
-                                                        <div className="ml-auto w-1.5 h-1.5 rounded-full bg-[#E31E24]" />
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-[#E31E24] flex-shrink-0" />
                                                     )}
                                                 </motion.button>
                                             );
