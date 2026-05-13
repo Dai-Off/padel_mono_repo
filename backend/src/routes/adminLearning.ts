@@ -262,7 +262,6 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
                 schema_version: p.schema_version,
                 statement: p.statement,
                 court_position: p.court_position,
-                general_explanation: p.general_explanation,
                 initial_frame: p.initial_frame,
                 options: p.options,
               }

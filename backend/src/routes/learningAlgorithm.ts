@@ -204,13 +204,13 @@ export function checkAnswer(type: string, content: Record<string, unknown>, sele
     }
 
     case 'puzzle': {
-      // Cliente envía { option_id: 1|2|3 }. Correcta = la opción con points=2.
-      const options = (content as { options?: { id: number; points: number }[] }).options;
+      // Cliente envía { option_id: 1|2|3 }. Correcta = la opción con is_correct=true.
+      const options = (content as { options?: { id: number; is_correct: boolean }[] }).options;
       if (!Array.isArray(options)) return false;
       const sel = selectedAnswer as { option_id?: number } | null;
       const optionId = sel?.option_id;
       const opt = options.find((o) => o.id === optionId);
-      return !!opt && opt.points === 2;
+      return !!opt && opt.is_correct === true;
     }
 
     default:
@@ -235,8 +235,8 @@ export function getCorrectAnswer(type: string, content: Record<string, unknown>)
       return Array.from({ length: steps.length }, (_, i) => i);
     }
     case 'puzzle': {
-      const options = (content as { options?: { id: number; points: number }[] }).options;
-      const correct = options?.find((o) => o.points === 2);
+      const options = (content as { options?: { id: number; is_correct: boolean }[] }).options;
+      const correct = options?.find((o) => o.is_correct === true);
       return correct ? { correct_option_id: correct.id } : null;
     }
     default:

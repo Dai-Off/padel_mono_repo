@@ -73,7 +73,7 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     if (puzzleIds.length > 0) {
       const { data: puzzles, error: puzzleErr } = await supabase
         .from('learning_puzzles')
-        .select('question_id, statement, court_position, general_explanation, initial_frame, options, schema_version')
+        .select('question_id, statement, court_position, initial_frame, options, schema_version')
         .in('question_id', puzzleIds);
       if (puzzleErr) return res.status(500).json({ ok: false, error: puzzleErr.message });
       const byQ = new Map((puzzles ?? []).map((p) => [String(p.question_id), p]));
@@ -86,7 +86,6 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
               schema_version: p.schema_version,
               statement: p.statement,
               court_position: p.court_position,
-              general_explanation: p.general_explanation,
               initial_frame: p.initial_frame,
               options: p.options,
             };
@@ -198,14 +197,14 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
       return res.status(400).json({ ok: false, error: 'Uno o más question_id no son válidos' });
     }
 
-    // Mergear árbol de learning_puzzles para preguntas type='puzzle' (contiene options con points).
+    // Mergear árbol de learning_puzzles para preguntas type='puzzle' (contiene options con is_correct).
     const puzzleQuestionIds = Array.from(questionsById.values())
       .filter((q) => q.type === 'puzzle')
       .map((q) => q.id);
     if (puzzleQuestionIds.length > 0) {
       const { data: puzzles, error: pErr } = await supabase
         .from('learning_puzzles')
-        .select('question_id, statement, court_position, general_explanation, initial_frame, options, schema_version')
+        .select('question_id, statement, court_position, initial_frame, options, schema_version')
         .in('question_id', puzzleQuestionIds);
       if (pErr) return res.status(500).json({ ok: false, error: pErr.message });
       const byQ = new Map((puzzles ?? []).map((p) => [String(p.question_id), p]));
@@ -217,7 +216,6 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
               schema_version: p.schema_version,
               statement: p.statement,
               court_position: p.court_position,
-              general_explanation: p.general_explanation,
               initial_frame: p.initial_frame,
               options: p.options,
             };

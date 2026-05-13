@@ -1,7 +1,9 @@
 -- ===========================================================================
--- Seed: 5 puzzles de prueba para WeMatch
--- Cada puzzle tiene posiciones iniciales distintas para que sean
--- visualmente distinguibles entre sí.
+-- Seeds de puzzles tácticos (schema v2) — 3 puzzles del catálogo padelchess.
+-- Generado automáticamente desde docs/learning/Puzzles/starter-kit-for-wematch/sample-puzzles.json.
+-- - Cada shape sin id en el origen recibe un id de 8 chars autogenerado.
+-- - ball.shot_type='flat' se borra (no es valor válido en v2: queda undefined).
+-- Para regenerar: cd docs/learning/Puzzles && node _convertSamples.js > seed_puzzles.sql
 -- ===========================================================================
 
 -- Limpieza opcional (descomenta si quieres recrear desde cero):
@@ -9,7 +11,7 @@
 --  where type = 'puzzle' and created_by_club = 'ec0bc05c-f21b-465b-82b0-6bd75d1f4163';
 
 -- ---------------------------------------------------------------------------
--- Puzzle 1: rival sube a la red, equipo en defensa profunda — sin reveal_frame
+-- Puzzle (source padelchess #1): Where you should return the ball to reach the net with the least risk?
 -- ---------------------------------------------------------------------------
 with q as (
   insert into public.learning_questions (type, level, area, has_video, video_url, content, created_by_club, is_active)
@@ -18,27 +20,15 @@ with q as (
 )
 insert into public.learning_puzzles (question_id, schema_version, statement, court_position, initial_frame, options)
 select
-  id, 1,
-  'Tu rival ha subido a la red y tú estás en el fondo. ¿Cuál es la mejor jugada?',
-  'both',
-  jsonb_build_object(
-    'players', jsonb_build_array(
-      jsonb_build_object('id', 1, 'team', 1, 'x', 2.5, 'y', 18.0),
-      jsonb_build_object('id', 2, 'team', 1, 'x', 7.5, 'y', 18.0),
-      jsonb_build_object('id', 3, 'team', 2, 'x', 3.0, 'y', 8.0),
-      jsonb_build_object('id', 4, 'team', 2, 'x', 7.0, 'y', 8.0)
-    ),
-    'ball', jsonb_build_object('x', 5.0, 'y', 16.0)
-  ),
-  jsonb_build_array(
-    jsonb_build_object('id', 1, 'text', 'Globo', 'explanation', 'Correcto: les fuerza a retroceder', 'points', 2),
-    jsonb_build_object('id', 2, 'text', 'Bandeja', 'explanation', 'No es el mejor recurso desde el fondo', 'points', 1),
-    jsonb_build_object('id', 3, 'text', 'Smash', 'explanation', 'Demasiado riesgo desde esa distancia', 'points', 0)
-  )
+  id, 2,
+  'Where you should return the ball to reach the net with the least risk?',
+  'left',
+  '{"players":[{"id":1,"team":1,"x":3.0539419087136936,"y":18.37551867219917,"is_user":true}],"ball":{"x":3.713692946058091,"y":17.70746887966805},"shapes":[{"type":"circle","x":3.691983122362869,"y":17.679324894514767,"radius":0.5,"dashed":true,"color":"yellow","id":"ipyJKkmx"}]}'::jsonb,
+  '[{"id":1,"text":"To the left","is_correct":false,"explanation":"Net height is highest at the edges: 92 cm","badge_position":{"x":1,"y":6},"select_frame":{"players":[{"id":1,"team":1,"x":2.66570373093825,"y":17.91313444333561,"is_user":true}],"ball":{"x":1,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":3.669527896995708,"y":17.725321888412015,"radius":0.5,"dashed":true,"color":"yellow","id":"FYivMXQj"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":3.540772532188841,"y":17.128755364806867},"endPoint":{"x":1.1373390557939913,"y":7.592274678111588},"id":"XH3UyJ0A"},{"type":"circle","x":1.0085836909871244,"y":7.017167381974248,"radius":0.5,"dashed":true,"color":"yellow","id":"mujry6S4"}],"duration_ms":1000},"confirmation_frame":{"players":[{"id":1,"team":1,"x":2.66570373093825,"y":17.91313444333561,"is_user":true}],"ball":{"x":1,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":3.669527896995708,"y":17.725321888412015,"radius":0.5,"dashed":true,"color":"yellow","id":"sQ6R5cye"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":3.540772532188841,"y":17.128755364806867},"endPoint":{"x":1.1373390557939913,"y":7.592274678111588},"id":"MceVJkeT"},{"type":"circle","x":1.0085836909871244,"y":7.017167381974248,"radius":0.5,"dashed":true,"color":"yellow","id":"0jVXLYX3"},{"type":"rect","x":0.25316455696202533,"y":9.071729957805909,"color":"#ff9182","fillColor":"#ff9182","fillOpacity":0.7,"width":3.0843881856540083,"height":0.9451476793248954,"visible_only_after_confirmation":true,"id":"SHntBp4s"},{"type":"circle","x":3.669527896995708,"y":17.725321888412015,"radius":0.5,"dashed":true,"color":"yellow","visible_only_after_confirmation":true,"id":"ujkpaXTd"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":17.128755364806867,"x":3.540772532188841},"endPoint":{"y":7.592274678111588,"x":1.1373390557939913},"visible_only_after_confirmation":true,"id":"3TkAZw0Q"},{"type":"circle","x":1.0085836909871244,"y":7.017167381974248,"radius":0.5,"dashed":true,"color":"yellow","visible_only_after_confirmation":true,"id":"pSIru736"},{"type":"arrow","x":0,"y":0,"color":"red","startPoint":{"y":10,"x":4.027333333333333},"endPoint":{"y":9.138666666666666,"x":4.016},"pointerAtBeginning":true,"visible_only_after_confirmation":true,"id":"4NSN4ZZw"},{"type":"text","x":3.188666666666666,"y":10.827333333333332,"color":"red","fontSize":14,"text":"92 cantimeters","visible_only_after_confirmation":true,"id":"0mUW8gub"}],"duration_ms":1000}},{"id":2,"text":"To the center","is_correct":true,"explanation":"Net height is lowest at the center: 88 cm","badge_position":{"x":5,"y":6},"select_frame":{"players":[{"id":1,"team":1,"x":3.0464202648264873,"y":17.981097868459297,"is_user":true}],"ball":{"x":5,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":3.71244635193133,"y":17.660944206008587,"radius":0.5,"dashed":true,"color":"yellow","id":"wmZcYXWY"},{"type":"circle","x":5,"y":7.03862660944206,"radius":0.5,"dashed":true,"color":"yellow","id":"9BZpjDJ3"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":17.064377682403435,"x":3.798283261802575},"endPoint":{"y":7.613733905579399,"x":4.914163090128755},"id":"oW8YESFg"}],"duration_ms":1000},"confirmation_frame":{"players":[{"id":1,"team":1,"x":3.0464202648264873,"y":17.981097868459297,"is_user":true}],"ball":{"x":5,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":3.71244635193133,"y":17.660944206008587,"radius":0.5,"dashed":true,"color":"yellow","id":"U03hlcCD"},{"type":"circle","x":5,"y":7.03862660944206,"radius":0.5,"dashed":true,"color":"yellow","id":"frIAUJFe"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":17.064377682403435,"x":3.798283261802575},"endPoint":{"y":7.613733905579399,"x":4.914163090128755},"id":"hYmTtzA4"},{"type":"rect","x":3.649789029535865,"y":9.09282700421941,"color":"#68fec3","fillColor":"#68fec3","fillOpacity":0.7,"width":2.9999999999999996,"height":0.9451476793248936,"visible_only_after_confirmation":true,"id":"7NZwFx4h"},{"type":"arrow","x":0,"y":0,"color":"green","startPoint":{"y":10.056666666666665,"x":7.314},"endPoint":{"y":9.116,"x":7.279999999999999},"pointerAtBeginning":true,"visible_only_after_confirmation":true,"id":"crvyYghO"},{"type":"text","x":6.917333333333333,"y":10.748,"color":"green","fontSize":14,"text":"88 cantimeters","visible_only_after_confirmation":true,"id":"LdNnDyuP"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":17.064377682403435,"x":3.798283261802575},"endPoint":{"y":7.613733905579399,"x":4.914163090128755},"visible_only_after_confirmation":true,"id":"0m71qYDP"},{"type":"circle","x":3.71244635193133,"y":17.660944206008587,"radius":0.5,"dashed":true,"color":"yellow","visible_only_after_confirmation":true,"id":"HUBwNDXX"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":17.064377682403435,"x":3.798283261802575},"endPoint":{"y":7.613733905579399,"x":4.914163090128755},"visible_only_after_confirmation":true,"id":"vx12n7pI"},{"type":"circle","x":5,"y":7.03862660944206,"radius":0.5,"dashed":true,"color":"yellow","visible_only_after_confirmation":true,"id":"E93tHujg"}],"duration_ms":1000}},{"id":3,"text":"To the right","is_correct":false,"explanation":"Net height is highest at the edges: 92 cm","badge_position":{"x":9,"y":6},"select_frame":{"players":[{"id":1,"team":1,"x":3.220996417187791,"y":18.000758213263175,"is_user":true}],"ball":{"x":9,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":3.7339055793991416,"y":17.682403433476395,"radius":0.5,"dashed":true,"color":"yellow","id":"jsDQqQvr"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":3.927038626609442,"y":17.085836909871244},"endPoint":{"x":8.669527896995708,"y":7.570815450643777},"id":"4Vp7DydK"},{"type":"circle","x":9.012875536480687,"y":7.017167381974248,"radius":0.5,"dashed":true,"color":"yellow","id":"MVVaWizy"}],"duration_ms":800},"confirmation_frame":{"players":[{"id":1,"team":1,"x":3.220996417187791,"y":18.000758213263175,"is_user":true}],"ball":{"x":9,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":3.7339055793991416,"y":17.682403433476395,"radius":0.5,"dashed":true,"color":"yellow","id":"wCo5mO6i"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":3.927038626609442,"y":17.085836909871244},"endPoint":{"x":8.669527896995708,"y":7.570815450643777},"id":"PSudCu6Z"},{"type":"circle","x":9.012875536480687,"y":7.017167381974248,"radius":0.5,"dashed":true,"color":"yellow","id":"LAnDQCgb"},{"type":"rect","x":6.772151898734178,"y":9.113924050632912,"color":"#ff9182","fillColor":"#ff9182","fillOpacity":0.7,"width":2.9789029535864966,"height":0.9240506329113938,"visible_only_after_confirmation":true,"id":"qXEIWUQW"},{"type":"circle","x":3.7339055793991416,"y":17.682403433476395,"radius":0.5,"dashed":true,"color":"yellow","visible_only_after_confirmation":true,"id":"i7Q1gUFU"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":3.927038626609442,"y":17.085836909871244},"endPoint":{"x":8.669527896995708,"y":7.570815450643777},"visible_only_after_confirmation":true,"id":"oPAVfe4H"},{"type":"circle","x":9.012875536480687,"y":7.017167381974248,"radius":0.5,"dashed":true,"color":"yellow","visible_only_after_confirmation":true,"id":"Q3HgyCcq"},{"type":"arrow","x":0,"y":0,"color":"red","startPoint":{"x":6.305333333333333,"y":10.045333333333332},"endPoint":{"x":6.294,"y":9.161333333333332},"pointerAtBeginning":true,"visible_only_after_confirmation":true,"id":"Q9pUEe2j"},{"type":"text","x":5.138,"y":10.884,"color":"red","fontSize":14,"text":"92 cantimeters","visible_only_after_confirmation":true,"id":"23y0QTxE"}],"duration_ms":800}}]'::jsonb
 from q;
 
 -- ---------------------------------------------------------------------------
--- Puzzle 2: saque cómodo, rivales aún en zona de saque — reveal sin shot_type
+-- Puzzle (source padelchess #27): You're at the net and played a difficult shot for the opponent. What should you do?
 -- ---------------------------------------------------------------------------
 with q as (
   insert into public.learning_questions (type, level, area, has_video, video_url, content, created_by_club, is_active)
@@ -47,186 +37,26 @@ with q as (
 )
 insert into public.learning_puzzles (question_id, schema_version, statement, court_position, initial_frame, options)
 select
-  id, 1,
-  'Tu rival saca y la pelota viene cómoda. Estás en posición de resto. ¿A dónde devuelves?',
-  'both',
-  jsonb_build_object(
-    'players', jsonb_build_array(
-      jsonb_build_object('id', 1, 'team', 1, 'x', 7.5, 'y', 17.0),
-      jsonb_build_object('id', 2, 'team', 1, 'x', 2.5, 'y', 14.0),
-      jsonb_build_object('id', 3, 'team', 2, 'x', 7.0, 'y', 4.0),
-      jsonb_build_object('id', 4, 'team', 2, 'x', 2.5, 'y', 7.0)
-    ),
-    'ball', jsonb_build_object('x', 7.5, 'y', 14.5)
-  ),
-  jsonb_build_array(
-    jsonb_build_object(
-      'id', 1, 'text', 'Cruzada al fondo', 'explanation', 'Correcta: rompes la posición rival y ganas la red',
-      'points', 2,
-      'reveal_frame', jsonb_build_object(
-        'players', jsonb_build_array(
-          jsonb_build_object('id', 1, 'team', 1, 'x', 7.0, 'y', 13.0),
-          jsonb_build_object('id', 2, 'team', 1, 'x', 3.0, 'y', 12.0),
-          jsonb_build_object('id', 3, 'team', 2, 'x', 7.5, 'y', 4.0),
-          jsonb_build_object('id', 4, 'team', 2, 'x', 1.5, 'y', 6.0)
-        ),
-        'ball', jsonb_build_object('x', 1.5, 'y', 2.5),
-        'duration_ms', 1500
-      )
-    ),
-    jsonb_build_object('id', 2, 'text', 'Paralela', 'explanation', 'Riesgo alto: demasiado cerca de la línea', 'points', 0),
-    jsonb_build_object('id', 3, 'text', 'Cruzada corta', 'explanation', 'Aceptable pero deja al rival con bola', 'points', 1)
-  )
+  id, 2,
+  'You''re at the net and played a difficult shot for the opponent. What should you do?',
+  'left',
+  '{"players":[{"id":1,"team":1,"x":2.4932735426008965,"y":12.670403587443946,"is_user":true},{"id":2,"team":1,"x":7.192825112107624,"y":12.647982062780269,"is_user":false},{"id":3,"team":2,"x":2,"y":1.5,"is_user":false},{"id":4,"team":2,"x":8,"y":1.5,"is_user":false}],"ball":{"x":0.9641255605381166,"y":0.5269058295964125},"shapes":[{"type":"circle","x":3.304721030042918,"y":11.995708154506437,"radius":0.5,"dashed":true,"color":"yellow","id":"fsz9EZPm"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":3.1759656652360517,"y":11.356223175965665},"endPoint":{"y":1.1115879828326183,"x":1.0300429184549362},"id":"0j6FGnx6"},{"type":"circle","x":0.9704641350210971,"y":0.569620253164557,"radius":0.5,"dashed":true,"color":"yellow","id":"7FuBBBHY"}]}'::jsonb,
+  '[{"id":1,"text":"Step forward and try to finish the point after opponent''s return","is_correct":true,"explanation":"You''re in a good position to play a fast volley, pop out or a flat smash to win the point.","badge_position":{"x":0.946188340807175,"y":10.928251121076231},"select_frame":{"players":[{"id":1,"team":1,"x":2.493273542600897,"y":11.213004484304934,"is_user":true},{"id":2,"team":1,"x":6.228699551569507,"y":11.39237668161435,"is_user":false},{"id":3,"team":2,"x":2,"y":1.5,"is_user":false},{"id":4,"team":2,"x":8,"y":1.5,"is_user":false}],"ball":{"x":1.7713004484304933,"y":9.899103139013453,"spin":"random"},"shapes":[{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":2.381974248927039,"y":12.92274678111588},"endPoint":{"x":2.3390557939914167,"y":12.29184549356223},"id":"iooYyO95"},{"type":"circle","x":2.4678111587982836,"y":13.454935622317596,"radius":0.5,"dashed":true,"color":"yellow","id":"HwkgedtX"},{"type":"circle","x":0.759493670886076,"y":0.5274261603375527,"radius":0.5,"dashed":true,"color":"yellow","id":"fG0z13z8"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":0.7383966244725738,"y":1.1139240506329116},"endPoint":{"x":1.6666666666666667,"y":9.329113924050633},"id":"O8qs1Thy"},{"type":"circle","x":1.7721518987341773,"y":9.957805907172997,"radius":0.5,"dashed":true,"color":"yellow","id":"CR3VaKsT"}],"duration_ms":1100},"confirmation_frame":{"players":[{"id":1,"team":1,"x":2.493273542600897,"y":11.213004484304934,"is_user":true},{"id":2,"team":1,"x":6.228699551569507,"y":11.39237668161435,"is_user":false,"speech_label":"me gusta!"},{"id":3,"team":2,"x":2,"y":1.5,"is_user":false},{"id":4,"team":2,"x":8,"y":1.5,"is_user":false}],"ball":{"x":1.7713004484304933,"y":9.899103139013453,"spin":"random"},"shapes":[{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":2.381974248927039,"y":12.92274678111588},"endPoint":{"x":2.3390557939914167,"y":12.29184549356223},"id":"BPDeQhPD"},{"type":"circle","x":2.4678111587982836,"y":13.454935622317596,"radius":0.5,"dashed":true,"color":"yellow","id":"EhwAlfPJ"},{"type":"circle","x":0.759493670886076,"y":0.5274261603375527,"radius":0.5,"dashed":true,"color":"yellow","id":"h1xlePIN"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"x":0.7383966244725738,"y":1.1139240506329116},"endPoint":{"x":1.6666666666666667,"y":9.329113924050633},"id":"CJgreqGE"},{"type":"circle","x":1.7721518987341773,"y":9.957805907172997,"radius":0.5,"dashed":true,"color":"yellow","id":"kjZOvuT4"}],"duration_ms":1100}},{"id":2,"text":"Stay at the same position","is_correct":false,"explanation":"You''re missing an opportunity to finish the point on the next shot.","badge_position":{"x":0.9573991031390138,"y":13.013452914798206},"select_frame":{"players":[{"id":1,"team":1,"x":2.4932735426008965,"y":12.670403587443946,"is_user":true},{"id":2,"team":1,"x":7.192825112107624,"y":12.647982062780269,"is_user":false},{"id":3,"team":2,"x":2,"y":1.5,"is_user":false},{"id":4,"team":2,"x":8,"y":1.5,"is_user":false}],"ball":{"x":2.0627802690582957,"y":11.221973094170403,"spin":"random"},"shapes":[{"type":"circle","x":0.7805907172995781,"y":0.5907172995780591,"radius":0.5,"dashed":true,"color":"yellow","id":"iyNYati5"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":1.19831223628692,"x":0.8016877637130804},"endPoint":{"y":10.616033755274263,"x":1.9409282700421941},"id":"IWQYafFN"},{"type":"circle","x":2.067510548523207,"y":11.265822784810126,"radius":0.5,"dashed":true,"color":"yellow","id":"6FvP6xOK"}],"duration_ms":800},"confirmation_frame":{"players":[{"id":1,"team":1,"x":2.4932735426008965,"y":12.670403587443946,"is_user":true},{"id":2,"team":1,"x":7.192825112107624,"y":12.647982062780269,"is_user":false},{"id":3,"team":2,"x":2,"y":1.5,"is_user":false},{"id":4,"team":2,"x":8,"y":1.5,"is_user":false}],"ball":{"x":2.0627802690582957,"y":11.221973094170403,"spin":"random"},"shapes":[{"type":"circle","x":0.7805907172995781,"y":0.5907172995780591,"radius":0.5,"dashed":true,"color":"yellow","id":"grk15mFY"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":1.19831223628692,"x":0.8016877637130804},"endPoint":{"y":10.616033755274263,"x":1.9409282700421941},"id":"JV8aivvJ"},{"type":"circle","x":2.067510548523207,"y":11.265822784810126,"radius":0.5,"dashed":true,"color":"yellow","id":"34hFby0I"}],"duration_ms":800}}]'::jsonb
 from q;
 
 -- ---------------------------------------------------------------------------
--- Puzzle 3: pelota baja cerca de la red — reveal con shot_type=lob
+-- Puzzle (source padelchess #151): Where you should return the ball to reach the net with the least risk?
 -- ---------------------------------------------------------------------------
 with q as (
   insert into public.learning_questions (type, level, area, has_video, video_url, content, created_by_club, is_active)
-  values ('puzzle', 3, 'tactics', false, null, '{}'::jsonb, 'ec0bc05c-f21b-465b-82b0-6bd75d1f4163', true)
+  values ('puzzle', 2, 'tactics', false, null, '{}'::jsonb, 'ec0bc05c-f21b-465b-82b0-6bd75d1f4163', true)
   returning id
 )
 insert into public.learning_puzzles (question_id, schema_version, statement, court_position, initial_frame, options)
 select
-  id, 1,
-  'Estás cerca de la red, la pelota viene baja. Tus rivales están adelantados. ¿Qué jugada eliges?',
-  'both',
-  jsonb_build_object(
-    'players', jsonb_build_array(
-      jsonb_build_object('id', 1, 'team', 1, 'x', 4.0, 'y', 12.0),
-      jsonb_build_object('id', 2, 'team', 1, 'x', 8.0, 'y', 12.5),
-      jsonb_build_object('id', 3, 'team', 2, 'x', 3.0, 'y', 7.5),
-      jsonb_build_object('id', 4, 'team', 2, 'x', 7.5, 'y', 7.0)
-    ),
-    'ball', jsonb_build_object('x', 4.0, 'y', 11.0)
-  ),
-  jsonb_build_array(
-    jsonb_build_object(
-      'id', 1, 'text', 'Lob defensivo', 'explanation', 'Correcta: ganas tiempo y los echas hacia atrás',
-      'points', 2,
-      'reveal_frame', jsonb_build_object(
-        'players', jsonb_build_array(
-          jsonb_build_object('id', 1, 'team', 1, 'x', 4.0, 'y', 14.0),
-          jsonb_build_object('id', 2, 'team', 1, 'x', 8.0, 'y', 14.0),
-          jsonb_build_object('id', 3, 'team', 2, 'x', 3.0, 'y', 1.5),
-          jsonb_build_object('id', 4, 'team', 2, 'x', 7.5, 'y', 1.5)
-        ),
-        'ball', jsonb_build_object('x', 5.0, 'y', 1.5, 'shot_type', 'lob'),
-        'duration_ms', 2000
-      )
-    ),
-    jsonb_build_object('id', 2, 'text', 'Volea agresiva', 'explanation', 'Mal momento: la pelota está demasiado baja', 'points', 0),
-    jsonb_build_object('id', 3, 'text', 'Bandeja larga', 'explanation', 'Aceptable pero menos óptima que el lob', 'points', 1)
-  )
-from q;
-
--- ---------------------------------------------------------------------------
--- Puzzle 4: chiquita rival peligrosa — reveal con chiquita + spin
--- ---------------------------------------------------------------------------
-with q as (
-  insert into public.learning_questions (type, level, area, has_video, video_url, content, created_by_club, is_active)
-  values ('puzzle', 3, 'tactics', false, null, '{}'::jsonb, 'ec0bc05c-f21b-465b-82b0-6bd75d1f4163', true)
-  returning id
-)
-insert into public.learning_puzzles (question_id, schema_version, statement, court_position, initial_frame, options)
-select
-  id, 1,
-  'El rival ha jugado una chiquita corta. Estás llegando con dificultad. ¿Cómo respondes?',
-  'both',
-  jsonb_build_object(
-    'players', jsonb_build_array(
-      jsonb_build_object('id', 1, 'team', 1, 'x', 5.5, 'y', 11.5),
-      jsonb_build_object('id', 2, 'team', 1, 'x', 8.5, 'y', 16.0),
-      jsonb_build_object('id', 3, 'team', 2, 'x', 2.5, 'y', 6.5),
-      jsonb_build_object('id', 4, 'team', 2, 'x', 7.0, 'y', 7.0)
-    ),
-    'ball', jsonb_build_object('x', 5.5, 'y', 10.5)
-  ),
-  jsonb_build_array(
-    jsonb_build_object(
-      'id', 1, 'text', 'Contra-chiquita', 'explanation', 'Correcta: les obligas a salir adelante a destiempo',
-      'points', 2,
-      'reveal_frame', jsonb_build_object(
-        'players', jsonb_build_array(
-          jsonb_build_object('id', 1, 'team', 1, 'x', 5.0, 'y', 10.5),
-          jsonb_build_object('id', 2, 'team', 1, 'x', 8.5, 'y', 16.0),
-          jsonb_build_object('id', 3, 'team', 2, 'x', 4.0, 'y', 6.5),
-          jsonb_build_object('id', 4, 'team', 2, 'x', 7.0, 'y', 7.0)
-        ),
-        'ball', jsonb_build_object('x', 4.0, 'y', 8.5, 'shot_type', 'chiquita', 'spin', 'clockwise'),
-        'duration_ms', 1500
-      )
-    ),
-    jsonb_build_object('id', 2, 'text', 'Globo', 'explanation', 'Demasiado lento: te cuelan otra chiquita', 'points', 1),
-    jsonb_build_object('id', 3, 'text', 'Volea fuerte', 'explanation', 'No llegas con tiempo a esa pelota', 'points', 0)
-  )
-from q;
-
--- ---------------------------------------------------------------------------
--- Puzzle 5: resto con dos rivales en la red — reveal en las 3 opciones
--- ---------------------------------------------------------------------------
-with q as (
-  insert into public.learning_questions (type, level, area, has_video, video_url, content, created_by_club, is_active)
-  values ('puzzle', 4, 'tactics', false, null, '{}'::jsonb, 'ec0bc05c-f21b-465b-82b0-6bd75d1f4163', true)
-  returning id
-)
-insert into public.learning_puzzles (question_id, schema_version, statement, court_position, initial_frame, options)
-select
-  id, 1,
-  'Restas y los dos rivales ya están subidos a la red. ¿Cuál es la mejor opción?',
-  'both',
-  jsonb_build_object(
-    'players', jsonb_build_array(
-      jsonb_build_object('id', 1, 'team', 1, 'x', 2.0, 'y', 19.0),
-      jsonb_build_object('id', 2, 'team', 1, 'x', 8.0, 'y', 14.5),
-      jsonb_build_object('id', 3, 'team', 2, 'x', 3.0, 'y', 4.0),
-      jsonb_build_object('id', 4, 'team', 2, 'x', 7.0, 'y', 4.0)
-    ),
-    'ball', jsonb_build_object('x', 2.0, 'y', 17.0)
-  ),
-  jsonb_build_array(
-    jsonb_build_object(
-      'id', 1, 'text', 'Resto cruzado', 'explanation', 'Correcta: máxima distancia y los obligas a moverse',
-      'points', 2,
-      'reveal_frame', jsonb_build_object(
-        'players', jsonb_build_array(
-          jsonb_build_object('id', 1, 'team', 1, 'x', 2.0, 'y', 17.0),
-          jsonb_build_object('id', 2, 'team', 1, 'x', 8.0, 'y', 14.5),
-          jsonb_build_object('id', 3, 'team', 2, 'x', 4.5, 'y', 4.0),
-          jsonb_build_object('id', 4, 'team', 2, 'x', 7.0, 'y', 4.0)
-        ),
-        'ball', jsonb_build_object('x', 8.5, 'y', 4.5),
-        'duration_ms', 1500
-      )
-    ),
-    jsonb_build_object(
-      'id', 2, 'text', 'Globo de resto', 'explanation', 'Te juegan la siguiente cómoda',
-      'points', 1,
-      'reveal_frame', jsonb_build_object(
-        'players', jsonb_build_array(
-          jsonb_build_object('id', 1, 'team', 1, 'x', 2.0, 'y', 17.0),
-          jsonb_build_object('id', 2, 'team', 1, 'x', 8.0, 'y', 16.0),
-          jsonb_build_object('id', 3, 'team', 2, 'x', 3.0, 'y', 1.5),
-          jsonb_build_object('id', 4, 'team', 2, 'x', 7.0, 'y', 1.5)
-        ),
-        'ball', jsonb_build_object('x', 5.0, 'y', 1.5, 'shot_type', 'lob'),
-        'duration_ms', 2000
-      )
-    ),
-    jsonb_build_object(
-      'id', 3, 'text', 'Chiquita', 'explanation', 'Mal: les regalas la red en zona ya cómoda',
-      'points', 0,
-      'reveal_frame', jsonb_build_object(
-        'players', jsonb_build_array(
-          jsonb_build_object('id', 1, 'team', 1, 'x', 2.0, 'y', 17.0),
-          jsonb_build_object('id', 2, 'team', 1, 'x', 8.0, 'y', 14.5),
-          jsonb_build_object('id', 3, 'team', 2, 'x', 3.0, 'y', 5.0),
-          jsonb_build_object('id', 4, 'team', 2, 'x', 7.0, 'y', 5.0)
-        ),
-        'ball', jsonb_build_object('x', 5.0, 'y', 9.0, 'shot_type', 'chiquita'),
-        'duration_ms', 1500
-      )
-    )
-  )
+  id, 2,
+  'Where you should return the ball to reach the net with the least risk?',
+  'right',
+  '{"players":[{"id":1,"team":1,"x":7.215767634854772,"y":18.29253112033195,"is_user":true}],"ball":{"x":6.244813278008299,"y":17.479253112033195},"shapes":[]}'::jsonb,
+  '[{"id":1,"text":"To the right","is_correct":false,"explanation":"Net height is highest at the edges: 92 cm","badge_position":{"x":1,"y":6},"select_frame":{"players":[{"id":1,"team":1,"x":6.572614107883817,"y":18.271784232365146,"is_user":true}],"ball":{"x":1,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":6.288131905256799,"y":17.445008460236885,"radius":0.5,"dashed":true,"color":"yellow","id":"RS7iOm8m"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":16.94077834179357,"x":5.983048032959136},"endPoint":{"y":7.526226734348562,"x":1.2372989083288242},"id":"Y5oFUAeO"}],"duration_ms":800},"confirmation_frame":{"players":[{"id":1,"team":1,"x":6.572614107883817,"y":18.271784232365146,"is_user":true}],"ball":{"x":1,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":6.288131905256799,"y":17.445008460236885,"radius":0.5,"dashed":true,"color":"yellow","id":"NIVIRSJ1"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":16.94077834179357,"x":5.983048032959136},"endPoint":{"y":7.526226734348562,"x":1.2372989083288242},"id":"5RTMpDWA"}],"duration_ms":800}},{"id":2,"text":"To the center","is_correct":true,"explanation":"Net height is lowest at the center: 88 cm","badge_position":{"x":5,"y":6},"select_frame":{"players":[{"id":1,"team":1,"x":6.723628100622407,"y":18.312904732365144,"is_user":true}],"ball":{"x":5,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":6.152539073124505,"y":17.54653130287648,"radius":0.5,"dashed":true,"color":"yellow","id":"Mjmhxf27"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":16.703891708967852,"x":5.983048032959135},"endPoint":{"y":7.593908629441624,"x":5.067796416066147},"id":"smzL3v0X"}],"duration_ms":1000},"confirmation_frame":{"players":[{"id":1,"team":1,"x":6.723628100622407,"y":18.312904732365144,"is_user":true}],"ball":{"x":5,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":6.152539073124505,"y":17.54653130287648,"radius":0.5,"dashed":true,"color":"yellow","id":"odEaYiC0"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":16.703891708967852,"x":5.983048032959135},"endPoint":{"y":7.593908629441624,"x":5.067796416066147},"id":"VlJBhuVz"}],"duration_ms":1000}},{"id":3,"text":"To the left","is_correct":false,"explanation":"Net height is highest at the edges: 92 cm","badge_position":{"x":9,"y":6},"select_frame":{"players":[{"id":1,"team":1,"x":7.796680497925311,"y":18.313278008298756,"is_user":true}],"ball":{"x":9,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":6.355928321322946,"y":17.478849407783418,"radius":0.5,"dashed":true,"color":"yellow","id":"2Z4QvYNP"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":16.67005076142132,"x":6.3559283213229465},"endPoint":{"y":7.458544839255498,"x":8.830497507737324},"id":"3EeephsF"}],"duration_ms":1000},"confirmation_frame":{"players":[{"id":1,"team":1,"x":7.796680497925311,"y":18.313278008298756,"is_user":true}],"ball":{"x":9,"y":7,"spin":"random"},"shapes":[{"type":"circle","x":6.355928321322946,"y":17.478849407783418,"radius":0.5,"dashed":true,"color":"yellow","id":"EN7NU2FB"},{"type":"arrow","x":0,"y":0,"dashed":true,"color":"yellow","startPoint":{"y":16.67005076142132,"x":6.3559283213229465},"endPoint":{"y":7.458544839255498,"x":8.830497507737324},"id":"7JdQ2B4E"}],"duration_ms":1000}}]'::jsonb
 from q;

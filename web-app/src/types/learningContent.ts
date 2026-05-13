@@ -23,6 +23,7 @@ export interface PuzzlePlayer {
   team: 1 | 2;
   x: number;
   y: number;
+  is_user?: boolean;
   facing?: PuzzlePlayerFacing;
   speech_label?: string;
 }
@@ -34,12 +35,19 @@ export interface PuzzleBall {
   spin?: PuzzleSpin;
 }
 
+interface PuzzleShapeBase {
+  id: string;
+  color?: string;
+  visible_only_after_confirmation?: boolean;
+}
+
 export type PuzzleShape =
-  | { id: number; type: 'arrow'; color?: string; start: { x: number; y: number }; end: { x: number; y: number }; control?: { x: number; y: number }; pointer_at_start?: boolean; pointer_at_end?: boolean; tag_text?: string }
-  | { id: number; type: 'circle'; color?: string; cx: number; cy: number; r: number; dashed?: boolean }
-  | { id: number; type: 'rect'; color?: string; x: number; y: number; w: number; h: number }
-  | { id: number; type: 'triangle'; color?: string; points: number[] }
-  | { id: number; type: 'text_tag'; color?: string; text: string; x: number; y: number; font_size?: number };
+  | (PuzzleShapeBase & { type: 'circle'; x: number; y: number; radius: number; dashed?: boolean })
+  | (PuzzleShapeBase & { type: 'arrow'; startPoint: { x: number; y: number }; endPoint: { x: number; y: number }; controlPoint?: { x: number; y: number }; dashed?: boolean; pointerAtBeginning?: boolean; tagText?: string; tagPosition?: number })
+  | (PuzzleShapeBase & { type: 'rect'; x: number; y: number; width: number; height: number; fillColor?: string; fillOpacity?: number })
+  | (PuzzleShapeBase & { type: 'line'; points: number[]; strokeWidth?: number })
+  | (PuzzleShapeBase & { type: 'text'; x: number; y: number; text: string; fontSize?: number })
+  | (PuzzleShapeBase & { type: 'triangle'; points: number[]; fillColor?: string; fillOpacity?: number });
 
 export interface PuzzleFrame {
   players: PuzzlePlayer[];
@@ -52,16 +60,16 @@ export interface PuzzleOption {
   id: 1 | 2 | 3;
   text: string;
   explanation: string;
-  points: 0 | 1 | 2;
+  is_correct: boolean;
   badge_position?: { x: number; y: number };
-  reveal_frame?: PuzzleFrame;
+  select_frame?: PuzzleFrame;
+  confirmation_frame?: PuzzleFrame;
 }
 
 export interface PuzzleContent {
-  schema_version?: 1;
+  schema_version?: 2;
   statement: string;
   court_position?: PuzzleCourtPosition;
-  general_explanation?: string;
   initial_frame: PuzzleFrame;
   options: PuzzleOption[];
 }
@@ -118,7 +126,6 @@ export interface Question {
     schema_version: number;
     statement: string;
     court_position: PuzzleCourtPosition;
-    general_explanation: string | null;
     initial_frame: PuzzleFrame;
     options: PuzzleOption[];
     thumbnail_url: string | null;
