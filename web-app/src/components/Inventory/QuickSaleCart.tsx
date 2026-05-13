@@ -304,14 +304,20 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
         }
     };
 
-    const topActions = [
+    type TopBarAction = {
+        label: string;
+        onClick: () => void;
+        tone: 'blue' | 'red';
+        disabled?: boolean;
+    };
+    const topActions: TopBarAction[] = [
         { label: 'Productos', onClick: () => setShowProductCatalog((value) => !value), tone: 'blue' },
         { label: 'Editar venta', onClick: () => setEditMode((value) => !value), tone: 'blue' },
         { label: 'Anular venta', onClick: () => setCartLines([]), tone: 'red' },
         { label: 'Añadir reservado', onClick: () => toast.info('Reservado añadido al ticket'), tone: 'blue' },
         { label: 'Buscar producto', onClick: () => searchInputRef.current?.focus(), tone: 'blue' },
         { label: 'Cargar ticket', onClick: submitSale, tone: 'blue', disabled: !canSubmitSale },
-    ] as const;
+    ];
     const categoryFilters = [
         { id: 'todos', label: 'Todos' },
         ...categories.map((category) => ({ id: category.id, label: category.name })),
@@ -338,7 +344,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                             key={action.label}
                             type="button"
                             onClick={action.onClick}
-                            disabled={action.disabled}
+                            disabled={action.disabled === true}
                             className={`${action.tone === 'red' ? 'bg-[#E31E24]' : 'bg-[#0B5B7A]'} rounded-xl px-3 py-3 text-xs font-black text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50`}
                         >
                             {action.label}
