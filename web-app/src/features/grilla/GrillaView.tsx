@@ -41,7 +41,18 @@ import { GrillaLegend } from './components/GrillaLegend';
 import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
 import { HoverTooltip } from './components/HoverTooltip';
-import { pixelsToTime, timeToPixels, parseTimeStr, START_HOUR, END_HOUR, PIXELS_PER_MINUTE } from './utils/timeGrid';
+import {
+  pixelsToTime,
+  timeToPixels,
+  parseTimeStr,
+  START_HOUR,
+  END_HOUR,
+  PIXELS_PER_MINUTE,
+  computeCompactPxPerMinute,
+  computeMobileCourtLayout,
+  estimateMobileGridViewportHeight,
+  GRILLA_COMPACT_LAYOUT_MAX_PX,
+} from './utils/timeGrid';
 import { courtVisibleInGridForDate } from './courtVisibility';
 import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
@@ -94,6 +105,7 @@ const useClubData = (dateOrStr: Date | string) => {
     const [courts, setCourts] = useState<Court[]>([]);
     const [reservations, setReservations] = useState<Reservation[]>([]);
     const [loading, setLoading] = useState(true);
+    const [authResolved, setAuthResolved] = useState(false);
     const [isCreatingCourt, setIsCreatingCourt] = useState(false);
     const [clubId, setClubId] = useState<string | null>(null);
     const [typeColorOverrides, setTypeColorOverrides] = useState<Record<string, string>>({});
@@ -124,7 +136,8 @@ const useClubData = (dateOrStr: Date | string) => {
                     }
                 }
             })
-            .catch(() => setClubId(null));
+            .catch(() => setClubId(null))
+            .finally(() => setAuthResolved(true));
     }, []);
 
     // Fetch courts once per club (they rarely change)
@@ -255,8 +268,12 @@ const useClubData = (dateOrStr: Date | string) => {
     }, [clubId]);
 
     const fetchData = useCallback(async () => {
-        if (!clubId) { setLoading(false); return; }
-        // Mostrar spinner solo en la primera carga (antes de tener canchas)
+        if (!authResolved) return;
+        if (!clubId) {
+            setLoading(false);
+            return;
+        }
+        // Spinner en la primera carga (antes de tener canchas)
         const isFirstLoad = courtsRef.current.length === 0;
         if (isFirstLoad) setLoading(true);
 
@@ -277,7 +294,7 @@ const useClubData = (dateOrStr: Date | string) => {
         } finally {
             setLoading(false);
         }
-    }, [clubId, dateStr, fetchCourts, fetchBookingsForDate, prefetchWindow]);
+    }, [authResolved, clubId, dateStr, fetchCourts, fetchBookingsForDate, prefetchWindow]);
 
     // Force-refresh: invalidate cache for current date and re-fetch
     const refresh = useCallback(async () => {
@@ -489,7 +506,7 @@ const useClubData = (dateOrStr: Date | string) => {
         }
     }, []);
 
-    return { courts, reservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides };
+    return { courts, reservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides };
 };
 
 function linkedTournamentDisplayName(b: any): string | null {
@@ -743,7 +760,7 @@ function GrillaViewInner() {
     return 'future';
   }, [today, selectedDate]);
 
-  const { courts, reservations: serverReservations, loading, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
   const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(clubId);
 
   const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
@@ -839,24 +856,40 @@ function GrillaViewInner() {
 
   // Ref to control the zoom-pan-pinch library programmatically
   const transformComponentRef = useRef<ReactZoomPanPinchRef | null>(null);
+  const mobileGridViewportRef = useRef<HTMLDivElement | null>(null);
   const activeMobileScaleRef = useRef<number>(1);
   const tournamentDropRequestSeqRef = useRef<Record<string, number>>({});
 
-  // Auto-detect mobile devices for the compact full view grid (<= 768px)
   const [isMobileDevice, setIsMobileDevice] = useState<boolean>(window.innerWidth <= 768);
-  const mobileFullView = isMobileDevice && !focusedCourtId;
+  const [useCompactGridLayout, setUseCompactGridLayout] = useState<boolean>(
+    () => window.innerWidth <= GRILLA_COMPACT_LAYOUT_MAX_PX
+  );
+  const mobileFullView = useCompactGridLayout && !focusedCourtId;
 
-  // Dynamic pixels-per-minute for mobile full view — fits the grid into the viewport height
-  const [compactPxPerMinute, setCompactPxPerMinute] = useState<number>(0.5);
+  const [compactPxPerMinute, setCompactPxPerMinute] = useState<number>(() =>
+    computeCompactPxPerMinute(estimateMobileGridViewportHeight())
+  );
+  const [gridViewportWidth, setGridViewportWidth] = useState(0);
+
+  const measureMobileGridViewport = useCallback(() => {
+    const el = mobileGridViewportRef.current;
+    const height = el?.clientHeight && el.clientHeight > 0
+      ? el.clientHeight
+      : estimateMobileGridViewportHeight();
+    const width = el?.clientWidth && el.clientWidth > 0
+      ? el.clientWidth
+      : Math.min(window.innerWidth, GRILLA_COMPACT_LAYOUT_MAX_PX);
+    setGridViewportWidth(width);
+    setCompactPxPerMinute(computeCompactPxPerMinute(height));
+  }, []);
 
   useEffect(() => {
-    const computeCompactPpm = () => {
-      setCompactPxPerMinute(0.30);
-    };
-
     const onResize = () => {
-      computeCompactPpm();
       setIsMobileDevice(window.innerWidth <= 768);
+      setUseCompactGridLayout(window.innerWidth <= GRILLA_COMPACT_LAYOUT_MAX_PX);
+      if (window.innerWidth <= GRILLA_COMPACT_LAYOUT_MAX_PX && !focusedCourtId) {
+        measureMobileGridViewport();
+      }
     };
 
     let orientationTimer: ReturnType<typeof setTimeout> | null = null;
@@ -864,12 +897,10 @@ function GrillaViewInner() {
       if (orientationTimer) clearTimeout(orientationTimer);
       orientationTimer = setTimeout(() => {
         orientationTimer = null;
-        computeCompactPpm();
-        setIsMobileDevice(window.innerWidth <= 768);
-      }, 100);
+        onResize();
+      }, 150);
     };
 
-    computeCompactPpm();
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', onOrientationChange);
 
@@ -878,7 +909,20 @@ function GrillaViewInner() {
       window.removeEventListener('resize', onResize);
       window.removeEventListener('orientationchange', onOrientationChange);
     };
-  }, []);
+  }, [focusedCourtId, measureMobileGridViewport]);
+
+  useEffect(() => {
+    if (!mobileFullView) return;
+
+    measureMobileGridViewport();
+
+    const el = mobileGridViewportRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+
+    const ro = new ResizeObserver(() => measureMobileGridViewport());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [mobileFullView, measureMobileGridViewport, gridCourts.length]);
 
   // Day chip key-to-translation map
   const dayChipKeys = ['yesterday', 'today', 'tomorrow', 'dayAfterTomorrow'] as const;
@@ -1392,11 +1436,11 @@ function GrillaViewInner() {
 
     // delta.y is in screen pixels, but the grid is scaled by CSS zoom,
     // so we need to convert screen delta to grid-space delta
-    const currentScale = activeMobileScaleRef.current;
-    const effectiveZoom = mobileFullView ? 0.28 * currentScale : scale;
-    const currentPixels = timeToPixels(activeReservation.startTime);
-    const newPixels = currentPixels + (delta.y / effectiveZoom);
-    const newStartTime = pixelsToTime(newPixels);
+    const panScale = mobileFullView ? activeMobileScaleRef.current : scale;
+    const ppm = mobileFullView ? compactPxPerMinute : PIXELS_PER_MINUTE;
+    const currentPixels = timeToPixels(activeReservation.startTime, ppm);
+    const newPixels = currentPixels + delta.y / panScale;
+    const newStartTime = pixelsToTime(newPixels, ppm);
     const startMins = parseTimeStr(newStartTime);
 
     if (isValidDrop(over.id as string, startMins, activeReservation.durationMinutes, activeReservation.id)) {
@@ -1457,12 +1501,11 @@ function GrillaViewInner() {
 
     const newCourtId = over.id as string;
 
-    // Convert screen delta to grid-space delta (accounting for actual CSS zoom and Mobile Canvas Zoom)
-    const currentScale = activeMobileScaleRef.current;
-    const effectiveZoom = mobileFullView ? 0.28 * currentScale : scale;
-    const currentPixels = timeToPixels(reservation.startTime);
-    const newPixels = currentPixels + (delta.y / effectiveZoom);
-    const newStartTime = pixelsToTime(newPixels);
+    const panScale = mobileFullView ? activeMobileScaleRef.current : scale;
+    const ppm = mobileFullView ? compactPxPerMinute : PIXELS_PER_MINUTE;
+    const currentPixels = timeToPixels(reservation.startTime, ppm);
+    const newPixels = currentPixels + delta.y / panScale;
+    const newStartTime = pixelsToTime(newPixels, ppm);
 
     let newStatus = reservation.status;
     const isHiddenCourt = (cId: string) => courts.find(c => c.id === cId)?.is_hidden === true;
@@ -1688,11 +1731,15 @@ function GrillaViewInner() {
     setGapWarnings([]);
   };
 
+  const activeGridPpm = mobileFullView ? compactPxPerMinute : PIXELS_PER_MINUTE;
+  const compactHeaderPx = 24;
+
   // Compute the native (unscaled) grid height so we can set the scroll container size
   const nativeGridHeight = useMemo(() => {
     const totalMinutes = (END_HOUR - START_HOUR) * 60;
-    return totalMinutes * PIXELS_PER_MINUTE + 28; // +28 header (h-7), no extra margin
-  }, []);
+    const headerPx = mobileFullView ? compactHeaderPx : 28;
+    return totalMinutes * activeGridPpm + headerPx;
+  }, [mobileFullView, activeGridPpm]);
 
 
 
@@ -1725,6 +1772,16 @@ function GrillaViewInner() {
 
     return gridCourts.slice(startIndex, startIndex + 3);
   }, [focusedCourtId, gridCourts]);
+
+  const mobileCourtLayout = useMemo(() => {
+    if (!mobileFullView || visibleCourts.length === 0) return null;
+    const vw = gridViewportWidth || mobileGridViewportRef.current?.clientWidth || window.innerWidth;
+    return computeMobileCourtLayout(vw, visibleCourts.length);
+  }, [mobileFullView, visibleCourts.length, gridViewportWidth]);
+
+  const mobileCourtColWidthPx = mobileCourtLayout?.columnWidthPx;
+  const mobileCanvasWidthPx = mobileCourtLayout?.canvasWidthPx;
+  const mobileGridOverflows = mobileCourtLayout?.overflowsHorizontally ?? false;
 
   const isFirstCourt = focusedCourtId === gridCourts[0]?.id;
   const isLastCourt = focusedCourtId === gridCourts[gridCourts.length - 1]?.id;
@@ -1770,7 +1827,7 @@ function GrillaViewInner() {
     navigate('/login', { replace: true });
   };
 
-  if (loading) return <PageSpinner />;
+  if (loading || !authResolved) return <PageSpinner />;
 
   return (
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
@@ -1943,15 +2000,22 @@ function GrillaViewInner() {
             onDragEnd={handleDragEnd}
             modifiers={[restrictToWindowEdges]}
           >
-            <div className="flex-1 bg-white overflow-hidden flex flex-col relative min-h-0 min-w-0">
+            <div className="flex-1 bg-white overflow-hidden flex flex-col relative min-h-0 min-w-0 grilla-flex-shrink">
 
 
               {/* Scrollable area */}
-              <div className={clsx("flex-1 overflow-auto relative min-h-0 min-w-0", activeId && "dragging-active")}>
+              <div className={clsx(
+                "flex-1 flex flex-col min-h-0 min-w-0",
+                !mobileFullView && "overflow-auto",
+                activeId && "dragging-active"
+              )}>
 
                 {/* ── Integrated Toolbar – scrolls with grid ── */}
                 {(
-                  <div className="bg-[#f8f8f8] border-b border-gray-200 px-4 md:px-8 py-2 mb-1">
+                  <div className={clsx(
+                    "bg-[#f8f8f8] border-b border-gray-200 px-4 md:px-8 py-2 mb-1",
+                    mobileFullView && "flex-shrink-0"
+                  )}>
                     {/* Heading row with mobile hamburger */}
                     <div className="flex items-center gap-2 mb-1.5">
                       {isMobileDevice && (
@@ -2085,7 +2149,10 @@ function GrillaViewInner() {
 
               {/* ── Tab bar: Padel / PISTA OCULTA ── */}
               {courts.length > 0 && (
-                <div className="bg-white border-b border-gray-200 px-4 md:px-8 flex items-end gap-0 flex-shrink-0">
+                <div className={clsx(
+                  "bg-white border-b border-gray-200 px-4 md:px-8 flex items-end gap-0 flex-shrink-0",
+                  mobileFullView && "flex-shrink-0"
+                )}>
                   <button
                     ref={tabCourtsRef}
                     onClick={() => setGrillaTab('courts')}
@@ -2223,7 +2290,7 @@ function GrillaViewInner() {
               )}
 
                 {mobileFullView ? (
-                  <>
+                  <div ref={mobileGridViewportRef} className="grilla-mobile-viewport flex-1 min-h-0">
                   <TransformWrapper
                     ref={transformComponentRef}
                     initialScale={1}
@@ -2232,10 +2299,11 @@ function GrillaViewInner() {
                     centerOnInit={false}
                     wheel={{ wheelDisabled: true }}
                     doubleClick={{ disabled: true }}
-                    panning={{ disabled: activeId !== null }}
+                    panning={{ disabled: activeId !== null, velocityDisabled: false }}
                     pinch={{ disabled: activeId !== null }}
-                    limitToBounds={false}
                     alignmentAnimation={{ disabled: true }}
+                    disablePadding
+                    limitToBounds={false}
                     onTransformed={(_ref, state) => {
                       activeMobileScaleRef.current = state.scale;
                     }}
@@ -2243,26 +2311,43 @@ function GrillaViewInner() {
                     <ZoomScrollbars />
                     <TransformComponent
                       wrapperStyle={{ width: '100%', height: '100%' }}
-                      contentStyle={{ width: '100%', height: '100%' }}
+                      contentStyle={{
+                        width: mobileCanvasWidthPx ?? '100%',
+                        height: `${nativeGridHeight}px`,
+                        flexShrink: 0,
+                      }}
                     >
-                      {/* Render the same desktop grid, scaled to fit mobile */}
                       <div
-                        style={{ height: `${nativeGridHeight}px`, zoom: 0.28 }}
+                        style={{
+                          height: `${nativeGridHeight}px`,
+                          ...(mobileCanvasWidthPx ? { width: mobileCanvasWidthPx } : {}),
+                        }}
                         className={clsx(
-                          "flex relative pl-2 overflow-hidden",
-                          focusedCourtId && !activeId && "touch-pan-y"
+                          'grilla-mobile-canvas grilla-flex-shrink flex relative pl-1',
+                          mobileGridOverflows && 'grilla-mobile-canvas--scroll',
                         )}
-                        onTouchStart={focusedCourtId && !activeId ? onTouchStart : undefined}
-                        onTouchMove={focusedCourtId && !activeId ? onTouchMove : undefined}
-                        onTouchEnd={focusedCourtId && !activeId ? onTouchEnd : undefined}
                       >
-                        <TimeAxis position="left" isCompact={false} />
+                        <TimeAxis
+                          position="left"
+                          isCompact
+                          compactPxPerMinute={compactPxPerMinute}
+                        />
 
-                        <div className="flex relative z-10 mb-0 overflow-hidden">
-                          <GridBackground />
+                        <div
+                          className={clsx(
+                            'grilla-mobile-courts-row relative z-10 mb-0',
+                            mobileGridOverflows && 'grilla-mobile-courts-row--scroll',
+                          )}
+                          style={
+                            mobileGridOverflows && mobileCourtColWidthPx
+                              ? { width: visibleCourts.length * mobileCourtColWidthPx }
+                              : undefined
+                          }
+                        >
+                          <GridBackground compactPxPerMinute={compactPxPerMinute} />
                           {/* Current time red line — only shown when viewing today */}
                           {activeChip === 'today' && nowMinutes >= START_HOUR * 60 && nowMinutes <= END_HOUR * 60 && (() => {
-                            const topPx = 22 + (nowMinutes - START_HOUR * 60) * PIXELS_PER_MINUTE;
+                            const topPx = compactHeaderPx + (nowMinutes - START_HOUR * 60) * compactPxPerMinute;
                             return (
                               <div
                                 className="absolute left-0 right-0 z-30 pointer-events-none"
@@ -2271,7 +2356,7 @@ function GrillaViewInner() {
                                 {/* Past overlay */}
                                 <div
                                   className="absolute left-0 right-0 bg-red-500/5 pointer-events-none"
-                                  style={{ bottom: 0, top: -(topPx - 22) }}
+                                  style={{ bottom: 0, top: -(topPx - compactHeaderPx) }}
                                 />
                                 {/* Red line */}
                                 <div className="w-full h-[2px] bg-red-500 relative">
@@ -2283,7 +2368,7 @@ function GrillaViewInner() {
                           })()}
                           {visibleCourts.map(court => (
                             <CourtColumn
-                              key={`col-${court.id}-${focusedCourtId}`}
+                              key={`col-${court.id}`}
                               court={court}
                               reservations={reservations.filter(r => r.courtId === court.id)}
                               gridDayKind={gridDayKind}
@@ -2306,20 +2391,24 @@ function GrillaViewInner() {
                               }}
                               onHeaderHover={setHoveredCourtId}
                               isMaintenanceBlocked={isNonWorkingDay || reservations.some(r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO')}
-                              isFocusedMode={focusedCourtId !== null}
-                              isCurrentlyFocused={court.id === focusedCourtId}
-                              isCompactView={false}
+                              isCompactView
+                              compactPxPerMinute={compactPxPerMinute}
+                              mobileColumnWidthPx={mobileCourtColWidthPx}
                               totalCourts={gridCourts.length}
                               typeColorOverrides={typeColorOverrides}
                             />
                           ))}
                         </div>
 
-                        <TimeAxis position="right" isCompact={false} />
+                        <TimeAxis
+                          position="right"
+                          isCompact
+                          compactPxPerMinute={compactPxPerMinute}
+                        />
                       </div>
                     </TransformComponent>
                   </TransformWrapper>
-                  </>
+                  </div>
                 ) : (
                   <div
                     style={{
