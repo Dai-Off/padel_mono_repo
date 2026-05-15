@@ -84,6 +84,13 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
         options={content.options}
         selectedOptionId={selected?.id ?? null}
         onSelectOption={handleSelect}
+        transitionKey={
+          confirmed && selected
+            ? `confirm-${selected.id}`
+            : selected
+              ? `select-${selected.id}`
+              : 'init'
+        }
       />
 
       {/* Texto del bocadillo: cambia según la fase */}

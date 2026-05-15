@@ -13,13 +13,34 @@
 // La letra se renderiza como <Text> de RN (no <SvgText>) porque el centrado de
 // texto SVG en react-native-svg es inconsistente entre iOS/Android.
 
-import { useEffect, useRef } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { G as SvgG, Path } from 'react-native-svg';
 import { OUTER_H, OUTER_W, courtConfig } from './lib/courtConfig';
 import type { PuzzleOption } from '../../../types/puzzle';
 
-const AnimatedG = Animated.createAnimatedComponent(SvgG);
+// Tween simple sin Animated.Value: useState + requestAnimationFrame.
+// Evitamos pasar AnimatedNodes a react-native-svg, que en Android puede crashear
+// (java.lang.String cannot be cast to com.facebook.react.bridge.ReadableArray).
+function useTween(target: number, durationMs: number) {
+  const [value, setValue] = useState(target);
+  useEffect(() => {
+    let raf = 0;
+    const start = Date.now();
+    const from = value;
+    if (from === target) return;
+    const tick = () => {
+      const t = Math.min(1, (Date.now() - start) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setValue(from + (target - from) * eased);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, durationMs]);
+  return value;
+}
 
 type Props = {
   options: PuzzleOption[];
@@ -106,25 +127,20 @@ function BadgeSvg({
 
   const targetOpacity =
     anyActive && state === 'default' && !showCorrectReveal ? 0.4 : 1;
-  const opacity = useRef(new Animated.Value(targetOpacity)).current;
-
-  useEffect(() => {
-    Animated.timing(opacity, {
-      toValue: targetOpacity,
-      duration: 400,
-      useNativeDriver: false,
-    }).start();
-  }, [targetOpacity, opacity]);
+  const opacity = useTween(targetOpacity, 400);
 
   const pos = option.badge_position ?? defaultBadgePos(option.id);
   const cx = pos.x + courtConfig.outerMargin;
   const cy = pos.y + courtConfig.outerMargin;
   const d = buildSquirclePath(cx, cy);
+  // Path desplazado para la sombra (evitamos transform=string, que crashea en
+  // Android cuando se combina con bridge nativo).
+  const shadowD = buildSquirclePath(cx + 0.06, cy + 0.1);
 
   return (
-    <AnimatedG opacity={opacity}>
+    <SvgG opacity={opacity}>
       {fillOpacity === 1 && (
-        <Path d={d} fill="rgba(0,0,0,0.25)" transform="translate(0.06 0.1)" />
+        <Path d={shadowD} fill="rgba(0,0,0,0.25)" />
       )}
       <Path
         d={d}
@@ -133,7 +149,7 @@ function BadgeSvg({
         stroke={stroke}
         strokeWidth={0.06}
       />
-    </AnimatedG>
+    </SvgG>
   );
 }
 

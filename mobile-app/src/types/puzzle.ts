@@ -24,8 +24,21 @@ export interface PuzzleBall {
   spin?: PuzzleSpin;
 }
 
+// Preset visual de la shape. Define color/animación/borde/etc., sustituye al uso libre
+// de color/dashed/fillColor cuando está presente.
+export type ShapePreset =
+  | 'trajectory'
+  | 'movement'
+  | 'highlight'
+  | 'good_zone'
+  | 'bad_zone'
+  | 'neutral_zone'
+  | 'measure'
+  | 'tactical';
+
 interface PuzzleShapeBase {
   id: string;
+  style?: ShapePreset;
   color?: string;
   visible_only_after_confirmation?: boolean;
 }

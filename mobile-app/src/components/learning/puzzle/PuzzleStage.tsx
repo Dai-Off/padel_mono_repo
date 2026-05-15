@@ -29,6 +29,9 @@ type Props = {
   options?: PuzzleOption[];
   selectedOptionId?: 1 | 2 | 3 | null;
   onSelectOption?: (opt: PuzzleOption) => void;
+  // Identifica el frame activo (init / select-X / confirm-X). Cuando cambia,
+  // la flecha de trayectoria se redibuja sincronizada con la pelota.
+  transitionKey?: string;
 };
 
 export function PuzzleStage({
@@ -38,6 +41,7 @@ export function PuzzleStage({
   options,
   selectedOptionId = null,
   onSelectOption,
+  transitionKey,
 }: Props) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const win = useWindowDimensions();
@@ -77,7 +81,14 @@ export function PuzzleStage({
 
         {/* Capa de shapes: entre court y players. */}
         {size && validFrame && (
-          <Shapes frame={frame} state={state} widthPx={size.w} heightPx={size.h} />
+          <Shapes
+            frame={frame}
+            state={state}
+            widthPx={size.w}
+            heightPx={size.h}
+            transitionKey={transitionKey}
+            transitionDurationMs={durationMs}
+          />
         )}
 
         {size && validFrame &&

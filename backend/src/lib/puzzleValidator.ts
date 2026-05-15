@@ -9,6 +9,16 @@ const VALID_SHOT_TYPES = ['lob', 'chiquita'] as const;
 const VALID_SPINS = ['clockwise', 'counter-clockwise', 'random'] as const;
 const VALID_FACINGS = ['face', 'back'] as const;
 const VALID_SHAPE_TYPES = ['arrow', 'circle', 'rect', 'line', 'text', 'triangle'] as const;
+const VALID_SHAPE_PRESETS = [
+  'trajectory',
+  'movement',
+  'highlight',
+  'good_zone',
+  'bad_zone',
+  'neutral_zone',
+  'measure',
+  'tactical',
+] as const;
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
@@ -73,6 +83,9 @@ function validateShape(s: unknown, idx: number, prefix: string): string | null {
   }
   if (s.color !== undefined && typeof s.color !== 'string') {
     return `${prefix}.shapes[${idx}].color debe ser string`;
+  }
+  if (s.style !== undefined && !VALID_SHAPE_PRESETS.includes(s.style as typeof VALID_SHAPE_PRESETS[number])) {
+    return `${prefix}.shapes[${idx}].style debe ser ${VALID_SHAPE_PRESETS.join('|')}`;
   }
   if (
     s.visible_only_after_confirmation !== undefined &&

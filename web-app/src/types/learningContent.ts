@@ -35,8 +35,30 @@ export interface PuzzleBall {
   spin?: PuzzleSpin;
 }
 
+// Preset visual de la shape. Define color/animación/borde/etc., sustituye al uso libre
+// de color/dashed/fillColor cuando está presente.
+//   - trajectory     → trayectoria de pelota (curva naranja con dashes marchando + halo origen + punta perpendicular)
+//   - movement       → movimiento de jugador (dashes finos azul + punta perpendicular)
+//   - highlight      → halo radial pulsante (resaltar posición)
+//   - good_zone      → área correcta (verde con gradient suave, transparente)
+//   - bad_zone       → área a evitar (rojo con gradient + diagonales hatch)
+//   - neutral_zone   → área aceptable (amarillo con gradient suave, mismo estilo que good/bad)
+//   - measure        → anotación numérica (pill blanca + texto oscuro)
+//   - tactical       → anotación táctica (pill naranja + mayúsculas)
+//   - speech_bubble  → bocadillo de jugador (no se usa como shape directa, lo aplica el player)
+export type ShapePreset =
+  | 'trajectory'
+  | 'movement'
+  | 'highlight'
+  | 'good_zone'
+  | 'bad_zone'
+  | 'neutral_zone'
+  | 'measure'
+  | 'tactical';
+
 interface PuzzleShapeBase {
   id: string;
+  style?: ShapePreset;
   color?: string;
   visible_only_after_confirmation?: boolean;
 }
