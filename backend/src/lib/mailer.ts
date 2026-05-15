@@ -17,15 +17,36 @@ const SUPABASE_SERVICE_ROLE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').
 const SMTP_USER = process.env.SMTP_USER || '';
 const SMTP_PASS = process.env.SMTP_PASS || '';
 const SMTP_FROM = process.env.SMTP_FROM || 'WeMatch <noreply@wematch.com>';
+const SMTP_HOST = (process.env.SMTP_HOST || '').trim();
+const SMTP_PORT_RAW = (process.env.SMTP_PORT || '').trim();
+const SMTP_PORT = SMTP_PORT_RAW ? parseInt(SMTP_PORT_RAW, 10) : 587;
+const SMTP_SECURE = (process.env.SMTP_SECURE || '').toLowerCase() === 'true';
+
+function buildSmtpTransport() {
+  if (SMTP_HOST) {
+    const port = Number.isFinite(SMTP_PORT) ? SMTP_PORT : 587;
+    const secure = SMTP_SECURE || port === 465;
+    return nodemailer.createTransport({
+      host: SMTP_HOST,
+      port,
+      secure,
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASS,
+      },
+    });
+  }
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: SMTP_USER,
+      pass: SMTP_PASS,
+    },
+  });
+}
 
 // Transmisor SMTP de Nodemailer (Singleton)
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: SMTP_USER,
-    pass: SMTP_PASS,
-  },
-});
+const transporter = buildSmtpTransport();
 
 /**
  * Envía un correo mediante SMTP directo (Nodemailer).

@@ -1,5 +1,6 @@
 // Metro config con react-native-svg-transformer para poder importar
 // archivos .svg como componentes React. Setup estándar para Expo + RN.
+// Extensión .cjs: en Windows, cargar metro.config.js como ESM falla (ERR_UNSUPPORTED_ESM_URL_SCHEME / protocol 'c:').
 const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);

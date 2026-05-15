@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useState, useCallback } from 'react';
 import { StyleSheet } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -12,19 +12,54 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { MainApp } from './src/screens/MainApp';
 import { RegisterScreen } from './src/screens/RegisterScreen';
 import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
+import { ResetPasswordScreen, type RecoveryPayload } from './src/screens/ResetPasswordScreen';
 import { RequireAuth } from './src/components/auth';
 import { STRIPE_PUBLISHABLE_KEY } from './src/config';
 import { theme } from './src/theme';
+import { isRecoveryDeepLink, parseSupabaseRecoveryFromUrl } from './src/lib/parseAuthRecoveryUrl';
 
-type AuthScreen = 'login' | 'register' | 'forgot_password';
+type AuthScreen = 'login' | 'register' | 'forgot_password' | 'reset_password';
 
 function AuthFlowWrapper() {
   const [screen, setScreen] = useState<AuthScreen>('login');
+  const [recovery, setRecovery] = useState<RecoveryPayload | null>(null);
+
+  const consumeRecoveryUrl = useCallback((url: string | null) => {
+    if (!url || !isRecoveryDeepLink(url)) return;
+    const parsed = parseSupabaseRecoveryFromUrl(url);
+    setRecovery({
+      access_token: parsed.access_token,
+      refresh_token: parsed.refresh_token,
+      token_hash: parsed.token_hash,
+    });
+    setScreen('reset_password');
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const initial = await Linking.getInitialURL();
+      if (alive && initial) consumeRecoveryUrl(initial);
+    })();
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      consumeRecoveryUrl(url);
+    });
+    return () => {
+      alive = false;
+      sub.remove();
+    };
+  }, [consumeRecoveryUrl]);
+
+  const goLogin = () => {
+    setRecovery(null);
+    setScreen('login');
+  };
+
   return (
     <SafeAreaView style={[styles.container, styles.authContainer]} edges={['top', 'bottom']}>
       {screen === 'login' && (
-        <LoginScreen 
-          onGoToRegister={() => setScreen('register')} 
+        <LoginScreen
+          onGoToRegister={() => setScreen('register')}
           onGoToForgot={() => setScreen('forgot_password')}
         />
       )}
@@ -32,8 +67,11 @@ function AuthFlowWrapper() {
         <RegisterScreen onGoToLogin={() => setScreen('login')} />
       )}
       {screen === 'forgot_password' && (
-        <ForgotPasswordScreen onBackToLogin={() => setScreen('login')} />
+        <ForgotPasswordScreen onBackToLogin={goLogin} />
       )}
+      {screen === 'reset_password' && recovery ? (
+        <ResetPasswordScreen recovery={recovery} onBackToLogin={goLogin} />
+      ) : null}
     </SafeAreaView>
   );
 }
