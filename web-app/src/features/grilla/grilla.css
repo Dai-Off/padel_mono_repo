@@ -23,9 +23,13 @@
   -webkit-overflow-scrolling: auto !important;
 }
 
-/* Ensure draggable elements always block native touch gestures */
+/* Ensure draggable elements always block native touch gestures and iOS
+   long-press menus / text selection that interfere with drag-and-drop. */
 [data-dnd-draggable] {
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 /* Safari iOS: use -webkit-fill-available as fallback for dvh */
@@ -40,4 +44,27 @@
   -webkit-overflow-scrolling: touch;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+/* Root wrapper of the Grilla view: neutralizes iOS Safari quirks
+   (auto-zoom of small text, font rendering) and provides a known
+   anchor for the flex-shrink fix below. */
+.grilla-shell {
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Promote to its own layer — avoids glyph re-rasterization jitter on iOS */
+  transform: translateZ(0);
+}
+
+/* Safari respects flex-basis but not the implicit `min-width: auto` /
+   `min-height: auto` on flex items. Without these resets the grilla's
+   inner flex columns overflow and the columns appear "corridas". */
+.grilla-flex-shrink,
+.grilla-flex-shrink > * {
+  min-width: 0;
+  min-height: 0;
 }
