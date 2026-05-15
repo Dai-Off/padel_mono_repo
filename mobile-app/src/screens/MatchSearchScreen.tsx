@@ -36,7 +36,10 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
     applyFilters,
     clearFilters,
     results,
+    listResults,
     loading,
+    fetchError,
+    refetch,
     sportLabel,
     dateLabel,
     timeRangeLabel,
@@ -61,8 +64,8 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
   );
 
   const clubCountForFilters = useMemo(
-    () => aggregateCourtsByClub(results, { sortBy: filters.sortBy }).length,
-    [results, filters.sortBy]
+    () => aggregateCourtsByClub(listResults, { sortBy: filters.sortBy }).length,
+    [listResults, filters.sortBy]
   );
 
   return (
@@ -134,7 +137,9 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
       >
         <SearchResultsList
           clubGroups={clubGroups}
-          loading={loading}
+          loading={loading && clubGroups.length === 0}
+          fetchError={fetchError}
+          onRetry={refetch}
           onClubPress={onCourtPress}
           onFavoritePress={(court) =>
             Alert.alert(
