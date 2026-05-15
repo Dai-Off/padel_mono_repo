@@ -1774,7 +1774,7 @@ function GrillaViewInner() {
 
   return (
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
-      <div className="h-[100dvh] flex flex-col bg-gray-100 font-sans overflow-hidden">
+      <div className="grilla-shell h-[100dvh] flex flex-col bg-gray-100 font-sans overflow-hidden">
         {!isMobileDevice && (
           <header className="bg-[#00726b] px-4 md:px-6 py-1.5 md:py-2 z-50 flex-shrink-0 flex justify-between items-center border-b border-[#005a4f] gap-3">
             <div className="flex items-center gap-3 md:gap-4">
@@ -1893,7 +1893,7 @@ function GrillaViewInner() {
         )}
 
         {/* ── Grid Area ── */}
-        <main className="flex-1 overflow-hidden flex flex-col min-h-0 relative z-0 bg-white">
+        <main className="flex-1 overflow-hidden flex flex-col min-h-0 min-w-0 relative z-0 bg-white">
           {activeView === 'matches' ? (
             <MatchesManagementPanel
               clubId={clubId}
@@ -1943,11 +1943,11 @@ function GrillaViewInner() {
             onDragEnd={handleDragEnd}
             modifiers={[restrictToWindowEdges]}
           >
-            <div className="flex-1 bg-white overflow-hidden flex flex-col relative min-h-0">
+            <div className="flex-1 bg-white overflow-hidden flex flex-col relative min-h-0 min-w-0">
 
 
               {/* Scrollable area */}
-              <div className={clsx("flex-1 overflow-auto relative", activeId && "dragging-active")}>
+              <div className={clsx("flex-1 overflow-auto relative min-h-0 min-w-0", activeId && "dragging-active")}>
 
                 {/* ── Integrated Toolbar – scrolls with grid ── */}
                 {(
