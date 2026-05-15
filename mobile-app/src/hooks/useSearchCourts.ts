@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchSearchCourts, type SearchCourtResult } from '../api/search';
 import type { SearchFiltersState } from '../components/search/SearchFiltersSheet';
-import { applySearchCourtFilters } from '../domain/searchCourtFilters';
+import { decorateSearchCourtSlots } from '../domain/searchCourtFilters';
 import { toDateStringLocal } from '../utils/dateLocal';
 
 export function useSearchCourts(filters: SearchFiltersState) {
   const [rawResults, setRawResults] = useState<SearchCourtResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [slotNow, setSlotNow] = useState(() => new Date());
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     setSlotNow(new Date());
@@ -16,7 +18,9 @@ export function useSearchCourts(filters: SearchFiltersState) {
   }, [filters.date, filters.cerramiento, filters.paredes]);
 
   const search = useCallback(async () => {
+    const seq = ++requestSeq.current;
     setLoading(true);
+    setFetchError(null);
     try {
       const dateFrom =
         filters.date != null
@@ -41,33 +45,49 @@ export function useSearchCourts(filters: SearchFiltersState) {
         dateTo: dateTo ?? undefined,
         indoor,
         glassType,
+        sport: filters.sport ?? undefined,
       });
+
+      if (seq !== requestSeq.current) return;
       setRawResults(data);
-    } catch {
-      setRawResults([]);
+    } catch (err) {
+      if (seq !== requestSeq.current) return;
+      setFetchError(err instanceof Error ? err.message : 'Error al cargar clubes');
+      // Mantener rawResults anteriores para que la lista no desaparezca
     } finally {
-      setLoading(false);
+      if (seq === requestSeq.current) {
+        setLoading(false);
+      }
     }
-  }, [filters.date, filters.cerramiento, filters.paredes]);
+  }, [filters.date, filters.cerramiento, filters.paredes, filters.sport]);
 
   useEffect(() => {
     search();
   }, [search]);
 
+  /** Listado estable: todos los clubes/pistas de la última respuesta OK de la API. */
+  const listResults = rawResults;
+
+  /** Misma lista con franjas horarias decoradas para las tarjetas (no reduce filas). */
   const results = useMemo(
-    () => applySearchCourtFilters(rawResults, filters, { now: slotNow }),
+    () => decorateSearchCourtSlots(listResults, filters, { now: slotNow }),
     [
-      rawResults,
-      filters.sport,
+      listResults,
+      filters.showUnavailable,
       filters.timeRange?.start,
       filters.timeRange?.end,
-      filters.showUnavailable,
-      filters.maxDistanceKm,
       filters.duration,
       filters.date,
       slotNow,
     ],
   );
 
-  return { results, resultCount: results.length, loading };
+  return {
+    results,
+    listResults,
+    resultCount: listResults.length,
+    loading,
+    fetchError,
+    refetch: search,
+  };
 }

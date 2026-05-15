@@ -39,23 +39,19 @@ export async function fetchSearchCourts(
   if (glassType) url.searchParams.set('glass_type', glassType);
   if (sport?.trim()) url.searchParams.set('sport', sport.trim().toLowerCase());
 
-  try {
-    const res = await fetch(url.toString(), {
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-    });
-    const json = (await res.json()) as { ok?: boolean; results?: SearchCourtResult[]; error?: string };
-    if (!res.ok) {
-      __DEV__ && console.warn('[search] API error:', res.status, json.error);
-      return [];
-    }
-    if (!Array.isArray(json.results)) {
-      __DEV__ && console.warn('[search] Invalid response:', json);
-      return [];
-    }
-    return json.results;
-  } catch (err) {
-    __DEV__ && console.warn('[search] Fetch failed:', err);
-    return [];
+  const res = await fetch(url.toString(), {
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+  });
+  const json = (await res.json()) as { ok?: boolean; results?: SearchCourtResult[]; error?: string };
+  if (!res.ok) {
+    const msg = json.error ?? `HTTP ${res.status}`;
+    __DEV__ && console.warn('[search] API error:', res.status, msg);
+    throw new Error(msg);
   }
+  if (!Array.isArray(json.results)) {
+    __DEV__ && console.warn('[search] Invalid response:', json);
+    throw new Error('Respuesta de búsqueda inválida');
+  }
+  return json.results;
 }

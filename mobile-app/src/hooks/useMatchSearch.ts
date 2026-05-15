@@ -11,7 +11,7 @@ export function useMatchSearch() {
     sport: null,
     date: null,
     timeRange: null,
-    showUnavailable: false,
+    showUnavailable: true,
     sortBy: 'distancia',
     maxDistanceKm: 50,
     duration: 90,
@@ -19,7 +19,8 @@ export function useMatchSearch() {
     paredes: null,
   }));
 
-  const { results, resultCount, loading } = useSearchCourts(filters);
+  const { results, listResults, resultCount, loading, fetchError, refetch } =
+    useSearchCourts(filters);
 
   const applyFilters = useCallback((newFilters: SearchFiltersState) => {
     setFilters(newFilters);
@@ -30,7 +31,7 @@ export function useMatchSearch() {
       sport: null,
       date: null,
       timeRange: null,
-      showUnavailable: false,
+      showUnavailable: true,
       sortBy: 'distancia',
       maxDistanceKm: 50,
       duration: 90,
@@ -58,8 +59,11 @@ export function useMatchSearch() {
     applyFilters,
     clearFilters,
     results,
+    listResults,
     resultCount,
     loading,
+    fetchError,
+    refetch,
     sportLabel,
     dateLabel,
     timeRangeLabel,

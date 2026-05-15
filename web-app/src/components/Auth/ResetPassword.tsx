@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, CheckCircle2, AlertCircle, ArrowRight } from 'lucide-react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { getSupabaseClient, parseHashParams } from '../../lib/supabase';
 
@@ -14,8 +14,6 @@ export const ResetPassword: React.FC = () => {
     const [confirm, setConfirm] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const navigate = useNavigate();
-
     useEffect(() => {
         const init = async () => {
             try {
@@ -82,9 +80,9 @@ export const ResetPassword: React.FC = () => {
             const { error } = await supabase.auth.updateUser({ password });
             if (error) throw error;
 
+            await supabase.auth.signOut();
             setStatus('success');
             toast.success('Contraseña actualizada correctamente');
-            setTimeout(() => navigate('/login'), 3000);
         } catch (err: any) {
             toast.error(err.message || 'Error al guardar la contraseña');
         } finally {
@@ -159,7 +157,9 @@ export const ResetPassword: React.FC = () => {
                                 </div>
                                 <div className="space-y-2">
                                     <h1 className="text-xl font-bold text-white">¡Listo! Contraseña actualizada</h1>
-                                    <p className="text-sm text-white/50 tracking-tight">Redirigiéndote al inicio de sesión...</p>
+                                    <p className="text-sm text-white/50 leading-relaxed px-2">
+                                        Ya puedes cerrar esta pestaña e iniciar sesión en la app con tu nueva contraseña.
+                                    </p>
                                 </div>
                             </motion.div>
                         )}
