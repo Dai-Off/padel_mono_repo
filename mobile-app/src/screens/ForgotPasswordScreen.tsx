@@ -9,7 +9,7 @@ import {
   AuthFormLink,
   AuthFooter,
 } from '../components/auth';
-import { API_URL } from '../config';
+import { forgotPassword } from '../api/auth';
 import { theme } from '../theme';
 
 type ForgotPasswordScreenProps = {
@@ -33,17 +33,13 @@ export function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProp
     setError('');
     
     try {
-      const res = await fetch(`${API_URL}/auth/forgot-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: e }),
-      });
-      const data = await res.json();
-      
-      if (data.ok) {
+      const res = await forgotPassword(e, { client: 'mobile' });
+      if (res.ok) {
         setSuccess(true);
+      } else if (res.httpStatus === 429) {
+        setError(res.error ?? 'Demasiados intentos. Espera unos minutos.');
       } else {
-        setError(data.error ?? 'Error al enviar el correo de recuperación');
+        setError(res.error ?? 'Error al enviar el correo de recuperación');
       }
     } catch {
       setError('Error de conexión con el servidor');
