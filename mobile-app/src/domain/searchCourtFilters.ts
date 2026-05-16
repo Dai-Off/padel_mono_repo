@@ -11,21 +11,17 @@ function slotToMinutes(slot: string): number {
   return hh * 60 + mm;
 }
 
-/** N franjas libres consecutivas de 1 h (como devuelve /search/courts). */
-function hasConsecutiveHourSlots(slots: string[], neededSlots: number): boolean {
-  if (neededSlots <= 0) return true;
-  const mins = [...new Set(slots.map(slotToMinutes))].sort((a, b) => a - b);
-  if (neededSlots === 1) return mins.length > 0;
-  let run = 1;
-  for (let i = 1; i < mins.length; i += 1) {
-    if (mins[i] === mins[i - 1] + 60) {
-      run += 1;
-      if (run >= neededSlots) return true;
-    } else {
-      run = 1;
+/** Horas de inicio con N franjas libres consecutivas de 1 h (como devuelve /search/courts). */
+function slotStartsWithConsecutiveHours(slots: string[], neededSlots: number): string[] {
+  if (neededSlots <= 1) return slots;
+  const minSet = new Set(slots.map(slotToMinutes));
+  return slots.filter((slot) => {
+    const start = slotToMinutes(slot);
+    for (let i = 0; i < neededSlots; i += 1) {
+      if (!minSet.has(start + i * 60)) return false;
     }
-  }
-  return run >= neededSlots;
+    return true;
+  });
 }
 
 function slotsInTimeRange(slots: string[], start: string, end: string): string[] {
@@ -41,13 +37,11 @@ function neededSlotsForDurationMinutes(duration: number): number {
   return Math.max(1, Math.ceil(duration / 60));
 }
 
-const DEFAULT_MAX_DISTANCE_KM = 50;
-
 /**
- * Post-filtrado local de resultados de /search/courts (la API solo filtra fecha, indoor, cristal).
- * `now` en hora local del dispositivo: para el día de búsqueda que sea «hoy», oculta franjas ya pasadas.
+ * Ajusta `timeSlots` para las tarjetas de club. **Nunca elimina pistas/clubes** del listado.
+ * `showUnavailable: true` → franjas sin filtrar por duración/hora (solo oculta horas ya pasadas hoy).
  */
-export function applySearchCourtFilters(
+export function decorateSearchCourtSlots(
   courts: SearchCourtResult[],
   filters: SearchFiltersState,
   options?: { now?: Date },
@@ -56,42 +50,20 @@ export function applySearchCourtFilters(
   const calendarKey =
     filters.date != null ? toDateStringLocal(filters.date) : toDateStringLocal(now);
   const needed = neededSlotsForDurationMinutes(filters.duration);
+  const strictSlots = !filters.showUnavailable;
 
-  let out = courts.map((c) => ({ ...c, timeSlots: [...(c.timeSlots ?? [])] }));
-
-  out = out.map((c) => {
-    let slots = filterSlotsStartingAfterNow(calendarKey, c.timeSlots, now);
-    if (filters.timeRange) {
-      slots = slotsInTimeRange(slots, filters.timeRange.start, filters.timeRange.end);
+  return courts.map((c) => {
+    let slots = [...(c.timeSlots ?? [])];
+    slots = filterSlotsStartingAfterNow(calendarKey, slots, now);
+    if (strictSlots) {
+      if (filters.timeRange) {
+        slots = slotsInTimeRange(slots, filters.timeRange.start, filters.timeRange.end);
+      }
+      slots = slotStartsWithConsecutiveHours(slots, needed);
     }
     return { ...c, timeSlots: slots };
   });
-
-  out = out.filter((c) => {
-    const fitsDuration = hasConsecutiveHourSlots(c.timeSlots, needed);
-    if (fitsDuration) return true;
-    if (filters.showUnavailable) {
-      return true;
-    }
-    return false;
-  });
-
-  out = out.map((c) => {
-    if (!hasConsecutiveHourSlots(c.timeSlots, needed) && filters.showUnavailable) {
-      return { ...c, timeSlots: [] };
-    }
-    return c;
-  });
-
-  const maxKm = filters.maxDistanceKm;
-  if (maxKm < DEFAULT_MAX_DISTANCE_KM) {
-    out = out.filter((c) => c.distanceKm == null || c.distanceKm <= maxKm);
-  }
-
-  if (filters.sport) {
-    const want = filters.sport.toLowerCase();
-    out = out.filter((c) => (c.sport ?? 'padel').toLowerCase() === want);
-  }
-
-  return out;
 }
+
+/** @deprecated Usar decorateSearchCourtSlots */
+export const applySearchCourtFilters = decorateSearchCourtSlots;

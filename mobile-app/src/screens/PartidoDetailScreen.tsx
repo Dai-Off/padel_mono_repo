@@ -444,7 +444,6 @@ export function PartidoDetailScreen({
     !isInMatch &&
     firstFreeIndex >= 0 &&
     selectedSlotIndex != null &&
-    !partido.scoreStatus &&
     matchPhase !== 'past';
 
   const canPressMatchmakingPay =
@@ -854,7 +853,7 @@ export function PartidoDetailScreen({
             ) : (
               <View style={styles.ctaTextWrap}>
                 <Text style={styles.ctaText}>
-                  {partido.scoreStatus
+                  {matchPhase === 'past'
                     ? 'Partido finalizado'
                     : isInMatch
                       ? 'Ya estás en el partido'

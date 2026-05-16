@@ -1,0 +1,25 @@
+diff --git a/node_modules/metro-config/src/loadConfig.js b/node_modules/metro-config/src/loadConfig.js
+index 7ac9d88..7688a36 100644
+--- a/node_modules/metro-config/src/loadConfig.js
++++ b/node_modules/metro-config/src/loadConfig.js
+@@ -15,6 +15,7 @@ var MetroCache = _interopRequireWildcard(require("metro-cache"));
+ var _os = require("os");
+ var path = _interopRequireWildcard(require("path"));
+ var _yaml = require("yaml");
++var _url = require("url");
+ function _getRequireWildcardCache(e) {
+   if ("function" != typeof WeakMap) return null;
+   var r = new WeakMap(),
+@@ -289,7 +290,11 @@ async function loadConfigFile(absolutePath) {
+       }
+     } catch (e) {
+       try {
+-        const configModule = await import(absolutePath);
++        // Node ESM dynamic import() requires a file URL for absolute paths on Windows (ERR_UNSUPPORTED_ESM_URL_SCHEME / protocol 'c:').
++        const importSpecifier = path.isAbsolute(absolutePath)
++          ? _url.pathToFileURL(absolutePath).href
++          : absolutePath;
++        const configModule = await import(importSpecifier);
+         config = await configModule.default;
+       } catch (error) {
+         let prefix = `Error loading Metro config at: ${absolutePath}\n`;

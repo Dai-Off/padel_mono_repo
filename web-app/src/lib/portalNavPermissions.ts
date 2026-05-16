@@ -21,6 +21,7 @@ export const PORTAL_MENU_ITEM_PERMS: Record<string, string[]> = {
     'contenido-aprendizaje': ['escuela'],
     personal: ['gestion'],
     inventario: ['gestion'],
+    carrito: ['gestion'],
     incidencias: ['gestion'],
     resenas: ['gestion'],
     configuracion: ['configuracion'],

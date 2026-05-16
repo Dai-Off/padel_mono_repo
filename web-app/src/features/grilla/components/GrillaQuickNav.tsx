@@ -9,10 +9,10 @@ import {
   BarChart3,
   Settings,
   Shield,
-  CreditCard,
   ClipboardList,
   Trophy,
   MessageCircle,
+  ShoppingCart,
 } from 'lucide-react';
 import { portalMenuItemAllowed } from '../../../lib/portalNavPermissions';
 import { useClubChatMentionsCount } from '../../../hooks/useClubChatMentionsCount';
@@ -73,8 +73,9 @@ function buildSections(isAdmin: boolean): NavSection[] {
     {
       id: 'pagos',
       label: 'TPV',
-      icon: CreditCard,
+      icon: ShoppingCart,
       children: [
+        { id: 'carrito', path: '/carrito', label: 'Carrito' },
         { id: 'pagos', path: '/pagos', label: 'Pagos' },
       ],
     },
