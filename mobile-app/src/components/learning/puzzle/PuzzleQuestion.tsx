@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PuzzleStage } from './PuzzleStage';
@@ -12,6 +12,31 @@ type Props = {
 export function PuzzleQuestion({ content, onAnswered }: Props) {
   const [selected, setSelected] = useState<PuzzleOption | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  // Si el puzzle tiene intro_frame: arrancamos mostrándolo y al siguiente tick
+  // cambiamos a initial_frame para disparar la animación. Solo se reproduce una
+  // vez (al cargar o al pulsar "Repetir intro"). Después permanece estático.
+  const [showingIntro, setShowingIntro] = useState<boolean>(!!content.intro_frame);
+  // Se mantiene true mientras dura la animación intro→initial completa
+  // (showingIntro + duración del frame destino). Lo usamos para ocultar los
+  // badges A/B/C durante toda la transición, no solo el primer tick.
+  const [introAnimating, setIntroAnimating] = useState<boolean>(!!content.intro_frame);
+  useEffect(() => {
+    if (!showingIntro) return;
+    const raf = requestAnimationFrame(() => setShowingIntro(false));
+    return () => cancelAnimationFrame(raf);
+  }, [showingIntro]);
+  useEffect(() => {
+    if (!introAnimating) return;
+    // Duración total: muestro intro (~1 tick) + animación hacia initial.
+    const dur = content.initial_frame?.duration_ms ?? 1500;
+    const t = setTimeout(() => setIntroAnimating(false), dur + 50);
+    return () => clearTimeout(t);
+  }, [introAnimating, content.initial_frame?.duration_ms]);
+  const replayIntro = () => {
+    if (!content.intro_frame || confirmed || selected) return;
+    setShowingIntro(true);
+    setIntroAnimating(true);
+  };
 
   // Defensa contra content malformado (puzzle sin árbol mergeado, p. ej. fila huérfana
   // en learning_puzzles): renderizar mensaje en lugar de crashear.
@@ -45,10 +70,15 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
   //   select     (selected !== null && !confirmed) → selected.select_frame
   //   confirmed  (selected !== null && confirmed)  → selected.confirmation_frame
   // Si alguno de los frames de la opción falta, caemos al siguiente disponible.
+  // Base frame: si estamos en fase intro, mostramos intro_frame (1 tick).
+  // Después se cambia a initial_frame, lo que dispara la animación intro→initial.
+  const baseFrame: PuzzleFrame = showingIntro && content.intro_frame
+    ? content.intro_frame
+    : content.initial_frame;
   const displayedFrame: PuzzleFrame =
     confirmed && selected?.confirmation_frame
       ? selected.confirmation_frame
-      : selected?.select_frame ?? selected?.confirmation_frame ?? content.initial_frame;
+      : selected?.select_frame ?? selected?.confirmation_frame ?? baseFrame;
 
   const handleSelect = (opt: PuzzleOption) => {
     if (confirmed) return;
@@ -76,7 +106,18 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
 
   return (
     <View>
-      <Text style={styles.statement}>{content.statement}</Text>
+      <View style={styles.statementRow}>
+        <Text style={[styles.statement, { flex: 1 }]}>{content.statement}</Text>
+        {content.intro_frame && !selected && !confirmed && (
+          <Pressable
+            onPress={replayIntro}
+            hitSlop={8}
+            style={styles.replayBtn}
+          >
+            <Ionicons name="play-back" size={16} color="#9CA3AF" />
+          </Pressable>
+        )}
+      </View>
 
       <PuzzleStage
         frame={displayedFrame}
@@ -89,8 +130,23 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
             ? `confirm-${selected.id}`
             : selected
               ? `select-${selected.id}`
-              : 'init'
+              : showingIntro
+                ? 'intro'
+                : 'init'
         }
+        prevFrame={
+          confirmed && selected
+            ? (selected.select_frame ?? content.initial_frame)
+            : selected
+              ? content.initial_frame
+              : showingIntro
+                ? null // durante el primer tick: no hay anterior, es la posición de partida
+                : (content.intro_frame ?? null) // tras intro: el anterior es el intro
+        }
+        // Badges ocultos mientras se muestra/anima el intro: el usuario aún no
+        // entiende qué decide. Aparecen con fade-in al terminar la animación
+        // (introAnimating cubre showingIntro + duración del frame destino).
+        badgesHidden={introAnimating}
       />
 
       {/* Texto del bocadillo: cambia según la fase */}
@@ -175,12 +231,22 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
 const BADGE_SIZE = 44;
 
 const styles = StyleSheet.create({
+  statementRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 8,
+  },
   statement: {
     color: '#FFFFFF',
     fontWeight: '700',
     fontSize: 14,
     lineHeight: 19,
-    marginBottom: 8,
+  },
+  replayBtn: {
+    padding: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   // Bocadillo de texto contextual
   bubble: {

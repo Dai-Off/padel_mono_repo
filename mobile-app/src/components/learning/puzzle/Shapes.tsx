@@ -20,6 +20,7 @@ import Svg, {
 } from 'react-native-svg';
 import { OUTER_H, OUTER_W, courtConfig } from './lib/courtConfig';
 import { PRESETS, resolvePreset, type PresetVisual } from './lib/shapePresets';
+import { generateAutoShapes } from './lib/autoTrajectory';
 import type { PuzzleFrame, PuzzleShape } from '../../../types/puzzle';
 
 type PuzzleStateKey = 'init' | 'select' | 'confirmed';
@@ -34,15 +35,14 @@ type Props = {
   // con la pelota. Las shapes que no son trajectory mantienen su fade-in normal.
   transitionKey?: string;
   transitionDurationMs?: number;
+  // Frame anterior (initial cuando state=select; select cuando state=confirmed).
+  // Si está definido y `frame.auto_trajectory !== false`, se generan trajectory
+  // + highlights automáticamente desde la pelota del previo a la actual.
+  prevFrame?: PuzzleFrame | null;
 };
 
 const mx = (m: number) => m + courtConfig.outerMargin;
 const my = (m: number) => m + courtConfig.outerMargin;
-
-function shouldRender(shape: PuzzleShape, state: PuzzleStateKey): boolean {
-  if (shape.visible_only_after_confirmation && state !== 'confirmed') return false;
-  return true;
-}
 
 // Calcula los 3 puntos de la punta de flecha (triángulo isósceles) tal que:
 //   - la punta del triángulo está en (tipX, tipY)
@@ -220,18 +220,46 @@ function useHaloPulse(enabled: boolean) {
 
 // ─── Renderers por preset ──────────────────────────────────────────────────
 
-function TrajectoryShape({ shape, visual, progress }: {
+function TrajectoryShape({ shape, visual, progress, ballShotType }: {
   shape: Extract<PuzzleShape, { type: 'arrow' }>;
   visual: PresetVisual;
   progress: number;
+  ballShotType?: 'lob' | 'chiquita';
 }) {
   const sx = mx(shape.startPoint.x);
   const sy = my(shape.startPoint.y);
   const ex = mx(shape.endPoint.x);
   const ey = my(shape.endPoint.y);
-  const cp = shape.controlPoint
-    ? { x: mx(shape.controlPoint.x), y: my(shape.controlPoint.y) }
-    : null;
+  // El controlPoint se calcula UNA sola vez por combinación de endpoints +
+  // shot_type. Sin useMemo, cada re-render del marching/progress evalúa otra
+  // vez la lógica de border-avoidance y, con redondeos, puede acabar eligiendo
+  // el lado opuesto a mitad de animación.
+  const explicitCp = shape.controlPoint;
+  const cp = useMemo<{ x: number; y: number } | null>(() => {
+    if (explicitCp) {
+      return { x: mx(explicitCp.x), y: my(explicitCp.y) };
+    }
+    if (!ballShotType) return null;
+    const midX = (sx + ex) / 2;
+    const midY = (sy + ey) / 2;
+    const dx = ex - sx;
+    const dy = ey - sy;
+    const len = Math.hypot(dx, dy);
+    if (len <= 0.001) return null;
+    const px = -dy / len;
+    const py = dx / len;
+    const factor = ballShotType === 'lob' ? 0.25 : 0.12;
+    const offset = len * factor;
+    const candA = { x: midX + px * offset, y: midY + py * offset };
+    const candB = { x: midX - px * offset, y: midY - py * offset };
+    const minX = courtConfig.outerMargin;
+    const maxX = OUTER_W - courtConfig.outerMargin;
+    const minY = courtConfig.outerMargin;
+    const maxY = OUTER_H - courtConfig.outerMargin;
+    const distToBorder = (p: { x: number; y: number }) =>
+      Math.min(p.x - minX, maxX - p.x, p.y - minY, maxY - p.y);
+    return distToBorder(candA) >= distToBorder(candB) ? candA : candB;
+  }, [sx, sy, ex, ey, explicitCp?.x, explicitCp?.y, ballShotType]);
 
   const headLen = 0.5;
   const halfBase = 0.22;
@@ -351,35 +379,81 @@ function TrajectoryShape({ shape, visual, progress }: {
   );
 }
 
-function MovementShape({ shape, visual }: { shape: Extract<PuzzleShape, { type: 'arrow' }>; visual: PresetVisual }) {
+function MovementShape({ shape, visual, progress }: {
+  shape: Extract<PuzzleShape, { type: 'arrow' }>;
+  visual: PresetVisual;
+  progress: number;
+}) {
+  // Mismo algoritmo de dashes individuales que TrajectoryShape pero sin cp.
   const sx = mx(shape.startPoint.x);
   const sy = my(shape.startPoint.y);
   const ex = mx(shape.endPoint.x);
   const ey = my(shape.endPoint.y);
-  const tangentX = ex - sx;
-  const tangentY = ey - sy;
   const headLen = 0.45;
   const halfBase = 0.18;
-  const head = arrowHead(ex, ey, tangentX, tangentY, headLen, halfBase);
-  const endX = head?.cutX ?? ex;
-  const endY = head?.cutY ?? ey;
+  const tangentEndX = ex - sx;
+  const tangentEndY = ey - sy;
+  const finalHead = arrowHead(ex, ey, tangentEndX, tangentEndY, headLen, halfBase);
+  const endX = finalHead?.cutX ?? ex;
+  const endY = finalHead?.cutY ?? ey;
+  const lineLength = approxPathLength(sx, sy, endX, endY, null);
 
-  const dashOffset = useMarchingOffset(!!visual.marching, 2400, 1);
+  const dashArr = visual.dashArray ?? [0.2, 0.18];
+  const dashSize = dashArr[0];
+  const gapSize = dashArr[1] ?? 0.18;
+  const cycle = dashSize + gapSize;
+  const visibleLen = lengthAtT(sx, sy, endX, endY, null, progress);
+  const rawMarch = useMarchingOffset(!!visual.marching, 2400, cycle);
+  const marchOffset = ((-rawMarch) % cycle + cycle) % cycle;
+
+  let dynamicHead = finalHead;
+  const isDrawing = progress < 1;
+  if (isDrawing) {
+    const pt = pointAndTangentOnPath(sx, sy, endX, endY, null, progress);
+    const tlen = Math.hypot(pt.dx, pt.dy) || 1;
+    const ux = pt.dx / tlen;
+    const uy = pt.dy / tlen;
+    dynamicHead = arrowHead(pt.x + ux * headLen, pt.y + uy * headLen, pt.dx, pt.dy, headLen, halfBase);
+  }
+
+  void lineLength;
+  const swHalf = (visual.strokeWidthM ?? 0.12) / 2;
+  const dashesEnd = Math.max(0, visibleLen - swHalf);
+  const dashes: { polyPoints: number[] }[] = [];
+  const startIdx = Math.floor(-marchOffset / cycle) - 1;
+  const endIdx = Math.ceil((dashesEnd - marchOffset) / cycle) + 1;
+  const minDashLen = 0.005;
+  for (let i = startIdx; i <= endIdx; i++) {
+    const startArc = marchOffset + i * cycle;
+    const endArc = startArc + dashSize;
+    const a = Math.max(0, startArc);
+    const b = Math.min(dashesEnd, endArc);
+    if (b - a < minDashLen) continue;
+    const tA = a / lineLength;
+    const tB = b / lineLength;
+    dashes.push({
+      polyPoints: [
+        sx + (endX - sx) * tA, sy + (endY - sy) * tA,
+        sx + (endX - sx) * tB, sy + (endY - sy) * tB,
+      ],
+    });
+  }
 
   return (
     <>
-      <Path
-        d={`M ${sx} ${sy} L ${endX} ${endY}`}
-        stroke={visual.stroke}
-        strokeWidth={visual.strokeWidthM}
-        strokeDasharray={visual.dashArray}
-        strokeDashoffset={dashOffset}
-        fill="none"
-        strokeLinecap="round"
-      />
-      {head && (
+      {dashes.map((d, i) => (
+        <Polyline
+          key={i}
+          points={d.polyPoints.join(' ')}
+          stroke={visual.stroke}
+          strokeWidth={visual.strokeWidthM}
+          fill="none"
+          strokeLinecap="round"
+        />
+      ))}
+      {dynamicHead && (
         <Polygon
-          points={`${head.tipX},${head.tipY} ${head.b1x},${head.b1y} ${head.b2x},${head.b2y}`}
+          points={`${dynamicHead.tipX},${dynamicHead.tipY} ${dynamicHead.b1x},${dynamicHead.b1y} ${dynamicHead.b2x},${dynamicHead.b2y}`}
           fill={visual.stroke}
         />
       )}
@@ -387,7 +461,19 @@ function MovementShape({ shape, visual }: { shape: Extract<PuzzleShape, { type: 
   );
 }
 
-function HighlightShape({ shape, visual }: { shape: Extract<PuzzleShape, { type: 'circle' }>; visual: PresetVisual }) {
+function HighlightShape({
+  shape,
+  visual,
+  progress,
+  appearOnArrival,
+}: {
+  shape: Extract<PuzzleShape, { type: 'circle' }>;
+  visual: PresetVisual;
+  progress: number;
+  // Si true, el highlight permanece invisible hasta que la pelota está
+  // llegando (progress ≥ 0.85) y entonces hace fade-in suave.
+  appearOnArrival?: boolean;
+}) {
   const cx = mx(shape.x);
   const cy = my(shape.y);
   const r = shape.radius;
@@ -395,13 +481,19 @@ function HighlightShape({ shape, visual }: { shape: Extract<PuzzleShape, { type:
   const baseR = r * 1.2;
   const animR = baseR * halo.scale;
 
+  let appearOpacity = 1;
+  if (appearOnArrival) {
+    // 0 hasta 0.85; sube linealmente hasta 1 en 1.0.
+    appearOpacity = progress < 0.85 ? 0 : Math.min(1, (progress - 0.85) / 0.15);
+  }
+
   return (
     <Circle
       cx={cx}
       cy={cy}
       r={animR}
       fill={visual.stroke}
-      opacity={halo.opacity}
+      opacity={halo.opacity * appearOpacity}
     />
   );
 }
@@ -495,16 +587,33 @@ function LineShape({ shape, visual }: { shape: Extract<PuzzleShape, { type: 'lin
 
 // ─── ShapeView (dispatch por tipo + preset) ────────────────────────────────
 
-function ShapeView({ shape, trajectoryProgress }: { shape: PuzzleShape; trajectoryProgress: number }) {
+function ShapeView({
+  shape,
+  trajectoryProgress,
+  ballShotType,
+  appearOnArrival,
+}: {
+  shape: PuzzleShape;
+  trajectoryProgress: number;
+  ballShotType?: 'lob' | 'chiquita';
+  appearOnArrival?: boolean;
+}) {
   const preset = resolvePreset(shape);
   const visual = PRESETS[preset];
 
   if (shape.type === 'arrow') {
-    if (preset === 'movement') return <MovementShape shape={shape} visual={visual} />;
-    return <TrajectoryShape shape={shape} visual={visual} progress={trajectoryProgress} />;
+    if (preset === 'movement') return <MovementShape shape={shape} visual={visual} progress={trajectoryProgress} />;
+    return <TrajectoryShape shape={shape} visual={visual} progress={trajectoryProgress} ballShotType={ballShotType} />;
   }
   if (shape.type === 'circle') {
-    return <HighlightShape shape={shape} visual={visual} />;
+    return (
+      <HighlightShape
+        shape={shape}
+        visual={visual}
+        progress={trajectoryProgress}
+        appearOnArrival={appearOnArrival}
+      />
+    );
   }
   if (shape.type === 'rect') {
     return <ZoneRectShape shape={shape} visual={visual} withHatch={preset === 'bad_zone'} />;
@@ -515,15 +624,24 @@ function ShapeView({ shape, trajectoryProgress }: { shape: PuzzleShape; trajecto
   if (shape.type === 'line') {
     return <LineShape shape={shape} visual={visual} />;
   }
-  // text → se renderiza fuera del SVG (overlay RN Text)
+  // text + speechbubble → se renderizan fuera del SVG (overlay RN Text)
   return null;
 }
 
 // ─── Componente principal ─────────────────────────────────────────────────
 
-export function Shapes({ frame, state, widthPx, heightPx, transitionKey, transitionDurationMs }: Props) {
+export function Shapes({ frame, state, widthPx, heightPx, transitionKey, transitionDurationMs, prevFrame }: Props) {
+  // El parámetro `state` se conserva en la firma para compatibilidad de los
+  // callers pero ya no se usa para filtrar shapes — el sistema de frames split
+  // garantiza que cada frame solo se renderiza en su estado correspondiente.
+  void state;
   const opacity = useRef(new Animated.Value(0)).current;
-  const shapes = (frame.shapes ?? []).filter((s) => shouldRender(s, state));
+  // Shapes auto (trayectoria + highlights) primero, luego las manuales encima.
+  const autoShapes = useMemo(
+    () => generateAutoShapes(prevFrame ?? null, frame),
+    [prevFrame, frame],
+  );
+  const shapes = [...autoShapes, ...(frame.shapes ?? [])];
 
   // Progress 0..1 sincronizado con la duración del frame. Lo consumen las
   // shapes de tipo trayectoria para dibujarse detrás de la pelota.
@@ -540,7 +658,10 @@ export function Shapes({ frame, state, widthPx, heightPx, transitionKey, transit
 
   const textShapes = useMemo(
     () =>
-      shapes.filter((s): s is Extract<PuzzleShape, { type: 'text' }> => s.type === 'text'),
+      shapes.filter(
+        (s): s is Extract<PuzzleShape, { type: 'text' | 'speechbubble' }> =>
+          s.type === 'text' || s.type === 'speechbubble',
+      ),
     [shapes],
   );
 
@@ -552,9 +673,22 @@ export function Shapes({ frame, state, widthPx, heightPx, transitionKey, transit
       style={[styles.layer, { width: widthPx, height: heightPx, opacity }]}
     >
       <Svg width={widthPx} height={heightPx} viewBox={`0 0 ${OUTER_W} ${OUTER_H}`}>
-        {shapes.map((s) => (
-          <ShapeView key={s.id} shape={s} trajectoryProgress={trajectoryProgress} />
-        ))}
+        {shapes.map((s) => {
+          // El highlight auto de destino solo "aparece" cuando la pelota llega:
+          // identificable por id y solo aplica si hay frame anterior (es decir,
+          // hay transición con trajectoria). Si no hay prev, el highlight es
+          // estático y visible desde el primer paint.
+          const isAutoDestArrival = !!prevFrame && s.id === 'auto-dest';
+          return (
+            <ShapeView
+              key={s.id}
+              shape={s}
+              trajectoryProgress={trajectoryProgress}
+              ballShotType={frame.ball.shot_type === 'lob' || frame.ball.shot_type === 'chiquita' ? frame.ball.shot_type : undefined}
+              appearOnArrival={isAutoDestArrival}
+            />
+          );
+        })}
       </Svg>
 
       {/* Overlay de textos en RN nativo: pills (measure/tactical). */}
@@ -562,21 +696,67 @@ export function Shapes({ frame, state, widthPx, heightPx, transitionKey, transit
         const preset = resolvePreset(s);
         const visual = PRESETS[preset];
         const isTactical = preset === 'tactical';
+        const isBubble = s.type === 'speechbubble';
         const text = isTactical ? s.text.toUpperCase() : s.text;
 
-        // Tamaño base del texto en metros, escalado al Stage.
-        const sizeM = Math.max(0.5, (s.fontSize ?? 14) * 0.045);
         const pxPerMeterX = widthPx / OUTER_W;
-        const fontSizePx = sizeM * pxPerMeterX;
-        // Posición del centro del pill.
+
+        // Cálculo de tamaño:
+        //   - text (no bubble): ancho según número de chars, sin límite. 1 línea.
+        //   - speechbubble: ancho fijo MAX. Si el texto excede, salto a 2 líneas.
+        //     Si en 2 líneas aún excede, escalar fontSize hacia abajo.
+        let fontSizePx: number;
+        let pillW: number;
+        let pillH: number;
+        let numberOfLines = 1;
+        const padX = isBubble ? 10 : 0;
+        const padY = isBubble ? 6 : 0;
+
+        if (isBubble) {
+          // Ancho fijo: 35% del Stage horizontal, máximo 220px.
+          const targetW = Math.min(220, widthPx * 0.35);
+          // Tamaño base por fontSize del shape.
+          const sizeM = Math.max(0.5, (s.fontSize ?? 14) * 0.045);
+          let baseFontPx = sizeM * pxPerMeterX;
+          // Ancho disponible para texto.
+          const innerW = targetW - padX * 2;
+          // Aprox chars que caben en una línea con baseFontPx.
+          const charW = baseFontPx * 0.55;
+          const charsPerLine = Math.max(1, Math.floor(innerW / charW));
+          if (text.length <= charsPerLine) {
+            numberOfLines = 1;
+          } else if (text.length <= charsPerLine * 2) {
+            numberOfLines = 2;
+          } else {
+            // No cabe en 2 líneas: reducir fontSize hasta que quepa.
+            numberOfLines = 2;
+            const needed = text.length / 2;
+            const scaleDown = charsPerLine / needed;
+            baseFontPx = Math.max(10, baseFontPx * scaleDown);
+          }
+          fontSizePx = baseFontPx;
+          pillW = targetW;
+          pillH = fontSizePx * numberOfLines * 1.2 + padY * 2;
+        } else {
+          // text (medida/tactica): igual que antes.
+          const sizeM = Math.max(0.5, (s.fontSize ?? 14) * 0.045);
+          fontSizePx = sizeM * pxPerMeterX;
+          const approxTextWidth = text.length * fontSizePx * 0.62;
+          const tPadX = fontSizePx * 0.6;
+          const tPadY = fontSizePx * 0.35;
+          pillW = approxTextWidth + tPadX * 2;
+          pillH = fontSizePx + tPadY * 2;
+        }
+
         const cxPx = ((s.x + courtConfig.outerMargin) / OUTER_W) * widthPx;
         const cyPx = ((s.y + courtConfig.outerMargin) / OUTER_H) * heightPx;
-        // Ancho aproximado (chars × ancho medio).
-        const approxTextWidth = text.length * fontSizePx * 0.62;
-        const padX = fontSizePx * 0.6;
-        const padY = fontSizePx * 0.35;
-        const pillW = approxTextWidth + padX * 2;
-        const pillH = fontSizePx + padY * 2;
+
+        // Speech bubble: fondo blanco, borde negro, rabo apuntando abajo.
+        const bgColor = isBubble ? '#ffffff' : (visual.fill ?? '#fff');
+        const txtColor = isBubble ? '#0f172a' : (isTactical ? '#ffffff' : '#0f172a');
+        const borderWidth = isTactical && !isBubble ? 0 : 1;
+        const borderColor = isBubble ? '#0f172a' : 'rgba(0,0,0,0.4)';
+        const tailH = isBubble ? fontSizePx * 0.5 : 0;
 
         return (
           <View
@@ -585,29 +765,70 @@ export function Shapes({ frame, state, widthPx, heightPx, transitionKey, transit
             style={{
               position: 'absolute',
               left: cxPx - pillW / 2,
-              top: cyPx - pillH / 2,
+              top: cyPx - (pillH + tailH) / 2,
               width: pillW,
-              height: pillH,
-              borderRadius: pillH / 2,
-              backgroundColor: visual.fill ?? '#fff',
-              borderWidth: isTactical ? 0 : 0.5,
-              borderColor: 'rgba(0,0,0,0.4)',
+              height: pillH + tailH,
               alignItems: 'center',
-              justifyContent: 'center',
             }}
           >
-            <Text
-              numberOfLines={1}
+            <View
               style={{
-                color: isTactical ? '#ffffff' : '#0f172a',
-                fontSize: fontSizePx,
-                fontWeight: '800',
-                includeFontPadding: false,
-                letterSpacing: isTactical ? 0.5 : 0,
+                width: pillW,
+                height: pillH,
+                borderRadius: isBubble ? fontSizePx * 0.45 : pillH / 2,
+                backgroundColor: bgColor,
+                borderWidth,
+                borderColor,
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              {text}
-            </Text>
+              <Text
+                numberOfLines={isBubble ? numberOfLines : 1}
+                style={{
+                  color: txtColor,
+                  fontSize: fontSizePx,
+                  lineHeight: fontSizePx * 1.2,
+                  fontWeight: '800',
+                  includeFontPadding: false,
+                  letterSpacing: isTactical ? 0.5 : 0,
+                  textAlign: 'center',
+                }}
+              >
+                {text}
+              </Text>
+            </View>
+            {isBubble && (
+              <View
+                style={{
+                  width: 0,
+                  height: 0,
+                  marginTop: -1,
+                  borderLeftWidth: tailH * 0.55,
+                  borderRightWidth: tailH * 0.55,
+                  borderTopWidth: tailH,
+                  borderLeftColor: 'transparent',
+                  borderRightColor: 'transparent',
+                  borderTopColor: '#0f172a',
+                }}
+              >
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: -tailH - 1,
+                    left: -tailH * 0.55 + 1,
+                    width: 0,
+                    height: 0,
+                    borderLeftWidth: tailH * 0.55 - 1,
+                    borderRightWidth: tailH * 0.55 - 1,
+                    borderTopWidth: tailH - 1,
+                    borderLeftColor: 'transparent',
+                    borderRightColor: 'transparent',
+                    borderTopColor: '#ffffff',
+                  }}
+                />
+              </View>
+            )}
           </View>
         );
       })}

@@ -348,6 +348,7 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
               schema_version: p.schema_version,
               statement: p.statement,
               court_position: p.court_position,
+              intro_frame: p.intro_frame,
               initial_frame: p.initial_frame,
               options: p.options,
             };

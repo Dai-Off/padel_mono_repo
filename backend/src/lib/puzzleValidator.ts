@@ -8,7 +8,7 @@ const VALID_COURT_POSITIONS = ['left', 'right', 'both'] as const;
 const VALID_SHOT_TYPES = ['lob', 'chiquita'] as const;
 const VALID_SPINS = ['clockwise', 'counter-clockwise', 'random'] as const;
 const VALID_FACINGS = ['face', 'back'] as const;
-const VALID_SHAPE_TYPES = ['arrow', 'circle', 'rect', 'line', 'text', 'triangle'] as const;
+const VALID_SHAPE_TYPES = ['arrow', 'circle', 'rect', 'line', 'text', 'triangle', 'speechbubble'] as const;
 const VALID_SHAPE_PRESETS = [
   'trajectory',
   'movement',
@@ -87,12 +87,9 @@ function validateShape(s: unknown, idx: number, prefix: string): string | null {
   if (s.style !== undefined && !VALID_SHAPE_PRESETS.includes(s.style as typeof VALID_SHAPE_PRESETS[number])) {
     return `${prefix}.shapes[${idx}].style debe ser ${VALID_SHAPE_PRESETS.join('|')}`;
   }
-  if (
-    s.visible_only_after_confirmation !== undefined &&
-    typeof s.visible_only_after_confirmation !== 'boolean'
-  ) {
-    return `${prefix}.shapes[${idx}].visible_only_after_confirmation debe ser boolean`;
-  }
+  // Nota: `visible_only_after_confirmation` (campo legacy) se ignora — el sistema
+  // de frames split lo hace redundante. Si llega en el payload, se acepta sin error
+  // pero no se valida ni se usa.
 
   switch (s.type) {
     case 'circle': {
@@ -154,7 +151,8 @@ function validateShape(s: unknown, idx: number, prefix: string): string | null {
       }
       break;
     }
-    case 'text': {
+    case 'text':
+    case 'speechbubble': {
       if (!isNonEmptyString(s.text)) return `${prefix}.shapes[${idx}].text vacío`;
       if (!inCourtTolerant(s.x, COURT_W)) return `${prefix}.shapes[${idx}].x fuera de rango`;
       if (!inCourtTolerant(s.y, COURT_H)) return `${prefix}.shapes[${idx}].y fuera de rango`;
@@ -225,6 +223,9 @@ function validateFrame(frame: unknown, prefix: string, opts: { requirePlayers: b
   if (frame.duration_ms !== undefined && !isInRange(frame.duration_ms, 100, 5000)) {
     return `${prefix}.duration_ms debe estar entre 100 y 5000 ms`;
   }
+  if (frame.auto_trajectory !== undefined && typeof frame.auto_trajectory !== 'boolean') {
+    return `${prefix}.auto_trajectory debe ser boolean`;
+  }
   return null;
 }
 
@@ -270,6 +271,13 @@ export function validatePuzzleContent(content: unknown): string | null {
     }
   }
 
+  // Solo validamos intro_frame si viene con valor real. `null` es legítimo
+  // (columna jsonb vacía: puzzle sin intro). `undefined` también.
+  if (content.intro_frame != null) {
+    const introErr = validateFrame(content.intro_frame, 'puzzle.intro_frame', { requirePlayers: true });
+    if (introErr) return introErr;
+  }
+
   const initialErr = validateFrame(content.initial_frame, 'puzzle.initial_frame', { requirePlayers: true });
   if (initialErr) return initialErr;
 
@@ -307,6 +315,7 @@ export function buildPuzzleRow(content: Record<string, unknown>, questionId: str
     schema_version: (content.schema_version as number) ?? 2,
     statement: content.statement as string,
     court_position: (content.court_position as string) ?? 'both',
+    intro_frame: content.intro_frame ?? null,
     initial_frame: content.initial_frame,
     options: content.options,
   };

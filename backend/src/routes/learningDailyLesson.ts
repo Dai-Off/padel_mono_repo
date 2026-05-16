@@ -73,7 +73,7 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     if (puzzleIds.length > 0) {
       const { data: puzzles, error: puzzleErr } = await supabase
         .from('learning_puzzles')
-        .select('question_id, statement, court_position, initial_frame, options, schema_version')
+        .select('question_id, statement, court_position, intro_frame, initial_frame, options, schema_version')
         .in('question_id', puzzleIds);
       if (puzzleErr) return res.status(500).json({ ok: false, error: puzzleErr.message });
       const byQ = new Map((puzzles ?? []).map((p) => [String(p.question_id), p]));
@@ -86,6 +86,7 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
               schema_version: p.schema_version,
               statement: p.statement,
               court_position: p.court_position,
+              intro_frame: p.intro_frame,
               initial_frame: p.initial_frame,
               options: p.options,
             };
@@ -204,7 +205,7 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
     if (puzzleQuestionIds.length > 0) {
       const { data: puzzles, error: pErr } = await supabase
         .from('learning_puzzles')
-        .select('question_id, statement, court_position, initial_frame, options, schema_version')
+        .select('question_id, statement, court_position, intro_frame, initial_frame, options, schema_version')
         .in('question_id', puzzleQuestionIds);
       if (pErr) return res.status(500).json({ ok: false, error: pErr.message });
       const byQ = new Map((puzzles ?? []).map((p) => [String(p.question_id), p]));
@@ -216,6 +217,7 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
               schema_version: p.schema_version,
               statement: p.statement,
               court_position: p.court_position,
+              intro_frame: p.intro_frame,
               initial_frame: p.initial_frame,
               options: p.options,
             };

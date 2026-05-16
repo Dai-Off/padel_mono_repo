@@ -217,7 +217,7 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
 
   const isPuzzle = type === 'puzzle';
   return (
-    <div className={`fixed inset-0 z-50 bg-black/40 flex items-center justify-center overflow-y-auto px-4 ${isPuzzle ? 'py-6' : 'py-20'}`}>
+    <div className={`fixed inset-0 z-[100] bg-black/40 flex items-start justify-center overflow-y-auto px-4 ${isPuzzle ? 'pt-6 pb-6' : 'py-20'}`}>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

@@ -32,6 +32,12 @@ type Props = {
   // Identifica el frame activo (init / select-X / confirm-X). Cuando cambia,
   // la flecha de trayectoria se redibuja sincronizada con la pelota.
   transitionKey?: string;
+  // Frame anterior, para generar trajectory+highlights auto. Sin él, no se
+  // genera nada auto (initial_frame no tiene anterior).
+  prevFrame?: PuzzleFrame | null;
+  // Si true, los badges A/B/C se ocultan (durante la intro). Aparecen con
+  // fade-in cuando pasa a false.
+  badgesHidden?: boolean;
 };
 
 export function PuzzleStage({
@@ -42,6 +48,8 @@ export function PuzzleStage({
   selectedOptionId = null,
   onSelectOption,
   transitionKey,
+  prevFrame,
+  badgesHidden,
 }: Props) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const win = useWindowDimensions();
@@ -88,6 +96,7 @@ export function PuzzleStage({
             heightPx={size.h}
             transitionKey={transitionKey}
             transitionDurationMs={durationMs}
+            prevFrame={prevFrame}
           />
         )}
 
@@ -145,6 +154,7 @@ export function PuzzleStage({
             onSelect={onSelectOption}
             widthPx={size.w}
             heightPx={size.h}
+            hidden={badgesHidden}
           />
         )}
       </View>

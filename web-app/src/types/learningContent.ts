@@ -60,7 +60,6 @@ interface PuzzleShapeBase {
   id: string;
   style?: ShapePreset;
   color?: string;
-  visible_only_after_confirmation?: boolean;
 }
 
 export type PuzzleShape =
@@ -69,13 +68,20 @@ export type PuzzleShape =
   | (PuzzleShapeBase & { type: 'rect'; x: number; y: number; width: number; height: number; fillColor?: string; fillOpacity?: number })
   | (PuzzleShapeBase & { type: 'line'; points: number[]; strokeWidth?: number })
   | (PuzzleShapeBase & { type: 'text'; x: number; y: number; text: string; fontSize?: number })
-  | (PuzzleShapeBase & { type: 'triangle'; points: number[]; fillColor?: string; fillOpacity?: number });
+  | (PuzzleShapeBase & { type: 'triangle'; points: number[]; fillColor?: string; fillOpacity?: number })
+  | (PuzzleShapeBase & { type: 'speechbubble'; x: number; y: number; text: string; fontSize?: number });
 
 export interface PuzzleFrame {
   players: PuzzlePlayer[];
   ball: PuzzleBall;
   shapes?: PuzzleShape[];
   duration_ms?: number;
+  // Si true (default), el visor genera automáticamente una shape `trajectory`
+  // desde la pelota del frame anterior hasta la actual + dos `highlight` en
+  // origen y destino, sin que esas shapes estén guardadas en `shapes`. Las
+  // shapes manuales en `shapes` se renderizan encima. Si false, solo se ven
+  // las manuales (útil para rebotes en la pared u otras trayectorias custom).
+  auto_trajectory?: boolean;
 }
 
 export interface PuzzleOption {
@@ -92,6 +98,11 @@ export interface PuzzleContent {
   schema_version?: 2;
   statement: string;
   court_position?: PuzzleCourtPosition;
+  // intro_frame opcional: si existe, al cargar el puzzle el visor reproduce
+  // automáticamente la transición `intro_frame → initial_frame` antes de quedar
+  // estático esperando respuesta. Útil para "previas" que añaden contexto
+  // (un golpe que ya ha ocurrido, una posición inicial diferente, etc.).
+  intro_frame?: PuzzleFrame;
   initial_frame: PuzzleFrame;
   options: PuzzleOption[];
 }

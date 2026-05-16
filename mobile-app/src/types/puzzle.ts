@@ -40,7 +40,6 @@ interface PuzzleShapeBase {
   id: string;
   style?: ShapePreset;
   color?: string;
-  visible_only_after_confirmation?: boolean;
 }
 
 export type PuzzleShape =
@@ -49,13 +48,17 @@ export type PuzzleShape =
   | (PuzzleShapeBase & { type: 'rect'; x: number; y: number; width: number; height: number; fillColor?: string; fillOpacity?: number })
   | (PuzzleShapeBase & { type: 'line'; points: number[]; strokeWidth?: number })
   | (PuzzleShapeBase & { type: 'text'; x: number; y: number; text: string; fontSize?: number })
-  | (PuzzleShapeBase & { type: 'triangle'; points: number[]; fillColor?: string; fillOpacity?: number });
+  | (PuzzleShapeBase & { type: 'triangle'; points: number[]; fillColor?: string; fillOpacity?: number })
+  | (PuzzleShapeBase & { type: 'speechbubble'; x: number; y: number; text: string; fontSize?: number });
 
 export interface PuzzleFrame {
   players: PuzzlePlayer[];
   ball: PuzzleBall;
   shapes?: PuzzleShape[];
   duration_ms?: number;
+  // Si true (default), el visor genera automáticamente trajectory + highlights
+  // desde la pelota del frame anterior. Si false, solo shapes manuales.
+  auto_trajectory?: boolean;
 }
 
 export interface PuzzleOption {
@@ -72,6 +75,7 @@ export interface PuzzleContent {
   schema_version?: 2;
   statement: string;
   court_position?: PuzzleCourtPosition;
+  intro_frame?: PuzzleFrame;
   initial_frame: PuzzleFrame;
   options: PuzzleOption[];
 }

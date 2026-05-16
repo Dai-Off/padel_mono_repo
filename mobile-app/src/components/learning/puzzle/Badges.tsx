@@ -49,6 +49,10 @@ type Props = {
   onSelect: (opt: PuzzleOption) => void;
   widthPx: number;
   heightPx: number;
+  // Si true, los badges se ocultan (opacity 0, no pulsables). Pasa a false con
+  // fade-in al terminar la intro: el usuario ve la escena animarse sin
+  // distracciones y los A/B/C aparecen cuando puede decidir.
+  hidden?: boolean;
 };
 
 const SIDE_M = 1.8;
@@ -160,13 +164,16 @@ export function Badges({
   onSelect,
   widthPx,
   heightPx,
+  hidden,
 }: Props) {
   const anyActive = selectedId !== null;
+  // Fade-in suave al hacerse visible (al terminar el intro).
+  const layerOpacity = useTween(hidden ? 0 : 1, 350);
 
   return (
     <View
-      style={[styles.layer, { width: widthPx, height: heightPx }]}
-      pointerEvents="box-none"
+      style={[styles.layer, { width: widthPx, height: heightPx, opacity: layerOpacity }]}
+      pointerEvents={hidden ? 'none' : 'box-none'}
     >
       <Svg
         width={widthPx}

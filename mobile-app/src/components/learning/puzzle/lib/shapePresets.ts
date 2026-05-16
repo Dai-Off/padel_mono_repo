@@ -105,6 +105,8 @@ export function resolvePreset(shape: PuzzleShape): ShapePreset {
       return 'measure';
     case 'line':
       return 'movement';
+    case 'speechbubble':
+      return 'tactical';
     default:
       return 'highlight';
   }
