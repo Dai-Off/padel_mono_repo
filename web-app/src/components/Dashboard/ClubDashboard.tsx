@@ -42,6 +42,7 @@ import { clubService, type Club } from '../../services/club';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { ClubStaffTab } from '../Staff/ClubStaffTab';
 import { InventoryControl } from '../Inventory/InventoryControl';
+import { QuickSaleCart } from '../Inventory/QuickSaleCart';
 import { ClubSchoolTab } from '../School/ClubSchoolTab';
 import { ClubPaymentsTab } from '../Payments/ClubPayments';
 import { ClubCheckinTab } from './ClubDashboardExtensions';
@@ -66,6 +67,7 @@ export const ClubDashboard = () => {
     const isPortalRolesPage = location.pathname === '/equipo-portal';
     const isPersonalPage = location.pathname === '/personal';
     const isInventoryPage = location.pathname === '/inventario';
+    const isCartPage = location.pathname === '/carrito';
     const isSchoolPage = location.pathname === '/escuela';
     const isPaymentsPage = location.pathname === '/pagos';
     const isCheckinPage = location.pathname === '/checkIn';
@@ -143,7 +145,7 @@ export const ClubDashboard = () => {
     const [courtDetail, setCourtDetail] = useState<Court | null>(null);
 
     const fetchData = useCallback(async () => {
-        if (isPlayersPage || isConfigPage || isSportsPage || isPortalRolesPage || isPersonalPage || isInventoryPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isChatsPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
+        if (isPlayersPage || isConfigPage || isSportsPage || isPortalRolesPage || isPersonalPage || isInventoryPage || isCartPage || isSchoolPage || isPaymentsPage || isCheckinPage || isCashClosingPage || isChatsPage || isResenasPage || isIncidenciasPage || isTorneosPage || isFechasEspecialesPage) {
             setLoading(false);
             return;
         }
@@ -156,7 +158,7 @@ export const ClubDashboard = () => {
         } finally {
             setLoading(false);
         }
-    }, [isPlayersPage, isConfigPage, isSportsPage, isPortalRolesPage, isPersonalPage, isInventoryPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isChatsPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
+    }, [isPlayersPage, isConfigPage, isSportsPage, isPortalRolesPage, isPersonalPage, isInventoryPage, isCartPage, isSchoolPage, isPaymentsPage, isCheckinPage, isCashClosingPage, isChatsPage, isResenasPage, isIncidenciasPage, isTorneosPage, isFechasEspecialesPage, club?.id]);
 
     useEffect(() => {
         fetchData();
@@ -289,6 +291,8 @@ export const ClubDashboard = () => {
                         <ClubStaffTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isInventoryPage ? (
                         <InventoryControl clubId={club?.id ?? null} clubResolved={clubResolved} />
+                    ) : isCartPage ? (
+                        <QuickSaleCart clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isSchoolPage ? (
                         <ClubSchoolTab clubId={club?.id ?? null} clubResolved={clubResolved} />
                     ) : isPaymentsPage ? (

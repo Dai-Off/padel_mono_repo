@@ -14,6 +14,7 @@ import {
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
 import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
+import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
 
 const router = Router();
 
@@ -63,6 +64,10 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
  *         name: date_to
  *         description: ISO8601; filtra por bookings.start_at <= date_to (con expand).
  *         schema: { type: string, format: date-time }
+ *       - in: query
+ *         name: club_id
+ *         description: Con expand=1, solo partidos cuyas reservas están en pistas de ese club (evita el límite global de 100).
+ *         schema: { type: string, format: uuid }
  *     responses:
  *       200:
  *         content:
@@ -77,10 +82,63 @@ router.get('/', async (req: Request, res: Response) => {
   const active_only = req.query.active_only === '1' || req.query.active_only === 'true';
   const date_from = req.query.date_from as string | undefined;
   const date_to = req.query.date_to as string | undefined;
+  const filter_club_id = String(req.query.club_id ?? '').trim() || undefined;
   try {
     await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
     const nowIso = new Date().toISOString();
+
+    if (expand && filter_club_id) {
+      const { data: courtRows, error: cErr } = await supabase.from('courts').select('id').eq('club_id', filter_club_id);
+      if (cErr) return res.status(500).json({ ok: false, error: cErr.message });
+      const courtIds = (courtRows ?? []).map((c: { id: string }) => c.id);
+      if (courtIds.length === 0) return res.json({ ok: true, matches: [] });
+
+      let bq = supabase
+        .from('bookings')
+        .select('id')
+        .in('court_id', courtIds)
+        .neq('status', 'cancelled')
+        .is('deleted_at', null);
+      if (active_only) bq = bq.gt('end_at', nowIso);
+      if (date_from) bq = bq.gte('start_at', date_from);
+      if (date_to) bq = bq.lte('start_at', date_to);
+      bq = bq.limit(500);
+      const { data: bidRows, error: bErr } = await bq;
+      if (bErr) return res.status(500).json({ ok: false, error: bErr.message });
+      const bookingIds = [...new Set((bidRows ?? []).map((r: { id: string }) => r.id))];
+      if (bookingIds.length === 0) return res.json({ ok: true, matches: [] });
+
+      const bookingRel = active_only ? 'bookings!inner' : 'bookings';
+      let mq = supabase.from('matches').select(expandSelect(bookingRel)).in('booking_id', bookingIds);
+      if (active_only) {
+        mq = mq
+          .not('status', 'eq', 'cancelled')
+          .not('status', 'eq', 'finished')
+          .gt('bookings.end_at', nowIso)
+          .order('start_at', { ascending: true, foreignTable: 'bookings' })
+          .limit(200);
+      } else {
+        mq = mq.limit(200);
+        if (date_from || date_to) {
+          mq = mq.order('start_at', { ascending: true, foreignTable: 'bookings' });
+        } else {
+          mq = mq.order('created_at', { ascending: false });
+        }
+      }
+      if (booking_id) mq = mq.eq('booking_id', booking_id);
+      const { data, error } = await mq;
+      if (error) return res.status(500).json({ ok: false, error: error.message });
+      const rows = data ?? [];
+      if (active_only) {
+        const filtered = rows.filter((row: any) => {
+          const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
+          return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
+        });
+        return res.json({ ok: true, matches: filtered });
+      }
+      return res.json({ ok: true, matches: rows });
+    }
 
     if (expand) {
       const bookingRel = active_only ? 'bookings!inner' : 'bookings';
@@ -686,6 +744,12 @@ router.post('/', async (req: Request, res: Response) => {
   }
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const { data: existing } = await supabase.from('matches').select(SELECT_ONE).eq('booking_id', booking_id).maybeSingle();
+    if (existing) {
+      await syncMatchPlayersFromBooking(supabase, (existing as { id: string }).id, String(booking_id));
+      return res.status(200).json({ ok: true, match: existing });
+    }
+
     const type = bodyType === 'matchmaking' ? 'matchmaking' : 'open';
     const isCompetitive = competitive !== false;
     let eloMinIns = elo_min != null ? Number(elo_min) : null;
@@ -719,7 +783,19 @@ router.post('/', async (req: Request, res: Response) => {
       ])
       .select(SELECT_ONE)
       .maybeSingle();
-    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (error) {
+      if (error.code === '23505') {
+        const { data: again } = await supabase.from('matches').select(SELECT_ONE).eq('booking_id', booking_id).maybeSingle();
+        if (again) {
+          await syncMatchPlayersFromBooking(supabase, (again as { id: string }).id, String(booking_id));
+          return res.status(200).json({ ok: true, match: again });
+        }
+      }
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+    if (data) {
+      await syncMatchPlayersFromBooking(supabase, (data as { id: string }).id, String(booking_id));
+    }
     return res.status(201).json({ ok: true, match: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

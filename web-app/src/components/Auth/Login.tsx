@@ -7,6 +7,7 @@ import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { clubPortalService } from '../../services/clubPortal';
+import { isSupabaseRecoveryHash, isSupabaseRecoverySearch } from '../../lib/supabase';
 
 export const Login: React.FC = () => {
     const { t } = useTranslation();
@@ -26,6 +27,19 @@ export const Login: React.FC = () => {
     const inviteEmailFromQuery = searchParams.get('invite_email')?.trim().toLowerCase() ?? '';
     const [resolvedInviteEmail, setResolvedInviteEmail] = useState<string>(inviteEmailFromQuery);
     const isInviteRegisterMode = !!inviteToken && !!resolvedInviteEmail;
+
+    // Si Supabase cae en /login con tokens de recovery (Site URL), mandar a pantalla de reset web.
+    useEffect(() => {
+        const { hash, search } = window.location;
+        if (isSupabaseRecoveryHash(hash)) {
+            const h = hash.startsWith('#') ? hash.slice(1) : hash;
+            navigate({ pathname: '/reset-password', hash: h }, { replace: true });
+            return;
+        }
+        if (isSupabaseRecoverySearch(search)) {
+            navigate({ pathname: '/reset-password', search }, { replace: true });
+        }
+    }, [navigate]);
 
     useEffect(() => {
         if (sessionStorage.getItem('padel_session_expired')) {

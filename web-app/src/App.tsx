@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Login } from './components/Auth/Login';
 import { ForgotPassword } from './components/Auth/ForgotPassword';
 import { ResetPassword } from './components/Auth/ResetPassword';
@@ -18,12 +18,44 @@ import { AdminLearningPage } from './components/Admin/Learning/AdminLearningPage
 import { authService } from './services/auth';
 import { Toaster } from 'sonner';
 import { ErrorBoundary } from './components/Layout/ErrorBoundary';
+import { isSupabaseRecoveryHash } from './lib/supabase';
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const session = authService.getSession();
   if (!session) return <Navigate to="/login" replace />;
   return <ErrorBoundary>{children}</ErrorBoundary>;
 };
+
+/** Si Supabase redirige al origen (/) con hash de recovery, mandar a la ruta pública de reset antes del guard. */
+function RootRoute() {
+  const loc = useLocation();
+  if (isSupabaseRecoveryHash(loc.hash)) {
+    const h = loc.hash.startsWith('#') ? loc.hash.slice(1) : loc.hash;
+    return <Navigate to={{ pathname: '/reset-password', hash: h }} replace />;
+  }
+  return (
+    <ProtectedRoute>
+      <Navigate to="/grilla?menu=resumen" replace />
+    </ProtectedRoute>
+  );
+}
+
+/** Enlaces viejos a /app-recovery → misma pantalla que /reset-password */
+function AppRecoveryRedirect() {
+  const loc = useLocation();
+  const h = loc.hash.startsWith('#') ? loc.hash.slice(1) : loc.hash;
+  return <Navigate to={{ pathname: '/reset-password', hash: h, search: loc.search }} replace />;
+}
+
+/** Evita perder el hash: <Navigate to="/" /> del catch-all borraría los tokens. */
+function CatchAllRoute() {
+  const loc = useLocation();
+  if (isSupabaseRecoveryHash(loc.hash)) {
+    const h = loc.hash.startsWith('#') ? loc.hash.slice(1) : loc.hash;
+    return <Navigate to={{ pathname: '/reset-password', hash: h }} replace />;
+  }
+  return <Navigate to="/" replace />;
+}
 
 function App() {
   return (
@@ -34,6 +66,8 @@ function App() {
         <Route path="/email-confirmed" element={<EmailConfirmed />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/app-recovery" element={<AppRecoveryRedirect />} />
+        <Route path="/" element={<RootRoute />} />
         <Route path="/registro" element={<ClubRegistration />} />
         <Route path="/registro-club" element={<RegistroClubInvite />} />
         <Route path="/invitacion-equipo" element={<ClubPortalInviteAccept />} />
@@ -59,14 +93,6 @@ function App() {
           element={
             <ProtectedRoute>
               <AdminLearningPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <Navigate to="/grilla?menu=resumen" replace />
             </ProtectedRoute>
           }
         />
@@ -136,6 +162,14 @@ function App() {
         />
         <Route
           path="/inventario"
+          element={
+            <ProtectedRoute>
+              <ClubDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/carrito"
           element={
             <ProtectedRoute>
               <ClubDashboard />
@@ -263,7 +297,7 @@ function App() {
           }
         />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<CatchAllRoute />} />
       </Routes>
     </BrowserRouter>
   );

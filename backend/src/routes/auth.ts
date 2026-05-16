@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
+import { createClient } from '@supabase/supabase-js';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hashInviteToken } from '../lib/inviteToken';
 import { sendPasswordResetEmail, sendRegistrationConfirmationEmail, syncPlayerVector } from '../lib/mailer';
-import { getFrontendUrl } from '../lib/env';
+import { getFrontendUrl, getPasswordResetRedirectUrl } from '../lib/env';
+import { applyRedirectToActionLink } from '../lib/recoveryMobileBridge';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 import { assignActiveMatchmakingSeasonIfNull } from '../services/matchmakingSeasonService';
 
@@ -201,12 +203,47 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ ok: false, error: 'No se pudo iniciar sesión' });
     }
 
+    // Fallback: si el usuario no tiene fila en players (registro fuera del flujo normal), crearla.
+    const authUser = data.user!;
+    const emailStr2 = String(authUser.email ?? '').trim().toLowerCase();
+    if (emailStr2) {
+      const { data: existingPlayer } = await supabase
+        .from('players')
+        .select('id')
+        .or(`auth_user_id.eq.${authUser.id},email.eq.${emailStr2}`)
+        .neq('status', 'deleted')
+        .maybeSingle();
+
+      if (!existingPlayer) {
+        const fullName = String(authUser.user_metadata?.full_name ?? '').trim();
+        const nameParts = fullName ? fullName.split(/\s+/) : [];
+        const { data: created } = await supabase
+          .from('players')
+          .insert([{
+            first_name: nameParts[0] || 'Usuario',
+            last_name: nameParts.slice(1).join(' ') || '',
+            email: emailStr2,
+            status: 'active',
+            auth_user_id: authUser.id,
+          }])
+          .select('id')
+          .maybeSingle();
+        if (created?.id) {
+          await assignActiveMatchmakingSeasonIfNull(supabase, created.id as string);
+          syncPlayerVector(created.id as string).catch((e) =>
+            console.error('[login] sync-player-vector failed:', e),
+          );
+          console.log('[login] Player row created for auth user without player:', authUser.id);
+        }
+      }
+    }
+
     return res.json({
       ok: true,
       user: {
-        id: data.user?.id,
-        email: data.user?.email,
-        user_metadata: data.user?.user_metadata,
+        id: authUser.id,
+        email: authUser.email,
+        user_metadata: authUser.user_metadata,
       },
       session: {
         access_token: data.session.access_token,
@@ -262,15 +299,17 @@ router.post('/refresh', async (req: Request, res: Response) => {
 
 // POST /auth/forgot-password — envía enlace para restablecer contraseña por email
 router.post('/forgot-password', async (req: Request, res: Response) => {
-  const { email } = req.body ?? {};
+  const { email, client } = req.body ?? {};
   const emailStr = typeof email === 'string' ? email.trim().toLowerCase() : '';
   if (!emailStr) {
     return res.status(400).json({ ok: false, error: 'Email es obligatorio' });
   }
 
+  const clientNorm = typeof client === 'string' ? client.trim().toLowerCase() : '';
+
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const redirectTo = `${getFrontendUrl()}/reset-password`;
+    const redirectTo = getPasswordResetRedirectUrl();
     const { data, error } = await supabase.auth.admin.generateLink({
       type: 'recovery',
       email: emailStr,
@@ -279,6 +318,12 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 
     if (error) {
       const msg = error.message.toLowerCase();
+      if (msg.includes('user not found') || msg.includes('not been registered') || msg.includes('email not found')) {
+        return res.json({
+          ok: true,
+          message: 'Si el correo existe, recibirás un enlace para restablecer la contraseña',
+        });
+      }
       if (msg.includes('rate limit')) {
         return res.status(429).json({
           ok: false,
@@ -289,11 +334,18 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: error.message });
     }
 
-    const actionLink =
+    const actionLinkRaw =
       (data as { properties?: { action_link?: string }; action_link?: string })?.properties?.action_link ??
       (data as { action_link?: string })?.action_link;
-    if (!actionLink) {
+    if (!actionLinkRaw) {
       return res.status(500).json({ ok: false, error: 'No se pudo generar el enlace' });
+    }
+
+    const actionLink = applyRedirectToActionLink(actionLinkRaw, redirectTo);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(
+        `[auth/forgot-password] client=${clientNorm || 'web'} redirectTo=${redirectTo}`,
+      );
     }
 
     const { sent, error: mailError } = await sendPasswordResetEmail(emailStr, actionLink);
@@ -302,6 +354,78 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
     }
 
     return res.json({ ok: true, message: 'Si el correo existe, recibirás un enlace para restablecer la contraseña' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    return res.status(500).json({ ok: false, error: message });
+  }
+});
+
+// POST /auth/recovery/apply-password — establece nueva contraseña con tokens del enlace de recovery (app móvil sin SDK Supabase).
+router.post('/recovery/apply-password', async (req: Request, res: Response) => {
+  const { access_token, refresh_token, password, token_hash } = req.body ?? {};
+  const accessStr = typeof access_token === 'string' ? access_token.trim() : '';
+  const refreshStr = typeof refresh_token === 'string' ? refresh_token.trim() : '';
+  const tokenHashStr = typeof token_hash === 'string' ? token_hash.trim() : '';
+  const passwordStr = typeof password === 'string' ? password : '';
+
+  if (!accessStr && !tokenHashStr) {
+    return res.status(400).json({
+      ok: false,
+      error: 'Se requiere access_token y refresh_token, o bien token_hash del enlace de recuperación',
+    });
+  }
+  if (passwordStr.length < 6) {
+    return res.status(400).json({
+      ok: false,
+      error: 'La contraseña debe tener al menos 6 caracteres',
+    });
+  }
+
+  const url = (process.env.SUPABASE_URL || '').trim();
+  const anonKey = (process.env.SUPABASE_ANON_KEY || '').trim();
+  if (!url || !anonKey) {
+    return res.status(500).json({ ok: false, error: 'Configuración de auth incompleta en el servidor' });
+  }
+
+  try {
+    const client = createClient(url, anonKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+
+    if (tokenHashStr && !accessStr) {
+      const { data: otpData, error: otpError } = await client.auth.verifyOtp({
+        token_hash: tokenHashStr,
+        type: 'recovery',
+      });
+      if (otpError || !otpData.session) {
+        return res.status(401).json({
+          ok: false,
+          error: 'Enlace inválido o expirado. Solicita un nuevo correo de recuperación.',
+        });
+      }
+    } else {
+      const { data: sessionData, error: sessionError } = await client.auth.setSession({
+        access_token: accessStr,
+        refresh_token: refreshStr,
+      });
+
+      if (sessionError || !sessionData.session) {
+        return res.status(401).json({
+          ok: false,
+          error: 'Enlace inválido o expirado. Solicita un nuevo correo de recuperación.',
+        });
+      }
+    }
+
+    const { error: updateError } = await client.auth.updateUser({ password: passwordStr });
+    if (updateError) {
+      return res.status(400).json({ ok: false, error: updateError.message });
+    }
+
+    return res.json({ ok: true, message: 'Contraseña actualizada correctamente' });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return res.status(500).json({ ok: false, error: message });

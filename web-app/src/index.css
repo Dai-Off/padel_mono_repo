@@ -40,12 +40,35 @@
     overflow-y: auto;
     scrollbar-width: none;
     -ms-overflow-style: none;
+    /* Prevent iOS Safari "Text Size Adjust" from magnifying small text */
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* Crisp typography on Retina / iOS */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    /* Lock the viewport so iOS doesn't bounce/scale on input focus */
+    -webkit-tap-highlight-color: transparent;
   }
 
   html::-webkit-scrollbar,
   body::-webkit-scrollbar {
     width: 0px;
     height: 0px;
+  }
+
+  /*
+   * iOS Safari auto-zooms when a focused input has font-size < 16px.
+   * Force a 16px minimum only on iOS (detected via @supports for an iOS-only
+   * feature) so Android / desktop styling is untouched.
+   */
+  @supports (-webkit-touch-callout: none) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+    select,
+    textarea {
+      font-size: max(16px, 1em);
+    }
   }
 }
 

@@ -53,7 +53,7 @@ export async function hasCourtConflict(courtId: string, startAt: string, endAt: 
   if (excludeBookingId) q = q.neq('id', excludeBookingId);
   const { data: existingBookings, error: bErr } = await q;
   if (bErr) return bErr.message;
-  const bookingOverlap = (existingBookings ?? []).some((b: { start_at: string; end_at: string; notes?: string | null }) => {
+  const bookingOverlap = (existingBookings ?? []).some((b: { start_at: string; end_at: string; notes?: string | null; reservation_type?: string | null; status?: string | null }) => {
     if (isExpiredMatchLock(b.notes)) return false;
     const s = new Date(b.start_at).getTime();
     const e = new Date(b.end_at).getTime();

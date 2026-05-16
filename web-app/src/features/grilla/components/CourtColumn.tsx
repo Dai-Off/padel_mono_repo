@@ -23,6 +23,8 @@ interface Props {
     isCurrentlyFocused?: boolean;
     isCompactView?: boolean;
     compactPxPerMinute?: number;
+    /** Fixed column width on mobile when many courts (enables horizontal pan). */
+    mobileColumnWidthPx?: number;
     totalCourts?: number;
     typeColorOverrides?: Record<string, string>;
     /** Día de la grilla respecto a hoy: celdas libres pasadas se muestran en gris. */
@@ -59,6 +61,7 @@ export const CourtColumn: React.FC<Props> = ({
     isCurrentlyFocused,
     isCompactView,
     compactPxPerMinute,
+    mobileColumnWidthPx,
     totalCourts,
     typeColorOverrides,
     gridDayKind = 'future',
@@ -116,12 +119,22 @@ export const CourtColumn: React.FC<Props> = ({
     const freeSlots = getFreeSlots();
 
     return (
-        <div className={clsx(
+        <div
+            className={clsx(
             "flex-1 border-r-2 border-white flex flex-col relative transition-all duration-300 ease-in-out",
-            isCompactView ? "min-w-0 w-0" : "min-w-[81px] max-w-[161px]",
-            // Dim non-focused courts when in focus mode
+            mobileColumnWidthPx
+                ? "flex-none shrink-0"
+                : isCompactView
+                    ? "flex-1 min-w-0 basis-0"
+                    : "min-w-[81px] max-w-[161px]",
             isFocusedMode && !isCurrentlyFocused && "bg-gray-50 opacity-60 grayscale-[20%]"
-        )}>
+        )}
+            style={
+                mobileColumnWidthPx
+                    ? { width: mobileColumnWidthPx, minWidth: mobileColumnWidthPx, maxWidth: mobileColumnWidthPx }
+                    : undefined
+            }
+        >
             {/* Court Header — draggable to move between tabs */}
             <div
                 ref={setDragRef}
@@ -132,7 +145,11 @@ export const CourtColumn: React.FC<Props> = ({
                 onMouseLeave={() => onHeaderHover?.(null)}
                 className={clsx(
                     "border-b border-[#b0b0b0] flex flex-col items-center justify-center font-bold transition-colors touch-none relative",
-                    isCompactView ? "h-6 text-[7px] leading-tight px-0.5 text-center" : isSmallZoom ? "h-[22px] text-[14px]" : "h-[22px] text-[10px]",
+                    mobileColumnWidthPx
+                        ? "h-6 text-[8px] leading-tight px-0.5 text-center max-w-full"
+                        : isCompactView
+                            ? "h-6 text-[7px] leading-tight px-0.5 text-center"
+                            : isSmallZoom ? "h-[22px] text-[14px]" : "h-[22px] text-[10px]",
                     isDragging && "opacity-40",
                     isVirtual
                         ? "text-slate-500 bg-white"
@@ -144,7 +161,9 @@ export const CourtColumn: React.FC<Props> = ({
                 )}
             >
                 {isCompactView ? (
-                    <span>{tData(court.name).replace(/^球場 /, 'C').replace(/^Pista /, 'P')}</span>
+                    <span className={mobileColumnWidthPx ? 'block truncate w-full' : undefined}>
+                        {tData(court.name).replace(/^球場 /, 'C').replace(/^Pista /, 'P')}
+                    </span>
                 ) : (
                     <>
                         <span className="leading-none tracking-wide">{courtMain}</span>
@@ -235,7 +254,9 @@ export const CourtColumn: React.FC<Props> = ({
                                     <span className={clsx(
                                         "font-semibold pointer-events-none",
                                         isCompactView
-                                            ? (manyCourts ? "text-[7.5px] -ml-0.5 tracking-tighter" : "text-[7px]")
+                                            ? (mobileColumnWidthPx
+                                                ? "text-[8px]"
+                                                : manyCourts ? "text-[7.5px] -ml-0.5 tracking-tighter" : "text-[7px]")
                                             : isSmallZoom ? "text-[13px]" : "text-[8px]",
                                         "text-[#919191]"
                                     )}>

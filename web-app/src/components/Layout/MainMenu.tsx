@@ -18,6 +18,7 @@ import {
     UserCog,
     BookOpen,
     Trophy,
+    ShoppingCart,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { portalMenuItemAllowed } from '../../lib/portalNavPermissions';
@@ -92,6 +93,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isA
                 items: [
                     { id: 'personal', path: '/personal', icon: Users, label: t('menu_personal'), color: 'rgb(236, 72, 153)', bgColor: 'rgba(236, 72, 153, 0.06)' },
                     { id: 'inventario', path: '/inventario', icon: Grid3x3, label: t('menu_inventario'), color: 'rgb(99, 102, 241)', bgColor: 'rgba(99, 102, 241, 0.06)' },
+                    { id: 'carrito', path: '/carrito', icon: ShoppingCart, label: 'Carrito', color: 'rgb(11, 91, 122)', bgColor: 'rgba(11, 91, 122, 0.08)' },
                     { id: 'incidencias', path: '/incidencias', icon: AlertCircle, label: t('menu_incidencias'), color: 'rgb(239, 68, 68)', bgColor: 'rgba(239, 68, 68, 0.06)' },
                     { id: 'resenas', path: '/resenas', icon: Star, label: t('menu_reseñas'), color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
                 ],

@@ -23,15 +23,20 @@
   -webkit-overflow-scrolling: auto !important;
 }
 
-/* Ensure draggable elements always block native touch gestures */
+/* Ensure draggable elements always block native touch gestures and iOS
+   long-press menus / text selection that interfere with drag-and-drop. */
 [data-dnd-draggable] {
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
-/* Safari iOS: use -webkit-fill-available as fallback for dvh */
+/* Safari iOS: dvh fallback without breaking flex children */
 @supports (-webkit-touch-callout: none) {
-  .h-\[100dvh\] {
-    height: -webkit-fill-available;
+  .grilla-shell.h-\[100dvh\] {
+    height: 100dvh;
+    min-height: -webkit-fill-available;
   }
 }
 
@@ -40,4 +45,75 @@
   -webkit-overflow-scrolling: touch;
   overflow-x: auto;
   overflow-y: hidden;
+  touch-action: pan-x pan-y;
+}
+
+/* Pinch-pan canvas for mobile full grid (replaces CSS zoom — unsupported on iOS) */
+.grilla-mobile-viewport {
+  flex: 1 1 0%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  -webkit-overflow-scrolling: touch;
+  touch-action: none;
+}
+
+/* react-zoom-pan-pinch internal wrappers must fill the viewport */
+.grilla-mobile-viewport .react-transform-wrapper,
+.grilla-mobile-viewport .react-transform-component {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.grilla-mobile-canvas {
+  display: flex;
+  position: relative;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+/* Many courts: intrinsic width — do not shrink to viewport (pan/zoom instead) */
+.grilla-mobile-canvas--scroll {
+  width: max-content;
+  max-width: none;
+  flex-shrink: 0;
+}
+
+/* Court columns share the full viewport width (≤4 courts) */
+.grilla-mobile-courts-row {
+  display: flex;
+  flex: 1 1 0%;
+  min-width: 0;
+  width: 100%;
+}
+
+.grilla-mobile-courts-row--scroll {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 0;
+}
+
+/* Root wrapper of the Grilla view: neutralizes iOS Safari quirks
+   (auto-zoom of small text, font rendering) and provides a known
+   anchor for the flex-shrink fix below. */
+.grilla-shell {
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  /* Promote to its own layer — avoids glyph re-rasterization jitter on iOS */
+  transform: translateZ(0);
+}
+
+/* Safari respects flex-basis but not the implicit `min-width: auto` /
+   `min-height: auto` on flex items. Without these resets the grilla's
+   inner flex columns overflow and the columns appear "corridas". */
+.grilla-flex-shrink,
+.grilla-flex-shrink > * {
+  min-width: 0;
+  min-height: 0;
 }

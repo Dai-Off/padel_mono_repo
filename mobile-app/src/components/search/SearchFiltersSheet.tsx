@@ -58,7 +58,7 @@ export function getInitialFilters(): SearchFiltersState {
     sport: null,
     date: null,
     timeRange: null,
-    showUnavailable: false,
+    showUnavailable: true,
     sortBy: 'distancia',
     maxDistanceKm: 50,
     duration: 90,
@@ -270,13 +270,13 @@ export function SearchFiltersSheet({
 
             <View style={[styles.section, styles.sectionBorder]}>
               <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Mostrar clubes sin disponibilidad</Text>
+                <Text style={styles.toggleLabel}>Solo horarios reservables (duración)</Text>
                 <Switch
-                  value={filters.showUnavailable}
-                  onValueChange={(v) => setFilters((s) => ({ ...s, showUnavailable: v }))}
+                  value={!filters.showUnavailable}
+                  onValueChange={(v) => setFilters((s) => ({ ...s, showUnavailable: !v }))}
                   trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
                   thumbColor="#fff"
-                  accessibilityLabel="Mostrar clubes sin disponibilidad"
+                  accessibilityLabel="Solo horarios reservables para la duración seleccionada"
                 />
               </View>
             </View>
