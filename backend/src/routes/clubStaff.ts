@@ -123,7 +123,7 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
   if (!club_id?.trim()) {
     return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
   }
-  if (!canAccessClub(req, club_id, 'gestion')) {
+  if (!canAccessClub(req, club_id, ['gestion', 'escuela'])) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
   try {

@@ -32,9 +32,10 @@ interface MainMenuProps {
     isAdmin?: boolean;
     /** null = acceso completo (dueño o admin). Array = permisos del rol de portal para el club actual. */
     portalMenuPermissionKeys?: string[] | null;
+    loading?: boolean;
 }
 
-export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isAdmin, portalMenuPermissionKeys }) => {
+export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isAdmin, portalMenuPermissionKeys, loading }) => {
     const { t } = useTranslation();
     const location = useLocation();
     const navigate = useNavigate();
@@ -145,7 +146,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isA
             {isOpen && (
                 <>
                     <motion.div
-                        className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60]"
+                        className="fixed inset-0 bg-black/40 backdrop-blur-sm z-60"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
                         exit={{ opacity: 0 }}
@@ -153,7 +154,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isA
                     />
 
                     <motion.div
-                        className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[32px] shadow-2xl z-[70] max-h-[85vh] overflow-y-auto"
+                        className="fixed bottom-0 left-0 right-0 bg-white rounded-t-[32px] shadow-2xl z-70 max-h-[85vh] overflow-y-auto"
                         initial={{ y: '100%' }}
                         animate={{ y: 0 }}
                         exit={{ y: '100%' }}
@@ -164,7 +165,23 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isA
                         </div>
 
                         <div className="px-5 pb-8 space-y-6">
-                            {menuSections.map((section, idx) => (
+                            {loading ? (
+                                // Skeleton loader for mobile menu
+                                Array.from({ length: 3 }).map((_, secIdx) => (
+                                    <div key={secIdx} className="space-y-4 animate-pulse">
+                                        <div className="w-20 h-2 bg-gray-100 rounded ml-1" />
+                                        <div className="space-y-2">
+                                            {Array.from({ length: 3 }).map((_, itemIdx) => (
+                                                <div key={itemIdx} className="w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-gray-50/50">
+                                                    <div className="w-9 h-9 rounded-xl bg-gray-100" />
+                                                    <div className="w-32 h-3 bg-gray-100 rounded" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                menuSections.map((section, idx) => (
                                 <div key={idx} className="space-y-2">
                                     <p className="text-[10px] font-bold text-gray-300 uppercase tracking-[0.15em] mb-2 px-1">
                                         {section.title}
@@ -190,7 +207,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isA
                                                         }`}
                                                 >
                                                     <div
-                                                        className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 relative"
+                                                        className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 relative"
                                                         style={{
                                                             backgroundColor: isActive ? 'rgba(255,255,255,0.1)' : item.bgColor
                                                         }}
@@ -209,14 +226,14 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isA
                                                         {item.label}
                                                     </span>
                                                     {isActive && (
-                                                        <div className="w-1.5 h-1.5 rounded-full bg-[#E31E24] flex-shrink-0" />
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-[#E31E24] shrink-0" />
                                                     )}
                                                 </motion.button>
                                             );
                                         })}
                                     </div>
                                 </div>
-                            ))}
+                            )))}
                         </div>
                     </motion.div>
                 </>

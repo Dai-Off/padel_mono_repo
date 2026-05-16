@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, LogIn, Mail, Lock, AlertCircle, Plus } from 'lucide-react';
 import { authService } from '../../services/auth';
+import { HttpError } from '../../services/api';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
@@ -98,8 +99,16 @@ export const Login: React.FC = () => {
                 toast.error(t('invalid_credentials'));
             }
         } catch (err: any) {
-            setError(t('connection_error'));
-            toast.error(t('connection_error'));
+            if (err instanceof HttpError) {
+                const msg = err.status === 401 || err.status === 403
+                    ? t('invalid_credentials')
+                    : err.message || t('login_error');
+                setError(msg);
+                toast.error(msg);
+            } else {
+                setError(t('connection_error'));
+                toast.error(t('connection_error'));
+            }
         } finally {
             setIsLoading(false);
         }

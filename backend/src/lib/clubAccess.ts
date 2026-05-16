@@ -72,3 +72,42 @@ export function portalClubIdsWithAnyPermission(
   }
   return out;
 }
+
+/** Obtiene el staff_id vinculado al usuario actual mediante su email en un club. */
+export async function getStaffIdForUser(req: Request, clubId: string): Promise<string | null> {
+  const ctx = req.authContext;
+  if (!ctx?.userEmail) return null;
+  
+  // Import dinámico para evitar ciclos si existieran
+  const { getSupabaseServiceRoleClient } = await import('./supabase');
+  const supabase = getSupabaseServiceRoleClient();
+  
+  const { data } = await supabase
+    .from('club_staff')
+    .select('id')
+    .eq('club_id', clubId)
+    .eq('email', ctx.userEmail.toLowerCase())
+    .maybeSingle();
+    
+  return (data as { id: string } | null)?.id ?? null;
+}
+
+/** 
+ * Indica si el usuario es estrictamente un profesor (tiene el rol 'profesor' 
+ * y no tiene permisos de gestión administrativa global). 
+ */
+export function isOnlyTeacher(req: Request, clubId: string): boolean {
+  const ctx = req.authContext;
+  if (!ctx) return false;
+  // Dueños de club o admins plataforma no son "solo profesores"
+  if (ctx.adminId) return false;
+  if (ctx.allowedClubIds?.includes(clubId)) return false;
+  
+  const m = ctx.portalMemberships?.find((x) => x.club_id === clubId);
+  if (!m) return false;
+  
+  // Si tiene permisos de gestión o club.manage, no es "solo profesor"
+  if (m.permissions?.includes('club.manage') || m.permissions?.includes('gestion')) return false;
+  
+  return m.role_slug === 'profesor';
+}

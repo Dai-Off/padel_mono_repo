@@ -854,7 +854,7 @@ export function PartidoDetailScreen({
             ) : (
               <View style={styles.ctaTextWrap}>
                 <Text style={styles.ctaText}>
-                  {partido.scoreStatus
+                  {partido.scoreStatus || matchPhase === 'past'
                     ? 'Partido finalizado'
                     : isInMatch
                       ? 'Ya estás en el partido'

@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
-import { canAccessClub } from '../lib/clubAccess';
+import { canAccessClub, isOnlyTeacher, getStaffIdForUser } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -262,6 +262,16 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
   try {
     const supabase = getSupabaseServiceRoleClient();
     let q = supabase.from('club_school_courses').select(COURSE_FIELDS).eq('club_id', clubId).order('created_at', { ascending: false });
+    
+    if (isOnlyTeacher(req, clubId)) {
+      const staffId = await getStaffIdForUser(req, clubId);
+      if (staffId) {
+        q = q.eq('staff_id', staffId);
+      } else {
+        return res.json({ ok: true, courses: [] });
+      }
+    }
+
     if (sport) q = q.eq('sport', sport);
     if (level) q = q.eq('level', level);
 
@@ -472,6 +482,13 @@ router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
 
     const clubId = (course as any).club_id as string;
     if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+
+    if (isOnlyTeacher(req, clubId)) {
+      const staffId = await getStaffIdForUser(req, clubId);
+      if ((course as any).staff_id !== staffId) {
+        return res.status(403).json({ ok: false, error: 'No tienes permiso para ver este curso' });
+      }
+    }
 
     const [daysRes, staffRes, courtRes, enrollCountRes] = await Promise.all([
       supabase
@@ -708,6 +725,13 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
     const clubId = (existing as { club_id: string }).club_id;
     if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
 
+    if (isOnlyTeacher(req, clubId)) {
+      const staffId = await getStaffIdForUser(req, clubId);
+      if ((existing as any).staff_id !== staffId) {
+        return res.status(403).json({ ok: false, error: 'No tienes permiso para editar este curso' });
+      }
+    }
+
     const {
       name,
       sport,
@@ -883,13 +907,20 @@ router.delete('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
     const supabase = getSupabaseServiceRoleClient();
     const { data: existing, error: exErr } = await supabase
       .from('club_school_courses')
-      .select('id, club_id')
+      .select('id, club_id, staff_id')
       .eq('id', id)
       .maybeSingle();
     if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
     if (!existing) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
     const clubId = (existing as { club_id: string }).club_id;
     if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+
+    if (isOnlyTeacher(req, clubId)) {
+      const staffId = await getStaffIdForUser(req, clubId);
+      if ((existing as any).staff_id !== staffId) {
+        return res.status(403).json({ ok: false, error: 'No tienes permiso para eliminar este curso' });
+      }
+    }
     await supabase.from('club_school_course_days').delete().eq('course_id', id);
     await supabase.from('club_school_course_enrollments').delete().eq('course_id', id);
     const { error: delErr } = await supabase.from('club_school_courses').delete().eq('id', id);
@@ -937,13 +968,22 @@ router.post('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req
     const supabase = getSupabaseServiceRoleClient();
     const { data: course, error: cErr } = await supabase
       .from('club_school_courses')
-      .select('id, club_id, capacity')
+      .select('id, club_id, capacity, staff_id')
       .eq('id', id)
       .maybeSingle();
     if (cErr) return res.status(500).json({ ok: false, error: cErr.message });
     if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
-    if (!canAccessClub(req, (course as any).club_id, 'escuela')) {
+    
+    const clubId = (course as any).club_id;
+    if (!canAccessClub(req, clubId, 'escuela')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+    }
+
+    if (isOnlyTeacher(req, clubId)) {
+      const staffId = await getStaffIdForUser(req, clubId);
+      if ((course as any).staff_id !== staffId) {
+        return res.status(403).json({ ok: false, error: 'No tienes permiso para anotar alumnos en este curso' });
+      }
     }
 
     const { count, error: countErr } = await supabase
@@ -991,12 +1031,20 @@ router.get('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req:
     const supabase = getSupabaseServiceRoleClient();
     const { data: course, error: cErr } = await supabase
       .from('club_school_courses')
-      .select('id, club_id')
+      .select('id, club_id, staff_id')
       .eq('id', id)
       .maybeSingle();
     if (cErr) return res.status(500).json({ ok: false, error: cErr.message });
     if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
-    if (!canAccessClub(req, (course as any).club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+    const clubId = (course as any).club_id;
+    if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+
+    if (isOnlyTeacher(req, clubId)) {
+      const staffId = await getStaffIdForUser(req, clubId);
+      if ((course as any).staff_id !== staffId) {
+        return res.status(403).json({ ok: false, error: 'No tienes permiso para ver inscripciones de este curso' });
+      }
+    }
 
     const { data: enrollments, error } = await supabase
       .from('club_school_course_enrollments')
@@ -1030,12 +1078,20 @@ router.put('/:id/enrollments/:enrollmentId', requireClubOwnerOrAdminOrPortalStaf
     const supabase = getSupabaseServiceRoleClient();
     const { data: course, error: cErr } = await supabase
       .from('club_school_courses')
-      .select('id, club_id')
+      .select('id, club_id, staff_id')
       .eq('id', id)
       .maybeSingle();
     if (cErr) return res.status(500).json({ ok: false, error: cErr.message });
     if (!course) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
-    if (!canAccessClub(req, (course as any).club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+    const clubId = (course as any).club_id;
+    if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este curso' });
+
+    if (isOnlyTeacher(req, clubId)) {
+      const staffId = await getStaffIdForUser(req, clubId);
+      if ((course as any).staff_id !== staffId) {
+        return res.status(403).json({ ok: false, error: 'No tienes permiso para gestionar esta inscripción' });
+      }
+    }
 
     const update: Record<string, unknown> = {};
     if (req.body?.fee_cents !== undefined) {
