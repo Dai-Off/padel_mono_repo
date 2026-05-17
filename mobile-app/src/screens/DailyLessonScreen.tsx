@@ -65,7 +65,11 @@ function getQuestionPreview(q: DailyLessonQuestion): string {
       ? c.instruction
       : 'Ordena la secuencia';
   }
-  return typeof c.question === 'string' ? c.question : 'Pregunta';
+  // test_classic / multi_select usan `question`.
+  // true_false y puzzle usan `statement`.
+  if (typeof c.question === 'string' && c.question.trim()) return c.question;
+  if (typeof c.statement === 'string' && c.statement.trim()) return c.statement;
+  return 'Pregunta';
 }
 
 export function DailyLessonScreen({ onBack, onComplete }: Props) {
@@ -253,6 +257,13 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     const elapsed = Date.now() - questionStartTime.current;
     const q = questions[currentIndex];
 
+    // Guard contra doble-disparo: si el usuario hace doble-tap rápido en
+    // Confirmar antes de que React procese el setState que deshabilita el
+    // botón, el handler puede ejecutarse dos veces sincrónicas con el mismo
+    // question_id. Eso provocaba 6 filas en el resumen (5 + 1 duplicada) y
+    // un warning de React por keys repetidas.
+    if (answers.some((a) => a.question_id === q.id)) return;
+
     const newAnswer: AnswerPayload = {
       question_id: q.id,
       selected_answer: selectedAnswer,
@@ -329,10 +340,16 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           startQuestionOrVideo(failedIndices[nextReview]);
         });
       } else {
-        doSubmit(answers);
+        // Repaso terminado. Las respuestas del repaso son solo práctica — la
+        // lección ya se envió al backend al terminar el primer paso. Volver a
+        // submit dispararía "Ya completaste la lección de hoy". Solo volvemos
+        // a la pantalla de resultados (los resultados originales siguen en state).
+        fadeQuestion(() => {
+          setPhase('results');
+        });
       }
     }, advanceDelayMs);
-  }, [reviewIndex, failedIndices, questions, answers, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo]);
+  }, [reviewIndex, failedIndices, questions, fadeQuestion, animateProgressTo, startQuestionOrVideo]);
 
   const handleVideoEnd = useCallback(() => {
     setTimeout(() => {
@@ -554,11 +571,7 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           </Animated.View>
         )}
 
-        {submitting && (
-          <View style={styles.submittingOverlay}>
-            <Text style={styles.submittingText}>Enviando resultados...</Text>
-          </View>
-        )}
+        {submitting && <SubmittingOverlay />}
       </View>
     );
   }
@@ -669,14 +682,19 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
             <Text style={styles.summaryTitle}>Resumen de respuestas</Text>
             {results.results.map((r, i) => {
               const q = questions[i];
-              const preview = q ? getQuestionPreview(q) : `Pregunta ${i + 1}`;
+              const preview = q ? getQuestionPreview(q) : 'Pregunta';
               const vote = questionVotes[r.question_id] ?? null;
               return (
-                <View key={r.question_id} style={styles.summaryRow}>
+                // Key con índice como sufijo para no crashear si hubiese
+                // duplicados de question_id (defensivo).
+                <View key={`${r.question_id}-${i}`} style={styles.summaryRow}>
                   <View style={[styles.summaryIcon, r.correct ? styles.summaryIconCorrect : styles.summaryIconIncorrect]}>
                     <Ionicons name={r.correct ? 'checkmark' : 'close'} size={14} color={r.correct ? '#10B981' : '#EF4444'} />
                   </View>
-                  <Text style={styles.summaryText} numberOfLines={2}>{preview}</Text>
+                  <Text style={styles.summaryText} numberOfLines={2}>
+                    <Text style={styles.summaryIndex}>{i + 1}. </Text>
+                    {preview}
+                  </Text>
                   <Pressable
                     onPress={() => toggleVote(r.question_id, 'up')}
                     hitSlop={6}
@@ -739,6 +757,85 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
   }
 
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// SubmittingOverlay
+// Pantalla de carga al enviar los resultados al backend. Se muestra tras
+// confirmar la última pregunta, mientras se calcula la sesión.
+// Diseño coherente con la estética del resto de la app (orange brand,
+// fondo casi negro, card con borde sutil y glow del color de marca).
+// ---------------------------------------------------------------------------
+
+function SubmittingOverlay() {
+  // Anillo exterior pulsante (scale + opacity sinusoidal).
+  const pulse = useRef(new Animated.Value(0)).current;
+  // Rotación continua del icono interior.
+  const spin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1100,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    const spinLoop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 1200,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    pulseLoop.start();
+    spinLoop.start();
+    return () => { pulseLoop.stop(); spinLoop.stop(); };
+  }, [pulse, spin]);
+
+  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] });
+  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0.15] });
+  const spinDeg = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  return (
+    <View style={styles.submittingOverlay}>
+      <View style={styles.submittingCard}>
+        <View style={styles.submittingIconWrap}>
+          {/* Glow estático suave detrás del icono */}
+          <View style={styles.submittingGlow} />
+          {/* Anillo pulsante naranja */}
+          <Animated.View
+            style={[
+              styles.submittingPulseRing,
+              { transform: [{ scale: pulseScale }], opacity: pulseOpacity },
+            ]}
+          />
+          {/* Icono que rota dentro de un círculo del color de marca */}
+          <LinearGradient
+            colors={['#F18F34', '#d97706']}
+            style={styles.submittingIcon}
+          >
+            <Animated.View style={{ transform: [{ rotate: spinDeg }] }}>
+              <Ionicons name="sync" size={28} color="#FFFFFF" />
+            </Animated.View>
+          </LinearGradient>
+        </View>
+
+        <Text style={styles.submittingTitle}>Calculando tus resultados</Text>
+        <Text style={styles.submittingSubtitle}>Un segundo mientras lo preparamos…</Text>
+      </View>
+    </View>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -810,8 +907,73 @@ const styles = StyleSheet.create({
   },
   reviewBadgeText: { color: '#FB923C', fontSize: 11, fontWeight: '700' },
   questionContent: { paddingHorizontal: 20, paddingTop: 8 },
-  submittingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center' },
-  submittingText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  // Overlay al enviar resultados al backend. Fondo casi negro (consistente con
+  // el resto de la app) con card central y spinner animado en color de marca.
+  submittingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,15,15,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    zIndex: 20,
+  },
+  submittingCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 28,
+    borderRadius: 24,
+    backgroundColor: 'rgba(20,20,22,0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  submittingIconWrap: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  submittingGlow: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#F18F34',
+    opacity: 0.18,
+    shadowColor: '#F18F34',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 40,
+    elevation: 25,
+  },
+  submittingPulseRing: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 2,
+    borderColor: '#F18F34',
+  },
+  submittingIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submittingTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  submittingSubtitle: {
+    color: '#9CA3AF',
+    fontSize: 13,
+    textAlign: 'center',
+  },
 
   // Results
   resultsContent: { paddingHorizontal: 20, paddingTop: 40, alignItems: 'center' },
@@ -855,6 +1017,7 @@ const styles = StyleSheet.create({
   summaryIconCorrect: { backgroundColor: 'rgba(16,185,129,0.2)' },
   summaryIconIncorrect: { backgroundColor: 'rgba(239,68,68,0.2)' },
   summaryText: { flex: 1, color: '#D1D5DB', fontSize: 12, lineHeight: 16 },
+  summaryIndex: { color: '#FB923C', fontWeight: '700' },
   voteBtn: {
     width: 28, height: 28, borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.04)',
