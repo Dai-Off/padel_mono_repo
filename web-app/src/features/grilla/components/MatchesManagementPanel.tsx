@@ -397,13 +397,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                             <ChevronRight className="w-4 h-4" />
                         </button>
                     </div>
-                    <input
-                        type="date"
-                        value={currentDateStr}
-                        onChange={(e) => handleDateInputChange(e.target.value)}
-                        className="hidden sm:block px-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A]"
-                        aria-label="Filtrar por fecha"
-                    />
+
                     <button
                         onClick={() => onBackToGrid ? onBackToGrid() : navigate(`/grilla?date=${currentDateStr}`)}
                         title="Ver en la grilla"
