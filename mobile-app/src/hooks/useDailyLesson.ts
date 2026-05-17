@@ -17,6 +17,9 @@ type DailyLessonState = {
   alreadyCompleted: boolean;
   loading: boolean;
   error: string | null;
+  // True si el backend rechazó por falta del cuestionario de nivelación.
+  // El consumidor renderiza la pantalla bloqueada amigable en vez del error.
+  requiresOnboarding: boolean;
   reload: () => void;
 };
 
@@ -26,16 +29,24 @@ export function useDailyLesson(timezone = 'UTC'): DailyLessonState {
   const [alreadyCompleted, setAlreadyCompleted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [requiresOnboarding, setRequiresOnboarding] = useState(false);
 
   const load = useCallback(() => {
     let mounted = true;
     setLoading(true);
     setError(null);
+    setRequiresOnboarding(false);
 
     fetchDailyLesson(session?.access_token, timezone)
       .then((res) => {
         if (!mounted) return;
         if (!res.ok) {
+          if ('requires_onboarding' in res && res.requires_onboarding) {
+            setRequiresOnboarding(true);
+            // No setError: dejamos que el caller diferencie "necesita onboarding"
+            // de "error real" leyendo el flag.
+            return;
+          }
           setError('error' in res ? res.error : 'Error desconocido');
           return;
         }
@@ -60,7 +71,7 @@ export function useDailyLesson(timezone = 'UTC'): DailyLessonState {
     return cleanup;
   }, [load]);
 
-  return { questions, alreadyCompleted, loading, error, reload: load };
+  return { questions, alreadyCompleted, loading, error, requiresOnboarding, reload: load };
 }
 
 // ---------------------------------------------------------------------------

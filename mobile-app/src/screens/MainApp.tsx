@@ -64,6 +64,10 @@ export function MainApp() {
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  // Si llegamos al perfil desde una feature bloqueada por falta de onboarding
+  // (p.ej. Daily Lesson), pedimos a ProfileScreen que abra el modal del
+  // cuestionario de nivelación automáticamente al montar.
+  const [profileAutoOpenOnboarding, setProfileAutoOpenOnboarding] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showCommunity, setShowCommunity] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
@@ -123,6 +127,11 @@ export function MainApp() {
             setShowDailyLesson(false);
             setStreakRefreshKey((k) => k + 1);
           }}
+          onOpenOnboarding={() => {
+            setShowDailyLesson(false);
+            setProfileAutoOpenOnboarding(true);
+            setShowProfile(true);
+          }}
         />
       );
     }
@@ -158,12 +167,15 @@ export function MainApp() {
           onBack={() => {
             setShowProfile(false);
             setShowPreferences(false);
+            setProfileAutoOpenOnboarding(false);
           }}
           onMenuPress={sidebar.toggle}
           onPreferencesPress={() => {
             setShowProfile(false);
             setShowPreferences(true);
           }}
+          autoOpenOnboarding={profileAutoOpenOnboarding}
+          onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
         />
       );
     }

@@ -17,6 +17,8 @@ import { useStreak } from '../../../hooks/useDailyLesson';
 import { ScalePressable } from './ScalePressable';
 import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
+import { useAuth } from '../../../contexts/AuthContext';
+import { fetchMyPlayerProfile } from '../../../api/players';
 
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -28,10 +30,10 @@ const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 //   racha 21-45→ x2.5  (multiplier 1.5 → factor 2.5)
 //   racha 46+  → x3    (multiplier 2.0 → factor 3.0)
 const BONUS_TIERS = [
-  { minStreak: 3,  label: 'Bonus x1.5', color: '#FB923C' },
-  { minStreak: 8,  label: 'Bonus x2',   color: '#FDBA74' },
-  { minStreak: 21, label: 'Bonus x2.5', color: '#FCD34D' },
-  { minStreak: 46, label: 'Bonus x3',   color: '#FCD34D' },
+  { minStreak: 3,  label: 'Bonus x1.5 SP', color: '#FB923C' },
+  { minStreak: 8,  label: 'Bonus x2 SP',   color: '#FDBA74' },
+  { minStreak: 21, label: 'Bonus x2.5 SP', color: '#FCD34D' },
+  { minStreak: 46, label: 'Bonus x3 SP',   color: '#FCD34D' },
 ] as const;
 
 type Props = {
@@ -106,7 +108,7 @@ function getBonusInfo(streak: number): { text: string; color: string } {
     const remaining = 3 - streak;
     const dayWord = remaining === 1 ? 'día restante' : 'días restantes';
     return {
-      text: `${remaining} ${dayWord} para Bonus x1.5`,
+      text: `${remaining} ${dayWord} para Bonus x1.5 SP`,
       color: '#9CA3AF',
     };
   }
@@ -152,6 +154,20 @@ export function DailyLessonCard({
   variant = 'default',
   streakRefreshKey = 0,
 }: Props) {
+  const { session } = useAuth();
+  // Estado del cuestionario de nivelación. Fetch ligero (un GET /players/me) en
+  // mount para saber si bloqueamos visualmente la card. Si onboardingCompleted
+  // es false, mostramos un candado discreto en vez de "Empezar"/"Hecha".
+  // null mientras carga → no se renderiza candado (la card se ve normal).
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    fetchMyPlayerProfile(session?.access_token).then((p) => {
+      if (mounted && p) setOnboardingCompleted(p.onboardingCompleted);
+    });
+    return () => { mounted = false; };
+  }, [session?.access_token]);
+  const locked = onboardingCompleted === false;
   const isCarousel = variant === 'carousel';
   const { currentStreak, multiplier, lastCompleted, loading } = useStreak(
     TIMEZONE,
@@ -519,7 +535,18 @@ export function DailyLessonCard({
               </View>
             </View>
 
-            {completedToday ? (
+            {locked ? (
+              // Estado "bloqueada" cuando el usuario no ha completado el
+              // cuestionario de nivelación. Tap sigue funcionando — la pantalla
+              // bloqueada amigable explica qué hacer y lleva al onboarding.
+              <View
+                style={styles.lockedBadge}
+                accessibilityLabel="Cuestionario de nivelación pendiente"
+              >
+                <Ionicons name="lock-closed" size={12} color={color1} />
+                <Text style={[styles.lockedBadgeText, { color: color1 }]}>Bloqueado</Text>
+              </View>
+            ) : completedToday ? (
               <View style={styles.hechaBadge}>
                 <Ionicons name="checkmark-circle" size={12} color={color1} />
                 <Text style={[styles.hechaText, { color: color1 }]}>Hecha</Text>
@@ -720,6 +747,24 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   hechaText: androidReadableText({
+    fontSize: 10,
+    fontWeight: '900',
+  }),
+  // Mismo estilo que hechaBadge para que el cambio entre estados (bloqueada /
+  // hecha / empezar) sea consistente visualmente y no salte el layout.
+  lockedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    flexShrink: 0,
+  },
+  lockedBadgeText: androidReadableText({
     fontSize: 10,
     fontWeight: '900',
   }),

@@ -23,6 +23,10 @@ import { LessonImpactRadar, type SkillValues } from '../components/learning/Less
 type Props = {
   onBack: () => void;
   onComplete: () => void;
+  // Si el usuario no tiene completado el cuestionario de nivelación, esta
+  // pantalla se bloquea y el botón "Empezar cuestionario" llama a este callback
+  // para llevar al perfil con el modal de onboarding abierto.
+  onOpenOnboarding?: () => void;
 };
 
 type Phase = 'intro' | 'questions' | 'review' | 'results';
@@ -72,10 +76,10 @@ function getQuestionPreview(q: DailyLessonQuestion): string {
   return 'Pregunta';
 }
 
-export function DailyLessonScreen({ onBack, onComplete }: Props) {
+export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const { questions: hookQuestions, alreadyCompleted, loading, error } = useDailyLesson(TIMEZONE);
+  const { questions: hookQuestions, alreadyCompleted, loading, error, requiresOnboarding } = useDailyLesson(TIMEZONE);
   const streak = useStreak(TIMEZONE);
 
   // Preguntas que se muestran. Por defecto vienen del hook (el algoritmo de
@@ -428,6 +432,64 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           <Skeleton width={200} height={24} variant="dark" borderRadius={8} />
           <Skeleton width={150} height={16} variant="dark" borderRadius={8} style={{ marginTop: 12 }} />
           <Skeleton width="80%" height={48} variant="dark" borderRadius={16} style={{ marginTop: 32 }} />
+        </View>
+      </View>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // RENDER: Bloqueado por falta de cuestionario de nivelación
+  // ---------------------------------------------------------------------------
+  if (requiresOnboarding) {
+    return (
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <View style={styles.lockedContainer}>
+          <View style={styles.lockedIconWrap}>
+            <View style={styles.lockedIconGlow} />
+            <LinearGradient colors={['#F18F34', '#d97706']} style={styles.lockedIconCircle}>
+              <Ionicons name="compass" size={44} color="#FFFFFF" />
+            </LinearGradient>
+          </View>
+
+          <Text style={styles.lockedTitle}>Cuestionario de nivelación</Text>
+          <Text style={styles.lockedSubtitle}>
+            Necesitamos un nivel para poder ofrecer una experiencia mucho más personalizada.
+          </Text>
+
+          <View style={styles.lockedBullets}>
+            <View style={styles.lockedBullet}>
+              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+              <Text style={styles.lockedBulletText}>Lecciones diarias a tu nivel real</Text>
+            </View>
+            <View style={styles.lockedBullet}>
+              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+              <Text style={styles.lockedBulletText}>Coach IA adaptado a ti</Text>
+            </View>
+            <View style={styles.lockedBullet}>
+              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+              <Text style={styles.lockedBulletText}>Recomendaciones de cursos relevantes</Text>
+            </View>
+          </View>
+
+          <Pressable
+            onPress={() => onOpenOnboarding?.()}
+            disabled={!onOpenOnboarding}
+            style={styles.lockedCta}
+          >
+            <LinearGradient
+              colors={['#F18F34', '#C46A20']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.lockedCtaGradient}
+            >
+              <Ionicons name="play" size={18} color="#fff" />
+              <Text style={styles.lockedCtaText}>Empezar cuestionario</Text>
+            </LinearGradient>
+          </Pressable>
+
+          <Pressable onPress={onBack} hitSlop={8} style={styles.cancelButton}>
+            <Text style={styles.cancelText}>Ahora no</Text>
+          </Pressable>
         </View>
       </View>
     );
@@ -909,6 +971,88 @@ const styles = StyleSheet.create({
 
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   errorText: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', marginTop: 12 },
+
+  // Pantalla bloqueada por falta de cuestionario de nivelación.
+  lockedContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  lockedIconWrap: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  lockedIconGlow: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#F18F34',
+    opacity: 0.18,
+    shadowColor: '#F18F34',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 40,
+    elevation: 25,
+  },
+  lockedIconCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lockedTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  lockedSubtitle: {
+    color: '#D1D5DB',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  lockedBullets: {
+    alignSelf: 'stretch',
+    gap: 10,
+    marginBottom: 28,
+  },
+  lockedBullet: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  lockedBulletText: {
+    color: '#E5E7EB',
+    fontSize: 13,
+    flex: 1,
+  },
+  lockedCta: {
+    width: '100%',
+    maxWidth: 320,
+    marginBottom: 12,
+  },
+  lockedCtaGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 16,
+    gap: 8,
+  },
+  lockedCtaText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 16,
+  },
 
   // Intro
   introContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 32 },

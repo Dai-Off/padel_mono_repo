@@ -95,7 +95,7 @@ export type StreakInfo = {
 export async function fetchDailyLesson(
   token: string | null | undefined,
   timezone = 'UTC',
-): Promise<DailyLessonResponse | { ok: false; error: string }> {
+): Promise<DailyLessonResponse | { ok: false; error: string; requires_onboarding?: boolean }> {
   if (!token) return { ok: false, error: 'Token requerido' };
   try {
     const res = await fetch(
@@ -108,7 +108,17 @@ export async function fetchDailyLesson(
       },
     );
     const json = await res.json();
-    if (!res.ok) return { ok: false, error: json.error ?? 'Error al obtener lección' };
+    if (!res.ok) {
+      // Caso especial: el backend manda 403 con requires_onboarding:true cuando
+      // el jugador no ha completado el cuestionario de nivelación. Lo propagamos
+      // como flag para que el caller renderice la pantalla bloqueada amigable
+      // en vez de un error genérico.
+      return {
+        ok: false,
+        error: json.error ?? 'Error al obtener lección',
+        requires_onboarding: json.requires_onboarding === true,
+      };
+    }
     return json as DailyLessonResponse;
   } catch {
     return { ok: false, error: 'Error de conexión' };
