@@ -1,8 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import PlayerBack from '../../../../assets/puzzles/player_back.svg';
 import PlayerFront from '../../../../assets/puzzles/player_front.svg';
-import { SpeechBubble } from './SpeechBubble';
 import type { PuzzlePlayer } from '../../../types/puzzle';
 import type { PuzzleStateKey } from './Shapes';
 
@@ -17,9 +16,13 @@ type Props = {
   durationMs: number;       // duración de la animación de transición
   // Estado del puzzle: necesario para decidir si se muestra "YOU" automático.
   puzzleState?: PuzzleStateKey;
+  // Si true, este cambio de posición se aplica instantáneamente (snap, sin
+  // animar). Útil para replay del intro: el jugador aparece en posición de
+  // partida sin "viajar" desde donde se quedó tras la animación previa.
+  snap?: boolean;
 };
 
-export function AnimatedPlayer({ player, cxPx, cyPx, widthPx, durationMs, puzzleState = 'init' }: Props) {
+export function AnimatedPlayer({ player, cxPx, cyPx, widthPx, durationMs, puzzleState = 'init', snap }: Props) {
   const heightPx = widthPx * SPRITE_ASPECT;
   // Posición top-left = centro − mitad de tamaño.
   const targetX = cxPx - widthPx / 2;
@@ -59,19 +62,25 @@ export function AnimatedPlayer({ player, cxPx, cyPx, widthPx, durationMs, puzzle
       initialized.current = true;
       return;
     }
+    // Modo snap: posicionar instantáneamente (replay/reset).
+    if (snap) {
+      xy.setValue({ x: targetX, y: targetY });
+      return;
+    }
     Animated.timing(xy, {
       toValue: { x: targetX, y: targetY },
       duration: durationMs,
       easing: Easing.inOut(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [targetX, targetY, durationMs, xy]);
+  }, [targetX, targetY, durationMs, xy, snap]);
 
   const Sprite = player.team === 1 ? PlayerBack : PlayerFront;
-  // Texto del bocadillo: custom > "YOU" automático en initial_frame.
-  const bubbleText =
-    player.speech_label ??
-    (player.is_user && puzzleState === 'init' ? 'YOU' : null);
+  // El YOU se muestra como label naranja debajo del sprite (coherente con el
+  // editor web). El antiguo SpeechBubble se reservaba solo para `speech_label`
+  // legacy: con la migración a shape speechbubble ya no hace falta renderizarlo
+  // aquí (los puzzles nuevos lo llevan como shape).
+  const showYouLabel = player.is_user && puzzleState === 'init';
 
   return (
     <Animated.View
@@ -90,9 +99,16 @@ export function AnimatedPlayer({ player, cxPx, cyPx, widthPx, durationMs, puzzle
       ]}
     >
       <Sprite width={widthPx} height={heightPx} preserveAspectRatio="xMidYMid meet" />
-      {bubbleText ? (
-        <SpeechBubble text={bubbleText} spriteWidthPx={widthPx} />
-      ) : null}
+      {showYouLabel && (
+        <Text
+          style={[
+            styles.youLabel,
+            { width: widthPx, top: heightPx + 2, fontSize: Math.max(10, widthPx / 5) },
+          ]}
+        >
+          YOU
+        </Text>
+      )}
     </Animated.View>
   );
 }
@@ -102,6 +118,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     top: 0,
+  },
+  youLabel: {
+    position: 'absolute',
+    left: 0,
+    color: '#F18F34',
+    fontWeight: '800',
+    textAlign: 'center',
   },
 });
 
@@ -118,9 +141,7 @@ export function StaticPlayer({
 }: Omit<Props, 'durationMs'>) {
   const heightPx = widthPx * SPRITE_ASPECT;
   const Sprite = player.team === 1 ? PlayerBack : PlayerFront;
-  const bubbleText =
-    player.speech_label ??
-    (player.is_user && puzzleState === 'init' ? 'YOU' : null);
+  const showYouLabel = player.is_user && puzzleState === 'init';
   return (
     <View
       pointerEvents="none"
@@ -134,9 +155,16 @@ export function StaticPlayer({
       ]}
     >
       <Sprite width={widthPx} height={heightPx} preserveAspectRatio="xMidYMid meet" />
-      {bubbleText ? (
-        <SpeechBubble text={bubbleText} spriteWidthPx={widthPx} />
-      ) : null}
+      {showYouLabel && (
+        <Text
+          style={[
+            styles.youLabel,
+            { width: widthPx, top: heightPx + 2, fontSize: Math.max(10, widthPx / 5) },
+          ]}
+        >
+          YOU
+        </Text>
+      )}
     </View>
   );
 }

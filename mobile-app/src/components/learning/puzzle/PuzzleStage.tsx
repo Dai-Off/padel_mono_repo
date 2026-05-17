@@ -38,6 +38,10 @@ type Props = {
   // Si true, los badges A/B/C se ocultan (durante la intro). Aparecen con
   // fade-in cuando pasa a false.
   badgesHidden?: boolean;
+  // Si true, el siguiente cambio de posición de jugadores/pelota se aplica
+  // instantáneamente (sin animar). Útil para replay/reset: aparecemos en el
+  // frame de partida sin "viajar" desde donde estábamos.
+  snap?: boolean;
 };
 
 export function PuzzleStage({
@@ -50,6 +54,7 @@ export function PuzzleStage({
   transitionKey,
   prevFrame,
   badgesHidden,
+  snap,
 }: Props) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const win = useWindowDimensions();
@@ -100,6 +105,21 @@ export function PuzzleStage({
           />
         )}
 
+        {/* Capa de badges A/B/C: por DEBAJO de players/ball para que los actores
+            queden por encima cuando comparten zona. Coherente con el editor web
+            Konva (badges en layer anterior a players/ball). */}
+        {size && options && onSelectOption && (
+          <Badges
+            options={options}
+            selectedId={selectedOptionId}
+            confirmed={state === 'confirmed'}
+            onSelect={onSelectOption}
+            widthPx={size.w}
+            heightPx={size.h}
+            hidden={badgesHidden}
+          />
+        )}
+
         {size && validFrame &&
           frame.players.map((p) => {
             const cxPx = (m2pctX(p.x) / 100) * size.w;
@@ -113,6 +133,7 @@ export function PuzzleStage({
                 widthPx={playerWidthPx}
                 durationMs={durationMs}
                 puzzleState={state}
+                snap={snap}
               />
             ) : (
               <StaticPlayer
@@ -134,6 +155,7 @@ export function PuzzleStage({
               cyPx={(m2pctY(frame.ball.y) / 100) * size.h}
               sizePx={ballSidePx}
               durationMs={durationMs}
+              snap={snap}
             />
           ) : (
             <StaticBall
@@ -145,18 +167,6 @@ export function PuzzleStage({
           )
         )}
 
-        {/* Capa de badges A/B/C en pista. Encima de players/ball. */}
-        {size && options && onSelectOption && (
-          <Badges
-            options={options}
-            selectedId={selectedOptionId}
-            confirmed={state === 'confirmed'}
-            onSelect={onSelectOption}
-            widthPx={size.w}
-            heightPx={size.h}
-            hidden={badgesHidden}
-          />
-        )}
       </View>
     </View>
   );

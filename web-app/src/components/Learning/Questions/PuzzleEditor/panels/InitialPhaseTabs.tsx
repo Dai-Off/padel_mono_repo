@@ -15,6 +15,8 @@ interface Props {
   onPreview: () => void;
   onPlayGlobal: () => void;
   disabled?: boolean;
+  // Sub-tabs con errores reciben un punto rojo.
+  errorSubTabs?: Set<InitialSubTab>;
 }
 
 export function InitialPhaseTabs({
@@ -26,8 +28,10 @@ export function InitialPhaseTabs({
   onPreview,
   onPlayGlobal,
   disabled,
+  errorSubTabs,
 }: Props) {
   const hasIntro = !!content.intro_frame;
+  const hasError = (s: InitialSubTab) => !!errorSubTabs?.has(s);
 
   return (
     <div className={`flex items-center gap-1 flex-wrap ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
@@ -36,11 +40,14 @@ export function InitialPhaseTabs({
           <button
             type="button"
             onClick={() => onSelect('intro')}
-            className={`px-2.5 py-1.5 rounded-l-xl text-[10px] font-bold transition-all ${
+            className={`relative px-2.5 py-1.5 rounded-l-xl text-[10px] font-bold transition-all ${
               active === 'intro' ? 'bg-purple-500 text-white' : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
             }`}
           >
             Intro
+            {hasError('intro') && (
+              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-white" title="Errores en intro" />
+            )}
           </button>
           <button
             type="button"
@@ -66,11 +73,14 @@ export function InitialPhaseTabs({
       <button
         type="button"
         onClick={() => onSelect('static')}
-        className={`px-2.5 py-1.5 rounded-xl text-[10px] font-bold transition-all ${
+        className={`relative px-2.5 py-1.5 rounded-xl text-[10px] font-bold transition-all ${
           active === 'static' ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
         }`}
       >
         Estático
+        {hasError('static') && (
+          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-white" title="Errores en frame estático" />
+        )}
       </button>
 
       <div className="w-px h-5 bg-gray-200 mx-1" />

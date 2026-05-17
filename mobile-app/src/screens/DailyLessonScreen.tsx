@@ -270,6 +270,24 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     // Cancelar timer anterior si existe
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
 
+    // Delay antes de avanzar a la siguiente pregunta.
+    // - Tipos sencillos (test_classic, true_false, etc.): 2200 ms basta para
+    //   leer el feedback y el flash de acierto/fallo.
+    // - Puzzle: la animación de confirmation_frame puede durar 1500 ms o más,
+    //   y además hay que leer la explicación. Calculamos
+    //   max(2200, duration_ms_del_confirm_de_la_opcion_elegida + 2500) para
+    //   dar tiempo a ver la jugada completa + leer.
+    let advanceDelayMs = 2200;
+    if (q.type === 'puzzle') {
+      const content = q.content as {
+        options?: { id: number; confirmation_frame?: { duration_ms?: number } }[];
+      };
+      const optionId = (selectedAnswer as { option_id?: number })?.option_id;
+      const opt = content?.options?.find((o) => o.id === optionId);
+      const confirmDur = opt?.confirmation_frame?.duration_ms ?? 1500;
+      advanceDelayMs = Math.max(2200, confirmDur + 2500);
+    }
+
     advanceTimer.current = setTimeout(() => {
       const nextIndex = currentIndex + 1;
       if (nextIndex < questions.length) {
@@ -282,11 +300,25 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
         // Fin de preguntas — siempre ir a results
         doSubmit(updatedAnswers);
       }
-    }, 2200);
+    }, advanceDelayMs);
   }, [currentIndex, questions, answers, failedIndices, showFlash, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo]);
 
-  const handleReviewAnswered = useCallback((_correct: boolean, _selectedAnswer: unknown) => {
+  const handleReviewAnswered = useCallback((_correct: boolean, selectedAnswer: unknown) => {
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
+
+    // Mismo cálculo de delay que en handleQuestionAnswered: puzzle necesita más
+    // tiempo para que se vea la animación de confirm + se lea la explicación.
+    const q = questions[failedIndices[reviewIndex]];
+    let advanceDelayMs = 2200;
+    if (q?.type === 'puzzle') {
+      const content = q.content as {
+        options?: { id: number; confirmation_frame?: { duration_ms?: number } }[];
+      };
+      const optionId = (selectedAnswer as { option_id?: number })?.option_id;
+      const opt = content?.options?.find((o) => o.id === optionId);
+      const confirmDur = opt?.confirmation_frame?.duration_ms ?? 1500;
+      advanceDelayMs = Math.max(2200, confirmDur + 2500);
+    }
 
     advanceTimer.current = setTimeout(() => {
       const nextReview = reviewIndex + 1;
@@ -299,8 +331,8 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
       } else {
         doSubmit(answers);
       }
-    }, 2200);
-  }, [reviewIndex, failedIndices, answers, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo]);
+    }, advanceDelayMs);
+  }, [reviewIndex, failedIndices, questions, answers, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo]);
 
   const handleVideoEnd = useCallback(() => {
     setTimeout(() => {

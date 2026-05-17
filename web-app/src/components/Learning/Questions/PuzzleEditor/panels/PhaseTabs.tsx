@@ -15,6 +15,8 @@ interface Props {
   onPreview: () => void;
   onPlayGlobal: () => void;
   disabled?: boolean;
+  // Fases con errores reciben un punto rojo.
+  errorPhases?: Set<Phase>;
 }
 
 export function PhaseTabs({
@@ -26,22 +28,33 @@ export function PhaseTabs({
   onPreview,
   onPlayGlobal,
   disabled,
+  errorPhases,
 }: Props) {
   const phases: Phase[] = ['select', 'confirm'];
   const hasFrame = (p: Phase) =>
     p === 'select' ? !!option.select_frame : !!option.confirmation_frame;
+  const hasError = (p: Phase) => !!errorPhases?.has(p);
 
   return (
     <div className={`flex items-center gap-1 flex-wrap ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
       {phases.map((phase) => {
         const label = phase === 'select' ? 'Selección' : 'Confirmación';
         if (!hasFrame(phase)) {
+          // No se puede crear confirmación si todavía no existe selección:
+          // forzamos el orden lógico (primero seleccionar, luego confirmar).
+          const blocked = phase === 'confirm' && !hasFrame('select');
           return (
             <button
               key={phase}
               type="button"
-              onClick={() => onAddPhase(phase)}
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-bold bg-white text-gray-400 border border-dashed border-gray-300 hover:border-indigo-400 hover:text-indigo-500 transition-all"
+              onClick={() => { if (!blocked) onAddPhase(phase); }}
+              disabled={blocked}
+              title={blocked ? 'Crea primero el frame de Selección' : undefined}
+              className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-[10px] font-bold border border-dashed transition-all ${
+                blocked
+                  ? 'bg-gray-50 text-gray-300 border-gray-200 cursor-not-allowed'
+                  : 'bg-white text-gray-400 border-gray-300 hover:border-indigo-400 hover:text-indigo-500'
+              }`}
             >
               <Plus className="w-3 h-3" />
               {label}
@@ -54,15 +67,20 @@ export function PhaseTabs({
             <button
               type="button"
               onClick={() => onSelect(phase)}
-              className={`px-2.5 py-1.5 rounded-l-xl text-[10px] font-bold transition-all ${
+              className={`relative px-2.5 py-1.5 rounded-l-xl text-[10px] font-bold transition-all ${
                 isActive
                   ? phase === 'select'
                     ? 'bg-amber-500 text-white'
-                    : 'bg-emerald-500 text-white'
+                    : option.is_correct
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-red-500 text-white'
                   : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
               }`}
             >
               {label}
+              {hasError(phase) && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-white" title="Hay errores en este frame" />
+              )}
             </button>
             <button
               type="button"

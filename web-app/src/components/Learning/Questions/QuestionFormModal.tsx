@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { X, Plus, Trash2, Upload, Video } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService, validateVideo, VIDEO_LIMITS } from '../../../services/learningContent';
 import { PuzzleEditor } from './PuzzleEditor/PuzzleEditor';
+import { validatePuzzleContentAll } from '../../../lib/puzzleValidator';
 import type {
   Question,
   QuestionType,
@@ -74,7 +75,7 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
 
   // Campos comunes
   const [type, setType] = useState<QuestionType>(question?.type ?? 'test_classic');
-  const [level, setLevel] = useState(question?.level ?? 0);
+  const [level, setLevel] = useState<number | null>(question?.level ?? null);
   const [area, setArea] = useState<QuestionArea>(question?.area ?? 'technique');
   const [videoUrl, setVideoUrl] = useState(question?.video_url ?? '');
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -132,6 +133,11 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
 
   // Validación del contenido según tipo
   const validateContent = (): string | null => {
+    // Guard transversal: el nivel es obligatorio y debe ser > 0 para cualquier
+    // tipo de pregunta. Sin esto se quedaba en 0 si el usuario se olvidaba.
+    if (level == null || level <= 0) {
+      return 'El nivel es obligatorio y debe ser mayor que 0';
+    }
     switch (type) {
       case 'test_classic': {
         const c = content as TestClassicContent;
@@ -163,17 +169,30 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
         return null;
       }
       case 'puzzle': {
-        // Validación ligera client-side: el backend hace validación completa.
-        const c = content as PuzzleContent;
-        if (!c?.statement || c.statement.trim().length < 8) return 'El enunciado del puzzle debe tener al menos 8 caracteres';
-        if (!c.initial_frame?.players || c.initial_frame.players.length < 1) return 'El puzzle necesita al menos 1 jugador';
-        if (!Array.isArray(c.options) || c.options.length < 2) return 'El puzzle necesita al menos 2 opciones';
-        if (c.options.filter((o) => o.is_correct).length !== 1) return 'Debe haber exactamente 1 opción marcada como correcta';
+        // Validación completa client-side (mismo validador que el backend).
+        // Si hay errores, el banner del PuzzleEditor ya los pinta uno a uno;
+        // aquí solo bloqueamos el submit con un resumen.
+        const all = validatePuzzleContentAll(content as PuzzleContent);
+        if (all.length > 0) {
+          const first = all[0].message;
+          return all.length === 1
+            ? `Puzzle inválido: ${first}`
+            : `Puzzle inválido: ${first} (y ${all.length - 1} error${all.length - 1 === 1 ? '' : 'es'} más; revisa el banner del editor)`;
+        }
         return null;
       }
     }
     return null;
   };
+
+  // Recompute puzzle errors en vivo para poder deshabilitar el botón Guardar
+  // (no solo mostrar toast tras click). Solo aplica si el tipo es puzzle —
+  // los demás tipos tienen validación trivial en validateContent.
+  const puzzleErrors = useMemo(() => {
+    if (type !== 'puzzle') return [];
+    return validatePuzzleContentAll(content as PuzzleContent);
+  }, [type, content]);
+  const submitBlocked = type === 'puzzle' && puzzleErrors.length > 0;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,17 +287,22 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
               <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_level')}</label>
               <input
                 type="number"
-                min={0}
+                min={0.5}
                 max={7}
                 step={0.5}
-                value={level}
+                value={level ?? ''}
+                placeholder="1.0 - 7.0"
                 onChange={(e) => {
+                  if (e.target.value === '') {
+                    setLevel(null);
+                    return;
+                  }
                   const val = Number(e.target.value);
                   // Solo permitir incrementos de 0.5
                   const rounded = Math.round(val * 2) / 2;
-                  setLevel(Math.max(0, Math.min(7, rounded)));
+                  setLevel(Math.max(0.5, Math.min(7, rounded)));
                 }}
-                className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
+                className={`w-full rounded-xl border px-3 py-2 text-sm ${level == null || level <= 0 ? 'border-red-300 bg-red-50' : 'border-gray-200'}`}
               />
             </div>
           </div>
@@ -395,10 +419,17 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
             </button>
             <button
               type="submit"
-              disabled={saving || uploading}
-              className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-[#E31E24] hover:opacity-90 transition-all disabled:opacity-50"
+              disabled={saving || uploading || submitBlocked}
+              title={submitBlocked ? `Faltan ${puzzleErrors.length} cosas por arreglar` : undefined}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-[#E31E24] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {uploading ? `${t('learning_field_video')}...` : saving ? '...' : t('save')}
+              {uploading
+                ? `${t('learning_field_video')}...`
+                : saving
+                  ? '...'
+                  : submitBlocked
+                    ? `${t('save')} (${puzzleErrors.length} error${puzzleErrors.length === 1 ? '' : 'es'})`
+                    : t('save')}
             </button>
           </div>
         </form>

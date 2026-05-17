@@ -14,6 +14,8 @@ interface Props {
   onAddOption: () => void;
   onRemoveOption: (optionId: 1 | 2 | 3) => void;
   disabled?: boolean;
+  // Tabs con errores de validación reciben un punto rojo.
+  errorTabs?: Set<MainTabKey>;
 }
 
 function nextOptionLabel(content: PuzzleContent): string {
@@ -24,13 +26,15 @@ function nextOptionLabel(content: PuzzleContent): string {
   return '';
 }
 
-export function MainTabs({ content, active, onSelect, onAddOption, onRemoveOption, disabled }: Props) {
+export function MainTabs({ content, active, onSelect, onAddOption, onRemoveOption, disabled, errorTabs }: Props) {
+  const hasError = (key: MainTabKey) => !!errorTabs?.has(key);
   return (
     <div className={`flex items-center gap-1.5 flex-wrap ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
       <TabButton
         active={active === 'initial'}
         onClick={() => onSelect('initial')}
         label="Inicial"
+        error={hasError('initial')}
       />
 
       {content.options.map((opt: PuzzleOption) => {
@@ -45,6 +49,7 @@ export function MainTabs({ content, active, onSelect, onAddOption, onRemoveOptio
               label={`Opción ${letter}`}
               correct={opt.is_correct}
               rounded={canRemove ? 'left' : 'full'}
+              error={hasError(opt.id)}
             />
             {canRemove && (
               <button
@@ -84,19 +89,21 @@ function TabButton({
   label,
   correct,
   rounded = 'full',
+  error,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
   correct?: boolean;
   rounded?: 'full' | 'left';
+  error?: boolean;
 }) {
   const radius = rounded === 'full' ? 'rounded-xl' : 'rounded-l-xl';
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex items-center gap-1 px-3 py-1.5 ${radius} text-[10px] font-bold transition-all ${
+      className={`relative flex items-center gap-1 px-3 py-1.5 ${radius} text-[10px] font-bold transition-all ${
         active
           ? 'bg-[#1A1A1A] text-white'
           : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
@@ -104,6 +111,9 @@ function TabButton({
     >
       {label}
       {correct && <span className="text-emerald-400">✓</span>}
+      {error && (
+        <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-white" title="Hay errores en este apartado" />
+      )}
     </button>
   );
 }

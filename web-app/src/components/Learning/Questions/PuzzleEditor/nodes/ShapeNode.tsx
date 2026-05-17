@@ -2,7 +2,7 @@
 // Animaciones: marching dashes (dashOffset) + halo pulse (escala).
 // Puntas de flecha: base perpendicular al final de la línea, no superpuestas.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Circle, Group, Line, Rect, Text, Transformer } from 'react-konva';
 import type { KonvaEventObject } from 'konva/lib/Node';
 import type Konva from 'konva';
@@ -247,30 +247,34 @@ function TrajectoryRender({ shape, visual, scale, ballShotType, progress = 1 }: 
   const ex = m2px(shape.endPoint.x, scale);
   const ey = m2px(shape.endPoint.y, scale);
   // Curvatura automática si no hay controlPoint pero la pelota es lob/chiquita.
-  let cp: { x: number; y: number } | null = shape.controlPoint
-    ? { x: m2px(shape.controlPoint.x, scale), y: m2px(shape.controlPoint.y, scale) }
-    : null;
-  if (!cp && ballShotType) {
+  // Se memoriza para que NO se recalcule en cada frame del progress: si lo
+  // recalculamos, mínimas diferencias de redondeo en distToBorder(candA/B)
+  // pueden hacer que el lado elegido se invierta a mitad de animación.
+  const explicitCpX = shape.controlPoint?.x;
+  const explicitCpY = shape.controlPoint?.y;
+  const cp = useMemo<{ x: number; y: number } | null>(() => {
+    if (explicitCpX !== undefined && explicitCpY !== undefined) {
+      return { x: m2px(explicitCpX, scale), y: m2px(explicitCpY, scale) };
+    }
+    if (!ballShotType) return null;
     const midX = (sx + ex) / 2;
     const midY = (sy + ey) / 2;
     const dx = ex - sx;
     const dy = ey - sy;
     const len = Math.hypot(dx, dy);
-    if (len > 0.001) {
-      const px = -dy / len;
-      const py = dx / len;
-      const factor = ballShotType === 'lob' ? 0.25 : 0.12;
-      const offset = len * factor;
-      // Probamos ambos lados y elegimos el que mantiene cp dentro del campo.
-      const candA = { x: midX + px * offset, y: midY + py * offset };
-      const candB = { x: midX - px * offset, y: midY - py * offset };
-      const stageW = scale.widthPx;
-      const stageH = scale.heightPx;
-      const distToBorder = (p: { x: number; y: number }) =>
-        Math.min(p.x, stageW - p.x, p.y, stageH - p.y);
-      cp = distToBorder(candA) >= distToBorder(candB) ? candA : candB;
-    }
-  }
+    if (len <= 0.001) return null;
+    const px = -dy / len;
+    const py = dx / len;
+    const factor = ballShotType === 'lob' ? 0.25 : 0.12;
+    const offset = len * factor;
+    const candA = { x: midX + px * offset, y: midY + py * offset };
+    const candB = { x: midX - px * offset, y: midY - py * offset };
+    const stageW = scale.widthPx;
+    const stageH = scale.heightPx;
+    const distToBorder = (p: { x: number; y: number }) =>
+      Math.min(p.x, stageW - p.x, p.y, stageH - p.y);
+    return distToBorder(candA) >= distToBorder(candB) ? candA : candB;
+  }, [sx, sy, ex, ey, explicitCpX, explicitCpY, ballShotType, scale]);
   // Path acortado: termina justo en la base de la cabeza final.
   const tangentEndX = cp ? ex - cp.x : ex - sx;
   const tangentEndY = cp ? ey - cp.y : ey - sy;

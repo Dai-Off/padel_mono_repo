@@ -81,16 +81,21 @@ export function PlayerNode({ player, scale, selected, onSelect, onChange, snapTo
           strokeWidth={1}
         />
       )}
-      <Text
-        x={0}
-        y={heightPx + 2}
-        text={`P${player.id}`}
-        fontSize={Math.max(10, widthPx / 6)}
-        fill="#ffffff"
-        width={widthPx}
-        align="center"
-        listening={false}
-      />
+      {/* Solo mostramos texto bajo el jugador del usuario ("YOU"). El resto no
+          lleva label — quita ruido visual del editor. */}
+      {player.is_user && (
+        <Text
+          x={0}
+          y={heightPx + 2}
+          text="YOU"
+          fontSize={Math.max(10, widthPx / 6)}
+          fill="#fbbf24"
+          fontStyle="bold"
+          width={widthPx}
+          align="center"
+          listening={false}
+        />
+      )}
     </Group>
   );
 }

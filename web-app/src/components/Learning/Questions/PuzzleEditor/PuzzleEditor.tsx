@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Undo2, Redo2, RotateCcw } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Undo2, Redo2, RotateCcw, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { PuzzleStage, type SelectedItem } from './PuzzleStage';
 import { MetaPanel } from './panels/MetaPanel';
 import { OptionPanel } from './panels/OptionPanel';
@@ -8,12 +8,13 @@ import { PhaseTabs, type Phase } from './panels/PhaseTabs';
 import { InitialPhaseTabs, type InitialSubTab } from './panels/InitialPhaseTabs';
 import { RevealFramePanel } from './panels/RevealFramePanel';
 import { ShapesToolbar } from './panels/ShapesToolbar';
-import type { ShapeType } from './lib/shapeFactory';
+import { createShape, type ShapeType } from './lib/shapeFactory';
 import { ShapeInspector } from './panels/ShapeInspector';
 import { PlayerInspector } from './panels/PlayerInspector';
 import { BallInspector } from './panels/BallInspector';
 import { PuzzlePlayer } from './PuzzlePlayer';
 import { cloneFrame, interpolateFrames, type ActiveFrameKey } from './lib/frames';
+import { validatePuzzleContentAll, type PuzzleErrorScope, type PuzzleValidationError } from '../../../../lib/puzzleValidator';
 import type {
   PuzzleBall,
   PuzzleContent,
@@ -28,10 +29,12 @@ interface Props {
   onChange: (next: PuzzleContent) => void;
 }
 
-function nextOptionId(existing: PuzzleOption[]): 1 | 2 | 3 {
-  const used = new Set(existing.map((o) => o.id));
-  for (const id of [1, 2, 3] as const) if (!used.has(id)) return id;
-  return 3;
+// Renumera los ids de las opciones a 1..N por posición en el array. Mantiene
+// el resto de campos (text, frames, badge_position) intactos. Esto garantiza
+// que la letra A/B/C derivada (`String.fromCharCode(64 + opt.id)`) coincide
+// siempre con la posición visible y no quedan huecos tras borrar.
+function renumberOptions(options: PuzzleOption[]): PuzzleOption[] {
+  return options.map((o, i) => ({ ...o, id: (i + 1) as 1 | 2 | 3 }));
 }
 
 export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
@@ -110,11 +113,71 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
         e.preventDefault();
         removeShape(selected.id);
       }
+      // ───── Flechas: mover elemento seleccionado ─────
+      // Step 0.1m por defecto, 0.5m con Shift. Clamp a la pista [0..10] × [0..20].
+      // Funciona para shape / player / ball cuando hay algo seleccionado.
+      if (!inInput && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        if (!selected) return;
+        const step = e.shiftKey ? 0.5 : 0.1;
+        const dx = e.key === 'ArrowRight' ? step : e.key === 'ArrowLeft' ? -step : 0;
+        const dy = e.key === 'ArrowDown' ? step : e.key === 'ArrowUp' ? -step : 0;
+        if (dx === 0 && dy === 0) return;
+        e.preventDefault();
+        const frame = getActiveFrame();
+        if (!frame) return;
+        const clampX = (v: number) => Math.max(0, Math.min(10, v));
+        const clampY = (v: number) => Math.max(0, Math.min(20, v));
+        if (selected.kind === 'player') {
+          const p = frame.players.find((pp) => pp.id === selected.id);
+          if (!p) return;
+          updatePlayer({ ...p, x: clampX(p.x + dx), y: clampY(p.y + dy) });
+          return;
+        }
+        if (selected.kind === 'ball') {
+          updateBall({ ...frame.ball, x: clampX(frame.ball.x + dx), y: clampY(frame.ball.y + dy) });
+          return;
+        }
+        if (selected.kind === 'shape') {
+          const s = (frame.shapes ?? []).find((sh) => sh.id === selected.id);
+          if (!s) return;
+          // El delta se aplica a las coordenadas movibles según el tipo. Para
+          // arrow movemos los 3 puntos para mover la flecha entera. Para line
+          // y triangle desplazamos todo el array de puntos.
+          let next: PuzzleShape;
+          switch (s.type) {
+            case 'circle':
+            case 'rect':
+            case 'text':
+            case 'speechbubble':
+              next = { ...s, x: clampX(s.x + dx), y: clampY(s.y + dy) } as PuzzleShape;
+              break;
+            case 'arrow':
+              next = {
+                ...s,
+                startPoint: { x: clampX(s.startPoint.x + dx), y: clampY(s.startPoint.y + dy) },
+                endPoint: { x: clampX(s.endPoint.x + dx), y: clampY(s.endPoint.y + dy) },
+                controlPoint: s.controlPoint
+                  ? { x: clampX(s.controlPoint.x + dx), y: clampY(s.controlPoint.y + dy) }
+                  : s.controlPoint,
+              } as PuzzleShape;
+              break;
+            case 'line':
+            case 'triangle': {
+              const pts = s.points.map((v, i) => (i % 2 === 0 ? clampX(v + dx) : clampY(v + dy)));
+              next = { ...s, points: pts } as PuzzleShape;
+              break;
+            }
+            default:
+              return;
+          }
+          updateShape(next);
+        }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drawingType, selected, undo, redo]);
+  }, [drawingType, selected, undo, redo, content, mainTab, phaseTab, initialSubTab]);
 
   // Preview animado del editor (contextual): anima desde el frame anterior
   // lógico hasta el activo.
@@ -139,13 +202,20 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
       setMainTab('initial');
       return;
     }
-    // Si no existe la phase activa, intentamos la otra. Si tampoco existe,
-    // dejamos la phase como está (no hay nada que editar — el usuario tiene
-    // que añadir un frame).
-    const hasPhase = phaseTab === 'select' ? !!opt.select_frame : !!opt.confirmation_frame;
+    const hasSelect = !!opt.select_frame;
+    const hasConfirm = !!opt.confirmation_frame;
+    // Si la opción no tiene NINGÚN frame, siempre se debe crear primero el de
+    // selección. Forzamos phaseTab='select' para que el mensaje central y el
+    // botón "+ Crear" reflejen esa primera fase y no la de confirmación.
+    if (!hasSelect && !hasConfirm) {
+      if (phaseTab !== 'select') setPhaseTab('select');
+      return;
+    }
+    // Si la phase activa no existe pero la otra sí, saltar a la que existe.
+    const hasPhase = phaseTab === 'select' ? hasSelect : hasConfirm;
     if (!hasPhase) {
       const other: Phase = phaseTab === 'select' ? 'confirm' : 'select';
-      const hasOther = other === 'select' ? !!opt.select_frame : !!opt.confirmation_frame;
+      const hasOther = other === 'select' ? hasSelect : hasConfirm;
       if (hasOther) setPhaseTab(other);
     }
   }, [content.options, mainTab, phaseTab]);
@@ -297,6 +367,100 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
     updateShape(sourceShape);
   };
 
+  // Helper: obtiene el frame anterior real (objeto), no la referencia.
+  const getPrevFrameObj = (): PuzzleFrame | null => {
+    if (mainTab === 'initial') {
+      // En sub-tab estático, el anterior lógico es el intro (si existe).
+      if (initialSubTab === 'static' && content.intro_frame) return content.intro_frame;
+      return null;
+    }
+    const prev = getNeighborFrame('prev');
+    if (!prev || !frameExists(prev)) return null;
+    if (prev === 'initial') return content.initial_frame;
+    return prev.phase === 'select'
+      ? content.options.find((o) => o.id === prev.optionId)?.select_frame ?? null
+      : content.options.find((o) => o.id === prev.optionId)?.confirmation_frame ?? null;
+  };
+
+  // ───── Reset posición de player/ball al estado del frame anterior ─────
+  const resetPlayerFromPrev = (player: PuzzlePlayerType) => {
+    const sourceFrame = getPrevFrameObj();
+    if (!sourceFrame) return;
+    const sourcePlayer = sourceFrame.players.find((p) => p.id === player.id);
+    if (!sourcePlayer) return;
+    // Solo restauramos posición x/y. El resto de campos (team, is_user,
+    // speech_label, facing) los gestiona el usuario explícitamente.
+    updatePlayer({ ...player, x: sourcePlayer.x, y: sourcePlayer.y });
+  };
+
+  const resetBallFromPrev = () => {
+    const sourceFrame = getPrevFrameObj();
+    if (!sourceFrame?.ball) return;
+    updateBall({ ...sourceFrame.ball });
+  };
+
+  // ───── Añadir bocadillo sobre un jugador ─────
+  // Sustituye al antiguo campo `speech_label` del player. Crea una shape
+  // speechbubble posicionada justo encima del jugador, editable como cualquier
+  // otra shape (mover, redimensionar, cambiar texto).
+  const addSpeechBubbleForPlayer = (player: PuzzlePlayerType) => {
+    const base = createShape('speechbubble');
+    const bubble: PuzzleShape = {
+      ...base,
+      x: player.x,
+      y: Math.max(0, player.y - 1.2),
+      text: 'Mine!',
+    } as PuzzleShape;
+    addShape(bubble);
+  };
+
+  // ───── Migración suave: speech_label legacy → shape speechbubble ─────
+  // Si el puzzle viene de BD con players que tienen `speech_label`, generamos
+  // los shapes equivalentes y limpiamos el campo. Se aplica una sola vez al
+  // montar para no luchar contra ediciones posteriores del usuario.
+  const migratedRef = useRef(false);
+  useEffect(() => {
+    if (migratedRef.current) return;
+    migratedRef.current = true;
+    let changed = false;
+    const migrateFrame = (frame: PuzzleFrame): PuzzleFrame => {
+      const newShapes: PuzzleShape[] = [];
+      const newPlayers = frame.players.map((p) => {
+        const label = p.speech_label?.trim();
+        if (!label) return p;
+        changed = true;
+        const base = createShape('speechbubble');
+        newShapes.push({
+          ...base,
+          x: p.x,
+          y: Math.max(0, p.y - 1.2),
+          text: label,
+        } as PuzzleShape);
+        return { ...p, speech_label: undefined };
+      });
+      if (newShapes.length === 0) return frame;
+      return {
+        ...frame,
+        players: newPlayers,
+        shapes: [...(frame.shapes ?? []), ...newShapes],
+      };
+    };
+    const migrated: PuzzleContent = {
+      ...content,
+      initial_frame: migrateFrame(content.initial_frame),
+      intro_frame: content.intro_frame ? migrateFrame(content.intro_frame) : content.intro_frame,
+      options: content.options.map((o) => ({
+        ...o,
+        select_frame: o.select_frame ? migrateFrame(o.select_frame) : o.select_frame,
+        confirmation_frame: o.confirmation_frame ? migrateFrame(o.confirmation_frame) : o.confirmation_frame,
+      })),
+    };
+    // Se hace via onChangeRaw para que no se cuente como acción del usuario
+    // en el historial de undo.
+    if (changed) onChangeRaw(migrated);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const copyShapeToFrame = (shape: PuzzleShape, target: FrameRef) => {
     // Generar un nuevo id para evitar colisión.
     const cloned: PuzzleShape = { ...shape, id: shape.id + '-c' + Math.random().toString(36).slice(2, 6) } as PuzzleShape;
@@ -330,21 +494,33 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
 
   const addOption = () => {
     if (content.options.length >= 3) return;
-    const id = nextOptionId(content.options);
+    const id = (content.options.length + 1) as 1 | 2 | 3;
     const newOpt: PuzzleOption = {
       id,
       text: '',
       explanation: '',
       is_correct: false,
     };
-    onChange({ ...content, options: [...content.options, newOpt] });
+    // Renumeración no es necesaria al append (ids ya son 1..N+1), pero la
+    // aplicamos por consistencia y robustez ante estados antiguos en BD.
+    onChange({ ...content, options: renumberOptions([...content.options, newOpt]) });
     setMainTab(id);
   };
 
   const removeOption = (optionId: 1 | 2 | 3) => {
     if (content.options.length <= 2) return;
-    onChange({ ...content, options: content.options.filter((o) => o.id !== optionId) });
-    if (mainTab === optionId) setMainTab('initial');
+    // Tras quitar, renumeramos para que las opciones queden con ids 1..N
+    // consecutivos y la letra visual (A/B/C) coincida con la posición.
+    const filtered = content.options.filter((o) => o.id !== optionId);
+    const renumbered = renumberOptions(filtered);
+    onChange({ ...content, options: renumbered });
+    // Ajustar mainTab tras renumeración: si la activa era la borrada → initial.
+    // Si la activa estaba después del hueco, su id baja en 1.
+    if (mainTab === optionId) {
+      setMainTab('initial');
+    } else if (typeof mainTab === 'number' && mainTab > optionId) {
+      setMainTab((mainTab - 1) as 1 | 2 | 3);
+    }
   };
 
   // ───── Intro frame: add / remove ─────
@@ -458,6 +634,60 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
     previewRafRef.current = requestAnimationFrame(tick);
   };
 
+  // ───── Validación en vivo ─────
+  // Pasa el árbol entero por el validador. Cada cambio dispara recálculo (es
+  // función pura O(n) sobre el content). Los errores se agrupan por scope para
+  // pintar puntos rojos en las tabs correspondientes.
+  const errors = useMemo(() => validatePuzzleContentAll(content), [content]);
+
+  // Sets de tabs con error, derivados del scope de cada error.
+  const errorMainTabs = useMemo(() => {
+    const s = new Set<MainTabKey>();
+    for (const e of errors) {
+      if (e.scope.kind === 'meta' || e.scope.kind === 'initial' || e.scope.kind === 'intro') s.add('initial');
+      else if (e.scope.kind === 'option') s.add(e.scope.optionId);
+    }
+    return s;
+  }, [errors]);
+
+  const errorInitialSubTabs = useMemo(() => {
+    const s = new Set<InitialSubTab>();
+    for (const e of errors) {
+      if (e.scope.kind === 'intro') s.add('intro');
+      else if (e.scope.kind === 'initial' || e.scope.kind === 'meta') s.add('static');
+    }
+    return s;
+  }, [errors]);
+
+  // Por opción: qué fases (select/confirm) tienen errores.
+  const errorPhasesByOption = useMemo(() => {
+    const m = new Map<1 | 2 | 3, Set<Phase>>();
+    for (const e of errors) {
+      if (e.scope.kind !== 'option' || !e.scope.phase) continue;
+      const cur = m.get(e.scope.optionId) ?? new Set<Phase>();
+      cur.add(e.scope.phase);
+      m.set(e.scope.optionId, cur);
+    }
+    return m;
+  }, [errors]);
+
+  // Navega a la tab que corresponda al scope del error clicado.
+  const navigateToError = (scope: PuzzleErrorScope) => {
+    if (scope.kind === 'meta' || scope.kind === 'initial') {
+      setMainTab('initial');
+      setInitialSubTab('static');
+    } else if (scope.kind === 'intro') {
+      setMainTab('initial');
+      setInitialSubTab('intro');
+    } else if (scope.kind === 'option') {
+      setMainTab(scope.optionId);
+      if (scope.phase) setPhaseTab(scope.phase);
+    }
+    setSelected(null);
+  };
+
+  const [errorsExpanded, setErrorsExpanded] = useState(true);
+
   // ───── Render ─────
 
   const previewing = previewFrame !== null;
@@ -482,6 +712,40 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
 
   return (
     <>
+      {/* Banner de validación en vivo: lista de errores. Click navega a la tab
+          que los contiene. Se puede colapsar para no estorbar mientras se edita. */}
+      {errors.length > 0 && (
+        <div className="mb-2 rounded-xl border border-amber-300 bg-amber-50">
+          <button
+            type="button"
+            onClick={() => setErrorsExpanded((v) => !v)}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+          >
+            <div className="flex items-center gap-2 text-amber-900">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span className="text-xs font-bold">
+                {errors.length} error{errors.length === 1 ? '' : 'es'} de validación
+              </span>
+            </div>
+            {errorsExpanded ? <ChevronUp className="w-4 h-4 text-amber-900" /> : <ChevronDown className="w-4 h-4 text-amber-900" />}
+          </button>
+          {errorsExpanded && (
+            <ul className="max-h-40 overflow-y-auto px-3 pb-2 space-y-1">
+              {errors.map((e: PuzzleValidationError, i: number) => (
+                <li key={i}>
+                  <button
+                    type="button"
+                    onClick={() => navigateToError(e.scope)}
+                    className="w-full text-left text-[11px] text-amber-900 hover:bg-amber-100 rounded px-2 py-1 transition-colors"
+                  >
+                    {e.message}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-4 h-[70vh] min-h-[600px]">
         {/* Canvas + controles */}
         <div className="flex flex-col h-full min-h-0">
@@ -494,6 +758,7 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
               onAddOption={addOption}
               onRemoveOption={removeOption}
               disabled={previewing}
+              errorTabs={errorMainTabs}
             />
             <div className="flex items-center gap-1">
               <button
@@ -529,6 +794,7 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
                 onPreview={runPreview}
                 onPlayGlobal={() => setShowPlayer(true)}
                 disabled={previewing}
+                errorPhases={errorPhasesByOption.get(activeOption.id)}
               />
               {activeFrameContent && (
                 <button
@@ -557,6 +823,7 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
                 onPreview={runPreview}
                 onPlayGlobal={() => setShowPlayer(true)}
                 disabled={previewing}
+                errorSubTabs={errorInitialSubTabs}
               />
               {initialSubTab === 'static' && content.intro_frame && (
                 <button
@@ -704,17 +971,29 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
               {selected?.kind === 'player' &&
                 (() => {
                   const player = frameToShow.players.find((p) => p.id === selected.id);
-                  return player ? (
+                  if (!player) return null;
+                  const prevObj = getPrevFrameObj();
+                  const prevHasPlayer = !!prevObj?.players.some((p) => p.id === player.id);
+                  return (
                     <>
                       <div className="border-t border-gray-100" />
-                      <PlayerInspector player={player} onChange={updatePlayer} />
+                      <PlayerInspector
+                        player={player}
+                        onChange={updatePlayer}
+                        onResetFromPrev={prevHasPlayer ? () => resetPlayerFromPrev(player) : undefined}
+                        onAddSpeech={() => addSpeechBubbleForPlayer(player)}
+                      />
                     </>
-                  ) : null;
+                  );
                 })()}
               {selected?.kind === 'ball' && mainTab !== 'initial' && (
                 <>
                   <div className="border-t border-gray-100" />
-                  <BallInspector ball={frameToShow.ball} onChange={updateBall} />
+                  <BallInspector
+                    ball={frameToShow.ball}
+                    onChange={updateBall}
+                    onResetFromPrev={getPrevFrameObj() ? resetBallFromPrev : undefined}
+                  />
                 </>
               )}
               {selected?.kind === 'ball' && mainTab === 'initial' && (

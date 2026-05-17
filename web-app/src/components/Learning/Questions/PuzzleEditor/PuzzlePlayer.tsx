@@ -187,7 +187,9 @@ export function PuzzlePlayer({ content, onClose }: Props) {
                   ? (selected.select_frame ?? content.initial_frame)
                   : selected
                     ? content.initial_frame
-                    : null
+                    // En init: si hay intro_frame, el anterior es el intro
+                    // para que la animación dibuje la flecha intro→initial.
+                    : (content.intro_frame ?? null)
               }
               // Ocultar badges A/B/C durante toda la animación intro→initial.
               // Aparecen con fade-in cuando termina.

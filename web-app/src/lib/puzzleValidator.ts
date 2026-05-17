@@ -1,11 +1,13 @@
+// DUPLICADO: mantener sincronizado con backend/src/lib/puzzleValidator.ts.
+// El monorepo no tiene carpeta shared/, así que la validación cliente-side se
+// copia tal cual. Si tocas uno, toca el otro.
+//
 // Validación del árbol jsonb de un puzzle táctico (type='puzzle').
 // Schema v2: formato del catálogo importado (kit starter).
 //
 // Exporta dos APIs:
 //   - validatePuzzleContent(content) → string | null  (primer error, legacy)
 //   - validatePuzzleContentAll(content) → PuzzleValidationError[]
-// La primera es wrapper de la segunda para no romper a los callers existentes
-// (handlers POST/PUT del backend).
 
 const COURT_W = 10;
 const COURT_H = 20;
@@ -37,8 +39,8 @@ export type PuzzleErrorScope =
   | { kind: 'option'; optionId: 1 | 2 | 3; phase?: 'select' | 'confirm' };
 
 export interface PuzzleValidationError {
-  path: string;     // ej: 'puzzle.options[1].select_frame.players[0].x'
-  message: string;  // mensaje legible (ya incluye el path al principio)
+  path: string;
+  message: string;
   scope: PuzzleErrorScope;
 }
 
@@ -65,7 +67,6 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.trim().length > 0;
 }
 
-// Margen tolerante para shapes que sobresalen (líneas finas, anotaciones cerca del borde).
 function inCourtTolerant(n: unknown, max: number): boolean {
   return typeof n === 'number' && Number.isFinite(n) && n >= -0.5 && n <= max + 0.5;
 }
@@ -75,7 +76,7 @@ function push(errors: PuzzleValidationError[], scope: PuzzleErrorScope, path: st
 }
 
 // ---------------------------------------------------------------------------
-// Validadores por entidad (acumulan en `errors`, no devuelven nada)
+// Validadores por entidad
 // ---------------------------------------------------------------------------
 
 function validatePlayer(
@@ -127,7 +128,7 @@ function validateShape(
   if (!isNonEmptyString(s.id)) push(errors, scope, `${path}.id`, 'debe ser string no vacío');
   if (!VALID_SHAPE_TYPES.includes(s.type as typeof VALID_SHAPE_TYPES[number])) {
     push(errors, scope, `${path}.type`, `debe ser ${VALID_SHAPE_TYPES.join('|')}`);
-    return; // sin type válido no tiene sentido seguir validando el resto
+    return;
   }
   if (s.color !== undefined && typeof s.color !== 'string') {
     push(errors, scope, `${path}.color`, 'debe ser string');
@@ -135,8 +136,6 @@ function validateShape(
   if (s.style !== undefined && !VALID_SHAPE_PRESETS.includes(s.style as typeof VALID_SHAPE_PRESETS[number])) {
     push(errors, scope, `${path}.style`, `debe ser ${VALID_SHAPE_PRESETS.join('|')}`);
   }
-  // Nota: `visible_only_after_confirmation` (campo legacy) se ignora — el sistema
-  // de frames split lo hace redundante. Si llega en el payload, se acepta sin error.
 
   switch (s.type) {
     case 'circle': {
@@ -283,7 +282,6 @@ function validateOption(o: unknown, idx: number, errors: PuzzleValidationError[]
   const path = `puzzle.options[${idx}]`;
   if (!isObject(o)) { push(errors, metaScope, path, 'debe ser un objeto'); return; }
 
-  // Determinar scope desde el id (si es válido). Si no, todo va a meta.
   const optId = (o.id === 1 || o.id === 2 || o.id === 3) ? (o.id as 1 | 2 | 3) : null;
   const optScope: PuzzleErrorScope = optId ? { kind: 'option', optionId: optId } : metaScope;
 
@@ -308,10 +306,6 @@ function validateOption(o: unknown, idx: number, errors: PuzzleValidationError[]
 // API pública
 // ---------------------------------------------------------------------------
 
-/**
- * Valida el árbol completo de un puzzle (schema v2) y devuelve TODOS los errores.
- * Lista vacía = válido. Usar en editores que quieren mostrar feedback por panel.
- */
 export function validatePuzzleContentAll(content: unknown): PuzzleValidationError[] {
   const errors: PuzzleValidationError[] = [];
   const meta: PuzzleErrorScope = { kind: 'meta' };
@@ -337,12 +331,10 @@ export function validatePuzzleContentAll(content: unknown): PuzzleValidationErro
     }
   }
 
-  // intro_frame: opcional. null y undefined son válidos.
   if (content.intro_frame != null) {
     validateFrame(content.intro_frame, 'puzzle.intro_frame', { kind: 'intro' }, { requirePlayers: true }, errors);
   }
 
-  // initial_frame: obligatorio.
   validateFrame(content.initial_frame, 'puzzle.initial_frame', { kind: 'initial' }, { requirePlayers: true }, errors);
 
   if (!Array.isArray(content.options)) {
@@ -370,27 +362,7 @@ export function validatePuzzleContentAll(content: unknown): PuzzleValidationErro
   return errors;
 }
 
-/**
- * Wrapper legacy: devuelve `null` si es válido, o el mensaje del primer error.
- * Mantener para no romper los handlers POST/PUT que esperan string|null.
- */
 export function validatePuzzleContent(content: unknown): string | null {
   const errors = validatePuzzleContentAll(content);
   return errors[0]?.message ?? null;
-}
-
-/**
- * Construye el row para learning_puzzles a partir del content validado.
- * Asume que validatePuzzleContent ya retornó null para este content.
- */
-export function buildPuzzleRow(content: Record<string, unknown>, questionId: string) {
-  return {
-    question_id: questionId,
-    schema_version: (content.schema_version as number) ?? 2,
-    statement: content.statement as string,
-    court_position: (content.court_position as string) ?? 'both',
-    intro_frame: content.intro_frame ?? null,
-    initial_frame: content.initial_frame,
-    options: content.options,
-  };
 }

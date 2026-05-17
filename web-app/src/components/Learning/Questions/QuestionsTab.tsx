@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Edit, HelpCircle } from 'lucide-react';
+import { Plus, Edit, HelpCircle, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
@@ -69,6 +69,23 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
       load();
     } catch (e) {
       toast.error((e as Error).message || t('learning_save_error'));
+    }
+  };
+
+  // Borrado permanente. Solo disponible para preguntas ya desactivadas.
+  // Doble paso: confirm del navegador antes de tirar el DELETE.
+  const handleDelete = async (q: Question) => {
+    if (q.is_active) return;
+    const ok = window.confirm(
+      `¿Borrar definitivamente "${extractPreview(q).slice(0, 60)}"?\n\nEsta acción no se puede deshacer.`,
+    );
+    if (!ok) return;
+    try {
+      await learningContentService.deleteQuestion(q.id);
+      toast.success('Pregunta borrada definitivamente');
+      load();
+    } catch (e) {
+      toast.error((e as Error).message || 'Error al borrar');
     }
   };
 
@@ -226,6 +243,18 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
                     style={{ transform: q.is_active ? 'translateX(16px)' : 'translateX(0)' }}
                   />
                 </button>
+                {/* Borrado permanente solo para inactivas. Doble paso de seguridad. */}
+                {!q.is_active && (
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(q)}
+                    className="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-50 text-red-600 text-[10px] font-bold hover:bg-red-100 transition-all"
+                    title="Borrar definitivamente"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Borrar
+                  </button>
+                )}
               </div>
             </motion.div>
           ))}

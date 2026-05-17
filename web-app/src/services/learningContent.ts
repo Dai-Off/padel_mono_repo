@@ -177,6 +177,11 @@ export const learningContentService = {
     await apiFetchWithAuth(`/learning/questions/${id}/activate`, { method: 'PATCH' });
   },
 
+  // Borrado permanente. El backend exige que la pregunta esté ya desactivada.
+  async deleteQuestion(id: string): Promise<void> {
+    await apiFetchWithAuth(`/learning/questions/${id}`, { method: 'DELETE' });
+  },
+
   // ---------------------------------------------------------------------------
   // Cursos
   // ---------------------------------------------------------------------------

@@ -3,11 +3,14 @@
 // la animación) y, si la shape trajectory no tiene controlPoint, también
 // determinan la curvatura automática de la trayectoria.
 
+import { RotateCcw } from 'lucide-react';
 import type { PuzzleBall, PuzzleShotType, PuzzleSpin } from '../../../../../types/learningContent';
 
 interface Props {
   ball: PuzzleBall;
   onChange: (next: PuzzleBall) => void;
+  // Si se pasa, muestra botón "Reset" que copia la pelota completa del frame previo.
+  onResetFromPrev?: () => void;
 }
 
 const SHOT_TYPES: { value: PuzzleShotType | 'none'; label: string; hint: string }[] = [
@@ -23,13 +26,26 @@ const SPINS: { value: PuzzleSpin | 'none'; label: string }[] = [
   { value: 'random', label: 'Aleatorio' },
 ];
 
-export function BallInspector({ ball, onChange }: Props) {
+export function BallInspector({ ball, onChange, onResetFromPrev }: Props) {
   const shotType = ball.shot_type ?? 'none';
   const spin = ball.spin ?? 'none';
 
   return (
     <div className="space-y-3">
-      <h4 className="text-[10px] font-bold text-gray-500 uppercase">Pelota</h4>
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="text-[10px] font-bold text-gray-500 uppercase">Pelota</h4>
+        {onResetFromPrev && (
+          <button
+            type="button"
+            onClick={onResetFromPrev}
+            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-50 text-amber-600 hover:bg-amber-100"
+            title="Reset posición y propiedades al frame anterior"
+          >
+            <RotateCcw className="w-3 h-3" />
+            Reset
+          </button>
+        )}
+      </div>
 
       <div>
         <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">

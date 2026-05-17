@@ -32,6 +32,15 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
     const t = setTimeout(() => setIntroAnimating(false), dur + 50);
     return () => clearTimeout(t);
   }, [introAnimating, content.initial_frame?.duration_ms]);
+  // Si cambia el puzzle (navegamos a otro de la lección), resetear todo el
+  // estado local. Sin esto, los flags showingIntro/introAnimating del puzzle
+  // anterior pueden quedar desincronizados con el nuevo content.
+  useEffect(() => {
+    setSelected(null);
+    setConfirmed(false);
+    setShowingIntro(!!content.intro_frame);
+    setIntroAnimating(!!content.intro_frame);
+  }, [content]);
   const replayIntro = () => {
     if (!content.intro_frame || confirmed || selected) return;
     setShowingIntro(true);
@@ -139,14 +148,22 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
             ? (selected.select_frame ?? content.initial_frame)
             : selected
               ? content.initial_frame
-              : showingIntro
-                ? null // durante el primer tick: no hay anterior, es la posición de partida
-                : (content.intro_frame ?? null) // tras intro: el anterior es el intro
+              // Estado init (con o sin showingIntro): el anterior lógico es el
+              // intro_frame. Pasarlo SIEMPRE (no solo cuando showingIntro=false)
+              // permite que generateAutoShapes genere la flecha intro→initial y
+              // que se vea dibujada durante la animación.
+              : (content.intro_frame ?? null)
         }
         // Badges ocultos mientras se muestra/anima el intro: el usuario aún no
         // entiende qué decide. Aparecen con fade-in al terminar la animación
         // (introAnimating cubre showingIntro + duración del frame destino).
         badgesHidden={introAnimating}
+        // Cuando estamos en el tick inicial del intro (showingIntro=true) los
+        // actores deben SALTAR a la posición del intro_frame sin animar. En el
+        // siguiente tick, snap=false y arranca la animación intro→initial
+        // normal. Sin esto, al pulsar Replay la pelota intenta volver desde su
+        // posición actual al intro y no llega a tiempo.
+        snap={showingIntro}
       />
 
       {/* Texto del bocadillo: cambia según la fase */}

@@ -92,8 +92,8 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
     if (!VALID_AREAS.includes(area)) {
       return res.status(400).json({ ok: false, error: `area debe ser uno de: ${VALID_AREAS.join(', ')}` });
     }
-    if (level == null || typeof level !== 'number' || level < 0) {
-      return res.status(400).json({ ok: false, error: 'level debe ser un número >= 0' });
+    if (level == null || typeof level !== 'number' || level <= 0) {
+      return res.status(400).json({ ok: false, error: 'level debe ser un número > 0' });
     }
 
     const contentError = validateQuestionContent(type, content);
@@ -182,8 +182,8 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
     // Si la pregunta resultante es de tipo puzzle, forzar area='tactics' (independientemente de lo enviado).
     if (effectiveType === 'puzzle') updates.area = 'tactics';
     if (level !== undefined) {
-      if (typeof level !== 'number' || level < 0) {
-        return res.status(400).json({ ok: false, error: 'level debe ser un número >= 0' });
+      if (typeof level !== 'number' || level <= 0) {
+        return res.status(400).json({ ok: false, error: 'level debe ser un número > 0' });
       }
       updates.level = level;
     }
@@ -236,6 +236,46 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
     }
 
     return res.json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// DELETE /questions/:id
+// Borrado permanente. Solo se permite si la pregunta ya está desactivada
+// (`is_active = false`). Doble paso de seguridad para evitar borrados accidentales
+// de contenido vivo. El cascade del FK a learning_puzzles elimina la fila
+// asociada automáticamente.
+router.delete('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const questionId = req.params.id;
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('learning_questions')
+      .select('id, created_by_club, is_active')
+      .eq('id', questionId)
+      .maybeSingle();
+
+    if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
+    if (!canAccessClub(req, existing.created_by_club, 'escuela')) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    if (existing.is_active) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Para borrar definitivamente, primero hay que desactivar la pregunta',
+      });
+    }
+
+    const { error } = await supabase
+      .from('learning_questions')
+      .delete()
+      .eq('id', questionId);
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, data: { id: questionId, deleted: true } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
