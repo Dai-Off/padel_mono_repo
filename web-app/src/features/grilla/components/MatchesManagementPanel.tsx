@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     X,
@@ -53,6 +53,24 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
         timeFrom: '' as string,
         timeTo: '' as string,
     });
+
+    const filterPanelRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (filterPanelRef.current && !filterPanelRef.current.contains(event.target as Node)) {
+                const toggleBtn = document.getElementById('filter-toggle-button');
+                if (toggleBtn && toggleBtn.contains(event.target as Node)) return;
+                setShowFilters(false);
+            }
+        };
+        if (showFilters) {
+            document.addEventListener('mousedown', handleClickOutside);
+        }
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
+    }, [showFilters]);
 
     useEffect(() => {
         setCurrentDate(new Date(dateStr + 'T12:00:00'));
@@ -362,7 +380,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
     return (
         <div className="flex flex-col h-full bg-white max-w-6xl">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-white border-b z-10 shrink-0">
+            <div className="flex items-center justify-between px-4 py-3 bg-white border-b z-20 shrink-0">
                 <div className="flex items-center gap-2">
                     <h2 className="text-lg font-extrabold text-gray-900 tracking-tight">Partidos</h2>
                 </div>
@@ -393,21 +411,161 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                     >
                         <LayoutGrid className="w-4 h-4" />
                     </button>
-                    <button
-                        onClick={() => setShowFilters(prev => !prev)}
-                        className={`p-1.5 border rounded-lg transition-colors relative ${
-                            showFilters || activeFilterCount > 0
-                                ? 'border-[#006A6A] text-[#006A6A] bg-[#006A6A]/5'
-                                : 'border-gray-200 text-gray-500 hover:bg-gray-50'
-                        }`}
-                    >
-                        <Filter className="w-4 h-4" />
-                        {activeFilterCount > 0 && (
-                            <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[#006A6A] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                                {activeFilterCount}
-                            </span>
+                    <div className="relative">
+                        <button
+                            id="filter-toggle-button"
+                            onClick={() => setShowFilters(prev => !prev)}
+                            className={`p-1.5 border rounded-lg transition-colors relative ${
+                                showFilters || activeFilterCount > 0
+                                    ? 'border-[#006A6A] text-[#006A6A] bg-[#006A6A]/5'
+                                    : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                            }`}
+                        >
+                            <Filter className="w-4 h-4" />
+                            {activeFilterCount > 0 && (
+                                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[#006A6A] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                                    {activeFilterCount}
+                                </span>
+                            )}
+                        </button>
+
+                        {/* Filter Popover Dropdown */}
+                        {showFilters && (
+                            <div
+                                ref={filterPanelRef}
+                                className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 p-4 w-[280px] sm:w-[450px] md:w-[580px] animate-fade-in text-left"
+                            >
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Fecha</label>
+                                        <input
+                                            type="date"
+                                            value={currentDateStr}
+                                            onChange={e => handleDateInputChange(e.target.value)}
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Tipo</label>
+                                        <select
+                                            value={filters.type}
+                                            onChange={e => setFilters(f => ({ ...f, type: e.target.value }))}
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        >
+                                            <option value="">Todos</option>
+                                            <option value="amistoso">Amistoso</option>
+                                            <option value="competitivo">Competitivo</option>
+                                            <option value="americano">Americano</option>
+                                        </select>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Pista</label>
+                                        <select
+                                            value={filters.court}
+                                            onChange={e => setFilters(f => ({ ...f, court: e.target.value }))}
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        >
+                                            <option value="">Todas</option>
+                                            {courtNames.map(name => (
+                                                <option key={name} value={name}>{name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Pago</label>
+                                        <select
+                                            value={filters.payment}
+                                            onChange={e => setFilters(f => ({ ...f, payment: e.target.value }))}
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        >
+                                            <option value="">Todos</option>
+                                            <option value="paid">Completado</option>
+                                            <option value="pending">Pendiente</option>
+                                        </select>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Estado</label>
+                                        <select
+                                            value={filters.bookingStatus}
+                                            onChange={e => setFilters(f => ({ ...f, bookingStatus: e.target.value }))}
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        >
+                                            <option value="">Todos</option>
+                                            <option value="confirmed">Confirmada</option>
+                                            <option value="pending_payment">Pendiente pago</option>
+                                            <option value="cancelled">Cancelada</option>
+                                        </select>
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Cliente</label>
+                                        <input
+                                            type="text"
+                                            value={filters.client}
+                                            onChange={e => setFilters(f => ({ ...f, client: e.target.value }))}
+                                            placeholder="Nombre"
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Precio min</label>
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            step="0.01"
+                                            value={filters.priceMin}
+                                            onChange={e => setFilters(f => ({ ...f, priceMin: e.target.value }))}
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Precio max</label>
+                                        <input
+                                            type="number"
+                                            min={0}
+                                            step="0.01"
+                                            value={filters.priceMax}
+                                            onChange={e => setFilters(f => ({ ...f, priceMax: e.target.value }))}
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Hora desde</label>
+                                        <input
+                                            type="time"
+                                            value={filters.timeFrom}
+                                            onChange={e => setFilters(f => ({ ...f, timeFrom: e.target.value }))}
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        />
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
+                                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Hora hasta</label>
+                                        <input
+                                            type="time"
+                                            value={filters.timeTo}
+                                            onChange={e => setFilters(f => ({ ...f, timeTo: e.target.value }))}
+                                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] w-full"
+                                        />
+                                    </div>
+                                </div>
+                                <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between">
+                                    {activeFilterCount > 0 ? (
+                                        <button
+                                            onClick={clearFilters}
+                                            className="px-2.5 py-1 text-[10px] font-bold text-red-600 hover:bg-red-50 rounded-lg border border-red-200 transition-colors flex items-center gap-1"
+                                        >
+                                            <X className="w-3 h-3" />
+                                            Limpiar Filtros
+                                        </button>
+                                    ) : (
+                                        <div />
+                                    )}
+                                    <span className="text-[10px] text-gray-400 font-medium">
+                                        {filteredMatches.length} de {matches.length} partidos
+                                    </span>
+                                </div>
+                            </div>
                         )}
-                    </button>
+                    </div>
                     <button
                         type="button"
                         onClick={() => setIsCreateMatchOpen(true)}
@@ -420,134 +578,6 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                     </button>
                 </div>
             </div>
-
-            {/* Filter bar */}
-            {showFilters && (
-                <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-200 flex flex-wrap items-end gap-2 shrink-0">
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Fecha</label>
-                        <input
-                            type="date"
-                            value={currentDateStr}
-                            onChange={e => handleDateInputChange(e.target.value)}
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[130px]"
-                        />
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Tipo</label>
-                        <select
-                            value={filters.type}
-                            onChange={e => setFilters(f => ({ ...f, type: e.target.value }))}
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
-                        >
-                            <option value="">Todos</option>
-                            <option value="amistoso">Amistoso</option>
-                            <option value="competitivo">Competitivo</option>
-                            <option value="americano">Americano</option>
-                        </select>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Pista</label>
-                        <select
-                            value={filters.court}
-                            onChange={e => setFilters(f => ({ ...f, court: e.target.value }))}
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
-                        >
-                            <option value="">Todas</option>
-                            {courtNames.map(name => (
-                                <option key={name} value={name}>{name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Pago</label>
-                        <select
-                            value={filters.payment}
-                            onChange={e => setFilters(f => ({ ...f, payment: e.target.value }))}
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
-                        >
-                            <option value="">Todos</option>
-                            <option value="paid">Completado</option>
-                            <option value="pending">Pendiente</option>
-                        </select>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Estado</label>
-                        <select
-                            value={filters.bookingStatus}
-                            onChange={e => setFilters(f => ({ ...f, bookingStatus: e.target.value }))}
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
-                        >
-                            <option value="">Todos</option>
-                            <option value="confirmed">Confirmada</option>
-                            <option value="pending_payment">Pendiente pago</option>
-                            <option value="cancelled">Cancelada</option>
-                        </select>
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Cliente</label>
-                        <input
-                            type="text"
-                            value={filters.client}
-                            onChange={e => setFilters(f => ({ ...f, client: e.target.value }))}
-                            placeholder="Nombre"
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[110px]"
-                        />
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Precio min</label>
-                        <input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={filters.priceMin}
-                            onChange={e => setFilters(f => ({ ...f, priceMin: e.target.value }))}
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[85px]"
-                        />
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Precio max</label>
-                        <input
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={filters.priceMax}
-                            onChange={e => setFilters(f => ({ ...f, priceMax: e.target.value }))}
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[85px]"
-                        />
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Hora desde</label>
-                        <input
-                            type="time"
-                            value={filters.timeFrom}
-                            onChange={e => setFilters(f => ({ ...f, timeFrom: e.target.value }))}
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[85px]"
-                        />
-                    </div>
-                    <div className="flex flex-col gap-0.5">
-                        <label className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Hora hasta</label>
-                        <input
-                            type="time"
-                            value={filters.timeTo}
-                            onChange={e => setFilters(f => ({ ...f, timeTo: e.target.value }))}
-                            className="px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A] min-w-[85px]"
-                        />
-                    </div>
-                    {activeFilterCount > 0 && (
-                        <button
-                            onClick={clearFilters}
-                            className="px-2 py-1 text-[10px] font-semibold text-red-600 hover:bg-red-50 rounded-lg border border-red-200 transition-colors flex items-center gap-1 self-end"
-                        >
-                            <X className="w-3 h-3" />
-                            Limpiar
-                        </button>
-                    )}
-                    <span className="text-[10px] text-gray-400 self-end ml-auto">
-                        {filteredMatches.length} de {matches.length}
-                    </span>
-                </div>
-            )}
 
             {/* Content Table */}
             <div className="flex-1 overflow-auto bg-white">
@@ -710,11 +740,11 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
 
             {/* Add Player to Slot Mini Modal */}
             {addingToSlot && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => !loading && setAddingToSlot(null)}>
+                <div className="fixed inset-0 z-200 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => !loading && setAddingToSlot(null)}>
                     <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5 animate-scale-in" onClick={(e) => e.stopPropagation()}>
                         {/* Overlay de carga interno */}
                         {loading && (
-                            <div className="absolute inset-0 bg-white/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-[250] rounded-xl">
+                            <div className="absolute inset-0 bg-white/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-250 rounded-xl">
                                 <div className="w-8 h-8 border-4 border-[#006A6A] border-t-transparent rounded-full animate-spin"></div>
                                 <span className="mt-3 text-sm font-bold text-[#006A6A]">Asignando jugador...</span>
                             </div>
@@ -763,10 +793,10 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
 
             {/* Remove Player Modal */}
             {removingFromMatch && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => !loading && setRemovingFromMatch(null)}>
+                <div className="fixed inset-0 z-200 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => !loading && setRemovingFromMatch(null)}>
                     <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-sm mx-4 p-5 animate-scale-in" onClick={(e) => e.stopPropagation()}>
                         {loading && (
-                            <div className="absolute inset-0 bg-white/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-[250] rounded-xl">
+                            <div className="absolute inset-0 bg-white/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-250 rounded-xl">
                                 <div className="w-8 h-8 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
                                 <span className="mt-3 text-sm font-bold text-red-500">Removiendo...</span>
                             </div>
