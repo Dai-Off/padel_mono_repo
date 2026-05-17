@@ -50,6 +50,7 @@ import {
   PIXELS_PER_MINUTE,
   computeCompactPxPerMinute,
   computeMobileCourtLayout,
+  computeMobileGridFitScale,
   estimateMobileGridViewportHeight,
   GRILLA_COMPACT_LAYOUT_MAX_PX,
 } from './utils/timeGrid';
@@ -870,6 +871,8 @@ function GrillaViewInner() {
     computeCompactPxPerMinute(estimateMobileGridViewportHeight())
   );
   const [gridViewportWidth, setGridViewportWidth] = useState(0);
+  const [gridViewportHeight, setGridViewportHeight] = useState(0);
+  const mobileFitLayoutKeyRef = useRef('');
 
   const measureMobileGridViewport = useCallback(() => {
     const el = mobileGridViewportRef.current;
@@ -880,6 +883,7 @@ function GrillaViewInner() {
       ? el.clientWidth
       : Math.min(window.innerWidth, GRILLA_COMPACT_LAYOUT_MAX_PX);
     setGridViewportWidth(width);
+    setGridViewportHeight(height);
     setCompactPxPerMinute(computeCompactPxPerMinute(height));
   }, []);
 
@@ -1783,6 +1787,52 @@ function GrillaViewInner() {
   const mobileCanvasWidthPx = mobileCourtLayout?.canvasWidthPx;
   const mobileGridOverflows = mobileCourtLayout?.overflowsHorizontally ?? false;
 
+  const mobileGridFit = useMemo(() => {
+    if (!mobileFullView) return { fitScale: 1, minScale: 0.85 };
+    const vw = gridViewportWidth || mobileGridViewportRef.current?.clientWidth || 0;
+    const vh = gridViewportHeight || mobileGridViewportRef.current?.clientHeight || 0;
+    const cw = mobileCanvasWidthPx ?? vw;
+    return computeMobileGridFitScale(vw, vh, cw, nativeGridHeight);
+  }, [
+    mobileFullView,
+    gridViewportWidth,
+    gridViewportHeight,
+    mobileCanvasWidthPx,
+    nativeGridHeight,
+  ]);
+
+  const applyMobileGridFit = useCallback(() => {
+    const ref = transformComponentRef.current;
+    if (!ref || !mobileFullView) return;
+    const { fitScale } = mobileGridFit;
+    ref.centerView(fitScale, 0);
+    activeMobileScaleRef.current = fitScale;
+  }, [mobileFullView, mobileGridFit]);
+
+  useEffect(() => {
+    if (!mobileFullView || gridViewportWidth <= 0 || gridViewportHeight <= 0) return;
+    const layoutKey = `${gridViewportWidth}x${gridViewportHeight}:${mobileCanvasWidthPx ?? 0}:${nativeGridHeight}:${mobileGridFit.fitScale}`;
+    if (mobileFitLayoutKeyRef.current === layoutKey) return;
+
+    const frame = requestAnimationFrame(() => {
+      applyMobileGridFit();
+      mobileFitLayoutKeyRef.current = layoutKey;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    mobileFullView,
+    gridViewportWidth,
+    gridViewportHeight,
+    mobileCanvasWidthPx,
+    nativeGridHeight,
+    mobileGridFit.fitScale,
+    applyMobileGridFit,
+  ]);
+
+  useEffect(() => {
+    if (!mobileFullView) mobileFitLayoutKeyRef.current = '';
+  }, [mobileFullView]);
+
   const isFirstCourt = focusedCourtId === gridCourts[0]?.id;
   const isLastCourt = focusedCourtId === gridCourts[gridCourts.length - 1]?.id;
 
@@ -2293,9 +2343,10 @@ function GrillaViewInner() {
                   <div ref={mobileGridViewportRef} className="grilla-mobile-viewport flex-1 min-h-0">
                   <TransformWrapper
                     ref={transformComponentRef}
-                    initialScale={1}
-                    minScale={0.5}
+                    initialScale={mobileGridFit.fitScale}
+                    minScale={mobileGridFit.minScale}
                     maxScale={3}
+                    centerZoomedOut
                     centerOnInit={false}
                     wheel={{ wheelDisabled: true }}
                     doubleClick={{ disabled: true }}
@@ -2304,6 +2355,11 @@ function GrillaViewInner() {
                     alignmentAnimation={{ disabled: true }}
                     disablePadding
                     limitToBounds={false}
+                    onInit={(ref) => {
+                      transformComponentRef.current = ref;
+                      ref.centerView(mobileGridFit.fitScale, 0);
+                      activeMobileScaleRef.current = mobileGridFit.fitScale;
+                    }}
                     onTransformed={(_ref, state) => {
                       activeMobileScaleRef.current = state.scale;
                     }}
