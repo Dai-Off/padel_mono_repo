@@ -21,11 +21,17 @@ import { OPENWEATHER_API_KEY } from '../../../config';
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-const BONUS_LEVELS = [
-  { label: 'x0.5', minDays: 0, color: '#9CA3AF' },
-  { label: 'x1', minDays: 7, color: '#FB923C' },
-  { label: 'x1.5', minDays: 14, color: '#FDBA74' },
-  { label: 'x2', minDays: 30, color: '#FCD34D' },
+// Tiers de bonus alineados con backend (learningStreaks.getMultiplier):
+//   racha 0-2  → sin bonus (countdown a x1.5)
+//   racha 3-7  → x1.5  (multiplier 0.5 → factor 1.5)
+//   racha 8-20 → x2    (multiplier 1.0 → factor 2.0)
+//   racha 21-45→ x2.5  (multiplier 1.5 → factor 2.5)
+//   racha 46+  → x3    (multiplier 2.0 → factor 3.0)
+const BONUS_TIERS = [
+  { minStreak: 3,  label: 'Bonus x1.5', color: '#FB923C' },
+  { minStreak: 8,  label: 'Bonus x2',   color: '#FDBA74' },
+  { minStreak: 21, label: 'Bonus x2.5', color: '#FCD34D' },
+  { minStreak: 46, label: 'Bonus x3',   color: '#FCD34D' },
 ] as const;
 
 type Props = {
@@ -92,12 +98,23 @@ function DailyLessonIconBackdropSvg({ color }: { color: string }) {
   );
 }
 
-function getBonusLevelLabel(streak: number): { label: string; color: string } {
-  for (let i = BONUS_LEVELS.length - 1; i >= 0; i--) {
-    const L = BONUS_LEVELS[i];
-    if (streak >= L.minDays) return { label: L.label, color: L.color };
+// Devuelve el texto del badge de bonus (sin la llama ni la racha — esos los
+// renderiza el caller). En modo countdown añade el "en N más" para indicar
+// cuánto falta para el primer tier.
+function getBonusInfo(streak: number): { text: string; color: string } {
+  if (streak < 3) {
+    const remaining = 3 - streak;
+    const dayWord = remaining === 1 ? 'día restante' : 'días restantes';
+    return {
+      text: `${remaining} ${dayWord} para Bonus x1.5`,
+      color: '#9CA3AF',
+    };
   }
-  return { label: BONUS_LEVELS[0].label, color: BONUS_LEVELS[0].color };
+  for (let i = BONUS_TIERS.length - 1; i >= 0; i--) {
+    const t = BONUS_TIERS[i];
+    if (streak >= t.minStreak) return { text: t.label, color: t.color };
+  }
+  return { text: BONUS_TIERS[0].label, color: BONUS_TIERS[0].color };
 }
 
 function getMultiplierLabel(multiplier: number): string | null {
@@ -164,7 +181,7 @@ export function DailyLessonCard({
   const completedToday = isLessonCompletedToday(lastCompleted, TIMEZONE);
 
   const multiplierLabel = getMultiplierLabel(multiplier);
-  const bonusFromStreak = getBonusLevelLabel(currentStreak);
+  const bonusFromStreak = getBonusInfo(currentStreak);
 
   /** Fondo: pulso tipo Motion (~5s easeInOut 0↔1). */
   useEffect(() => {
@@ -519,14 +536,19 @@ export function DailyLessonCard({
           </View>
 
           <View style={[styles.streakRow, isCarousel && styles.streakRowCarousel]}>
-            {currentStreak > 0 ? (
-              <View style={styles.streakInline}>
-                <Ionicons name="flame" size={10} color="#FB923C" />
-                <Text style={styles.streakText}>{currentStreak} días de racha</Text>
-              </View>
-            ) : null}
-            <Text style={[styles.bonusText, { color: color2 }]}>
-              Bonus {bonusFromStreak.label}
+            {/* Contador de racha + bonus en una sola línea, separados por "·".
+                Formato: "🔥 N día(s) · Bonus xN.N [en N más]". La racha se
+                muestra siempre (incluso 0 días) para que el usuario vea su
+                progreso. Antes la línea se duplicaba ("1 día de racha | 2 días
+                para Bonus x1.5"); ahora "días" aparece solo una vez. */}
+            <View style={styles.streakInline}>
+              <Ionicons name="flame" size={10} color="#FB923C" />
+              <Text style={styles.streakText}>
+                {currentStreak} día{currentStreak === 1 ? '' : 's'}
+              </Text>
+            </View>
+            <Text style={[styles.bonusText, { color: bonusFromStreak.color }]}>
+              · {bonusFromStreak.text}
             </Text>
           </View>
 
