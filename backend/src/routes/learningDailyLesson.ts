@@ -140,6 +140,155 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+// GET /daily-lesson/today-results
+// Devuelve los resultados de la sesión de HOY (si existe), con el detalle por
+// pregunta reconstruido desde learning_question_log. Permite al usuario ver
+// su pantalla de resultados sin tener que rehacer la lección.
+// Shape compatible con SubmitLessonResponse para reutilizar el render existente.
+router.get('/daily-lesson/today-results', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const player = await getPlayerFromAuth(req.authContext!.userId);
+    if (!player) {
+      return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
+    }
+    const onboardingError = requireOnboarding(player);
+    if (onboardingError) return res.status(403).json({ ok: false, error: onboardingError, requires_onboarding: true });
+
+    const timezone = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
+    const { start, end } = getTodayRange(timezone);
+    const supabase = getSupabaseServiceRoleClient();
+
+    // 1. Sesión de hoy. Si no hay, 404 (el botón no debería ser visible).
+    const { data: todaySession, error: sErr } = await supabase
+      .from('learning_sessions')
+      .select('id, correct_count, total_count, score, xp_earned, completed_at')
+      .eq('player_id', player.id)
+      .gte('completed_at', start)
+      .lte('completed_at', end)
+      .order('completed_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (sErr) return res.status(500).json({ ok: false, error: sErr.message });
+    if (!todaySession) return res.status(404).json({ ok: false, error: 'No hay sesión de hoy' });
+
+    // 2. Logs de respuestas de hoy (en orden cronológico).
+    const { data: logsRaw, error: lErr } = await supabase
+      .from('learning_question_log')
+      .select('question_id, answered_correctly, answered_at')
+      .eq('player_id', player.id)
+      .gte('answered_at', start)
+      .lte('answered_at', end)
+      .order('answered_at', { ascending: true });
+
+    if (lErr) return res.status(500).json({ ok: false, error: lErr.message });
+    const logs = logsRaw ?? [];
+
+    // 3. Preguntas que respondió en esos logs. Si no hay logs (datos antiguos),
+    //    devolvemos arrays vacíos y el cliente muestra solo el resumen.
+    type RawQ = {
+      id: string;
+      type: string;
+      level: number;
+      area: string;
+      has_video: boolean;
+      video_url: string | null;
+      content: Record<string, unknown>;
+      created_by_club: string;
+      clubs: { name: string; city: string } | { name: string; city: string }[] | null;
+    };
+    let questions: RawQ[] = [];
+    if (logs.length > 0) {
+      const questionIds = logs.map((l) => l.question_id);
+      const { data: qData, error: qErr } = await supabase
+        .from('learning_questions')
+        .select('id, type, level, area, has_video, video_url, content, created_by_club, clubs:created_by_club(name, city)')
+        .in('id', questionIds);
+      if (qErr) return res.status(500).json({ ok: false, error: qErr.message });
+      questions = (qData ?? []) as RawQ[];
+
+      // Mergear árbol de puzzles.
+      const puzzleIds = questions.filter((q) => q.type === 'puzzle').map((q) => q.id);
+      if (puzzleIds.length > 0) {
+        const { data: puzzles, error: pErr } = await supabase
+          .from('learning_puzzles')
+          .select('question_id, statement, intro_frame, initial_frame, options, schema_version')
+          .in('question_id', puzzleIds);
+        if (pErr) return res.status(500).json({ ok: false, error: pErr.message });
+        const byQ = new Map((puzzles ?? []).map((p) => [String(p.question_id), p]));
+        for (const q of questions) {
+          if (q.type === 'puzzle') {
+            const p = byQ.get(String(q.id));
+            if (p) {
+              q.content = {
+                schema_version: p.schema_version,
+                statement: p.statement,
+                intro_frame: p.intro_frame,
+                initial_frame: p.initial_frame,
+                options: p.options,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    // Ordenar las questions en el mismo orden que los logs (cronológico = orden
+    // en que el usuario las contestó).
+    const qById = new Map(questions.map((q) => [q.id, q]));
+    const orderedQuestions = logs
+      .map((l) => qById.get(l.question_id))
+      .filter((q): q is RawQ => !!q)
+      .map((q) => {
+        const club = Array.isArray(q.clubs) ? q.clubs[0] : q.clubs;
+        return {
+          id: q.id,
+          type: q.type,
+          area: q.area,
+          has_video: q.has_video,
+          video_url: q.video_url,
+          content: sanitizeContent(q.type, q.content),
+          club_name: club?.name ?? null,
+          club_city: club?.city ?? null,
+        };
+      });
+
+    // 4. Reconstruir results[] (compat con SubmitLessonResponse).
+    const results = logs.map((l) => ({
+      question_id: l.question_id,
+      correct: l.answered_correctly,
+      correct_answer: null,
+      points: l.answered_correctly ? 100 : 0,
+    }));
+
+    // 5. Streak data para el header de la pantalla de resultados.
+    const { data: streakRow } = await supabase
+      .from('learning_streaks')
+      .select('current_streak, longest_streak')
+      .eq('player_id', player.id)
+      .maybeSingle();
+    const current = streakRow?.current_streak ?? 0;
+    const longest = streakRow?.longest_streak ?? 0;
+
+    return res.json({
+      ok: true,
+      session: todaySession,
+      questions: orderedQuestions,
+      results,
+      streak: {
+        current,
+        longest,
+        multiplier: getMultiplier(current),
+        xp_base: 0,
+        xp_bonus: 0,
+      },
+      shared_streaks: [],
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // POST /daily-lesson/complete
 router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Response) => {
   try {

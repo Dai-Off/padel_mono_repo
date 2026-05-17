@@ -115,6 +115,38 @@ export async function fetchDailyLesson(
   }
 }
 
+// Obtiene los resultados de la sesión de HOY (si existe). Misma shape que
+// submitDailyLesson para reutilizar la pantalla de resultados. Útil cuando
+// el usuario ya completó la lección y quiere revisar lo que hizo sin rehacer.
+// Incluye también `questions` con las preguntas exactas que respondió, para
+// que el repaso de fallos funcione en modo histórico.
+export type TodayResultsResponse = SubmitLessonResponse & {
+  questions: DailyLessonQuestion[];
+};
+
+export async function fetchTodayResults(
+  token: string | null | undefined,
+  timezone = 'UTC',
+): Promise<TodayResultsResponse | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(
+      `${API_URL}/learning/daily-lesson/today-results?timezone=${encodeURIComponent(timezone)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
+    const json = await res.json();
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al obtener resultados' };
+    return json as TodayResultsResponse;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
 export async function submitDailyLesson(
   token: string | null | undefined,
   timezone: string,

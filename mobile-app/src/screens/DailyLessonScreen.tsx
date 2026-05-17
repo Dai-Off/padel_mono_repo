@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
-import { submitDailyLesson, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
+import { submitDailyLesson, fetchTodayResults, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
 import { QuestionCard } from '../components/learning/QuestionCard';
 import { VideoPlayer } from '../components/learning/VideoPlayer';
@@ -75,8 +75,15 @@ function getQuestionPreview(q: DailyLessonQuestion): string {
 export function DailyLessonScreen({ onBack, onComplete }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const { questions, alreadyCompleted, loading, error } = useDailyLesson(TIMEZONE);
+  const { questions: hookQuestions, alreadyCompleted, loading, error } = useDailyLesson(TIMEZONE);
   const streak = useStreak(TIMEZONE);
+
+  // Preguntas que se muestran. Por defecto vienen del hook (el algoritmo de
+  // selección de hoy). Si el usuario pulsa "Ver resultados" para revisar lo
+  // que hizo, las cargamos desde /today-results — esas son las preguntas
+  // exactas que respondió (pueden diferir de las del repetir).
+  const [historicQuestions, setHistoricQuestions] = useState<DailyLessonQuestion[] | null>(null);
+  const questions = historicQuestions ?? hookQuestions;
 
   const [phase, setPhase] = useState<Phase>('intro');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -359,6 +366,36 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     }, 50);
   }, [contentOpacity]);
 
+  // Carga los resultados de la sesión de hoy y va directo a la pantalla de
+  // resultados. Reconstruye también `questions` y `failedIndices` para que la
+  // pantalla y el botón "Repasar fallos" funcionen idénticos al flujo normal.
+  const handleViewResults = useCallback(async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await fetchTodayResults(session?.access_token, TIMEZONE);
+      if (!res.ok) {
+        setSubmitError(('error' in res && res.error) ? res.error : 'No se pudieron cargar los resultados');
+        setSubmitting(false);
+        return;
+      }
+      // Las preguntas históricas reemplazan a las del hook (puede que el
+      // algoritmo elija otras hoy al repetir).
+      setHistoricQuestions(res.questions);
+      // failedIndices se reconstruye desde los results (posiciones donde correct=false).
+      const failed = res.results
+        .map((r, i) => (r.correct ? -1 : i))
+        .filter((i) => i >= 0);
+      setFailedIndices(failed);
+      setResults(res);
+      setPhase('results');
+    } catch {
+      setSubmitError('Error al cargar resultados');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [session?.access_token]);
+
   const handleStart = () => {
     setPhase('questions');
     setCurrentIndex(0);
@@ -367,6 +404,9 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     setReviewIndex(0);
     setResults(null);
     setSubmitError(null);
+    // Si veníamos de "Ver resultados", limpiamos las preguntas históricas
+    // para que la repetición use las del hook (algoritmo del día).
+    setHistoricQuestions(null);
     animateProgressTo(0);
     // Mostrar video si la primera pregunta tiene uno
     const firstQ = questions[0];
@@ -471,6 +511,25 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
             })}
           </View>
 
+          {/* Si la lección ya está hecha, ofrecemos también "Ver resultados"
+              (recupera la sesión de hoy sin tener que repetir). El botón
+              principal pasa a "Repetir lección" para mantener la jerarquía
+              visual del CTA principal en cualquier estado. */}
+          {alreadyCompleted && (
+            <Pressable
+              onPress={handleViewResults}
+              disabled={submitting}
+              style={styles.startButton}
+            >
+              <View style={styles.viewResultsButton}>
+                <Ionicons name="stats-chart" size={20} color="#10B981" />
+                <Text style={styles.viewResultsText}>
+                  {submitting ? 'Cargando...' : 'Ver resultados'}
+                </Text>
+              </View>
+            </Pressable>
+          )}
+
           <Pressable onPress={handleStart} style={styles.startButton}>
             <LinearGradient
               colors={alreadyCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#C46A20']}
@@ -478,8 +537,10 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
               end={{ x: 1, y: 0 }}
               style={styles.startGradient}
             >
-              <Ionicons name="play" size={20} color="#fff" />
-              <Text style={styles.startText}>Empezar</Text>
+              <Ionicons name={alreadyCompleted ? 'reload' : 'play'} size={20} color="#fff" />
+              <Text style={styles.startText}>
+                {alreadyCompleted ? 'Repetir lección' : 'Empezar'}
+              </Text>
             </LinearGradient>
           </Pressable>
 
@@ -885,6 +946,20 @@ const styles = StyleSheet.create({
   topicBadgeText: { fontSize: 11, fontWeight: '700' },
   startButton: { width: '100%', maxWidth: 280, marginBottom: 16 },
   startGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 16, gap: 8 },
+  // Botón secundario "Ver resultados" (solo aparece si ya completaste hoy).
+  // Variante outline en verde para diferenciarlo del CTA principal "Repetir".
+  viewResultsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 16,
+    gap: 8,
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+  },
+  viewResultsText: { color: '#10B981', fontWeight: '700', fontSize: 16 },
   startText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
   cancelButton: { paddingVertical: 8 },
   cancelText: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
