@@ -9,6 +9,9 @@
 --   - Cada opción tiene `select_frame` + `confirmation_frame` (no `reveal_frame`).
 --   - Shapes en formato kit (circle/arrow/rect/line/text/triangle).
 --   - `intro_frame` opcional: si está presente, el visor anima intro → initial al cargar.
+--
+-- Idempotente. Al final limpia el campo legacy `court_position` (era una etiqueta
+-- editorial que nunca afectó al scheduling ni al render mobile, ver más abajo).
 
 -- 1. Permitir 'puzzle' en el CHECK constraint de learning_questions.type.
 alter table public.learning_questions drop constraint if exists learning_questions_type_check;
@@ -22,8 +25,6 @@ create table if not exists public.learning_puzzles (
                        references public.learning_questions(id) on delete cascade,
   schema_version     smallint not null default 2,
   statement          text not null,
-  court_position     text not null default 'both'
-                       check (court_position in ('left','right','both')),
 
   -- Sub-árbol del puzzle. Se carga siempre junto al puzzle entero, nunca se filtra suelto.
   intro_frame        jsonb,            -- opcional: { players, ball, shapes?, duration_ms?, auto_trajectory? }
@@ -35,11 +36,20 @@ create table if not exists public.learning_puzzles (
   updated_at         timestamptz not null default now()
 );
 
-create index if not exists learning_puzzles_court_position_idx
-  on public.learning_puzzles (court_position);
-
 create index if not exists learning_puzzles_question_id_idx
   on public.learning_puzzles (question_id);
+
+-- 3. Limpieza del campo legacy `court_position`.
+--
+-- Era una etiqueta editorial (left/right/both) que solo se usaba como ayuda
+-- visual en el editor web (oscurecer la mitad inactiva). Nunca afectó al
+-- scheduling ni se renderizó en mobile. Acabó siendo un campo zombi: el autor
+-- lo rellenaba pero nada cambiaba a partir de ahí.
+-- Si en el futuro queremos preferencias por lado del jugador, será mejor un
+-- campo explícito `side_relevance` (left/right/agnostic) que el autor marque
+-- a conciencia. Mientras tanto, fuera.
+alter table public.learning_puzzles drop column if exists court_position;
+drop index if exists public.learning_puzzles_court_position_idx;
 
 -- Comentarios documentales
 comment on table public.learning_puzzles is

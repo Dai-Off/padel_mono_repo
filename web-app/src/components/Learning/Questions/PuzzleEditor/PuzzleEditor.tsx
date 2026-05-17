@@ -27,6 +27,10 @@ import type {
 interface Props {
   content: PuzzleContent;
   onChange: (next: PuzzleContent) => void;
+  // Si true, el banner de validación y los puntos rojos en tabs aparecen. El
+  // padre (QuestionFormModal) lo activa tras el primer intento fallido de
+  // publicar. Mientras es false, la UI es silenciosa y el usuario edita en paz.
+  showErrors?: boolean;
 }
 
 // Renumera los ids de las opciones a 1..N por posición en el array. Mantiene
@@ -37,7 +41,7 @@ function renumberOptions(options: PuzzleOption[]): PuzzleOption[] {
   return options.map((o, i) => ({ ...o, id: (i + 1) as 1 | 2 | 3 }));
 }
 
-export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
+export function PuzzleEditor({ content, onChange: onChangeRaw, showErrors = false }: Props) {
   const [selected, setSelected] = useState<SelectedItem>(null);
   const [mainTab, setMainTab] = useState<MainTabKey>('initial');
   const [phaseTab, setPhaseTab] = useState<Phase>('select');
@@ -638,9 +642,13 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
   // Pasa el árbol entero por el validador. Cada cambio dispara recálculo (es
   // función pura O(n) sobre el content). Los errores se agrupan por scope para
   // pintar puntos rojos en las tabs correspondientes.
-  const errors = useMemo(() => validatePuzzleContentAll(content), [content]);
+  // Validación en vivo. La lista solo se "expone" cuando el padre activa
+  // showErrors (tras el primer intento de publicar). Mientras showErrors=false
+  // todo queda silenciado: ni banner ni puntos rojos en tabs.
+  const allErrors = useMemo(() => validatePuzzleContentAll(content), [content]);
+  const errors = useMemo(() => (showErrors ? allErrors : []), [showErrors, allErrors]);
 
-  // Sets de tabs con error, derivados del scope de cada error.
+  // Sets de tabs con error, derivados del scope de cada error (solo live).
   const errorMainTabs = useMemo(() => {
     const s = new Set<MainTabKey>();
     for (const e of errors) {
@@ -730,19 +738,26 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
             {errorsExpanded ? <ChevronUp className="w-4 h-4 text-amber-900" /> : <ChevronDown className="w-4 h-4 text-amber-900" />}
           </button>
           {errorsExpanded && (
-            <ul className="max-h-40 overflow-y-auto px-3 pb-2 space-y-1">
-              {errors.map((e: PuzzleValidationError, i: number) => (
-                <li key={i}>
-                  <button
-                    type="button"
-                    onClick={() => navigateToError(e.scope)}
-                    className="w-full text-left text-[11px] text-amber-900 hover:bg-amber-100 rounded px-2 py-1 transition-colors"
-                  >
-                    {e.message}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="max-h-40 overflow-y-auto px-3 space-y-1">
+                {errors.map((e: PuzzleValidationError, i: number) => (
+                  <li key={i}>
+                    <button
+                      type="button"
+                      onClick={() => navigateToError(e.scope)}
+                      className="w-full text-left text-[11px] text-amber-900 hover:bg-amber-100 rounded px-2 py-1 transition-colors"
+                    >
+                      {e.message}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {/* Hint: ofrece la alternativa de guardar como borrador para
+                  que el usuario sepa que puede pausar el trabajo sin perderlo. */}
+              <p className="px-3 py-2 text-[10px] text-amber-800 italic">
+                ¿Aún no has terminado? Pulsa <span className="font-bold">Guardar borrador</span> para continuar más tarde sin perder lo hecho.
+              </p>
+            </>
           )}
         </div>
       )}
@@ -883,7 +898,6 @@ export function PuzzleEditor({ content, onChange: onChangeRaw }: Props) {
                 })
               }
               onShapeChange={updateShape}
-              courtPosition={content.court_position}
               activeOptionId={mainTab !== 'initial' ? mainTab : null}
               drawingType={drawingType}
               onDrawingComplete={(s) => {

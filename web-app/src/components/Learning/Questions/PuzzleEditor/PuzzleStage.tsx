@@ -39,9 +39,6 @@ interface Props {
   // Callback para actualizar una shape (drag/edit). Si no se pasa, las shapes
   // no son interactivas.
   onShapeChange?: (next: import('../../../../types/learningContent').PuzzleShape) => void;
-  // Indicador visual de la mitad activa de la pista (left / right).
-  // Solo cuando no es 'both'.
-  courtPosition?: 'left' | 'right' | 'both';
   // Id de la opción activa en el editor (tab activa). Si está definido, el badge
   // de esa opción se resalta y los demás se atenúan al 40%.
   activeOptionId?: 1 | 2 | 3 | null;
@@ -82,7 +79,6 @@ export function PuzzleStage({
   options,
   onOptionChange,
   onShapeChange,
-  courtPosition,
   activeOptionId,
   playerSelectedId,
   playerConfirmed,
@@ -214,21 +210,6 @@ export function PuzzleStage({
           <Layer listening={false}>
             <CourtBackground scale={scale} />
           </Layer>
-
-          {/* Overlay de court_position: oscurece la mitad inactiva. */}
-          {courtPosition && courtPosition !== 'both' && (
-            <Layer listening={false}>
-              <Group x={innerOffsetPx} y={innerOffsetPx}>
-                <Rect
-                  x={courtPosition === 'left' ? m2px(courtConfig.surface.width / 2, scale) : 0}
-                  y={0}
-                  width={m2px(courtConfig.surface.width / 2, scale)}
-                  height={m2px(courtConfig.surface.height, scale)}
-                  fill="rgba(0,0,0,0.35)"
-                />
-              </Group>
-            </Layer>
-          )}
 
           {/* Capa de badges A/B/C. En el editor van DETRÁS de shapes/players
               (no tapar el contenido). En el visor (PlayModal) van con estados

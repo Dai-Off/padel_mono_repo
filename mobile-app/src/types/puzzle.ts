@@ -2,7 +2,6 @@
 // web-app/src/types/learningContent.ts (PuzzleContent y derivados).
 // Schema v2: formato del catálogo importado (kit starter).
 
-export type PuzzleCourtPosition = 'left' | 'right' | 'both';
 export type PuzzleShotType = 'lob' | 'chiquita';
 export type PuzzleSpin = 'clockwise' | 'counter-clockwise' | 'random';
 export type PuzzlePlayerFacing = 'face' | 'back';
@@ -74,7 +73,6 @@ export interface PuzzleOption {
 export interface PuzzleContent {
   schema_version?: 2;
   statement: string;
-  court_position?: PuzzleCourtPosition;
   intro_frame?: PuzzleFrame;
   initial_frame: PuzzleFrame;
   options: PuzzleOption[];

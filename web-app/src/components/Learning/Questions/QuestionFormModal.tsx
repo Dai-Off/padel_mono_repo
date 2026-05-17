@@ -25,8 +25,7 @@ const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'men
 // Plantilla mínima válida para un puzzle nuevo (cumple validatePuzzleContent del backend).
 const PUZZLE_TEMPLATE: PuzzleContent = {
   schema_version: 2,
-  statement: 'Describe la situación táctica del puzzle aquí.',
-  court_position: 'both',
+  statement: '',
   initial_frame: {
     players: [
       { id: 1, team: 1, x: 3, y: 15, is_user: true },
@@ -131,13 +130,21 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // Validación del contenido según tipo
-  const validateContent = (): string | null => {
-    // Guard transversal: el nivel es obligatorio y debe ser > 0 para cualquier
-    // tipo de pregunta. Sin esto se quedaba en 0 si el usuario se olvidaba.
-    if (level == null || level <= 0) {
-      return 'El nivel es obligatorio y debe ser mayor que 0';
+  // Validación mínima — se exige siempre, incluso al guardar como borrador.
+  // El nivel es necesario para que el algoritmo de scheduling pueda colocar
+  // la pregunta cuando se publique. Sin nivel no tiene sentido siquiera el draft.
+  const validateMinimal = (): string | null => {
+    if (level == null) {
+      return 'El nivel es obligatorio';
     }
+    if (level < 0.5 || level > 6.5) {
+      return 'El nivel debe estar entre 0.5 y 6.5';
+    }
+    return null;
+  };
+
+  // Validación completa por tipo — se exige al publicar. Para draft se salta.
+  const validateFull = (): string | null => {
     switch (type) {
       case 'test_classic': {
         const c = content as TestClassicContent;
@@ -169,15 +176,12 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
         return null;
       }
       case 'puzzle': {
-        // Validación completa client-side (mismo validador que el backend).
-        // Si hay errores, el banner del PuzzleEditor ya los pinta uno a uno;
-        // aquí solo bloqueamos el submit con un resumen.
         const all = validatePuzzleContentAll(content as PuzzleContent);
         if (all.length > 0) {
           const first = all[0].message;
           return all.length === 1
-            ? `Puzzle inválido: ${first}`
-            : `Puzzle inválido: ${first} (y ${all.length - 1} error${all.length - 1 === 1 ? '' : 'es'} más; revisa el banner del editor)`;
+            ? first
+            : `${first} (y ${all.length - 1} error${all.length - 1 === 1 ? '' : 'es'} más; revisa el banner del editor)`;
         }
         return null;
       }
@@ -185,19 +189,51 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
     return null;
   };
 
-  // Recompute puzzle errors en vivo para poder deshabilitar el botón Guardar
-  // (no solo mostrar toast tras click). Solo aplica si el tipo es puzzle —
-  // los demás tipos tienen validación trivial en validateContent.
+  // Errores del puzzle (en vivo). El banner del editor decide cuándo mostrarlos
+  // (no aparece hasta el primer intento de publicar — ver hasAttemptedPublish).
   const puzzleErrors = useMemo(() => {
     if (type !== 'puzzle') return [];
     return validatePuzzleContentAll(content as PuzzleContent);
   }, [type, content]);
-  const submitBlocked = type === 'puzzle' && puzzleErrors.length > 0;
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const contentError = validateContent();
-    if (contentError) return toast.error(contentError);
+  // hasAttemptedPublish: se activa al primer click de "Publicar" con errores.
+  // A partir de ahí, el banner del editor permanece visible y actualiza en vivo
+  // hasta que se resuelven o se cierra el modal. Sirve para no asustar al
+  // usuario nada más crear el puzzle con errores que aún no ha tenido tiempo
+  // de empezar a corregir.
+  const [hasAttemptedPublish, setHasAttemptedPublish] = useState(false);
+
+  const handleSave = async (saveMode: 'draft' | 'publish') => {
+    const minimalErr = validateMinimal();
+    if (minimalErr) {
+      // Si era un intento de Publicar, activamos hasAttemptedPublish para que
+      // a partir de ahora el input del nivel se pinte en rojo en vivo. En
+      // borrador no, porque el usuario solo quería pausar el trabajo.
+      if (saveMode === 'publish') setHasAttemptedPublish(true);
+      return toast.error(minimalErr);
+    }
+
+    if (saveMode === 'publish') {
+      const fullErr = validateFull();
+      if (fullErr) {
+        // Primer intento fallido de publicar: activamos el banner del editor
+        // para que se vean todos los errores en contexto (lista + dots en tabs).
+        // No spammeamos un toast en puzzle — el banner es la fuente de verdad.
+        setHasAttemptedPublish(true);
+        if (type === 'puzzle') return;
+        return toast.error(fullErr);
+      }
+    }
+
+    // Edge case: si la pregunta ya está publicada (o inactive con contenido
+    // válido) y el usuario pulsa "Guardar borrador", confirmamos. Es destructivo:
+    // la pregunta deja de estar accesible vía el toggle, vuelve a estado draft.
+    if (saveMode === 'draft' && mode === 'edit' && question && question.status !== 'draft') {
+      const ok = window.confirm(
+        'Esto revertirá la pregunta a borrador y dejará de aparecer en las lecciones. ¿Continuar?',
+      );
+      if (!ok) return;
+    }
 
     setSaving(true);
     try {
@@ -213,10 +249,11 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
       const body = {
         club_id: clubId,
         type,
-        level,
+        level: level as number,
         area,
         video_url: finalVideoUrl || null,
         content,
+        status: (saveMode === 'draft' ? 'draft' : 'published') as 'draft' | 'published',
       };
 
       if (mode === 'create') {
@@ -224,7 +261,13 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
       } else if (question) {
         await learningContentService.updateQuestion(question.id, body);
       }
-      toast.success(t('learning_save_success'));
+      if (saveMode === 'draft') {
+        toast.success('Guardado como borrador', {
+          style: { background: '#fef3c7', color: '#92400e' },
+        });
+      } else {
+        toast.success(t('learning_save_success'));
+      }
       onSaved();
     } catch (e) {
       toast.error((e as Error).message || t('learning_save_error'));
@@ -232,6 +275,11 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
       setSaving(false);
       setUploading(false);
     }
+  };
+
+  // Enter dentro de un input no debe disparar nada (los botones son explícitos).
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
   };
 
   const isPuzzle = type === 'puzzle';
@@ -252,7 +300,7 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+        <form onSubmit={handleFormSubmit} className="p-5 space-y-4">
           {/* Tipo */}
           <div>
             <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_type')}</label>
@@ -288,21 +336,27 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
               <input
                 type="number"
                 min={0.5}
-                max={7}
+                max={6.5}
                 step={0.5}
                 value={level ?? ''}
-                placeholder="1.0 - 7.0"
+                placeholder="0.5 - 6.5"
                 onChange={(e) => {
                   if (e.target.value === '') {
                     setLevel(null);
                     return;
                   }
                   const val = Number(e.target.value);
-                  // Solo permitir incrementos de 0.5
+                  // Solo permitir incrementos de 0.5 dentro del rango [0.5, 6.5].
                   const rounded = Math.round(val * 2) / 2;
-                  setLevel(Math.max(0.5, Math.min(7, rounded)));
+                  setLevel(Math.max(0.5, Math.min(6.5, rounded)));
                 }}
-                className={`w-full rounded-xl border px-3 py-2 text-sm ${level == null || level <= 0 ? 'border-red-300 bg-red-50' : 'border-gray-200'}`}
+                // El borde rojo solo aparece tras el primer intento de Publicar.
+                // Antes, el campo se ve neutro para no asustar al crear el puzzle.
+                className={`w-full rounded-xl border px-3 py-2 text-sm ${
+                  hasAttemptedPublish && (level == null || level < 0.5 || level > 6.5)
+                    ? 'border-red-300 bg-red-50'
+                    : 'border-gray-200'
+                }`}
               />
             </div>
           </div>
@@ -405,6 +459,7 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
             <PuzzleEditor
               content={content as PuzzleContent}
               onChange={(c) => setContent(c)}
+              showErrors={hasAttemptedPublish}
             />
           )}
 
@@ -417,19 +472,34 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
             >
               {t('cancel')}
             </button>
+            {/* Guardar borrador: siempre disponible (no valida contenido).
+                Útil para pausar trabajo en progreso sin perder lo hecho. */}
             <button
-              type="submit"
-              disabled={saving || uploading || submitBlocked}
-              title={submitBlocked ? `Faltan ${puzzleErrors.length} cosas por arreglar` : undefined}
+              type="button"
+              disabled={saving || uploading}
+              onClick={() => handleSave('draft')}
+              title="Guarda el progreso sin validar contenido. No aparecerá en lecciones."
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? '...' : 'Guardar borrador'}
+            </button>
+            {/* Publicar: siempre clicable. Si hay errores, al pulsar se activa
+                el banner del editor (no deshabilitamos el botón para evitar el
+                patrón "gris sin razón"). El contador con número de errores solo
+                aparece después del primer intento de publicar. */}
+            <button
+              type="button"
+              disabled={saving || uploading}
+              onClick={() => handleSave('publish')}
               className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-[#E31E24] hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {uploading
                 ? `${t('learning_field_video')}...`
                 : saving
                   ? '...'
-                  : submitBlocked
-                    ? `${t('save')} (${puzzleErrors.length} error${puzzleErrors.length === 1 ? '' : 'es'})`
-                    : t('save')}
+                  : hasAttemptedPublish && type === 'puzzle' && puzzleErrors.length > 0
+                    ? `Publicar (${puzzleErrors.length} error${puzzleErrors.length === 1 ? '' : 'es'})`
+                    : 'Publicar'}
             </button>
           </div>
         </form>

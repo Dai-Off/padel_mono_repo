@@ -13,7 +13,6 @@ export type QuestionArea = 'technique' | 'tactics' | 'physical' | 'mental' | 'ru
 // [0..10, 10..20]; equipo 2 (rival) arriba [0..10, 0..10].
 // ---------------------------------------------------------------------------
 
-export type PuzzleCourtPosition = 'left' | 'right' | 'both';
 export type PuzzleShotType = 'lob' | 'chiquita';
 export type PuzzleSpin = 'clockwise' | 'counter-clockwise' | 'random';
 export type PuzzlePlayerFacing = 'face' | 'back';
@@ -97,7 +96,6 @@ export interface PuzzleOption {
 export interface PuzzleContent {
   schema_version?: 2;
   statement: string;
-  court_position?: PuzzleCourtPosition;
   // intro_frame opcional: si existe, al cargar el puzzle el visor reproduce
   // automáticamente la transición `intro_frame → initial_frame` antes de quedar
   // estático esperando respuesta. Útil para "previas" que añaden contexto
@@ -140,6 +138,8 @@ export type QuestionContent =
   | OrderSequenceContent
   | PuzzleContent;
 
+export type QuestionStatus = 'draft' | 'published' | 'inactive';
+
 export interface Question {
   id: string;
   club_id: string;
@@ -149,7 +149,11 @@ export interface Question {
   has_video: boolean;
   video_url: string | null;
   content: QuestionContent;
-  is_active: boolean;
+  // Estado de la pregunta. Solo 'published' se sirve en las lecciones del mobile.
+  //   - 'draft'     → en progreso, content puede ser inválido.
+  //   - 'published' → válida y servida en lecciones.
+  //   - 'inactive'  → pausada (no se sirve, conserva contenido válido).
+  status: QuestionStatus;
   created_at: string;
   // Solo presente si type='puzzle'. Metadata de la fila learning_puzzles (id propio,
   // thumbnail_url, timestamps). El árbol también se mergea en content.
@@ -158,7 +162,6 @@ export interface Question {
     question_id: string;
     schema_version: number;
     statement: string;
-    court_position: PuzzleCourtPosition;
     initial_frame: PuzzleFrame;
     options: PuzzleOption[];
     thumbnail_url: string | null;
