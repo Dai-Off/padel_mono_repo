@@ -109,6 +109,7 @@ const useClubData = (dateOrStr: Date | string) => {
     const [isCreatingCourt, setIsCreatingCourt] = useState(false);
     const [clubId, setClubId] = useState<string | null>(null);
     const [typeColorOverrides, setTypeColorOverrides] = useState<Record<string, string>>({});
+    const [typeConfigs, setTypeConfigs] = useState<Record<string, { color: string | null; display_name: string; is_system: boolean }>>({});
     const courtsRef = useRef<Court[]>([]);
     const dateStr = toDateStr(dateOrStr);
 
@@ -121,14 +122,23 @@ const useClubData = (dateOrStr: Date | string) => {
                 setClubId(id);
                 if (id) {
                     try {
-                        const pricesRes = await apiFetchWithAuth<{ ok: boolean; prices?: Record<string, { color?: string | null }> }>(
+                        const pricesRes = await apiFetchWithAuth<{ ok: boolean; prices?: Record<string, { color?: string | null; display_name?: string; is_system?: boolean }> }>(
                             `/reservation-type-prices?club_id=${encodeURIComponent(id)}`
                         );
                         if (pricesRes?.ok && pricesRes.prices) {
+                            const configMap: Record<string, { color: string | null; display_name: string; is_system: boolean }> = {};
                             const colorMap: Record<string, string> = {};
                             for (const [type, entry] of Object.entries(pricesRes.prices)) {
-                                if (entry?.color) colorMap[type] = entry.color;
+                                if (entry) {
+                                    configMap[type] = {
+                                        color: entry.color ?? null,
+                                        display_name: entry.display_name ?? type,
+                                        is_system: entry.is_system ?? false
+                                    };
+                                    if (entry.color) colorMap[type] = entry.color;
+                                }
                             }
+                            setTypeConfigs(configMap);
                             setTypeColorOverrides(colorMap);
                         }
                     } catch {
@@ -506,7 +516,7 @@ const useClubData = (dateOrStr: Date | string) => {
         }
     }, []);
 
-    return { courts, reservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides };
+    return { courts, reservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs };
 };
 
 function linkedTournamentDisplayName(b: any): string | null {
@@ -760,7 +770,7 @@ function GrillaViewInner() {
     return 'future';
   }, [today, selectedDate]);
 
-  const { courts, reservations: serverReservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs } = useClubData(selectedDate);
   const { permissionKeys: portalMenuPermissionKeys, loading: permissionsLoading } = usePortalMenuPermissions(clubId);
 
   const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
@@ -2019,7 +2029,7 @@ function GrillaViewInner() {
                 {(
                   <div className={clsx(
                     "bg-[#f8f8f8] border-b border-gray-200 px-4 md:px-8 py-2 mb-1",
-                    mobileFullView && "flex-shrink-0"
+                    mobileFullView && "shrink-0"
                   )}>
                     {/* Heading row with mobile hamburger */}
                     <div className="flex items-center gap-2 mb-1.5">
@@ -2498,7 +2508,10 @@ function GrillaViewInner() {
           )}
         </main>
 
-        <GrillaLegend typeColorOverrides={Object.keys(typeColorOverrides).length > 0 ? typeColorOverrides : undefined} />
+        <GrillaLegend
+          typeConfigs={Object.keys(typeConfigs).length > 0 ? typeConfigs : undefined}
+          typeColorOverrides={Object.keys(typeColorOverrides).length > 0 ? typeColorOverrides : undefined}
+        />
 
         <ReservationModal
           clubId={clubId}

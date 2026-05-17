@@ -3,19 +3,7 @@ import { motion } from 'framer-motion';
 import { Loader2, Save } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { reservationTypePricesService, RESERVATION_TYPES } from '../../services/reservationTypePrices';
-
-const TYPE_LABELS: Record<string, string> = {
-  standard: 'Pista privada',
-  open_match: 'Partido abierto',
-  pozo: 'Pozo / Americanas',
-  fixed_recurring: 'Turno fijo',
-  school_group: 'Escuela — clase grupal',
-  school_individual: 'Escuela — clase particular',
-  flat_rate: 'Tarifa plana',
-  tournament: 'Torneo',
-  blocked: 'Bloqueo administrativo',
-};
+import { reservationTypePricesService, type ReservationTypeConfig } from '../../services/reservationTypePrices';
 
 function formatCentsToEur(cents: number): string {
   return (cents / 100).toFixed(2).replace('.', ',');
@@ -35,6 +23,7 @@ export function ReservationTypePricesCard({ clubId }: ReservationTypePricesCardP
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [typeConfigs, setTypeConfigs] = useState<ReservationTypeConfig[]>([]);
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -47,9 +36,18 @@ export function ReservationTypePricesCard({ clubId }: ReservationTypePricesCardP
       .getByClub(clubId)
       .then((data) => {
         if (cancelled) return;
+        const configs = Object.entries(data).map(([type, entry]) => ({
+          ...entry,
+          reservation_type: type,
+        })).sort((a, b) => {
+          if (a.is_system !== b.is_system) return a.is_system ? -1 : 1;
+          return (a.sort_order ?? 100) - (b.sort_order ?? 100);
+        });
+        setTypeConfigs(configs);
+
         const next: Record<string, number> = {};
-        for (const type of RESERVATION_TYPES) {
-          next[type] = data[type]?.price_per_hour_cents ?? 0;
+        for (const c of configs) {
+          next[c.reservation_type] = c.price_per_hour_cents;
         }
         setPrices(next);
       })
@@ -104,24 +102,29 @@ export function ReservationTypePricesCard({ clubId }: ReservationTypePricesCardP
 
       <form onSubmit={handleSave} className="space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {RESERVATION_TYPES.map((type) => (
-            <div key={type} className="flex items-center gap-2">
-              <label className="text-[11px] font-medium text-gray-600 w-40 shrink-0 truncate">
-                {TYPE_LABELS[type] ?? type}
-              </label>
-              <div className="flex-1 flex items-center gap-1">
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={formatCentsToEur(prices[type] ?? 0)}
-                  onChange={(e) => handleChange(type, e.target.value)}
-                  placeholder="0,00"
-                  className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm text-[#1A1A1A] focus:ring-2 focus:ring-[#E31E24]/30 focus:border-[#E31E24]/30"
-                />
-                <span className="text-[10px] text-gray-400 shrink-0">€/h</span>
+          {typeConfigs.map((c) => {
+            const type = c.reservation_type;
+            const label = c.is_system ? t(`reservation_type_${type}`) : c.display_name;
+
+            return (
+              <div key={type} className="flex items-center gap-2">
+                <label className="text-[11px] font-medium text-gray-600 w-40 shrink-0 truncate" title={label}>
+                  {label}
+                </label>
+                <div className="flex-1 flex items-center gap-1">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={formatCentsToEur(prices[type] ?? 0)}
+                    onChange={(e) => handleChange(type, e.target.value)}
+                    placeholder="0,00"
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-sm text-[#1A1A1A] focus:ring-2 focus:ring-[#E31E24]/30 focus:border-[#E31E24]/30"
+                  />
+                  <span className="text-[10px] text-gray-400 shrink-0">€/h</span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <motion.button
@@ -144,3 +147,4 @@ export function ReservationTypePricesCard({ clubId }: ReservationTypePricesCardP
     </div>
   );
 }
+
