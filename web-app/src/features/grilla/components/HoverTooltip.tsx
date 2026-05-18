@@ -13,7 +13,7 @@ export const HoverTooltip: React.FC<HoverTooltipProps> = ({ reservation, anchorE
   const tooltipRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
-    if (!reservation || !anchorElement) return;
+    if (!reservation || !anchorElement?.isConnected) return;
     const rect = anchorElement.getBoundingClientRect();
     const tooltipW = 350;
     const tooltipH = tooltipRef.current?.offsetHeight ?? 300;
@@ -34,7 +34,7 @@ export const HoverTooltip: React.FC<HoverTooltipProps> = ({ reservation, anchorE
     setPosition(prev => (prev.top === newTop && prev.left === newLeft) ? prev : { top: newTop, left: newLeft });
   }, [reservation, anchorElement]);
 
-  if (!reservation || !anchorElement) return null;
+  if (!reservation || !anchorElement?.isConnected) return null;
 
   const [h, m] = reservation.startTime.split(':').map(Number);
   const endTotalMins = h * 60 + m + reservation.durationMinutes;

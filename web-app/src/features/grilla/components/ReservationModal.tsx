@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { Reservation, PaymentMethod } from '../types';
 import {
     X,
@@ -21,8 +22,14 @@ import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { calendarLocale } from '../i18n/calendarLocale';
 import { TournamentGridBookingEditor } from './TournamentGridBookingEditor';
 import { WEEKDAY_CHIPS } from '../utils/recurrenceDates';
+import { resolveJoinedPlayer } from '../utils/bookingDisplay';
 
 const PLAY_MODE_MARKER = '__PLAY_MODE__';
+
+function portalModal(node: React.ReactNode): React.ReactNode {
+    if (typeof document === 'undefined') return null;
+    return createPortal(node, document.body);
+}
 
 function extractPlayMode(rawNotes: string | null | undefined): { mode: 'single' | 'double'; cleanNotes: string } {
     const src = String(rawNotes ?? '');
@@ -541,12 +548,13 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             setConfirmEmail(false);
 
             // Set organizer from joined players data
-            if (bd.players) {
+            const orgPlayer = resolveJoinedPlayer(bd.players);
+            if (orgPlayer && bd.organizer_player_id) {
                 setOrganizer({
                     id: bd.organizer_player_id,
-                    first_name: bd.players.first_name,
-                    last_name: bd.players.last_name,
-                    email: bd.players.email || '',
+                    first_name: orgPlayer.first_name ?? '',
+                    last_name: orgPlayer.last_name ?? '',
+                    email: (orgPlayer as { email?: string }).email || '',
                     phone: null,
                     elo_rating: 1200,
                     status: 'active',
@@ -707,7 +715,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     if (!isOpen) return null;
 
     if (isLoadingBookingData && reservation && !reservation.id.startsWith('new-')) {
-        return (
+        return portalModal(
             <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
                 <div className="absolute inset-0" onClick={onClose} />
                 <div className="relative flex flex-col w-full h-[90vh] bg-gray-50 rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[520px] sm:rounded-2xl overflow-hidden">
@@ -727,7 +735,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                         </div>
                     </div>
                 </div>
-            </div>
+            </div>,
         );
     }
 
@@ -737,7 +745,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         tournamentIdFromBooking;
 
     if (isTournamentGridEdit && editingBookingData && tournamentIdFromBooking) {
-        return (
+        return portalModal(
             <TournamentGridBookingEditor
                 isOpen={isOpen}
                 onClose={onClose}
@@ -752,7 +760,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 onMoveToVisible={onMoveToVisible}
                 isOnHiddenCourt={isOnHiddenCourt}
                 vvStyle={vvStyle}
-            />
+            />,
         );
     }
 
@@ -941,7 +949,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
     const minutes = ['00', '15', '30', '45'];
 
-    return (
+    return portalModal(
         <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
             {/* Backdrop click to close */}
             <div className="absolute inset-0" onClick={onClose} />
@@ -1519,6 +1527,6 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 )}
 
             </div>
-        </div>
+        </div>,
     );
 };
