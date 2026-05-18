@@ -74,10 +74,42 @@ export function computeCompactPxPerMinute(availableHeightPx: number): number {
 }
 
 export function estimateMobileGridViewportHeight(): number {
-    const vh = typeof window !== 'undefined'
-        ? (window.visualViewport?.height ?? window.innerHeight)
-        : 600;
-    return Math.max(180, vh - 200);
+    if (typeof window === 'undefined') return 400;
+    const vh = window.visualViewport?.height ?? window.innerHeight;
+    const vw = window.innerWidth;
+    const isPortraitPhone = vw <= GRILLA_COMPACT_LAYOUT_MAX_PX && vh > vw;
+    const chromePx = isPortraitPhone
+        ? Math.min(400, Math.round(vh * 0.48))
+        : 220;
+    return Math.max(180, vh - chromePx);
+}
+
+export type MobileGridFitScale = {
+    fitScale: number;
+    minScale: number;
+};
+
+/**
+ * Default mobile zoom: fit full day height in the viewport.
+ * Horizontal overflow is handled by pan — do not shrink width to show all courts.
+ */
+export function computeMobileGridFitScale(
+    viewportWidthPx: number,
+    viewportHeightPx: number,
+    _contentWidthPx: number,
+    contentHeightPx: number,
+): MobileGridFitScale {
+    void viewportWidthPx;
+    void _contentWidthPx;
+    if (viewportHeightPx <= 0 || contentHeightPx <= 0) {
+        return { fitScale: 1, minScale: 0.85 };
+    }
+    const heightScale = viewportHeightPx / contentHeightPx;
+    const fitScale = Math.min(1, Math.max(0.78, heightScale));
+    return {
+        fitScale,
+        minScale: Math.max(0.78, fitScale * 0.97),
+    };
 }
 
 // Convert Y pixel position to snapped 30-min time
