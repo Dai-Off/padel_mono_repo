@@ -54,6 +54,7 @@ import {
   estimateMobileGridViewportHeight,
   GRILLA_COMPACT_LAYOUT_MAX_PX,
 } from './utils/timeGrid';
+import { enumerateDatesInRange } from './utils/recurrenceDates';
 import { courtVisibleInGridForDate } from './courtVisibility';
 import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
@@ -1166,22 +1167,32 @@ function GrillaViewInner() {
 
   const handleCreateBooking = async (bookingData: any) => {
       try {
-          const recurrenceCount = Math.max(1, Number(bookingData.recurrence_count) || 1);
-          const recurrenceUnit = bookingData.recurrence_unit === 'months' ? 'months' : 'weeks';
           const includeHolidays = bookingData.include_holidays !== false;
           const courtIds: string[] = Array.isArray(bookingData.court_ids) && bookingData.court_ids.length > 0
               ? bookingData.court_ids.map((x: unknown) => String(x)).filter(Boolean)
               : [String(bookingData.court_id)];
-          const baseDate = new Date(`${formatDateForInput(selectedDate)}T12:00:00`);
           const createdBookings: any[] = [];
           const skippedHolidayDates: string[] = [];
           const failedAttempts: Array<{ date: string; court_id: string; reason: string }> = [];
 
-          for (let i = 0; i < recurrenceCount; i++) {
-              const slotDate = new Date(baseDate);
-              if (recurrenceUnit === 'months') slotDate.setMonth(baseDate.getMonth() + i);
-              else slotDate.setDate(baseDate.getDate() + (i * 7));
-              const dateText = `${slotDate.getFullYear()}-${String(slotDate.getMonth() + 1).padStart(2, '0')}-${String(slotDate.getDate()).padStart(2, '0')}`;
+          let datesToBook: string[];
+          if (bookingData.is_multiple && bookingData.recurrence_start_date && bookingData.recurrence_end_date) {
+              const weekdays = Array.isArray(bookingData.recurrence_weekdays)
+                  ? bookingData.recurrence_weekdays.map((x: unknown) => Number(x)).filter((n: number) => !Number.isNaN(n))
+                  : [];
+              datesToBook = enumerateDatesInRange(
+                  String(bookingData.recurrence_start_date),
+                  String(bookingData.recurrence_end_date),
+                  weekdays,
+              );
+              if (datesToBook.length === 0) {
+                  throw new Error('No hay fechas en el rango seleccionado para los días indicados.');
+              }
+          } else {
+              datesToBook = [formatDateForInput(selectedDate)];
+          }
+
+          for (const dateText of datesToBook) {
               if (!includeHolidays && clubId) {
                   try {
                       const holidayCheck = await apiFetchWithAuth<any>(`/club-special-dates/check?club_id=${clubId}&date=${dateText}`);
@@ -1219,8 +1230,10 @@ function GrillaViewInner() {
                       total_price_cents: totalPriceCents,
                   };
                   delete payload.court_ids;
-                  delete payload.recurrence_count;
-                  delete payload.recurrence_unit;
+                  delete payload.is_multiple;
+                  delete payload.recurrence_start_date;
+                  delete payload.recurrence_end_date;
+                  delete payload.recurrence_weekdays;
                   delete payload.include_holidays;
 
                   const res = await apiFetch<any>('/bookings', {
@@ -2553,6 +2566,7 @@ function GrillaViewInner() {
 
         <ReservationModal
           clubId={clubId}
+          gridDate={formatDateForInput(selectedDate)}
           isOpen={selectedModalReservationId !== null}
           onGridRefresh={refresh}
           onClose={() => {

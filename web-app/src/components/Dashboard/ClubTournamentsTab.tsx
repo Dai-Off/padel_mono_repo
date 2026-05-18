@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
+import { WEEKDAY_CHIPS } from '../../features/grilla/utils/recurrenceDates';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { PageSpinner } from '../Layout/PageSpinner';
@@ -171,6 +172,31 @@ function calcDurationMin(startTime: string, endTime: string): number {
   return diff;
 }
 
+function localDateTimeParts(iso: string): { date: string; time: string } {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return { date: '', time: '21:30' };
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const rounded = Math.round((d.getHours() * 60 + d.getMinutes()) / 30) * 30;
+  const h = Math.min(23, Math.floor(rounded / 60));
+  const m = rounded % 60;
+  return {
+    date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+    time: `${pad2(h)}:${pad2(m === 30 ? 30 : 0)}`,
+  };
+}
+
+function calcDurationFromDateRange(
+  startDate: string,
+  endDate: string,
+  startTime: string,
+  endTime: string,
+): number {
+  if (startDate === endDate) return calcDurationMin(startTime, endTime);
+  const start = new Date(`${startDate}T${startTime}`);
+  const end = new Date(`${endDate}T${endTime}`);
+  return Math.round((end.getTime() - start.getTime()) / 60000);
+}
+
 function tournamentGenderLabel(g: string | null | undefined): string {
   if (g === 'male') return 'Masculino';
   if (g === 'female') return 'Femenino';
@@ -205,11 +231,6 @@ function normalizeHalfHourLocalDateTime(value: string): string {
   if (mins >= 45) d.setHours(d.getHours() + 1);
   d.setMinutes(snappedMins, 0, 0);
   return d.toISOString().slice(0, 16);
-}
-
-function isValidDuration30(value: string): boolean {
-  const n = Number(value);
-  return Number.isInteger(n) && n >= 30 && n % 30 === 0;
 }
 
 function nextPowerOfTwo(n: number): number {
@@ -688,6 +709,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [form, setForm] = useState({
     name: '',
     start_date: '',
+    end_date: '',
     start_time: '21:30',
     end_time: '23:00',
     start_at: '',
@@ -716,8 +738,10 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   });
   const [settingsForm, setSettingsForm] = useState({
     name: '',
-    start_at: '',
-    duration_min: '120',
+    start_date: '',
+    end_date: '',
+    start_time: '21:30',
+    end_time: '23:00',
     max_players: '12',
     price_euros: '0',
     prizeRows: [] as PrizeFormRow[],
@@ -765,6 +789,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     setForm({
       name: '',
       start_date: '',
+      end_date: '',
       start_time: '21:30',
       end_time: '23:00',
       start_at: '',
@@ -818,6 +843,9 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       ...prev,
       name: String(t.name ?? ''),
       start_date: localDate,
+      end_date: end && Number.isFinite(end.getTime())
+        ? `${end.getFullYear()}-${pad2(end.getMonth() + 1)}-${pad2(end.getDate())}`
+        : localDate,
       start_time: localStartTime,
       end_time: localEndTime,
       duration_min: String(duration),
@@ -1033,10 +1061,19 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
 
   useEffect(() => {
     if (!selected) return;
+    const stParts = localDateTimeParts(String(selected.start_at ?? ''));
+    const enIso =
+      selected.end_at ||
+      (selected.start_at && selected.duration_min
+        ? new Date(new Date(selected.start_at).getTime() + Number(selected.duration_min) * 60_000).toISOString()
+        : '');
+    const enParts = enIso ? localDateTimeParts(enIso) : stParts;
     setSettingsForm({
       name: String(selected.name ?? ''),
-      start_at: selected.start_at ? new Date(selected.start_at).toISOString().slice(0, 16) : '',
-      duration_min: String(selected.duration_min ?? 120),
+      start_date: stParts.date,
+      end_date: enParts.date || stParts.date,
+      start_time: stParts.time,
+      end_time: enParts.time,
       max_players: String(selected.max_players ?? 12),
       price_euros: centsToEurosInput(selected.price_cents ?? 0),
       prizeRows: prizesToFormRows(selected.prizes),
@@ -1447,8 +1484,16 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
         toast.error('Selecciona una fecha de inicio');
         return false;
       }
-      if (calcDurationMin(form.start_time, form.end_time) < 30) {
-        toast.error('La duración mínima es 30 minutos');
+      if (!form.end_date) {
+        toast.error('Selecciona una fecha de fin');
+        return false;
+      }
+      if (form.end_date < form.start_date) {
+        toast.error('La fecha de fin no puede ser anterior a la de inicio');
+        return false;
+      }
+      if (calcDurationFromDateRange(form.start_date, form.end_date, form.start_time, form.end_time) < 30) {
+        toast.error('El tramo horario debe ser de al menos 30 minutos');
         return false;
       }
       if (form.recurring_enabled) {
@@ -2560,13 +2605,27 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Nombre del torneo</label>
                     <input value={settingsForm.name} onChange={(e) => setSettingsForm((p) => ({ ...p, name: e.target.value }))} placeholder="Ej. Copa Primavera 2026" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
                   </div>
-                  <div>
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Fecha y hora de inicio</label>
-                    <input type="datetime-local" step={1800} value={settingsForm.start_at} onChange={(e) => setSettingsForm((p) => ({ ...p, start_at: normalizeHalfHourLocalDateTime(e.target.value) }))} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Duración (minutos)</label>
-                    <input type="number" min={30} step={30} value={settingsForm.duration_min} onChange={(e) => setSettingsForm((p) => ({ ...p, duration_min: e.target.value }))} placeholder="120" className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                  <div className="md:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div>
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Fecha inicio</label>
+                      <input type="date" value={settingsForm.start_date} onChange={(e) => setSettingsForm((p) => ({ ...p, start_date: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Fecha fin</label>
+                      <input type="date" value={settingsForm.end_date} onChange={(e) => setSettingsForm((p) => ({ ...p, end_date: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs" />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Hora inicio</label>
+                      <select value={settingsForm.start_time} onChange={(e) => setSettingsForm((p) => ({ ...p, start_time: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs">
+                        {HALF_HOUR_TIMES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Hora fin</label>
+                      <select value={settingsForm.end_time} onChange={(e) => setSettingsForm((p) => ({ ...p, end_time: e.target.value }))} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs">
+                        {HALF_HOUR_TIMES.map((t) => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
                   </div>
                   <div>
                     <label className="text-[10px] font-semibold text-gray-500 uppercase mb-1 block">Precio inscripción (€)</label>
@@ -2832,12 +2891,22 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                   disabled={savingSettings}
                   onClick={async () => {
                     if (!selected) return;
-                    if (!isHalfHourLocalDateTime(settingsForm.start_at)) {
-                      toast.error('El inicio debe ser en punto o y media (ej: 09:00, 09:30)');
+                    if (!settingsForm.start_date || !settingsForm.end_date) {
+                      toast.error('Indica fecha de inicio y de fin');
                       return;
                     }
-                    if (!isValidDuration30(settingsForm.duration_min)) {
-                      toast.error('La duración debe ser múltiplo de 30 (30, 60, 90, 120...)');
+                    if (settingsForm.end_date < settingsForm.start_date) {
+                      toast.error('La fecha de fin no puede ser anterior a la de inicio');
+                      return;
+                    }
+                    const settingsDuration = calcDurationFromDateRange(
+                      settingsForm.start_date,
+                      settingsForm.end_date,
+                      settingsForm.start_time,
+                      settingsForm.end_time,
+                    );
+                    if (settingsDuration < 30 || settingsDuration % 30 !== 0) {
+                      toast.error('El tramo horario debe ser múltiplo de 30 minutos (mín. 30)');
                       return;
                     }
                     if (!settingsForm.court_ids.length) {
@@ -2848,8 +2917,8 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                     try {
                       const updatedTournament = await tournamentsService.update(selected.id, {
                         name: settingsForm.name || null,
-                        start_at: settingsForm.start_at ? new Date(settingsForm.start_at).toISOString() : selected.start_at,
-                        duration_min: Number(settingsForm.duration_min),
+                        start_at: new Date(`${settingsForm.start_date}T${settingsForm.start_time}`).toISOString(),
+                        duration_min: settingsDuration,
                         max_players: Math.max(2, Number(settingsForm.max_players) || 2),
                         price_cents: eurosInputToCents(settingsForm.price_euros),
                         prizes: formRowsToPrizePayload(settingsForm.prizeRows),
@@ -3135,7 +3204,27 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                         <input
                           type="date"
                           value={form.start_date}
-                          onChange={(e) => setForm((p) => ({ ...p, start_date: e.target.value }))}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setForm((p) => ({
+                              ...p,
+                              start_date: v,
+                              end_date: !p.end_date || p.end_date < v ? v : p.end_date,
+                            }));
+                          }}
+                          className="w-full text-sm outline-none bg-transparent"
+                        />
+                        <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-gray-500 mb-1 block">Fecha de fin</label>
+                      <div className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5">
+                        <input
+                          type="date"
+                          value={form.end_date}
+                          min={form.start_date || undefined}
+                          onChange={(e) => setForm((p) => ({ ...p, end_date: e.target.value }))}
                           className="w-full text-sm outline-none bg-transparent"
                         />
                         <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
@@ -3146,13 +3235,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       <div className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5">
                         <select
                           value={form.start_time}
-                          onChange={(e) => {
-                            const st = e.target.value;
-                            setForm((p) => {
-                              const dur = calcDurationMin(st, p.end_time);
-                              return { ...p, start_time: st, duration_min: String(dur) };
-                            });
-                          }}
+                          onChange={(e) => setForm((p) => ({ ...p, start_time: e.target.value }))}
                           className="w-full text-sm outline-none bg-transparent appearance-none"
                         >
                           {HALF_HOUR_TIMES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -3165,13 +3248,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       <div className="flex items-center gap-1.5 rounded-lg border border-gray-300 px-2.5 py-1.5">
                         <select
                           value={form.end_time}
-                          onChange={(e) => {
-                            const et = e.target.value;
-                            setForm((p) => {
-                              const dur = calcDurationMin(p.start_time, et);
-                              return { ...p, end_time: et, duration_min: String(dur) };
-                            });
-                          }}
+                          onChange={(e) => setForm((p) => ({ ...p, end_time: e.target.value }))}
                           className="w-full text-sm outline-none bg-transparent appearance-none"
                         >
                           {HALF_HOUR_TIMES.map((t) => <option key={t} value={t}>{t}</option>)}
@@ -3180,7 +3257,6 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       </div>
                     </div>
                   </div>
-                  <p className="text-[11px] text-gray-400 mt-2">Duración: {form.duration_min} min</p>
                 </div>
 
                 <div className="rounded-2xl border border-gray-200 bg-white p-4 md:col-span-2">
@@ -3210,35 +3286,30 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                           <Calendar className="w-4 h-4 text-gray-400 shrink-0" />
                         </div>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          { id: 1, label: 'Lun' },
-                          { id: 2, label: 'Mar' },
-                          { id: 3, label: 'Mié' },
-                          { id: 4, label: 'Jue' },
-                          { id: 5, label: 'Vie' },
-                          { id: 6, label: 'Sáb' },
-                          { id: 0, label: 'Dom' },
-                        ].map((d) => {
-                          const active = form.recurring_weekdays.includes(d.id);
-                          return (
-                            <button
-                              key={d.id}
-                              type="button"
-                              onClick={() =>
-                                setForm((p) => ({
-                                  ...p,
-                                  recurring_weekdays: p.recurring_weekdays.includes(d.id)
-                                    ? p.recurring_weekdays.filter((x) => x !== d.id)
-                                    : [...p.recurring_weekdays, d.id].sort((a, b) => a - b),
-                                }))
-                              }
-                              className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium ${active ? 'bg-[#E31E24] text-white border-[#E31E24]' : 'bg-white text-gray-700 border-gray-300'}`}
-                            >
-                              {d.label}
-                            </button>
-                          );
-                        })}
+                      <div>
+                        <p className="text-[10px] font-semibold text-gray-500 mb-1">Días de la semana</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {WEEKDAY_CHIPS.map((d) => {
+                            const active = form.recurring_weekdays.includes(d.id);
+                            return (
+                              <button
+                                key={d.id}
+                                type="button"
+                                onClick={() =>
+                                  setForm((p) => ({
+                                    ...p,
+                                    recurring_weekdays: p.recurring_weekdays.includes(d.id)
+                                      ? p.recurring_weekdays.filter((x) => x !== d.id)
+                                      : [...p.recurring_weekdays, d.id].sort((a, b) => a - b),
+                                  }))
+                                }
+                                className={`px-2 py-1 rounded-lg border text-[10px] font-bold ${active ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]' : 'bg-white text-gray-600 border-gray-200'}`}
+                              >
+                                {d.label}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -3589,9 +3660,22 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
                       return;
                     }
                   }
-                  const durationMin = calcDurationMin(form.start_time, form.end_time);
+                  if (!form.end_date) {
+                    toast.error('Selecciona una fecha de fin');
+                    return;
+                  }
+                  if (form.end_date < form.start_date) {
+                    toast.error('La fecha de fin no puede ser anterior a la de inicio');
+                    return;
+                  }
+                  const durationMin = calcDurationFromDateRange(
+                    form.start_date,
+                    form.end_date,
+                    form.start_time,
+                    form.end_time,
+                  );
                   if (durationMin < 30) {
-                    toast.error('La duración mínima es 30 minutos');
+                    toast.error('El tramo horario debe ser de al menos 30 minutos');
                     return;
                   }
                   if (!selectedCourtIds.length) {
