@@ -42,6 +42,11 @@ import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
 import { HoverTooltip } from './components/HoverTooltip';
 import {
+  formatPlayerDisplayName,
+  resolveBookingGridLabel,
+  resolveOrganizerFromBooking,
+} from './utils/bookingDisplay';
+import {
   pixelsToTime,
   timeToPixels,
   parseTimeStr,
@@ -569,16 +574,11 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
         )
         .map((b: any) => {
         const start = new Date(b.start_at);
-        const organizer = b.players;
+        const organizer = resolveOrganizerFromBooking(b);
         const bookingType = b.reservation_type ?? b.booking_type ?? 'standard';
         const tournName = linkedTournamentDisplayName(b);
         const tournamentId = linkedTournamentId(b);
-        const playerName =
-            bookingType === 'tournament'
-                ? (tournName || 'Torneo')
-                : organizer
-                    ? `${organizer.first_name} ${organizer.last_name}`
-                    : '';
+        const playerName = resolveBookingGridLabel(b, tournName);
         const isMaintenance = typeof b.notes === 'string' && b.notes.includes('__COURT_MAINTENANCE__');
 
         // Build a per-player payment map from payment_transactions (authoritative for Stripe/app payments)
@@ -637,7 +637,8 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
                 if (participants.length === 0 && organizer) {
                     // Only organizer, no booking_participants — use payment_transactions
                     const txInfo = txByPlayer.get(b.organizer_player_id);
-                    return [{ name: playerName, isMember: false, level: 0, paidAmount: (txInfo?.amount ?? 0) / 100, paymentMethod: (txInfo?.method ?? null) as any }];
+                    const orgName = formatPlayerDisplayName(organizer) || playerName;
+                    return [{ name: orgName, isMember: false, level: organizer.elo_rating ?? 0, paidAmount: (txInfo?.amount ?? 0) / 100, paymentMethod: (txInfo?.method ?? null) as any }];
                 }
                 return participants.map((p: any) => {
                     const pl = Array.isArray(p.players) ? p.players[0] : p.players;
@@ -966,6 +967,7 @@ function GrillaViewInner() {
   }, [selectedDate]);
 
   const handleReservationClick = async (res: Reservation) => {
+      setHoveredTooltip(null);
       if (res.booking_type === 'school_course' || res.id.startsWith('school-slot-')) {
           const raw = res.id.startsWith('school-slot-') ? res.id.replace('school-slot-', '') : '';
           const courseId = raw.split(':')[0];
