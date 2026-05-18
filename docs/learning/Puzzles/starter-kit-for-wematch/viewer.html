@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Padel Chess — Puzzle Compendium Viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; background: #0e1116; color: #e7eaf0; }
+  body { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+  aside { border-right: 1px solid #1f2730; overflow-y: auto; background: #11151b; }
+  aside header { position: sticky; top: 0; background: #11151b; padding: 12px; border-bottom: 1px solid #1f2730; }
+  aside input { width: 100%; padding: 8px 10px; background: #0e1116; border: 1px solid #2a3340; border-radius: 6px; color: #e7eaf0; }
+  aside ul { list-style: none; margin: 0; padding: 0; }
+  aside li { padding: 8px 12px; border-bottom: 1px solid #161b22; cursor: pointer; font-size: 13px; line-height: 1.35; }
+  aside li:hover { background: #161e2a; }
+  aside li.active { background: #1c2942; color: #fff; }
+  aside li .id { color: #6c7a8b; font-variant-numeric: tabular-nums; margin-right: 6px; }
+  aside li .draft { display: inline-block; margin-left: 6px; font-size: 10px; color: #f0a732; border: 1px solid #f0a732; border-radius: 4px; padding: 0 4px; }
+  main { overflow-y: auto; padding: 24px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .meta { color: #8a96a6; font-size: 13px; margin-bottom: 18px; }
+  .frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
+  .frame { background: #161b22; border: 1px solid #232d3a; border-radius: 10px; overflow: hidden; }
+  .frame .canvas-wrap { aspect-ratio: 1/2; background: #0a0d12; }
+  .frame canvas { display: block; width: 100%; height: 100%; }
+  .frame .label { padding: 10px 12px; font-size: 13px; }
+  .frame .label .badge { display: inline-block; min-width: 22px; text-align: center; padding: 2px 6px; border-radius: 6px; margin-right: 6px; font-weight: 700; }
+  .badge.init { background: #2a3340; color: #cdd5e1; }
+  .badge.selected { background: #5c3a16; color: #ffd2a8; }
+  .badge.confirmed { background: #2a3340; color: #cdd5e1; }
+  .frame .label .points { color: #8a96a6; font-size: 11px; margin-left: 4px; }
+  .frame .label .text { display: block; margin-top: 6px; color: #c9d1da; }
+  .frame .expl { padding: 0 12px 12px; font-size: 12px; color: #93a0b2; line-height: 1.45; }
+  .toolbar { display: flex; gap: 8px; margin-bottom: 16px; align-items: center; }
+  .toolbar a { color: #6ea8fe; text-decoration: none; font-size: 13px; }
+  .chip { background: #1c2942; color: #8eb1ff; padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+  .empty { color: #6c7a8b; font-size: 13px; }
+</style>
+</head>
+<body>
+<aside>
+  <header>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+      <strong>Puzzles</strong>
+      <span id="count" class="empty"></span>
+    </div>
+    <input id="search" placeholder="Search… (id, text, tag)" />
+  </header>
+  <ul id="list"></ul>
+</aside>
+<main id="main">
+  <p class="empty">Loading puzzles.json…</p>
+</main>
+
+<script>
+const COURT = { w: 10, h: 20, color: '#3b82f6', line: '#ffffff', lineWidth: 0.07 };
+const PLAYER_R = 0.6;
+const BALL_R = 0.4;
+// WeMatch model: three real states (default / selected / confirmed). Dimming of siblings is a
+// derived visual effect, not a state. After Confirm, the fill colour is computed from is_correct.
+
+function drawFrame(canvas, frame, opts) {
+  if (!frame) return;
+  opts = opts || {};
+  // hideSpoilerShapes: true on the initial frame — drop shapes with visibleOnlyAfterConfirmation
+  // optionBadges: [{ id, letter, coordinates, points, isSelected }] drawn on top of the court
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  // Internal pixel size: 2:1 (h:w) so use the canvas client w/h
+  const W = canvas.width  = Math.max(1, Math.round(rect.width  * dpr));
+  const H = canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  const cw = rect.width, ch = rect.height;
+  // Fit court (10 wide, 20 tall) into canvas, preserve aspect 1:2
+  const scale = Math.min(cw / COURT.w, ch / COURT.h);
+  const offX = (cw - COURT.w * scale) / 2;
+  const offY = (ch - COURT.h * scale) / 2;
+  const m2p = m => m * scale;
+  const X = x => offX + x * scale;
+  const Y = y => offY + y * scale;
+
+  // Surface
+  ctx.fillStyle = COURT.color;
+  ctx.fillRect(X(0), Y(0), m2p(COURT.w), m2p(COURT.h));
+
+  // Lines
+  ctx.strokeStyle = COURT.line;
+  ctx.lineWidth = m2p(COURT.lineWidth);
+  // Outer
+  ctx.strokeRect(X(0), Y(0), m2p(COURT.w), m2p(COURT.h));
+  // Service lines
+  ctx.beginPath();
+  ctx.moveTo(X(0), Y(3));  ctx.lineTo(X(10), Y(3));
+  ctx.moveTo(X(0), Y(17)); ctx.lineTo(X(10), Y(17));
+  // Center service line
+  ctx.moveTo(X(5), Y(2.6)); ctx.lineTo(X(5), Y(17.4));
+  ctx.stroke();
+  // Net
+  ctx.lineWidth = m2p(COURT.lineWidth * 2);
+  ctx.beginPath();
+  ctx.moveTo(X(0), Y(10)); ctx.lineTo(X(10), Y(10));
+  ctx.stroke();
+
+  // Shapes
+  const shapes = (frame.shapes || []).filter(s =>
+    !(opts.hideSpoilerShapes && s.visibleOnlyAfterConfirmation));
+  for (const s of shapes) {
+    ctx.save();
+    ctx.strokeStyle = s.color || '#ffcf68';
+    ctx.fillStyle = s.color || '#ffcf68';
+    ctx.lineWidth = m2p(s.strokeWidth || 0.12);
+    if (s.dashed) ctx.setLineDash([m2p(0.3), m2p(0.2)]);
+    if (s.type === 'circle') {
+      ctx.beginPath();
+      ctx.arc(X(s.x), Y(s.y), m2p(s.radius || 0.5), 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (s.type === 'arrow' && s.startPoint && s.endPoint) {
+      const sx = X(s.startPoint.x), sy = Y(s.startPoint.y);
+      const ex = X(s.endPoint.x),   ey = Y(s.endPoint.y);
+      ctx.beginPath();
+      if (s.controlPoint) {
+        ctx.moveTo(sx, sy);
+        ctx.quadraticCurveTo(X(s.controlPoint.x), Y(s.controlPoint.y), ex, ey);
+      } else {
+        ctx.moveTo(sx, sy); ctx.lineTo(ex, ey);
+      }
+      ctx.stroke();
+      // Arrowhead
+      const ang = Math.atan2(ey - sy, ex - sx);
+      const ah = m2p(0.5);
+      ctx.beginPath();
+      ctx.moveTo(ex, ey);
+      ctx.lineTo(ex - ah * Math.cos(ang - 0.4), ey - ah * Math.sin(ang - 0.4));
+      ctx.lineTo(ex - ah * Math.cos(ang + 0.4), ey - ah * Math.sin(ang + 0.4));
+      ctx.closePath();
+      ctx.fill();
+    } else if (s.type === 'rect') {
+      ctx.globalAlpha = s.fillOpacity != null ? s.fillOpacity : 0.3;
+      ctx.fillStyle = s.fillColor || s.color || '#ffcf68';
+      ctx.fillRect(X(s.x), Y(s.y), m2p(s.width || 1), m2p(s.height || 1));
+      ctx.globalAlpha = 1;
+      ctx.strokeRect(X(s.x), Y(s.y), m2p(s.width || 1), m2p(s.height || 1));
+    } else if (s.type === 'triangle' && s.points && s.points.length >= 6) {
+      ctx.globalAlpha = s.fillOpacity != null ? s.fillOpacity : 0.3;
+      ctx.fillStyle = s.fillColor || s.color || '#ffcf68';
+      ctx.beginPath();
+      ctx.moveTo(X(s.points[0]), Y(s.points[1]));
+      ctx.lineTo(X(s.points[2]), Y(s.points[3]));
+      ctx.lineTo(X(s.points[4]), Y(s.points[5]));
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.stroke();
+    } else if ((s.type === 'text' || s.type === 'textTag') && (s.text || s.tagText)) {
+      const txt = s.text || s.tagText;
+      // fontSize in the data is given in pixels at the original stage scale, not metres.
+      // Approximate by treating it as a fraction of a metre (≈0.05 m per pt).
+      const sizeM = s.fontSize ? Math.max(0.45, s.fontSize * 0.05) : 0.6;
+      ctx.fillStyle = s.color || '#ffffff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = m2p(0.08);
+      ctx.font = `bold ${m2p(sizeM)}px system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.strokeText(txt, X(s.x || 5), Y(s.y || 5));
+      ctx.fillText(txt, X(s.x || 5), Y(s.y || 5));
+    } else if (s.type === 'line' && s.points && s.points.length >= 4) {
+      ctx.beginPath();
+      ctx.moveTo(X(s.points[0]), Y(s.points[1]));
+      for (let i = 2; i < s.points.length - 1; i += 2) {
+        ctx.lineTo(X(s.points[i]), Y(s.points[i + 1]));
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Players
+  for (const p of (frame.players || [])) {
+    const cx = X(p.x), cy = Y(p.y);
+    const r = m2p(PLAYER_R);
+    ctx.save();
+    ctx.fillStyle = p.team === 1 ? '#f4f4f5' : '#1f2937';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = m2p(0.05);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    if (p.isUser) {
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = m2p(0.12);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 1.2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = p.team === 1 ? '#000' : '#fff';
+    ctx.font = `bold ${m2p(0.6)}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(p.id ?? ''), cx, cy);
+
+    // Speech bubble (e.g. "YOU", "Yours up!")
+    const label = p.speechLabel || (p.isUser && opts.showYouBubble ? 'YOU' : null);
+    if (label) {
+      ctx.font = `bold ${m2p(0.5)}px system-ui, sans-serif`;
+      const padX = m2p(0.25), padY = m2p(0.18);
+      const tw = ctx.measureText(label).width;
+      const bx = cx - tw / 2 - padX;
+      const by = cy - r * 2.4 - m2p(0.5) - padY;
+      const bw = tw + padX * 2, bh = m2p(0.7) + padY * 2;
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+      ctx.lineWidth = m2p(0.05);
+      ctx.beginPath();
+      const rad = m2p(0.15);
+      ctx.moveTo(bx + rad, by);
+      ctx.lineTo(bx + bw - rad, by);
+      ctx.arcTo(bx + bw, by, bx + bw, by + rad, rad);
+      ctx.lineTo(bx + bw, by + bh - rad);
+      ctx.arcTo(bx + bw, by + bh, bx + bw - rad, by + bh, rad);
+      ctx.lineTo(bx + bw / 2 + m2p(0.2), by + bh);
+      ctx.lineTo(bx + bw / 2, by + bh + m2p(0.3));
+      ctx.lineTo(bx + bw / 2 - m2p(0.2), by + bh);
+      ctx.lineTo(bx + rad, by + bh);
+      ctx.arcTo(bx, by + bh, bx, by + bh - rad, rad);
+      ctx.lineTo(bx, by + rad);
+      ctx.arcTo(bx, by, bx + rad, by, rad);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#000';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, bx + bw / 2, by + bh / 2);
+    }
+    ctx.restore();
+  }
+
+  // Ball
+  if (frame.ball) {
+    const bx = X(frame.ball.x), by = Y(frame.ball.y);
+    ctx.fillStyle = '#daf843';
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = m2p(0.08);
+    ctx.beginPath();
+    ctx.arc(bx, by, m2p(BALL_R), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // Option badges on the court — WeMatch palette.
+  // Three real states: default / selected / confirmed. The dimming of siblings is computed: when
+  // any badge in the canvas is in selected/confirmed state, every other badge renders at 40% alpha.
+  if (opts.optionBadges && opts.optionBadges.length) {
+    const palette = {
+      default:           { fill: '#ffffff', text: '#111111' },
+      selected:          { fill: '#fb923c', text: '#1a0a00' },
+      confirmedCorrect:  { fill: '#22c55e', text: '#06210f' },
+      confirmedWrong:    { fill: '#ef4444', text: '#2a0606' },
+    };
+    const anyActive = opts.optionBadges.some(b => b.state === 'selected' || b.state === 'confirmed');
+    for (const b of opts.optionBadges) {
+      // Only one 'confirmed' state — its colour is derived at render-time from is_correct.
+      const key = b.state === 'confirmed'
+        ? (b.is_correct ? 'confirmedCorrect' : 'confirmedWrong')
+        : b.state;
+      const p = palette[key] || palette.default;
+      const isThisActive = b.state === 'selected' || b.state === 'confirmed';
+      const alpha = anyActive && !isThisActive ? 0.4 : 1.0;
+      const cx = X(b.x), cy = Y(b.y);
+      const size = m2p(0.9);
+      const rad = m2p(0.22);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.fill;
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+      ctx.lineWidth = m2p(0.06);
+      ctx.shadowColor = 'rgba(0,0,0,0.35)';
+      ctx.shadowBlur = m2p(0.18);
+      ctx.shadowOffsetY = m2p(0.06);
+      ctx.beginPath();
+      ctx.moveTo(cx - size + rad, cy - size);
+      ctx.lineTo(cx + size - rad, cy - size);
+      ctx.arcTo(cx + size, cy - size, cx + size, cy - size + rad, rad);
+      ctx.lineTo(cx + size, cy + size - rad);
+      ctx.arcTo(cx + size, cy + size, cx + size - rad, cy + size, rad);
+      ctx.lineTo(cx - size + rad, cy + size);
+      ctx.arcTo(cx - size, cy + size, cx - size, cy + size - rad, rad);
+      ctx.lineTo(cx - size, cy - size + rad);
+      ctx.arcTo(cx - size, cy - size, cx - size + rad, cy - size, rad);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowColor = 'transparent';
+      ctx.stroke();
+      ctx.fillStyle = p.text;
+      ctx.font = `900 ${m2p(1.2)}px "Bebas Neue", Impact, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(b.letter, cx, cy + m2p(0.05));
+      ctx.restore();
+    }
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+let puzzles = [];
+let activeId = null;
+
+const $list = document.getElementById('list');
+const $main = document.getElementById('main');
+const $count = document.getElementById('count');
+const $search = document.getElementById('search');
+
+function renderList(filter = '') {
+  const f = filter.trim().toLowerCase();
+  const items = puzzles.filter(p => !f
+    || String(p.id) === f
+    || (p.content || '').toLowerCase().includes(f)
+    || (p.tags || []).some(t => String(t).toLowerCase().includes(f))
+  );
+  $count.textContent = `${items.length} / ${puzzles.length}`;
+  $list.innerHTML = items.map(p => `
+    <li data-id="${p.id}" class="${p.id === activeId ? 'active' : ''}">
+      <span class="id">#${p.id}</span>${escapeHtml((p.content || '').slice(0, 90))}${p.published ? '' : '<span class="draft">draft</span>'}
+    </li>`).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderPuzzle(p) {
+  if (!p) {
+    $main.innerHTML = '<p class="empty">Select a puzzle on the left.</p>';
+    return;
+  }
+  const initial = (p.initialFrames || [])[p.initialFrames.length - 1];
+  const badgePos = o => ({
+    x: o.coordinates && Number.isFinite(o.coordinates.x) ? o.coordinates.x : 2 + 2.5 * o.id,
+    y: o.coordinates && Number.isFinite(o.coordinates.y) ? o.coordinates.y : 4,
+  });
+
+  // Badge sets per canvas. Three real states: default / selected / confirmed.
+  // Sibling dimming is computed inside drawFrame — we don't model 'dimmed' as a state here.
+  const makeBadges = (activeId, activeState) => p.options.map(o => ({
+    id: o.id, letter: o.letter, ...badgePos(o),
+    is_correct: !!o.is_correct,
+    state: o.id === activeId ? activeState : 'default',
+  }));
+
+  const frameCards = [];
+  frameCards.push({
+    key: 'init', title: 'Initial', subtitle: 'Lo que ve el jugador al cargar',
+    badgeCls: 'init', frame: initial,
+    opts: { hideSpoilerShapes: true, showYouBubble: true, optionBadges: makeBadges(null, 'default') },
+  });
+  p.options.forEach(o => {
+    frameCards.push({
+      key: `sel-${o.id}`, title: `${o.letter} · Select`, subtitle: o.text || '',
+      badgeCls: 'selected', frame: o.select_frame,
+      opts: { hideSpoilerShapes: false, showYouBubble: false, optionBadges: makeBadges(o.id, 'selected') },
+    });
+    frameCards.push({
+      key: `conf-${o.id}`, title: `${o.letter} · Confirm`,
+      subtitle: o.is_correct ? 'correct' : 'wrong',
+      badgeCls: 'confirmed',
+      frame: o.confirmation_frame,
+      opts: { hideSpoilerShapes: false, showYouBubble: false, optionBadges: makeBadges(o.id, 'confirmed') },
+      expl: o.explanation || '',
+    });
+  });
+
+  $main.innerHTML = `
+    <h1>#${p.id} — ${escapeHtml(p.content || '')}</h1>
+    <div class="meta">
+      <span class="chip">${p.courtPosition || 'court ?'}</span>
+      ${p.published ? '' : '<span class="chip" style="background:#3a2a10;color:#f0a732">draft</span>'}
+      ${(p.tags || []).map(t => `<span class="chip">${escapeHtml(t)}</span>`).join(' ')}
+    </div>
+    <div class="toolbar">
+      <a href="https://www.padelchess.me/puzzles?questionId=${p.id}" target="_blank" rel="noopener">Open on padelchess.me ↗</a>
+      ${p.thumbnailUrl ? `<a href="thumbnails/${p.id}.png" target="_blank">Original thumbnail</a>` : ''}
+    </div>
+    <div class="frames">
+      ${frameCards.map(c => `
+        <div class="frame">
+          <div class="canvas-wrap"><canvas data-frame="${c.key}"></canvas></div>
+          <div class="label">
+            <span class="badge ${c.badgeCls}">${c.title.split(' · ')[0]}</span>
+            <strong>${escapeHtml(c.title.split(' · ')[1] || c.title)}</strong>
+            <span class="text">${escapeHtml(c.subtitle)}</span>
+          </div>
+          ${c.expl ? `<div class="expl">${escapeHtml(c.expl)}</div>` : ''}
+        </div>`).join('')}
+    </div>`;
+  requestAnimationFrame(() => {
+    for (const c of frameCards) {
+      drawFrame($main.querySelector(`[data-frame="${c.key}"]`), c.frame, c.opts);
+    }
+  });
+}
+
+$list.addEventListener('click', e => {
+  const li = e.target.closest('li[data-id]');
+  if (!li) return;
+  activeId = Number(li.dataset.id);
+  renderList($search.value);
+  renderPuzzle(puzzles.find(p => p.id === activeId));
+});
+
+$search.addEventListener('input', () => renderList($search.value));
+
+window.addEventListener('resize', () => {
+  const p = puzzles.find(p => p.id === activeId);
+  if (p) renderPuzzle(p);
+});
+
+fetch('viewer-data.json').then(r => r.json()).then(data => {
+  puzzles = data;
+  renderList();
+  if (puzzles.length) {
+    activeId = puzzles[0].id;
+    renderList();
+    renderPuzzle(puzzles[0]);
+  }
+}).catch(err => {
+  $main.innerHTML = `<p class="empty">Failed to load puzzles.json: ${err.message}<br>Open this page through a local server (e.g. <code>npx serve</code>) so fetch() works.</p>`;
+});
+</script>
+</body>
+</html>

@@ -213,22 +213,23 @@ router.get('/courses', requireAdmin, async (req: Request, res: Response) => {
   }
 });
 
-// GET /questions — todas las preguntas (filtros opcionales: club_id, type, area, is_active)
+// GET /questions — todas las preguntas (filtros opcionales: club_id, type, area, status)
 router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const { club_id, type, area, is_active } = req.query;
+    const { club_id, type, area, status } = req.query;
 
     let query = supabase
       .from('learning_questions')
-      .select('id, created_by_club, type, level, area, has_video, video_url, content, is_active, created_at, clubs:created_by_club(name)')
+      .select('id, created_by_club, type, level, area, has_video, video_url, content, status, created_at, clubs:created_by_club(name)')
       .order('created_at', { ascending: false });
 
     if (club_id) query = query.eq('created_by_club', club_id as string);
     if (type) query = query.eq('type', type as string);
     if (area) query = query.eq('area', area as string);
-    if (is_active === 'true') query = query.eq('is_active', true);
-    else if (is_active === 'false') query = query.eq('is_active', false);
+    if (status === 'draft' || status === 'published' || status === 'inactive') {
+      query = query.eq('status', status);
+    }
 
     const { data: questions, error } = await query;
 
@@ -261,8 +262,7 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
             ? {
                 schema_version: p.schema_version,
                 statement: p.statement,
-                court_position: p.court_position,
-                general_explanation: p.general_explanation,
+                intro_frame: p.intro_frame,
                 initial_frame: p.initial_frame,
                 options: p.options,
               }
@@ -294,11 +294,11 @@ router.patch('/questions/:id/activate', requireAdmin, async (req: Request, res: 
 
     const { error } = await supabase
       .from('learning_questions')
-      .update({ is_active: true })
+      .update({ status: 'published' })
       .eq('id', req.params.id);
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, data: { id: req.params.id, is_active: true } });
+    return res.json({ ok: true, data: { id: req.params.id, status: 'published' } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -319,11 +319,11 @@ router.patch('/questions/:id/deactivate', requireAdmin, async (req: Request, res
 
     const { error } = await supabase
       .from('learning_questions')
-      .update({ is_active: false })
+      .update({ status: 'inactive' })
       .eq('id', req.params.id);
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, data: { id: req.params.id, is_active: false } });
+    return res.json({ ok: true, data: { id: req.params.id, status: 'inactive' } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -349,11 +349,11 @@ router.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
       { data: coursesByClub },
     ] = await Promise.all([
       supabase.from('learning_questions').select('id', { count: 'exact', head: true }),
-      supabase.from('learning_questions').select('id', { count: 'exact', head: true }).eq('is_active', true),
+      supabase.from('learning_questions').select('id', { count: 'exact', head: true }).eq('status', 'published'),
       supabase.from('learning_courses').select('id', { count: 'exact', head: true }),
       supabase.from('learning_courses').select('id', { count: 'exact', head: true }).eq('status', 'active'),
       supabase.from('learning_courses').select('id', { count: 'exact', head: true }).eq('status', 'pending_review'),
-      supabase.from('learning_questions').select('created_by_club, clubs:created_by_club(name)').eq('is_active', true),
+      supabase.from('learning_questions').select('created_by_club, clubs:created_by_club(name)').eq('status', 'published'),
       supabase.from('learning_courses').select('club_id, clubs(name)').eq('status', 'active'),
     ]);
 

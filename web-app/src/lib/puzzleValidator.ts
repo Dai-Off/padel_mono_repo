@@ -1,3 +1,7 @@
+// DUPLICADO: mantener sincronizado con backend/src/lib/puzzleValidator.ts.
+// El monorepo no tiene carpeta shared/, así que la validación cliente-side se
+// copia tal cual. Si tocas uno, toca el otro.
+//
 // Validación del árbol jsonb de un puzzle táctico (type='puzzle').
 // Schema v2: formato del catálogo importado (kit starter).
 //

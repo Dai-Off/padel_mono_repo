@@ -26,6 +26,13 @@ type ProfileScreenProps = {
   onBack: () => void;
   onMenuPress: () => void;
   onPreferencesPress?: () => void;
+  // Si true, abre automáticamente el modal del cuestionario de nivelación al
+  // montar. Usado cuando se llega aquí desde una feature bloqueada (Daily
+  // Lesson) para que el usuario complete el onboarding sin un paso extra.
+  autoOpenOnboarding?: boolean;
+  // Callback para que el padre limpie su flag autoOpenOnboarding tras
+  // consumirlo. Evita re-disparar el modal en re-renders.
+  onOnboardingAutoOpened?: () => void;
 };
 
 function getInitials(firstName?: string | null, lastName?: string | null): string {
@@ -34,7 +41,13 @@ function getInitials(firstName?: string | null, lastName?: string | null): strin
   return 'SN';
 }
 
-export function ProfileScreen({ onBack, onMenuPress, onPreferencesPress }: ProfileScreenProps) {
+export function ProfileScreen({
+  onBack,
+  onMenuPress,
+  onPreferencesPress,
+  autoOpenOnboarding = false,
+  onOnboardingAutoOpened,
+}: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
@@ -42,6 +55,17 @@ export function ProfileScreen({ onBack, onMenuPress, onPreferencesPress }: Profi
   const [activeSport, setActiveSport] = useState('Pádel');
   const [activeLogroTab, setActiveLogroTab] = useState('Todos');
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+
+  // Auto-abrir el modal del cuestionario de nivelación cuando el padre lo pide
+  // (p.ej. el usuario viene desde la pantalla bloqueada de Daily Lesson). Una
+  // vez consumido, avisamos al padre para que limpie su flag.
+  useEffect(() => {
+    if (autoOpenOnboarding) {
+      setShowOnboardingModal(true);
+      onOnboardingAutoOpened?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpenOnboarding]);
   const [assessment, setAssessment] = useState<CoachAssessment | null>(null);
   const [peerInsight, setPeerInsight] = useState<PeerFeedbackInsight | null>(null);
 
