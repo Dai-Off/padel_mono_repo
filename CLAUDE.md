@@ -9,7 +9,7 @@ Padel club management platform: court booking, match management, payments, and p
   - `web-app/` — React (Vite) admin panel for club management
   - `mobile-app/` — React Native app for players
   - `supabase/` — Database migrations and edge functions
-  - `docs/` — Documentation
+  -  `docs/` — Documentation
 
 ## Key conventions
 - **DB column**: The bookings table uses `reservation_type` (not `booking_type`) despite migration 007 naming it `booking_type`. The API accepts `booking_type` in request body and maps it to `reservation_type` on insert.
