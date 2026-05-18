@@ -66,7 +66,9 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     const history = (historyRes.data ?? []) as HistoryEntry[];
 
     if (questions.length === 0) {
-      return res.json({ ok: true, already_completed: false, questions: [] });
+      // Sin preguntas publicadas en absoluto. Mismo flag para que el mobile
+      // muestre la pantalla "Lección no disponible" en vez de un error genérico.
+      return res.json({ ok: true, already_completed: false, questions: [], not_enough_questions: true });
     }
 
     // Para preguntas type='puzzle', el `content` está en learning_puzzles. Mergear.
@@ -112,6 +114,20 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     }
 
     const selected = selectQuestions(questions, historyByQuestion, player.elo_rating);
+
+    // Si no hay suficientes preguntas para una lección completa, no servimos
+    // una lección parcial — el mobile lo trataba como questions.length=N y
+    // crasheaba al pasar de la posición N. Devolvemos un flag explícito para
+    // que la app muestre una pantalla "Lección no disponible" amigable.
+    if (selected.length < LESSON_SIZE) {
+      return res.json({
+        ok: true,
+        already_completed: !!todaySession,
+        session: todaySession ?? undefined,
+        questions: [],
+        not_enough_questions: true,
+      });
+    }
 
     // Sanitize content — remove correct answers
     const clientQuestions = selected.map((q) => {

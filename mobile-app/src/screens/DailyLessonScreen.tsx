@@ -79,7 +79,7 @@ function getQuestionPreview(q: DailyLessonQuestion): string {
 export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const { questions: hookQuestions, alreadyCompleted, loading, error, requiresOnboarding } = useDailyLesson(TIMEZONE);
+  const { questions: hookQuestions, alreadyCompleted, loading, error, requiresOnboarding, notEnoughQuestions } = useDailyLesson(TIMEZONE);
   const streak = useStreak(TIMEZONE);
 
   // Preguntas que se muestran. Por defecto vienen del hook (el algoritmo de
@@ -489,6 +489,41 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
 
           <Pressable onPress={onBack} hitSlop={8} style={styles.cancelButton}>
             <Text style={styles.cancelText}>Ahora no</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // RENDER: No hay suficientes preguntas para una lección completa
+  // ---------------------------------------------------------------------------
+  if (notEnoughQuestions) {
+    return (
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <View style={styles.lockedContainer}>
+          <View style={styles.lockedIconWrap}>
+            <View style={styles.lockedIconGlow} />
+            <LinearGradient colors={['#F18F34', '#d97706']} style={styles.lockedIconCircle}>
+              <Ionicons name="hourglass-outline" size={44} color="#FFFFFF" />
+            </LinearGradient>
+          </View>
+
+          <Text style={styles.lockedTitle}>Lección no disponible</Text>
+          <Text style={styles.lockedSubtitle}>
+            Aún no hay suficientes preguntas para tu lección de hoy. Estamos preparando contenido — vuelve pronto.
+          </Text>
+
+          <Pressable onPress={onBack} style={styles.lockedCta}>
+            <LinearGradient
+              colors={['#F18F34', '#C46A20']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.lockedCtaGradient}
+            >
+              <Ionicons name="arrow-back" size={18} color="#fff" />
+              <Text style={styles.lockedCtaText}>Volver</Text>
+            </LinearGradient>
           </Pressable>
         </View>
       </View>

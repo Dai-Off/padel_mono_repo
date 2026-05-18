@@ -29,6 +29,10 @@ export type DailyLessonResponse = {
   ok: boolean;
   already_completed: boolean;
   questions: DailyLessonQuestion[];
+  // True si no hay suficientes preguntas publicadas para montar una lección
+  // completa (LESSON_SIZE en backend). El backend nunca devuelve una lección
+  // parcial; el cliente muestra una pantalla "no disponible".
+  not_enough_questions?: boolean;
   session?: {
     id: string;
     correct_count: number;

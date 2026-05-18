@@ -20,6 +20,9 @@ type DailyLessonState = {
   // True si el backend rechazó por falta del cuestionario de nivelación.
   // El consumidor renderiza la pantalla bloqueada amigable en vez del error.
   requiresOnboarding: boolean;
+  // True si no hay suficientes preguntas publicadas para montar una lección.
+  // Se renderiza una pantalla "Lección no disponible" amigable.
+  notEnoughQuestions: boolean;
   reload: () => void;
 };
 
@@ -30,12 +33,14 @@ export function useDailyLesson(timezone = 'UTC'): DailyLessonState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [requiresOnboarding, setRequiresOnboarding] = useState(false);
+  const [notEnoughQuestions, setNotEnoughQuestions] = useState(false);
 
   const load = useCallback(() => {
     let mounted = true;
     setLoading(true);
     setError(null);
     setRequiresOnboarding(false);
+    setNotEnoughQuestions(false);
 
     fetchDailyLesson(session?.access_token, timezone)
       .then((res) => {
@@ -53,6 +58,7 @@ export function useDailyLesson(timezone = 'UTC'): DailyLessonState {
         const data = res as DailyLessonResponse;
         setAlreadyCompleted(data.already_completed);
         setQuestions(data.questions ?? []);
+        setNotEnoughQuestions(data.not_enough_questions === true);
       })
       .catch(() => {
         if (mounted) setError('Error de conexión');
@@ -71,7 +77,7 @@ export function useDailyLesson(timezone = 'UTC'): DailyLessonState {
     return cleanup;
   }, [load]);
 
-  return { questions, alreadyCompleted, loading, error, requiresOnboarding, reload: load };
+  return { questions, alreadyCompleted, loading, error, requiresOnboarding, notEnoughQuestions, reload: load };
 }
 
 // ---------------------------------------------------------------------------
