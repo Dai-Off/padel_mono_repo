@@ -1,4 +1,4 @@
--- 058_learning_questions_status.sql
+-- 060_learning_questions_status.sql
 -- Modelo de estado unificado para learning_questions.
 --
 -- Sustituye el binomio is_active + is_draft por un único campo `status` con

@@ -1,4 +1,4 @@
--- 057_learning_puzzles.sql
+-- 059_learning_puzzles.sql
 -- Tabla learning_puzzles, vinculada 1:1 con learning_questions cuando type='puzzle'.
 -- El árbol del puzzle (frames, jugadores, pelota, opciones, shapes) vive en columnas jsonb
 -- dentro de esta tabla. Para puzzles, learning_questions.content queda en '{}'::jsonb

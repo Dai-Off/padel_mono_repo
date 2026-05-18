@@ -558,7 +558,7 @@ export function validatePuzzleContent(content: unknown): string | null {
 /**
  * Construye el row para learning_puzzles a partir del content.
  * Tolerante a campos faltantes para soportar borradores. Sin `court_position`
- * (campo eliminado, ver migración 059_drop_court_position.sql).
+ * (campo eliminado, ver migración 059_learning_puzzles.sql).
  */
 export function buildPuzzleRow(content: Record<string, unknown>, questionId: string) {
   const initialFrame = isObject(content.initial_frame)
