@@ -52,6 +52,12 @@ const transporter = buildSmtpTransport();
  * Envía un correo mediante SMTP directo (Nodemailer).
  */
 async function sendMailSmtp(to: string, subject: string, html: string): Promise<{ sent: boolean; error?: string }> {
+  if (!SMTP_USER || !SMTP_PASS) {
+    const error = 'Faltan credenciales SMTP (SMTP_USER/SMTP_PASS). El correo no se enviará.';
+    console.error(`[Mailer] ${error}`);
+    return { sent: false, error };
+  }
+
   try {
     await transporter.sendMail({
       from: SMTP_FROM,
@@ -62,7 +68,7 @@ async function sendMailSmtp(to: string, subject: string, html: string): Promise<
     return { sent: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('SMTP send error:', msg);
+    console.error(`[Mailer] Error SMTP enviando a ${to}:`, msg);
     return { sent: false, error: msg };
   }
 }

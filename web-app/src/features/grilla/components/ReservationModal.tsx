@@ -15,7 +15,7 @@ import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
 import { apiFetchWithAuth } from '../../../services/api';
 import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
-import { reservationTypePricesService } from '../../../services/reservationTypePrices';
+import { reservationTypePricesService, type ReservationTypeConfig } from '../../../services/reservationTypePrices';
 import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { calendarLocale } from '../i18n/calendarLocale';
@@ -211,7 +211,7 @@ export const PlayerSearch: React.FC<{
                                 type="button"
                                 title={t('playerSearch.addPlayerTooltip')}
                                 onClick={() => { setAltaOpen(true); setAltaError(''); }}
-                                className="flex items-center justify-center w-10 h-10 rounded-md bg-[#00726b] hover:bg-[#005a4f] text-white transition-colors shrink-0"
+                                className="flex items-center justify-center w-10 h-10 rounded-md bg-portal-header hover:bg-portal-header-edge text-white transition-colors shrink-0"
                             >
                                 <UserPlus size={16} />
                             </button>
@@ -253,7 +253,7 @@ export const PlayerSearch: React.FC<{
 
             {/* Modal Alta de Jugador */}
             {altaOpen && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setAltaOpen(false)}>
+                <div className="fixed inset-0 z-200 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setAltaOpen(false)}>
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-between mb-4">
                             <h3 className="text-base font-bold text-gray-900">{t('playerSearch.manualAddTitle')}</h3>
@@ -280,7 +280,7 @@ export const PlayerSearch: React.FC<{
                                         }
                                         value={altaForm[field]}
                                         onChange={(e) => setAltaForm(prev => ({ ...prev, [field]: e.target.value }))}
-                                        className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-[#00726b] focus:border-transparent outline-none"
+                                        className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-portal-header focus:border-transparent outline-none"
                                     />
                                 </div>
                             ))}
@@ -288,7 +288,7 @@ export const PlayerSearch: React.FC<{
                             <button
                                 type="submit"
                                 disabled={altaSubmitting}
-                                className="mt-1 w-full py-2.5 rounded-lg bg-[#00726b] hover:bg-[#005a4f] text-white text-sm font-bold transition-colors disabled:opacity-60"
+                                className="mt-1 w-full py-2.5 rounded-lg bg-portal-header hover:bg-portal-header-edge text-white text-sm font-bold transition-colors disabled:opacity-60"
                             >
                                 {altaSubmitting ? t('playerSearch.submitting') : t('playerSearch.submit')}
                             </button>
@@ -477,7 +477,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [isDeleting, setIsDeleting] = useState(false);
     const [overlapError, setOverlapError] = useState<string | null>(null);
     const [paymentError, setPaymentError] = useState<string | null>(null);
-    const [pricesByType, setPricesByType] = useState<Record<string, { price_per_hour_cents: number }>>({});
+    const [pricesByType, setPricesByType] = useState<Record<string, ReservationTypeConfig>>({});
     const [isMarkingPaid, setIsMarkingPaid] = useState(false);
     const [playMode, setPlayMode] = useState<'single' | 'double'>('double');
     const [isMovingToHidden, setIsMovingToHidden] = useState(false);
@@ -708,14 +708,14 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
     if (isLoadingBookingData && reservation && !reservation.id.startsWith('new-')) {
         return (
-            <div style={vvStyle} className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
+            <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
                 <div className="absolute inset-0" onClick={onClose} />
                 <div className="relative flex flex-col w-full h-[90vh] bg-gray-50 rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[520px] sm:rounded-2xl overflow-hidden">
                     <div className="flex items-start justify-between px-6 py-4 bg-white border-b border-gray-100 shrink-0">
                         <h2 className="text-xl font-bold text-gray-900">{t('reservation.modalTitleEdit')}</h2>
                         <button
                             onClick={onClose}
-                            className="p-2 text-gray-400 transition-colors bg-gray-100 rounded-full hover:bg-gray-200 hover:text-gray-600 flex-shrink-0"
+                            className="p-2 text-gray-400 transition-colors bg-gray-100 rounded-full hover:bg-gray-200 hover:text-gray-600 shrink-0"
                         >
                             <X size={20} />
                         </button>
@@ -942,7 +942,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const minutes = ['00', '15', '30', '45'];
 
     return (
-        <div style={vvStyle} className="fixed inset-0 z-[100] flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
+        <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
             {/* Backdrop click to close */}
             <div className="absolute inset-0" onClick={onClose} />
 
@@ -1052,7 +1052,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 text-gray-400 transition-colors bg-gray-100 rounded-full hover:bg-gray-200 hover:text-gray-600 flex-shrink-0"
+                        className="p-2 text-gray-400 transition-colors bg-gray-100 rounded-full hover:bg-gray-200 hover:text-gray-600 shrink-0"
                     >
                         <X size={20} />
                     </button>
@@ -1333,15 +1333,32 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     value={resType}
                                     onChange={(e) => setResType(e.target.value)}
                                 >
-                                    <option value="standard">{t('reservation.type_standard')}</option>
-                                    <option value="open_match">{t('reservation.type_open_match')}</option>
-                                    <option value="pozo">{t('reservation.type_pozo')}</option>
-                                    <option value="fixed_recurring">{t('reservation.type_fixed_recurring')}</option>
-                                    <option value="school_group">{t('reservation.type_school_group')}</option>
-                                    <option value="school_individual">{t('reservation.type_school_individual')}</option>
-                                    <option value="flat_rate">{t('reservation.type_flat_rate')}</option>
-                                    <option value="tournament">{t('reservation.type_tournament')}</option>
-                                    <option value="blocked">{t('reservation.type_blocked')}</option>
+                                    {(Object.keys(pricesByType).length > 0
+                                        ? Object.values(pricesByType).sort((a, b) => {
+                                            if (a.is_system !== b.is_system) return a.is_system ? -1 : 1;
+                                            return (a.sort_order ?? 100) - (b.sort_order ?? 100);
+                                          })
+                                        : [
+                                            { reservation_type: 'standard', display_name: 'Pista privada', is_system: true },
+                                            { reservation_type: 'open_match', display_name: 'Partido abierto', is_system: true },
+                                            { reservation_type: 'pozo', display_name: 'Americanas', is_system: true },
+                                            { reservation_type: 'fixed_recurring', display_name: 'Turno fijo', is_system: true },
+                                            { reservation_type: 'school_group', display_name: 'Escuela grupo', is_system: true },
+                                            { reservation_type: 'school_individual', display_name: 'Clase particular', is_system: true },
+                                            { reservation_type: 'flat_rate', display_name: 'Tarifa plana', is_system: true },
+                                            { reservation_type: 'tournament', display_name: 'Torneo', is_system: true },
+                                            { reservation_type: 'blocked', display_name: 'Bloqueado', is_system: true },
+                                          ]
+                                    ).map((opt) => {
+                                        const label = opt.is_system
+                                            ? t(`reservation.type_${opt.reservation_type}`)
+                                            : opt.display_name;
+                                        return (
+                                            <option key={opt.reservation_type} value={opt.reservation_type}>
+                                                {label}
+                                            </option>
+                                        );
+                                    })}
                                 </select>
                             </div>
                             <div className="flex items-center gap-2">
@@ -1493,7 +1510,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
                 {/* Saving overlay */}
                 {isSaving && (
-                    <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-[110]">
+                    <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] flex items-center justify-center z-110">
                         <div className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-lg border border-gray-100">
                             <div className="w-5 h-5 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
                             <span className="text-sm font-bold text-gray-900">{t('reservation.processing')}</span>

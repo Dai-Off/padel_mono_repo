@@ -127,7 +127,7 @@ export const ClubDashboard = () => {
     }, []);
 
     const clubId = club?.id ?? null;
-    const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(clubId);
+    const { permissionKeys: portalMenuPermissionKeys, loading: permissionsLoading } = usePortalMenuPermissions(clubId);
 
     const [courts, setCourts] = useState<Court[]>([]);
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -236,7 +236,12 @@ export const ClubDashboard = () => {
             <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
                 <PortalTealHeader clubName="" onMenuClick={() => setIsMenuOpen(true)} />
                 <div className="hidden md:block">
-                    <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} clubId={clubId} />
+                    <GrillaQuickNav 
+                        isAdmin={isAdmin} 
+                        portalMenuPermissionKeys={portalMenuPermissionKeys} 
+                        clubId={clubId} 
+                        loading={permissionsLoading}
+                    />
                 </div>
                 <PageSpinner />
                 <MainMenu
@@ -246,6 +251,7 @@ export const ClubDashboard = () => {
                     clubId={null}
                     isAdmin={isAdmin}
                     portalMenuPermissionKeys={portalMenuPermissionKeys}
+                    loading={permissionsLoading}
                 />
             </div>
         );
@@ -255,7 +261,12 @@ export const ClubDashboard = () => {
         <div className="min-h-screen bg-background text-foreground font-sans selection:bg-brand/10 selection:text-brand">
             <PortalTealHeader clubName={club?.name ?? ''} onMenuClick={() => setIsMenuOpen(true)} />
             <div className="hidden md:block">
-                <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} clubId={clubId} />
+                <GrillaQuickNav 
+                    isAdmin={isAdmin} 
+                    portalMenuPermissionKeys={portalMenuPermissionKeys} 
+                    clubId={clubId} 
+                    loading={permissionsLoading}
+                />
             </div>
 
             <main className="px-4 sm:px-5 py-5 pb-20">
@@ -366,6 +377,7 @@ export const ClubDashboard = () => {
                 clubId={club?.id ?? null}
                 isAdmin={isAdmin}
                 portalMenuPermissionKeys={portalMenuPermissionKeys}
+                loading={permissionsLoading}
             />
 
             {!isInventoryPage && isFormOpen && (

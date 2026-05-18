@@ -11,17 +11,7 @@ export type ReservationStatus =
     | 'past';             // Tiempo pasado (solo UI)
 
 // Type of reservation (maps to bookings.booking_type in DB)
-export type ReservationType =
-    | 'standard'
-    | 'open_match'
-    | 'pozo'
-    | 'fixed_recurring'
-    | 'school_course'
-    | 'school_group'
-    | 'school_individual'
-    | 'flat_rate'
-    | 'tournament'
-    | 'blocked';
+export type ReservationType = string;
 
 export type PaymentMethod = 'cash' | 'card' | 'wallet' | null;
 

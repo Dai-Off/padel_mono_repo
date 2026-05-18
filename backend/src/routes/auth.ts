@@ -56,11 +56,16 @@ router.post('/register', async (req: Request, res: Response) => {
       
       const confirmationUrl = linkData?.properties?.action_link || (linkData as any)?.action_link;
       if (confirmationUrl) {
-        await sendRegistrationConfirmationEmail(
+        const { sent, error: mailError } = await sendRegistrationConfirmationEmail(
           emailStr,
           name ? String(name).trim() : 'Jugador',
           confirmationUrl
         );
+        if (!sent) {
+          console.error(`[AuthRegistration] Error enviando email de confirmación a ${emailStr}:`, mailError);
+        } else {
+          console.log(`[AuthRegistration] Email de confirmación enviado exitosamente a ${emailStr}`);
+        }
       }
     }
 

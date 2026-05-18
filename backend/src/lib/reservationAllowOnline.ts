@@ -1,6 +1,6 @@
 import { getSupabaseServiceRoleClient } from './supabase';
 
-const KNOWN_TYPES = [
+const SYSTEM_TYPES = [
   'standard',
   'open_match',
   'pozo',
@@ -11,8 +11,6 @@ const KNOWN_TYPES = [
   'tournament',
   'blocked',
 ] as const;
-
-export type KnownReservationType = (typeof KNOWN_TYPES)[number];
 
 function defaultAllowOnline(t: string): boolean {
   return t === 'standard' || t === 'open_match';
@@ -26,13 +24,18 @@ export async function fetchAllowOnlineByType(
   clubId: string,
 ): Promise<Record<string, boolean>> {
   const out: Record<string, boolean> = {};
-  for (const t of KNOWN_TYPES) out[t] = defaultAllowOnline(t);
+
+  // Seed default system types
+  for (const t of SYSTEM_TYPES) {
+    out[t] = defaultAllowOnline(t);
+  }
 
   let data: { reservation_type?: string; allow_online?: boolean }[] | null = null;
   const q1 = await supabase
     .from('reservation_type_prices')
     .select('reservation_type, allow_online')
     .eq('club_id', clubId);
+
   if (q1.error) {
     const msg = String(q1.error.message ?? '').toLowerCase();
     if (msg.includes('allow_online') || msg.includes('column')) {
@@ -43,6 +46,7 @@ export async function fetchAllowOnlineByType(
   } else {
     data = q1.data ?? [];
   }
+
   for (const row of data) {
     const rt = String((row as { reservation_type?: string }).reservation_type ?? '');
     if (!rt) continue;
@@ -71,3 +75,4 @@ export function assertReservationTypeAllowedOnline(
   }
   return { ok: true };
 }
+

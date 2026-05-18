@@ -30,6 +30,7 @@ const SLOT_ITEMS: LegendItem[] = [
 ];
 
 interface Props {
+    typeConfigs?: Record<string, { color: string | null; display_name: string; is_system: boolean }>;
     typeColorOverrides?: Record<string, string>;
 }
 
@@ -46,17 +47,46 @@ const TYPE_LABELS: Record<string, string> = {
     blocked: 'Bloqueado',
 };
 
-export const GrillaLegend: React.FC<Props> = ({ typeColorOverrides }) => {
-    const overrideItems: LegendItem[] = typeColorOverrides
-        ? Object.entries(typeColorOverrides).map(([type, color]) => ({
-              color,
-              borderColor: color,
-              textColor: '#fff',
-              label: TYPE_LABELS[type] ?? type,
-          }))
-        : [];
+export const GrillaLegend: React.FC<Props> = ({ typeConfigs, typeColorOverrides }) => {
+    const dynamicItems: LegendItem[] = [];
 
-    const allItems = overrideItems.length > 0 ? [...overrideItems, ...SLOT_ITEMS] : [...STANDARD_ITEMS, ...SLOT_ITEMS];
+    if (typeConfigs) {
+        const configsArray = Object.entries(typeConfigs).sort((a, b) => {
+            if (a[1].is_system !== b[1].is_system) return a[1].is_system ? -1 : 1;
+            return a[0].localeCompare(b[0]);
+        });
+
+        for (const [type, config] of configsArray) {
+            const color = config.color ?? typeColorOverrides?.[type] ?? '#6b7280';
+            const label = config.is_system ? TYPE_LABELS[type] ?? config.display_name : config.display_name;
+
+            const doubleLegendTypes = ['standard', 'open_match', 'pozo', 'fixed_recurring', 'tournament'];
+            if (doubleLegendTypes.includes(type)) {
+                dynamicItems.push({
+                    color,
+                    borderColor: color,
+                    textColor: '#fff',
+                    label: `${label} Reservado`,
+                    dashed: true,
+                });
+                dynamicItems.push({
+                    color,
+                    borderColor: color,
+                    textColor: '#fff',
+                    label: `${label} Pagado`,
+                });
+            } else {
+                dynamicItems.push({
+                    color,
+                    borderColor: color,
+                    textColor: '#fff',
+                    label,
+                });
+            }
+        }
+    }
+
+    const allItems = typeConfigs && dynamicItems.length > 0 ? [...dynamicItems, ...SLOT_ITEMS] : [...STANDARD_ITEMS, ...SLOT_ITEMS];
 
     return (
         <div className="shrink-0 border-t border-gray-200 bg-[#f8f8f8] px-3 py-1.5 overflow-x-auto">
@@ -64,13 +94,13 @@ export const GrillaLegend: React.FC<Props> = ({ typeColorOverrides }) => {
                 {allItems.map((item, i) => (
                     <div key={i} className="flex items-center gap-1 shrink-0">
                         <span
-                            className="inline-block w-4 h-4 rounded-sm border flex-shrink-0"
+                            className="inline-block w-4 h-4 rounded-sm border shrink-0"
                             style={{
                                 backgroundColor: item.color,
                                 borderColor: item.borderColor ?? item.color,
                                 borderStyle: item.dashed ? 'dashed' : 'solid',
                                 borderWidth: '2px',
-                            }}
+                             }}
                         />
                         <span className="text-[10px] text-gray-600 whitespace-nowrap leading-none">
                             {item.label}
@@ -81,3 +111,4 @@ export const GrillaLegend: React.FC<Props> = ({ typeColorOverrides }) => {
         </div>
     );
 };
+
