@@ -15,6 +15,9 @@ import {
   createCashOpeningRecordHandler,
   listCashClosingRecordsHandler,
   createCashClosingRecordHandler,
+  listCashMovementRecordsHandler,
+  createCashMovementRecordHandler,
+  getCashCurrentOperatorHandler,
   customerPortalHandler,
   simulateTurnPaymentHandler,
 } from './payments';
@@ -30,6 +33,9 @@ router.get('/cash-opening/today', requireClubOwnerOrAdminOrPortalStaff, getCashO
 router.post('/cash-opening/records', requireClubOwnerOrAdminOrPortalStaff, createCashOpeningRecordHandler);
 router.get('/cash-closing/records', requireClubOwnerOrAdminOrPortalStaff, listCashClosingRecordsHandler);
 router.post('/cash-closing/records', requireClubOwnerOrAdminOrPortalStaff, createCashClosingRecordHandler);
+router.get('/cash-movements/records', requireClubOwnerOrAdminOrPortalStaff, listCashMovementRecordsHandler);
+router.post('/cash-movements/records', requireClubOwnerOrAdminOrPortalStaff, createCashMovementRecordHandler);
+router.get('/cash-ledger/current-operator', requireClubOwnerOrAdminOrPortalStaff, getCashCurrentOperatorHandler);
 router.post('/customer-portal', customerPortalHandler);
 router.post('/create-intent', createIntentHandler);
 router.post('/create-intent-for-new-match', createIntentForNewMatchHandler);

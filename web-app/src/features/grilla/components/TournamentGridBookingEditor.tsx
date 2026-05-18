@@ -11,6 +11,7 @@ import {
 import { HttpError } from '../../../services/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { calendarLocale } from '../i18n/calendarLocale';
+import { calcDurationMinutes } from '../utils/recurrenceDates';
 export type TournamentGridBookingEditorProps = {
     isOpen: boolean;
     onClose: () => void;
@@ -71,7 +72,8 @@ export const TournamentGridBookingEditor: React.FC<TournamentGridBookingEditorPr
     const [bookingDate, setBookingDate] = useState('');
     const [startHour, setStartHour] = useState('10');
     const [startMinute, setStartMinute] = useState('00');
-    const [durationMin, setDurationMin] = useState(90);
+    const [endHour, setEndHour] = useState('11');
+    const [endMinute, setEndMinute] = useState('30');
 
     const [inviteEmail1, setInviteEmail1] = useState('');
     const [inviteEmail2, setInviteEmail2] = useState('');
@@ -140,16 +142,18 @@ export const TournamentGridBookingEditor: React.FC<TournamentGridBookingEditorPr
             setEloMax(tr.elo_max != null ? String(tr.elo_max) : '');
 
             const st = new Date(tr.start_at);
+            const en = tr.end_at ? new Date(tr.end_at) : new Date(st.getTime() + (tr.duration_min ?? 90) * 60_000);
             setBookingDate(
                 `${st.getUTCFullYear()}-${String(st.getUTCMonth() + 1).padStart(2, '0')}-${String(st.getUTCDate()).padStart(2, '0')}`,
             );
-            const totalM = st.getUTCHours() * 60 + st.getUTCMinutes();
-            const rounded = Math.round(totalM / 30) * 30;
-            const rh = Math.min(23, Math.floor(rounded / 60));
-            const rm = rounded % 60;
-            setStartHour(String(rh).padStart(2, '0'));
-            setStartMinute(rm === 30 ? '30' : '00');
-            setDurationMin(tr.duration_min ?? 90);
+            const startTotalM = st.getUTCHours() * 60 + st.getUTCMinutes();
+            const startRounded = Math.round(startTotalM / 30) * 30;
+            setStartHour(String(Math.min(23, Math.floor(startRounded / 60))).padStart(2, '0'));
+            setStartMinute(startRounded % 60 === 30 ? '30' : '00');
+            const endTotalM = en.getUTCHours() * 60 + en.getUTCMinutes();
+            const endRounded = Math.round(endTotalM / 30) * 30;
+            setEndHour(String(Math.min(23, Math.floor(endRounded / 60))).padStart(2, '0'));
+            setEndMinute(endRounded % 60 === 30 ? '30' : '00');
         } catch (e: unknown) {
             setError(e instanceof Error ? e.message : 'No se pudo cargar el torneo');
         } finally {
@@ -198,9 +202,13 @@ export const TournamentGridBookingEditor: React.FC<TournamentGridBookingEditorPr
 
     const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
     const minutes = ['00', '30'];
-    const durationOptions = [30, 60, 90, 120, 150, 180];
 
     const handleSave = async () => {
+        const durationMin = calcDurationMinutes(`${startHour}:${startMinute}`, `${endHour}:${endMinute}`);
+        if (durationMin < 30) {
+            setError('La hora de fin debe ser al menos 30 minutos después del inicio.');
+            return;
+        }
         setSaving(true);
         setError(null);
         try {
@@ -513,46 +521,56 @@ export const TournamentGridBookingEditor: React.FC<TournamentGridBookingEditorPr
                                         onChange={(e) => setBookingDate(e.target.value)}
                                     />
                                 </label>
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-bold text-gray-700 w-24">Inicio</span>
-                                    <select
-                                        className="p-2 border border-gray-300 rounded-md text-sm"
-                                        value={startHour}
-                                        onChange={(e) => setStartHour(e.target.value)}
-                                    >
-                                        {hours.map((h) => (
-                                            <option key={h} value={h}>
-                                                {h}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    <span>:</span>
-                                    <select
-                                        className="p-2 border border-gray-300 rounded-md text-sm"
-                                        value={startMinute}
-                                        onChange={(e) => setStartMinute(e.target.value)}
-                                    >
-                                        {minutes.map((m) => (
-                                            <option key={m} value={m}>
-                                                {m}
-                                            </option>
-                                        ))}
-                                    </select>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div>
+                                        <span className="text-sm font-bold text-gray-700">Hora inicio</span>
+                                        <div className="flex items-center gap-1 mt-1">
+                                            <select
+                                                className="p-2 border border-gray-300 rounded-md text-sm"
+                                                value={startHour}
+                                                onChange={(e) => setStartHour(e.target.value)}
+                                            >
+                                                {hours.map((h) => (
+                                                    <option key={h} value={h}>{h}</option>
+                                                ))}
+                                            </select>
+                                            <span>:</span>
+                                            <select
+                                                className="p-2 border border-gray-300 rounded-md text-sm"
+                                                value={startMinute}
+                                                onChange={(e) => setStartMinute(e.target.value)}
+                                            >
+                                                {minutes.map((m) => (
+                                                    <option key={m} value={m}>{m}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <span className="text-sm font-bold text-gray-700">Hora fin</span>
+                                        <div className="flex items-center gap-1 mt-1">
+                                            <select
+                                                className="p-2 border border-gray-300 rounded-md text-sm"
+                                                value={endHour}
+                                                onChange={(e) => setEndHour(e.target.value)}
+                                            >
+                                                {hours.map((h) => (
+                                                    <option key={h} value={h}>{h}</option>
+                                                ))}
+                                            </select>
+                                            <span>:</span>
+                                            <select
+                                                className="p-2 border border-gray-300 rounded-md text-sm"
+                                                value={endMinute}
+                                                onChange={(e) => setEndMinute(e.target.value)}
+                                            >
+                                                {minutes.map((m) => (
+                                                    <option key={m} value={m}>{m}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
                                 </div>
-                                <label className="block">
-                                    <span className="text-sm font-bold text-gray-700">Duración (min)</span>
-                                    <select
-                                        className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm"
-                                        value={durationMin}
-                                        onChange={(e) => setDurationMin(Number(e.target.value))}
-                                    >
-                                        {durationOptions.map((d) => (
-                                            <option key={d} value={d}>
-                                                {d}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </label>
 
                                 <div className="pt-4 border-t border-gray-200">
                                     <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wide flex items-center gap-2">

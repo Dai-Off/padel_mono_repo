@@ -2,6 +2,14 @@ import type { Request } from 'express';
 import type { AuthContext } from '../middleware/attachAuthContext';
 import type { PortalPermissionKey } from './portalPermissions';
 
+/** Dueño del club (o admin plataforma): puede operar caja sin empleado vinculado y delegar en personal. */
+export function isClubOwnerForCashLedger(req: Request, clubId: string): boolean {
+  const ctx = req.authContext;
+  if (!ctx) return false;
+  if (ctx.adminId) return true;
+  return ctx.allowedClubIds?.includes(clubId) ?? false;
+}
+
 /** Dueño real del club o admin plataforma (gestión de pistas / club). */
 export function isClubOwnerOrAdmin(req: Request, clubId: string): boolean {
   const ctx = req.authContext;
