@@ -233,11 +233,6 @@ function normalizeHalfHourLocalDateTime(value: string): string {
   return d.toISOString().slice(0, 16);
 }
 
-function isValidDuration30(value: string): boolean {
-  const n = Number(value);
-  return Number.isInteger(n) && n >= 30 && n % 30 === 0;
-}
-
 function nextPowerOfTwo(n: number): number {
   let p = 1;
   while (p < n) p *= 2;
@@ -794,6 +789,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     setForm({
       name: '',
       start_date: '',
+      end_date: '',
       start_time: '21:30',
       end_time: '23:00',
       start_at: '',

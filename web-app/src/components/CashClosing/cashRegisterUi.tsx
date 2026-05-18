@@ -17,7 +17,6 @@ import type {
   CashClosingBookingExpected,
   CashMovementRecord,
   CashMovementType,
-  CashOpeningSavedRecord,
 } from '../../services/payments';
 import type { CashRecordKind } from '../../services/payments';
 
@@ -314,13 +313,10 @@ type CountFormProps = {
   t: TFunction;
   cashBreakdown: CashBreakdown;
   setCashBreakdown: React.Dispatch<React.SetStateAction<CashBreakdown>>;
-  employeeId: string;
-  setEmployeeId: (v: string) => void;
   cardTotal: string;
   setCardTotal: (v: string) => void;
   observations: string;
   setObservations: (v: string) => void;
-  staffOptions: { id: string; name: string }[];
   noStaffWarning: boolean;
   realCashTotal: number;
   realCardTotal: number;
@@ -345,13 +341,10 @@ export function CashCountForm({
   t,
   cashBreakdown,
   setCashBreakdown,
-  employeeId,
-  setEmployeeId,
   cardTotal,
   setCardTotal,
   observations,
   setObservations,
-  staffOptions,
   noStaffWarning,
   realCashTotal,
   realCardTotal,

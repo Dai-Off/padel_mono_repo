@@ -58,7 +58,6 @@ export function ClubCashClosingTab({
   const { t } = useTranslation();
   const [section, setSection] = useState<CashSection>('listado');
   const [staff, setStaff] = useState<ClubStaffMember[]>([]);
-  const [employeeId, setEmployeeId] = useState('');
   const [observations, setObservations] = useState('');
   const [cardTotal, setCardTotal] = useState('');
   const [cashBreakdown, setCashBreakdown] = useState<CashBreakdown>(emptyBreakdown);
@@ -114,10 +113,6 @@ export function ClubCashClosingTab({
     }
     return operatorName ?? ownerDisplayName;
   }, [delegateMode, delegatedStaffId, operatorName, ownerDisplayName, staffOptions]);
-
-  useEffect(() => {
-    setEmployeeId(effectiveStaffId);
-  }, [effectiveStaffId]);
 
   const realCashTotal = useMemo(
     () => denominations.reduce((acc, d) => acc + cashBreakdown[d.key] * d.value, 0),
@@ -210,7 +205,11 @@ export function ClubCashClosingTab({
           setOwnerDisplayName(null);
           setOperatorStaffId('');
           setOperatorName(null);
-          setOperatorError('error' in operator ? operator.error : t('cash_operator_not_linked'));
+          setOperatorError(
+            'error' in operator && typeof operator.error === 'string'
+              ? operator.error
+              : t('cash_operator_not_linked'),
+          );
           setDelegateMode(false);
           setDelegatedStaffId('');
         }
@@ -252,7 +251,6 @@ export function ClubCashClosingTab({
   const resetCountForm = () => {
     setCashBreakdown(emptyBreakdown);
     setCardTotal('');
-    setEmployeeId('');
     setObservations('');
   };
 
@@ -315,7 +313,6 @@ export function ClubCashClosingTab({
       setOpeningRecord(saved);
       const expected = await paymentsService.getCashClosingExpected(clubId, saved.for_date, operativeTimezone);
       applyExpected(expected);
-      setEmployeeId(saved.staff_id ?? '');
       setOpeningCashTotal('');
       setOpeningNotes('');
       toast.success(t('cash_opening_success'));
@@ -436,13 +433,10 @@ export function ClubCashClosingTab({
     t,
     cashBreakdown,
     setCashBreakdown,
-    employeeId,
-    setEmployeeId,
     cardTotal,
     setCardTotal,
     observations,
     setObservations,
-    staffOptions,
     noStaffWarning: staff.length > 0 && staffForCashOperations.length === 0,
     realCashTotal,
     realCardTotal,
