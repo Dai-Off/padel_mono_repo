@@ -989,6 +989,12 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
           {failedIndices.length > 0 && (
             <Pressable
               onPress={() => {
+                // Resetear opacidad y limpiar timer pendiente. Si no, al
+                // entrar la segunda vez al repaso el contenido se ve "apagado"
+                // (fadeQuestion del repaso anterior dejó valores intermedios).
+                contentOpacity.setValue(1);
+                if (advanceTimer.current) clearTimeout(advanceTimer.current);
+                setShowingVideo(false);
                 setReviewIndex(0);
                 setPhase('review');
                 animateProgressTo(0);
