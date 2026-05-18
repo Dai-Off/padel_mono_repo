@@ -70,7 +70,7 @@ function QuestionsModeration() {
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState<QuestionType | 'all'>('all');
   const [areaFilter, setAreaFilter] = useState<QuestionArea | 'all'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'true' | 'false'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published' | 'inactive'>('all');
   const [clubFilter, setClubFilter] = useState<string>('all');
 
   // Cargar lista de clubs una vez (sin filtro de club)
@@ -87,10 +87,15 @@ function QuestionsModeration() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const filters: { type?: QuestionType; area?: QuestionArea; is_active?: 'true' | 'false' | 'all'; club_id?: string } = {};
+      const filters: {
+        type?: QuestionType;
+        area?: QuestionArea;
+        status?: 'all' | 'draft' | 'published' | 'inactive';
+        club_id?: string;
+      } = {};
       if (typeFilter !== 'all') filters.type = typeFilter;
       if (areaFilter !== 'all') filters.area = areaFilter;
-      filters.is_active = statusFilter;
+      filters.status = statusFilter;
       if (clubFilter !== 'all') filters.club_id = clubFilter;
       const list = await adminLearningService.listAllQuestions(filters);
       setQuestions(list);
@@ -103,9 +108,11 @@ function QuestionsModeration() {
 
   useEffect(() => { load(); }, [load]);
 
+  // Toggle published ↔ inactive. Los drafts no se toggle-ean.
   const handleToggle = async (q: AdminQuestion) => {
+    if (q.status === 'draft') return;
     try {
-      if (q.is_active) {
+      if (q.status === 'published') {
         await adminLearningService.deactivateQuestion(q.id);
         toast.success(t('learning_deactivate_success'));
       } else {
@@ -160,7 +167,12 @@ function QuestionsModeration() {
 
         {/* Estado */}
         <div className="flex flex-wrap gap-1.5">
-          {([{ key: 'all', label: t('learning_filter_all_status') }, { key: 'true', label: t('learning_filter_active') }, { key: 'false', label: t('learning_filter_inactive') }] as const).map((s) => (
+          {([
+            { key: 'all', label: 'Todas' },
+            { key: 'published', label: 'Publicadas' },
+            { key: 'draft', label: 'Borradores' },
+            { key: 'inactive', label: 'Inactivas' },
+          ] as const).map((s) => (
             <button key={s.key} onClick={() => setStatusFilter(s.key)} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${statusFilter === s.key ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A]'}`}>
               {s.label}
             </button>
@@ -183,32 +195,42 @@ function QuestionsModeration() {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.02 }}
-              className={`bg-white rounded-2xl border p-4 space-y-3 ${q.is_active ? 'border-gray-100' : 'border-gray-100 opacity-60'}`}
+              className={`bg-white rounded-2xl border p-4 space-y-3 ${q.status === 'published' ? 'border-gray-100' : 'border-gray-100 opacity-60'}`}
             >
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-600 text-[10px] font-bold">{t(`learning_type_${q.type}`)}</span>
                 <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-600 text-[10px] font-bold">{t(`learning_area_${q.area}`)}</span>
                 <span className="px-2 py-0.5 rounded-lg bg-gray-100 text-gray-500 text-[10px] font-bold">Lv. {q.level}</span>
                 <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-[10px] font-bold">{q.club_name}</span>
+                {q.status === 'draft' && (
+                  <span className="px-2 py-0.5 rounded-lg bg-yellow-50 text-yellow-600 text-[10px] font-bold">Borrador</span>
+                )}
+                {q.status === 'inactive' && (
+                  <span className="px-2 py-0.5 rounded-lg bg-red-50 text-red-500 text-[10px] font-bold">Inactiva</span>
+                )}
               </div>
               <div className="flex items-start gap-2">
                 <HelpCircle className="w-4 h-4 text-gray-300 mt-0.5 shrink-0" />
                 <p className="text-xs text-[#1A1A1A] line-clamp-2">{extractPreview(q)}</p>
               </div>
               <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={q.is_active}
-                  onClick={() => handleToggle(q)}
-                  className="relative w-9 h-5 rounded-full transition-colors shrink-0"
-                  style={{ backgroundColor: q.is_active ? '#22C55E' : '#D1D5DB' }}
-                >
-                  <span
-                    className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
-                    style={{ transform: q.is_active ? 'translateX(16px)' : 'translateX(0)' }}
-                  />
-                </button>
+                {/* Toggle solo para published/inactive. Drafts no se moderan
+                    desde aquí (publicación vía el editor del club). */}
+                {q.status !== 'draft' && (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={q.status === 'published'}
+                    onClick={() => handleToggle(q)}
+                    className="relative w-9 h-5 rounded-full transition-colors shrink-0"
+                    style={{ backgroundColor: q.status === 'published' ? '#22C55E' : '#D1D5DB' }}
+                  >
+                    <span
+                      className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
+                      style={{ transform: q.status === 'published' ? 'translateX(16px)' : 'translateX(0)' }}
+                    />
+                  </button>
+                )}
               </div>
             </motion.div>
           ))}

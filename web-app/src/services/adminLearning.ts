@@ -54,13 +54,13 @@ export const adminLearningService = {
     club_id?: string;
     type?: QuestionType;
     area?: QuestionArea;
-    is_active?: 'true' | 'false' | 'all';
+    status?: 'all' | 'draft' | 'published' | 'inactive';
   }): Promise<AdminQuestion[]> {
     const q = new URLSearchParams();
     if (filters?.club_id) q.set('club_id', filters.club_id);
     if (filters?.type) q.set('type', filters.type);
     if (filters?.area) q.set('area', filters.area);
-    if (filters?.is_active) q.set('is_active', filters.is_active);
+    if (filters?.status && filters.status !== 'all') q.set('status', filters.status);
     const qs = q.toString();
     const res = await apiFetchWithAuth<ApiOk<{ data: AdminQuestion[] }>>(`/admin/learning/questions${qs ? `?${qs}` : ''}`);
     return res.data ?? [];

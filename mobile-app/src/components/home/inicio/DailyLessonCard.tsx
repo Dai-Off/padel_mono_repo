@@ -17,15 +17,24 @@ import { useStreak } from '../../../hooks/useDailyLesson';
 import { ScalePressable } from './ScalePressable';
 import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
+import { useAuth } from '../../../contexts/AuthContext';
+import { fetchMyPlayerProfile } from '../../../api/players';
+import { loadProgress } from '../../../lib/dailyLessonStorage';
 
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
-const BONUS_LEVELS = [
-  { label: 'x0.5', minDays: 0, color: '#9CA3AF' },
-  { label: 'x1', minDays: 7, color: '#FB923C' },
-  { label: 'x1.5', minDays: 14, color: '#FDBA74' },
-  { label: 'x2', minDays: 30, color: '#FCD34D' },
+// Tiers de bonus alineados con backend (learningStreaks.getMultiplier):
+//   racha 0-2  → sin bonus (countdown a x1.5)
+//   racha 3-7  → x1.5  (multiplier 0.5 → factor 1.5)
+//   racha 8-20 → x2    (multiplier 1.0 → factor 2.0)
+//   racha 21-45→ x2.5  (multiplier 1.5 → factor 2.5)
+//   racha 46+  → x3    (multiplier 2.0 → factor 3.0)
+const BONUS_TIERS = [
+  { minStreak: 3,  label: 'Bonus x1.5 SP', color: '#FB923C' },
+  { minStreak: 8,  label: 'Bonus x2 SP',   color: '#FDBA74' },
+  { minStreak: 21, label: 'Bonus x2.5 SP', color: '#FCD34D' },
+  { minStreak: 46, label: 'Bonus x3 SP',   color: '#FCD34D' },
 ] as const;
 
 type Props = {
@@ -92,12 +101,23 @@ function DailyLessonIconBackdropSvg({ color }: { color: string }) {
   );
 }
 
-function getBonusLevelLabel(streak: number): { label: string; color: string } {
-  for (let i = BONUS_LEVELS.length - 1; i >= 0; i--) {
-    const L = BONUS_LEVELS[i];
-    if (streak >= L.minDays) return { label: L.label, color: L.color };
+// Devuelve el texto del badge de bonus (sin la llama ni la racha — esos los
+// renderiza el caller). En modo countdown añade el "en N más" para indicar
+// cuánto falta para el primer tier.
+function getBonusInfo(streak: number): { text: string; color: string } {
+  if (streak < 3) {
+    const remaining = 3 - streak;
+    const dayWord = remaining === 1 ? 'día restante' : 'días restantes';
+    return {
+      text: `${remaining} ${dayWord} para Bonus x1.5 SP`,
+      color: '#9CA3AF',
+    };
   }
-  return { label: BONUS_LEVELS[0].label, color: BONUS_LEVELS[0].color };
+  for (let i = BONUS_TIERS.length - 1; i >= 0; i--) {
+    const t = BONUS_TIERS[i];
+    if (streak >= t.minStreak) return { text: t.label, color: t.color };
+  }
+  return { text: BONUS_TIERS[0].label, color: BONUS_TIERS[0].color };
 }
 
 function getMultiplierLabel(multiplier: number): string | null {
@@ -135,6 +155,36 @@ export function DailyLessonCard({
   variant = 'default',
   streakRefreshKey = 0,
 }: Props) {
+  const { session } = useAuth();
+  // Estado del cuestionario de nivelación. Fetch ligero (un GET /players/me) en
+  // mount para saber si bloqueamos visualmente la card. Si onboardingCompleted
+  // es false, mostramos un candado discreto en vez de "Empezar"/"Hecha".
+  // null mientras carga → no se renderiza candado (la card se ve normal).
+  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    fetchMyPlayerProfile(session?.access_token).then((p) => {
+      if (mounted && p) setOnboardingCompleted(p.onboardingCompleted);
+    });
+    return () => { mounted = false; };
+  }, [session?.access_token]);
+  const locked = onboardingCompleted === false;
+
+  // ¿Tiene una lección a medias guardada en local? Mostramos "Continuar"
+  // en lugar de "Empezar" para que sepa que puede retomar desde el home.
+  // Se refresca con streakRefreshKey (se incrementa al cerrar la lección).
+  const [hasResume, setHasResume] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    const uid = session?.user?.id;
+    if (!uid) return;
+    loadProgress(uid, TIMEZONE).then((snap) => {
+      if (!mounted) return;
+      // Solo válido si quedan respuestas pendientes (incompleta).
+      setHasResume(!!snap && snap.answers.length < snap.questions.length);
+    });
+    return () => { mounted = false; };
+  }, [session?.user?.id, streakRefreshKey]);
   const isCarousel = variant === 'carousel';
   const { currentStreak, multiplier, lastCompleted, loading } = useStreak(
     TIMEZONE,
@@ -164,7 +214,7 @@ export function DailyLessonCard({
   const completedToday = isLessonCompletedToday(lastCompleted, TIMEZONE);
 
   const multiplierLabel = getMultiplierLabel(multiplier);
-  const bonusFromStreak = getBonusLevelLabel(currentStreak);
+  const bonusFromStreak = getBonusInfo(currentStreak);
 
   /** Fondo: pulso tipo Motion (~5s easeInOut 0↔1). */
   useEffect(() => {
@@ -502,7 +552,18 @@ export function DailyLessonCard({
               </View>
             </View>
 
-            {completedToday ? (
+            {locked ? (
+              // Estado "bloqueada" cuando el usuario no ha completado el
+              // cuestionario de nivelación. Tap sigue funcionando — la pantalla
+              // bloqueada amigable explica qué hacer y lleva al onboarding.
+              <View
+                style={styles.lockedBadge}
+                accessibilityLabel="Cuestionario de nivelación pendiente"
+              >
+                <Ionicons name="lock-closed" size={12} color={color1} />
+                <Text style={[styles.lockedBadgeText, { color: color1 }]}>Bloqueado</Text>
+              </View>
+            ) : completedToday ? (
               <View style={styles.hechaBadge}>
                 <Ionicons name="checkmark-circle" size={12} color={color1} />
                 <Text style={[styles.hechaText, { color: color1 }]}>Hecha</Text>
@@ -512,21 +573,30 @@ export function DailyLessonCard({
                 collapsable={false}
                 style={[styles.ctaRow, { transform: [{ translateX: ctaTx }] }]}
               >
-                <Text style={[styles.ctaInline, { color: color1 }]}>Empezar</Text>
+                {/* "Continuar" cuando hay una sesión a medias guardada. La
+                    pantalla detalle hace lo mismo (resume vs nueva). */}
+                <Text style={[styles.ctaInline, { color: color1 }]}>
+                  {hasResume ? 'Continuar' : 'Empezar'}
+                </Text>
                 <Ionicons name="chevron-forward" size={14} color={color1} />
               </Animated.View>
             )}
           </View>
 
           <View style={[styles.streakRow, isCarousel && styles.streakRowCarousel]}>
-            {currentStreak > 0 ? (
-              <View style={styles.streakInline}>
-                <Ionicons name="flame" size={10} color="#FB923C" />
-                <Text style={styles.streakText}>{currentStreak} días de racha</Text>
-              </View>
-            ) : null}
-            <Text style={[styles.bonusText, { color: color2 }]}>
-              Bonus {bonusFromStreak.label}
+            {/* Contador de racha + bonus en una sola línea, separados por "·".
+                Formato: "🔥 N día(s) · Bonus xN.N [en N más]". La racha se
+                muestra siempre (incluso 0 días) para que el usuario vea su
+                progreso. Antes la línea se duplicaba ("1 día de racha | 2 días
+                para Bonus x1.5"); ahora "días" aparece solo una vez. */}
+            <View style={styles.streakInline}>
+              <Ionicons name="flame" size={10} color="#FB923C" />
+              <Text style={styles.streakText}>
+                {currentStreak} día{currentStreak === 1 ? '' : 's'}
+              </Text>
+            </View>
+            <Text style={[styles.bonusText, { color: bonusFromStreak.color }]}>
+              · {bonusFromStreak.text}
             </Text>
           </View>
 
@@ -698,6 +768,24 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   hechaText: androidReadableText({
+    fontSize: 10,
+    fontWeight: '900',
+  }),
+  // Mismo estilo que hechaBadge para que el cambio entre estados (bloqueada /
+  // hecha / empezar) sea consistente visualmente y no salte el layout.
+  lockedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    flexShrink: 0,
+  },
+  lockedBadgeText: androidReadableText({
     fontSize: 10,
     fontWeight: '900',
   }),

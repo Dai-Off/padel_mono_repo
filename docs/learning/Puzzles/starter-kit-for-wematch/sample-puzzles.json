@@ -1,0 +1,1336 @@
+[
+  {
+    "source_padelchess_id": 1,
+    "statement": "Where you should return the ball to reach the net with the least risk?",
+    "court_position": "left",
+    "initial_frame": {
+      "players": [
+        {
+          "id": 1,
+          "team": 1,
+          "x": 3.0539419087136936,
+          "y": 18.37551867219917,
+          "is_user": true
+        }
+      ],
+      "ball": {
+        "x": 3.713692946058091,
+        "y": 17.70746887966805
+      },
+      "shapes": [
+        {
+          "type": "circle",
+          "x": 3.691983122362869,
+          "y": 17.679324894514767,
+          "radius": 0.5,
+          "dashed": true,
+          "color": "yellow"
+        }
+      ]
+    },
+    "options": [
+      {
+        "id": 1,
+        "text": "To the left",
+        "is_correct": false,
+        "explanation": "Net height is highest at the edges: 92 cm",
+        "badge_position": {
+          "x": 1,
+          "y": 6
+        },
+        "select_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.66570373093825,
+              "y": 17.91313444333561,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 1,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 3.669527896995708,
+              "y": 17.725321888412015,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "x": 3.540772532188841,
+                "y": 17.128755364806867
+              },
+              "endPoint": {
+                "x": 1.1373390557939913,
+                "y": 7.592274678111588
+              }
+            },
+            {
+              "type": "circle",
+              "x": 1.0085836909871244,
+              "y": 7.017167381974248,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            }
+          ],
+          "duration_ms": 1000
+        },
+        "confirmation_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.66570373093825,
+              "y": 17.91313444333561,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 1,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 3.669527896995708,
+              "y": 17.725321888412015,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "x": 3.540772532188841,
+                "y": 17.128755364806867
+              },
+              "endPoint": {
+                "x": 1.1373390557939913,
+                "y": 7.592274678111588
+              }
+            },
+            {
+              "type": "circle",
+              "x": 1.0085836909871244,
+              "y": 7.017167381974248,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "rect",
+              "x": 0.25316455696202533,
+              "y": 9.071729957805909,
+              "color": "#ff9182",
+              "fillColor": "#ff9182",
+              "fillOpacity": 0.7,
+              "width": 3.0843881856540083,
+              "height": 0.9451476793248954,
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "circle",
+              "x": 3.669527896995708,
+              "y": 17.725321888412015,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow",
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 17.128755364806867,
+                "x": 3.540772532188841
+              },
+              "endPoint": {
+                "y": 7.592274678111588,
+                "x": 1.1373390557939913
+              },
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "circle",
+              "x": 1.0085836909871244,
+              "y": 7.017167381974248,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow",
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "color": "red",
+              "startPoint": {
+                "y": 10,
+                "x": 4.027333333333333
+              },
+              "endPoint": {
+                "y": 9.138666666666666,
+                "x": 4.016
+              },
+              "pointerAtBeginning": true,
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "text",
+              "x": 3.188666666666666,
+              "y": 10.827333333333332,
+              "color": "red",
+              "fontSize": 14,
+              "text": "92 cantimeters",
+              "visible_only_after_confirmation": true
+            }
+          ],
+          "duration_ms": 1000
+        }
+      },
+      {
+        "id": 2,
+        "text": "To the center",
+        "is_correct": true,
+        "explanation": "Net height is lowest at the center: 88 cm",
+        "badge_position": {
+          "x": 5,
+          "y": 6
+        },
+        "select_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 3.0464202648264873,
+              "y": 17.981097868459297,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 5,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 3.71244635193133,
+              "y": 17.660944206008587,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "circle",
+              "x": 5,
+              "y": 7.03862660944206,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 17.064377682403435,
+                "x": 3.798283261802575
+              },
+              "endPoint": {
+                "y": 7.613733905579399,
+                "x": 4.914163090128755
+              }
+            }
+          ],
+          "duration_ms": 1000
+        },
+        "confirmation_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 3.0464202648264873,
+              "y": 17.981097868459297,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 5,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 3.71244635193133,
+              "y": 17.660944206008587,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "circle",
+              "x": 5,
+              "y": 7.03862660944206,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 17.064377682403435,
+                "x": 3.798283261802575
+              },
+              "endPoint": {
+                "y": 7.613733905579399,
+                "x": 4.914163090128755
+              }
+            },
+            {
+              "type": "rect",
+              "x": 3.649789029535865,
+              "y": 9.09282700421941,
+              "color": "#68fec3",
+              "fillColor": "#68fec3",
+              "fillOpacity": 0.7,
+              "width": 2.9999999999999996,
+              "height": 0.9451476793248936,
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "color": "green",
+              "startPoint": {
+                "y": 10.056666666666665,
+                "x": 7.314
+              },
+              "endPoint": {
+                "y": 9.116,
+                "x": 7.279999999999999
+              },
+              "pointerAtBeginning": true,
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "text",
+              "x": 6.917333333333333,
+              "y": 10.748,
+              "color": "green",
+              "fontSize": 14,
+              "text": "88 cantimeters",
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 17.064377682403435,
+                "x": 3.798283261802575
+              },
+              "endPoint": {
+                "y": 7.613733905579399,
+                "x": 4.914163090128755
+              },
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "circle",
+              "x": 3.71244635193133,
+              "y": 17.660944206008587,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow",
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 17.064377682403435,
+                "x": 3.798283261802575
+              },
+              "endPoint": {
+                "y": 7.613733905579399,
+                "x": 4.914163090128755
+              },
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "circle",
+              "x": 5,
+              "y": 7.03862660944206,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow",
+              "visible_only_after_confirmation": true
+            }
+          ],
+          "duration_ms": 1000
+        }
+      },
+      {
+        "id": 3,
+        "text": "To the right",
+        "is_correct": false,
+        "explanation": "Net height is highest at the edges: 92 cm",
+        "badge_position": {
+          "x": 9,
+          "y": 6
+        },
+        "select_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 3.220996417187791,
+              "y": 18.000758213263175,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 9,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 3.7339055793991416,
+              "y": 17.682403433476395,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "x": 3.927038626609442,
+                "y": 17.085836909871244
+              },
+              "endPoint": {
+                "x": 8.669527896995708,
+                "y": 7.570815450643777
+              }
+            },
+            {
+              "type": "circle",
+              "x": 9.012875536480687,
+              "y": 7.017167381974248,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            }
+          ],
+          "duration_ms": 800
+        },
+        "confirmation_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 3.220996417187791,
+              "y": 18.000758213263175,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 9,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 3.7339055793991416,
+              "y": 17.682403433476395,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "x": 3.927038626609442,
+                "y": 17.085836909871244
+              },
+              "endPoint": {
+                "x": 8.669527896995708,
+                "y": 7.570815450643777
+              }
+            },
+            {
+              "type": "circle",
+              "x": 9.012875536480687,
+              "y": 7.017167381974248,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "rect",
+              "x": 6.772151898734178,
+              "y": 9.113924050632912,
+              "color": "#ff9182",
+              "fillColor": "#ff9182",
+              "fillOpacity": 0.7,
+              "width": 2.9789029535864966,
+              "height": 0.9240506329113938,
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "circle",
+              "x": 3.7339055793991416,
+              "y": 17.682403433476395,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow",
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "x": 3.927038626609442,
+                "y": 17.085836909871244
+              },
+              "endPoint": {
+                "x": 8.669527896995708,
+                "y": 7.570815450643777
+              },
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "circle",
+              "x": 9.012875536480687,
+              "y": 7.017167381974248,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow",
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "color": "red",
+              "startPoint": {
+                "x": 6.305333333333333,
+                "y": 10.045333333333332
+              },
+              "endPoint": {
+                "x": 6.294,
+                "y": 9.161333333333332
+              },
+              "pointerAtBeginning": true,
+              "visible_only_after_confirmation": true
+            },
+            {
+              "type": "text",
+              "x": 5.138,
+              "y": 10.884,
+              "color": "red",
+              "fontSize": 14,
+              "text": "92 cantimeters",
+              "visible_only_after_confirmation": true
+            }
+          ],
+          "duration_ms": 800
+        }
+      }
+    ]
+  },
+  {
+    "source_padelchess_id": 27,
+    "statement": "You're at the net and played a difficult shot for the opponent. What should you do?",
+    "court_position": "left",
+    "initial_frame": {
+      "players": [
+        {
+          "id": 1,
+          "team": 1,
+          "x": 2.4932735426008965,
+          "y": 12.670403587443946,
+          "is_user": true
+        },
+        {
+          "id": 2,
+          "team": 1,
+          "x": 7.192825112107624,
+          "y": 12.647982062780269,
+          "is_user": false
+        },
+        {
+          "id": 3,
+          "team": 2,
+          "x": 2,
+          "y": 1.5,
+          "is_user": false
+        },
+        {
+          "id": 4,
+          "team": 2,
+          "x": 8,
+          "y": 1.5,
+          "is_user": false
+        }
+      ],
+      "ball": {
+        "x": 0.9641255605381166,
+        "y": 0.5269058295964125
+      },
+      "shapes": [
+        {
+          "type": "circle",
+          "x": 3.304721030042918,
+          "y": 11.995708154506437,
+          "radius": 0.5,
+          "dashed": true,
+          "color": "yellow"
+        },
+        {
+          "type": "arrow",
+          "x": 0,
+          "y": 0,
+          "dashed": true,
+          "color": "yellow",
+          "startPoint": {
+            "x": 3.1759656652360517,
+            "y": 11.356223175965665
+          },
+          "endPoint": {
+            "y": 1.1115879828326183,
+            "x": 1.0300429184549362
+          }
+        },
+        {
+          "type": "circle",
+          "x": 0.9704641350210971,
+          "y": 0.569620253164557,
+          "radius": 0.5,
+          "dashed": true,
+          "color": "yellow"
+        }
+      ]
+    },
+    "options": [
+      {
+        "id": 1,
+        "text": "Step forward and try to finish the point after opponent's return",
+        "is_correct": true,
+        "explanation": "You're in a good position to play a fast volley, pop out or a flat smash to win the point.",
+        "badge_position": {
+          "x": 0.946188340807175,
+          "y": 10.928251121076231
+        },
+        "select_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.493273542600897,
+              "y": 11.213004484304934,
+              "is_user": true
+            },
+            {
+              "id": 2,
+              "team": 1,
+              "x": 6.228699551569507,
+              "y": 11.39237668161435,
+              "is_user": false
+            },
+            {
+              "id": 3,
+              "team": 2,
+              "x": 2,
+              "y": 1.5,
+              "is_user": false
+            },
+            {
+              "id": 4,
+              "team": 2,
+              "x": 8,
+              "y": 1.5,
+              "is_user": false
+            }
+          ],
+          "ball": {
+            "x": 1.7713004484304933,
+            "y": 9.899103139013453,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "x": 2.381974248927039,
+                "y": 12.92274678111588
+              },
+              "endPoint": {
+                "x": 2.3390557939914167,
+                "y": 12.29184549356223
+              }
+            },
+            {
+              "type": "circle",
+              "x": 2.4678111587982836,
+              "y": 13.454935622317596,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "circle",
+              "x": 0.759493670886076,
+              "y": 0.5274261603375527,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "x": 0.7383966244725738,
+                "y": 1.1139240506329116
+              },
+              "endPoint": {
+                "x": 1.6666666666666667,
+                "y": 9.329113924050633
+              }
+            },
+            {
+              "type": "circle",
+              "x": 1.7721518987341773,
+              "y": 9.957805907172997,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            }
+          ],
+          "duration_ms": 1100
+        },
+        "confirmation_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.493273542600897,
+              "y": 11.213004484304934,
+              "is_user": true
+            },
+            {
+              "id": 2,
+              "team": 1,
+              "x": 6.228699551569507,
+              "y": 11.39237668161435,
+              "is_user": false,
+              "speech_label": "me gusta!"
+            },
+            {
+              "id": 3,
+              "team": 2,
+              "x": 2,
+              "y": 1.5,
+              "is_user": false
+            },
+            {
+              "id": 4,
+              "team": 2,
+              "x": 8,
+              "y": 1.5,
+              "is_user": false
+            }
+          ],
+          "ball": {
+            "x": 1.7713004484304933,
+            "y": 9.899103139013453,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "x": 2.381974248927039,
+                "y": 12.92274678111588
+              },
+              "endPoint": {
+                "x": 2.3390557939914167,
+                "y": 12.29184549356223
+              }
+            },
+            {
+              "type": "circle",
+              "x": 2.4678111587982836,
+              "y": 13.454935622317596,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "circle",
+              "x": 0.759493670886076,
+              "y": 0.5274261603375527,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "x": 0.7383966244725738,
+                "y": 1.1139240506329116
+              },
+              "endPoint": {
+                "x": 1.6666666666666667,
+                "y": 9.329113924050633
+              }
+            },
+            {
+              "type": "circle",
+              "x": 1.7721518987341773,
+              "y": 9.957805907172997,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            }
+          ],
+          "duration_ms": 1100
+        }
+      },
+      {
+        "id": 2,
+        "text": "Stay at the same position",
+        "is_correct": false,
+        "explanation": "You're missing an opportunity to finish the point on the next shot.",
+        "badge_position": {
+          "x": 0.9573991031390138,
+          "y": 13.013452914798206
+        },
+        "select_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.4932735426008965,
+              "y": 12.670403587443946,
+              "is_user": true
+            },
+            {
+              "id": 2,
+              "team": 1,
+              "x": 7.192825112107624,
+              "y": 12.647982062780269,
+              "is_user": false
+            },
+            {
+              "id": 3,
+              "team": 2,
+              "x": 2,
+              "y": 1.5,
+              "is_user": false
+            },
+            {
+              "id": 4,
+              "team": 2,
+              "x": 8,
+              "y": 1.5,
+              "is_user": false
+            }
+          ],
+          "ball": {
+            "x": 2.0627802690582957,
+            "y": 11.221973094170403,
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 0.7805907172995781,
+              "y": 0.5907172995780591,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 1.19831223628692,
+                "x": 0.8016877637130804
+              },
+              "endPoint": {
+                "y": 10.616033755274263,
+                "x": 1.9409282700421941
+              }
+            },
+            {
+              "type": "circle",
+              "x": 2.067510548523207,
+              "y": 11.265822784810126,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            }
+          ],
+          "duration_ms": 800
+        },
+        "confirmation_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.4932735426008965,
+              "y": 12.670403587443946,
+              "is_user": true
+            },
+            {
+              "id": 2,
+              "team": 1,
+              "x": 7.192825112107624,
+              "y": 12.647982062780269,
+              "is_user": false
+            },
+            {
+              "id": 3,
+              "team": 2,
+              "x": 2,
+              "y": 1.5,
+              "is_user": false
+            },
+            {
+              "id": 4,
+              "team": 2,
+              "x": 8,
+              "y": 1.5,
+              "is_user": false
+            }
+          ],
+          "ball": {
+            "x": 2.0627802690582957,
+            "y": 11.221973094170403,
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 0.7805907172995781,
+              "y": 0.5907172995780591,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 1.19831223628692,
+                "x": 0.8016877637130804
+              },
+              "endPoint": {
+                "y": 10.616033755274263,
+                "x": 1.9409282700421941
+              }
+            },
+            {
+              "type": "circle",
+              "x": 2.067510548523207,
+              "y": 11.265822784810126,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            }
+          ],
+          "duration_ms": 800
+        }
+      }
+    ]
+  },
+  {
+    "source_padelchess_id": 151,
+    "statement": "Where you should return the ball to reach the net with the least risk?",
+    "court_position": "right",
+    "initial_frame": {
+      "players": [
+        {
+          "id": 1,
+          "team": 1,
+          "x": 7.215767634854772,
+          "y": 18.29253112033195,
+          "is_user": true
+        }
+      ],
+      "ball": {
+        "x": 6.244813278008299,
+        "y": 17.479253112033195
+      },
+      "shapes": []
+    },
+    "options": [
+      {
+        "id": 1,
+        "text": "To the right",
+        "is_correct": false,
+        "explanation": "Net height is highest at the edges: 92 cm",
+        "badge_position": {
+          "x": 1,
+          "y": 6
+        },
+        "select_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 6.572614107883817,
+              "y": 18.271784232365146,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 1,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 6.288131905256799,
+              "y": 17.445008460236885,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 16.94077834179357,
+                "x": 5.983048032959136
+              },
+              "endPoint": {
+                "y": 7.526226734348562,
+                "x": 1.2372989083288242
+              }
+            }
+          ],
+          "duration_ms": 800
+        },
+        "confirmation_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 6.572614107883817,
+              "y": 18.271784232365146,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 1,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 6.288131905256799,
+              "y": 17.445008460236885,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 16.94077834179357,
+                "x": 5.983048032959136
+              },
+              "endPoint": {
+                "y": 7.526226734348562,
+                "x": 1.2372989083288242
+              }
+            }
+          ],
+          "duration_ms": 800
+        }
+      },
+      {
+        "id": 2,
+        "text": "To the center",
+        "is_correct": true,
+        "explanation": "Net height is lowest at the center: 88 cm",
+        "badge_position": {
+          "x": 5,
+          "y": 6
+        },
+        "select_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 6.723628100622407,
+              "y": 18.312904732365144,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 5,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 6.152539073124505,
+              "y": 17.54653130287648,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 16.703891708967852,
+                "x": 5.983048032959135
+              },
+              "endPoint": {
+                "y": 7.593908629441624,
+                "x": 5.067796416066147
+              }
+            }
+          ],
+          "duration_ms": 1000
+        },
+        "confirmation_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 6.723628100622407,
+              "y": 18.312904732365144,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 5,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 6.152539073124505,
+              "y": 17.54653130287648,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 16.703891708967852,
+                "x": 5.983048032959135
+              },
+              "endPoint": {
+                "y": 7.593908629441624,
+                "x": 5.067796416066147
+              }
+            }
+          ],
+          "duration_ms": 1000
+        }
+      },
+      {
+        "id": 3,
+        "text": "To the left",
+        "is_correct": false,
+        "explanation": "Net height is highest at the edges: 92 cm",
+        "badge_position": {
+          "x": 9,
+          "y": 6
+        },
+        "select_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 7.796680497925311,
+              "y": 18.313278008298756,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 9,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 6.355928321322946,
+              "y": 17.478849407783418,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 16.67005076142132,
+                "x": 6.3559283213229465
+              },
+              "endPoint": {
+                "y": 7.458544839255498,
+                "x": 8.830497507737324
+              }
+            }
+          ],
+          "duration_ms": 1000
+        },
+        "confirmation_frame": {
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 7.796680497925311,
+              "y": 18.313278008298756,
+              "is_user": true
+            }
+          ],
+          "ball": {
+            "x": 9,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "circle",
+              "x": 6.355928321322946,
+              "y": 17.478849407783418,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow",
+              "startPoint": {
+                "y": 16.67005076142132,
+                "x": 6.3559283213229465
+              },
+              "endPoint": {
+                "y": 7.458544839255498,
+                "x": 8.830497507737324
+              }
+            }
+          ],
+          "duration_ms": 1000
+        }
+      }
+    ]
+  }
+]

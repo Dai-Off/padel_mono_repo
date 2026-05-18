@@ -29,6 +29,10 @@ export type DailyLessonResponse = {
   ok: boolean;
   already_completed: boolean;
   questions: DailyLessonQuestion[];
+  // True si no hay suficientes preguntas publicadas para montar una lección
+  // completa (LESSON_SIZE en backend). El backend nunca devuelve una lección
+  // parcial; el cliente muestra una pantalla "no disponible".
+  not_enough_questions?: boolean;
   session?: {
     id: string;
     correct_count: number;
@@ -95,7 +99,7 @@ export type StreakInfo = {
 export async function fetchDailyLesson(
   token: string | null | undefined,
   timezone = 'UTC',
-): Promise<DailyLessonResponse | { ok: false; error: string }> {
+): Promise<DailyLessonResponse | { ok: false; error: string; requires_onboarding?: boolean }> {
   if (!token) return { ok: false, error: 'Token requerido' };
   try {
     const res = await fetch(
@@ -108,8 +112,50 @@ export async function fetchDailyLesson(
       },
     );
     const json = await res.json();
-    if (!res.ok) return { ok: false, error: json.error ?? 'Error al obtener lección' };
+    if (!res.ok) {
+      // Caso especial: el backend manda 403 con requires_onboarding:true cuando
+      // el jugador no ha completado el cuestionario de nivelación. Lo propagamos
+      // como flag para que el caller renderice la pantalla bloqueada amigable
+      // en vez de un error genérico.
+      return {
+        ok: false,
+        error: json.error ?? 'Error al obtener lección',
+        requires_onboarding: json.requires_onboarding === true,
+      };
+    }
     return json as DailyLessonResponse;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+// Obtiene los resultados de la sesión de HOY (si existe). Misma shape que
+// submitDailyLesson para reutilizar la pantalla de resultados. Útil cuando
+// el usuario ya completó la lección y quiere revisar lo que hizo sin rehacer.
+// Incluye también `questions` con las preguntas exactas que respondió, para
+// que el repaso de fallos funcione en modo histórico.
+export type TodayResultsResponse = SubmitLessonResponse & {
+  questions: DailyLessonQuestion[];
+};
+
+export async function fetchTodayResults(
+  token: string | null | undefined,
+  timezone = 'UTC',
+): Promise<TodayResultsResponse | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(
+      `${API_URL}/learning/daily-lesson/today-results?timezone=${encodeURIComponent(timezone)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      },
+    );
+    const json = await res.json();
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al obtener resultados' };
+    return json as TodayResultsResponse;
   } catch {
     return { ok: false, error: 'Error de conexión' };
   }

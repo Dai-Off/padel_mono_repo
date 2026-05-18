@@ -76,10 +76,21 @@ function validateQuestionContent(type: string, content: unknown): string | null 
 // ---------------------------------------------------------------------------
 
 // POST /questions
+const VALID_STATUS = ['draft', 'published', 'inactive'] as const;
+type QuestionStatus = (typeof VALID_STATUS)[number];
+
 router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const { club_id, type, level, video_url, content } = req.body ?? {};
     let { area } = req.body ?? {};
+    // status: 'draft' (sin validar content) o 'published' (validación full).
+    // Default 'published' para no romper a callers viejos. 'inactive' al crear
+    // no tiene sentido (se llega vía toggle posterior).
+    const status: QuestionStatus =
+      VALID_STATUS.includes(req.body?.status) && req.body.status !== 'inactive'
+        ? req.body.status
+        : 'published';
+    const isDraft = status === 'draft';
 
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
     if (!canAccessClub(req, club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -92,12 +103,16 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
     if (!VALID_AREAS.includes(area)) {
       return res.status(400).json({ ok: false, error: `area debe ser uno de: ${VALID_AREAS.join(', ')}` });
     }
-    if (level == null || typeof level !== 'number' || level < 0) {
-      return res.status(400).json({ ok: false, error: 'level debe ser un número >= 0' });
+    if (level == null || typeof level !== 'number' || level < 0.5 || level > 6.5) {
+      return res.status(400).json({ ok: false, error: 'level debe ser un número entre 0.5 y 6.5' });
     }
 
-    const contentError = validateQuestionContent(type, content);
-    if (contentError) return res.status(400).json({ ok: false, error: contentError });
+    // Validación de content solo si NO es borrador. Los borradores pueden
+    // guardarse con content vacío o parcial (es el sentido de la feature).
+    if (!isDraft) {
+      const contentError = validateQuestionContent(type, content);
+      if (contentError) return res.status(400).json({ ok: false, error: contentError });
+    }
 
     const isPuzzle = type === 'puzzle';
     const hasVideo = !isPuzzle && !!video_url && typeof video_url === 'string';
@@ -112,9 +127,9 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
         area,
         has_video: hasVideo,
         video_url: hasVideo ? video_url : null,
-        content: isPuzzle ? {} : content,
+        content: isPuzzle ? {} : (content ?? {}),
         created_by_club: club_id,
-        is_active: true,
+        status,
       })
       .select('*')
       .single();
@@ -122,8 +137,14 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
     // 2. Si es puzzle, insert en learning_puzzles con el árbol del content recibido.
+    // Para borradores con content vacío/null, buildPuzzleRow tolera campos faltantes
+    // y crea una fila con defaults vacíos (el editor la rellenará al editar).
     if (isPuzzle && question) {
-      const puzzleRow = buildPuzzleRow(content as Record<string, unknown>, question.id);
+      const puzzleSource =
+        content && typeof content === 'object' && !Array.isArray(content)
+          ? (content as Record<string, unknown>)
+          : {};
+      const puzzleRow = buildPuzzleRow(puzzleSource, question.id);
       const { data: puzzle, error: puzzleErr } = await supabase
         .from('learning_puzzles')
         .insert(puzzleRow)
@@ -152,7 +173,7 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
 
     const { data: existing, error: fetchErr } = await supabase
       .from('learning_questions')
-      .select('id, created_by_club, type')
+      .select('id, created_by_club, type, status')
       .eq('id', questionId)
       .maybeSingle();
 
@@ -166,6 +187,17 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
     const updates: Record<string, unknown> = {};
 
     const effectiveType = type ?? existing.type;
+    // status post-update: si el body lo trae y es válido lo aplicamos.
+    // Si no, conservamos el actual. Determina si validamos content o no.
+    const incomingStatus =
+      typeof req.body?.status === 'string' && VALID_STATUS.includes(req.body.status as QuestionStatus)
+        ? (req.body.status as QuestionStatus)
+        : null;
+    const effectiveStatus: QuestionStatus = incomingStatus ?? (existing.status as QuestionStatus);
+    if (incomingStatus !== null) {
+      updates.status = incomingStatus;
+    }
+    const effectiveIsDraft = effectiveStatus === 'draft';
 
     if (type !== undefined) {
       if (!VALID_QUESTION_TYPES.includes(type)) {
@@ -182,8 +214,8 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
     // Si la pregunta resultante es de tipo puzzle, forzar area='tactics' (independientemente de lo enviado).
     if (effectiveType === 'puzzle') updates.area = 'tactics';
     if (level !== undefined) {
-      if (typeof level !== 'number' || level < 0) {
-        return res.status(400).json({ ok: false, error: 'level debe ser un número >= 0' });
+      if (typeof level !== 'number' || level < 0.5 || level > 6.5) {
+        return res.status(400).json({ ok: false, error: 'level debe ser un número entre 0.5 y 6.5' });
       }
       updates.level = level;
     }
@@ -195,13 +227,20 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
     let puzzleContent: Record<string, unknown> | null = null;
 
     if (content !== undefined) {
-      const contentError = validateQuestionContent(effectiveType, content);
-      if (contentError) return res.status(400).json({ ok: false, error: contentError });
+      // Solo validamos content cuando se publica (no draft). En modo borrador
+      // se acepta content parcial / vacío.
+      if (!effectiveIsDraft) {
+        const contentError = validateQuestionContent(effectiveType, content);
+        if (contentError) return res.status(400).json({ ok: false, error: contentError });
+      }
       if (isPuzzle) {
-        puzzleContent = content as Record<string, unknown>;
+        puzzleContent =
+          content && typeof content === 'object' && !Array.isArray(content)
+            ? (content as Record<string, unknown>)
+            : {};
         updates.content = {}; // árbol va a learning_puzzles
       } else {
-        updates.content = content;
+        updates.content = content ?? {};
       }
     }
 
@@ -241,7 +280,48 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
   }
 });
 
+// DELETE /questions/:id
+// Borrado permanente. Solo se permite si la pregunta está en estado 'draft'
+// o 'inactive'. Las 'published' hay que desactivar/despublicar primero. El
+// cascade del FK a learning_puzzles elimina la fila asociada automáticamente.
+router.delete('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const questionId = req.params.id;
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('learning_questions')
+      .select('id, created_by_club, status')
+      .eq('id', questionId)
+      .maybeSingle();
+
+    if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
+    if (!canAccessClub(req, existing.created_by_club, 'escuela')) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    if (existing.status === 'published') {
+      return res.status(409).json({
+        ok: false,
+        error: 'Para borrar definitivamente, primero hay que despublicar (pasar a inactiva) o que sea borrador',
+      });
+    }
+
+    const { error } = await supabase
+      .from('learning_questions')
+      .delete()
+      .eq('id', questionId);
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, data: { id: questionId, deleted: true } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // PATCH /questions/:id/deactivate
+// Despublica una pregunta: status='published' → 'inactive'. Si ya está
+// inactive o es draft, no aplica.
 router.patch('/questions/:id/deactivate', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -249,7 +329,7 @@ router.patch('/questions/:id/deactivate', requireClubOwnerOrAdminOrPortalStaff, 
 
     const { data: existing, error: fetchErr } = await supabase
       .from('learning_questions')
-      .select('id, created_by_club')
+      .select('id, created_by_club, status')
       .eq('id', questionId)
       .maybeSingle();
 
@@ -258,20 +338,28 @@ router.patch('/questions/:id/deactivate', requireClubOwnerOrAdminOrPortalStaff, 
     if (!canAccessClub(req, existing.created_by_club, 'escuela')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
+    if (existing.status !== 'published') {
+      return res.status(409).json({
+        ok: false,
+        error: `Solo se puede despublicar una pregunta 'published' (estado actual: ${existing.status})`,
+      });
+    }
 
     const { error } = await supabase
       .from('learning_questions')
-      .update({ is_active: false })
+      .update({ status: 'inactive' })
       .eq('id', questionId);
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, data: { id: questionId, is_active: false } });
+    return res.json({ ok: true, data: { id: questionId, status: 'inactive' } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
 // PATCH /questions/:id/activate
+// Reactiva una pregunta: status='inactive' → 'published'. Si está en draft,
+// no aplica (usar PUT con status='published' que valida el content primero).
 router.patch('/questions/:id/activate', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -279,7 +367,7 @@ router.patch('/questions/:id/activate', requireClubOwnerOrAdminOrPortalStaff, as
 
     const { data: existing, error: fetchErr } = await supabase
       .from('learning_questions')
-      .select('id, created_by_club')
+      .select('id, created_by_club, status')
       .eq('id', questionId)
       .maybeSingle();
 
@@ -288,14 +376,20 @@ router.patch('/questions/:id/activate', requireClubOwnerOrAdminOrPortalStaff, as
     if (!canAccessClub(req, existing.created_by_club, 'escuela')) {
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
+    if (existing.status !== 'inactive') {
+      return res.status(409).json({
+        ok: false,
+        error: `Solo se puede reactivar una pregunta 'inactive' (estado actual: ${existing.status})`,
+      });
+    }
 
     const { error } = await supabase
       .from('learning_questions')
-      .update({ is_active: true })
+      .update({ status: 'published' })
       .eq('id', questionId);
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    return res.json({ ok: true, data: { id: questionId, is_active: true } });
+    return res.json({ ok: true, data: { id: questionId, status: 'published' } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -315,15 +409,17 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
       .eq('created_by_club', clubId)
       .order('created_at', { ascending: false });
 
-    const { type, area, is_active } = req.query;
+    const { type, area, status } = req.query;
     if (type) query = query.eq('type', type as string);
     if (area) query = query.eq('area', area as string);
-    if (is_active === 'false') {
-      query = query.eq('is_active', false);
-    } else if (is_active === 'all') {
-      // No filtrar por is_active
+    // Filtro de estado. Default: solo 'published' (lo que el listado muestra
+    // por defecto). 'all' devuelve todos; 'draft'/'published'/'inactive' filtran.
+    if (status === 'all') {
+      // No filtrar
+    } else if (status === 'draft' || status === 'published' || status === 'inactive') {
+      query = query.eq('status', status);
     } else {
-      query = query.eq('is_active', true);
+      query = query.eq('status', 'published');
     }
 
     const { data, error } = await query;
@@ -347,8 +443,7 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
             (row as Record<string, unknown>).content = {
               schema_version: p.schema_version,
               statement: p.statement,
-              court_position: p.court_position,
-              general_explanation: p.general_explanation,
+              intro_frame: p.intro_frame,
               initial_frame: p.initial_frame,
               options: p.options,
             };

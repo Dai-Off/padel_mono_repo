@@ -41,6 +41,21 @@ export type CashClosingBookingExpected = {
   card_paid_cents: number;
 };
 
+export type CashMovementType = 'withdrawal' | 'deposit';
+
+export type CashMovementRecord = {
+  id: string;
+  club_id: string;
+  staff_id: string | null;
+  employee_name: string;
+  movement_type: CashMovementType;
+  amount_cents: number;
+  for_date: string;
+  opening_id: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
 export type CashClosingExpected = {
   ok: true;
   date: string;
@@ -54,12 +69,29 @@ export type CashClosingExpected = {
   storeSalesCard_cents?: number;
   storeSalesCash_eur?: number;
   storeSalesCard_eur?: number;
+  cash_deposits_cents?: number;
+  cash_withdrawals_cents?: number;
+  cash_deposits_eur?: number;
+  cash_withdrawals_eur?: number;
+  cash_movement_net_cents?: number;
+  cash_movement_net_eur?: number;
   /** Último cierre del día (ISO). */
   last_closing_at?: string | null;
   /** Tras un cierre, hace falta una apertura posterior para contar efectivo inicial en el esperado. */
   needs_new_opening_after_closing?: boolean;
   opening?: CashOpeningSavedRecord | null;
+  openings?: CashOpeningSavedRecord[];
+  cash_movements?: CashMovementRecord[];
   bookings: CashClosingBookingExpected[];
+};
+
+export type CashCurrentOperator = {
+  ok: true;
+  staff_id: string | null;
+  employee_name: string;
+  is_club_owner?: boolean;
+  can_delegate?: boolean;
+  owner_display_name?: string;
 };
 
 export type CashOpeningSavedRecord = {
@@ -72,6 +104,8 @@ export type CashOpeningSavedRecord = {
   opening_cash_cents: number;
   notes: string | null;
 };
+
+export type CashRecordKind = 'arqueo' | 'cierre';
 
 export type CashClosingSavedRecord = {
   id: string;
@@ -87,6 +121,7 @@ export type CashClosingSavedRecord = {
   difference_cents: number;
   observations: string | null;
   status: 'perfect' | 'surplus' | 'deficit';
+  record_kind?: CashRecordKind;
 };
 
 export const paymentsService = {
@@ -120,7 +155,7 @@ export const paymentsService = {
 
   createCashOpeningRecord: async (body: {
     club_id: string;
-    staff_id: string;
+    staff_id?: string | null;
     for_date?: string;
     opening_cash_cents: number;
     notes?: string;
@@ -132,24 +167,62 @@ export const paymentsService = {
     return res.record;
   },
 
-  listCashClosingRecords: async (clubId: string, limit = 50, date?: string): Promise<CashClosingSavedRecord[]> => {
+  listCashClosingRecords: async (
+    clubId: string,
+    limit = 50,
+    date?: string,
+    recordKind?: CashRecordKind,
+  ): Promise<CashClosingSavedRecord[]> => {
     const q = new URLSearchParams({ club_id: clubId, limit: String(limit) });
     if (date) q.set('date', date);
+    if (recordKind) q.set('record_kind', recordKind);
     const res = await apiFetchWithAuth<{ ok: true; records: CashClosingSavedRecord[] }>(
       `/payments/cash-closing/records?${q}`
     );
     return res.records ?? [];
   },
 
+  getCashCurrentOperator: async (clubId: string): Promise<CashCurrentOperator> => {
+    const q = new URLSearchParams({ club_id: clubId });
+    return apiFetchWithAuth<CashCurrentOperator>(`/payments/cash-ledger/current-operator?${q}`);
+  },
+
+  listCashMovementRecords: async (
+    clubId: string,
+    date?: string,
+  ): Promise<{ ok: true; date: string; session_active: boolean; records: CashMovementRecord[] }> => {
+    const q = new URLSearchParams({ club_id: clubId });
+    if (date) q.set('date', date);
+    return apiFetchWithAuth<{ ok: true; date: string; session_active: boolean; records: CashMovementRecord[] }>(
+      `/payments/cash-movements/records?${q}`,
+    );
+  },
+
+  createCashMovementRecord: async (body: {
+    club_id: string;
+    staff_id?: string | null;
+    movement_type: CashMovementType;
+    amount_cents: number;
+    for_date?: string;
+    notes?: string;
+  }): Promise<CashMovementRecord> => {
+    const res = await apiFetchWithAuth<{ ok: true; record: CashMovementRecord }>(
+      '/payments/cash-movements/records',
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    return res.record;
+  },
+
   createCashClosingRecord: async (body: {
     club_id: string;
-    staff_id: string;
+    staff_id?: string | null;
     for_date?: string;
     real_cash_cents: number;
     real_card_cents: number;
     system_cash_cents: number;
     system_card_cents: number;
     observations?: string;
+    record_kind?: CashRecordKind;
   }): Promise<CashClosingSavedRecord> => {
     const res = await apiFetchWithAuth<{ ok: true; record: CashClosingSavedRecord }>(
       '/payments/cash-closing/records',

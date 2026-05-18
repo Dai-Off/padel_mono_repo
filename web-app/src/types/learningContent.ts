@@ -13,7 +13,6 @@ export type QuestionArea = 'technique' | 'tactics' | 'physical' | 'mental' | 'ru
 // [0..10, 10..20]; equipo 2 (rival) arriba [0..10, 0..10].
 // ---------------------------------------------------------------------------
 
-export type PuzzleCourtPosition = 'left' | 'right' | 'both';
 export type PuzzleShotType = 'lob' | 'chiquita';
 export type PuzzleSpin = 'clockwise' | 'counter-clockwise' | 'random';
 export type PuzzlePlayerFacing = 'face' | 'back';
@@ -23,6 +22,7 @@ export interface PuzzlePlayer {
   team: 1 | 2;
   x: number;
   y: number;
+  is_user?: boolean;
   facing?: PuzzlePlayerFacing;
   speech_label?: string;
 }
@@ -34,34 +34,73 @@ export interface PuzzleBall {
   spin?: PuzzleSpin;
 }
 
+// Preset visual de la shape. Define color/animación/borde/etc., sustituye al uso libre
+// de color/dashed/fillColor cuando está presente.
+//   - trajectory     → trayectoria de pelota (curva naranja con dashes marchando + halo origen + punta perpendicular)
+//   - movement       → movimiento de jugador (dashes finos azul + punta perpendicular)
+//   - highlight      → halo radial pulsante (resaltar posición)
+//   - good_zone      → área correcta (verde con gradient suave, transparente)
+//   - bad_zone       → área a evitar (rojo con gradient + diagonales hatch)
+//   - neutral_zone   → área aceptable (amarillo con gradient suave, mismo estilo que good/bad)
+//   - measure        → anotación numérica (pill blanca + texto oscuro)
+//   - tactical       → anotación táctica (pill naranja + mayúsculas)
+//   - speech_bubble  → bocadillo de jugador (no se usa como shape directa, lo aplica el player)
+export type ShapePreset =
+  | 'trajectory'
+  | 'movement'
+  | 'highlight'
+  | 'good_zone'
+  | 'bad_zone'
+  | 'neutral_zone'
+  | 'measure'
+  | 'tactical';
+
+interface PuzzleShapeBase {
+  id: string;
+  style?: ShapePreset;
+  color?: string;
+}
+
 export type PuzzleShape =
-  | { id: number; type: 'arrow'; color?: string; start: { x: number; y: number }; end: { x: number; y: number }; control?: { x: number; y: number }; pointer_at_start?: boolean; pointer_at_end?: boolean; tag_text?: string }
-  | { id: number; type: 'circle'; color?: string; cx: number; cy: number; r: number; dashed?: boolean }
-  | { id: number; type: 'rect'; color?: string; x: number; y: number; w: number; h: number }
-  | { id: number; type: 'triangle'; color?: string; points: number[] }
-  | { id: number; type: 'text_tag'; color?: string; text: string; x: number; y: number; font_size?: number };
+  | (PuzzleShapeBase & { type: 'circle'; x: number; y: number; radius: number; dashed?: boolean })
+  | (PuzzleShapeBase & { type: 'arrow'; startPoint: { x: number; y: number }; endPoint: { x: number; y: number }; controlPoint?: { x: number; y: number }; dashed?: boolean; pointerAtBeginning?: boolean; tagText?: string; tagPosition?: number })
+  | (PuzzleShapeBase & { type: 'rect'; x: number; y: number; width: number; height: number; fillColor?: string; fillOpacity?: number })
+  | (PuzzleShapeBase & { type: 'line'; points: number[]; strokeWidth?: number })
+  | (PuzzleShapeBase & { type: 'text'; x: number; y: number; text: string; fontSize?: number })
+  | (PuzzleShapeBase & { type: 'triangle'; points: number[]; fillColor?: string; fillOpacity?: number })
+  | (PuzzleShapeBase & { type: 'speechbubble'; x: number; y: number; text: string; fontSize?: number });
 
 export interface PuzzleFrame {
   players: PuzzlePlayer[];
   ball: PuzzleBall;
   shapes?: PuzzleShape[];
   duration_ms?: number;
+  // Si true (default), el visor genera automáticamente una shape `trajectory`
+  // desde la pelota del frame anterior hasta la actual + dos `highlight` en
+  // origen y destino, sin que esas shapes estén guardadas en `shapes`. Las
+  // shapes manuales en `shapes` se renderizan encima. Si false, solo se ven
+  // las manuales (útil para rebotes en la pared u otras trayectorias custom).
+  auto_trajectory?: boolean;
 }
 
 export interface PuzzleOption {
   id: 1 | 2 | 3;
   text: string;
   explanation: string;
-  points: 0 | 1 | 2;
+  is_correct: boolean;
   badge_position?: { x: number; y: number };
-  reveal_frame?: PuzzleFrame;
+  select_frame?: PuzzleFrame;
+  confirmation_frame?: PuzzleFrame;
 }
 
 export interface PuzzleContent {
-  schema_version?: 1;
+  schema_version?: 2;
   statement: string;
-  court_position?: PuzzleCourtPosition;
-  general_explanation?: string;
+  // intro_frame opcional: si existe, al cargar el puzzle el visor reproduce
+  // automáticamente la transición `intro_frame → initial_frame` antes de quedar
+  // estático esperando respuesta. Útil para "previas" que añaden contexto
+  // (un golpe que ya ha ocurrido, una posición inicial diferente, etc.).
+  intro_frame?: PuzzleFrame;
   initial_frame: PuzzleFrame;
   options: PuzzleOption[];
 }
@@ -99,6 +138,8 @@ export type QuestionContent =
   | OrderSequenceContent
   | PuzzleContent;
 
+export type QuestionStatus = 'draft' | 'published' | 'inactive';
+
 export interface Question {
   id: string;
   club_id: string;
@@ -108,7 +149,11 @@ export interface Question {
   has_video: boolean;
   video_url: string | null;
   content: QuestionContent;
-  is_active: boolean;
+  // Estado de la pregunta. Solo 'published' se sirve en las lecciones del mobile.
+  //   - 'draft'     → en progreso, content puede ser inválido.
+  //   - 'published' → válida y servida en lecciones.
+  //   - 'inactive'  → pausada (no se sirve, conserva contenido válido).
+  status: QuestionStatus;
   created_at: string;
   // Solo presente si type='puzzle'. Metadata de la fila learning_puzzles (id propio,
   // thumbnail_url, timestamps). El árbol también se mergea en content.
@@ -117,8 +162,6 @@ export interface Question {
     question_id: string;
     schema_version: number;
     statement: string;
-    court_position: PuzzleCourtPosition;
-    general_explanation: string | null;
     initial_frame: PuzzleFrame;
     options: PuzzleOption[];
     thumbnail_url: string | null;

@@ -50,9 +50,11 @@ import {
   PIXELS_PER_MINUTE,
   computeCompactPxPerMinute,
   computeMobileCourtLayout,
+  computeMobileGridFitScale,
   estimateMobileGridViewportHeight,
   GRILLA_COMPACT_LAYOUT_MAX_PX,
 } from './utils/timeGrid';
+import { enumerateDatesInRange } from './utils/recurrenceDates';
 import { courtVisibleInGridForDate } from './courtVisibility';
 import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
@@ -880,6 +882,8 @@ function GrillaViewInner() {
     computeCompactPxPerMinute(estimateMobileGridViewportHeight())
   );
   const [gridViewportWidth, setGridViewportWidth] = useState(0);
+  const [gridViewportHeight, setGridViewportHeight] = useState(0);
+  const mobileFitLayoutKeyRef = useRef('');
 
   const measureMobileGridViewport = useCallback(() => {
     const el = mobileGridViewportRef.current;
@@ -890,6 +894,7 @@ function GrillaViewInner() {
       ? el.clientWidth
       : Math.min(window.innerWidth, GRILLA_COMPACT_LAYOUT_MAX_PX);
     setGridViewportWidth(width);
+    setGridViewportHeight(height);
     setCompactPxPerMinute(computeCompactPxPerMinute(height));
   }, []);
 
@@ -1172,22 +1177,32 @@ function GrillaViewInner() {
 
   const handleCreateBooking = async (bookingData: any) => {
       try {
-          const recurrenceCount = Math.max(1, Number(bookingData.recurrence_count) || 1);
-          const recurrenceUnit = bookingData.recurrence_unit === 'months' ? 'months' : 'weeks';
           const includeHolidays = bookingData.include_holidays !== false;
           const courtIds: string[] = Array.isArray(bookingData.court_ids) && bookingData.court_ids.length > 0
               ? bookingData.court_ids.map((x: unknown) => String(x)).filter(Boolean)
               : [String(bookingData.court_id)];
-          const baseDate = new Date(`${formatDateForInput(selectedDate)}T12:00:00`);
           const createdBookings: any[] = [];
           const skippedHolidayDates: string[] = [];
           const failedAttempts: Array<{ date: string; court_id: string; reason: string }> = [];
 
-          for (let i = 0; i < recurrenceCount; i++) {
-              const slotDate = new Date(baseDate);
-              if (recurrenceUnit === 'months') slotDate.setMonth(baseDate.getMonth() + i);
-              else slotDate.setDate(baseDate.getDate() + (i * 7));
-              const dateText = `${slotDate.getFullYear()}-${String(slotDate.getMonth() + 1).padStart(2, '0')}-${String(slotDate.getDate()).padStart(2, '0')}`;
+          let datesToBook: string[];
+          if (bookingData.is_multiple && bookingData.recurrence_start_date && bookingData.recurrence_end_date) {
+              const weekdays = Array.isArray(bookingData.recurrence_weekdays)
+                  ? bookingData.recurrence_weekdays.map((x: unknown) => Number(x)).filter((n: number) => !Number.isNaN(n))
+                  : [];
+              datesToBook = enumerateDatesInRange(
+                  String(bookingData.recurrence_start_date),
+                  String(bookingData.recurrence_end_date),
+                  weekdays,
+              );
+              if (datesToBook.length === 0) {
+                  throw new Error('No hay fechas en el rango seleccionado para los días indicados.');
+              }
+          } else {
+              datesToBook = [formatDateForInput(selectedDate)];
+          }
+
+          for (const dateText of datesToBook) {
               if (!includeHolidays && clubId) {
                   try {
                       const holidayCheck = await apiFetchWithAuth<any>(`/club-special-dates/check?club_id=${clubId}&date=${dateText}`);
@@ -1225,8 +1240,10 @@ function GrillaViewInner() {
                       total_price_cents: totalPriceCents,
                   };
                   delete payload.court_ids;
-                  delete payload.recurrence_count;
-                  delete payload.recurrence_unit;
+                  delete payload.is_multiple;
+                  delete payload.recurrence_start_date;
+                  delete payload.recurrence_end_date;
+                  delete payload.recurrence_weekdays;
                   delete payload.include_holidays;
 
                   const res = await apiFetch<any>('/bookings', {
@@ -1793,6 +1810,52 @@ function GrillaViewInner() {
   const mobileCanvasWidthPx = mobileCourtLayout?.canvasWidthPx;
   const mobileGridOverflows = mobileCourtLayout?.overflowsHorizontally ?? false;
 
+  const mobileGridFit = useMemo(() => {
+    if (!mobileFullView) return { fitScale: 1, minScale: 0.85 };
+    const vw = gridViewportWidth || mobileGridViewportRef.current?.clientWidth || 0;
+    const vh = gridViewportHeight || mobileGridViewportRef.current?.clientHeight || 0;
+    const cw = mobileCanvasWidthPx ?? vw;
+    return computeMobileGridFitScale(vw, vh, cw, nativeGridHeight);
+  }, [
+    mobileFullView,
+    gridViewportWidth,
+    gridViewportHeight,
+    mobileCanvasWidthPx,
+    nativeGridHeight,
+  ]);
+
+  const applyMobileGridFit = useCallback(() => {
+    const ref = transformComponentRef.current;
+    if (!ref || !mobileFullView) return;
+    const { fitScale } = mobileGridFit;
+    ref.centerView(fitScale, 0);
+    activeMobileScaleRef.current = fitScale;
+  }, [mobileFullView, mobileGridFit]);
+
+  useEffect(() => {
+    if (!mobileFullView || gridViewportWidth <= 0 || gridViewportHeight <= 0) return;
+    const layoutKey = `${gridViewportWidth}x${gridViewportHeight}:${mobileCanvasWidthPx ?? 0}:${nativeGridHeight}:${mobileGridFit.fitScale}`;
+    if (mobileFitLayoutKeyRef.current === layoutKey) return;
+
+    const frame = requestAnimationFrame(() => {
+      applyMobileGridFit();
+      mobileFitLayoutKeyRef.current = layoutKey;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    mobileFullView,
+    gridViewportWidth,
+    gridViewportHeight,
+    mobileCanvasWidthPx,
+    nativeGridHeight,
+    mobileGridFit.fitScale,
+    applyMobileGridFit,
+  ]);
+
+  useEffect(() => {
+    if (!mobileFullView) mobileFitLayoutKeyRef.current = '';
+  }, [mobileFullView]);
+
   const isFirstCourt = focusedCourtId === gridCourts[0]?.id;
   const isLastCourt = focusedCourtId === gridCourts[gridCourts.length - 1]?.id;
 
@@ -2308,9 +2371,10 @@ function GrillaViewInner() {
                   <div ref={mobileGridViewportRef} className="grilla-mobile-viewport flex-1 min-h-0">
                   <TransformWrapper
                     ref={transformComponentRef}
-                    initialScale={1}
-                    minScale={0.5}
+                    initialScale={mobileGridFit.fitScale}
+                    minScale={mobileGridFit.minScale}
                     maxScale={3}
+                    centerZoomedOut
                     centerOnInit={false}
                     wheel={{ wheelDisabled: true }}
                     doubleClick={{ disabled: true }}
@@ -2319,6 +2383,11 @@ function GrillaViewInner() {
                     alignmentAnimation={{ disabled: true }}
                     disablePadding
                     limitToBounds={false}
+                    onInit={(ref) => {
+                      transformComponentRef.current = ref;
+                      ref.centerView(mobileGridFit.fitScale, 0);
+                      activeMobileScaleRef.current = mobileGridFit.fitScale;
+                    }}
                     onTransformed={(_ref, state) => {
                       activeMobileScaleRef.current = state.scale;
                     }}
@@ -2515,6 +2584,7 @@ function GrillaViewInner() {
 
         <ReservationModal
           clubId={clubId}
+          gridDate={formatDateForInput(selectedDate)}
           isOpen={selectedModalReservationId !== null}
           onGridRefresh={refresh}
           onClose={() => {

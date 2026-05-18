@@ -30,6 +30,12 @@ interface ScoredQuestion {
 const PESO_BASE = 100;
 export const LESSON_SIZE = 5;
 
+// Cuántos puzzles aparecen en cada lección diaria.
+// Decisión actual: 1 (catálogo pequeño hoy, mejor rotación, "puzzle del día"
+// como highlight, ritmo balanceado para 5 preguntas). Si en el futuro el
+// catálogo crece mucho o quieres más densidad interactiva, sube a 2.
+const TARGET_PUZZLES_PER_LESSON = 1;
+
 function daysBetween(a: Date, b: Date): number {
   return Math.max(0, Math.floor((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24)));
 }
@@ -99,13 +105,34 @@ function pickFromScored(scored: ScoredQuestion[]): QuestionRow[] {
     areas.add(firstClassic.question.area);
   }
 
+  // Garantizar TARGET_PUZZLES_PER_LESSON puzzles si hay disponibles. Mete el
+  // mejor por weight (el scoring ya da bonus a "nuevos" y "no respondidos
+  // recientemente", así que rotan entre días). La posición exacta dentro de
+  // la lección no se fuerza — el shuffle final la randomiza.
+  while (
+    selected.filter((q) => q.type === 'puzzle').length < TARGET_PUZZLES_PER_LESSON &&
+    selected.length < LESSON_SIZE
+  ) {
+    const bestPuzzle = scored.find((s) => s.question.type === 'puzzle' && !used.has(s.question.id));
+    if (!bestPuzzle) break;
+    selected.push(bestPuzzle.question);
+    used.add(bestPuzzle.question.id);
+    areas.add(bestPuzzle.question.area);
+  }
+
   while (selected.length < LESSON_SIZE) {
     const remainingSlots = LESSON_SIZE - selected.length;
     const last = selected[selected.length - 1];
     // Force a new area if this is the last slot and we still only have one area
     const needNewArea = areas.size < 2 && remainingSlots === 1;
+    // Cap de puzzles: si ya alcanzamos el target, filtramos puzzles del pool
+    // para no superar la cuota. Mantiene la lección balanceada con otros tipos.
+    const puzzlesSoFar = selected.filter((q) => q.type === 'puzzle').length;
+    const allowMorePuzzles = puzzlesSoFar < TARGET_PUZZLES_PER_LESSON;
 
-    const candidates = scored.filter((s) => !used.has(s.question.id));
+    const candidates = scored.filter((s) =>
+      !used.has(s.question.id) && (allowMorePuzzles || s.question.type !== 'puzzle'),
+    );
     if (candidates.length === 0) break;
 
     const findFirst = (predicate: (q: QuestionRow) => boolean) =>
@@ -204,13 +231,13 @@ export function checkAnswer(type: string, content: Record<string, unknown>, sele
     }
 
     case 'puzzle': {
-      // Cliente envía { option_id: 1|2|3 }. Correcta = la opción con points=2.
-      const options = (content as { options?: { id: number; points: number }[] }).options;
+      // Cliente envía { option_id: 1|2|3 }. Correcta = la opción con is_correct=true.
+      const options = (content as { options?: { id: number; is_correct: boolean }[] }).options;
       if (!Array.isArray(options)) return false;
       const sel = selectedAnswer as { option_id?: number } | null;
       const optionId = sel?.option_id;
       const opt = options.find((o) => o.id === optionId);
-      return !!opt && opt.points === 2;
+      return !!opt && opt.is_correct === true;
     }
 
     default:
@@ -235,8 +262,8 @@ export function getCorrectAnswer(type: string, content: Record<string, unknown>)
       return Array.from({ length: steps.length }, (_, i) => i);
     }
     case 'puzzle': {
-      const options = (content as { options?: { id: number; points: number }[] }).options;
-      const correct = options?.find((o) => o.points === 2);
+      const options = (content as { options?: { id: number; is_correct: boolean }[] }).options;
+      const correct = options?.find((o) => o.is_correct === true);
       return correct ? { correct_option_id: correct.id } : null;
     }
     default:

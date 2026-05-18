@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import PlayerBack from '../../../../assets/puzzles/player_back.svg';
 import PlayerFront from '../../../../assets/puzzles/player_front.svg';
 import type { PuzzlePlayer } from '../../../types/puzzle';
+import type { PuzzleStateKey } from './Shapes';
 
 const SPRITE_ASPECT = 3054 / 1408; // alto/ancho del SVG original
 
@@ -13,9 +14,15 @@ type Props = {
   cyPx: number;
   widthPx: number;          // tamaño del lado del cuadrado del jugador
   durationMs: number;       // duración de la animación de transición
+  // Estado del puzzle: necesario para decidir si se muestra "YOU" automático.
+  puzzleState?: PuzzleStateKey;
+  // Si true, este cambio de posición se aplica instantáneamente (snap, sin
+  // animar). Útil para replay del intro: el jugador aparece en posición de
+  // partida sin "viajar" desde donde se quedó tras la animación previa.
+  snap?: boolean;
 };
 
-export function AnimatedPlayer({ player, cxPx, cyPx, widthPx, durationMs }: Props) {
+export function AnimatedPlayer({ player, cxPx, cyPx, widthPx, durationMs, puzzleState = 'init', snap }: Props) {
   const heightPx = widthPx * SPRITE_ASPECT;
   // Posición top-left = centro − mitad de tamaño.
   const targetX = cxPx - widthPx / 2;
@@ -24,11 +31,40 @@ export function AnimatedPlayer({ player, cxPx, cyPx, widthPx, durationMs }: Prop
   const xy = useRef(new Animated.ValueXY({ x: targetX, y: targetY })).current;
   const initialized = useRef(false);
 
+  // Breathing idle: scale Y 1 ↔ 1.025 con periodo ~2s. Es independiente de la
+  // animación de posición; ambas pueden correr en paralelo sin interferir.
+  const breath = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breath, {
+          toValue: 1.025,
+          duration: 1000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(breath, {
+          toValue: 1,
+          duration: 1000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [breath]);
+
   useEffect(() => {
     if (!initialized.current) {
       // Primer mount: no animar, simplemente fijar.
       xy.setValue({ x: targetX, y: targetY });
       initialized.current = true;
+      return;
+    }
+    // Modo snap: posicionar instantáneamente (replay/reset).
+    if (snap) {
+      xy.setValue({ x: targetX, y: targetY });
       return;
     }
     Animated.timing(xy, {
@@ -37,9 +73,14 @@ export function AnimatedPlayer({ player, cxPx, cyPx, widthPx, durationMs }: Prop
       easing: Easing.inOut(Easing.cubic),
       useNativeDriver: true,
     }).start();
-  }, [targetX, targetY, durationMs, xy]);
+  }, [targetX, targetY, durationMs, xy, snap]);
 
   const Sprite = player.team === 1 ? PlayerBack : PlayerFront;
+  // El YOU se muestra como label naranja debajo del sprite (coherente con el
+  // editor web). El antiguo SpeechBubble se reservaba solo para `speech_label`
+  // legacy: con la migración a shape speechbubble ya no hace falta renderizarlo
+  // aquí (los puzzles nuevos lo llevan como shape).
+  const showYouLabel = player.is_user && puzzleState === 'init';
 
   return (
     <Animated.View
@@ -49,11 +90,25 @@ export function AnimatedPlayer({ player, cxPx, cyPx, widthPx, durationMs }: Prop
         {
           width: widthPx,
           height: heightPx,
-          transform: [{ translateX: xy.x }, { translateY: xy.y }],
+          transform: [
+            { translateX: xy.x },
+            { translateY: xy.y },
+            { scaleY: breath },
+          ],
         },
       ]}
     >
       <Sprite width={widthPx} height={heightPx} preserveAspectRatio="xMidYMid meet" />
+      {showYouLabel && (
+        <Text
+          style={[
+            styles.youLabel,
+            { width: widthPx, top: heightPx + 2, fontSize: Math.max(10, widthPx / 5) },
+          ]}
+        >
+          YOU
+        </Text>
+      )}
     </Animated.View>
   );
 }
@@ -64,15 +119,29 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
   },
+  youLabel: {
+    position: 'absolute',
+    left: 0,
+    color: '#F18F34',
+    fontWeight: '800',
+    textAlign: 'center',
+  },
 });
 
 // ---------------------------------------------------------------------------
 // Render no animado, usado durante el estado inicial antes de tener `size` del Stage.
 // (Evita parpadeos al primer mount.)
 // ---------------------------------------------------------------------------
-export function StaticPlayer({ player, cxPx, cyPx, widthPx }: Omit<Props, 'durationMs'>) {
+export function StaticPlayer({
+  player,
+  cxPx,
+  cyPx,
+  widthPx,
+  puzzleState = 'init',
+}: Omit<Props, 'durationMs'>) {
   const heightPx = widthPx * SPRITE_ASPECT;
   const Sprite = player.team === 1 ? PlayerBack : PlayerFront;
+  const showYouLabel = player.is_user && puzzleState === 'init';
   return (
     <View
       pointerEvents="none"
@@ -86,6 +155,16 @@ export function StaticPlayer({ player, cxPx, cyPx, widthPx }: Omit<Props, 'durat
       ]}
     >
       <Sprite width={widthPx} height={heightPx} preserveAspectRatio="xMidYMid meet" />
+      {showYouLabel && (
+        <Text
+          style={[
+            styles.youLabel,
+            { width: widthPx, top: heightPx + 2, fontSize: Math.max(10, widthPx / 5) },
+          ]}
+        >
+          YOU
+        </Text>
+      )}
     </View>
   );
 }
