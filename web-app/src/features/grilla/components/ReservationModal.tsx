@@ -20,6 +20,7 @@ import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { calendarLocale } from '../i18n/calendarLocale';
 import { TournamentGridBookingEditor } from './TournamentGridBookingEditor';
+import { WEEKDAY_CHIPS } from '../utils/recurrenceDates';
 
 const PLAY_MODE_MARKER = '__PLAY_MODE__';
 
@@ -59,6 +60,8 @@ interface ReservationModalProps {
     isOnHiddenCourt?: boolean;
     onGridRefresh?: () => void;
     isLoadingBookingData?: boolean;
+    /** Fecha visible en la grilla (YYYY-MM-DD), para reservas múltiples y etiqueta en alta. */
+    gridDate?: string;
 }
 
 // Helper: Player Search Component
@@ -445,7 +448,7 @@ const PaymentSlot: React.FC<{
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData,
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate,
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
     const { t, i18n } = useGrillaTranslation();
@@ -481,8 +484,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [moveToHiddenError, setMoveToHiddenError] = useState<string | null>(null);
     const [slotPayments, setSlotPayments] = useState<SlotPayment[]>([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
     const [isMultipleReservation, setIsMultipleReservation] = useState(false);
-    const [recurrenceCount, setRecurrenceCount] = useState(1);
-    const [recurrenceUnit, setRecurrenceUnit] = useState<'weeks' | 'months'>('weeks');
+    const [multipleStartDate, setMultipleStartDate] = useState('');
+    const [multipleEndDate, setMultipleEndDate] = useState('');
+    const [multipleWeekdays, setMultipleWeekdays] = useState<number[]>([]);
     const [includeHolidaysInRecurrence, setIncludeHolidaysInRecurrence] = useState(true);
     const [selectedCourtIds, setSelectedCourtIds] = useState<string[]>([]);
     const [availableCourtsForSlot, setAvailableCourtsForSlot] = useState<Array<{ id: string; name: string }>>([]);
@@ -598,8 +602,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             });
             setSlotPayments(initPayments);
             setIsMultipleReservation(false);
-            setRecurrenceCount(1);
-            setRecurrenceUnit('weeks');
+            setMultipleStartDate('');
+            setMultipleEndDate('');
+            setMultipleWeekdays([]);
             setIncludeHolidaysInRecurrence(true);
             setSelectedCourtIds([editingBookingData.court_id]);
 
@@ -617,8 +622,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             setNotes('');
             setConfirmEmail(false);
             setIsMultipleReservation(false);
-            setRecurrenceCount(1);
-            setRecurrenceUnit('weeks');
+            const baseYmd = gridDate || new Date().toISOString().split('T')[0];
+            setMultipleStartDate(baseYmd);
+            setMultipleEndDate(baseYmd);
+            const wd = new Date(`${baseYmd}T12:00:00`).getDay();
+            setMultipleWeekdays([wd]);
             setIncludeHolidaysInRecurrence(true);
             setSelectedCourtIds(reservation?.courtId ? [reservation.courtId] : []);
             if (reservation?.startTime) {
@@ -629,7 +637,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         }
 
         return () => { document.body.style.overflow = 'unset'; };
-    }, [isOpen, reservation?.id, editingBookingData?.id]);
+    }, [isOpen, reservation?.id, editingBookingData?.id, gridDate]);
 
     useEffect(() => {
         if (!isOpen || !clubId || !reservation || isEditMode) return;
@@ -826,6 +834,21 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             }
         }
 
+        if (!isEditMode && isMultipleReservation) {
+            if (!multipleStartDate || !multipleEndDate) {
+                alert('Indica fecha de inicio y fecha de fin para la reserva múltiple.');
+                return;
+            }
+            if (multipleEndDate < multipleStartDate) {
+                alert('La fecha de fin no puede ser anterior a la de inicio.');
+                return;
+            }
+            if (!multipleWeekdays.length) {
+                alert('Selecciona al menos un día de la semana.');
+                return;
+            }
+        }
+
         setIsSaving(true);
         try {
             if (isEditMode && onUpdate && editingBookingData) {
@@ -855,8 +878,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     source_channel: 'manual',
                     participants: buildParticipants(),
                     send_email: confirmEmail,
-                    recurrence_count: isMultipleReservation ? recurrenceCount : 1,
-                    recurrence_unit: isMultipleReservation ? recurrenceUnit : 'weeks',
+                    is_multiple: isMultipleReservation,
+                    recurrence_start_date: isMultipleReservation ? multipleStartDate : undefined,
+                    recurrence_end_date: isMultipleReservation ? multipleEndDate : undefined,
+                    recurrence_weekdays: isMultipleReservation ? multipleWeekdays : undefined,
                     include_holidays: includeHolidaysInRecurrence,
                 };
                 await onSave(data);
@@ -899,7 +924,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         }
     };
 
-    const dateForLabel = bookingDate ? new Date(`${bookingDate}T12:00:00`) : new Date();
+    const dateForLabel = bookingDate
+        ? new Date(`${bookingDate}T12:00:00`)
+        : gridDate
+          ? new Date(`${gridDate}T12:00:00`)
+          : new Date();
     const formattedDate = dateForLabel.toLocaleDateString(calendarLocale(i18n.language), {
         weekday: 'long',
         year: 'numeric',
@@ -1078,10 +1107,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 </div>
                             </div>
 
-                            {/* Nº de reservas */}
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.fieldNumBookings')}</span>
-                                <div className="flex-1 space-y-2">
+                            {/* Reserva múltiple */}
+                            {!isEditMode && (
+                            <div className="space-y-2">
+                                <div className="space-y-2">
                                     <label className="inline-flex items-center gap-2 text-xs text-gray-700 font-medium">
                                         <input
                                             type="checkbox"
@@ -1091,40 +1120,64 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                         />
                                         Reserva múltiple
                                     </label>
-                                    <div className="flex gap-2">
-                                        <select
-                                            value={recurrenceUnit}
-                                            onChange={(e) => setRecurrenceUnit(e.target.value as 'weeks' | 'months')}
-                                            disabled={!isMultipleReservation}
-                                            className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A] disabled:bg-gray-100 disabled:text-gray-400"
-                                        >
-                                            <option value="weeks">Semanas</option>
-                                            <option value="months">Meses</option>
-                                        </select>
-                                        <select
-                                            value={recurrenceCount}
-                                            onChange={(e) => setRecurrenceCount(Math.max(1, Number(e.target.value) || 1))}
-                                            disabled={!isMultipleReservation}
-                                            className="w-24 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A] disabled:bg-gray-100 disabled:text-gray-400"
-                                        >
-                                            {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-                                                <option key={n} value={n}>{n}</option>
-                                            ))}
-                                        </select>
-                                    </div>
                                     {isMultipleReservation && (
-                                        <label className="inline-flex items-center gap-2 text-xs text-gray-700 font-medium">
-                                            <input
-                                                type="checkbox"
-                                                checked={includeHolidaysInRecurrence}
-                                                onChange={(e) => setIncludeHolidaysInRecurrence(e.target.checked)}
-                                                className="w-4 h-4 accent-[#006A6A]"
-                                            />
-                                            Reservar también en fechas festivas
-                                        </label>
+                                        <>
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <label className="block">
+                                                    <span className="text-[10px] font-semibold text-gray-500">Fecha inicio</span>
+                                                    <input
+                                                        type="date"
+                                                        value={multipleStartDate}
+                                                        onChange={(e) => setMultipleStartDate(e.target.value)}
+                                                        className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
+                                                    />
+                                                </label>
+                                                <label className="block">
+                                                    <span className="text-[10px] font-semibold text-gray-500">Fecha fin</span>
+                                                    <input
+                                                        type="date"
+                                                        value={multipleEndDate}
+                                                        onChange={(e) => setMultipleEndDate(e.target.value)}
+                                                        className="mt-1 w-full p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
+                                                    />
+                                                </label>
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-semibold text-gray-500 mb-1">Días de la semana</p>
+                                                <div className="flex flex-wrap gap-1.5">
+                                                    {WEEKDAY_CHIPS.map((d) => {
+                                                        const active = multipleWeekdays.includes(d.id);
+                                                        return (
+                                                            <button
+                                                                key={d.id}
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    setMultipleWeekdays((prev) =>
+                                                                        active ? prev.filter((x) => x !== d.id) : [...prev, d.id],
+                                                                    )
+                                                                }
+                                                                className={`px-2 py-1 rounded-lg border text-[10px] font-bold ${active ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]' : 'bg-white text-gray-600 border-gray-200'}`}
+                                                            >
+                                                                {d.label}
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                            <label className="inline-flex items-center gap-2 text-xs text-gray-700 font-medium">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={includeHolidaysInRecurrence}
+                                                    onChange={(e) => setIncludeHolidaysInRecurrence(e.target.checked)}
+                                                    className="w-4 h-4 accent-[#006A6A]"
+                                                />
+                                                Reservar también en fechas festivas
+                                            </label>
+                                        </>
                                     )}
                                 </div>
                             </div>
+                            )}
 
                             {/* Cliente */}
                             <div>
