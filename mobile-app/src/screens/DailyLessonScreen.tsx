@@ -13,7 +13,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
-import { submitDailyLesson, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
+import { submitDailyLesson, fetchTodayResults, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
+import { loadProgress, saveProgress, clearProgress, type DailyLessonProgress } from '../lib/dailyLessonStorage';
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
 import { QuestionCard } from '../components/learning/QuestionCard';
 import { VideoPlayer } from '../components/learning/VideoPlayer';
@@ -23,6 +24,10 @@ import { LessonImpactRadar, type SkillValues } from '../components/learning/Less
 type Props = {
   onBack: () => void;
   onComplete: () => void;
+  // Si el usuario no tiene completado el cuestionario de nivelación, esta
+  // pantalla se bloquea y el botón "Empezar cuestionario" llama a este callback
+  // para llevar al perfil con el modal de onboarding abierto.
+  onOpenOnboarding?: () => void;
 };
 
 type Phase = 'intro' | 'questions' | 'review' | 'results';
@@ -65,14 +70,31 @@ function getQuestionPreview(q: DailyLessonQuestion): string {
       ? c.instruction
       : 'Ordena la secuencia';
   }
-  return typeof c.question === 'string' ? c.question : 'Pregunta';
+  // test_classic / multi_select usan `question`.
+  // true_false y puzzle usan `statement`.
+  if (typeof c.question === 'string' && c.question.trim()) return c.question;
+  if (typeof c.statement === 'string' && c.statement.trim()) return c.statement;
+  return 'Pregunta';
 }
 
-export function DailyLessonScreen({ onBack, onComplete }: Props) {
+export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const { questions, alreadyCompleted, loading, error } = useDailyLesson(TIMEZONE);
+  const { questions: hookQuestions, alreadyCompleted, loading, error, requiresOnboarding, notEnoughQuestions } = useDailyLesson(TIMEZONE);
   const streak = useStreak(TIMEZONE);
+
+  // Preguntas que se muestran. Por defecto vienen del hook (el algoritmo de
+  // selección de hoy). Se sobreescriben en dos casos:
+  //  - "Ver resultados": preguntas exactas que ya respondió en su sesión de hoy.
+  //  - "Continuar lección" (resume): preguntas guardadas en AsyncStorage cuando
+  //    el usuario salió a mitad de la lección. Locked-in para no permitir
+  //    rerollear preguntas mal respondidas.
+  const [historicQuestions, setHistoricQuestions] = useState<DailyLessonQuestion[] | null>(null);
+  const questions = historicQuestions ?? hookQuestions;
+
+  // Snapshot de progreso guardado en local. Si existe, en la intro mostramos
+  // "Continuar lección" en vez de "Empezar".
+  const [pendingResume, setPendingResume] = useState<DailyLessonProgress | null>(null);
 
   const [phase, setPhase] = useState<Phase>('intro');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -147,6 +169,29 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     }
   }, [phase]);
 
+  // Hidratar progreso local al montar. Si el usuario tiene una sesión a
+  // medias guardada (sin haber completado las 5), la ofrecemos como "Continuar".
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid) return;
+    loadProgress(uid, TIMEZONE).then((snap) => {
+      if (snap && snap.answers.length < snap.questions.length) {
+        setPendingResume(snap);
+      }
+    });
+  }, [session?.user?.id]);
+
+  // Si el backend dice que ya está completa (otro dispositivo, otra ruta), el
+  // snapshot local queda obsoleto: lo limpiamos para no ofrecer "Continuar"
+  // sobre una lección que ya cerró por otra vía.
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (alreadyCompleted && uid) {
+      clearProgress(uid, TIMEZONE);
+      setPendingResume(null);
+    }
+  }, [alreadyCompleted, session?.user?.id]);
+
   // Cargar skills base desde coachAssessment al entrar en results
   useEffect(() => {
     if (phase !== 'results' || !session?.access_token) return;
@@ -205,6 +250,14 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
   // ---------------------------------------------------------------------------
 
   const doSubmit = useCallback(async (answersToSend: AnswerPayload[]) => {
+    // Sea cual sea el resultado del submit, el snapshot local ya no aporta:
+    // o la lección se completó, o falló y al reabrir queremos que el usuario
+    // pueda intentarlo de nuevo desde cero (sin "Continuar" colgado).
+    if (session?.user?.id) {
+      clearProgress(session.user.id, TIMEZONE);
+    }
+    setPendingResume(null);
+
     // Si ya completó hoy, mostrar resultados locales sin llamar al backend
     if (alreadyCompleted) {
       const correctCount = answersToSend.filter((_, i) => !failedIndices.includes(i)).length;
@@ -237,7 +290,7 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
       setPhase('results');
     }
     setSubmitting(false);
-  }, [session?.access_token, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, streak.multiplier]);
+  }, [session?.access_token, session?.user?.id, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, streak.multiplier]);
 
   const startQuestionOrVideo = useCallback((index: number) => {
     const q = questions[index];
@@ -253,6 +306,13 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     const elapsed = Date.now() - questionStartTime.current;
     const q = questions[currentIndex];
 
+    // Guard contra doble-disparo: si el usuario hace doble-tap rápido en
+    // Confirmar antes de que React procese el setState que deshabilita el
+    // botón, el handler puede ejecutarse dos veces sincrónicas con el mismo
+    // question_id. Eso provocaba 6 filas en el resumen (5 + 1 duplicada) y
+    // un warning de React por keys repetidas.
+    if (answers.some((a) => a.question_id === q.id)) return;
+
     const newAnswer: AnswerPayload = {
       question_id: q.id,
       selected_answer: selectedAnswer,
@@ -265,10 +325,40 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     const updatedFailed = correct ? failedIndices : [...failedIndices, currentIndex];
     setFailedIndices(updatedFailed);
 
+    // Guardar snapshot tras cada respuesta. Si el usuario sale, "Continuar"
+    // restaurará exactamente este estado en el próximo arranque.
+    if (session?.user?.id) {
+      saveProgress(session.user.id, TIMEZONE, {
+        questions,
+        answers: updatedAnswers,
+        failedIndices: updatedFailed,
+        currentIndex: currentIndex + 1,
+        startedAt: new Date().toISOString(),
+      });
+    }
+
     showFlash(correct);
 
     // Cancelar timer anterior si existe
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
+
+    // Delay antes de avanzar a la siguiente pregunta.
+    // - Tipos sencillos (test_classic, true_false, etc.): 2200 ms basta para
+    //   leer el feedback y el flash de acierto/fallo.
+    // - Puzzle: la animación de confirmation_frame puede durar 1500 ms o más,
+    //   y además hay que leer la explicación. Calculamos
+    //   max(2200, duration_ms_del_confirm_de_la_opcion_elegida + 2500) para
+    //   dar tiempo a ver la jugada completa + leer.
+    let advanceDelayMs = 2200;
+    if (q.type === 'puzzle') {
+      const content = q.content as {
+        options?: { id: number; confirmation_frame?: { duration_ms?: number } }[];
+      };
+      const optionId = (selectedAnswer as { option_id?: number })?.option_id;
+      const opt = content?.options?.find((o) => o.id === optionId);
+      const confirmDur = opt?.confirmation_frame?.duration_ms ?? 1500;
+      advanceDelayMs = Math.max(2200, confirmDur + 2500);
+    }
 
     advanceTimer.current = setTimeout(() => {
       const nextIndex = currentIndex + 1;
@@ -282,11 +372,25 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
         // Fin de preguntas — siempre ir a results
         doSubmit(updatedAnswers);
       }
-    }, 2200);
-  }, [currentIndex, questions, answers, failedIndices, showFlash, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo]);
+    }, advanceDelayMs);
+  }, [currentIndex, questions, answers, failedIndices, showFlash, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo, session?.user?.id]);
 
-  const handleReviewAnswered = useCallback((_correct: boolean, _selectedAnswer: unknown) => {
+  const handleReviewAnswered = useCallback((_correct: boolean, selectedAnswer: unknown) => {
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
+
+    // Mismo cálculo de delay que en handleQuestionAnswered: puzzle necesita más
+    // tiempo para que se vea la animación de confirm + se lea la explicación.
+    const q = questions[failedIndices[reviewIndex]];
+    let advanceDelayMs = 2200;
+    if (q?.type === 'puzzle') {
+      const content = q.content as {
+        options?: { id: number; confirmation_frame?: { duration_ms?: number } }[];
+      };
+      const optionId = (selectedAnswer as { option_id?: number })?.option_id;
+      const opt = content?.options?.find((o) => o.id === optionId);
+      const confirmDur = opt?.confirmation_frame?.duration_ms ?? 1500;
+      advanceDelayMs = Math.max(2200, confirmDur + 2500);
+    }
 
     advanceTimer.current = setTimeout(() => {
       const nextReview = reviewIndex + 1;
@@ -297,10 +401,16 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           startQuestionOrVideo(failedIndices[nextReview]);
         });
       } else {
-        doSubmit(answers);
+        // Repaso terminado. Las respuestas del repaso son solo práctica — la
+        // lección ya se envió al backend al terminar el primer paso. Volver a
+        // submit dispararía "Ya completaste la lección de hoy". Solo volvemos
+        // a la pantalla de resultados (los resultados originales siguen en state).
+        fadeQuestion(() => {
+          setPhase('results');
+        });
       }
-    }, 2200);
-  }, [reviewIndex, failedIndices, answers, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo]);
+    }, advanceDelayMs);
+  }, [reviewIndex, failedIndices, questions, fadeQuestion, animateProgressTo, startQuestionOrVideo]);
 
   const handleVideoEnd = useCallback(() => {
     setTimeout(() => {
@@ -310,6 +420,36 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     }, 50);
   }, [contentOpacity]);
 
+  // Carga los resultados de la sesión de hoy y va directo a la pantalla de
+  // resultados. Reconstruye también `questions` y `failedIndices` para que la
+  // pantalla y el botón "Repasar fallos" funcionen idénticos al flujo normal.
+  const handleViewResults = useCallback(async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const res = await fetchTodayResults(session?.access_token, TIMEZONE);
+      if (!res.ok) {
+        setSubmitError(('error' in res && res.error) ? res.error : 'No se pudieron cargar los resultados');
+        setSubmitting(false);
+        return;
+      }
+      // Las preguntas históricas reemplazan a las del hook (puede que el
+      // algoritmo elija otras hoy al repetir).
+      setHistoricQuestions(res.questions);
+      // failedIndices se reconstruye desde los results (posiciones donde correct=false).
+      const failed = res.results
+        .map((r, i) => (r.correct ? -1 : i))
+        .filter((i) => i >= 0);
+      setFailedIndices(failed);
+      setResults(res);
+      setPhase('results');
+    } catch {
+      setSubmitError('Error al cargar resultados');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [session?.access_token]);
+
   const handleStart = () => {
     setPhase('questions');
     setCurrentIndex(0);
@@ -318,10 +458,49 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
     setReviewIndex(0);
     setResults(null);
     setSubmitError(null);
+    // Si veníamos de "Ver resultados", limpiamos las preguntas históricas
+    // para que la repetición use las del hook (algoritmo del día).
+    setHistoricQuestions(null);
+    // Si había progreso guardado (raro: solo si el usuario tira "Empezar" en
+    // vez de "Continuar"; hoy no exponemos esa vía, pero por defensa).
+    setPendingResume(null);
     animateProgressTo(0);
+    // Guardar snapshot inicial. Si el usuario sale ahora mismo, al volver verá
+    // "Continuar" con las preguntas del hook ya cacheadas.
+    if (session?.user?.id && hookQuestions.length > 0 && !alreadyCompleted) {
+      saveProgress(session.user.id, TIMEZONE, {
+        questions: hookQuestions,
+        answers: [],
+        failedIndices: [],
+        currentIndex: 0,
+        startedAt: new Date().toISOString(),
+      });
+    }
     // Mostrar video si la primera pregunta tiene uno
     const firstQ = questions[0];
     if (firstQ?.has_video && firstQ.video_url) {
+      setShowingVideo(true);
+    } else {
+      setShowingVideo(false);
+      questionStartTime.current = Date.now();
+    }
+  };
+
+  // Reanudar una lección a medias: usa las preguntas y respuestas guardadas.
+  // No se permite volver atrás en las preguntas ya contestadas (anti-cheat).
+  const handleResume = () => {
+    if (!pendingResume) return;
+    setHistoricQuestions(pendingResume.questions);
+    setAnswers(pendingResume.answers);
+    setFailedIndices(pendingResume.failedIndices);
+    setCurrentIndex(pendingResume.currentIndex);
+    setReviewIndex(0);
+    setResults(null);
+    setSubmitError(null);
+    setPhase('questions');
+    animateProgressTo(pendingResume.currentIndex / pendingResume.questions.length);
+    const q = pendingResume.questions[pendingResume.currentIndex];
+    if (q?.has_video && q.video_url) {
       setShowingVideo(true);
     } else {
       setShowingVideo(false);
@@ -339,6 +518,99 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           <Skeleton width={200} height={24} variant="dark" borderRadius={8} />
           <Skeleton width={150} height={16} variant="dark" borderRadius={8} style={{ marginTop: 12 }} />
           <Skeleton width="80%" height={48} variant="dark" borderRadius={16} style={{ marginTop: 32 }} />
+        </View>
+      </View>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // RENDER: Bloqueado por falta de cuestionario de nivelación
+  // ---------------------------------------------------------------------------
+  if (requiresOnboarding) {
+    return (
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <View style={styles.lockedContainer}>
+          <View style={styles.lockedIconWrap}>
+            <View style={styles.lockedIconGlow} />
+            <LinearGradient colors={['#F18F34', '#d97706']} style={styles.lockedIconCircle}>
+              <Ionicons name="compass" size={44} color="#FFFFFF" />
+            </LinearGradient>
+          </View>
+
+          <Text style={styles.lockedTitle}>Cuestionario de nivelación</Text>
+          <Text style={styles.lockedSubtitle}>
+            Necesitamos un nivel para poder ofrecer una experiencia mucho más personalizada.
+          </Text>
+
+          <View style={styles.lockedBullets}>
+            <View style={styles.lockedBullet}>
+              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+              <Text style={styles.lockedBulletText}>Lecciones diarias a tu nivel real</Text>
+            </View>
+            <View style={styles.lockedBullet}>
+              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+              <Text style={styles.lockedBulletText}>Coach IA adaptado a ti</Text>
+            </View>
+            <View style={styles.lockedBullet}>
+              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+              <Text style={styles.lockedBulletText}>Recomendaciones de cursos relevantes</Text>
+            </View>
+          </View>
+
+          <Pressable
+            onPress={() => onOpenOnboarding?.()}
+            disabled={!onOpenOnboarding}
+            style={styles.lockedCta}
+          >
+            <LinearGradient
+              colors={['#F18F34', '#C46A20']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.lockedCtaGradient}
+            >
+              <Ionicons name="play" size={18} color="#fff" />
+              <Text style={styles.lockedCtaText}>Empezar cuestionario</Text>
+            </LinearGradient>
+          </Pressable>
+
+          <Pressable onPress={onBack} hitSlop={8} style={styles.cancelButton}>
+            <Text style={styles.cancelText}>Ahora no</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // RENDER: No hay suficientes preguntas para una lección completa
+  // ---------------------------------------------------------------------------
+  if (notEnoughQuestions) {
+    return (
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <View style={styles.lockedContainer}>
+          <View style={styles.lockedIconWrap}>
+            <View style={styles.lockedIconGlow} />
+            <LinearGradient colors={['#F18F34', '#d97706']} style={styles.lockedIconCircle}>
+              <Ionicons name="hourglass-outline" size={44} color="#FFFFFF" />
+            </LinearGradient>
+          </View>
+
+          <Text style={styles.lockedTitle}>Lección no disponible</Text>
+          <Text style={styles.lockedSubtitle}>
+            Aún no hay suficientes preguntas para tu lección de hoy. Estamos preparando contenido — vuelve pronto.
+          </Text>
+
+          <Pressable onPress={onBack} style={styles.lockedCta}>
+            <LinearGradient
+              colors={['#F18F34', '#C46A20']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.lockedCtaGradient}
+            >
+              <Ionicons name="arrow-back" size={18} color="#fff" />
+              <Text style={styles.lockedCtaText}>Volver</Text>
+            </LinearGradient>
+          </Pressable>
         </View>
       </View>
     );
@@ -422,17 +694,57 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
             })}
           </View>
 
-          <Pressable onPress={handleStart} style={styles.startButton}>
-            <LinearGradient
-              colors={alreadyCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#C46A20']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.startGradient}
+          {/* Si la lección ya está hecha, ofrecemos también "Ver resultados"
+              (recupera la sesión de hoy sin tener que repetir). El botón
+              principal pasa a "Repetir lección" para mantener la jerarquía
+              visual del CTA principal en cualquier estado. */}
+          {alreadyCompleted && (
+            <Pressable
+              onPress={handleViewResults}
+              disabled={submitting}
+              style={styles.startButton}
             >
-              <Ionicons name="play" size={20} color="#fff" />
-              <Text style={styles.startText}>Empezar</Text>
-            </LinearGradient>
-          </Pressable>
+              <View style={styles.viewResultsButton}>
+                <Ionicons name="stats-chart" size={20} color="#10B981" />
+                <Text style={styles.viewResultsText}>
+                  {submitting ? 'Cargando...' : 'Ver resultados'}
+                </Text>
+              </View>
+            </Pressable>
+          )}
+
+          {/* Si hay una sesión a medias guardada en local (el usuario salió a
+              mitad), el CTA principal pasa a "Continuar lección (N/5)". Sin
+              opción de "Empezar de nuevo" — eso eliminaría el anti-cheat. */}
+          {pendingResume && !alreadyCompleted ? (
+            <Pressable onPress={handleResume} style={styles.startButton}>
+              <LinearGradient
+                colors={['#F18F34', '#C46A20']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.startGradient}
+              >
+                <Ionicons name="play-forward" size={20} color="#fff" />
+                <Text style={styles.startText}>
+                  Continuar lección ({pendingResume.answers.length}/{pendingResume.questions.length})
+                </Text>
+              </LinearGradient>
+            </Pressable>
+          ) : (
+            <Pressable onPress={handleStart} style={styles.startButton}>
+              <LinearGradient
+                colors={alreadyCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#C46A20']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.startGradient}
+              >
+                <Ionicons name={alreadyCompleted ? 'reload' : 'play'} size={20} color="#fff" />
+                <Text style={styles.startText}>
+                  {alreadyCompleted ? 'Repetir lección' : 'Empezar'}
+                </Text>
+              </LinearGradient>
+            </Pressable>
+          )}
 
           <Pressable onPress={onBack} hitSlop={8} style={styles.cancelButton}>
             <Text style={styles.cancelText}>Cancelar</Text>
@@ -522,11 +834,7 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           </Animated.View>
         )}
 
-        {submitting && (
-          <View style={styles.submittingOverlay}>
-            <Text style={styles.submittingText}>Enviando resultados...</Text>
-          </View>
-        )}
+        {submitting && <SubmittingOverlay />}
       </View>
     );
   }
@@ -637,14 +945,19 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
             <Text style={styles.summaryTitle}>Resumen de respuestas</Text>
             {results.results.map((r, i) => {
               const q = questions[i];
-              const preview = q ? getQuestionPreview(q) : `Pregunta ${i + 1}`;
+              const preview = q ? getQuestionPreview(q) : 'Pregunta';
               const vote = questionVotes[r.question_id] ?? null;
               return (
-                <View key={r.question_id} style={styles.summaryRow}>
+                // Key con índice como sufijo para no crashear si hubiese
+                // duplicados de question_id (defensivo).
+                <View key={`${r.question_id}-${i}`} style={styles.summaryRow}>
                   <View style={[styles.summaryIcon, r.correct ? styles.summaryIconCorrect : styles.summaryIconIncorrect]}>
                     <Ionicons name={r.correct ? 'checkmark' : 'close'} size={14} color={r.correct ? '#10B981' : '#EF4444'} />
                   </View>
-                  <Text style={styles.summaryText} numberOfLines={2}>{preview}</Text>
+                  <Text style={styles.summaryText} numberOfLines={2}>
+                    <Text style={styles.summaryIndex}>{i + 1}. </Text>
+                    {preview}
+                  </Text>
                   <Pressable
                     onPress={() => toggleVote(r.question_id, 'up')}
                     hitSlop={6}
@@ -676,6 +989,12 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
           {failedIndices.length > 0 && (
             <Pressable
               onPress={() => {
+                // Resetear opacidad y limpiar timer pendiente. Si no, al
+                // entrar la segunda vez al repaso el contenido se ve "apagado"
+                // (fadeQuestion del repaso anterior dejó valores intermedios).
+                contentOpacity.setValue(1);
+                if (advanceTimer.current) clearTimeout(advanceTimer.current);
+                setShowingVideo(false);
                 setReviewIndex(0);
                 setPhase('review');
                 animateProgressTo(0);
@@ -710,6 +1029,85 @@ export function DailyLessonScreen({ onBack, onComplete }: Props) {
 }
 
 // ---------------------------------------------------------------------------
+// SubmittingOverlay
+// Pantalla de carga al enviar los resultados al backend. Se muestra tras
+// confirmar la última pregunta, mientras se calcula la sesión.
+// Diseño coherente con la estética del resto de la app (orange brand,
+// fondo casi negro, card con borde sutil y glow del color de marca).
+// ---------------------------------------------------------------------------
+
+function SubmittingOverlay() {
+  // Anillo exterior pulsante (scale + opacity sinusoidal).
+  const pulse = useRef(new Animated.Value(0)).current;
+  // Rotación continua del icono interior.
+  const spin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 1100,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 1100,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    const spinLoop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 1200,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    pulseLoop.start();
+    spinLoop.start();
+    return () => { pulseLoop.stop(); spinLoop.stop(); };
+  }, [pulse, spin]);
+
+  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] });
+  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0.15] });
+  const spinDeg = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  return (
+    <View style={styles.submittingOverlay}>
+      <View style={styles.submittingCard}>
+        <View style={styles.submittingIconWrap}>
+          {/* Glow estático suave detrás del icono */}
+          <View style={styles.submittingGlow} />
+          {/* Anillo pulsante naranja */}
+          <Animated.View
+            style={[
+              styles.submittingPulseRing,
+              { transform: [{ scale: pulseScale }], opacity: pulseOpacity },
+            ]}
+          />
+          {/* Icono que rota dentro de un círculo del color de marca */}
+          <LinearGradient
+            colors={['#F18F34', '#d97706']}
+            style={styles.submittingIcon}
+          >
+            <Animated.View style={{ transform: [{ rotate: spinDeg }] }}>
+              <Ionicons name="sync" size={28} color="#FFFFFF" />
+            </Animated.View>
+          </LinearGradient>
+        </View>
+
+        <Text style={styles.submittingTitle}>Calculando tus resultados</Text>
+        <Text style={styles.submittingSubtitle}>Un segundo mientras lo preparamos…</Text>
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Estilos
 // ---------------------------------------------------------------------------
 
@@ -719,6 +1117,88 @@ const styles = StyleSheet.create({
 
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
   errorText: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', marginTop: 12 },
+
+  // Pantalla bloqueada por falta de cuestionario de nivelación.
+  lockedContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  lockedIconWrap: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
+  },
+  lockedIconGlow: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#F18F34',
+    opacity: 0.18,
+    shadowColor: '#F18F34',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 40,
+    elevation: 25,
+  },
+  lockedIconCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lockedTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  lockedSubtitle: {
+    color: '#D1D5DB',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  lockedBullets: {
+    alignSelf: 'stretch',
+    gap: 10,
+    marginBottom: 28,
+  },
+  lockedBullet: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  lockedBulletText: {
+    color: '#E5E7EB',
+    fontSize: 13,
+    flex: 1,
+  },
+  lockedCta: {
+    width: '100%',
+    maxWidth: 320,
+    marginBottom: 12,
+  },
+  lockedCtaGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 16,
+    gap: 8,
+  },
+  lockedCtaText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 16,
+  },
 
   // Intro
   introContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 32 },
@@ -756,6 +1236,20 @@ const styles = StyleSheet.create({
   topicBadgeText: { fontSize: 11, fontWeight: '700' },
   startButton: { width: '100%', maxWidth: 280, marginBottom: 16 },
   startGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, borderRadius: 16, gap: 8 },
+  // Botón secundario "Ver resultados" (solo aparece si ya completaste hoy).
+  // Variante outline en verde para diferenciarlo del CTA principal "Repetir".
+  viewResultsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 16,
+    gap: 8,
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+  },
+  viewResultsText: { color: '#10B981', fontWeight: '700', fontSize: 16 },
   startText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
   cancelButton: { paddingVertical: 8 },
   cancelText: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
@@ -778,8 +1272,73 @@ const styles = StyleSheet.create({
   },
   reviewBadgeText: { color: '#FB923C', fontSize: 11, fontWeight: '700' },
   questionContent: { paddingHorizontal: 20, paddingTop: 8 },
-  submittingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center' },
-  submittingText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  // Overlay al enviar resultados al backend. Fondo casi negro (consistente con
+  // el resto de la app) con card central y spinner animado en color de marca.
+  submittingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,15,15,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    zIndex: 20,
+  },
+  submittingCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 28,
+    borderRadius: 24,
+    backgroundColor: 'rgba(20,20,22,0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+  },
+  submittingIconWrap: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  submittingGlow: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#F18F34',
+    opacity: 0.18,
+    shadowColor: '#F18F34',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 40,
+    elevation: 25,
+  },
+  submittingPulseRing: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 2,
+    borderColor: '#F18F34',
+  },
+  submittingIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  submittingTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  submittingSubtitle: {
+    color: '#9CA3AF',
+    fontSize: 13,
+    textAlign: 'center',
+  },
 
   // Results
   resultsContent: { paddingHorizontal: 20, paddingTop: 40, alignItems: 'center' },
@@ -823,6 +1382,7 @@ const styles = StyleSheet.create({
   summaryIconCorrect: { backgroundColor: 'rgba(16,185,129,0.2)' },
   summaryIconIncorrect: { backgroundColor: 'rgba(239,68,68,0.2)' },
   summaryText: { flex: 1, color: '#D1D5DB', fontSize: 12, lineHeight: 16 },
+  summaryIndex: { color: '#FB923C', fontWeight: '700' },
   voteBtn: {
     width: 28, height: 28, borderRadius: 8,
     backgroundColor: 'rgba(255,255,255,0.04)',

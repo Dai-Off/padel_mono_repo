@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Edit, HelpCircle } from 'lucide-react';
+import { Plus, Edit, HelpCircle, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
@@ -30,16 +30,21 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
   const [loading, setLoading] = useState(false);
   const [typeFilter, setTypeFilter] = useState<QuestionType | 'all'>('all');
   const [areaFilter, setAreaFilter] = useState<QuestionArea | 'all'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'true' | 'false'>('all');
+  // Filtro único de estado. Default 'published' (contenido vivo).
+  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published' | 'inactive'>('published');
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; question?: Question } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const filters: { type?: QuestionType; area?: QuestionArea; is_active?: 'true' | 'false' | 'all' } = {};
+      const filters: {
+        type?: QuestionType;
+        area?: QuestionArea;
+        status?: 'all' | 'draft' | 'published' | 'inactive';
+      } = {};
       if (typeFilter !== 'all') filters.type = typeFilter;
       if (areaFilter !== 'all') filters.area = areaFilter;
-      filters.is_active = statusFilter;
+      filters.status = statusFilter;
       const list = await learningContentService.listQuestions(clubId, filters);
       setQuestions(list);
     } catch (e) {
@@ -53,13 +58,16 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
 
   const stats = useMemo(() => {
     const total = questions.length;
-    const active = questions.filter((q) => q.is_active).length;
-    return { total, active };
+    const published = questions.filter((q) => q.status === 'published').length;
+    return { total, published };
   }, [questions]);
 
-  const handleToggleActive = async (q: Question) => {
+  // Toggle: solo aplica si la pregunta está publicada o inactiva. Los drafts
+  // no se toggle-ean (no han sido validados todavía).
+  const handleTogglePublished = async (q: Question) => {
+    if (q.status === 'draft') return;
     try {
-      if (q.is_active) {
+      if (q.status === 'published') {
         await learningContentService.deactivateQuestion(q.id);
         toast.success(t('learning_deactivate_success'));
       } else {
@@ -69,6 +77,22 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
       load();
     } catch (e) {
       toast.error((e as Error).message || t('learning_save_error'));
+    }
+  };
+
+  // Borrado permanente. Disponible para drafts e inactives (no publicadas).
+  const handleDelete = async (q: Question) => {
+    if (q.status === 'published') return;
+    const ok = window.confirm(
+      `¿Borrar definitivamente "${extractPreview(q).slice(0, 60)}"?\n\nEsta acción no se puede deshacer.`,
+    );
+    if (!ok) return;
+    try {
+      await learningContentService.deleteQuestion(q.id);
+      toast.success('Pregunta borrada definitivamente');
+      load();
+    } catch (e) {
+      toast.error((e as Error).message || 'Error al borrar');
     }
   };
 
@@ -99,8 +123,8 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
           <p className="text-[10px] text-gray-400">{t('learning_tab_questions')}</p>
         </div>
         <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <p className="text-lg font-black text-[#1A1A1A]">{stats.active}</p>
-          <p className="text-[10px] text-gray-400">{t('learning_filter_active')}</p>
+          <p className="text-lg font-black text-[#1A1A1A]">{stats.published}</p>
+          <p className="text-[10px] text-gray-400">Publicadas</p>
         </div>
       </div>
 
@@ -144,12 +168,13 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
           ))}
         </div>
 
-        {/* Estado */}
+        {/* Estado: filtro único con los 4 valores. Default 'published'. */}
         <div className="flex flex-wrap gap-1.5">
           {([
-            { key: 'all', label: t('learning_filter_all_status') },
-            { key: 'true', label: t('learning_filter_active') },
-            { key: 'false', label: t('learning_filter_inactive') },
+            { key: 'all', label: 'Todas' },
+            { key: 'published', label: 'Publicadas' },
+            { key: 'draft', label: 'Borradores' },
+            { key: 'inactive', label: 'Inactivas' },
           ] as const).map((s) => (
             <button
               key={s.key}
@@ -177,7 +202,7 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.03 }}
-              className={`bg-white rounded-2xl border p-4 space-y-3 ${q.is_active ? 'border-gray-100' : 'border-gray-100 opacity-60'}`}
+              className={`bg-white rounded-2xl border p-4 space-y-3 ${q.status === 'published' ? 'border-gray-100' : 'border-gray-100 opacity-60'}`}
             >
               {/* Badges */}
               <div className="flex items-center gap-2 flex-wrap">
@@ -190,9 +215,19 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
                 <span className="px-2 py-0.5 rounded-lg bg-gray-100 text-gray-500 text-[10px] font-bold">
                   Lv. {q.level}
                 </span>
-                {!q.is_active && (
+                {q.status === 'draft' && (
+                  <span className="px-2 py-0.5 rounded-lg bg-yellow-50 text-yellow-600 text-[10px] font-bold">
+                    Borrador
+                  </span>
+                )}
+                {q.status === 'inactive' && (
                   <span className="px-2 py-0.5 rounded-lg bg-red-50 text-red-500 text-[10px] font-bold">
-                    {t('learning_filter_inactive')}
+                    Inactiva
+                  </span>
+                )}
+                {q.status === 'published' && (
+                  <span className="px-2 py-0.5 rounded-lg bg-emerald-100 text-emerald-700 text-[10px] font-bold">
+                    Publicada
                   </span>
                 )}
               </div>
@@ -213,19 +248,38 @@ export function QuestionsTab({ clubId }: { clubId: string }) {
                   <Edit className="w-3 h-3" />
                   {t('learning_edit_question')}
                 </button>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={q.is_active}
-                  onClick={() => handleToggleActive(q)}
-                  className="relative w-9 h-5 rounded-full transition-colors shrink-0"
-                  style={{ backgroundColor: q.is_active ? '#22C55E' : '#D1D5DB' }}
-                >
-                  <span
-                    className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
-                    style={{ transform: q.is_active ? 'translateX(16px)' : 'translateX(0)' }}
-                  />
-                </button>
+                {/* Toggle published ↔ inactive. Solo visible si la pregunta NO
+                    es un borrador (los drafts se publican vía el editor con el
+                    botón "Publicar" tras pasar validación). */}
+                {q.status !== 'draft' && (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={q.status === 'published'}
+                    onClick={() => handleTogglePublished(q)}
+                    title={q.status === 'published' ? 'Despublicar' : 'Republicar'}
+                    className="relative w-9 h-5 rounded-full transition-colors shrink-0"
+                    style={{ backgroundColor: q.status === 'published' ? '#22C55E' : '#D1D5DB' }}
+                  >
+                    <span
+                      className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
+                      style={{ transform: q.status === 'published' ? 'translateX(16px)' : 'translateX(0)' }}
+                    />
+                  </button>
+                )}
+                {/* Borrado permanente: drafts o inactivas. Las published se
+                    despublican primero (toggle) y luego se borran. */}
+                {q.status !== 'published' && (
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(q)}
+                    className="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-50 text-red-600 text-[10px] font-bold hover:bg-red-100 transition-all"
+                    title="Borrar definitivamente"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    Borrar
+                  </button>
+                )}
               </div>
             </motion.div>
           ))}

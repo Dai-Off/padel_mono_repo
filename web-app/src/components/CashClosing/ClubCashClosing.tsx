@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BarChart3, Calculator, CheckCircle2, History, Search, TrendingDown, TrendingUp } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { PageSpinner } from '../Layout/PageSpinner';
@@ -10,48 +9,30 @@ import {
   type CashClosingBookingExpected,
   type CashOpeningSavedRecord,
   type CashClosingSavedRecord,
+  type CashRecordKind,
+  type CashMovementRecord,
+  type CashMovementType,
 } from '../../services/payments';
 import type { ClubStaffMember } from '../../types/clubStaff';
+import {
+  CashCountForm,
+  CashDayTimeline,
+  CashMovementsPanel,
+  CashOperatorDelegate,
+  DayNavigator,
+  RecordList,
+  SectionTabs,
+  emptyBreakdown,
+  denominations,
+  localDateYmd,
+  staffRoleAllowsCashLedger,
+  type CashBreakdown,
+  type CashLedgerRecord,
+  type CashSection,
+  type CashTimelineEntry,
+} from './cashRegisterUi';
 
-type CashBreakdown = {
-  bills_500: number;
-  bills_200: number;
-  bills_100: number;
-  bills_50: number;
-  bills_20: number;
-  bills_10: number;
-  bills_5: number;
-  coins_2: number;
-  coins_1: number;
-  coins_050: number;
-  coins_020: number;
-  coins_010: number;
-  coins_005: number;
-  coins_002: number;
-  coins_001: number;
-};
-
-type CashClosingRecord = {
-  id: string;
-  date: Date;
-  employeeName: string;
-  realCashTotal: number;
-  realCardTotal: number;
-  systemCashTotal: number;
-  systemCardTotal: number;
-  totalDifference: number;
-  observations: string;
-  status: 'perfect' | 'surplus' | 'deficit';
-};
-
-function localDateYmd(d = new Date()): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function mapSavedToLocal(r: CashClosingSavedRecord): CashClosingRecord {
+function mapSavedToLocal(r: CashClosingSavedRecord): CashLedgerRecord {
   return {
     id: r.id,
     date: new Date(r.closed_at),
@@ -63,25 +44,8 @@ function mapSavedToLocal(r: CashClosingSavedRecord): CashClosingRecord {
     totalDifference: r.difference_cents / 100,
     observations: r.observations ?? '',
     status: r.status,
+    recordKind: r.record_kind === 'arqueo' ? 'arqueo' : 'cierre',
   };
-}
-
-const emptyBreakdown: CashBreakdown = {
-  bills_500: 0, bills_200: 0, bills_100: 0, bills_50: 0, bills_20: 0, bills_10: 0, bills_5: 0,
-  coins_2: 0, coins_1: 0, coins_050: 0, coins_020: 0, coins_010: 0, coins_005: 0, coins_002: 0, coins_001: 0,
-};
-
-const denominations: { key: keyof CashBreakdown; label: string; value: number }[] = [
-  { key: 'bills_500', label: '500EUR', value: 500 }, { key: 'bills_200', label: '200EUR', value: 200 }, { key: 'bills_100', label: '100EUR', value: 100 },
-  { key: 'bills_50', label: '50EUR', value: 50 }, { key: 'bills_20', label: '20EUR', value: 20 }, { key: 'bills_10', label: '10EUR', value: 10 }, { key: 'bills_5', label: '5EUR', value: 5 },
-  { key: 'coins_2', label: '2EUR', value: 2 }, { key: 'coins_1', label: '1EUR', value: 1 }, { key: 'coins_050', label: '0.50EUR', value: 0.5 },
-  { key: 'coins_020', label: '0.20EUR', value: 0.2 }, { key: 'coins_010', label: '0.10EUR', value: 0.1 }, { key: 'coins_005', label: '0.05EUR', value: 0.05 },
-  { key: 'coins_002', label: '0.02EUR', value: 0.02 }, { key: 'coins_001', label: '0.01EUR', value: 0.01 },
-];
-
-function staffRoleAllowsCashLedger(role: string | null | undefined): boolean {
-  const r = String(role ?? '').trim().toLowerCase();
-  return !/entrenador|entrenadora|coach|trainer|profesor/.test(r);
 }
 
 export function ClubCashClosingTab({
@@ -92,18 +56,12 @@ export function ClubCashClosingTab({
   clubResolved?: boolean;
 }) {
   const { t } = useTranslation();
-  const [view, setView] = useState<'new' | 'history'>('new');
+  const [section, setSection] = useState<CashSection>('listado');
   const [staff, setStaff] = useState<ClubStaffMember[]>([]);
-  const [employeeId, setEmployeeId] = useState('');
-  const selectedEmployeeName = useMemo(
-    () => staff.find((s) => s.id === employeeId)?.name ?? '',
-    [staff, employeeId]
-  );
   const [observations, setObservations] = useState('');
   const [cardTotal, setCardTotal] = useState('');
   const [cashBreakdown, setCashBreakdown] = useState<CashBreakdown>(emptyBreakdown);
-  const [historyRecords, setHistoryRecords] = useState<CashClosingRecord[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [historyRecords, setHistoryRecords] = useState<CashLedgerRecord[]>([]);
   const [expectedBookings, setExpectedBookings] = useState<CashClosingBookingExpected[]>([]);
   const [systemCashTotal, setSystemCashTotal] = useState(0);
   const [systemCardTotal, setSystemCardTotal] = useState(0);
@@ -114,10 +72,23 @@ export function ClubCashClosingTab({
   const [operativeDate, setOperativeDate] = useState(localDateYmd());
   const [openingRecord, setOpeningRecord] = useState<CashOpeningSavedRecord | null>(null);
   const [needsNewOpeningAfterClosing, setNeedsNewOpeningAfterClosing] = useState(false);
-  const [openingEmployeeId, setOpeningEmployeeId] = useState('');
+  const [openingsForDay, setOpeningsForDay] = useState<CashOpeningSavedRecord[]>([]);
   const [openingCashTotal, setOpeningCashTotal] = useState('');
   const [openingNotes, setOpeningNotes] = useState('');
   const [savingOpening, setSavingOpening] = useState(false);
+  const [cashMovements, setCashMovements] = useState<CashMovementRecord[]>([]);
+  const [operatorStaffId, setOperatorStaffId] = useState('');
+  const [operatorName, setOperatorName] = useState<string | null>(null);
+  const [operatorError, setOperatorError] = useState<string | null>(null);
+  const [canDelegate, setCanDelegate] = useState(false);
+  const [ownerDisplayName, setOwnerDisplayName] = useState<string | null>(null);
+  const [delegateMode, setDelegateMode] = useState(false);
+  const [delegatedStaffId, setDelegatedStaffId] = useState('');
+  const [movementAmount, setMovementAmount] = useState('');
+  const [movementNotes, setMovementNotes] = useState('');
+  const [activeMovementType, setActiveMovementType] = useState<CashMovementType | null>(null);
+  const [savingMovement, setSavingMovement] = useState(false);
+
   const operativeTimezone = useMemo(() => {
     try {
       return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Madrid';
@@ -130,32 +101,39 @@ export function ClubCashClosingTab({
     () => staff.filter((m) => m.status === 'active' && staffRoleAllowsCashLedger(m.role)),
     [staff],
   );
+  const staffOptions = useMemo(
+    () => staffForCashOperations.map((m) => ({ id: m.id, name: m.name })),
+    [staffForCashOperations],
+  );
 
-  useEffect(() => {
-    if (employeeId && !staffForCashOperations.some((s) => s.id === employeeId)) {
-      setEmployeeId('');
+  const effectiveStaffId = delegateMode ? delegatedStaffId : operatorStaffId;
+  const effectiveOperatorName = useMemo(() => {
+    if (delegateMode && delegatedStaffId) {
+      return staffOptions.find((s) => s.id === delegatedStaffId)?.name ?? null;
     }
-  }, [staffForCashOperations, employeeId]);
-
-  useEffect(() => {
-    if (openingEmployeeId && !staffForCashOperations.some((s) => s.id === openingEmployeeId)) {
-      setOpeningEmployeeId('');
-    }
-  }, [staffForCashOperations, openingEmployeeId]);
+    return operatorName ?? ownerDisplayName;
+  }, [delegateMode, delegatedStaffId, operatorName, ownerDisplayName, staffOptions]);
 
   const realCashTotal = useMemo(
-    () => denominations.reduce((acc, d) => acc + (cashBreakdown[d.key] * d.value), 0),
+    () => denominations.reduce((acc, d) => acc + cashBreakdown[d.key] * d.value, 0),
     [cashBreakdown],
   );
   const realCardTotal = Number(cardTotal) || 0;
-  const totalDifference = (realCashTotal + realCardTotal) - (systemCashTotal + systemCardTotal);
+  const totalDifference = realCashTotal + realCardTotal - (systemCashTotal + systemCardTotal);
+  const operatorReady = canDelegate ? (delegateMode ? Boolean(delegatedStaffId) : true) : Boolean(operatorStaffId);
+  const canSave = operatorReady;
 
-  const canSave = employeeId.trim() !== '';
+  const staffIdForSave = effectiveStaffId || undefined;
 
-  const filteredHistory = historyRecords.filter((r) => {
-    const q = searchTerm.toLowerCase();
-    return r.employeeName.toLowerCase().includes(q) || r.id.toLowerCase().includes(q);
-  });
+  const delegatePanelProps = {
+    delegateMode,
+    setDelegateMode,
+    delegatedStaffId,
+    setDelegatedStaffId,
+    staffOptions,
+    selfName: ownerDisplayName ?? operatorName,
+    t,
+  };
 
   const openingAppliesToSelectedDay = useMemo(() => {
     if (!openingRecord) return false;
@@ -164,9 +142,30 @@ export function ClubCashClosingTab({
     return String(raw).slice(0, 10) === operativeDate;
   }, [openingRecord, operativeDate]);
 
+  const arqueoRecords = useMemo(() => historyRecords.filter((r) => r.recordKind === 'arqueo'), [historyRecords]);
+  const cierreRecords = useMemo(() => historyRecords.filter((r) => r.recordKind === 'cierre'), [historyRecords]);
+  const isToday = operativeDate === localDateYmd();
+  const openingPending = !openingAppliesToSelectedDay || needsNewOpeningAfterClosing;
+  const sessionActive = openingAppliesToSelectedDay && !needsNewOpeningAfterClosing;
+  const showOpeningTab = openingPending && !sessionActive;
+
+  const applyExpected = (expected: Awaited<ReturnType<typeof paymentsService.getCashClosingExpected>>) => {
+    setExpectedBookings(expected.bookings ?? []);
+    setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
+    setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
+    setStoreSalesCashTotal(expected.storeSalesCash_eur ?? 0);
+    setStoreSalesCardTotal(expected.storeSalesCard_eur ?? 0);
+    setNeedsNewOpeningAfterClosing(expected.needs_new_opening_after_closing === true);
+    setCashMovements((expected.cash_movements ?? []) as CashMovementRecord[]);
+    setOpeningsForDay((expected.openings ?? []) as CashOpeningSavedRecord[]);
+  };
+
+  useEffect(() => {
+    if (!showOpeningTab && section === 'apertura') setSection('listado');
+  }, [showOpeningTab, section]);
+
   useEffect(() => {
     if (!needsNewOpeningAfterClosing) return;
-    setOpeningEmployeeId('');
     setOpeningCashTotal('');
     setOpeningNotes('');
   }, [needsNewOpeningAfterClosing]);
@@ -179,21 +178,41 @@ export function ClubCashClosingTab({
 
     (async () => {
       try {
-        const [staffRows, expected, opening] = await Promise.all([
+        const [staffRows, expected, opening, operator] = await Promise.all([
           clubStaffService.list(clubId),
           paymentsService.getCashClosingExpected(clubId, operativeDate, operativeTimezone),
           paymentsService.getCashOpeningForDay(clubId, operativeDate),
+          paymentsService.getCashCurrentOperator(clubId).catch((e) => {
+            const msg = (e as Error).message;
+            return { ok: false as const, error: msg };
+          }),
         ]);
         if (cancelled) return;
 
         setStaff(staffRows ?? []);
-        setExpectedBookings(expected.bookings ?? []);
-        setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
-        setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
-        setStoreSalesCashTotal(expected.storeSalesCash_eur ?? 0);
-        setStoreSalesCardTotal(expected.storeSalesCard_eur ?? 0);
+        applyExpected(expected);
         setOpeningRecord(opening.opening ?? null);
-        setNeedsNewOpeningAfterClosing(expected.needs_new_opening_after_closing === true);
+        if ('staff_id' in operator && !('error' in operator)) {
+          setCanDelegate(operator.can_delegate === true);
+          setOwnerDisplayName(operator.owner_display_name ?? null);
+          setOperatorStaffId(operator.staff_id ?? '');
+          setOperatorName(operator.employee_name);
+          setOperatorError(null);
+          setDelegateMode(false);
+          setDelegatedStaffId('');
+        } else {
+          setCanDelegate(false);
+          setOwnerDisplayName(null);
+          setOperatorStaffId('');
+          setOperatorName(null);
+          setOperatorError(
+            'error' in operator && typeof operator.error === 'string'
+              ? operator.error
+              : t('cash_operator_not_linked'),
+          );
+          setDelegateMode(false);
+          setDelegatedStaffId('');
+        }
 
         try {
           const recs = await paymentsService.listCashClosingRecords(clubId, 50, operativeDate);
@@ -202,7 +221,7 @@ export function ClubCashClosingTab({
           if (!cancelled) setHistoryRecords([]);
           if (!cancelled && histErr instanceof HttpError && histErr.status === 503) {
             toast.error(
-              'Falta la tabla de arqueos en la base de datos. Aplica la migración 012_club_cash_closings.sql en Supabase.'
+              'Falta la tabla de arqueos en la base de datos. Aplica la migración 012_club_cash_closings.sql en Supabase.',
             );
           } else if (!cancelled) {
             toast.error((histErr as Error).message || t('payments_load_error'));
@@ -217,6 +236,7 @@ export function ClubCashClosingTab({
         setSystemCardTotal(0);
         setStoreSalesCashTotal(0);
         setStoreSalesCardTotal(0);
+        setCashMovements([]);
         toast.error((e as Error).message || t('payments_load_error'));
       } finally {
         if (!cancelled) setLoadingExpected(false);
@@ -226,41 +246,48 @@ export function ClubCashClosingTab({
     return () => {
       cancelled = true;
     };
-  }, [clubId, clubResolved, operativeDate, operativeTimezone]);
+  }, [clubId, clubResolved, operativeDate, operativeTimezone, t]);
 
-  const saveClosing = async () => {
+  const resetCountForm = () => {
+    setCashBreakdown(emptyBreakdown);
+    setCardTotal('');
+    setObservations('');
+  };
+
+  const saveClosing = async (recordKind: CashRecordKind) => {
     if (!canSave || !clubId) return;
-    if (!selectedEmployeeName) return;
+    if (recordKind === 'cierre' && needsNewOpeningAfterClosing) {
+      toast.error(t('cash_closing_wait_reopen'));
+      setSection('apertura');
+      return;
+    }
     setSaving(true);
     try {
-      const forDate = operativeDate;
       const saved = await paymentsService.createCashClosingRecord({
         club_id: clubId,
-        staff_id: employeeId,
-        for_date: forDate,
+        staff_id: staffIdForSave,
+        for_date: operativeDate,
         real_cash_cents: Math.round(realCashTotal * 100),
         real_card_cents: Math.round(realCardTotal * 100),
         system_cash_cents: Math.round(systemCashTotal * 100),
         system_card_cents: Math.round(systemCardTotal * 100),
         observations: observations.trim() || undefined,
+        record_kind: recordKind,
       });
-      const refreshedExpected = await paymentsService.getCashClosingExpected(clubId, saved.for_date, operativeTimezone);
+      const refreshedExpected = await paymentsService.getCashClosingExpected(
+        clubId,
+        saved.for_date,
+        operativeTimezone,
+      );
       setHistoryRecords((prev) => [mapSavedToLocal(saved), ...prev]);
-      setExpectedBookings(refreshedExpected.bookings ?? []);
-      setSystemCashTotal(refreshedExpected.systemCashTotal_eur ?? 0);
-      setSystemCardTotal(refreshedExpected.systemCardTotal_eur ?? 0);
-      setStoreSalesCashTotal(refreshedExpected.storeSalesCash_eur ?? 0);
-      setStoreSalesCardTotal(refreshedExpected.storeSalesCard_eur ?? 0);
-      setNeedsNewOpeningAfterClosing(refreshedExpected.needs_new_opening_after_closing === true);
-      setCashBreakdown(emptyBreakdown);
-      setCardTotal('');
-      setEmployeeId('');
-      setObservations('');
-      setView('history');
+      applyExpected(refreshedExpected);
+      resetCountForm();
+      toast.success(recordKind === 'arqueo' ? t('cash_arqueo_success') : t('cash_cierre_success'));
+      setSection('listado');
     } catch (e) {
       if (e instanceof HttpError && e.status === 503) {
         toast.error(
-          'Falta la tabla de arqueos en la base de datos. Aplica la migración 012_club_cash_closings.sql en Supabase.'
+          'Falta la tabla de arqueos en la base de datos. Aplica la migración 012_club_cash_closings.sql en Supabase.',
         );
       } else {
         toast.error((e as Error).message || t('payments_load_error'));
@@ -271,31 +298,25 @@ export function ClubCashClosingTab({
   };
 
   const saveOpening = async () => {
-    if (!clubId || !openingEmployeeId) return;
+    if (!clubId || !operatorReady) return;
     const openingCashCents = Math.round((Number(openingCashTotal) || 0) * 100);
     if (openingCashCents < 0) return;
     setSavingOpening(true);
     try {
-      const forDate = operativeDate;
       const saved = await paymentsService.createCashOpeningRecord({
         club_id: clubId,
-        staff_id: openingEmployeeId,
-        for_date: forDate,
+        staff_id: staffIdForSave,
+        for_date: operativeDate,
         opening_cash_cents: openingCashCents,
         notes: openingNotes.trim() || undefined,
       });
       setOpeningRecord(saved);
       const expected = await paymentsService.getCashClosingExpected(clubId, saved.for_date, operativeTimezone);
-      setExpectedBookings(expected.bookings ?? []);
-      setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
-      setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
-      setStoreSalesCashTotal(expected.storeSalesCash_eur ?? 0);
-      setStoreSalesCardTotal(expected.storeSalesCard_eur ?? 0);
-      setNeedsNewOpeningAfterClosing(expected.needs_new_opening_after_closing === true);
-      setEmployeeId(saved.staff_id ?? '');
+      applyExpected(expected);
       setOpeningCashTotal('');
       setOpeningNotes('');
       toast.success(t('cash_opening_success'));
+      setSection('listado');
     } catch (e) {
       toast.error((e as Error).message || t('payments_load_error'));
     } finally {
@@ -303,290 +324,290 @@ export function ClubCashClosingTab({
     }
   };
 
+  const saveMovement = async () => {
+    if (!clubId || !activeMovementType || !operatorReady) return;
+    const amountCents = Math.round((Number(movementAmount) || 0) * 100);
+    if (amountCents <= 0) return;
+    setSavingMovement(true);
+    try {
+      await paymentsService.createCashMovementRecord({
+        club_id: clubId,
+        staff_id: staffIdForSave,
+        movement_type: activeMovementType,
+        for_date: operativeDate,
+        amount_cents: amountCents,
+        notes: movementNotes.trim() || undefined,
+      });
+      const expected = await paymentsService.getCashClosingExpected(clubId, operativeDate, operativeTimezone);
+      applyExpected(expected);
+      setMovementAmount('');
+      setMovementNotes('');
+      setActiveMovementType(null);
+      toast.success(
+        activeMovementType === 'withdrawal' ? t('cash_withdrawal_success') : t('cash_deposit_success'),
+      );
+    } catch (e) {
+      toast.error((e as Error).message || t('payments_load_error'));
+    } finally {
+      setSavingMovement(false);
+    }
+  };
+
+  const timelineEntries = useMemo((): CashTimelineEntry[] => {
+    const items: CashTimelineEntry[] = [];
+    for (const o of openingsForDay) {
+      items.push({
+        id: `open-${o.id}`,
+        at: new Date(o.opened_at),
+        kind: 'opening',
+        title: t('cash_section_opening'),
+        employeeName: o.employee_name,
+        amountEur: o.opening_cash_cents / 100,
+        tone: 'green',
+        subtitle: o.notes ?? undefined,
+      });
+    }
+    for (const r of historyRecords) {
+      const isCierre = r.recordKind === 'cierre';
+      items.push({
+        id: r.id,
+        at: r.date,
+        kind: isCierre ? 'cierre' : 'arqueo',
+        title: isCierre ? t('cash_section_close') : t('cash_section_count'),
+        employeeName: r.employeeName,
+        tone: isCierre ? 'neutral' : 'blue',
+        details: [
+          `Real: ${(r.realCashTotal + r.realCardTotal).toFixed(2)} €`,
+          `Sistema: ${(r.systemCashTotal + r.systemCardTotal).toFixed(2)} €`,
+          `Diferencia: ${r.totalDifference > 0 ? '+' : ''}${r.totalDifference.toFixed(2)} €`,
+        ],
+      });
+    }
+    for (const m of cashMovements) {
+      items.push({
+        id: m.id,
+        at: new Date(m.created_at),
+        kind: m.movement_type,
+        title: m.movement_type === 'withdrawal' ? t('cash_withdrawal_btn') : t('cash_deposit_btn'),
+        employeeName: m.employee_name,
+        amountEur: m.amount_cents / 100,
+        tone: m.movement_type === 'withdrawal' ? 'red' : 'emerald',
+        subtitle: m.notes ?? undefined,
+      });
+    }
+    for (const b of expectedBookings) {
+      if (!b.start_at) continue;
+      const total = (b.cash_paid_cents + b.card_paid_cents) / 100;
+      if (total <= 0) continue;
+      items.push({
+        id: `sale-${b.booking_id}`,
+        at: new Date(b.start_at),
+        kind: 'sale',
+        title: b.court_name ?? 'Reserva',
+        tone: 'neutral',
+        amountEur: total,
+        subtitle: `Efectivo ${(b.cash_paid_cents / 100).toFixed(2)} € · Tarjeta ${(b.card_paid_cents / 100).toFixed(2)} €`,
+      });
+    }
+    return items;
+  }, [openingsForDay, historyRecords, cashMovements, expectedBookings, t]);
+
+  const movementPanelProps = {
+    sessionActive,
+    movements: cashMovements,
+    operatorName: effectiveOperatorName,
+    operatorReady,
+    canDelegate,
+    movementAmount,
+    setMovementAmount,
+    movementNotes,
+    setMovementNotes,
+    activeMovementType,
+    setActiveMovementType,
+    savingMovement,
+    onSubmitMovement: () => void saveMovement(),
+    t,
+  };
+
+  const countFormProps = {
+    t,
+    cashBreakdown,
+    setCashBreakdown,
+    cardTotal,
+    setCardTotal,
+    observations,
+    setObservations,
+    noStaffWarning: staff.length > 0 && staffForCashOperations.length === 0,
+    realCashTotal,
+    realCardTotal,
+    totalDifference,
+    systemCashTotal,
+    systemCardTotal,
+    storeSalesCashTotal,
+    storeSalesCardTotal,
+    expectedBookings,
+    operativeDate,
+    saving,
+    canSave,
+    operatorName: effectiveOperatorName,
+    operatorReady,
+    canDelegate,
+    delegatePanelProps,
+  };
+
   if (!clubResolved) return <PageSpinner />;
   if (!clubId) return <p className="text-sm text-gray-500 text-center py-12">No se pudo determinar el club.</p>;
   if (loadingExpected) return <PageSpinner />;
-  const showOpeningOnly = !openingAppliesToSelectedDay || needsNewOpeningAfterClosing;
-  if (showOpeningOnly) {
-    return (
-      <div className="space-y-5">
-        <div>
-          <h2 className="text-sm font-bold text-[#1A1A1A]">{t('cash_opening_daily_title')}</h2>
-          <p className="text-[11px] text-gray-500 mt-1">{t('cash_opening_daily_sub')}</p>
-          {needsNewOpeningAfterClosing && (
-            <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">{t('cash_after_close_hint')}</p>
-          )}
-        </div>
-        {staff.length > 0 && staffForCashOperations.length === 0 && (
-          <p className="text-[11px] text-amber-800 font-medium max-w-xl">{t('cash_no_staff_authorized_for_caja')}</p>
-        )}
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3 max-w-xl">
-          <input
-            type="date"
-            value={operativeDate}
-            onChange={(e) => setOperativeDate(e.target.value)}
-            className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
-          />
-          <select
-            value={openingEmployeeId}
-            onChange={(e) => setOpeningEmployeeId(e.target.value)}
-            className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
-          >
-            <option value="">{t('cash_opening_employee')}</option>
-            {staffForCashOperations.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            value={openingCashTotal}
-            onChange={(e) => setOpeningCashTotal(e.target.value)}
-            placeholder={t('cash_opening_initial_placeholder')}
-            className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
-          />
-          <textarea
-            value={openingNotes}
-            onChange={(e) => setOpeningNotes(e.target.value)}
-            placeholder={t('cash_opening_notes_placeholder')}
-            className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs resize-none"
-            rows={3}
-          />
-          <button
-            type="button"
-            onClick={() => void saveOpening()}
-            disabled={!openingEmployeeId || savingOpening || staffForCashOperations.length === 0}
-            className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1A1A1A] text-white disabled:opacity-40"
-          >
-            {savingOpening ? t('loading') : t('cash_opening_save')}
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col gap-4">
         <div>
-          <h2 className="text-sm font-bold text-[#1A1A1A]">{t('cash_closing_title')}</h2>
-          <p className="text-[10px] text-gray-400">{operativeDate}</p>
-          <p className="text-[10px] text-gray-500 mt-1">
-            {openingRecord
-              ? t('cash_opening_banner', {
-                  amount: (openingRecord.opening_cash_cents / 100).toFixed(2),
-                  name: openingRecord.employee_name,
-                })
-              : null}
-          </p>
+          <h2 className="text-base font-black text-[#1A1A1A] uppercase tracking-wide">{t('cash_register_title')}</h2>
+          {openingRecord && openingAppliesToSelectedDay && (
+            <p className="text-[10px] text-gray-500 mt-1">
+              {t('cash_opening_banner', {
+                amount: (openingRecord.opening_cash_cents / 100).toFixed(2),
+                name: openingRecord.employee_name,
+              })}
+            </p>
+          )}
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={operativeDate}
-            onChange={(e) => setOperativeDate(e.target.value)}
-            className="px-3 py-2 rounded-xl border border-gray-200 bg-white text-xs font-semibold text-[#1A1A1A]"
-          />
-        </div>
-        <div className="flex items-center gap-1 p-1 bg-gray-100 rounded-2xl">
-          <button onClick={() => setView('new')} className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold ${view === 'new' ? 'bg-[#1A1A1A] text-white' : 'text-gray-500'}`}>
-            <Calculator className="w-3.5 h-3.5" />
-            {t('cash_closing_new')}
-          </button>
-          <button onClick={() => setView('history')} className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold ${view === 'history' ? 'bg-[#1A1A1A] text-white' : 'text-gray-500'}`}>
-            <History className="w-3.5 h-3.5" />
-            {t('cash_closing_history')}
-          </button>
-        </div>
+        <DayNavigator operativeDate={operativeDate} isToday={isToday} onDateChange={setOperativeDate} t={t} />
+        <SectionTabs
+          section={section}
+          openingPending={openingPending}
+          showOpeningTab={showOpeningTab}
+          onSectionChange={setSection}
+          t={t}
+        />
       </div>
 
-      {view === 'new' && (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <div className="bg-white rounded-2xl p-4 border border-gray-100">
-            <div className="text-[10px] text-gray-400 mb-1 font-semibold">{t('cash_counted')}</div>
-            <div className="text-lg font-black text-[#1A1A1A]">{realCashTotal.toFixed(2)}€</div>
+      {operatorError && !canDelegate && (
+        <p className="text-[11px] text-amber-800 font-medium bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
+          {operatorError}
+        </p>
+      )}
+
+      {canDelegate && <CashOperatorDelegate {...delegatePanelProps} />}
+
+      {section === 'listado' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="bg-white rounded-2xl p-4 border border-gray-100">
+              <p className="text-[10px] text-gray-400 font-semibold">{t('cash_day_summary')}</p>
+              <p className="text-[10px] text-gray-500 mt-1">{operativeDate}</p>
+            </div>
+            <div className="bg-white rounded-2xl p-4 border border-gray-100">
+              <p className="text-[10px] text-gray-400">Sistema efectivo</p>
+              <p className="text-lg font-black">{systemCashTotal.toFixed(2)} €</p>
+            </div>
+            <div className="bg-white rounded-2xl p-4 border border-gray-100">
+              <p className="text-[10px] text-gray-400">Sistema tarjeta</p>
+              <p className="text-lg font-black">{systemCardTotal.toFixed(2)} €</p>
+            </div>
+            <div className="bg-white rounded-2xl p-4 border border-gray-100">
+              <p className="text-[10px] text-gray-400">{t('cash_arqueos_today')}</p>
+              <p className="text-lg font-black">{arqueoRecords.length}</p>
+            </div>
           </div>
-          <div className="bg-white rounded-2xl p-4 border border-gray-100">
-            <div className="text-[10px] text-gray-400 mb-1 font-semibold">{t('cards')}</div>
-            <div className="text-lg font-black text-[#1A1A1A]">{realCardTotal.toFixed(2)}€</div>
+
+          <div className="bg-white rounded-2xl border border-gray-100 p-5">
+            <h3 className="text-xs font-bold text-[#1A1A1A] mb-3">{t('cash_day_timeline')}</h3>
+            <CashDayTimeline entries={timelineEntries} emptyLabel={t('cash_sales_empty')} />
           </div>
-          <div className="bg-white rounded-2xl p-4 border border-gray-100">
-            <div className="text-[10px] text-gray-400 mb-1 font-semibold">{t('cash_total_real')}</div>
-            <div className="text-lg font-black text-[#1A1A1A]">{(realCashTotal + realCardTotal).toFixed(2)}€</div>
-          </div>
-          <div className="bg-white rounded-2xl p-4 border border-gray-100">
-            <div className="text-[10px] text-gray-400 mb-1 font-semibold">{t('cash_difference')}</div>
-            <div className={`text-lg font-black flex items-center gap-1 ${
-              Math.abs(totalDifference) < 0.01
-                ? 'text-green-600'
-                : totalDifference > 0
-                  ? 'text-blue-600'
-                  : 'text-red-600'
-            }`}>
-              {Math.abs(totalDifference) < 0.01 ? (
-                <CheckCircle2 className="w-5 h-5" />
-              ) : totalDifference > 0 ? (
-                <TrendingUp className="w-5 h-5" />
-              ) : (
-                <TrendingDown className="w-5 h-5" />
-              )}
-              {totalDifference > 0 ? '+' : ''}
-              {totalDifference.toFixed(2)}€
+
+          {sessionActive && <CashMovementsPanel {...movementPanelProps} />}
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div>
+              <h3 className="text-xs font-bold text-[#1A1A1A] mb-2">{t('cash_arqueos_today')}</h3>
+              <RecordList records={arqueoRecords} emptyLabel={t('cash_no_records')} />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-[#1A1A1A] mb-2">{t('cash_cierres_today')}</h3>
+              <RecordList records={cierreRecords} emptyLabel={t('cash_no_records')} />
             </div>
           </div>
         </div>
       )}
 
-      {view === 'new' ? (
-        <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-100 p-5">
-            <h3 className="text-xs font-bold text-[#1A1A1A] mb-4">{t('cash_counting')}</h3>
-            <div className="grid md:grid-cols-2 gap-2">
-              {denominations.map((d) => (
-                <div key={d.key} className="flex items-center gap-2 p-2 rounded-xl border border-gray-100">
-                  <div className="w-20 text-xs font-bold text-[#1A1A1A]">{d.label}</div>
-                  <input
-                    type="number"
-                    min={0}
-                    value={cashBreakdown[d.key] || ''}
-                    onChange={(e) => setCashBreakdown((prev) => ({ ...prev, [d.key]: Math.max(0, parseInt(e.target.value || '0', 10) || 0) }))}
-                    className="w-20 px-2 py-1.5 rounded-xl border border-gray-200 text-xs"
-                    placeholder="0"
-                  />
-                  <span className="text-[10px] text-gray-400 ml-auto">{(cashBreakdown[d.key] * d.value).toFixed(2)}€</span>
-                </div>
-              ))}
-            </div>
-            {staff.length > 0 && staffForCashOperations.length === 0 && (
-              <p className="mt-3 text-[11px] text-amber-800 font-medium">{t('cash_no_staff_authorized_for_caja')}</p>
+      {section === 'apertura' && showOpeningTab && (
+        <div className="space-y-4 max-w-xl">
+          <div>
+            <h3 className="text-sm font-bold text-[#1A1A1A]">{t('cash_section_opening')}</h3>
+            <p className="text-[11px] text-gray-500 mt-1">{t('cash_opening_daily_sub')}</p>
+            {needsNewOpeningAfterClosing && (
+              <p className="text-[11px] text-gray-600 mt-2 leading-relaxed">{t('cash_after_close_hint')}</p>
             )}
-            <div className="grid md:grid-cols-2 gap-3 mt-4">
-              <select
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
-              >
-                <option value="">{t('cash_employee')}</option>
-                {staffForCashOperations.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </select>
+          </div>
+          <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
+              {!canDelegate && effectiveOperatorName && (
+                <p className="text-[11px] text-gray-600 mb-1">
+                  {t('cash_operator_label')}: <span className="font-bold">{effectiveOperatorName}</span>
+                </p>
+              )}
               <input
                 type="number"
                 min={0}
                 step="0.01"
-                value={cardTotal}
-                onChange={(e) => setCardTotal(e.target.value)}
-                placeholder={t('cards')}
-                className="px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
+                value={openingCashTotal}
+                onChange={(e) => setOpeningCashTotal(e.target.value)}
+                placeholder={t('cash_opening_initial_placeholder')}
+                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
               />
-            </div>
-            <textarea
-              value={observations}
-              onChange={(e) => setObservations(e.target.value)}
-              placeholder={t('cash_observations')}
-              className="w-full mt-3 px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs resize-none"
-              rows={3}
-            />
-            <div className="mt-4 bg-gray-50 border border-gray-100 rounded-2xl p-4">
-              <h4 className="text-[10px] font-bold text-gray-500 mb-2">Esperado ({operativeDate})</h4>
-              {loadingExpected ? (
-                <p className="text-xs text-gray-400">Cargando...</p>
-              ) : expectedBookings.length === 0 ? (
-                <p className="text-xs text-gray-400">Sin pagos registrados para este día.</p>
-              ) : (
-                <div className="space-y-2 max-h-[180px] overflow-auto pr-1">
-                  {expectedBookings.slice(0, 12).map((b) => {
-                    const time = b.start_at
-                      ? new Date(b.start_at).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
-                      : '-';
-                    return (
-                      <div key={b.booking_id} className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-[#1A1A1A] truncate">{b.court_name ?? 'Reserva'}</p>
-                          <p className="text-[10px] text-gray-400">{time}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-[10px] text-gray-500">Físico: €{(b.cash_paid_cents / 100).toFixed(2)}</p>
-                          <p className="text-[10px] text-gray-500">Tarjeta: €{(b.card_paid_cents / 100).toFixed(2)}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => void saveClosing()}
-              disabled={!canSave || saving || staffForCashOperations.length === 0}
-              className="mt-4 px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1A1A1A] text-white disabled:opacity-40"
-            >
-              {saving ? t('loading') : t('cash_save_closing')}
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              <p className="text-[10px] text-gray-400">{t('cash_total_real')}</p>
-              <p className="text-lg font-black text-[#1A1A1A]">{(realCashTotal + realCardTotal).toFixed(2)}€</p>
-            </div>
-            <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              <p className="text-[10px] text-gray-400">{t('cash_difference')}</p>
-              <p className={`text-lg font-black flex items-center gap-1 ${Math.abs(totalDifference) < 0.01 ? 'text-green-600' : totalDifference > 0 ? 'text-blue-600' : 'text-red-600'}`}>
-                {Math.abs(totalDifference) < 0.01 ? <CheckCircle2 className="w-5 h-5" /> : totalDifference > 0 ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
-                {totalDifference > 0 ? '+' : ''}
-                {totalDifference.toFixed(2)}€
-              </p>
-            </div>
-            <div className="bg-white rounded-2xl border border-gray-100 p-4">
-              <p className="text-[10px] text-gray-400">Sistema (esperado)</p>
-              <p className="text-[12px] font-bold text-[#1A1A1A]">
-                Físico: €{systemCashTotal.toFixed(2)} • Tarjeta: €{systemCardTotal.toFixed(2)}
-              </p>
-              {(storeSalesCashTotal > 0 || storeSalesCardTotal > 0) && (
-                <p className="text-[10px] text-gray-500 mt-1">
-                  Tienda: €{storeSalesCashTotal.toFixed(2)} efectivo • €{storeSalesCardTotal.toFixed(2)} tarjeta
-                </p>
-              )}
-            </div>
+              <textarea
+                value={openingNotes}
+                onChange={(e) => setOpeningNotes(e.target.value)}
+                placeholder={t('cash_opening_notes_placeholder')}
+                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs resize-none"
+                rows={3}
+              />
+              <button
+                type="button"
+                onClick={() => void saveOpening()}
+                disabled={!operatorReady || savingOpening}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold bg-[#1A1A1A] text-white disabled:opacity-40"
+              >
+                {savingOpening ? t('loading') : t('cash_opening_save')}
+              </button>
           </div>
         </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl border border-gray-100 p-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
-              <input
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder={t('cash_search_placeholder')}
-                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs"
-              />
-            </div>
+      )}
+
+      {section === 'arqueo' && (
+        <div className="space-y-3">
+          <p className="text-[11px] text-gray-500">{t('cash_arqueo_sub')}</p>
+          <CashCountForm
+            {...countFormProps}
+            showSalesDetail={false}
+            saveLabel={t('cash_save_arqueo')}
+            onSave={() => void saveClosing('arqueo')}
+          />
+          <div>
+            <h3 className="text-xs font-bold text-[#1A1A1A] mb-2">{t('cash_arqueos_today')}</h3>
+            <RecordList records={arqueoRecords} emptyLabel={t('cash_no_records')} />
           </div>
-          {filteredHistory.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-gray-100 p-12 text-center">
-              <BarChart3 className="w-12 h-12 text-gray-200 mx-auto mb-3" />
-              <p className="text-xs font-bold text-[#1A1A1A]">{t('cash_no_records')}</p>
-            </div>
-          ) : (
-            filteredHistory.map((record) => (
-              <div key={record.id} className="bg-white rounded-2xl border border-gray-100 p-4">
-                <p className="text-xs font-bold text-[#1A1A1A]">{record.date.toLocaleString('es-ES')}</p>
-                <p className="text-[10px] text-gray-400 mt-1">{record.employeeName}</p>
-                <p className="text-[10px] text-gray-500 mt-2">
-                  Real: {(record.realCashTotal + record.realCardTotal).toFixed(2)}€ • Sistema: {(record.systemCashTotal + record.systemCardTotal).toFixed(2)}€
-                  {record.observations ? ` • ${record.observations}` : ''}
-                </p>
-              </div>
-            ))
+        </div>
+      )}
+
+      {section === 'cierre' && (
+        <div className="space-y-4">
+          {needsNewOpeningAfterClosing && (
+            <p className="text-[11px] text-amber-800 font-medium bg-amber-50 border border-amber-100 rounded-2xl px-4 py-3">
+              {t('cash_closing_wait_reopen')}
+            </p>
           )}
+          <CashCountForm
+            {...countFormProps}
+            showSalesDetail
+            saveLabel={t('cash_save_cierre')}
+            onSave={() => void saveClosing('cierre')}
+          />
+          <div>
+            <h3 className="text-xs font-bold text-[#1A1A1A] mb-2">{t('cash_cierres_today')}</h3>
+            <RecordList records={cierreRecords} emptyLabel={t('cash_no_records')} />
+          </div>
         </div>
       )}
     </div>

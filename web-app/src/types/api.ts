@@ -54,16 +54,7 @@ export interface Club {
     notify_daily_email_summary?: boolean;
 }
 
-export type BookingType =
-    | 'standard'           // Pista privada normal
-    | 'open_match'         // Partido abierto (ELO-based, hasta 4 jugadores)
-    | 'pozo'               // Americanas / Melee
-    | 'fixed_recurring'    // Turno fijo semanal por temporada
-    | 'school_group'       // Clase de grupo con cuota mensual
-    | 'school_individual'  // Clase particular (pago suelto o bono)
-    | 'flat_rate'          // Tarifa plana (coste 0 en planilla, factura mensual)
-    | 'tournament'         // Pistas bloqueadas para torneo externo
-    | 'blocked';           // Bloqueo administrativo de pista
+export type BookingType = string;
 
 export type BookingSourceChannel = 'mobile' | 'web' | 'manual' | 'system';
 

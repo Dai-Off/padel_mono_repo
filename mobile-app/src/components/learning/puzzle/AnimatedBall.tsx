@@ -10,9 +10,13 @@ type Props = {
   cyPx: number;
   sizePx: number;
   durationMs: number;
+  // Si true, este cambio de posición se aplica instantáneamente (sin animar).
+  // Útil para reset/replay: salta al frame de partida sin "viajar" desde donde
+  // estaba la pelota en la animación anterior.
+  snap?: boolean;
 };
 
-export function AnimatedBall({ ball, cxPx, cyPx, sizePx, durationMs }: Props) {
+export function AnimatedBall({ ball, cxPx, cyPx, sizePx, durationMs, snap }: Props) {
   // Posición top-left del bounding box de la pelota.
   const targetX = cxPx - sizePx / 2;
   const targetY = cyPx - sizePx / 2;
@@ -30,6 +34,12 @@ export function AnimatedBall({ ball, cxPx, cyPx, sizePx, durationMs }: Props) {
       xy.setValue({ x: targetX, y: targetY });
       progress.setValue(1);
       initialized.current = true;
+      return;
+    }
+    // Modo snap: posicionar instantáneamente sin animar (replay/reset).
+    if (snap) {
+      xy.setValue({ x: targetX, y: targetY });
+      progress.setValue(1);
       return;
     }
 
@@ -64,7 +74,7 @@ export function AnimatedBall({ ball, cxPx, cyPx, sizePx, durationMs }: Props) {
         useNativeDriver: true,
       }),
     ]).start();
-  }, [targetX, targetY, ball.shot_type, ball.spin, durationMs, xy, progress]);
+  }, [targetX, targetY, ball.shot_type, ball.spin, durationMs, xy, progress, snap]);
 
   // Lob: pico de scale 2.5 a t=0.5. Chiquita: pico 1.25. Sin shot: scale 1.
   const isLob = ball.shot_type === 'lob';

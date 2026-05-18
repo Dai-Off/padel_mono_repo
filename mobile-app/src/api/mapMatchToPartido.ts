@@ -146,7 +146,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     duration: `${durationMin}min`,
     matchType: m.type ?? undefined,
     matchStatus: m.status,
-    scoreStatus: m.score_status,
+    scoreStatus: (m.score_status === 'pending' ? null : m.score_status) as PartidoItem['scoreStatus'],
     bookingStatus: b.status,
     venueAddress: address || undefined,
     courtName,

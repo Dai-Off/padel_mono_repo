@@ -1,0 +1,2520 @@
+[
+  {
+    "id": 1,
+    "title": "net height difference",
+    "content": "Where you should return the ball to reach the net with the least risk?",
+    "courtPosition": "left",
+    "published": true,
+    "tags": [
+      "694141cf55998c52cf296fab",
+      "694141f155998c52cf296fac"
+    ],
+    "thumbnailUrl": "https://ifjtpmqxdtmdv4wv.public.blob.vercel-storage.com/thumbnails/1.png",
+    "initialFrames": [
+      {
+        "id": 1,
+        "duration": 800,
+        "visibleOnlyAfterConfirmation": false,
+        "players": [
+          {
+            "id": 1,
+            "team": 1,
+            "x": 3.0539419087136936,
+            "y": 18.37551867219917,
+            "isUser": true
+          }
+        ],
+        "ball": {
+          "x": 3.713692946058091,
+          "y": 17.70746887966805
+        },
+        "shapes": [
+          {
+            "type": "circle",
+            "dashed": true,
+            "radius": 0.5,
+            "visibleOnlyAfterConfirmation": false,
+            "id": 1775857351123,
+            "x": 3.691983122362869,
+            "y": 17.679324894514767,
+            "color": "yellow"
+          }
+        ]
+      }
+    ],
+    "options": [
+      {
+        "id": 1,
+        "letter": "A",
+        "text": "To the left",
+        "is_correct": false,
+        "explanation": "Net height is highest at the edges: 92 cm",
+        "coordinates": {
+          "y": 6,
+          "x": 1
+        },
+        "tag": null,
+        "tagPosition": null,
+        "select_frame": {
+          "id": 1,
+          "duration": 1000,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.66570373093825,
+              "y": 17.91313444333561,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 1,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "x": 3.669527896995708,
+              "radius": 0.5,
+              "type": "circle",
+              "dashed": true,
+              "y": 17.725321888412015,
+              "id": 1766252617384,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false
+            },
+            {
+              "x": 0,
+              "type": "arrow",
+              "endPoint": {
+                "x": 1.1373390557939913,
+                "y": 7.592274678111588
+              },
+              "dashed": true,
+              "y": 0,
+              "id": 1766252629384,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "startPoint": {
+                "x": 3.540772532188841,
+                "y": 17.128755364806867
+              }
+            },
+            {
+              "x": 1.0085836909871244,
+              "radius": 0.5,
+              "type": "circle",
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": false,
+              "id": 1766252637364,
+              "color": "yellow",
+              "y": 7.017167381974248
+            }
+          ]
+        },
+        "confirmation_frame": {
+          "id": 1,
+          "duration": 1000,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.66570373093825,
+              "y": 17.91313444333561,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 1,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "x": 3.669527896995708,
+              "radius": 0.5,
+              "type": "circle",
+              "dashed": true,
+              "y": 17.725321888412015,
+              "id": 1766252617384,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false
+            },
+            {
+              "x": 0,
+              "type": "arrow",
+              "endPoint": {
+                "x": 1.1373390557939913,
+                "y": 7.592274678111588
+              },
+              "dashed": true,
+              "y": 0,
+              "id": 1766252629384,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "startPoint": {
+                "x": 3.540772532188841,
+                "y": 17.128755364806867
+              }
+            },
+            {
+              "x": 1.0085836909871244,
+              "radius": 0.5,
+              "type": "circle",
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": false,
+              "id": 1766252637364,
+              "color": "yellow",
+              "y": 7.017167381974248
+            },
+            {
+              "x": 0.25316455696202533,
+              "width": 3.0843881856540083,
+              "height": 0.9451476793248954,
+              "fillColor": "#ff9182",
+              "type": "rect",
+              "fillOpacity": 0.7,
+              "visibleOnlyAfterConfirmation": true,
+              "id": 1776265378826,
+              "color": "#ff9182",
+              "y": 9.071729957805909
+            },
+            {
+              "x": 3.669527896995708,
+              "radius": 0.5,
+              "type": "circle",
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": true,
+              "id": 1777502099138,
+              "color": "yellow",
+              "y": 17.725321888412015
+            },
+            {
+              "x": 0,
+              "type": "arrow",
+              "endPoint": {
+                "y": 7.592274678111588,
+                "x": 1.1373390557939913
+              },
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": true,
+              "id": 1777502099139,
+              "color": "yellow",
+              "y": 0,
+              "startPoint": {
+                "y": 17.128755364806867,
+                "x": 3.540772532188841
+              }
+            },
+            {
+              "x": 1.0085836909871244,
+              "radius": 0.5,
+              "type": "circle",
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": true,
+              "id": 1777502099140,
+              "color": "yellow",
+              "y": 7.017167381974248
+            },
+            {
+              "id": 1777502106453,
+              "type": "arrow",
+              "visibleOnlyAfterConfirmation": true,
+              "color": "red",
+              "endPoint": {
+                "y": 9.138666666666666,
+                "x": 4.016
+              },
+              "y": 0,
+              "x": 0,
+              "pointerAtBeginning": true,
+              "startPoint": {
+                "y": 10,
+                "x": 4.027333333333333
+              }
+            },
+            {
+              "text": "92 cantimeters",
+              "id": 1777502126637,
+              "type": "text",
+              "visibleOnlyAfterConfirmation": true,
+              "color": "red",
+              "y": 10.827333333333332,
+              "x": 3.188666666666666,
+              "fontSize": 14
+            }
+          ]
+        },
+        "frames": [
+          {
+            "id": 1,
+            "duration": 1000,
+            "visibleOnlyAfterConfirmation": false,
+            "players": [
+              {
+                "id": 1,
+                "team": 1,
+                "x": 2.66570373093825,
+                "y": 17.91313444333561,
+                "isUser": true
+              }
+            ],
+            "ball": {
+              "x": 1,
+              "y": 7,
+              "shot_type": "flat",
+              "spin": "random"
+            },
+            "shapes": [
+              {
+                "x": 3.669527896995708,
+                "radius": 0.5,
+                "type": "circle",
+                "dashed": true,
+                "y": 17.725321888412015,
+                "id": 1766252617384,
+                "color": "yellow",
+                "visibleOnlyAfterConfirmation": false
+              },
+              {
+                "x": 0,
+                "type": "arrow",
+                "endPoint": {
+                  "x": 1.1373390557939913,
+                  "y": 7.592274678111588
+                },
+                "dashed": true,
+                "y": 0,
+                "id": 1766252629384,
+                "color": "yellow",
+                "visibleOnlyAfterConfirmation": false,
+                "startPoint": {
+                  "x": 3.540772532188841,
+                  "y": 17.128755364806867
+                }
+              },
+              {
+                "x": 1.0085836909871244,
+                "radius": 0.5,
+                "type": "circle",
+                "dashed": true,
+                "visibleOnlyAfterConfirmation": false,
+                "id": 1766252637364,
+                "color": "yellow",
+                "y": 7.017167381974248
+              },
+              {
+                "x": 0.25316455696202533,
+                "width": 3.0843881856540083,
+                "height": 0.9451476793248954,
+                "fillColor": "#ff9182",
+                "type": "rect",
+                "fillOpacity": 0.7,
+                "visibleOnlyAfterConfirmation": true,
+                "id": 1776265378826,
+                "color": "#ff9182",
+                "y": 9.071729957805909
+              },
+              {
+                "x": 3.669527896995708,
+                "radius": 0.5,
+                "type": "circle",
+                "dashed": true,
+                "visibleOnlyAfterConfirmation": true,
+                "id": 1777502099138,
+                "color": "yellow",
+                "y": 17.725321888412015
+              },
+              {
+                "x": 0,
+                "type": "arrow",
+                "endPoint": {
+                  "y": 7.592274678111588,
+                  "x": 1.1373390557939913
+                },
+                "dashed": true,
+                "visibleOnlyAfterConfirmation": true,
+                "id": 1777502099139,
+                "color": "yellow",
+                "y": 0,
+                "startPoint": {
+                  "y": 17.128755364806867,
+                  "x": 3.540772532188841
+                }
+              },
+              {
+                "x": 1.0085836909871244,
+                "radius": 0.5,
+                "type": "circle",
+                "dashed": true,
+                "visibleOnlyAfterConfirmation": true,
+                "id": 1777502099140,
+                "color": "yellow",
+                "y": 7.017167381974248
+              },
+              {
+                "id": 1777502106453,
+                "type": "arrow",
+                "visibleOnlyAfterConfirmation": true,
+                "color": "red",
+                "endPoint": {
+                  "y": 9.138666666666666,
+                  "x": 4.016
+                },
+                "y": 0,
+                "x": 0,
+                "pointerAtBeginning": true,
+                "startPoint": {
+                  "y": 10,
+                  "x": 4.027333333333333
+                }
+              },
+              {
+                "text": "92 cantimeters",
+                "id": 1777502126637,
+                "type": "text",
+                "visibleOnlyAfterConfirmation": true,
+                "color": "red",
+                "y": 10.827333333333332,
+                "x": 3.188666666666666,
+                "fontSize": 14
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "letter": "B",
+        "text": "To the center",
+        "is_correct": true,
+        "explanation": "Net height is lowest at the center: 88 cm",
+        "coordinates": {
+          "x": 5,
+          "y": 6
+        },
+        "tag": null,
+        "tagPosition": null,
+        "select_frame": {
+          "id": 1,
+          "duration": 1000,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 3.0464202648264873,
+              "y": 17.981097868459297,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 5,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "id": 1766252585736,
+              "type": "circle",
+              "visibleOnlyAfterConfirmation": false,
+              "color": "yellow",
+              "y": 17.660944206008587,
+              "x": 3.71244635193133,
+              "dashed": true,
+              "radius": 0.5
+            },
+            {
+              "id": 1766252599680,
+              "type": "circle",
+              "visibleOnlyAfterConfirmation": false,
+              "color": "yellow",
+              "y": 7.03862660944206,
+              "x": 5,
+              "dashed": true,
+              "radius": 0.5
+            },
+            {
+              "id": 1766252604468,
+              "type": "arrow",
+              "visibleOnlyAfterConfirmation": false,
+              "color": "yellow",
+              "endPoint": {
+                "y": 7.613733905579399,
+                "x": 4.914163090128755
+              },
+              "y": 0,
+              "x": 0,
+              "dashed": true,
+              "startPoint": {
+                "y": 17.064377682403435,
+                "x": 3.798283261802575
+              }
+            }
+          ]
+        },
+        "confirmation_frame": {
+          "id": 1,
+          "duration": 1000,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 3.0464202648264873,
+              "y": 17.981097868459297,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 5,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "id": 1766252585736,
+              "type": "circle",
+              "visibleOnlyAfterConfirmation": false,
+              "color": "yellow",
+              "y": 17.660944206008587,
+              "x": 3.71244635193133,
+              "dashed": true,
+              "radius": 0.5
+            },
+            {
+              "id": 1766252599680,
+              "type": "circle",
+              "visibleOnlyAfterConfirmation": false,
+              "color": "yellow",
+              "y": 7.03862660944206,
+              "x": 5,
+              "dashed": true,
+              "radius": 0.5
+            },
+            {
+              "id": 1766252604468,
+              "type": "arrow",
+              "visibleOnlyAfterConfirmation": false,
+              "color": "yellow",
+              "endPoint": {
+                "y": 7.613733905579399,
+                "x": 4.914163090128755
+              },
+              "y": 0,
+              "x": 0,
+              "dashed": true,
+              "startPoint": {
+                "y": 17.064377682403435,
+                "x": 3.798283261802575
+              }
+            },
+            {
+              "fillColor": "#68fec3",
+              "id": 1776265330678,
+              "type": "rect",
+              "visibleOnlyAfterConfirmation": true,
+              "height": 0.9451476793248936,
+              "color": "#68fec3",
+              "width": 2.9999999999999996,
+              "y": 9.09282700421941,
+              "x": 3.649789029535865,
+              "fillOpacity": 0.7
+            },
+            {
+              "startPoint": {
+                "y": 10.056666666666665,
+                "x": 7.314
+              },
+              "y": 0,
+              "visibleOnlyAfterConfirmation": true,
+              "pointerAtBeginning": true,
+              "id": 1777500719523,
+              "endPoint": {
+                "y": 9.116,
+                "x": 7.279999999999999
+              },
+              "x": 0,
+              "color": "green",
+              "type": "arrow"
+            },
+            {
+              "text": "88 cantimeters",
+              "y": 10.748,
+              "visibleOnlyAfterConfirmation": true,
+              "fontSize": 14,
+              "id": 1777501734959,
+              "x": 6.917333333333333,
+              "color": "green",
+              "type": "text"
+            },
+            {
+              "startPoint": {
+                "y": 17.064377682403435,
+                "x": 3.798283261802575
+              },
+              "y": 0,
+              "visibleOnlyAfterConfirmation": true,
+              "dashed": true,
+              "id": 1777501828358,
+              "endPoint": {
+                "y": 7.613733905579399,
+                "x": 4.914163090128755
+              },
+              "x": 0,
+              "color": "yellow",
+              "type": "arrow"
+            },
+            {
+              "y": 17.660944206008587,
+              "visibleOnlyAfterConfirmation": true,
+              "dashed": true,
+              "radius": 0.5,
+              "id": 1777501842991,
+              "x": 3.71244635193133,
+              "color": "yellow",
+              "type": "circle"
+            },
+            {
+              "startPoint": {
+                "y": 17.064377682403435,
+                "x": 3.798283261802575
+              },
+              "dashed": true,
+              "color": "yellow",
+              "y": 0,
+              "endPoint": {
+                "y": 7.613733905579399,
+                "x": 4.914163090128755
+              },
+              "visibleOnlyAfterConfirmation": true,
+              "id": 1777501842992,
+              "x": 0,
+              "type": "arrow"
+            },
+            {
+              "dashed": true,
+              "color": "yellow",
+              "radius": 0.5,
+              "y": 7.03862660944206,
+              "visibleOnlyAfterConfirmation": true,
+              "id": 1777501862873,
+              "x": 5,
+              "type": "circle"
+            }
+          ]
+        },
+        "frames": [
+          {
+            "id": 1,
+            "duration": 1000,
+            "visibleOnlyAfterConfirmation": false,
+            "players": [
+              {
+                "id": 1,
+                "team": 1,
+                "x": 3.0464202648264873,
+                "y": 17.981097868459297,
+                "isUser": true
+              }
+            ],
+            "ball": {
+              "x": 5,
+              "y": 7,
+              "shot_type": "flat",
+              "spin": "random"
+            },
+            "shapes": [
+              {
+                "id": 1766252585736,
+                "type": "circle",
+                "visibleOnlyAfterConfirmation": false,
+                "color": "yellow",
+                "y": 17.660944206008587,
+                "x": 3.71244635193133,
+                "dashed": true,
+                "radius": 0.5
+              },
+              {
+                "id": 1766252599680,
+                "type": "circle",
+                "visibleOnlyAfterConfirmation": false,
+                "color": "yellow",
+                "y": 7.03862660944206,
+                "x": 5,
+                "dashed": true,
+                "radius": 0.5
+              },
+              {
+                "id": 1766252604468,
+                "type": "arrow",
+                "visibleOnlyAfterConfirmation": false,
+                "color": "yellow",
+                "endPoint": {
+                  "y": 7.613733905579399,
+                  "x": 4.914163090128755
+                },
+                "y": 0,
+                "x": 0,
+                "dashed": true,
+                "startPoint": {
+                  "y": 17.064377682403435,
+                  "x": 3.798283261802575
+                }
+              },
+              {
+                "fillColor": "#68fec3",
+                "id": 1776265330678,
+                "type": "rect",
+                "visibleOnlyAfterConfirmation": true,
+                "height": 0.9451476793248936,
+                "color": "#68fec3",
+                "width": 2.9999999999999996,
+                "y": 9.09282700421941,
+                "x": 3.649789029535865,
+                "fillOpacity": 0.7
+              },
+              {
+                "startPoint": {
+                  "y": 10.056666666666665,
+                  "x": 7.314
+                },
+                "y": 0,
+                "visibleOnlyAfterConfirmation": true,
+                "pointerAtBeginning": true,
+                "id": 1777500719523,
+                "endPoint": {
+                  "y": 9.116,
+                  "x": 7.279999999999999
+                },
+                "x": 0,
+                "color": "green",
+                "type": "arrow"
+              },
+              {
+                "text": "88 cantimeters",
+                "y": 10.748,
+                "visibleOnlyAfterConfirmation": true,
+                "fontSize": 14,
+                "id": 1777501734959,
+                "x": 6.917333333333333,
+                "color": "green",
+                "type": "text"
+              },
+              {
+                "startPoint": {
+                  "y": 17.064377682403435,
+                  "x": 3.798283261802575
+                },
+                "y": 0,
+                "visibleOnlyAfterConfirmation": true,
+                "dashed": true,
+                "id": 1777501828358,
+                "endPoint": {
+                  "y": 7.613733905579399,
+                  "x": 4.914163090128755
+                },
+                "x": 0,
+                "color": "yellow",
+                "type": "arrow"
+              },
+              {
+                "y": 17.660944206008587,
+                "visibleOnlyAfterConfirmation": true,
+                "dashed": true,
+                "radius": 0.5,
+                "id": 1777501842991,
+                "x": 3.71244635193133,
+                "color": "yellow",
+                "type": "circle"
+              },
+              {
+                "startPoint": {
+                  "y": 17.064377682403435,
+                  "x": 3.798283261802575
+                },
+                "dashed": true,
+                "color": "yellow",
+                "y": 0,
+                "endPoint": {
+                  "y": 7.613733905579399,
+                  "x": 4.914163090128755
+                },
+                "visibleOnlyAfterConfirmation": true,
+                "id": 1777501842992,
+                "x": 0,
+                "type": "arrow"
+              },
+              {
+                "dashed": true,
+                "color": "yellow",
+                "radius": 0.5,
+                "y": 7.03862660944206,
+                "visibleOnlyAfterConfirmation": true,
+                "id": 1777501862873,
+                "x": 5,
+                "type": "circle"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "letter": "C",
+        "text": "To the right",
+        "is_correct": false,
+        "explanation": "Net height is highest at the edges: 92 cm",
+        "coordinates": {
+          "y": 6,
+          "x": 9
+        },
+        "tag": null,
+        "tagPosition": null,
+        "select_frame": {
+          "id": 1,
+          "duration": 800,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 3.220996417187791,
+              "y": 18.000758213263175,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 9,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "dashed": true,
+              "color": "yellow",
+              "radius": 0.5,
+              "y": 17.682403433476395,
+              "visibleOnlyAfterConfirmation": false,
+              "id": 1766252653534,
+              "x": 3.7339055793991416,
+              "type": "circle"
+            },
+            {
+              "x": 0,
+              "color": "yellow",
+              "y": 0,
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": false,
+              "startPoint": {
+                "x": 3.927038626609442,
+                "y": 17.085836909871244
+              },
+              "type": "arrow",
+              "endPoint": {
+                "x": 8.669527896995708,
+                "y": 7.570815450643777
+              },
+              "id": 1766252669116
+            },
+            {
+              "x": 9.012875536480687,
+              "color": "yellow",
+              "y": 7.017167381974248,
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": false,
+              "radius": 0.5,
+              "type": "circle",
+              "id": 1766252678434
+            }
+          ]
+        },
+        "confirmation_frame": {
+          "id": 1,
+          "duration": 800,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 3.220996417187791,
+              "y": 18.000758213263175,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 9,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "dashed": true,
+              "color": "yellow",
+              "radius": 0.5,
+              "y": 17.682403433476395,
+              "visibleOnlyAfterConfirmation": false,
+              "id": 1766252653534,
+              "x": 3.7339055793991416,
+              "type": "circle"
+            },
+            {
+              "x": 0,
+              "color": "yellow",
+              "y": 0,
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": false,
+              "startPoint": {
+                "x": 3.927038626609442,
+                "y": 17.085836909871244
+              },
+              "type": "arrow",
+              "endPoint": {
+                "x": 8.669527896995708,
+                "y": 7.570815450643777
+              },
+              "id": 1766252669116
+            },
+            {
+              "x": 9.012875536480687,
+              "color": "yellow",
+              "y": 7.017167381974248,
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": false,
+              "radius": 0.5,
+              "type": "circle",
+              "id": 1766252678434
+            },
+            {
+              "x": 6.772151898734178,
+              "color": "#ff9182",
+              "y": 9.113924050632912,
+              "fillColor": "#ff9182",
+              "visibleOnlyAfterConfirmation": true,
+              "width": 2.9789029535864966,
+              "fillOpacity": 0.7,
+              "type": "rect",
+              "height": 0.9240506329113938,
+              "id": 1776265414390
+            },
+            {
+              "x": 3.7339055793991416,
+              "color": "yellow",
+              "y": 17.682403433476395,
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": true,
+              "radius": 0.5,
+              "type": "circle",
+              "id": 1777502013639
+            },
+            {
+              "x": 0,
+              "color": "yellow",
+              "y": 0,
+              "dashed": true,
+              "visibleOnlyAfterConfirmation": true,
+              "startPoint": {
+                "x": 3.927038626609442,
+                "y": 17.085836909871244
+              },
+              "type": "arrow",
+              "endPoint": {
+                "x": 8.669527896995708,
+                "y": 7.570815450643777
+              },
+              "id": 1777502013640
+            },
+            {
+              "type": "circle",
+              "dashed": true,
+              "radius": 0.5,
+              "visibleOnlyAfterConfirmation": true,
+              "id": 1777502013641,
+              "x": 9.012875536480687,
+              "color": "yellow",
+              "y": 7.017167381974248
+            },
+            {
+              "type": "arrow",
+              "visibleOnlyAfterConfirmation": true,
+              "startPoint": {
+                "x": 6.305333333333333,
+                "y": 10.045333333333332
+              },
+              "endPoint": {
+                "x": 6.294,
+                "y": 9.161333333333332
+              },
+              "id": 1777502023122,
+              "pointerAtBeginning": true,
+              "x": 0,
+              "color": "red",
+              "y": 0
+            },
+            {
+              "type": "text",
+              "visibleOnlyAfterConfirmation": true,
+              "id": 1777502040055,
+              "text": "92 cantimeters",
+              "fontSize": 14,
+              "x": 5.138,
+              "color": "red",
+              "y": 10.884
+            }
+          ]
+        },
+        "frames": [
+          {
+            "id": 1,
+            "duration": 800,
+            "visibleOnlyAfterConfirmation": false,
+            "players": [
+              {
+                "id": 1,
+                "team": 1,
+                "x": 3.220996417187791,
+                "y": 18.000758213263175,
+                "isUser": true
+              }
+            ],
+            "ball": {
+              "x": 9,
+              "y": 7,
+              "shot_type": "flat",
+              "spin": "random"
+            },
+            "shapes": [
+              {
+                "dashed": true,
+                "color": "yellow",
+                "radius": 0.5,
+                "y": 17.682403433476395,
+                "visibleOnlyAfterConfirmation": false,
+                "id": 1766252653534,
+                "x": 3.7339055793991416,
+                "type": "circle"
+              },
+              {
+                "x": 0,
+                "color": "yellow",
+                "y": 0,
+                "dashed": true,
+                "visibleOnlyAfterConfirmation": false,
+                "startPoint": {
+                  "x": 3.927038626609442,
+                  "y": 17.085836909871244
+                },
+                "type": "arrow",
+                "endPoint": {
+                  "x": 8.669527896995708,
+                  "y": 7.570815450643777
+                },
+                "id": 1766252669116
+              },
+              {
+                "x": 9.012875536480687,
+                "color": "yellow",
+                "y": 7.017167381974248,
+                "dashed": true,
+                "visibleOnlyAfterConfirmation": false,
+                "radius": 0.5,
+                "type": "circle",
+                "id": 1766252678434
+              },
+              {
+                "x": 6.772151898734178,
+                "color": "#ff9182",
+                "y": 9.113924050632912,
+                "fillColor": "#ff9182",
+                "visibleOnlyAfterConfirmation": true,
+                "width": 2.9789029535864966,
+                "fillOpacity": 0.7,
+                "type": "rect",
+                "height": 0.9240506329113938,
+                "id": 1776265414390
+              },
+              {
+                "x": 3.7339055793991416,
+                "color": "yellow",
+                "y": 17.682403433476395,
+                "dashed": true,
+                "visibleOnlyAfterConfirmation": true,
+                "radius": 0.5,
+                "type": "circle",
+                "id": 1777502013639
+              },
+              {
+                "x": 0,
+                "color": "yellow",
+                "y": 0,
+                "dashed": true,
+                "visibleOnlyAfterConfirmation": true,
+                "startPoint": {
+                  "x": 3.927038626609442,
+                  "y": 17.085836909871244
+                },
+                "type": "arrow",
+                "endPoint": {
+                  "x": 8.669527896995708,
+                  "y": 7.570815450643777
+                },
+                "id": 1777502013640
+              },
+              {
+                "type": "circle",
+                "dashed": true,
+                "radius": 0.5,
+                "visibleOnlyAfterConfirmation": true,
+                "id": 1777502013641,
+                "x": 9.012875536480687,
+                "color": "yellow",
+                "y": 7.017167381974248
+              },
+              {
+                "type": "arrow",
+                "visibleOnlyAfterConfirmation": true,
+                "startPoint": {
+                  "x": 6.305333333333333,
+                  "y": 10.045333333333332
+                },
+                "endPoint": {
+                  "x": 6.294,
+                  "y": 9.161333333333332
+                },
+                "id": 1777502023122,
+                "pointerAtBeginning": true,
+                "x": 0,
+                "color": "red",
+                "y": 0
+              },
+              {
+                "type": "text",
+                "visibleOnlyAfterConfirmation": true,
+                "id": 1777502040055,
+                "text": "92 cantimeters",
+                "fontSize": 14,
+                "x": 5.138,
+                "color": "red",
+                "y": 10.884
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "translations": {
+      "ru": {
+        "content": "Если хочешь безопасно вернуть мяч и не попасть в сетку, куда лучше направить удар?",
+        "options": [
+          {
+            "id": 1,
+            "text": "Влево",
+            "explanation": "По краям сетка выше: 92 см, сложнее перебить."
+          },
+          {
+            "id": 2,
+            "text": "В центр",
+            "explanation": "По центру сетка ниже всего: 88 см, проще перебить."
+          },
+          {
+            "id": 3,
+            "text": "Вправо",
+            "explanation": "По краям сетка выше: 92 см, сложнее перебить."
+          }
+        ]
+      },
+      "pt": {
+        "content": "Para onde você deve devolver a bola para acertar a rede com o menor risco?",
+        "options": [
+          {
+            "explanation": "A altura da rede é máxima nas bordas: 92 cm",
+            "id": 1,
+            "text": "Para a esquerda"
+          },
+          {
+            "explanation": "A altura da rede é mínima no centro: 88 cm",
+            "id": 2,
+            "text": "Para o centro"
+          },
+          {
+            "explanation": "A altura da rede é máxima nas bordas: 92 cm",
+            "id": 3,
+            "text": "Para a direita"
+          }
+        ]
+      },
+      "es": {
+        "content": "¿Dónde debes devolver la pelota para golpear la red con el menor riesgo?",
+        "options": [
+          {
+            "explanation": "La altura de la red es máxima en los bordes: 92 cm",
+            "text": "A la izquierda",
+            "id": 1
+          },
+          {
+            "explanation": "La altura de la red es mínima en el centro: 88 cm",
+            "text": "Al centro",
+            "id": 2
+          },
+          {
+            "explanation": "La altura de la red es máxima en los bordes: 92 cm",
+            "text": "A la derecha",
+            "id": 3
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": 27,
+    "title": "Hard ball for them",
+    "content": "You're at the net and played a difficult shot for the opponent. What should you do?",
+    "courtPosition": "left",
+    "published": true,
+    "tags": [
+      "6941544555998c52cf296fb0",
+      "694153fb55998c52cf296fae"
+    ],
+    "thumbnailUrl": "https://ifjtpmqxdtmdv4wv.public.blob.vercel-storage.com/thumbnails/27.png",
+    "initialFrames": [
+      {
+        "id": 1,
+        "duration": 800,
+        "visibleOnlyAfterConfirmation": false,
+        "players": [
+          {
+            "id": 1,
+            "team": 1,
+            "x": 2.4932735426008965,
+            "y": 12.670403587443946,
+            "isUser": true
+          },
+          {
+            "id": 2,
+            "team": 1,
+            "x": 7.192825112107624,
+            "y": 12.647982062780269,
+            "isUser": false
+          },
+          {
+            "id": 3,
+            "team": 2,
+            "x": 2,
+            "y": 1.5,
+            "isUser": false
+          },
+          {
+            "id": 4,
+            "team": 2,
+            "x": 8,
+            "y": 1.5,
+            "isUser": false
+          }
+        ],
+        "ball": {
+          "x": 0.9641255605381166,
+          "y": 0.5269058295964125
+        },
+        "shapes": [
+          {
+            "type": "circle",
+            "id": 1765985799191,
+            "dashed": true,
+            "y": 11.995708154506437,
+            "color": "yellow",
+            "x": 3.304721030042918,
+            "radius": 0.5
+          },
+          {
+            "type": "arrow",
+            "id": 1765985806173,
+            "dashed": true,
+            "y": 0,
+            "color": "yellow",
+            "x": 0,
+            "startPoint": {
+              "x": 3.1759656652360517,
+              "y": 11.356223175965665
+            },
+            "endPoint": {
+              "y": 1.1115879828326183,
+              "x": 1.0300429184549362
+            }
+          },
+          {
+            "type": "circle",
+            "visibleOnlyAfterConfirmation": false,
+            "id": 1767961691842,
+            "dashed": true,
+            "y": 0.569620253164557,
+            "color": "yellow",
+            "x": 0.9704641350210971,
+            "radius": 0.5
+          }
+        ]
+      }
+    ],
+    "options": [
+      {
+        "id": 1,
+        "letter": "A",
+        "text": "Step forward and try to finish the point after opponent's return ",
+        "is_correct": true,
+        "explanation": "You're in a good position to play a fast volley, pop out or a flat smash to win the point.",
+        "coordinates": {
+          "y": 10.928251121076231,
+          "x": 0.946188340807175
+        },
+        "tag": null,
+        "tagPosition": null,
+        "select_frame": {
+          "id": 1,
+          "duration": 1100,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.493273542600897,
+              "y": 11.213004484304934,
+              "isUser": true
+            },
+            {
+              "id": 2,
+              "team": 1,
+              "x": 6.228699551569507,
+              "y": 11.39237668161435,
+              "isUser": false
+            },
+            {
+              "id": 3,
+              "team": 2,
+              "x": 2,
+              "y": 1.5,
+              "isUser": false
+            },
+            {
+              "id": 4,
+              "team": 2,
+              "x": 8,
+              "y": 1.5,
+              "isUser": false
+            }
+          ],
+          "ball": {
+            "x": 1.7713004484304933,
+            "y": 9.899103139013453,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "startPoint": {
+                "x": 2.381974248927039,
+                "y": 12.92274678111588
+              },
+              "color": "yellow",
+              "dashed": true,
+              "id": 1765985753580,
+              "endPoint": {
+                "x": 2.3390557939914167,
+                "y": 12.29184549356223
+              }
+            },
+            {
+              "radius": 0.5,
+              "type": "circle",
+              "x": 2.4678111587982836,
+              "y": 13.454935622317596,
+              "color": "yellow",
+              "dashed": true,
+              "id": 1765985777124
+            },
+            {
+              "radius": 0.5,
+              "type": "circle",
+              "x": 0.759493670886076,
+              "y": 0.5274261603375527,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "dashed": true,
+              "id": 1767961780994
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "startPoint": {
+                "x": 0.7383966244725738,
+                "y": 1.1139240506329116
+              },
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "dashed": true,
+              "id": 1767961783642,
+              "endPoint": {
+                "x": 1.6666666666666667,
+                "y": 9.329113924050633
+              }
+            },
+            {
+              "radius": 0.5,
+              "type": "circle",
+              "x": 1.7721518987341773,
+              "y": 9.957805907172997,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "dashed": true,
+              "id": 1767961792842
+            }
+          ]
+        },
+        "confirmation_frame": {
+          "id": 1767961675341,
+          "duration": 1100,
+          "visibleOnlyAfterConfirmation": true,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.493273542600897,
+              "y": 11.213004484304934,
+              "isUser": true
+            },
+            {
+              "id": 2,
+              "team": 1,
+              "x": 6.228699551569507,
+              "y": 11.39237668161435,
+              "isUser": false,
+              "speechLabel": "me gusta!"
+            },
+            {
+              "id": 3,
+              "team": 2,
+              "x": 2,
+              "y": 1.5,
+              "isUser": false
+            },
+            {
+              "id": 4,
+              "team": 2,
+              "x": 8,
+              "y": 1.5,
+              "isUser": false
+            }
+          ],
+          "ball": {
+            "x": 1.7713004484304933,
+            "y": 9.899103139013453,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "startPoint": {
+                "x": 2.381974248927039,
+                "y": 12.92274678111588
+              },
+              "color": "yellow",
+              "dashed": true,
+              "id": 1765985753580,
+              "endPoint": {
+                "x": 2.3390557939914167,
+                "y": 12.29184549356223
+              }
+            },
+            {
+              "radius": 0.5,
+              "type": "circle",
+              "x": 2.4678111587982836,
+              "y": 13.454935622317596,
+              "color": "yellow",
+              "dashed": true,
+              "id": 1765985777124
+            },
+            {
+              "radius": 0.5,
+              "type": "circle",
+              "x": 0.759493670886076,
+              "y": 0.5274261603375527,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "dashed": true,
+              "id": 1767961780994
+            },
+            {
+              "type": "arrow",
+              "x": 0,
+              "y": 0,
+              "startPoint": {
+                "x": 0.7383966244725738,
+                "y": 1.1139240506329116
+              },
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "dashed": true,
+              "id": 1767961783642,
+              "endPoint": {
+                "x": 1.6666666666666667,
+                "y": 9.329113924050633
+              }
+            },
+            {
+              "radius": 0.5,
+              "type": "circle",
+              "x": 1.7721518987341773,
+              "y": 9.957805907172997,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "dashed": true,
+              "id": 1767961792842
+            }
+          ]
+        },
+        "frames": [
+          {
+            "id": 1,
+            "duration": 1100,
+            "visibleOnlyAfterConfirmation": false,
+            "players": [
+              {
+                "id": 1,
+                "team": 1,
+                "x": 2.493273542600897,
+                "y": 11.213004484304934,
+                "isUser": true
+              },
+              {
+                "id": 2,
+                "team": 1,
+                "x": 6.228699551569507,
+                "y": 11.39237668161435,
+                "isUser": false
+              },
+              {
+                "id": 3,
+                "team": 2,
+                "x": 2,
+                "y": 1.5,
+                "isUser": false
+              },
+              {
+                "id": 4,
+                "team": 2,
+                "x": 8,
+                "y": 1.5,
+                "isUser": false
+              }
+            ],
+            "ball": {
+              "x": 1.7713004484304933,
+              "y": 9.899103139013453,
+              "shot_type": "flat",
+              "spin": "random"
+            },
+            "shapes": [
+              {
+                "type": "arrow",
+                "x": 0,
+                "y": 0,
+                "startPoint": {
+                  "x": 2.381974248927039,
+                  "y": 12.92274678111588
+                },
+                "color": "yellow",
+                "dashed": true,
+                "id": 1765985753580,
+                "endPoint": {
+                  "x": 2.3390557939914167,
+                  "y": 12.29184549356223
+                }
+              },
+              {
+                "radius": 0.5,
+                "type": "circle",
+                "x": 2.4678111587982836,
+                "y": 13.454935622317596,
+                "color": "yellow",
+                "dashed": true,
+                "id": 1765985777124
+              },
+              {
+                "radius": 0.5,
+                "type": "circle",
+                "x": 0.759493670886076,
+                "y": 0.5274261603375527,
+                "color": "yellow",
+                "visibleOnlyAfterConfirmation": false,
+                "dashed": true,
+                "id": 1767961780994
+              },
+              {
+                "type": "arrow",
+                "x": 0,
+                "y": 0,
+                "startPoint": {
+                  "x": 0.7383966244725738,
+                  "y": 1.1139240506329116
+                },
+                "color": "yellow",
+                "visibleOnlyAfterConfirmation": false,
+                "dashed": true,
+                "id": 1767961783642,
+                "endPoint": {
+                  "x": 1.6666666666666667,
+                  "y": 9.329113924050633
+                }
+              },
+              {
+                "radius": 0.5,
+                "type": "circle",
+                "x": 1.7721518987341773,
+                "y": 9.957805907172997,
+                "color": "yellow",
+                "visibleOnlyAfterConfirmation": false,
+                "dashed": true,
+                "id": 1767961792842
+              }
+            ]
+          },
+          {
+            "id": 1767961675341,
+            "duration": 1100,
+            "visibleOnlyAfterConfirmation": true,
+            "players": [
+              {
+                "id": 1,
+                "team": 1,
+                "x": 2.493273542600897,
+                "y": 11.213004484304934,
+                "isUser": true
+              },
+              {
+                "id": 2,
+                "team": 1,
+                "x": 6.228699551569507,
+                "y": 11.39237668161435,
+                "isUser": false,
+                "speechLabel": "me gusta!"
+              },
+              {
+                "id": 3,
+                "team": 2,
+                "x": 2,
+                "y": 1.5,
+                "isUser": false
+              },
+              {
+                "id": 4,
+                "team": 2,
+                "x": 8,
+                "y": 1.5,
+                "isUser": false
+              }
+            ],
+            "ball": {
+              "x": 1.7713004484304933,
+              "y": 9.899103139013453,
+              "shot_type": "flat",
+              "spin": "random"
+            },
+            "shapes": [
+              {
+                "type": "arrow",
+                "y": 0,
+                "x": 0,
+                "startPoint": {
+                  "y": 12.92274678111588,
+                  "x": 2.381974248927039
+                },
+                "color": "yellow",
+                "id": 1765985753580,
+                "dashed": true,
+                "endPoint": {
+                  "y": 12.29184549356223,
+                  "x": 2.3390557939914167
+                }
+              },
+              {
+                "dashed": true,
+                "color": "yellow",
+                "type": "circle",
+                "radius": 0.5,
+                "x": 2.4678111587982836,
+                "id": 1765985777124,
+                "y": 13.454935622317596
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "letter": "B",
+        "text": "Stay at the same position",
+        "is_correct": false,
+        "explanation": "You're missing an opportunity to finish the point on the next shot.",
+        "coordinates": {
+          "y": 13.013452914798206,
+          "x": 0.9573991031390138
+        },
+        "tag": null,
+        "tagPosition": null,
+        "select_frame": {
+          "id": 1,
+          "duration": 800,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.4932735426008965,
+              "y": 12.670403587443946,
+              "isUser": true
+            },
+            {
+              "id": 2,
+              "team": 1,
+              "x": 7.192825112107624,
+              "y": 12.647982062780269,
+              "isUser": false
+            },
+            {
+              "id": 3,
+              "team": 2,
+              "x": 2,
+              "y": 1.5,
+              "isUser": false
+            },
+            {
+              "id": 4,
+              "team": 2,
+              "x": 8,
+              "y": 1.5,
+              "isUser": false
+            }
+          ],
+          "ball": {
+            "x": 2.0627802690582957,
+            "y": 11.221973094170403,
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "visibleOnlyAfterConfirmation": false,
+              "y": 0.5907172995780591,
+              "type": "circle",
+              "color": "yellow",
+              "id": 1767961804542,
+              "dashed": true,
+              "x": 0.7805907172995781,
+              "radius": 0.5
+            },
+            {
+              "type": "arrow",
+              "visibleOnlyAfterConfirmation": false,
+              "id": 1767961806978,
+              "dashed": true,
+              "color": "yellow",
+              "y": 0,
+              "x": 0,
+              "startPoint": {
+                "y": 1.19831223628692,
+                "x": 0.8016877637130804
+              },
+              "endPoint": {
+                "y": 10.616033755274263,
+                "x": 1.9409282700421941
+              }
+            },
+            {
+              "type": "circle",
+              "visibleOnlyAfterConfirmation": false,
+              "id": 1767961817619,
+              "dashed": true,
+              "color": "yellow",
+              "y": 11.265822784810126,
+              "x": 2.067510548523207,
+              "radius": 0.5
+            }
+          ]
+        },
+        "confirmation_frame": {
+          "id": 1,
+          "duration": 800,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 2.4932735426008965,
+              "y": 12.670403587443946,
+              "isUser": true
+            },
+            {
+              "id": 2,
+              "team": 1,
+              "x": 7.192825112107624,
+              "y": 12.647982062780269,
+              "isUser": false
+            },
+            {
+              "id": 3,
+              "team": 2,
+              "x": 2,
+              "y": 1.5,
+              "isUser": false
+            },
+            {
+              "id": 4,
+              "team": 2,
+              "x": 8,
+              "y": 1.5,
+              "isUser": false
+            }
+          ],
+          "ball": {
+            "x": 2.0627802690582957,
+            "y": 11.221973094170403,
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "visibleOnlyAfterConfirmation": false,
+              "y": 0.5907172995780591,
+              "type": "circle",
+              "color": "yellow",
+              "id": 1767961804542,
+              "dashed": true,
+              "x": 0.7805907172995781,
+              "radius": 0.5
+            },
+            {
+              "type": "arrow",
+              "visibleOnlyAfterConfirmation": false,
+              "id": 1767961806978,
+              "dashed": true,
+              "color": "yellow",
+              "y": 0,
+              "x": 0,
+              "startPoint": {
+                "y": 1.19831223628692,
+                "x": 0.8016877637130804
+              },
+              "endPoint": {
+                "y": 10.616033755274263,
+                "x": 1.9409282700421941
+              }
+            },
+            {
+              "type": "circle",
+              "visibleOnlyAfterConfirmation": false,
+              "id": 1767961817619,
+              "dashed": true,
+              "color": "yellow",
+              "y": 11.265822784810126,
+              "x": 2.067510548523207,
+              "radius": 0.5
+            }
+          ]
+        },
+        "frames": [
+          {
+            "id": 1,
+            "duration": 800,
+            "visibleOnlyAfterConfirmation": false,
+            "players": [
+              {
+                "id": 1,
+                "team": 1,
+                "x": 2.4932735426008965,
+                "y": 12.670403587443946,
+                "isUser": true
+              },
+              {
+                "id": 2,
+                "team": 1,
+                "x": 7.192825112107624,
+                "y": 12.647982062780269,
+                "isUser": false
+              },
+              {
+                "id": 3,
+                "team": 2,
+                "x": 2,
+                "y": 1.5,
+                "isUser": false
+              },
+              {
+                "id": 4,
+                "team": 2,
+                "x": 8,
+                "y": 1.5,
+                "isUser": false
+              }
+            ],
+            "ball": {
+              "x": 2.0627802690582957,
+              "y": 11.221973094170403,
+              "spin": "random"
+            },
+            "shapes": [
+              {
+                "visibleOnlyAfterConfirmation": false,
+                "y": 0.5907172995780591,
+                "type": "circle",
+                "color": "yellow",
+                "id": 1767961804542,
+                "dashed": true,
+                "x": 0.7805907172995781,
+                "radius": 0.5
+              },
+              {
+                "type": "arrow",
+                "visibleOnlyAfterConfirmation": false,
+                "id": 1767961806978,
+                "dashed": true,
+                "color": "yellow",
+                "y": 0,
+                "x": 0,
+                "startPoint": {
+                  "y": 1.19831223628692,
+                  "x": 0.8016877637130804
+                },
+                "endPoint": {
+                  "y": 10.616033755274263,
+                  "x": 1.9409282700421941
+                }
+              },
+              {
+                "type": "circle",
+                "visibleOnlyAfterConfirmation": false,
+                "id": 1767961817619,
+                "dashed": true,
+                "color": "yellow",
+                "y": 11.265822784810126,
+                "x": 2.067510548523207,
+                "radius": 0.5
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "translations": {
+      "ru": {
+        "content": "Вы с партнером у сетки. Ты сыграл сложный для соперника мяч. Что тебе следует делать?",
+        "options": [
+          {
+            "explanation": "Ты в хорошей позиции, чтобы сыграть быстрый удар с лету (volley), смэш (flat smash) или выбить мяч за пределы корта (pop out). ",
+            "text": "Сделать шаг вперед и попытаться закончить розыгрыш сразу после ответа от соперника",
+            "id": 1
+          },
+          {
+            "explanation": "Ты упускаешь возможность закончить розыгрыш при следующем ударе",
+            "text": "Остаться на той же позиции",
+            "id": 2
+          }
+        ]
+      }
+    }
+  },
+  {
+    "id": 151,
+    "title": "Net’s height",
+    "content": "Where you should return the ball to reach the net with the least risk?",
+    "courtPosition": "right",
+    "published": true,
+    "tags": [
+      "694141f155998c52cf296fac",
+      "694141cf55998c52cf296fab"
+    ],
+    "thumbnailUrl": "https://ifjtpmqxdtmdv4wv.public.blob.vercel-storage.com/thumbnails/1.png",
+    "initialFrames": [
+      {
+        "id": 1,
+        "duration": 800,
+        "visibleOnlyAfterConfirmation": false,
+        "players": [
+          {
+            "id": 1,
+            "team": 1,
+            "x": 7.215767634854772,
+            "y": 18.29253112033195,
+            "isUser": true
+          }
+        ],
+        "ball": {
+          "x": 6.244813278008299,
+          "y": 17.479253112033195
+        },
+        "shapes": []
+      }
+    ],
+    "options": [
+      {
+        "id": 1,
+        "letter": "A",
+        "text": "To the right",
+        "is_correct": false,
+        "explanation": "Net height is highest at the edges: 92 cm",
+        "coordinates": {
+          "y": 6,
+          "x": 1
+        },
+        "tag": null,
+        "tagPosition": null,
+        "select_frame": {
+          "id": 1,
+          "duration": 800,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 6.572614107883817,
+              "y": 18.271784232365146,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 1,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "x": 6.288131905256799,
+              "id": 1766011288204,
+              "type": "circle",
+              "radius": 0.5,
+              "visibleOnlyAfterConfirmation": false,
+              "y": 17.445008460236885,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "startPoint": {
+                "y": 16.94077834179357,
+                "x": 5.983048032959136
+              },
+              "x": 0,
+              "endPoint": {
+                "y": 7.526226734348562,
+                "x": 1.2372989083288242
+              },
+              "id": 1766011294937,
+              "type": "arrow",
+              "visibleOnlyAfterConfirmation": false,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow"
+            }
+          ]
+        },
+        "confirmation_frame": {
+          "id": 1,
+          "duration": 800,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 6.572614107883817,
+              "y": 18.271784232365146,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 1,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "x": 6.288131905256799,
+              "id": 1766011288204,
+              "type": "circle",
+              "radius": 0.5,
+              "visibleOnlyAfterConfirmation": false,
+              "y": 17.445008460236885,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "startPoint": {
+                "y": 16.94077834179357,
+                "x": 5.983048032959136
+              },
+              "x": 0,
+              "endPoint": {
+                "y": 7.526226734348562,
+                "x": 1.2372989083288242
+              },
+              "id": 1766011294937,
+              "type": "arrow",
+              "visibleOnlyAfterConfirmation": false,
+              "y": 0,
+              "dashed": true,
+              "color": "yellow"
+            }
+          ]
+        },
+        "frames": [
+          {
+            "id": 1,
+            "duration": 800,
+            "visibleOnlyAfterConfirmation": false,
+            "players": [
+              {
+                "id": 1,
+                "team": 1,
+                "x": 6.572614107883817,
+                "y": 18.271784232365146,
+                "isUser": true
+              }
+            ],
+            "ball": {
+              "x": 1,
+              "y": 7,
+              "shot_type": "flat",
+              "spin": "random"
+            },
+            "shapes": [
+              {
+                "x": 6.288131905256799,
+                "id": 1766011288204,
+                "type": "circle",
+                "radius": 0.5,
+                "visibleOnlyAfterConfirmation": false,
+                "y": 17.445008460236885,
+                "dashed": true,
+                "color": "yellow"
+              },
+              {
+                "startPoint": {
+                  "y": 16.94077834179357,
+                  "x": 5.983048032959136
+                },
+                "x": 0,
+                "endPoint": {
+                  "y": 7.526226734348562,
+                  "x": 1.2372989083288242
+                },
+                "id": 1766011294937,
+                "type": "arrow",
+                "visibleOnlyAfterConfirmation": false,
+                "y": 0,
+                "dashed": true,
+                "color": "yellow"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "letter": "B",
+        "text": "To the center",
+        "is_correct": true,
+        "explanation": "Net height is lowest at the center: 88 cm",
+        "coordinates": {
+          "y": 6,
+          "x": 5
+        },
+        "tag": null,
+        "tagPosition": null,
+        "select_frame": {
+          "id": 1,
+          "duration": 1000,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 6.723628100622407,
+              "y": 18.312904732365144,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 5,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "x": 6.152539073124505,
+              "id": 1766011257521,
+              "type": "circle",
+              "radius": 0.5,
+              "visibleOnlyAfterConfirmation": false,
+              "y": 17.54653130287648,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "y": 0,
+              "id": 1766011267320,
+              "startPoint": {
+                "y": 16.703891708967852,
+                "x": 5.983048032959135
+              },
+              "x": 0,
+              "dashed": true,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "type": "arrow",
+              "endPoint": {
+                "y": 7.593908629441624,
+                "x": 5.067796416066147
+              }
+            }
+          ]
+        },
+        "confirmation_frame": {
+          "id": 1,
+          "duration": 1000,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 6.723628100622407,
+              "y": 18.312904732365144,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 5,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "x": 6.152539073124505,
+              "id": 1766011257521,
+              "type": "circle",
+              "radius": 0.5,
+              "visibleOnlyAfterConfirmation": false,
+              "y": 17.54653130287648,
+              "dashed": true,
+              "color": "yellow"
+            },
+            {
+              "y": 0,
+              "id": 1766011267320,
+              "startPoint": {
+                "y": 16.703891708967852,
+                "x": 5.983048032959135
+              },
+              "x": 0,
+              "dashed": true,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "type": "arrow",
+              "endPoint": {
+                "y": 7.593908629441624,
+                "x": 5.067796416066147
+              }
+            }
+          ]
+        },
+        "frames": [
+          {
+            "id": 1,
+            "duration": 1000,
+            "visibleOnlyAfterConfirmation": false,
+            "players": [
+              {
+                "id": 1,
+                "team": 1,
+                "x": 6.723628100622407,
+                "y": 18.312904732365144,
+                "isUser": true
+              }
+            ],
+            "ball": {
+              "x": 5,
+              "y": 7,
+              "shot_type": "flat",
+              "spin": "random"
+            },
+            "shapes": [
+              {
+                "x": 6.152539073124505,
+                "id": 1766011257521,
+                "type": "circle",
+                "radius": 0.5,
+                "visibleOnlyAfterConfirmation": false,
+                "y": 17.54653130287648,
+                "dashed": true,
+                "color": "yellow"
+              },
+              {
+                "y": 0,
+                "id": 1766011267320,
+                "startPoint": {
+                  "y": 16.703891708967852,
+                  "x": 5.983048032959135
+                },
+                "x": 0,
+                "dashed": true,
+                "color": "yellow",
+                "visibleOnlyAfterConfirmation": false,
+                "type": "arrow",
+                "endPoint": {
+                  "y": 7.593908629441624,
+                  "x": 5.067796416066147
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": 3,
+        "letter": "C",
+        "text": "To the left",
+        "is_correct": false,
+        "explanation": "Net height is highest at the edges: 92 cm",
+        "coordinates": {
+          "y": 6,
+          "x": 9
+        },
+        "tag": null,
+        "tagPosition": null,
+        "select_frame": {
+          "id": 1,
+          "duration": 1000,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 7.796680497925311,
+              "y": 18.313278008298756,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 9,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "y": 17.478849407783418,
+              "id": 1766011308787,
+              "x": 6.355928321322946,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "type": "circle"
+            },
+            {
+              "y": 0,
+              "id": 1766011315653,
+              "startPoint": {
+                "y": 16.67005076142132,
+                "x": 6.3559283213229465
+              },
+              "x": 0,
+              "dashed": true,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "type": "arrow",
+              "endPoint": {
+                "y": 7.458544839255498,
+                "x": 8.830497507737324
+              }
+            }
+          ]
+        },
+        "confirmation_frame": {
+          "id": 1,
+          "duration": 1000,
+          "visibleOnlyAfterConfirmation": false,
+          "players": [
+            {
+              "id": 1,
+              "team": 1,
+              "x": 7.796680497925311,
+              "y": 18.313278008298756,
+              "isUser": true
+            }
+          ],
+          "ball": {
+            "x": 9,
+            "y": 7,
+            "shot_type": "flat",
+            "spin": "random"
+          },
+          "shapes": [
+            {
+              "y": 17.478849407783418,
+              "id": 1766011308787,
+              "x": 6.355928321322946,
+              "radius": 0.5,
+              "dashed": true,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "type": "circle"
+            },
+            {
+              "y": 0,
+              "id": 1766011315653,
+              "startPoint": {
+                "y": 16.67005076142132,
+                "x": 6.3559283213229465
+              },
+              "x": 0,
+              "dashed": true,
+              "color": "yellow",
+              "visibleOnlyAfterConfirmation": false,
+              "type": "arrow",
+              "endPoint": {
+                "y": 7.458544839255498,
+                "x": 8.830497507737324
+              }
+            }
+          ]
+        },
+        "frames": [
+          {
+            "id": 1,
+            "duration": 1000,
+            "visibleOnlyAfterConfirmation": false,
+            "players": [
+              {
+                "id": 1,
+                "team": 1,
+                "x": 7.796680497925311,
+                "y": 18.313278008298756,
+                "isUser": true
+              }
+            ],
+            "ball": {
+              "x": 9,
+              "y": 7,
+              "shot_type": "flat",
+              "spin": "random"
+            },
+            "shapes": [
+              {
+                "y": 17.478849407783418,
+                "id": 1766011308787,
+                "x": 6.355928321322946,
+                "radius": 0.5,
+                "dashed": true,
+                "color": "yellow",
+                "visibleOnlyAfterConfirmation": false,
+                "type": "circle"
+              },
+              {
+                "y": 0,
+                "id": 1766011315653,
+                "startPoint": {
+                  "y": 16.67005076142132,
+                  "x": 6.3559283213229465
+                },
+                "x": 0,
+                "dashed": true,
+                "color": "yellow",
+                "visibleOnlyAfterConfirmation": false,
+                "type": "arrow",
+                "endPoint": {
+                  "y": 7.458544839255498,
+                  "x": 8.830497507737324
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "translations": {
+      "ru": {
+        "content": "Если хочешь безопасно вернуть мяч и не попасть в сетку, куда лучше направить удар?",
+        "options": [
+          {
+            "explanation": "По краям сетка выше: 92 см, сложнее перебить.",
+            "id": 1,
+            "text": "Влево"
+          },
+          {
+            "explanation": "По центру сетка ниже всего: 88 см, проще перебить.",
+            "id": 2,
+            "text": "В центр"
+          },
+          {
+            "explanation": "По краям сетка выше: 92 см, сложнее перебить.",
+            "id": 3,
+            "text": "Вправо"
+          }
+        ]
+      },
+      "pt": {
+        "options": [
+          {
+            "explanation": "A altura da rede é máxima nas bordas: 92 cm",
+            "id": 1,
+            "text": "Para a esquerda"
+          },
+          {
+            "explanation": "A altura da rede é mínima no centro: 88 cm",
+            "id": 2,
+            "text": "Para o centro"
+          },
+          {
+            "id": 3,
+            "text": "Para a direita",
+            "explanation": "A altura da rede é máxima nas bordas: 92 cm"
+          }
+        ],
+        "content": "Para onde você deve devolver a bola para acertar a rede com o menor risco?"
+      },
+      "es": {
+        "options": [
+          {
+            "id": 1,
+            "text": "A la izquierda",
+            "explanation": "La altura de la red es máxima en los bordes: 92 cm"
+          },
+          {
+            "id": 2,
+            "text": "Al centro",
+            "explanation": "La altura de la red es mínima en el centro: 88 cm"
+          },
+          {
+            "id": 3,
+            "text": "A la derecha",
+            "explanation": "La altura de la red es máxima en los bordes: 92 cm"
+          }
+        ],
+        "content": "¿Dónde debes devolver la pelota para golpear la red con el menor riesgo?"
+      }
+    }
+  }
+]

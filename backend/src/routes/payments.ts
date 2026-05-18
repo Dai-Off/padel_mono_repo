@@ -19,7 +19,7 @@ import {
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import { insertGuestMatchPlayerAfterPayment } from '../services/matchPlayerSlotService';
 import { zonedTimeToUtc } from './learningTimezone';
-import { canAccessClub } from '../lib/clubAccess';
+import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
@@ -1574,6 +1574,7 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       .select('closed_at')
       .eq('club_id', clubId)
       .eq('for_date', dateStr)
+      .eq('record_kind', 'cierre')
       .order('closed_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -1754,12 +1755,49 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
     const systemCardTotalEur = Math.round((systemCardTotalCents / 100) * 100) / 100;
     const openingCashEur = Math.round((effectiveOpeningCashCents / 100) * 100) / 100;
 
+    let cashDepositsCents = 0;
+    let cashWithdrawalsCents = 0;
+    const cashMovements: Record<string, unknown>[] = [];
+    if (openingAfterLastClose) {
+      const sessionMovements = await loadSessionCashMovements(
+        supabase,
+        clubId,
+        dateStr,
+        closingCutoffMs,
+        openingRecord?.opened_at ? String(openingRecord.opened_at) : null,
+      );
+      for (const m of sessionMovements) {
+        cashMovements.push(m);
+        const cents = Math.trunc(Number(m.amount_cents ?? 0));
+        if (m.movement_type === 'deposit') cashDepositsCents += cents;
+        else if (m.movement_type === 'withdrawal') cashWithdrawalsCents += cents;
+      }
+    }
+    const cashMovementNetCents = cashDepositsCents - cashWithdrawalsCents;
+    const cashMovementNetEur = Math.round((cashMovementNetCents / 100) * 100) / 100;
+
+    let openingsForDay: Record<string, unknown>[] = [];
+    const { data: openingsRows, error: openingsListErr } = await supabase
+      .from('club_cash_openings')
+      .select(
+        'id, club_id, staff_id, employee_name, opened_by_name, opened_at, for_date, opening_cash_cents, notes',
+      )
+      .eq('club_id', clubId)
+      .eq('for_date', dateStr)
+      .order('opened_at', { ascending: true });
+    if (!openingsListErr && openingsRows) {
+      openingsForDay = (openingsRows as Record<string, unknown>[]).map((row) => ({
+        ...row,
+        employee_name: row.employee_name ?? row.opened_by_name ?? null,
+      }));
+    }
+
     res.json({
       ok: true,
       date: dateStr,
-      systemCashTotal_cents: systemCashTotalCents + effectiveOpeningCashCents,
+      systemCashTotal_cents: systemCashTotalCents + effectiveOpeningCashCents + cashMovementNetCents,
       systemCardTotal_cents: systemCardTotalCents,
-      systemCashTotal_eur: systemCashTotalEur + openingCashEur,
+      systemCashTotal_eur: systemCashTotalEur + openingCashEur + cashMovementNetEur,
       systemCardTotal_eur: systemCardTotalEur,
       openingCashTotal_cents: effectiveOpeningCashCents,
       openingCashTotal_eur: openingCashEur,
@@ -1767,9 +1805,17 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       storeSalesCard_cents: storeSalesCardCents,
       storeSalesCash_eur: Math.round((storeSalesCashCents / 100) * 100) / 100,
       storeSalesCard_eur: Math.round((storeSalesCardCents / 100) * 100) / 100,
+      cash_deposits_cents: cashDepositsCents,
+      cash_withdrawals_cents: cashWithdrawalsCents,
+      cash_deposits_eur: Math.round((cashDepositsCents / 100) * 100) / 100,
+      cash_withdrawals_eur: Math.round((cashWithdrawalsCents / 100) * 100) / 100,
+      cash_movement_net_cents: cashMovementNetCents,
+      cash_movement_net_eur: cashMovementNetEur,
       last_closing_at: lastClosedAtIso,
       needs_new_opening_after_closing,
       opening: openingRecord,
+      openings: openingsForDay,
+      cash_movements: cashMovements,
       bookings: Array.from(byBooking.values()).sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? '')),
     });
   } catch (err) {
@@ -1786,8 +1832,64 @@ function cashClosingStatusFromDiffCents(diffCents: number): CashClosingStatus {
 }
 
 type StaffCashLedgerAuth =
-  | { ok: true; employeeName: string }
+  | { ok: true; staffId: string | null; employeeName: string }
   | { ok: false; status: number; error: string };
+
+function getBearerToken(req: Request): string | null {
+  const authHeader = req.headers.authorization ?? req.headers['Authorization'];
+  const raw = typeof authHeader === 'string' ? authHeader : '';
+  if (raw.startsWith('Bearer ')) return raw.slice(7).trim();
+  return raw.trim() || null;
+}
+
+async function resolveStaffForCashLedgerFromAuth(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  req: Request,
+  clubId: string,
+): Promise<StaffCashLedgerAuth> {
+  if (!req.authContext?.userId) {
+    return { ok: false, status: 401, error: 'Token requerido' };
+  }
+  const token = getBearerToken(req);
+  if (!token) {
+    return { ok: false, status: 401, error: 'Token requerido' };
+  }
+  const { data: { user }, error: userErr } = await supabase.auth.getUser(token);
+  if (userErr || !user?.email) {
+    return { ok: false, status: 401, error: 'Sesión inválida' };
+  }
+  const email = user.email.trim().toLowerCase();
+  const { data: staffRow, error: staffErr } = await supabase
+    .from('club_staff')
+    .select('id, club_id, name, status, role, email')
+    .eq('club_id', clubId)
+    .eq('status', 'active')
+    .ilike('email', email)
+    .maybeSingle();
+  if (staffErr) {
+    return { ok: false, status: 500, error: staffErr.message };
+  }
+  if (!staffRow?.id) {
+    return {
+      ok: false,
+      status: 403,
+      error:
+        'Tu usuario no está vinculado a un empleado activo de este club (email del login = email del personal).',
+    };
+  }
+  if (!staffRoleAllowsCashLedger((staffRow as { role?: string | null }).role)) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Con tu rol no se permite operar la caja (p. ej. entrenadores).',
+    };
+  }
+  return {
+    ok: true,
+    staffId: String(staffRow.id),
+    employeeName: String((staffRow as { name?: string | null }).name ?? '').trim() || 'Empleado',
+  };
+}
 
 async function assertStaffAuthorizedForCashLedger(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
@@ -1804,6 +1906,7 @@ async function assertStaffAuthorizedForCashLedger(
     return { ok: false, status: 500, error: staffErr.message };
   }
   const row = staffRow as {
+    id?: string;
     club_id?: string;
     name?: string | null;
     status?: string | null;
@@ -1822,7 +1925,81 @@ async function assertStaffAuthorizedForCashLedger(
       error: 'Con el rol de este empleado no se permite apertura o cierre de caja (p. ej. entrenadores).',
     };
   }
-  return { ok: true, employeeName: String(row.name ?? '').trim() || 'Empleado' };
+  return {
+    ok: true,
+    staffId: String(row.id),
+    employeeName: String(row.name ?? '').trim() || 'Empleado',
+  };
+}
+
+async function assertStaffIdIsAuthOperator(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  req: Request,
+  clubId: string,
+  staffId: string,
+): Promise<StaffCashLedgerAuth> {
+  const resolved = await resolveStaffForCashLedgerFromAuth(supabase, req, clubId);
+  if (!resolved.ok) return resolved;
+  if (resolved.staffId !== staffId) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Solo puedes registrar operaciones con tu propio usuario de empleado.',
+    };
+  }
+  return resolved;
+}
+
+async function getClubOwnerDisplayName(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  req: Request,
+): Promise<{ ok: true; name: string } | { ok: false; status: number; error: string }> {
+  const ctx = req.authContext;
+  if (!ctx) {
+    return { ok: false, status: 401, error: 'Token requerido' };
+  }
+  if (ctx.adminId && !ctx.clubOwnerId) {
+    return { ok: true, name: 'Administrador' };
+  }
+  if (!ctx.clubOwnerId) {
+    return { ok: false, status: 403, error: 'No se encontró perfil de dueño' };
+  }
+  const { data, error } = await supabase
+    .from('club_owners')
+    .select('name')
+    .eq('id', ctx.clubOwnerId)
+    .maybeSingle();
+  if (error) {
+    return { ok: false, status: 500, error: error.message };
+  }
+  const name = String((data as { name?: string | null } | null)?.name ?? '').trim();
+  return { ok: true, name: name || 'Dueño del club' };
+}
+
+/** Dueño/admin puede omitir staff_id (queda a su nombre) o indicar un empleado para delegar. */
+async function resolveCashLedgerOperator(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  req: Request,
+  clubId: string,
+  staffIdInput?: string | null,
+): Promise<StaffCashLedgerAuth> {
+  const staffId = typeof staffIdInput === 'string' ? staffIdInput.trim() : '';
+
+  if (isClubOwnerForCashLedger(req, clubId)) {
+    if (staffId) {
+      return assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
+    }
+    const linked = await resolveStaffForCashLedgerFromAuth(supabase, req, clubId);
+    if (linked.ok) return linked;
+    const owner = await getClubOwnerDisplayName(supabase, req);
+    if (!owner.ok) return owner;
+    return { ok: true, staffId: null, employeeName: owner.name };
+  }
+
+  if (!staffId) {
+    return { ok: false, status: 400, error: 'staff_id es obligatorio' };
+  }
+  return assertStaffIdIsAuthOperator(supabase, req, clubId, staffId);
 }
 
 /**
@@ -1999,7 +2176,11 @@ export async function createCashOpeningRecordHandler(req: Request, res: Response
   const { club_id: bodyClubId, staff_id, for_date, opening_cash_cents, notes } = req.body ?? {};
   const clubId = typeof bodyClubId === 'string' ? bodyClubId.trim() : '';
   const staffId = typeof staff_id === 'string' ? staff_id.trim() : '';
-  if (!clubId || !staffId) {
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!isClubOwnerForCashLedger(req, clubId) && !staffId) {
     res.status(400).json({ ok: false, error: 'club_id y staff_id son obligatorios' });
     return;
   }
@@ -2020,7 +2201,7 @@ export async function createCashOpeningRecordHandler(req: Request, res: Response
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
+    const auth = await resolveCashLedgerOperator(supabase, req, clubId, staffId || null);
     if (!auth.ok) {
       res.status(auth.status).json({ ok: false, error: auth.error });
       return;
@@ -2030,7 +2211,7 @@ export async function createCashOpeningRecordHandler(req: Request, res: Response
       .from('club_cash_openings')
       .insert({
         club_id: clubId,
-        staff_id: staffId,
+        staff_id: auth.staffId,
         employee_name: employeeName,
         opened_by_name: employeeName,
         for_date: forDateStr,
@@ -2135,15 +2316,19 @@ export async function listCashClosingRecordsHandler(req: Request, res: Response)
 
   try {
     const supabase = getSupabaseServiceRoleClient();
+    const recordKind = String(req.query.record_kind ?? '').trim();
     let query = supabase
       .from('club_cash_closings')
       .select(
-        'id, club_id, staff_id, employee_name, closed_at, for_date, real_cash_cents, real_card_cents, system_cash_cents, system_card_cents, difference_cents, observations, status'
+        'id, club_id, staff_id, employee_name, closed_at, for_date, real_cash_cents, real_card_cents, system_cash_cents, system_card_cents, difference_cents, observations, status, record_kind'
       )
       .eq('club_id', clubId)
       .order('closed_at', { ascending: false })
       .limit(limit);
     if (dateStr) query = query.eq('for_date', dateStr);
+    if (recordKind === 'arqueo' || recordKind === 'cierre') {
+      query = query.eq('record_kind', recordKind);
+    }
     const { data, error } = await query;
 
     if (error) {
@@ -2228,12 +2413,17 @@ export async function createCashClosingRecordHandler(req: Request, res: Response
     system_cash_cents,
     system_card_cents,
     observations,
+    record_kind: bodyRecordKind,
   } = req.body ?? {};
 
   const clubId = typeof bodyClubId === 'string' ? bodyClubId.trim() : '';
   const staffId = typeof staff_id === 'string' ? staff_id.trim() : '';
 
-  if (!clubId || !staffId) {
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!isClubOwnerForCashLedger(req, clubId) && !staffId) {
     res.status(400).json({ ok: false, error: 'club_id y staff_id son obligatorios' });
     return;
   }
@@ -2255,11 +2445,13 @@ export async function createCashClosingRecordHandler(req: Request, res: Response
     typeof for_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(for_date.trim())
       ? for_date.trim()
       : new Date().toISOString().slice(0, 10);
+  const recordKind =
+    typeof bodyRecordKind === 'string' && bodyRecordKind.trim() === 'arqueo' ? 'arqueo' : 'cierre';
 
   try {
     const supabase = getSupabaseServiceRoleClient();
 
-    const auth = await assertStaffAuthorizedForCashLedger(supabase, clubId, staffId);
+    const auth = await resolveCashLedgerOperator(supabase, req, clubId, staffId || null);
     if (!auth.ok) {
       res.status(auth.status).json({ ok: false, error: auth.error });
       return;
@@ -2272,7 +2464,7 @@ export async function createCashClosingRecordHandler(req: Request, res: Response
       .from('club_cash_closings')
       .insert({
         club_id: clubId,
-        staff_id: staffId,
+        staff_id: auth.staffId,
         employee_name: employeeName,
         for_date: forDateStr,
         real_cash_cents: rc,
@@ -2282,9 +2474,10 @@ export async function createCashClosingRecordHandler(req: Request, res: Response
         difference_cents: diffCents,
         observations: typeof observations === 'string' ? observations.trim().slice(0, 2000) : null,
         status,
+        record_kind: recordKind,
       })
       .select(
-        'id, club_id, staff_id, employee_name, closed_at, for_date, real_cash_cents, real_card_cents, system_cash_cents, system_card_cents, difference_cents, observations, status'
+        'id, club_id, staff_id, employee_name, closed_at, for_date, real_cash_cents, real_card_cents, system_cash_cents, system_card_cents, difference_cents, observations, status, record_kind'
       )
       .maybeSingle();
 
@@ -2304,6 +2497,402 @@ export async function createCashClosingRecordHandler(req: Request, res: Response
     res.status(201).json({ ok: true, record: inserted });
   } catch (err) {
     console.error('[payments/cash-closing/records POST]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+type CashMovementType = 'withdrawal' | 'deposit';
+
+async function resolveCashSessionForDate(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+  dateStr: string,
+): Promise<
+  | {
+      ok: true;
+      openingAfterLastClose: boolean;
+      openingId: string | null;
+      openingOpenedAt: string | null;
+      closingCutoffMs: number | null;
+    }
+  | { ok: false; status: number; error: string }
+> {
+  const { data: lastClosing } = await supabase
+    .from('club_cash_closings')
+    .select('closed_at')
+    .eq('club_id', clubId)
+    .eq('for_date', dateStr)
+    .eq('record_kind', 'cierre')
+    .order('closed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const closingCutoffMs = lastClosing?.closed_at ? new Date(String(lastClosing.closed_at)).getTime() : null;
+
+  const { data: openingRow, error: openingErr } = await supabase
+    .from('club_cash_openings')
+    .select('id, opened_at')
+    .eq('club_id', clubId)
+    .eq('for_date', dateStr)
+    .order('opened_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (openingErr) {
+    if (openingErr.message.includes('relation') && openingErr.message.includes('does not exist')) {
+      return { ok: false, status: 503, error: 'Tabla club_cash_openings no existe. Aplica la migración 013.' };
+    }
+    return { ok: false, status: 500, error: openingErr.message };
+  }
+
+  const openingOpenedAt = openingRow?.opened_at ? String(openingRow.opened_at) : null;
+  const openingOpenedAtMs = openingOpenedAt ? new Date(openingOpenedAt).getTime() : NaN;
+  const openingAfterLastClose = Boolean(
+    openingRow &&
+      (!lastClosing?.closed_at ||
+        !Number.isFinite(openingOpenedAtMs) ||
+        openingOpenedAtMs > (closingCutoffMs ?? -Infinity)),
+  );
+
+  return {
+    ok: true,
+    openingAfterLastClose,
+    openingId: openingRow?.id ? String(openingRow.id) : null,
+    openingOpenedAt,
+    closingCutoffMs: Number.isFinite(closingCutoffMs ?? NaN) ? closingCutoffMs : null,
+  };
+}
+
+async function loadSessionCashMovements(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+  dateStr: string,
+  closingCutoffMs: number | null,
+  openingOpenedAt: string | null,
+): Promise<Record<string, unknown>[]> {
+  const { data, error } = await supabase
+    .from('club_cash_movements')
+    .select(
+      'id, club_id, staff_id, employee_name, movement_type, amount_cents, for_date, opening_id, notes, created_at',
+    )
+    .eq('club_id', clubId)
+    .eq('for_date', dateStr)
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (error) {
+    if (error.message.includes('relation') && error.message.includes('does not exist')) return [];
+    throw error;
+  }
+
+  const openingMs = openingOpenedAt ? new Date(openingOpenedAt).getTime() : NaN;
+  return ((data ?? []) as Record<string, unknown>[]).filter((row) => {
+    const createdAt = row.created_at;
+    if (typeof createdAt !== 'string') return true;
+    const createdMs = new Date(createdAt).getTime();
+    if (!Number.isFinite(createdMs)) return true;
+    if (closingCutoffMs != null && createdMs <= closingCutoffMs) return false;
+    if (Number.isFinite(openingMs) && createdMs < openingMs) return false;
+    return true;
+  });
+}
+
+/**
+ * GET /payments/cash-movements/records
+ *
+ * @openapi
+ * /payments/cash-movements/records:
+ *   get:
+ *     tags: [Cash movements]
+ *     summary: Listar movimientos de efectivo en caja
+ *     description: |
+ *       Devuelve retiradas e ingresos de la sesión activa (tras la última apertura y posterior al último cierre del día).
+ *       Requiere JWT con acceso al club.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: date
+ *         schema: { type: string, example: "2026-05-17" }
+ *     responses:
+ *       200: { description: OK }
+ *       400: { description: Validación }
+ *       401: { description: Sin token }
+ *       403: { description: Sin acceso }
+ *       500: { description: Error de base de datos }
+ */
+export async function listCashMovementRecordsHandler(req: Request, res: Response): Promise<void> {
+  const clubId = String(req.query.club_id ?? '').trim();
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+
+  const dateStr = String(req.query.date ?? '').trim() || new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    res.status(400).json({ ok: false, error: 'date inválida. Usa YYYY-MM-DD.' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const session = await resolveCashSessionForDate(supabase, clubId, dateStr);
+    if (!session.ok) {
+      res.status(session.status).json({ ok: false, error: session.error });
+      return;
+    }
+
+    const records = session.openingAfterLastClose
+      ? await loadSessionCashMovements(
+          supabase,
+          clubId,
+          dateStr,
+          session.closingCutoffMs,
+          session.openingOpenedAt,
+        )
+      : [];
+
+    res.json({
+      ok: true,
+      date: dateStr,
+      session_active: session.openingAfterLastClose,
+      records,
+    });
+  } catch (err) {
+    console.error('[payments/cash-movements/records GET]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/cash-movements/records
+ *
+ * @openapi
+ * /payments/cash-movements/records:
+ *   post:
+ *     tags: [Cash movements]
+ *     summary: Registrar retirada o ingreso de efectivo
+ *     description: |
+ *       Solo permitido con apertura de caja activa para el día (sesión abierta).
+ *       `movement_type`: `withdrawal` (retirada) o `deposit` (ingreso).
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_id, staff_id, movement_type, amount_cents]
+ *             properties:
+ *               club_id: { type: string, format: uuid }
+ *               staff_id: { type: string, format: uuid }
+ *               movement_type: { type: string, enum: [withdrawal, deposit] }
+ *               amount_cents: { type: integer, minimum: 1 }
+ *               for_date: { type: string, example: "2026-05-17" }
+ *               notes: { type: string }
+ *           example:
+ *             club_id: "uuid"
+ *             staff_id: "uuid"
+ *             movement_type: "withdrawal"
+ *             amount_cents: 5000
+ *             notes: "Cambio para proveedor"
+ *     responses:
+ *       201: { description: Creado }
+ *       400: { description: Sin apertura activa o validación }
+ *       401: { description: Sin token }
+ *       403: { description: Sin acceso o rol no permitido }
+ *       500: { description: Error de base de datos }
+ *       503: { description: Tabla no migrada }
+ */
+export async function createCashMovementRecordHandler(req: Request, res: Response): Promise<void> {
+  if (!req.authContext) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const {
+    club_id: bodyClubId,
+    staff_id,
+    movement_type,
+    amount_cents,
+    for_date,
+    notes,
+  } = req.body ?? {};
+
+  const clubId = typeof bodyClubId === 'string' ? bodyClubId.trim() : '';
+  const staffId = typeof staff_id === 'string' ? staff_id.trim() : '';
+  const movementType =
+    typeof movement_type === 'string' && (movement_type === 'withdrawal' || movement_type === 'deposit')
+      ? (movement_type as CashMovementType)
+      : null;
+
+  if (!clubId || !movementType) {
+    res.status(400).json({
+      ok: false,
+      error: 'club_id y movement_type (withdrawal|deposit) son obligatorios',
+    });
+    return;
+  }
+  if (!isClubOwnerForCashLedger(req, clubId) && !staffId) {
+    res.status(400).json({
+      ok: false,
+      error: 'club_id y staff_id son obligatorios',
+    });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+
+  const amountCents = Math.trunc(Number(amount_cents));
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    res.status(400).json({ ok: false, error: 'amount_cents debe ser un entero > 0' });
+    return;
+  }
+
+  const forDateStr =
+    typeof for_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(for_date.trim())
+      ? for_date.trim()
+      : new Date().toISOString().slice(0, 10);
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const session = await resolveCashSessionForDate(supabase, clubId, forDateStr);
+    if (!session.ok) {
+      res.status(session.status).json({ ok: false, error: session.error });
+      return;
+    }
+    if (!session.openingAfterLastClose) {
+      res.status(400).json({
+        ok: false,
+        error: 'Debes registrar la apertura de caja antes de retirar o ingresar efectivo.',
+      });
+      return;
+    }
+
+    const auth = await resolveCashLedgerOperator(supabase, req, clubId, staffId || null);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
+      return;
+    }
+
+    const { data: inserted, error: insErr } = await supabase
+      .from('club_cash_movements')
+      .insert({
+        club_id: clubId,
+        staff_id: auth.staffId,
+        employee_name: auth.employeeName,
+        movement_type: movementType,
+        amount_cents: amountCents,
+        for_date: forDateStr,
+        opening_id: session.openingId,
+        notes: typeof notes === 'string' ? notes.trim().slice(0, 2000) : null,
+      })
+      .select(
+        'id, club_id, staff_id, employee_name, movement_type, amount_cents, for_date, opening_id, notes, created_at',
+      )
+      .maybeSingle();
+
+    if (insErr) {
+      if (insErr.message.includes('relation') && insErr.message.includes('does not exist')) {
+        res.status(503).json({
+          ok: false,
+          error: 'Tabla club_cash_movements no existe. Aplica la migración 058 en Supabase.',
+        });
+        return;
+      }
+      console.error('[payments/cash-movements/records POST]', insErr);
+      res.status(500).json({ ok: false, error: insErr.message });
+      return;
+    }
+
+    res.status(201).json({ ok: true, record: inserted });
+  } catch (err) {
+    console.error('[payments/cash-movements/records POST]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * GET /payments/cash-ledger/current-operator
+ *
+ * @openapi
+ * /payments/cash-ledger/current-operator:
+ *   get:
+ *     tags: [Cash ledger]
+ *     summary: Empleado de caja vinculado al usuario autenticado
+ *     description: |
+ *       Resuelve el operador de caja: empleado vinculado por email, o dueño/admin del club
+ *       (`can_delegate: true`) que puede operar a su nombre o delegar en un empleado.
+ *       Requiere JWT con acceso al club.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200: { description: OK }
+ *       401: { description: Sin token }
+ *       403: { description: Sin empleado vinculado o sin permiso }
+ */
+export async function getCashCurrentOperatorHandler(req: Request, res: Response): Promise<void> {
+  const clubId = String(req.query.club_id ?? '').trim();
+  if (!clubId) {
+    res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+    return;
+  }
+  if (!canAccessClubForPayments(req, clubId)) {
+    res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    return;
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+
+    if (isClubOwnerForCashLedger(req, clubId)) {
+      const owner = await getClubOwnerDisplayName(supabase, req);
+      if (!owner.ok) {
+        res.status(owner.status).json({ ok: false, error: owner.error });
+        return;
+      }
+      const linked = await resolveStaffForCashLedgerFromAuth(supabase, req, clubId);
+      res.json({
+        ok: true,
+        is_club_owner: true,
+        can_delegate: true,
+        staff_id: linked.ok ? linked.staffId : null,
+        employee_name: linked.ok ? linked.employeeName : owner.name,
+        owner_display_name: owner.name,
+      });
+      return;
+    }
+
+    const auth = await resolveStaffForCashLedgerFromAuth(supabase, req, clubId);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
+      return;
+    }
+    res.json({
+      ok: true,
+      is_club_owner: false,
+      can_delegate: false,
+      staff_id: auth.staffId,
+      employee_name: auth.employeeName,
+    });
+  } catch (err) {
+    console.error('[payments/cash-ledger/current-operator]', err);
     res.status(500).json({ ok: false, error: (err as Error).message });
   }
 }

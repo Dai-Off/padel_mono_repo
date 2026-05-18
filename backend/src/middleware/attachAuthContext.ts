@@ -18,6 +18,7 @@ export interface PortalMembership {
 
 export interface AuthContext {
   userId: string;
+  userEmail?: string;
   clubOwnerId?: string;
   adminId?: string;
   allowedClubIds: string[];
@@ -54,6 +55,7 @@ export async function attachAuthContext(req: Request, _res: Response, next: Next
     }
     const ctx: AuthContext = {
       userId: user.id,
+      userEmail: user.email,
       allowedClubIds: [],
       portalMemberships: [],
     };
@@ -85,7 +87,7 @@ export async function attachAuthContext(req: Request, _res: Response, next: Next
       console.error('[attachAuthContext] club_portal_members:', memErr.message);
     }
     const members =
-      !memErr || memErr.message.includes('does not exist')
+      memErr && !memErr.message.includes('does not exist')
         ? ([] as { club_id: string; club_portal_role_id: string }[])
         : ((memberRows ?? []) as { club_id: string; club_portal_role_id: string }[]);
     if (members.length > 0) {

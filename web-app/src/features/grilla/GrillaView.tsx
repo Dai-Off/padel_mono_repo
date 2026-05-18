@@ -54,6 +54,7 @@ import {
   estimateMobileGridViewportHeight,
   GRILLA_COMPACT_LAYOUT_MAX_PX,
 } from './utils/timeGrid';
+import { enumerateDatesInRange } from './utils/recurrenceDates';
 import { courtVisibleInGridForDate } from './courtVisibility';
 import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
@@ -110,6 +111,7 @@ const useClubData = (dateOrStr: Date | string) => {
     const [isCreatingCourt, setIsCreatingCourt] = useState(false);
     const [clubId, setClubId] = useState<string | null>(null);
     const [typeColorOverrides, setTypeColorOverrides] = useState<Record<string, string>>({});
+    const [typeConfigs, setTypeConfigs] = useState<Record<string, { color: string | null; display_name: string; is_system: boolean }>>({});
     const courtsRef = useRef<Court[]>([]);
     const dateStr = toDateStr(dateOrStr);
 
@@ -122,14 +124,23 @@ const useClubData = (dateOrStr: Date | string) => {
                 setClubId(id);
                 if (id) {
                     try {
-                        const pricesRes = await apiFetchWithAuth<{ ok: boolean; prices?: Record<string, { color?: string | null }> }>(
+                        const pricesRes = await apiFetchWithAuth<{ ok: boolean; prices?: Record<string, { color?: string | null; display_name?: string; is_system?: boolean }> }>(
                             `/reservation-type-prices?club_id=${encodeURIComponent(id)}`
                         );
                         if (pricesRes?.ok && pricesRes.prices) {
+                            const configMap: Record<string, { color: string | null; display_name: string; is_system: boolean }> = {};
                             const colorMap: Record<string, string> = {};
                             for (const [type, entry] of Object.entries(pricesRes.prices)) {
-                                if (entry?.color) colorMap[type] = entry.color;
+                                if (entry) {
+                                    configMap[type] = {
+                                        color: entry.color ?? null,
+                                        display_name: entry.display_name ?? type,
+                                        is_system: entry.is_system ?? false
+                                    };
+                                    if (entry.color) colorMap[type] = entry.color;
+                                }
                             }
+                            setTypeConfigs(configMap);
                             setTypeColorOverrides(colorMap);
                         }
                     } catch {
@@ -507,7 +518,7 @@ const useClubData = (dateOrStr: Date | string) => {
         }
     }, []);
 
-    return { courts, reservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides };
+    return { courts, reservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs };
 };
 
 function linkedTournamentDisplayName(b: any): string | null {
@@ -761,8 +772,8 @@ function GrillaViewInner() {
     return 'future';
   }, [today, selectedDate]);
 
-  const { courts, reservations: serverReservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides } = useClubData(selectedDate);
-  const { permissionKeys: portalMenuPermissionKeys } = usePortalMenuPermissions(clubId);
+  const { courts, reservations: serverReservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs } = useClubData(selectedDate);
+  const { permissionKeys: portalMenuPermissionKeys, loading: permissionsLoading } = usePortalMenuPermissions(clubId);
 
   const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
   useEffect(() => {
@@ -1166,22 +1177,32 @@ function GrillaViewInner() {
 
   const handleCreateBooking = async (bookingData: any) => {
       try {
-          const recurrenceCount = Math.max(1, Number(bookingData.recurrence_count) || 1);
-          const recurrenceUnit = bookingData.recurrence_unit === 'months' ? 'months' : 'weeks';
           const includeHolidays = bookingData.include_holidays !== false;
           const courtIds: string[] = Array.isArray(bookingData.court_ids) && bookingData.court_ids.length > 0
               ? bookingData.court_ids.map((x: unknown) => String(x)).filter(Boolean)
               : [String(bookingData.court_id)];
-          const baseDate = new Date(`${formatDateForInput(selectedDate)}T12:00:00`);
           const createdBookings: any[] = [];
           const skippedHolidayDates: string[] = [];
           const failedAttempts: Array<{ date: string; court_id: string; reason: string }> = [];
 
-          for (let i = 0; i < recurrenceCount; i++) {
-              const slotDate = new Date(baseDate);
-              if (recurrenceUnit === 'months') slotDate.setMonth(baseDate.getMonth() + i);
-              else slotDate.setDate(baseDate.getDate() + (i * 7));
-              const dateText = `${slotDate.getFullYear()}-${String(slotDate.getMonth() + 1).padStart(2, '0')}-${String(slotDate.getDate()).padStart(2, '0')}`;
+          let datesToBook: string[];
+          if (bookingData.is_multiple && bookingData.recurrence_start_date && bookingData.recurrence_end_date) {
+              const weekdays = Array.isArray(bookingData.recurrence_weekdays)
+                  ? bookingData.recurrence_weekdays.map((x: unknown) => Number(x)).filter((n: number) => !Number.isNaN(n))
+                  : [];
+              datesToBook = enumerateDatesInRange(
+                  String(bookingData.recurrence_start_date),
+                  String(bookingData.recurrence_end_date),
+                  weekdays,
+              );
+              if (datesToBook.length === 0) {
+                  throw new Error('No hay fechas en el rango seleccionado para los días indicados.');
+              }
+          } else {
+              datesToBook = [formatDateForInput(selectedDate)];
+          }
+
+          for (const dateText of datesToBook) {
               if (!includeHolidays && clubId) {
                   try {
                       const holidayCheck = await apiFetchWithAuth<any>(`/club-special-dates/check?club_id=${clubId}&date=${dateText}`);
@@ -1219,8 +1240,10 @@ function GrillaViewInner() {
                       total_price_cents: totalPriceCents,
                   };
                   delete payload.court_ids;
-                  delete payload.recurrence_count;
-                  delete payload.recurrence_unit;
+                  delete payload.is_multiple;
+                  delete payload.recurrence_start_date;
+                  delete payload.recurrence_end_date;
+                  delete payload.recurrence_weekdays;
                   delete payload.include_holidays;
 
                   const res = await apiFetch<any>('/bookings', {
@@ -1881,14 +1904,14 @@ function GrillaViewInner() {
 
   return (
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
-      <div className="grilla-shell h-[100dvh] flex flex-col bg-gray-100 font-sans overflow-hidden">
+      <div className="grilla-shell h-dvh flex flex-col bg-gray-100 font-sans overflow-hidden">
         {!isMobileDevice && (
-          <header className="bg-[#00726b] px-4 md:px-6 py-1.5 md:py-2 z-50 flex-shrink-0 flex justify-between items-center border-b border-[#005a4f] gap-3">
+          <header className="bg-portal-header px-4 md:px-6 py-1.5 md:py-2 z-50 shrink-0 flex justify-between items-center border-b border-portal-header-edge gap-3">
             <div className="flex items-center gap-3 md:gap-4">
-              <button onClick={() => setIsMenuOpen(true)} className="md:hidden w-9 h-9 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors">
+              <button onClick={() => setIsMenuOpen(true)} className="md:hidden w-9 h-9 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 shrink-0 transition-colors">
                 <Menu className="w-5 h-5 text-white" />
               </button>
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center flex-shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">
+              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">
                 <div className="w-full h-full rounded-full border border-gray-900 bg-white flex items-center justify-center">
                   <span className="font-extrabold text-[10px] sm:text-xs text-black italic tracking-tighter">X7</span>
                 </div>
@@ -1901,13 +1924,13 @@ function GrillaViewInner() {
               <div className="relative">
                 <button
                   onClick={() => setLangMenuOpen((prev) => !prev)}
-                  className="w-9 h-9 md:w-10 md:h-10 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 flex-shrink-0 transition-colors"
+                  className="w-9 h-9 md:w-10 md:h-10 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 shrink-0 transition-colors"
                   title={t('header.languageLabel')}
                 >
                   <Globe className="w-4 h-4 md:w-5 md:h-5 text-white" />
                 </button>
                 {langMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-[60] overflow-hidden min-w-[160px] animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-60 overflow-hidden min-w-[160px] animate-in fade-in slide-in-from-top-2 duration-150">
                     {(
                       [
                         ['es', 'Español 🇪🇸'],
@@ -1939,7 +1962,7 @@ function GrillaViewInner() {
               </div>
               <button
                 onClick={handleLogout}
-                className="bg-[#1f1f1f] hover:bg-black text-white px-4 py-2 md:px-5 md:py-2.5 rounded-full font-medium text-xs md:text-sm flex items-center gap-2 transition-colors flex-shrink-0 shadow-sm"
+                className="bg-[#1f1f1f] hover:bg-black text-white px-4 py-2 md:px-5 md:py-2.5 rounded-full font-medium text-xs md:text-sm flex items-center gap-2 transition-colors shrink-0 shadow-sm"
               >
                 <ArrowLeft className="w-4 h-4 md:w-4.5 md:h-4.5" />
                 <span className="hidden sm:inline">{t('header.close')}</span>
@@ -1948,7 +1971,12 @@ function GrillaViewInner() {
           </header>
         )}
         <div className="hidden md:block">
-          <GrillaQuickNav isAdmin={isAdmin} portalMenuPermissionKeys={portalMenuPermissionKeys} clubId={clubId} />
+          <GrillaQuickNav 
+            isAdmin={isAdmin} 
+            portalMenuPermissionKeys={portalMenuPermissionKeys} 
+            clubId={clubId} 
+            loading={permissionsLoading}
+          />
         </div>
 
         {/* ── Single Court View Navigation (Conditionally Rendered) ── */}
@@ -2064,14 +2092,14 @@ function GrillaViewInner() {
                 {(
                   <div className={clsx(
                     "bg-[#f8f8f8] border-b border-gray-200 px-4 md:px-8 py-2 mb-1",
-                    mobileFullView && "flex-shrink-0"
+                    mobileFullView && "shrink-0"
                   )}>
                     {/* Heading row with mobile hamburger */}
                     <div className="flex items-center gap-2 mb-1.5">
                       {isMobileDevice && (
                         <button
                           onClick={() => setIsMenuOpen(true)}
-                          className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 flex-shrink-0 transition-colors"
+                          className="flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded text-gray-700 hover:bg-gray-50 shrink-0 transition-colors"
                           aria-label="Abrir menú"
                         >
                           <Menu className="w-4 h-4 text-gray-600" />
@@ -2083,16 +2111,16 @@ function GrillaViewInner() {
                     </div>
                     {isNonWorkingDay && (
                       <div className="flex items-center gap-2 px-3 py-1.5 mb-1.5 rounded-lg bg-red-50 border border-red-200 text-red-700 text-xs font-semibold">
-                        <span className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
+                        <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
                         Día no laborable — Todas las pistas están bloqueadas
                       </div>
                     )}
                     {/* Controls row */}
                     <div className="flex flex-wrap items-center gap-1 md:gap-2">
-                      <span className="text-[10px] font-medium text-gray-500 flex-shrink-0 mr-1">{t('toolbar.dateLabel')}</span>
+                      <span className="text-[10px] font-medium text-gray-500 shrink-0 mr-1">{t('toolbar.dateLabel')}</span>
 
                       {/* date picker group */}
-                      <div className="flex items-center gap-0.5 flex-shrink-0">
+                      <div className="flex items-center gap-0.5 shrink-0">
                         <button
                           onClick={() => setSelectedDate(addDays(selectedDate, -1))}
                           className="px-1.5 py-0.5 bg-white border border-gray-300 rounded text-[10px] text-gray-700 hover:bg-gray-50 transition-colors"
@@ -2110,7 +2138,7 @@ function GrillaViewInner() {
                           <input
                             ref={dateInputRef}
                             type="date"
-                            className="absolute bottom-0 left-0 w-full h-[1px] opacity-0 cursor-pointer pointer-events-none"
+                            className="absolute bottom-0 left-0 w-full h-px opacity-0 cursor-pointer pointer-events-none"
                             value={formatDateForInput(selectedDate)}
                             onChange={(e) => {
                               if (!e.target.value) return;
@@ -2144,7 +2172,7 @@ function GrillaViewInner() {
                               }
                             }}
                             className={clsx(
-                              "px-1.5 py-0.5 rounded text-[10px] transition-all whitespace-nowrap flex-shrink-0 border",
+                              "px-1.5 py-0.5 rounded text-[10px] transition-all whitespace-nowrap shrink-0 border",
                               dayKey === activeChip
                                 ? "bg-[#e53e3e] text-white border-[#e53e3e] font-bold"
                                 : "bg-[#097560] text-white border-[#097560] hover:bg-[#0b8b72] font-normal"
@@ -2159,7 +2187,7 @@ function GrillaViewInner() {
                       <span className="text-gray-300 select-none">|</span>
                       <button
                         onClick={() => setRechargeModalOpen(true)}
-                        className="flex items-center gap-1 px-2.5 py-0.5 rounded border border-[#00726b] bg-white text-[#00726b] hover:bg-[#00726b] hover:text-white text-[10px] font-bold transition-all whitespace-nowrap flex-shrink-0"
+                        className="flex items-center gap-1 px-2.5 py-0.5 rounded border border-portal-header bg-white text-portal-header hover:bg-portal-header hover:text-white text-[10px] font-bold transition-all whitespace-nowrap shrink-0"
                       >
                         <Wallet className="w-3 h-3" />
                         Wallet
@@ -2168,7 +2196,7 @@ function GrillaViewInner() {
                       <span className="text-gray-300 select-none">|</span>
                       <button
                         onClick={() => setBonusModalOpen(true)}
-                        className="flex items-center gap-1 px-2.5 py-0.5 rounded border border-[#005bc5] bg-white text-[#005bc5] hover:bg-[#005bc5] hover:text-white text-[10px] font-bold transition-all whitespace-nowrap flex-shrink-0"
+                        className="flex items-center gap-1 px-2.5 py-0.5 rounded border border-[#005bc5] bg-white text-[#005bc5] hover:bg-[#005bc5] hover:text-white text-[10px] font-bold transition-all whitespace-nowrap shrink-0"
                       >
                         <Gift className="w-3 h-3" />
                         Bonos
@@ -2181,7 +2209,7 @@ function GrillaViewInner() {
                         return (
                           <button
                             onClick={() => setActiveView(prev => prev === 'matches' ? 'grid' : 'matches')}
-                            className={`flex items-center gap-1 px-2.5 py-0.5 rounded border text-[10px] font-bold transition-all whitespace-nowrap flex-shrink-0 ${
+                            className={`flex items-center gap-1 px-2.5 py-0.5 rounded border text-[10px] font-bold transition-all whitespace-nowrap shrink-0 ${
                               isMatchesActive
                                 ? 'bg-orange-500 text-white border-orange-500'
                                 : 'border-orange-500 bg-white text-orange-500 hover:bg-orange-500 hover:text-white'
@@ -2200,8 +2228,8 @@ function GrillaViewInner() {
               {/* ── Tab bar: Padel / PISTA OCULTA ── */}
               {courts.length > 0 && (
                 <div className={clsx(
-                  "bg-white border-b border-gray-200 px-4 md:px-8 flex items-end gap-0 flex-shrink-0",
-                  mobileFullView && "flex-shrink-0"
+                  "bg-white border-b border-gray-200 px-4 md:px-8 flex items-end gap-0 shrink-0",
+                  mobileFullView && "shrink-0"
                 )}>
                   <button
                     ref={tabCourtsRef}
@@ -2209,10 +2237,10 @@ function GrillaViewInner() {
                     className={clsx(
                       "px-5 py-2.5 text-xs font-semibold transition-all relative",
                       grillaTab === 'courts'
-                        ? "text-[#005a4f] border-b-2 border-[#005a4f]"
+                        ? "text-portal-header-edge border-b-2 border-portal-header-edge"
                         : "text-gray-400 hover:text-gray-600 border-b-2 border-transparent",
                       tabHover === 'courts' && "bg-blue-300 text-blue-900 border-b-2 border-blue-700 scale-110 shadow-lg ring-2 ring-blue-400",
-                      highlightedTab === 'courts' && tabHover !== 'courts' && "bg-[#e8f5e9] text-[#005a4f] border-b-2 border-[#005a4f] ring-2 ring-[#005a4f] ring-opacity-50 animate-pulse delay-75"
+                      highlightedTab === 'courts' && tabHover !== 'courts' && "bg-[#e8f5e9] text-portal-header-edge border-b-2 border-portal-header-edge ring-2 ring-portal-header-edge ring-opacity-50 animate-pulse delay-75"
                     )}
                   >
                     Padel
@@ -2224,10 +2252,10 @@ function GrillaViewInner() {
                       className={clsx(
                         "px-5 py-2.5 text-xs font-semibold transition-all relative uppercase",
                         grillaTab === 'waitlist'
-                          ? "text-[#005a4f] border-b-2 border-[#005a4f]"
+                          ? "text-portal-header-edge border-b-2 border-portal-header-edge"
                           : "text-gray-400 hover:text-gray-600 border-b-2 border-transparent",
                         tabHover === 'waitlist' && "bg-blue-300 text-blue-900 border-b-2 border-blue-700 scale-110 shadow-lg ring-2 ring-blue-400",
-                        highlightedTab === 'waitlist' && tabHover !== 'waitlist' && "bg-[#e8f5e9] text-[#005a4f] border-b-2 border-[#005a4f] ring-2 ring-[#005a4f] ring-opacity-50 animate-pulse delay-75"
+                        highlightedTab === 'waitlist' && tabHover !== 'waitlist' && "bg-[#e8f5e9] text-portal-header-edge border-b-2 border-portal-header-edge ring-2 ring-portal-header-edge ring-opacity-50 animate-pulse delay-75"
                       )}
                     >
                       Pista Oculta
@@ -2239,7 +2267,7 @@ function GrillaViewInner() {
                         disabled={isCreatingCourt}
                         className={clsx(
                           "ml-2 w-5 h-5 flex items-center justify-center rounded-full text-white transition-colors shadow-sm mb-1.5",
-                          isCreatingCourt ? "bg-gray-400 cursor-not-allowed" : "bg-[#005a4f] hover:bg-[#00423a]"
+                          isCreatingCourt ? "bg-gray-400 cursor-not-allowed" : "bg-portal-header-edge hover:bg-[#00423a]"
                         )}
                       >
                         {isCreatingCourt ? (
@@ -2540,7 +2568,7 @@ function GrillaViewInner() {
                   />
                 </div>
               ) : draggingCourt ? (
-                <div className="px-3 py-1.5 bg-[#005a4f] text-white text-xs font-bold rounded-lg shadow-lg whitespace-nowrap">
+                <div className="px-3 py-1.5 bg-portal-header-edge text-white text-xs font-bold rounded-lg shadow-lg whitespace-nowrap">
                   {draggingCourt.name}
                 </div>
               ) : null}
@@ -2549,10 +2577,14 @@ function GrillaViewInner() {
           )}
         </main>
 
-        <GrillaLegend typeColorOverrides={Object.keys(typeColorOverrides).length > 0 ? typeColorOverrides : undefined} />
+        <GrillaLegend
+          typeConfigs={Object.keys(typeConfigs).length > 0 ? typeConfigs : undefined}
+          typeColorOverrides={Object.keys(typeColorOverrides).length > 0 ? typeColorOverrides : undefined}
+        />
 
         <ReservationModal
           clubId={clubId}
+          gridDate={formatDateForInput(selectedDate)}
           isOpen={selectedModalReservationId !== null}
           onGridRefresh={refresh}
           onClose={() => {
@@ -2640,6 +2672,7 @@ function GrillaViewInner() {
         clubId={clubId}
         isAdmin={isAdmin}
         portalMenuPermissionKeys={portalMenuPermissionKeys}
+        loading={permissionsLoading}
       />
     </ZoomContext.Provider>
   );

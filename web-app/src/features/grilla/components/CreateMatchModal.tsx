@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { apiFetchWithAuth } from '../../../services/api';
-import { reservationTypePricesService } from '../../../services/reservationTypePrices';
+import { reservationTypePricesService, type ReservationTypeConfig } from '../../../services/reservationTypePrices';
 import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { PlayerSearch } from './ReservationModal';
@@ -182,7 +182,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
     const [organizerError, setOrganizerError] = useState(false);
     const [overlapError, setOverlapError] = useState<string | null>(null);
     const [paymentError, setPaymentError] = useState<string | null>(null);
-    const [pricesByType, setPricesByType] = useState<Record<string, { price_per_hour_cents: number }>>({});
+    const [pricesByType, setPricesByType] = useState<Record<string, ReservationTypeConfig>>({});
     const [isSaving, setIsSaving] = useState(false);
     
     const [slotPayments, setSlotPayments] = useState<SlotPayment[]>([defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()]);
@@ -455,7 +455,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
     const minutes = ['00', '15', '30', '45'];
 
     return (
-        <div style={vvStyle} className="fixed inset-0 z-[250] flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 hover:opacity-100 transition-opacity duration-300">
+        <div style={vvStyle} className="fixed inset-0 z-250 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 hover:opacity-100 transition-opacity duration-300">
             <div className="absolute inset-0" onClick={onClose} />
             <div className="relative flex flex-col w-full h-[90vh] bg-gray-50 rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[800px] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in overflow-hidden">
                 <div className="flex justify-center w-full pt-3 pb-1 sm:hidden bg-white cursor-grab active:cursor-grabbing" onClick={onClose}>

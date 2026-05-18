@@ -127,12 +127,18 @@ export const learningContentService = {
 
   async listQuestions(
     clubId: string,
-    filters?: { type?: QuestionType; area?: QuestionArea; is_active?: 'true' | 'false' | 'all' },
+    filters?: {
+      type?: QuestionType;
+      area?: QuestionArea;
+      // 'all' devuelve todas; los valores concretos filtran. Default backend:
+      // 'published'. Si quieres ver borradores o inactivas, pásalo explícito.
+      status?: 'all' | 'draft' | 'published' | 'inactive';
+    },
   ): Promise<Question[]> {
     const q = new URLSearchParams({ club_id: clubId });
     if (filters?.type) q.set('type', filters.type);
     if (filters?.area) q.set('area', filters.area);
-    if (filters?.is_active) q.set('is_active', filters.is_active);
+    if (filters?.status) q.set('status', filters.status);
     const res = await apiFetchWithAuth<ApiOk<{ data: Question[] }>>(`/learning/questions?${q}`);
     return res.data ?? [];
   },
@@ -144,6 +150,8 @@ export const learningContentService = {
     area: QuestionArea;
     video_url?: string | null;
     content: QuestionContent;
+    // 'draft' o 'published'. 'inactive' no aplica al crear (se llega vía toggle).
+    status?: 'draft' | 'published';
   }): Promise<Question> {
     const res = await apiFetchWithAuth<ApiOk<{ data: Question }>>('/learning/questions', {
       method: 'POST',
@@ -160,6 +168,7 @@ export const learningContentService = {
       area: QuestionArea;
       video_url: string | null;
       content: QuestionContent;
+      status: 'draft' | 'published' | 'inactive';
     }>,
   ): Promise<Question> {
     const res = await apiFetchWithAuth<ApiOk<{ data: Question }>>(`/learning/questions/${id}`, {
@@ -175,6 +184,11 @@ export const learningContentService = {
 
   async activateQuestion(id: string): Promise<void> {
     await apiFetchWithAuth(`/learning/questions/${id}/activate`, { method: 'PATCH' });
+  },
+
+  // Borrado permanente. El backend exige que la pregunta esté ya desactivada.
+  async deleteQuestion(id: string): Promise<void> {
+    await apiFetchWithAuth(`/learning/questions/${id}`, { method: 'DELETE' });
   },
 
   // ---------------------------------------------------------------------------

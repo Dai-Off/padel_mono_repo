@@ -16,6 +16,8 @@ import type {
 } from '../../types/schoolCourses';
 import type { ClubStaffMember } from '../../types/clubStaff';
 import type { Court } from '../../types/court';
+import type { Player } from '../../types/api';
+import { PlayerSearch } from '../../features/grilla/components/ReservationModal';
 
 const LEVELS: SchoolLevel[] = ['Principiante', 'Intermedio', 'Avanzado', 'Competicion', 'Elite', 'Infantil'];
 const WEEKDAYS: { key: SchoolWeekday; label: string }[] = [
@@ -123,6 +125,7 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
   const [enrollmentsModal, setEnrollmentsModal] = useState<SchoolCourse | null>(null);
   const [enrollments, setEnrollments] = useState<SchoolEnrollment[]>([]);
   const [newEnrollment, setNewEnrollment] = useState({ student_name: '', student_email: '', student_phone: '', fee: '' });
+  const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [addingEnrollment, setAddingEnrollment] = useState(false);
   const [deletingEnrollmentId, setDeletingEnrollmentId] = useState<string | null>(null);
 
@@ -246,6 +249,7 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
   const openEnrollments = async (course: SchoolCourse) => {
     setEnrollmentsModal(course);
     setNewEnrollment({ student_name: '', student_email: '', student_phone: '', fee: '' });
+    setSelectedPlayer(null);
     try {
       const rows = await schoolCoursesService.listEnrollments(course.id);
       setEnrollments(rows.filter((x) => x.status !== 'cancelled'));
@@ -258,22 +262,46 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
   const addEnrollment = async () => {
     if (!enrollmentsModal) return;
     if (addingEnrollment) return;
-    if (!newEnrollment.student_name.trim() && !newEnrollment.student_email.trim()) {
-      return toast.error('Nombre o email obligatorio');
+
+    let payload: {
+      player_id?: string | null;
+      student_name?: string | null;
+      student_email?: string | null;
+      student_phone?: string | null;
+      fee_cents?: number;
+    } = {};
+
+    if (selectedPlayer) {
+      payload = {
+        player_id: selectedPlayer.id,
+        // Fallback textual info in case it is queried without joins:
+        student_name: `${selectedPlayer.first_name} ${selectedPlayer.last_name}`.trim(),
+        student_email: selectedPlayer.email,
+        student_phone: selectedPlayer.phone,
+      };
+    } else {
+      if (!newEnrollment.student_name.trim() && !newEnrollment.student_email.trim()) {
+        return toast.error('Nombre o email obligatorio');
+      }
+      payload = {
+        student_name: newEnrollment.student_name.trim() || null,
+        student_email: newEnrollment.student_email.trim() || null,
+        student_phone: newEnrollment.student_phone.trim() || null,
+      };
     }
-    const feeEuros = Number(newEnrollment.fee || '0');
+
+    // Default to the predefined course price
+    payload.fee_cents = enrollmentsModal.price_cents;
+
     setAddingEnrollment(true);
     try {
-      await schoolCoursesService.createEnrollment(enrollmentsModal.id, {
-        student_name: newEnrollment.student_name || null,
-        student_email: newEnrollment.student_email || null,
-        student_phone: newEnrollment.student_phone || null,
-        fee_cents: Math.round((Number.isFinite(feeEuros) ? Math.max(0, feeEuros) : 0) * 100),
-      });
+      await schoolCoursesService.createEnrollment(enrollmentsModal.id, payload);
       const rows = await schoolCoursesService.listEnrollments(enrollmentsModal.id);
       setEnrollments(rows.filter((x) => x.status !== 'cancelled'));
       await loadCore();
       setNewEnrollment({ student_name: '', student_email: '', student_phone: '', fee: '' });
+      setSelectedPlayer(null);
+      toast.success('Alumno agregado correctamente');
     } catch (e) {
       toast.error((e as Error).message || 'No se pudo agregar alumno');
     } finally {
@@ -605,8 +633,14 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <input type="number" step="0.01" className="rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Precio base" value={courseForm.price} onChange={(e) => setCourseForm((f) => ({ ...f, price: e.target.value }))} />
-                <input type="number" className="rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Capacidad" value={courseForm.capacity} onChange={(e) => setCourseForm((f) => ({ ...f, capacity: e.target.value }))} />
+                <div className="relative">
+                  <input type="number" step="0.01" className="w-full rounded-xl border border-gray-200 pl-7 pr-3 py-2 text-sm" placeholder="Precio base" value={courseForm.price} onChange={(e) => setCourseForm((f) => ({ ...f, price: e.target.value }))} />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-semibold text-sm pointer-events-none">€</span>
+                </div>
+                <div className="relative">
+                  <input type="number" className="w-full rounded-xl border border-gray-200 px-3 py-2 pr-24 text-sm" placeholder="Capacidad" value={courseForm.capacity} onChange={(e) => setCourseForm((f) => ({ ...f, capacity: e.target.value }))} />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">alumnos máx.</span>
+                </div>
               </div>
               <div>
                 <p className="text-[10px] font-semibold text-gray-500 mb-1">Días recurrentes</p>
@@ -659,7 +693,10 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
                 </select>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                <input type="number" step="0.01" className="rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Precio" value={privateForm.price} onChange={(e) => setPrivateForm((f) => ({ ...f, price: e.target.value }))} />
+                <div className="relative">
+                  <input type="number" step="0.01" className="w-full rounded-xl border border-gray-200 pl-7 pr-3 py-2 text-sm" placeholder="Precio" value={privateForm.price} onChange={(e) => setPrivateForm((f) => ({ ...f, price: e.target.value }))} />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-semibold text-sm pointer-events-none">€</span>
+                </div>
                 <select className="rounded-xl border border-gray-200 px-3 py-2 text-sm" value={privateForm.weekday} onChange={(e) => setPrivateForm((f) => ({ ...f, weekday: e.target.value as SchoolWeekday }))}>
                   {WEEKDAYS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
                 </select>
@@ -695,19 +732,53 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
           <div className="w-full max-w-2xl rounded-2xl bg-white border border-gray-200 p-5 shadow-xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-sm font-bold text-[#1A1A1A] mb-4">Alumnos · {enrollmentsModal.name}</h3>
-            <div className="grid md:grid-cols-4 gap-2 mb-3">
-              <input className="rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Nombre" value={newEnrollment.student_name} onChange={(e) => setNewEnrollment((p) => ({ ...p, student_name: e.target.value }))} />
-              <input className="rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Email" value={newEnrollment.student_email} onChange={(e) => setNewEnrollment((p) => ({ ...p, student_email: e.target.value }))} />
-              <input className="rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Teléfono" value={newEnrollment.student_phone} onChange={(e) => setNewEnrollment((p) => ({ ...p, student_phone: e.target.value }))} />
-              <input className="rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Cuota EUR" value={newEnrollment.fee} onChange={(e) => setNewEnrollment((p) => ({ ...p, fee: e.target.value }))} />
+            <div className="mb-4 space-y-4">
+              <PlayerSearch
+                label="Buscar alumno registrado"
+                placeholder="Buscar por nombre, email o teléfono..."
+                selectedPlayer={selectedPlayer}
+                onSelect={setSelectedPlayer}
+              />
+
+              {!selectedPlayer && (
+                <div className="p-3 bg-gray-50 border border-gray-100 rounded-xl space-y-3">
+                  <p className="text-xs font-semibold text-gray-500">¿No está en la base de datos? Registro manual:</p>
+                  <div className="grid md:grid-cols-3 gap-2">
+                    <input
+                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white"
+                      placeholder="Nombre completo"
+                      value={newEnrollment.student_name}
+                      onChange={(e) => setNewEnrollment((p) => ({ ...p, student_name: e.target.value }))}
+                    />
+                    <input
+                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white"
+                      placeholder="Email (opcional)"
+                      value={newEnrollment.student_email}
+                      onChange={(e) => setNewEnrollment((p) => ({ ...p, student_email: e.target.value }))}
+                    />
+                    <input
+                      className="rounded-xl border border-gray-200 px-3 py-2 text-sm bg-white"
+                      placeholder="Teléfono (opcional)"
+                      value={newEnrollment.student_phone}
+                      onChange={(e) => setNewEnrollment((p) => ({ ...p, student_phone: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-gray-50/50 rounded-xl border border-gray-100/50">
+                <span className="text-xs text-gray-600 font-medium">
+                  Cuota mensual predefinida: <strong className="text-gray-900">{(enrollmentsModal.price_cents / 100).toFixed(2)} €</strong>
+                </span>
+                <button
+                  onClick={() => void addEnrollment()}
+                  disabled={addingEnrollment}
+                  className="px-4 py-2 rounded-xl bg-[#E31E24] text-white text-xs font-bold hover:bg-[#c1151a] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {addingEnrollment ? 'Agregando...' : 'Agregar alumno'}
+                </button>
+              </div>
             </div>
-            <button
-              onClick={() => void addEnrollment()}
-              disabled={addingEnrollment}
-              className="mb-4 px-3 py-2 rounded-xl bg-[#1A1A1A] text-white text-xs font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {addingEnrollment ? 'Agregando...' : 'Agregar alumno'}
-            </button>
             <div className="space-y-2">
               {enrollments.map((enrollment) => (
                 <div key={enrollment.id} className="rounded-xl border border-gray-200 p-2 flex items-center justify-between gap-2">
