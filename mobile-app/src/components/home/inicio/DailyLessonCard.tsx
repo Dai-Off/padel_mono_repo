@@ -19,6 +19,7 @@ import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
 import { useAuth } from '../../../contexts/AuthContext';
 import { fetchMyPlayerProfile } from '../../../api/players';
+import { loadProgress } from '../../../lib/dailyLessonStorage';
 
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -168,6 +169,22 @@ export function DailyLessonCard({
     return () => { mounted = false; };
   }, [session?.access_token]);
   const locked = onboardingCompleted === false;
+
+  // ¿Tiene una lección a medias guardada en local? Mostramos "Continuar"
+  // en lugar de "Empezar" para que sepa que puede retomar desde el home.
+  // Se refresca con streakRefreshKey (se incrementa al cerrar la lección).
+  const [hasResume, setHasResume] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    const uid = session?.user?.id;
+    if (!uid) return;
+    loadProgress(uid, TIMEZONE).then((snap) => {
+      if (!mounted) return;
+      // Solo válido si quedan respuestas pendientes (incompleta).
+      setHasResume(!!snap && snap.answers.length < snap.questions.length);
+    });
+    return () => { mounted = false; };
+  }, [session?.user?.id, streakRefreshKey]);
   const isCarousel = variant === 'carousel';
   const { currentStreak, multiplier, lastCompleted, loading } = useStreak(
     TIMEZONE,
@@ -556,7 +573,11 @@ export function DailyLessonCard({
                 collapsable={false}
                 style={[styles.ctaRow, { transform: [{ translateX: ctaTx }] }]}
               >
-                <Text style={[styles.ctaInline, { color: color1 }]}>Empezar</Text>
+                {/* "Continuar" cuando hay una sesión a medias guardada. La
+                    pantalla detalle hace lo mismo (resume vs nueva). */}
+                <Text style={[styles.ctaInline, { color: color1 }]}>
+                  {hasResume ? 'Continuar' : 'Empezar'}
+                </Text>
                 <Ionicons name="chevron-forward" size={14} color={color1} />
               </Animated.View>
             )}

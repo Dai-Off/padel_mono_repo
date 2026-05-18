@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
 import { submitDailyLesson, fetchTodayResults, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
+import { loadProgress, saveProgress, clearProgress, type DailyLessonProgress } from '../lib/dailyLessonStorage';
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
 import { QuestionCard } from '../components/learning/QuestionCard';
 import { VideoPlayer } from '../components/learning/VideoPlayer';
@@ -83,11 +84,17 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   const streak = useStreak(TIMEZONE);
 
   // Preguntas que se muestran. Por defecto vienen del hook (el algoritmo de
-  // selección de hoy). Si el usuario pulsa "Ver resultados" para revisar lo
-  // que hizo, las cargamos desde /today-results — esas son las preguntas
-  // exactas que respondió (pueden diferir de las del repetir).
+  // selección de hoy). Se sobreescriben en dos casos:
+  //  - "Ver resultados": preguntas exactas que ya respondió en su sesión de hoy.
+  //  - "Continuar lección" (resume): preguntas guardadas en AsyncStorage cuando
+  //    el usuario salió a mitad de la lección. Locked-in para no permitir
+  //    rerollear preguntas mal respondidas.
   const [historicQuestions, setHistoricQuestions] = useState<DailyLessonQuestion[] | null>(null);
   const questions = historicQuestions ?? hookQuestions;
+
+  // Snapshot de progreso guardado en local. Si existe, en la intro mostramos
+  // "Continuar lección" en vez de "Empezar".
+  const [pendingResume, setPendingResume] = useState<DailyLessonProgress | null>(null);
 
   const [phase, setPhase] = useState<Phase>('intro');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -162,6 +169,29 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     }
   }, [phase]);
 
+  // Hidratar progreso local al montar. Si el usuario tiene una sesión a
+  // medias guardada (sin haber completado las 5), la ofrecemos como "Continuar".
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (!uid) return;
+    loadProgress(uid, TIMEZONE).then((snap) => {
+      if (snap && snap.answers.length < snap.questions.length) {
+        setPendingResume(snap);
+      }
+    });
+  }, [session?.user?.id]);
+
+  // Si el backend dice que ya está completa (otro dispositivo, otra ruta), el
+  // snapshot local queda obsoleto: lo limpiamos para no ofrecer "Continuar"
+  // sobre una lección que ya cerró por otra vía.
+  useEffect(() => {
+    const uid = session?.user?.id;
+    if (alreadyCompleted && uid) {
+      clearProgress(uid, TIMEZONE);
+      setPendingResume(null);
+    }
+  }, [alreadyCompleted, session?.user?.id]);
+
   // Cargar skills base desde coachAssessment al entrar en results
   useEffect(() => {
     if (phase !== 'results' || !session?.access_token) return;
@@ -220,6 +250,14 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   // ---------------------------------------------------------------------------
 
   const doSubmit = useCallback(async (answersToSend: AnswerPayload[]) => {
+    // Sea cual sea el resultado del submit, el snapshot local ya no aporta:
+    // o la lección se completó, o falló y al reabrir queremos que el usuario
+    // pueda intentarlo de nuevo desde cero (sin "Continuar" colgado).
+    if (session?.user?.id) {
+      clearProgress(session.user.id, TIMEZONE);
+    }
+    setPendingResume(null);
+
     // Si ya completó hoy, mostrar resultados locales sin llamar al backend
     if (alreadyCompleted) {
       const correctCount = answersToSend.filter((_, i) => !failedIndices.includes(i)).length;
@@ -252,7 +290,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setPhase('results');
     }
     setSubmitting(false);
-  }, [session?.access_token, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, streak.multiplier]);
+  }, [session?.access_token, session?.user?.id, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, streak.multiplier]);
 
   const startQuestionOrVideo = useCallback((index: number) => {
     const q = questions[index];
@@ -286,6 +324,18 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
 
     const updatedFailed = correct ? failedIndices : [...failedIndices, currentIndex];
     setFailedIndices(updatedFailed);
+
+    // Guardar snapshot tras cada respuesta. Si el usuario sale, "Continuar"
+    // restaurará exactamente este estado en el próximo arranque.
+    if (session?.user?.id) {
+      saveProgress(session.user.id, TIMEZONE, {
+        questions,
+        answers: updatedAnswers,
+        failedIndices: updatedFailed,
+        currentIndex: currentIndex + 1,
+        startedAt: new Date().toISOString(),
+      });
+    }
 
     showFlash(correct);
 
@@ -323,7 +373,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
         doSubmit(updatedAnswers);
       }
     }, advanceDelayMs);
-  }, [currentIndex, questions, answers, failedIndices, showFlash, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo]);
+  }, [currentIndex, questions, answers, failedIndices, showFlash, fadeQuestion, animateProgressTo, doSubmit, startQuestionOrVideo, session?.user?.id]);
 
   const handleReviewAnswered = useCallback((_correct: boolean, selectedAnswer: unknown) => {
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
@@ -411,10 +461,46 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     // Si veníamos de "Ver resultados", limpiamos las preguntas históricas
     // para que la repetición use las del hook (algoritmo del día).
     setHistoricQuestions(null);
+    // Si había progreso guardado (raro: solo si el usuario tira "Empezar" en
+    // vez de "Continuar"; hoy no exponemos esa vía, pero por defensa).
+    setPendingResume(null);
     animateProgressTo(0);
+    // Guardar snapshot inicial. Si el usuario sale ahora mismo, al volver verá
+    // "Continuar" con las preguntas del hook ya cacheadas.
+    if (session?.user?.id && hookQuestions.length > 0 && !alreadyCompleted) {
+      saveProgress(session.user.id, TIMEZONE, {
+        questions: hookQuestions,
+        answers: [],
+        failedIndices: [],
+        currentIndex: 0,
+        startedAt: new Date().toISOString(),
+      });
+    }
     // Mostrar video si la primera pregunta tiene uno
     const firstQ = questions[0];
     if (firstQ?.has_video && firstQ.video_url) {
+      setShowingVideo(true);
+    } else {
+      setShowingVideo(false);
+      questionStartTime.current = Date.now();
+    }
+  };
+
+  // Reanudar una lección a medias: usa las preguntas y respuestas guardadas.
+  // No se permite volver atrás en las preguntas ya contestadas (anti-cheat).
+  const handleResume = () => {
+    if (!pendingResume) return;
+    setHistoricQuestions(pendingResume.questions);
+    setAnswers(pendingResume.answers);
+    setFailedIndices(pendingResume.failedIndices);
+    setCurrentIndex(pendingResume.currentIndex);
+    setReviewIndex(0);
+    setResults(null);
+    setSubmitError(null);
+    setPhase('questions');
+    animateProgressTo(pendingResume.currentIndex / pendingResume.questions.length);
+    const q = pendingResume.questions[pendingResume.currentIndex];
+    if (q?.has_video && q.video_url) {
       setShowingVideo(true);
     } else {
       setShowingVideo(false);
@@ -627,19 +713,38 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             </Pressable>
           )}
 
-          <Pressable onPress={handleStart} style={styles.startButton}>
-            <LinearGradient
-              colors={alreadyCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#C46A20']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.startGradient}
-            >
-              <Ionicons name={alreadyCompleted ? 'reload' : 'play'} size={20} color="#fff" />
-              <Text style={styles.startText}>
-                {alreadyCompleted ? 'Repetir lección' : 'Empezar'}
-              </Text>
-            </LinearGradient>
-          </Pressable>
+          {/* Si hay una sesión a medias guardada en local (el usuario salió a
+              mitad), el CTA principal pasa a "Continuar lección (N/5)". Sin
+              opción de "Empezar de nuevo" — eso eliminaría el anti-cheat. */}
+          {pendingResume && !alreadyCompleted ? (
+            <Pressable onPress={handleResume} style={styles.startButton}>
+              <LinearGradient
+                colors={['#F18F34', '#C46A20']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.startGradient}
+              >
+                <Ionicons name="play-forward" size={20} color="#fff" />
+                <Text style={styles.startText}>
+                  Continuar lección ({pendingResume.answers.length}/{pendingResume.questions.length})
+                </Text>
+              </LinearGradient>
+            </Pressable>
+          ) : (
+            <Pressable onPress={handleStart} style={styles.startButton}>
+              <LinearGradient
+                colors={alreadyCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#C46A20']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.startGradient}
+              >
+                <Ionicons name={alreadyCompleted ? 'reload' : 'play'} size={20} color="#fff" />
+                <Text style={styles.startText}>
+                  {alreadyCompleted ? 'Repetir lección' : 'Empezar'}
+                </Text>
+              </LinearGradient>
+            </Pressable>
+          )}
 
           <Pressable onPress={onBack} hitSlop={8} style={styles.cancelButton}>
             <Text style={styles.cancelText}>Cancelar</Text>
