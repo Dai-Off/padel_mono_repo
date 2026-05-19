@@ -346,7 +346,7 @@ export function EducationalCourseDetailScreen({
                     onPress={onOpenProfileForOnboarding}
                   >
                     <Ionicons name="compass" size={18} color="white" />
-                    <Text style={styles.startBtnText}>Descubrir mi nivel para desbloquear</Text>
+                    <Text style={styles.startBtnText}>Descubre tu nivel para desbloquear</Text>
                   </Pressable>
                 </LinearGradient>
               );

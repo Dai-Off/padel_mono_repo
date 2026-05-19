@@ -20,6 +20,7 @@ import type { MyTournamentEntryRequest, PublicTournamentRow } from '../api/tourn
 import { fetchMyTournamentEntryRequests, fetchMyTournaments, fetchPublicTournaments } from '../api/tournaments';
 import { TournamentListCard } from '../components/competiciones/TournamentListCard';
 import { TournamentDetailScreen } from './TournamentDetailScreen';
+import { OnboardingInlineBanner } from '../components/onboarding/OnboardingInlineBanner';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile } from '../api/players';
 import {
@@ -280,27 +281,14 @@ export function CompeticionesScreen({
   const listHeader = (
     <>
       {/* Banner inline (no sticky) cuando el usuario aún no tiene nivel.
-          Avisa que los torneos competitivos no son inscribibles hasta
-          completar el cuestionario, con CTA al perfil. Solo en tab
-          'disponibles' — en 'inscritas'/'solicitudes' ya está dentro de su
-          flujo. */}
+          Solo en tab 'disponibles' — en 'inscritas'/'solicitudes' ya está
+          dentro de su flujo. Mismo componente que en Cursos para consistencia. */}
       {needsOnboarding && activeTab === 'disponibles' && (
-        <View style={styles.onboardingBanner}>
-          <View style={styles.onboardingBannerIcon}>
-            <Ionicons name="lock-closed" size={14} color="#F18F34" />
-          </View>
-          <Text style={styles.onboardingBannerText}>
-            Completa el cuestionario de nivelación para inscribirte en torneos competitivos
-          </Text>
-          <Pressable
-            onPress={() => onOpenProfileForOnboarding?.()}
-            hitSlop={6}
-            style={styles.onboardingBannerCta}
-          >
-            <Text style={styles.onboardingBannerCtaText}>Completar</Text>
-            <Ionicons name="arrow-forward" size={12} color="#F18F34" />
-          </Pressable>
-        </View>
+        <OnboardingInlineBanner
+          icon="trophy-outline"
+          message="Descubre tu nivel para inscribirte en torneos competitivos"
+          onPress={() => onOpenProfileForOnboarding?.()}
+        />
       )}
 
       <View style={styles.sectionHead}>
@@ -824,53 +812,6 @@ const styles = StyleSheet.create({
   },
   sectionHead: {
     marginBottom: 12,
-  },
-  // Banner inline (no sticky) que aparece arriba del listado cuando falta
-  // onboarding. Mismo lenguaje visual que el banner de Cursos: borde naranja
-  // tenue, fondo oscuro, icono candado, CTA inline a la derecha.
-  onboardingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(241,143,52,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.30)',
-    marginBottom: 14,
-  },
-  onboardingBannerIcon: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(241,143,52,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  onboardingBannerText: {
-    flex: 1,
-    color: '#E5E7EB',
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600',
-  },
-  onboardingBannerCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(241,143,52,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.45)',
-  },
-  onboardingBannerCtaText: {
-    color: '#F18F34',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.2,
   },
   sectionTitle: {
     fontSize: theme.fontSize.base,

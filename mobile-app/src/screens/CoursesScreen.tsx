@@ -24,6 +24,7 @@ import { fetchLearningCourses, EducationalCourse } from "../api/learning";
 import { useAuth } from "../contexts/AuthContext";
 import { PublicCourseCard } from "../components/schoolCourses/PublicCourseCard";
 import { BookedCourseCard } from "../components/schoolCourses/BookedCourseCard";
+import { OnboardingInlineBanner } from "../components/onboarding/OnboardingInlineBanner";
 
 const { width } = Dimensions.get("window");
 
@@ -338,25 +339,12 @@ export function CoursesScreen({
                 </View>
               ) : (
                 <>
-                  {/* Banner onboarding con CTA "Completar →" inline a la
-                      derecha. Cuando se completa el cuestionario, el banner
-                      desaparece y la lista vuelve a su forma categorizada
-                      ("Para tu nivel" / "Explora niveles superiores"). */}
                   {needsOnboarding && (
-                    <View style={styles.onboardingBanner}>
-                      <Ionicons name="school-outline" size={20} color="#F18F34" />
-                      <Text style={styles.onboardingText}>
-                        Descubre tu nivel para desbloquear cursos
-                      </Text>
-                      <Pressable
-                        onPress={() => onOpenProfileForOnboarding?.()}
-                        hitSlop={6}
-                        style={styles.onboardingBannerCta}
-                      >
-                        <Text style={styles.onboardingBannerCtaText}>Completar</Text>
-                        <Ionicons name="arrow-forward" size={12} color="#F18F34" />
-                      </Pressable>
-                    </View>
+                    <OnboardingInlineBanner
+                      icon="school-outline"
+                      message="Descubre tu nivel para desbloquear cursos"
+                      onPress={() => onOpenProfileForOnboarding?.()}
+                    />
                   )}
 
                   {needsOnboarding ? (
@@ -893,43 +881,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   // Estilos Educación
-  onboardingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 14,
-    marginBottom: 16,
-    borderRadius: 16,
-    backgroundColor: 'rgba(241,143,52,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.2)',
-  },
-  onboardingText: {
-    flex: 1,
-    color: '#FB923C',
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 18,
-  },
-  // CTA pill a la derecha del banner: misma paleta naranja pero con contraste
-  // suficiente para que se lea como botón (no solo etiqueta).
-  onboardingBannerCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(241,143,52,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.5)',
-  },
-  onboardingBannerCtaText: {
-    color: '#F18F34',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.2,
-  },
   eduContainer: {
     flex: 1,
     marginTop: 8,
