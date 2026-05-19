@@ -29,7 +29,8 @@ import {
   type SubmitMatchFeedbackBody,
 } from '../api/matches';
 import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
-import { fetchMyPlayerId } from '../api/players';
+import { fetchMyPlayerId, fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
+import { OnboardingSoftBlockBanner } from '../components/onboarding/OnboardingSoftBlockBanner';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { rejectMatchmakingProposal } from '../api/matchmaking';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
@@ -85,6 +86,12 @@ type PartidoDetailScreenProps = {
   onGoHome?: () => void;
   /** Abre el perfil público de un jugador */
   onOpenPublicProfile?: (playerId: string) => void;
+  /**
+   * Abre el perfil con el modal del cuestionario auto-abierto. Solo se usa
+   * cuando el partido es competitivo y el usuario aún no ha completado el
+   * onboarding (soft block sticky).
+   */
+  onOpenProfileForOnboarding?: () => void;
 };
 
 function PulseDot() {
@@ -101,6 +108,7 @@ export function PartidoDetailScreen({
   onBack,
   onGoHome,
   onOpenPublicProfile,
+  onOpenProfileForOnboarding,
 }: PartidoDetailScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -110,6 +118,13 @@ export function PartidoDetailScreen({
   const [activeTab, setActiveTab] = useState<TabId>('info');
   const [favorite, setFavorite] = useState(false);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
+  /**
+   * Necesitamos saber si el usuario ha completado el cuestionario de
+   * nivelación para soft-bloquear la inscripción en partidos competitivos.
+   * Si aún no se ha cargado tratamos como "completado" para no mostrar el
+   * candado durante el flicker inicial.
+   */
+  const [myProfile, setMyProfile] = useState<MyPlayerProfile | null>(null);
   /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido (fetch async). */
   const [playerContextResolved, setPlayerContextResolved] = useState(() => !session?.access_token);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
@@ -136,7 +151,20 @@ export function PartidoDetailScreen({
       .then(setCurrentPlayerId)
       .catch(() => setCurrentPlayerId(null))
       .finally(() => setPlayerContextResolved(true));
+    fetchMyPlayerProfile(session.access_token)
+      .then(setMyProfile)
+      .catch(() => setMyProfile(null));
   }, [session?.access_token]);
+
+  /**
+   * Soft block: el backend rechaza /matches/:id/join con 403 cuando el match
+   * es competitivo y el jugador no ha completado el onboarding
+   * (matches.ts:613). Bloqueamos el botón "Elegir plaza" y mostramos el
+   * banner sticky con CTA al cuestionario.
+   */
+  const isCompetitiveMatch = partido.mode === 'competitivo';
+  const needsOnboardingForJoin =
+    isCompetitiveMatch && myProfile != null && myProfile.onboardingCompleted === false;
 
   useEffect(() => {
     const token = session?.access_token;
@@ -706,6 +734,7 @@ export function PartidoDetailScreen({
                           playerContextResolved &&
                           p.isFree &&
                           !isInMatch &&
+                          !needsOnboardingForJoin &&
                           (joiningSlotIndex == null || joiningSlotIndex === i)
                             ? () => setSelectedSlotIndex(i)
                             : undefined
@@ -903,6 +932,15 @@ export function PartidoDetailScreen({
         visible={clubInfoVisible}
         onClose={() => setClubInfoVisible(false)}
         partido={partido}
+      />
+
+      {/* Soft block: partido competitivo + onboarding pendiente. El backend
+          rechazaría /matches/:id/join con 403, así que dejamos los slots
+          inactivos y mostramos esta barra sticky con CTA al cuestionario. */}
+      <OnboardingSoftBlockBanner
+        visible={needsOnboardingForJoin}
+        onPress={() => onOpenProfileForOnboarding?.()}
+        message="Completa tu nivel para unirte a partidos competitivos"
       />
     </View>
   );

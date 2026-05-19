@@ -35,6 +35,8 @@ interface CoursesScreenProps {
   onEducationalCoursePress?: (course: EducationalCourse) => void;
   refreshNonce?: number;
   initialTab?: TabId;
+  /** Tap en "Completar →" del banner soft block → perfil con onboarding. */
+  onOpenProfileForOnboarding?: () => void;
 }
 
 export function CoursesScreen({
@@ -43,6 +45,7 @@ export function CoursesScreen({
   onEducationalCoursePress,
   refreshNonce,
   initialTab = "apuntate",
+  onOpenProfileForOnboarding,
 }: CoursesScreenProps) {
   const { session } = useAuth();
   const insets = useSafeAreaInsets();
@@ -335,42 +338,73 @@ export function CoursesScreen({
                 </View>
               ) : (
                 <>
-                  {/* Banner onboarding */}
+                  {/* Banner onboarding con CTA "Completar →" inline a la
+                      derecha. Cuando se completa el cuestionario, el banner
+                      desaparece y la lista vuelve a su forma categorizada
+                      ("Para tu nivel" / "Explora niveles superiores"). */}
                   {needsOnboarding && (
                     <View style={styles.onboardingBanner}>
                       <Ionicons name="school-outline" size={20} color="#F18F34" />
                       <Text style={styles.onboardingText}>
-                        Completa el cuestionario de nivelacion para desbloquear los cursos
+                        Descubre tu nivel para desbloquear cursos
                       </Text>
+                      <Pressable
+                        onPress={() => onOpenProfileForOnboarding?.()}
+                        hitSlop={6}
+                        style={styles.onboardingBannerCta}
+                      >
+                        <Text style={styles.onboardingBannerCtaText}>Completar</Text>
+                        <Ionicons name="arrow-forward" size={12} color="#F18F34" />
+                      </Pressable>
                     </View>
                   )}
-                  {/* Para tu nivel */}
-                  <EducationalSectionHeader title="Para tu nivel" />
-                  <View style={styles.eduGrid}>
-                    {(eduCourses || [])
-                      .filter((c) => !c.locked)
-                      .map((course) => (
-                        <EducationalCourseCard
-                          key={course.id}
-                          course={course}
-                          onPress={() => onEducationalCoursePress?.(course)}
-                        />
-                      ))}
-                  </View>
 
-                  {/* Explora niveles superiores */}
-                  <EducationalSectionHeader title="Explora niveles superiores" />
-                  <View style={styles.eduGrid}>
-                    {(eduCourses || [])
-                      .filter((c) => c.locked)
-                      .map((course) => (
+                  {needsOnboarding ? (
+                    // Sin onboarding: una sola lista plana, todas las cards con
+                    // candado visual. Sin separar por "para tu nivel" /
+                    // "explora superiores" porque no hay un nivel del usuario
+                    // contra el que comparar.
+                    <View style={styles.eduGrid}>
+                      {(eduCourses || []).map((course) => (
                         <EducationalCourseCard
                           key={course.id}
                           course={course}
+                          lockedByOnboarding
                           onPress={() => onEducationalCoursePress?.(course)}
                         />
                       ))}
-                  </View>
+                    </View>
+                  ) : (
+                    <>
+                      {/* Para tu nivel */}
+                      <EducationalSectionHeader title="Para tu nivel" />
+                      <View style={styles.eduGrid}>
+                        {(eduCourses || [])
+                          .filter((c) => !c.locked)
+                          .map((course) => (
+                            <EducationalCourseCard
+                              key={course.id}
+                              course={course}
+                              onPress={() => onEducationalCoursePress?.(course)}
+                            />
+                          ))}
+                      </View>
+
+                      {/* Explora niveles superiores */}
+                      <EducationalSectionHeader title="Explora niveles superiores" />
+                      <View style={styles.eduGrid}>
+                        {(eduCourses || [])
+                          .filter((c) => c.locked)
+                          .map((course) => (
+                            <EducationalCourseCard
+                              key={course.id}
+                              course={course}
+                              onPress={() => onEducationalCoursePress?.(course)}
+                            />
+                          ))}
+                      </View>
+                    </>
+                  )}
 
                   {(eduCourses || []).length === 0 && (
                     <View style={styles.emptyState}>
@@ -461,7 +495,16 @@ function EducationalSectionHeader({ title }: { title: string }) {
   );
 }
 
-function EducationalCourseCard({ course, onPress }: { course: EducationalCourse; onPress?: () => void }) {
+function EducationalCourseCard({
+  course,
+  onPress,
+  lockedByOnboarding = false,
+}: {
+  course: EducationalCourse;
+  onPress?: () => void;
+  /** Aplica overlay de candado sobre todas las cards cuando falta onboarding. */
+  lockedByOnboarding?: boolean;
+}) {
   const imageUrl =
     course.banner_url ||
     "https://images.unsplash.com/photo-1658491830143-72808ca237e3?w=400&h=300&fit=crop";
@@ -535,7 +578,7 @@ function EducationalCourseCard({ course, onPress }: { course: EducationalCourse;
           </View>
         </View>
 
-        {course.locked && (
+        {(course.locked || lockedByOnboarding) && (
           <View style={styles.eduLockedOverlay}>
             <View style={styles.eduLockedCircle}>
               <Ionicons name="lock-closed" size={18} color="#fff" />
@@ -867,6 +910,25 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     lineHeight: 18,
+  },
+  // CTA pill a la derecha del banner: misma paleta naranja pero con contraste
+  // suficiente para que se lea como botón (no solo etiqueta).
+  onboardingBannerCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(241,143,52,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.5)',
+  },
+  onboardingBannerCtaText: {
+    color: '#F18F34',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   eduContainer: {
     flex: 1,

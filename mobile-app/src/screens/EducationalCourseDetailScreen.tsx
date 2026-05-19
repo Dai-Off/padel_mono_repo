@@ -15,6 +15,7 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EducationalCourse, fetchCourseDetail, completeCourseLesson, type CourseLesson } from "../api/learning";
+import { fetchMyPlayerProfile } from "../api/players";
 import { useAuth } from "../contexts/AuthContext";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { androidReadableText } from "../components/home/inicio/textStyles";
@@ -25,9 +26,16 @@ const { width } = Dimensions.get("window");
 interface Props {
   course: EducationalCourse;
   onBack: () => void;
+  /** Abre el perfil con el cuestionario auto-abierto (solo aplica si el curso
+   * está bloqueado por falta de onboarding). */
+  onOpenProfileForOnboarding?: () => void;
 }
 
-export function EducationalCourseDetailScreen({ course, onBack }: Props) {
+export function EducationalCourseDetailScreen({
+  course,
+  onBack,
+  onOpenProfileForOnboarding,
+}: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [expandedLessonId, setExpandedLessonId] = useState<string | null>(null);
@@ -35,6 +43,12 @@ export function EducationalCourseDetailScreen({ course, onBack }: Props) {
   const [lessonsLoading, setLessonsLoading] = useState(true);
   const [completing, setCompleting] = useState<string | null>(null);
   const [playingVideoUrl, setPlayingVideoUrl] = useState<string | null>(null);
+  /**
+   * Necesitamos diferenciar dos motivos por los que `course.locked` puede ser
+   * true: (a) usuario sin onboarding — mostramos CTA "Descubrir mi nivel";
+   * (b) onboarding hecho pero nivel insuficiente — solo informamos sin CTA.
+   */
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -45,6 +59,15 @@ export function EducationalCourseDetailScreen({ course, onBack }: Props) {
     });
     return () => { mounted = false; };
   }, [session?.access_token, course.id]);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchMyPlayerProfile(session?.access_token ?? null).then((p) => {
+      if (!mounted) return;
+      setNeedsOnboarding(p != null && p.onboardingCompleted === false);
+    });
+    return () => { mounted = false; };
+  }, [session?.access_token]);
 
   const toggleLesson = (id: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -307,6 +330,34 @@ export function EducationalCourseDetailScreen({ course, onBack }: Props) {
           const completedCount = lessons.filter(l => l.status === 'completed').length;
           const nextLesson = lessons.find(l => l.status === 'available');
           const allDone = lessons.length > 0 && completedCount === lessons.length;
+
+          // Curso bloqueado: un único botón que cambia según el motivo.
+          //   - Falta onboarding → botón naranja accionable que abre el
+          //     cuestionario.
+          //   - Onboarding hecho pero nivel insuficiente → botón gris no
+          //     accionable ("Curso bloqueado"). No tiene sentido llevarlo al
+          //     cuestionario: ya lo hizo, simplemente el curso no es para él.
+          if (course.locked) {
+            if (needsOnboarding && onOpenProfileForOnboarding) {
+              return (
+                <LinearGradient colors={["#F18F34", "#E95F32"]} style={styles.startBtn}>
+                  <Pressable
+                    style={styles.startBtnInner}
+                    onPress={onOpenProfileForOnboarding}
+                  >
+                    <Ionicons name="compass" size={18} color="white" />
+                    <Text style={styles.startBtnText}>Descubrir mi nivel para desbloquear</Text>
+                  </Pressable>
+                </LinearGradient>
+              );
+            }
+            return (
+              <View style={styles.lockedCtaPrimary}>
+                <Ionicons name="lock-closed" size={18} color="#9CA3AF" />
+                <Text style={styles.lockedCtaText}>Curso bloqueado</Text>
+              </View>
+            );
+          }
 
           if (allDone) {
             return (
@@ -921,6 +972,24 @@ const styles = StyleSheet.create({
   },
   startBtnText: androidReadableText({
     color: 'white',
+    fontSize: 14,
+    fontWeight: '700',
+  }),
+  // "Curso bloqueado": mensaje gris no-interactivo cuando el curso está
+  // bloqueado por nivel insuficiente (no por falta de onboarding).
+  lockedCtaPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  lockedCtaText: androidReadableText({
+    color: '#9CA3AF',
     fontSize: 14,
     fontWeight: '700',
   }),

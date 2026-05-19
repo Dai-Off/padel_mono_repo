@@ -6,6 +6,11 @@ import Svg, { Defs, RadialGradient, Rect, Stop } from 'react-native-svg';
 import { DASH, dash } from './dash';
 import { androidReadableText } from './textStyles';
 import { ScalePressable } from './ScalePressable';
+import { LOCK_BADGE_ICON_SIZE, lockBadgeStyles, lockBadgeTint } from './lockBadgeStyles';
+
+// Triplete RGB del color AMBER (#f59e0b) para tintar el badge sin repetir
+// la conversión hex→rgba en cada uso.
+const AMBER_RGB = '245, 158, 11';
 
 const AMBER = '#f59e0b';
 const AMBER_DARK = '#451a03';
@@ -89,6 +94,11 @@ type Props = {
   eloFiabCaption?: string | null;
   modeLabel?: string | null;
   onPress?: () => void;
+  /**
+   * Si true, sustituye el chevron por badge "Bloqueada" (estilo igual al de
+   * DailyLessonCard). El padre intercepta el tap y abre el hard block modal.
+   */
+  locked?: boolean;
 };
 
 export function CompetitiveLeagueHomeCard({
@@ -101,6 +111,7 @@ export function CompetitiveLeagueHomeCard({
   eloFiabCaption,
   modeLabel,
   onPress,
+  locked = false,
 }: Props) {
   const pct =
     ladderProgressPercent != null &&
@@ -156,7 +167,17 @@ export function CompetitiveLeagueHomeCard({
               </Text>
             </View>
           </View>
-          <Ionicons name="chevron-forward" size={compact ? 18 : 22} color="#6b7280" />
+          {locked ? (
+            <View
+              style={[lockBadgeStyles.badge, lockBadgeTint(AMBER_RGB)]}
+              accessibilityLabel="Cuestionario de nivelación pendiente"
+            >
+              <Ionicons name="lock-closed" size={LOCK_BADGE_ICON_SIZE} color={AMBER} />
+              <Text style={[lockBadgeStyles.text, { color: AMBER }]}>Bloqueado</Text>
+            </View>
+          ) : (
+            <Ionicons name="chevron-forward" size={compact ? 18 : 22} color="#6b7280" />
+          )}
         </View>
 
         <View style={[styles.midRow, compact && styles.midRowCompact]}>

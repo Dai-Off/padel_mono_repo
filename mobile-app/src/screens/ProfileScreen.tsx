@@ -33,6 +33,10 @@ type ProfileScreenProps = {
   // Callback para que el padre limpie su flag autoOpenOnboarding tras
   // consumirlo. Evita re-disparar el modal en re-renders.
   onOnboardingAutoOpened?: () => void;
+  // Disparado cuando el usuario completa el cuestionario con éxito. Lo usa
+  // MainApp para devolverlo a la sección desde la que llegó (lección diaria,
+  // ia afinidad, etc.) en lugar de dejarlo en el perfil.
+  onOnboardingCompleted?: () => void;
 };
 
 function getInitials(firstName?: string | null, lastName?: string | null): string {
@@ -47,6 +51,7 @@ export function ProfileScreen({
   onPreferencesPress,
   autoOpenOnboarding = false,
   onOnboardingAutoOpened,
+  onOnboardingCompleted,
 }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -350,6 +355,7 @@ export function ProfileScreen({
         onClose={() => setShowOnboardingModal(false)}
         onCompleted={() => {
           refreshProfileAndCoach();
+          onOnboardingCompleted?.();
         }}
       />
 

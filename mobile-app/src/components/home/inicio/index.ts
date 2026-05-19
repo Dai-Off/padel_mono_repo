@@ -18,3 +18,4 @@ export { ProximosPartidosSection } from './ProximosPartidosSection';
 export { InicioEnterBlock } from './InicioEnterBlock';
 export { InicioAmbientBackground } from './InicioAmbientBackground';
 export { InicioWidgetsCarousel } from './InicioWidgetsCarousel';
+export { OnboardingBanner } from './OnboardingBanner';

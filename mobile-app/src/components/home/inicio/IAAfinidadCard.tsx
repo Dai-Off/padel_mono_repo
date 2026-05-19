@@ -3,12 +3,24 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { androidReadableText } from './textStyles';
 import { ScalePressable } from './ScalePressable';
+import { LOCK_BADGE_ICON_SIZE, lockBadgeStyles, lockBadgeTint } from './lockBadgeStyles';
+
+// Color de marca de IA Afinidad para el badge (ámbar/amarillo, destaca sobre
+// el lavanda/púrpura de la card). Triplete RGB para usar con `lockBadgeTint`.
+const IA_LOCK_COLOR_RGB = '252, 211, 77';
+const IA_LOCK_COLOR = `rgb(${IA_LOCK_COLOR_RGB})`;
 
 type IAAfinidadCardProps = {
   onPress?: () => void;
+  /**
+   * Si true, pinta indicador de candado en la esquina y label "Bloqueada".
+   * La card sigue tappable: el padre intercepta el tap y abre la pantalla
+   * de hard block en vez del modal de IA.
+   */
+  locked?: boolean;
 };
 
-export function IAAfinidadCard({ onPress }: IAAfinidadCardProps) {
+export function IAAfinidadCard({ onPress, locked = false }: IAAfinidadCardProps) {
   return (
     <ScalePressable
       pressedScale={0.985}
@@ -39,7 +51,17 @@ export function IAAfinidadCard({ onPress }: IAAfinidadCardProps) {
         <View style={styles.textCol}>
           <View style={styles.titleRow}>
             <Text style={styles.title}>IA Afinidad</Text>
-            <Ionicons name="arrow-up" size={22} color="#c084fc" style={styles.arrow} />
+            {locked ? (
+              <View
+                style={[lockBadgeStyles.badge, lockBadgeTint(IA_LOCK_COLOR_RGB)]}
+                accessibilityLabel="Cuestionario de nivelación pendiente"
+              >
+                <Ionicons name="lock-closed" size={LOCK_BADGE_ICON_SIZE} color={IA_LOCK_COLOR} />
+                <Text style={[lockBadgeStyles.text, { color: IA_LOCK_COLOR }]}>Bloqueado</Text>
+              </View>
+            ) : (
+              <Ionicons name="arrow-up" size={22} color="#c084fc" style={styles.arrow} />
+            )}
           </View>
           <Text style={styles.desc}>
             Descubre jugadores afines a tu estilo, nivel y disponibilidad

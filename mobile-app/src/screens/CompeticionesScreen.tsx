@@ -44,6 +44,8 @@ type CompeticionesListRow =
 
 type CompeticionesScreenProps = {
   onBack?: () => void;
+  /** Abre el perfil con el cuestionario auto-abierto (banner soft block). */
+  onOpenProfileForOnboarding?: () => void;
 };
 
 function FilterChipButton({
@@ -68,7 +70,10 @@ function FilterChipButton({
   );
 }
 
-export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
+export function CompeticionesScreen({
+  onBack,
+  onOpenProfileForOnboarding,
+}: CompeticionesScreenProps) {
   const PAGE_SIZE = 20;
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -78,6 +83,12 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   const [levelFilter, setLevelFilter] = useState<TournamentLevelFilter>('all');
   const [joinableOnly, setJoinableOnly] = useState(true);
   const [myElo, setMyElo] = useState<number | null>(null);
+  /**
+   * Soft block: torneos competitivos bloquean inscripción si el usuario no
+   * ha completado el cuestionario de nivelación (backend tournaments.ts
+   * gatea por elo, que es NULL sin onboarding).
+   */
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [items, setItems] = useState<PublicTournamentRow[]>([]);
   const [requestItems, setRequestItems] = useState<MyTournamentEntryRequest[]>([]);
   const [requestUnreadCount, setRequestUnreadCount] = useState(0);
@@ -167,7 +178,10 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
     let cancelled = false;
     void (async () => {
       const p = await fetchMyPlayerProfile(session?.access_token ?? null);
-      if (!cancelled) setMyElo(p?.eloRating ?? null);
+      if (!cancelled) {
+        setMyElo(p?.eloRating ?? null);
+        setNeedsOnboarding(p != null && p.onboardingCompleted === false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -264,27 +278,53 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   const joinableChipLabel = joinableOnly ? 'Solo me puedo unir' : 'Mostrar todas';
 
   const listHeader = (
-    <View style={styles.sectionHead}>
-      <Text style={styles.sectionTitle}>
-        {activeTab === 'disponibles'
-          ? 'Torneos disponibles'
-          : activeTab === 'inscritas'
-            ? 'Mis torneos'
-            : 'Mis solicitudes'}
-      </Text>
-      <Text style={styles.sectionSub}>
-        {activeTab === 'solicitudes'
-          ? requestItems.length === 1
-            ? '1 solicitud'
-            : `${requestItems.length} solicitudes`
-          : filtered.length === 1
-            ? '1 torneo'
-            : `${filtered.length} torneos`}
-        {activeTab === 'inscritas' && !session?.access_token
-          ? ' · inicia sesión para ver inscripciones'
-          : ''}
-      </Text>
-    </View>
+    <>
+      {/* Banner inline (no sticky) cuando el usuario aún no tiene nivel.
+          Avisa que los torneos competitivos no son inscribibles hasta
+          completar el cuestionario, con CTA al perfil. Solo en tab
+          'disponibles' — en 'inscritas'/'solicitudes' ya está dentro de su
+          flujo. */}
+      {needsOnboarding && activeTab === 'disponibles' && (
+        <View style={styles.onboardingBanner}>
+          <View style={styles.onboardingBannerIcon}>
+            <Ionicons name="lock-closed" size={14} color="#F18F34" />
+          </View>
+          <Text style={styles.onboardingBannerText}>
+            Completa el cuestionario de nivelación para inscribirte en torneos competitivos
+          </Text>
+          <Pressable
+            onPress={() => onOpenProfileForOnboarding?.()}
+            hitSlop={6}
+            style={styles.onboardingBannerCta}
+          >
+            <Text style={styles.onboardingBannerCtaText}>Completar</Text>
+            <Ionicons name="arrow-forward" size={12} color="#F18F34" />
+          </Pressable>
+        </View>
+      )}
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>
+          {activeTab === 'disponibles'
+            ? 'Torneos disponibles'
+            : activeTab === 'inscritas'
+              ? 'Mis torneos'
+              : 'Mis solicitudes'}
+        </Text>
+        <Text style={styles.sectionSub}>
+          {activeTab === 'solicitudes'
+            ? requestItems.length === 1
+              ? '1 solicitud'
+              : `${requestItems.length} solicitudes`
+            : filtered.length === 1
+              ? '1 torneo'
+              : `${filtered.length} torneos`}
+          {activeTab === 'inscritas' && !session?.access_token
+            ? ' · inicia sesión para ver inscripciones'
+            : ''}
+        </Text>
+      </View>
+    </>
   );
 
   return (
@@ -497,6 +537,13 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
               <TournamentListCard
                 row={item.row}
                 userElo={myElo}
+                // Solo torneos competitivos (rango de elo definido) llevan
+                // candado cuando falta onboarding. Los abiertos sin rango se
+                // muestran normales y el usuario puede inscribirse.
+                lockedByOnboarding={
+                  needsOnboarding &&
+                  (item.row.elo_min != null || item.row.elo_max != null)
+                }
                 onPress={() => setDetailOpen({ id: item.row.id })}
               />
             )
@@ -539,6 +586,10 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
             <TournamentDetailScreen
               tournamentId={detailOpen.id}
               onClose={() => setDetailOpen(null)}
+              onOpenProfileForOnboarding={() => {
+                setDetailOpen(null);
+                onOpenProfileForOnboarding?.();
+              }}
             />
           </View>
         ) : null}
@@ -773,6 +824,53 @@ const styles = StyleSheet.create({
   },
   sectionHead: {
     marginBottom: 12,
+  },
+  // Banner inline (no sticky) que aparece arriba del listado cuando falta
+  // onboarding. Mismo lenguaje visual que el banner de Cursos: borde naranja
+  // tenue, fondo oscuro, icono candado, CTA inline a la derecha.
+  onboardingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(241,143,52,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.30)',
+    marginBottom: 14,
+  },
+  onboardingBannerIcon: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(241,143,52,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  onboardingBannerText: {
+    flex: 1,
+    color: '#E5E7EB',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
+  onboardingBannerCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(241,143,52,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.45)',
+  },
+  onboardingBannerCtaText: {
+    color: '#F18F34',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   sectionTitle: {
     fontSize: theme.fontSize.base,
