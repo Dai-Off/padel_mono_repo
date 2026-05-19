@@ -101,9 +101,10 @@ export const inventoryService = {
         club_id: string;
         booking_id: string;
         player_id: string;
-        payment_method: 'cash' | 'card';
+        payment_method: 'cash' | 'card' | 'wallet';
+        wallet_amount_cents?: number;
         lines: Array<{ item_id?: string; quantity: number; name?: string; unit_price_cents?: number }>;
-    }): Promise<{ id: string; total_cents: number; currency: string }> => {
+    }): Promise<{ id: string; total_cents: number; currency: string; wallet_amount_cents?: number }> => {
         const res = await apiFetchWithAuth<ApiOk<{ sale: { id: string; total_cents: number; currency: string } }>>('/inventario/sales', {
             method: 'POST',
             body: JSON.stringify(body),
