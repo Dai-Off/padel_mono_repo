@@ -35,6 +35,7 @@ import type {
   TournamentPlayerAgenda,
 } from '../api/tournaments';
 import { fetchMyPlayerProfile } from '../api/players';
+import { OnboardingSoftBlockBanner } from '../components/onboarding/OnboardingSoftBlockBanner';
 import {
   fetchTournamentCompetitionPlayerView,
   fetchTournamentChatMessages,
@@ -81,6 +82,10 @@ type DetailTab = 'info' | 'equipos' | 'cuadro' | 'chat' | 'partidos';
 type Props = {
   tournamentId: string;
   onClose: () => void;
+  /** Abre el perfil con el cuestionario auto-abierto. Solo se usa cuando el
+   * torneo es competitivo (rango de elo definido) y el usuario aún no ha
+   * completado el cuestionario (soft block sticky). */
+  onOpenProfileForOnboarding?: () => void;
 };
 
 function pickClub(row: PublicTournamentRow) {
@@ -335,7 +340,11 @@ function TournamentDetailLoadingSkeleton({
   );
 }
 
-export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
+export function TournamentDetailScreen({
+  tournamentId,
+  onClose,
+  onOpenProfileForOnboarding,
+}: Props) {
   const insets = useSafeAreaInsets();
   const { session, isLoading: authBooting } = useAuth();
   const loadGenerationRef = useRef(0);
@@ -347,6 +356,8 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
   });
   const [myStatus, setMyStatus] = useState<string | null>(null);
   const [myElo, setMyElo] = useState<number | null>(null);
+  /** Soft block: si torneo competitivo + onboarding pendiente, bloqueamos CTA. */
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [myEntryRequest, setMyEntryRequest] = useState<{
     id?: string;
     status?: 'pending' | 'approved' | 'rejected' | 'dismissed' | string;
@@ -444,8 +455,10 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
         if (session?.access_token) {
           const me = await fetchMyPlayerProfile(session.access_token);
           setMyElo(me?.eloRating ?? null);
+          setNeedsOnboarding(me != null && me.onboardingCompleted === false);
         } else {
           setMyElo(null);
+          setNeedsOnboarding(false);
         }
         if (session?.access_token) {
           const [competitionRes, agendaRes] = await Promise.all([
@@ -909,8 +922,17 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
     if (hasActiveInscription) return [CTA_LEAVE_START, CTA_LEAVE_END];
     return [ACCENT, ACCENT_END];
   }, [hasActiveInscription]);
+  /**
+   * Torneo competitivo = tiene rango de elo. Si además al usuario le falta
+   * onboarding, el backend (tournaments.ts:1708) rechazaría la inscripción.
+   * Bloqueamos el CTA y mostramos el banner sticky de soft block.
+   */
+  const isCompetitiveTournament = eloMin != null || eloMax != null;
+  const blockedByOnboarding = isCompetitiveTournament && needsOnboarding;
+
   const ctaDisabled =
     !row ||
+    blockedByOnboarding ||
     (!hasActiveInscription &&
       (!isTournamentStatusOpen(row.status) || remaining <= 0 || requestStatus === 'pending'));
 
@@ -1603,6 +1625,16 @@ export function TournamentDetailScreen({ tournamentId, onClose }: Props) {
           onClose={() => setConfirmationModalData(null)}
         />
       ) : null}
+
+      {/* Soft block sticky encima del CTA. Solo en torneos competitivos cuando
+          falta onboarding. El CTA queda visualmente desactivado via
+          ctaDisabled (incluye blockedByOnboarding). */}
+      <OnboardingSoftBlockBanner
+        visible={blockedByOnboarding}
+        onPress={() => onOpenProfileForOnboarding?.()}
+        message="Completa tu nivel para inscribirte"
+        bottomOffset={90}
+      />
     </View>
   );
 }

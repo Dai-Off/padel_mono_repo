@@ -20,6 +20,7 @@ import {
   INICIO_STACK_GAP,
   MissionsHomeSection,
   type HomeMission,
+  OnboardingBanner,
   ProximosPartidosSection,
   SeasonPassHomeCard,
 } from '../components/home/inicio';
@@ -28,6 +29,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useHomeStats } from '../hooks/useHomeStats';
 import type { PartidoItem } from './PartidosScreen';
 import { IAAfinidadModal } from '../components/home/IAAfinidadModal';
+import { OnboardingHardBlockModal } from '../components/onboarding/OnboardingHardBlockModal';
 import { searchAiMatch } from '../api/aiMatch';
 import { fetchSeasonPassMe, type SeasonPassMeOk, type SeasonPassMissionDto } from '../api/seasonPass';
 import {
@@ -76,6 +78,8 @@ type HomeScreenProps = {
   onOpenPublicProfile?: (playerId: string) => void;
   /** Abre perfil público desde IA Afinidad — reabre modal al volver */
   onOpenAffinityPublicProfile?: (playerId: string) => void;
+  /** Abre el perfil con el modal del cuestionario auto-abierto (banner + hard blocks). */
+  onOpenProfileForOnboarding?: () => void;
 };
 
 /** Caché a nivel de módulo para que affinityResponse y los IDs enviados sobrevivan al desmonte/remonte de HomeScreen */
@@ -98,6 +102,7 @@ export function HomeScreen({
   onAffinityReopened,
   onOpenPublicProfile,
   onOpenAffinityPublicProfile,
+  onOpenProfileForOnboarding,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session, refreshAccessToken } = useAuth();
@@ -125,6 +130,14 @@ export function HomeScreen({
   };
   const [seasonPassMe, setSeasonPassMe] = useState<SeasonPassMeOk | null>(null);
   const [seasonPassLoading, setSeasonPassLoading] = useState(false);
+  /**
+   * Cuál de los hard block modals está abierto. Se renderiza como Modal RN
+   * fullScreen encima del Home, así "Ahora no" lo cierra sin remontar el Home
+   * (no hay reload de partidos/season pass/etc).
+   */
+  const [hardBlockOpen, setHardBlockOpen] = useState<
+    null | 'daily-lesson' | 'ia-afinidad' | 'matchmaking'
+  >(null);
 
   // Cuando el usuario vuelve del chat de IA Afinidad, reabrir el modal con los resultados del caché
   useEffect(() => {
@@ -322,8 +335,16 @@ export function HomeScreen({
           ]}
           showsVerticalScrollIndicator={false}
         >
-        {(matchesLoading || misProximosPartidos.length > 0) && (
+        {/* Banner proactivo: visible arriba de todo si el jugador no ha
+            completado el cuestionario de nivelación. Tap → perfil con modal
+            del onboarding auto-abierto. */}
+        {myPlayerProfile && !myPlayerProfile.onboardingCompleted && (
           <InicioEnterBlock enterIndex={0}>
+            <OnboardingBanner onPress={() => onOpenProfileForOnboarding?.()} />
+          </InicioEnterBlock>
+        )}
+        {(matchesLoading || misProximosPartidos.length > 0) && (
+          <InicioEnterBlock enterIndex={1}>
             <ProximosPartidosSection
               items={misProximosPartidos}
               /** No acoplar a session aquí: en iOS la sesión hidrata tarde y `loading` quedaba false con items vacíos → la sección se ocultaba por completo (early return). */
@@ -332,12 +353,20 @@ export function HomeScreen({
             />
           </InicioEnterBlock>
         )}
-        <InicioEnterBlock enterIndex={1}>
+        <InicioEnterBlock enterIndex={2}>
           <InicioWidgetsCarousel>
             <DailyLessonCard
               variant="carousel"
               streakRefreshKey={streakRefreshKey}
-              onPress={() => onDailyLessonPress?.()}
+              onPress={() => {
+                // Hard block: si falta onboarding, abrir modal en vez de entrar
+                // a DailyLessonScreen. Evita el reload del home al cerrar.
+                if (myPlayerProfile && !myPlayerProfile.onboardingCompleted) {
+                  setHardBlockOpen('daily-lesson');
+                  return;
+                }
+                onDailyLessonPress?.();
+              }}
             />
             <SeasonPassHomeCard
               compact
@@ -354,11 +383,18 @@ export function HomeScreen({
             />
             <CompetitiveLeagueHomeCard
               compact
-              onPress={() => onOpenCompetitiveLeague?.()}
+              locked={myPlayerProfile != null && !myPlayerProfile.onboardingCompleted}
+              onPress={() => {
+                if (myPlayerProfile && !myPlayerProfile.onboardingCompleted) {
+                  setHardBlockOpen('matchmaking');
+                  return;
+                }
+                onOpenCompetitiveLeague?.();
+              }}
             />
           </InicioWidgetsCarousel>
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={2}>
+        <InicioEnterBlock enterIndex={3}>
           <InicioQuickActions
             onNavigateToTab={onNavigateToTab}
             onCoursesPress={onCoursesPress}
@@ -368,9 +404,17 @@ export function HomeScreen({
             loading={listLoading}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={3}>
+        <InicioEnterBlock enterIndex={4}>
           <IAAfinidadCard
+            locked={myPlayerProfile != null && !myPlayerProfile.onboardingCompleted}
             onPress={() => {
+              // Hard block: si no ha completado onboarding, abrir modal y no
+              // el flujo de IA. El Home no se desmonta (Modal RN), así
+              // "Ahora no" cierra sin reload.
+              if (myPlayerProfile != null && !myPlayerProfile.onboardingCompleted) {
+                setHardBlockOpen('ia-afinidad');
+                return;
+              }
               setAffinityError(null);
               // No resetear la respuesta si ya hay resultados — al volver del chat
               // el modal los mostrará directamente sin tener que buscar de nuevo.
@@ -378,10 +422,10 @@ export function HomeScreen({
             }}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={4}>
+        <InicioEnterBlock enterIndex={5}>
           <MissionsHomeSection missions={homeMissionsFromPass} />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={5}>
+        <InicioEnterBlock enterIndex={6}>
           <EnDirectoSection
             partidos={partidos.filter((p) => p.matchPhase === 'live')}
             loading={matchesLoading}
@@ -420,6 +464,58 @@ export function HomeScreen({
         }}
       />
 
+      {/* Modales hard block: se montan encima del Home sin desmontarlo.
+          Cerrar "Ahora no" o el botón cerrar arriba no recarga el Home. */}
+      <OnboardingHardBlockModal
+        visible={hardBlockOpen === 'daily-lesson'}
+        featureIcon="flame"
+        title="Desbloquea la Lección diaria"
+        subtitle="Completa el cuestionario de nivelación para acceder a tu entrenamiento diario personalizado."
+        bullets={[
+          'Preguntas adaptadas a tu nivel real',
+          'Racha diaria con bonus de SP',
+          'Progreso que evoluciona contigo',
+        ]}
+        onClose={() => setHardBlockOpen(null)}
+        onStart={() => {
+          setHardBlockOpen(null);
+          onOpenProfileForOnboarding?.();
+        }}
+      />
+
+      <OnboardingHardBlockModal
+        visible={hardBlockOpen === 'ia-afinidad'}
+        featureIcon="people"
+        title="Desbloquea la IA de afinidad"
+        subtitle="Completa el cuestionario de nivelación para encontrar los jugadores más compatibles contigo."
+        bullets={[
+          'Compatibilidad real, no solo nivel',
+          'Jugadores cerca de ti con tu estilo',
+          'Mejora con cada partido que juegas',
+        ]}
+        onClose={() => setHardBlockOpen(null)}
+        onStart={() => {
+          setHardBlockOpen(null);
+          onOpenProfileForOnboarding?.();
+        }}
+      />
+
+      <OnboardingHardBlockModal
+        visible={hardBlockOpen === 'matchmaking'}
+        featureIcon="trophy"
+        title="Desbloquea la Liga Competitiva"
+        subtitle="Completa el cuestionario de nivelación para acceder al matchmaking competitivo."
+        bullets={[
+          'Partidos 2v2 con matchmaking real',
+          'Sube de división ganando LP',
+          'Compite y gana premios por temporada',
+        ]}
+        onClose={() => setHardBlockOpen(null)}
+        onStart={() => {
+          setHardBlockOpen(null);
+          onOpenProfileForOnboarding?.();
+        }}
+      />
     </>
   );
 }

@@ -895,6 +895,7 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
           {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
         </View>
       )}
+
     </View>
   );
 }

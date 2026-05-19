@@ -43,6 +43,20 @@ import { PublicProfileScreen } from './PublicProfileScreen';
 import type { EducationalCourse } from '../api/dailyLessons';
 import type { PublicCourse } from '../api/schoolCourses';
 
+/**
+ * Claves de retorno post-onboarding. Cuando el usuario llega al cuestionario
+ * desde una feature bloqueada, al completarlo lo devolvemos a esa sección en
+ * vez de dejarlo en el perfil.
+ */
+type PostOnboardingReturn =
+  | 'home'
+  | 'daily-lesson'
+  | 'ia-afinidad'
+  | 'matchmaking'
+  | 'partido-detail'
+  | 'torneos'
+  | 'cursos';
+
 export function MainApp() {
   const sidebar = useSidebar(false);
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
@@ -82,6 +96,46 @@ export function MainApp() {
   const [selectedPublicPlayerId, setSelectedPublicPlayerId] = useState<string | null>(null);
   /** Perfil público abierto desde IA Afinidad — back reabre el modal */
   const [affinityPublicProfileId, setAffinityPublicProfileId] = useState<string | null>(null);
+  /**
+   * Si el usuario llega al cuestionario desde una feature bloqueada, guardamos
+   * aquí la clave de origen para devolverlo a esa pantalla al completarlo.
+   * Null = no hay sección de origen (se queda en el perfil).
+   */
+  const [pendingOnboardingReturn, setPendingOnboardingReturn] =
+    useState<PostOnboardingReturn | null>(null);
+
+  /**
+   * Abre el perfil con el modal del cuestionario auto-abierto y guarda la
+   * sección de origen para devolver al usuario al completarlo. Usado por todos
+   * los bloqueos (banner home, hard blocks, soft blocks).
+   */
+  const openOnboardingFromSection = (returnTo: PostOnboardingReturn) => {
+    setPendingOnboardingReturn(returnTo);
+    setProfileAutoOpenOnboarding(true);
+    setShowProfile(true);
+  };
+
+  /**
+   * Disparado cuando el modal del cuestionario completa con éxito. Devuelve al
+   * usuario a la sección de origen reabriendo la pantalla correspondiente.
+   */
+  const handleOnboardingCompleted = () => {
+    const target = pendingOnboardingReturn;
+    setPendingOnboardingReturn(null);
+    setProfileAutoOpenOnboarding(false);
+    if (!target || target === 'home') {
+      setShowProfile(false);
+      setActiveTab('inicio');
+      return;
+    }
+    setShowProfile(false);
+    if (target === 'daily-lesson') setShowDailyLesson(true);
+    else if (target === 'matchmaking') setShowCompetitiveLeague(true);
+    else if (target === 'torneos') setActiveTab('torneos');
+    else if (target === 'cursos') setShowCourses(true);
+    // partido-detail: no podemos reabrirlo automáticamente sin el objeto del
+    // partido (se perdería en el ciclo de perfil). El usuario lo verá al volver.
+  };
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
@@ -92,6 +146,14 @@ export function MainApp() {
         <EducationalCourseDetailScreen
           course={selectedEducationalCourse}
           onBack={() => setSelectedEducationalCourse(null)}
+          onOpenProfileForOnboarding={() => {
+            // Cerramos también `showCourses` (listado): en `renderContent` se
+            // evalúa antes que `showProfile`, así que sin esto la navegación
+            // se quedaba en el listado de cursos en vez de ir al perfil.
+            setSelectedEducationalCourse(null);
+            setShowCourses(false);
+            openOnboardingFromSection('cursos');
+          }}
         />
       );
     }
@@ -116,6 +178,10 @@ export function MainApp() {
             setCoursesTab('cursos');
             setSelectedEducationalCourse(course);
           }}
+          onOpenProfileForOnboarding={() => {
+            setShowCourses(false);
+            openOnboardingFromSection('cursos');
+          }}
         />
       );
     }
@@ -129,8 +195,7 @@ export function MainApp() {
           }}
           onOpenOnboarding={() => {
             setShowDailyLesson(false);
-            setProfileAutoOpenOnboarding(true);
-            setShowProfile(true);
+            openOnboardingFromSection('daily-lesson');
           }}
         />
       );
@@ -176,6 +241,7 @@ export function MainApp() {
           }}
           autoOpenOnboarding={profileAutoOpenOnboarding}
           onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
+          onOnboardingCompleted={handleOnboardingCompleted}
         />
       );
     }
@@ -301,6 +367,10 @@ export function MainApp() {
             setSelectedPublicPlayerId(pid);
             setShowPublicProfile(true);
           }}
+          onOpenProfileForOnboarding={() => {
+            setSelectedPartido(null);
+            openOnboardingFromSection('partido-detail');
+          }}
         />
       );
     }
@@ -339,6 +409,7 @@ export function MainApp() {
               setAffinityPublicProfileId(pid);
               setShowPublicProfile(true);
             }}
+            onOpenProfileForOnboarding={() => openOnboardingFromSection('home')}
           />
         );
       case 'pistas':
@@ -351,7 +422,12 @@ export function MainApp() {
       case 'tienda':
         return <TiendaScreen />;
       case 'torneos':
-        return <CompeticionesScreen onBack={() => setActiveTab('inicio')} />;
+        return (
+          <CompeticionesScreen
+            onBack={() => setActiveTab('inicio')}
+            onOpenProfileForOnboarding={() => openOnboardingFromSection('torneos')}
+          />
+        );
       case 'partidos':
         return (
           <PartidosScreen

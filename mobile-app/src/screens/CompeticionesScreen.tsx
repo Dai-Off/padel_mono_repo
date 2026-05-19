@@ -20,6 +20,7 @@ import type { MyTournamentEntryRequest, PublicTournamentRow } from '../api/tourn
 import { fetchMyTournamentEntryRequests, fetchMyTournaments, fetchPublicTournaments } from '../api/tournaments';
 import { TournamentListCard } from '../components/competiciones/TournamentListCard';
 import { TournamentDetailScreen } from './TournamentDetailScreen';
+import { OnboardingInlineBanner } from '../components/onboarding/OnboardingInlineBanner';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile } from '../api/players';
 import {
@@ -44,6 +45,8 @@ type CompeticionesListRow =
 
 type CompeticionesScreenProps = {
   onBack?: () => void;
+  /** Abre el perfil con el cuestionario auto-abierto (banner soft block). */
+  onOpenProfileForOnboarding?: () => void;
 };
 
 function FilterChipButton({
@@ -68,7 +71,10 @@ function FilterChipButton({
   );
 }
 
-export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
+export function CompeticionesScreen({
+  onBack,
+  onOpenProfileForOnboarding,
+}: CompeticionesScreenProps) {
   const PAGE_SIZE = 20;
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -78,6 +84,12 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   const [levelFilter, setLevelFilter] = useState<TournamentLevelFilter>('all');
   const [joinableOnly, setJoinableOnly] = useState(true);
   const [myElo, setMyElo] = useState<number | null>(null);
+  /**
+   * Soft block: torneos competitivos bloquean inscripción si el usuario no
+   * ha completado el cuestionario de nivelación (backend tournaments.ts
+   * gatea por elo, que es NULL sin onboarding).
+   */
+  const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [items, setItems] = useState<PublicTournamentRow[]>([]);
   const [requestItems, setRequestItems] = useState<MyTournamentEntryRequest[]>([]);
   const [requestUnreadCount, setRequestUnreadCount] = useState(0);
@@ -167,7 +179,10 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
     let cancelled = false;
     void (async () => {
       const p = await fetchMyPlayerProfile(session?.access_token ?? null);
-      if (!cancelled) setMyElo(p?.eloRating ?? null);
+      if (!cancelled) {
+        setMyElo(p?.eloRating ?? null);
+        setNeedsOnboarding(p != null && p.onboardingCompleted === false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -264,27 +279,40 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   const joinableChipLabel = joinableOnly ? 'Solo me puedo unir' : 'Mostrar todas';
 
   const listHeader = (
-    <View style={styles.sectionHead}>
-      <Text style={styles.sectionTitle}>
-        {activeTab === 'disponibles'
-          ? 'Torneos disponibles'
-          : activeTab === 'inscritas'
-            ? 'Mis torneos'
-            : 'Mis solicitudes'}
-      </Text>
-      <Text style={styles.sectionSub}>
-        {activeTab === 'solicitudes'
-          ? requestItems.length === 1
-            ? '1 solicitud'
-            : `${requestItems.length} solicitudes`
-          : filtered.length === 1
-            ? '1 torneo'
-            : `${filtered.length} torneos`}
-        {activeTab === 'inscritas' && !session?.access_token
-          ? ' · inicia sesión para ver inscripciones'
-          : ''}
-      </Text>
-    </View>
+    <>
+      {/* Banner inline (no sticky) cuando el usuario aún no tiene nivel.
+          Solo en tab 'disponibles' — en 'inscritas'/'solicitudes' ya está
+          dentro de su flujo. Mismo componente que en Cursos para consistencia. */}
+      {needsOnboarding && activeTab === 'disponibles' && (
+        <OnboardingInlineBanner
+          icon="trophy-outline"
+          message="Descubre tu nivel para inscribirte en torneos competitivos"
+          onPress={() => onOpenProfileForOnboarding?.()}
+        />
+      )}
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>
+          {activeTab === 'disponibles'
+            ? 'Torneos disponibles'
+            : activeTab === 'inscritas'
+              ? 'Mis torneos'
+              : 'Mis solicitudes'}
+        </Text>
+        <Text style={styles.sectionSub}>
+          {activeTab === 'solicitudes'
+            ? requestItems.length === 1
+              ? '1 solicitud'
+              : `${requestItems.length} solicitudes`
+            : filtered.length === 1
+              ? '1 torneo'
+              : `${filtered.length} torneos`}
+          {activeTab === 'inscritas' && !session?.access_token
+            ? ' · inicia sesión para ver inscripciones'
+            : ''}
+        </Text>
+      </View>
+    </>
   );
 
   return (
@@ -497,6 +525,13 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
               <TournamentListCard
                 row={item.row}
                 userElo={myElo}
+                // Solo torneos competitivos (rango de elo definido) llevan
+                // candado cuando falta onboarding. Los abiertos sin rango se
+                // muestran normales y el usuario puede inscribirse.
+                lockedByOnboarding={
+                  needsOnboarding &&
+                  (item.row.elo_min != null || item.row.elo_max != null)
+                }
                 onPress={() => setDetailOpen({ id: item.row.id })}
               />
             )
@@ -539,6 +574,10 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
             <TournamentDetailScreen
               tournamentId={detailOpen.id}
               onClose={() => setDetailOpen(null)}
+              onOpenProfileForOnboarding={() => {
+                setDetailOpen(null);
+                onOpenProfileForOnboarding?.();
+              }}
             />
           </View>
         ) : null}

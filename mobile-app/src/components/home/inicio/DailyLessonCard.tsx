@@ -556,6 +556,8 @@ export function DailyLessonCard({
               // Estado "bloqueada" cuando el usuario no ha completado el
               // cuestionario de nivelación. Tap sigue funcionando — la pantalla
               // bloqueada amigable explica qué hacer y lleva al onboarding.
+              // Estilo centralizado en lockBadgeStyles para que las 3 cards
+              // (Lección, IA, Liga) sean visualmente idénticas.
               <View
                 style={styles.lockedBadge}
                 accessibilityLabel="Cuestionario de nivelación pendiente"

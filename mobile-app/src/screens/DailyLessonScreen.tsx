@@ -530,30 +530,38 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.lockedContainer}>
-          <View style={styles.lockedIconWrap}>
-            <View style={styles.lockedIconGlow} />
-            <LinearGradient colors={['#F18F34', '#d97706']} style={styles.lockedIconCircle}>
-              <Ionicons name="compass" size={44} color="#FFFFFF" />
-            </LinearGradient>
+          {/* Icono superior: candado grande en doble círculo gris/apagado.
+              Doble círculo = halo exterior translúcido + círculo interior con
+              borde y fondo. La paleta gris transmite "bloqueado/inactivo". */}
+          <View style={styles.lockOuterCircle}>
+            <View style={styles.lockInnerCircle}>
+              <Ionicons name="lock-closed" size={42} color="#9CA3AF" />
+            </View>
           </View>
 
-          <Text style={styles.lockedTitle}>Cuestionario de nivelación</Text>
+          {/* Icono feature: identifica la sección sin gritar. Naranja pequeño
+              debajo del candado para conservar el código de color de marca. */}
+          <View style={styles.featureIconBadge}>
+            <Ionicons name="flame" size={14} color="#F18F34" />
+          </View>
+
+          <Text style={styles.lockedTitle}>Desbloquea la Lección diaria</Text>
           <Text style={styles.lockedSubtitle}>
-            Necesitamos un nivel para poder ofrecer una experiencia mucho más personalizada.
+            Completa el cuestionario de nivelación para acceder a tu entrenamiento diario personalizado.
           </Text>
 
           <View style={styles.lockedBullets}>
             <View style={styles.lockedBullet}>
               <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-              <Text style={styles.lockedBulletText}>Lecciones diarias a tu nivel real</Text>
+              <Text style={styles.lockedBulletText}>Preguntas adaptadas a tu nivel real</Text>
             </View>
             <View style={styles.lockedBullet}>
               <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-              <Text style={styles.lockedBulletText}>Coach IA adaptado a ti</Text>
+              <Text style={styles.lockedBulletText}>Racha diaria con bonus de SP</Text>
             </View>
             <View style={styles.lockedBullet}>
               <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-              <Text style={styles.lockedBulletText}>Recomendaciones de cursos relevantes</Text>
+              <Text style={styles.lockedBulletText}>Progreso que evoluciona contigo</Text>
             </View>
           </View>
 
@@ -568,8 +576,8 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               end={{ x: 1, y: 0 }}
               style={styles.lockedCtaGradient}
             >
-              <Ionicons name="play" size={18} color="#fff" />
-              <Text style={styles.lockedCtaText}>Empezar cuestionario</Text>
+              <Ionicons name="compass" size={18} color="#fff" />
+              <Text style={styles.lockedCtaText}>Descubrir mi nivel</Text>
             </LinearGradient>
           </Pressable>
 
@@ -1151,6 +1159,45 @@ const styles = StyleSheet.create({
     borderRadius: 44,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Doble círculo gris/apagado para el icono de candado superior. El anillo
+  // exterior es translúcido (halo neutro), el interior tiene borde para dar la
+  // sensación de "compartimento cerrado". Sin gradiente: queremos que la única
+  // nota de color sea el feature badge debajo.
+  lockOuterCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(156,163,175,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(156,163,175,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  lockInnerCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: 'rgba(31,41,55,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(156,163,175,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Badge pequeño debajo del candado que identifica la feature (flame para
+  // lección diaria, people para IA afinidad). Color de marca para mantener el
+  // hilo visual aunque el candado sea gris.
+  featureIconBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(241,143,52,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
   },
   lockedTitle: {
     color: '#FFFFFF',

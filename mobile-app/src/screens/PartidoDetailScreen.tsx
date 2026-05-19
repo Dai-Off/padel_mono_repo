@@ -29,7 +29,7 @@ import {
   type SubmitMatchFeedbackBody,
 } from '../api/matches';
 import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
-import { fetchMyPlayerId } from '../api/players';
+import { fetchMyPlayerId, fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { rejectMatchmakingProposal } from '../api/matchmaking';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
@@ -85,6 +85,12 @@ type PartidoDetailScreenProps = {
   onGoHome?: () => void;
   /** Abre el perfil público de un jugador */
   onOpenPublicProfile?: (playerId: string) => void;
+  /**
+   * Abre el perfil con el modal del cuestionario auto-abierto. Solo se usa
+   * cuando el partido es competitivo y el usuario aún no ha completado el
+   * onboarding (soft block sticky).
+   */
+  onOpenProfileForOnboarding?: () => void;
 };
 
 function PulseDot() {
@@ -101,6 +107,7 @@ export function PartidoDetailScreen({
   onBack,
   onGoHome,
   onOpenPublicProfile,
+  onOpenProfileForOnboarding,
 }: PartidoDetailScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -110,6 +117,13 @@ export function PartidoDetailScreen({
   const [activeTab, setActiveTab] = useState<TabId>('info');
   const [favorite, setFavorite] = useState(false);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
+  /**
+   * Necesitamos saber si el usuario ha completado el cuestionario de
+   * nivelación para soft-bloquear la inscripción en partidos competitivos.
+   * Si aún no se ha cargado tratamos como "completado" para no mostrar el
+   * candado durante el flicker inicial.
+   */
+  const [myProfile, setMyProfile] = useState<MyPlayerProfile | null>(null);
   /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido (fetch async). */
   const [playerContextResolved, setPlayerContextResolved] = useState(() => !session?.access_token);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
@@ -136,7 +150,20 @@ export function PartidoDetailScreen({
       .then(setCurrentPlayerId)
       .catch(() => setCurrentPlayerId(null))
       .finally(() => setPlayerContextResolved(true));
+    fetchMyPlayerProfile(session.access_token)
+      .then(setMyProfile)
+      .catch(() => setMyProfile(null));
   }, [session?.access_token]);
+
+  /**
+   * Soft block: el backend rechaza /matches/:id/join con 403 cuando el match
+   * es competitivo y el jugador no ha completado el onboarding
+   * (matches.ts:613). Bloqueamos el botón "Elegir plaza" y mostramos el
+   * banner sticky con CTA al cuestionario.
+   */
+  const isCompetitiveMatch = partido.mode === 'competitivo';
+  const needsOnboardingForJoin =
+    isCompetitiveMatch && myProfile != null && myProfile.onboardingCompleted === false;
 
   useEffect(() => {
     const token = session?.access_token;
@@ -706,12 +733,14 @@ export function PartidoDetailScreen({
                           playerContextResolved &&
                           p.isFree &&
                           !isInMatch &&
+                          !needsOnboardingForJoin &&
                           (joiningSlotIndex == null || joiningSlotIndex === i)
                             ? () => setSelectedSlotIndex(i)
                             : undefined
                         }
                         joining={joiningSlotIndex === i}
                         selected={selectedSlotIndex === i}
+                        lockedByOnboarding={needsOnboardingForJoin}
                         onOpenPublicProfile={onOpenPublicProfile}
                       />
                     ))}
@@ -734,6 +763,7 @@ export function PartidoDetailScreen({
                           }
                           joining={joiningSlotIndex === slotIdx}
                           selected={selectedSlotIndex === slotIdx}
+                          lockedByOnboarding={needsOnboardingForJoin}
                           onOpenPublicProfile={onOpenPublicProfile}
                         />
                       );
@@ -839,33 +869,51 @@ export function PartidoDetailScreen({
         </View>
       ) : (
         <View style={[styles.bottomBar, styles.bottomBarStack, { paddingBottom: Math.max(insets.bottom, 16) }]}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.ctaBtn,
-              !canPressCta && styles.ctaBtnDisabled,
-              pressed && canPressCta && styles.pressed,
-            ]}
-            onPress={() => selectedSlotIndex != null && handleJoin(selectedSlotIndex)}
-            disabled={!canPressCta}
-          >
-            {joinBusy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <View style={styles.ctaTextWrap}>
-                <Text style={styles.ctaText}>
-                  {matchPhase === 'past'
-                    ? 'Partido finalizado'
-                    : isInMatch
-                      ? 'Ya estás en el partido'
-                      : firstFreeIndex < 0
-                        ? 'No hay plazas libres'
-                        : selectedSlotIndex == null
-                          ? 'Selecciona una plaza para continuar'
-                          : `Reservar plaza - ${partido.pricePerPlayer}`}
-                </Text>
-              </View>
-            )}
-          </Pressable>
+          {needsOnboardingForJoin ? (
+            // Partido competitivo + onboarding pendiente: el botón principal
+            // pasa a ser un CTA al cuestionario. Mismo estilo visual que el
+            // bloqueo de Cursos (gradient naranja + sombra + icono compass).
+            <LinearGradient
+              colors={['#F18F34', '#E95F32']}
+              style={styles.onboardingCtaBtn}
+            >
+              <Pressable
+                style={styles.onboardingCtaInner}
+                onPress={() => onOpenProfileForOnboarding?.()}
+              >
+                <Ionicons name="compass" size={18} color="white" />
+                <Text style={styles.onboardingCtaText}>Descubre tu nivel para desbloquear</Text>
+              </Pressable>
+            </LinearGradient>
+          ) : (
+            <Pressable
+              style={({ pressed }) => [
+                styles.ctaBtn,
+                !canPressCta && styles.ctaBtnDisabled,
+                pressed && canPressCta && styles.pressed,
+              ]}
+              onPress={() => selectedSlotIndex != null && handleJoin(selectedSlotIndex)}
+              disabled={!canPressCta}
+            >
+              {joinBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <View style={styles.ctaTextWrap}>
+                  <Text style={styles.ctaText}>
+                    {matchPhase === 'past'
+                      ? 'Partido finalizado'
+                      : isInMatch
+                        ? 'Ya estás en el partido'
+                        : firstFreeIndex < 0
+                          ? 'No hay plazas libres'
+                          : selectedSlotIndex == null
+                            ? 'Selecciona una plaza para continuar'
+                            : `Reservar plaza - ${partido.pricePerPlayer}`}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+          )}
           {canDeclineMmProposal ? (
             <Pressable
               style={({ pressed }) => [styles.declineMmBtn, pressed && styles.pressed]}
@@ -904,6 +952,7 @@ export function PartidoDetailScreen({
         onClose={() => setClubInfoVisible(false)}
         partido={partido}
       />
+
     </View>
   );
 }
@@ -935,12 +984,16 @@ function PlayerSlotDetail({
   onJoin,
   joining,
   selected,
+  lockedByOnboarding = false,
   onOpenPublicProfile,
 }: {
   player: PartidoPlayer;
   onJoin?: () => void;
   joining?: boolean;
   selected?: boolean;
+  /** Pintar candado en la plaza libre porque el usuario no puede unirse
+   * (partido competitivo + onboarding pendiente). */
+  lockedByOnboarding?: boolean;
   onOpenPublicProfile?: (playerId: string) => void;
 }) {
   if (player.isFree) {
@@ -957,12 +1010,22 @@ function PlayerSlotDetail({
         >
           {joining ? (
             <ActivityIndicator size="small" color={ACCENT} />
+          ) : lockedByOnboarding ? (
+            <Ionicons name="lock-closed" size={22} color="#9CA3AF" />
           ) : (
             <Text style={styles.plFreePlus}>+</Text>
           )}
         </Pressable>
         <Text style={styles.plFreeCap}>
-          {joining ? 'Uniendo...' : selected ? 'Seleccionada' : onJoin ? 'Elegir plaza' : 'Libre'}
+          {joining
+            ? 'Uniendo...'
+            : selected
+              ? 'Seleccionada'
+              : lockedByOnboarding
+                ? 'Bloqueada'
+                : onJoin
+                  ? 'Elegir plaza'
+                  : 'Libre'}
         </Text>
       </View>
     );
@@ -1512,4 +1575,27 @@ const styles = StyleSheet.create({
     }),
   },
   pressed: { opacity: 0.88 },
+  // CTA "Descubre tu nivel para desbloquear" cuando partido competitivo +
+  // onboarding pendiente. Clonado del `startBtn` de EducationalCourseDetailScreen
+  // para que ambos bloqueos se vean idénticos.
+  onboardingCtaBtn: {
+    borderRadius: 16,
+    shadowColor: '#F18F34',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  onboardingCtaInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 8,
+  },
+  onboardingCtaText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });
