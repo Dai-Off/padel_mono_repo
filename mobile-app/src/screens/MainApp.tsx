@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Pressable, View, StyleSheet } from 'react-native';
+import { useEffect, useState } from 'react';
+import { BackHandler, Pressable, View, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { SearchCourtResult } from '../api/search';
@@ -139,6 +139,167 @@ export function MainApp() {
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
+
+  /**
+   * Botón hardware atrás (Android). La app no usa React Navigation, así que
+   * sin este listener Android cierra la activity por defecto.
+   *
+   * Cada `if` replica la acción de cierre del `onBack` de la pantalla
+   * correspondiente, en el MISMO orden de prioridad que `renderContent`.
+   * Devuelve `true` para consumir el evento, `false` para dejar a Android
+   * que cierre la app (solo en Inicio sin nada abierto).
+   */
+  useEffect(() => {
+    const onBack = (): boolean => {
+      // Sidebar abierto → cerrar primero (cubre cualquier pantalla).
+      if (sidebar.isOpen) {
+        sidebar.close();
+        return true;
+      }
+      // Flujos modales por encima de todo
+      if (bookingSuccessData != null) {
+        setBookingSuccessData(null);
+        return true;
+      }
+      // Detalle de curso educativo
+      if (selectedEducationalCourse) {
+        setSelectedEducationalCourse(null);
+        return true;
+      }
+      // Detalle de curso público
+      if (selectedPublicCourse) {
+        setSelectedPublicCourse(null);
+        return true;
+      }
+      // Listado de cursos
+      if (showCourses) {
+        setShowCourses(false);
+        return true;
+      }
+      // Lección diaria
+      if (showDailyLesson) {
+        setShowDailyLesson(false);
+        return true;
+      }
+      // Flujo crear partido (cierra y refresca lista)
+      if (crearPartidoFlow.open) {
+        setCrearPartidoFlow({ open: false, organizerId: null });
+        setPartidosRefreshNonce((n) => n + 1);
+        return true;
+      }
+      // Preferences → vuelve a perfil (igual que su onBack)
+      if (showPreferences) {
+        setShowPreferences(false);
+        setShowProfile(true);
+        return true;
+      }
+      // Perfil
+      if (showProfile) {
+        setShowProfile(false);
+        setShowPreferences(false);
+        setProfileAutoOpenOnboarding(false);
+        return true;
+      }
+      // Community
+      if (showCommunity) {
+        setShowCommunity(false);
+        return true;
+      }
+      // Hilo DM dentro de Mensajes
+      if (showMessages && messagesPeer) {
+        setMessagesPeer(null);
+        return true;
+      }
+      // Lista de mensajes
+      if (showMessages) {
+        setShowMessages(false);
+        setMessagesPeer(null);
+        return true;
+      }
+      // DM abierto desde IA Afinidad → reabre el modal
+      if (affinityDmPeer) {
+        setAffinityDmPeer(null);
+        setAffinityReopenSignal((s) => s + 1);
+        return true;
+      }
+      // Perfil público (genérico o desde afinidad)
+      if (affinityPublicProfileId) {
+        setAffinityPublicProfileId(null);
+        setShowPublicProfile(false);
+        setAffinityReopenSignal((s) => s + 1);
+        return true;
+      }
+      if (showPublicProfile) {
+        setShowPublicProfile(false);
+        setSelectedPublicPlayerId(null);
+        return true;
+      }
+      // Liga competitiva
+      if (showCompetitiveLeague) {
+        setShowCompetitiveLeague(false);
+        return true;
+      }
+      // Season Pass
+      if (showSeasonPass) {
+        setShowSeasonPass(false);
+        return true;
+      }
+      // Transacciones (sale antes que TusPagos en renderContent)
+      if (showTransacciones) {
+        setShowTransacciones(false);
+        return true;
+      }
+      // Tus Pagos
+      if (showTusPagos) {
+        setShowTusPagos(false);
+        return true;
+      }
+      // Detalle de partido (público o privado)
+      if (selectedPartido) {
+        setSelectedPartido(null);
+        return true;
+      }
+      // Detalle de club en pestaña Pistas
+      if (clubDetailCourt) {
+        setClubDetailCourt(null);
+        return true;
+      }
+      // En otra pestaña sin nada abierto → volver a Inicio.
+      if (activeTab !== 'inicio') {
+        setActiveTab('inicio');
+        return true;
+      }
+      // Inicio sin nada abierto → Android cierra la app (comportamiento por
+      // defecto, sin confirmación).
+      return false;
+    };
+
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, [
+    sidebar,
+    bookingSuccessData,
+    selectedEducationalCourse,
+    selectedPublicCourse,
+    showCourses,
+    showDailyLesson,
+    crearPartidoFlow.open,
+    showPreferences,
+    showProfile,
+    showCommunity,
+    showMessages,
+    messagesPeer,
+    affinityDmPeer,
+    affinityPublicProfileId,
+    showPublicProfile,
+    showCompetitiveLeague,
+    showSeasonPass,
+    showTransacciones,
+    showTusPagos,
+    selectedPartido,
+    clubDetailCourt,
+    activeTab,
+  ]);
 
   const renderContent = () => {
     if (selectedEducationalCourse) {
