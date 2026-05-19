@@ -46,9 +46,17 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
     });
 
     const source = (reservation.matchType || reservation.playerName || '').trim();
-    const typesWithoutPlayer = ['blocked', 'tournament'];
-    const isLoadingName = !source && reservation.status !== 'available' && reservation.status !== 'past' && !typesWithoutPlayer.includes(reservation.booking_type);
+    const isLoadingName =
+        !source &&
+        reservation.status !== 'available' &&
+        reservation.status !== 'past' &&
+        reservation.booking_type !== 'blocked' &&
+        reservation.booking_type !== 'tournament';
     const displayLabel = source ? tData(reservation.matchType || reservation.playerName) : (isLoadingName ? null : t('grid.noClient'));
+    const priceLabel =
+        reservation.totalPrice != null && reservation.totalPrice > 0
+            ? `${reservation.totalPrice.toFixed(2).replace('.', ',')} €`
+            : null;
     const isCompact = !!compactPxPerMinute;
     const isSmallZoom = !isCompact && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
     const isShortBooking = reservation.durationMinutes <= 60;
@@ -95,15 +103,28 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                 )}
                 style={{ ...style, ...typeColorStyle, transform: undefined, zIndex: 0 }}
             >
-                <div className={clsx(
-                    "font-bold text-center leading-none overflow-hidden",
-                    isVeryShort && "hidden",
-                    isShort ? "text-[5px] truncate" : isCompact ? "text-[6px]" : "text-[12px] leading-tight"
-                )}>
-                    {reservation.startTime}
-                </div>
-                <div className={clsx("flex flex-col mt-auto text-center opacity-90", isCompact && "hidden")}>
-                    <span className="uppercase font-bold text-[10px] leading-tight break-words whitespace-normal">{displayLabel}</span>
+                <div className="flex flex-col flex-1 min-h-0 text-center justify-between py-0.5 px-0.5 opacity-90">
+                    {!isVeryShort && (
+                        <span className={clsx(
+                            "font-semibold leading-none opacity-80 shrink-0",
+                            isCompact ? "text-[7px]" : "text-[12px]",
+                        )}>
+                            {reservation.startTime}
+                        </span>
+                    )}
+                    {displayLabel && (
+                        <span className={clsx(
+                            "uppercase font-bold leading-tight break-words flex-1 flex items-center justify-center",
+                            isCompact ? "text-[5.5px] line-clamp-3" : "text-[10px]",
+                        )}>
+                            {displayLabel}
+                        </span>
+                    )}
+                    {priceLabel && (
+                        <span className={clsx("opacity-90 leading-none shrink-0", isCompact ? "text-[5px]" : "text-[8px]")}>
+                            {priceLabel}
+                        </span>
+                    )}
                 </div>
             </div>
         );
@@ -136,7 +157,7 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
             className={clsx(
                 // Rectangular card: no rounded corners, border on all sides
                 'absolute inset-x-0 border flex flex-col overflow-hidden cursor-pointer hover:brightness-95 transition-[filter]',
-                isShortBooking && 'justify-center items-center',
+                isShortBooking && !isCompact && 'justify-center items-center',
                 isCompact ? 'p-0 px-0.5 text-[8px]' : isShortBooking ? 'p-0 px-0.5' : isSmallZoom ? 'p-1.5 text-[18px]' : 'p-1.5 text-xs',
                 typeColorClass,
                 reservation.status === 'pending_payment' && pendingPaymentStyle,
@@ -147,6 +168,7 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
             <AnimatePresence>
                 {justDropped && (
                     <motion.div
+                        key="drop-flash"
                         className="absolute inset-x-0 -inset-y-[1px] ring-4 ring-blue-400 bg-blue-100/20 z-0 pointer-events-none"
                         initial={{ opacity: 0, scale: 0.90 }}
                         animate={{ opacity: 1, scale: 1.05 }}
@@ -156,49 +178,64 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
                 )}
             </AnimatePresence>
 
-            {/* Time label — hidden for short bookings (≤60 min) */}
-            {!isShortBooking && (
-                <div className={clsx(
-                    "font-semibold text-center leading-none relative z-10 overflow-hidden opacity-80 pt-0.5",
-                    isVeryShort && "hidden",
-                    isShort
-                        ? "text-[5px] truncate"
-                        : isCompact
-                            ? "text-[6px]"
-                            : "text-[5px] leading-tight"
-                )}>
-                    {reservation.startTime}
-                </div>
-            )}
-
-            {/* Player / match label */}
-            <div className={clsx(
-                "flex flex-col text-center relative z-10 overflow-hidden items-center",
-                !isShortBooking && "pt-0.5",
-                isCompact && "hidden",
-                isVeryShort && "hidden",
-            )}>
-                {isLoadingName ? (
-                    <div className="flex items-center gap-1 py-0.5">
-                        <svg className="animate-spin" style={{ width: isSmallZoom ? 14 : 8, height: isSmallZoom ? 14 : 8 }} viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                        </svg>
-                        <span className={clsx("opacity-70 italic", isSmallZoom ? "text-[10px]" : "text-[5px]")}>
-                            Cargando...
-                        </span>
+            {isCompact && !isVeryShort ? (
+                <div className="relative z-10 flex flex-col flex-1 min-h-0 text-center justify-between py-0.5 px-0.5">
+                    <span className="text-[7px] font-semibold leading-none opacity-80 shrink-0">
+                        {reservation.startTime}
+                    </span>
+                    <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden px-0.5">
+                        {isLoadingName ? (
+                            <span className="text-[5px] opacity-70 italic">…</span>
+                        ) : displayLabel ? (
+                            <span className="uppercase font-bold text-[5.5px] leading-tight line-clamp-4 break-words">
+                                {displayLabel}
+                            </span>
+                        ) : null}
                     </div>
-                ) : (
-                    <span className="uppercase font-bold leading-tight break-words whitespace-normal text-[5.5px]">
-                        {displayLabel}
-                    </span>
-                )}
-                {!isCompact && reservation.totalPrice != null && reservation.totalPrice > 0 && (
-                    <span className="text-[5px] opacity-90 mt-0.5">
-                        {(reservation.totalPrice).toFixed(2).replace('.', ',')} €
-                    </span>
-                )}
-            </div>
+                    {priceLabel && (
+                        <span className="text-[5px] opacity-90 leading-none shrink-0">{priceLabel}</span>
+                    )}
+                </div>
+            ) : (
+                <>
+                    {/* Time label — hidden for short bookings (≤60 min) on desktop */}
+                    {!isShortBooking && (
+                        <div className={clsx(
+                            "font-semibold text-center leading-none relative z-10 overflow-hidden opacity-80 pt-0.5",
+                            isVeryShort && "hidden",
+                            isShort ? "text-[5px] truncate" : "text-[5px] leading-tight",
+                        )}>
+                            {reservation.startTime}
+                        </div>
+                    )}
+
+                    {/* Player / match label */}
+                    <div className={clsx(
+                        "flex flex-col text-center relative z-10 overflow-hidden items-center min-h-0",
+                        !isShortBooking && "pt-0.5",
+                        isVeryShort && "hidden",
+                    )}>
+                        {isLoadingName ? (
+                            <div className="flex items-center gap-1 py-0.5">
+                                <svg className="animate-spin" style={{ width: isSmallZoom ? 14 : 8, height: isSmallZoom ? 14 : 8 }} viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                                <span className={clsx("opacity-70 italic", isSmallZoom ? "text-[10px]" : "text-[5px]")}>
+                                    Cargando...
+                                </span>
+                            </div>
+                        ) : displayLabel ? (
+                            <span className="uppercase font-bold leading-tight break-words whitespace-normal text-[5.5px]">
+                                {displayLabel}
+                            </span>
+                        ) : null}
+                        {priceLabel && (
+                            <span className="text-[5px] opacity-90 mt-0.5">{priceLabel}</span>
+                        )}
+                    </div>
+                </>
+            )}
 
             {/* Yellow alert circle — top left */}
             {reservation.hasYellowAlert && (
