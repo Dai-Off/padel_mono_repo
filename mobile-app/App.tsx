@@ -7,6 +7,7 @@ import Constants from 'expo-constants';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StripeProvider } from './src/stripe';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
+import { HomeDataProvider } from './src/contexts/HomeDataContext';
 import { SplashScreen } from './src/components/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { MainApp } from './src/screens/MainApp';
@@ -96,7 +97,12 @@ function AppContent() {
       <>
         <StatusBar style="dark" />
         <RequireAuth>
-          <MainApp />
+          {/* HomeDataProvider vive aquí — montado una sola vez tras login —
+              para que los datos del Home sobrevivan a remounts cuando el
+              usuario navega a otras pantallas y vuelve. */}
+          <HomeDataProvider>
+            <MainApp />
+          </HomeDataProvider>
         </RequireAuth>
       </>
     );
