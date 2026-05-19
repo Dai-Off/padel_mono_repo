@@ -17,7 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useStripe } from '../../stripe';
 import { useAuth } from '../../contexts/AuthContext';
-import { fetchMyPlayerProfile } from '../../api/players';
+import { useHomeData } from '../../contexts/HomeDataContext';
 import { createIntentForNewMatch, confirmPaymentFromClient } from '../../api/payments';
 import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
@@ -124,6 +124,9 @@ export function CrearPartidoLocationSheet({
   onNavigateToCompleteOnboarding,
 }: CrearPartidoLocationSheetProps) {
   const { session } = useAuth();
+  // Profile compartido (HomeDataContext) — evita un GET /players/me extra
+  // cada vez que el usuario pulsa un slot para crear partido.
+  const { profile: cachedProfile } = useHomeData();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const insets = useSafeAreaInsets();
   const [step, setStep] = useState<Step>(initialStep);
@@ -210,29 +213,21 @@ export function CrearPartidoLocationSheet({
       const token = session?.access_token;
       if (!token) return;
 
-      setOnboardingCheckPending(true);
-      try {
-        const profile = await fetchMyPlayerProfile(token);
-        if (profile && profile.onboardingCompleted === false) {
-          Alert.alert(
-            'Completa tu nivelación',
-            'Para elegir tipo de partido y reservar en WeMatch necesitas completar la nivelación inicial en tu perfil.',
-            [
-              { text: 'Ahora no', style: 'cancel' },
-              onNavigateToCompleteOnboarding
-                ? {
-                    text: 'Ir a completar',
-                    onPress: () => onNavigateToCompleteOnboarding(),
-                  }
-                : { text: 'Entendido', style: 'default' },
-            ],
-          );
-          return;
-        }
-      } catch {
-        // Si falla la verificación, no bloqueamos el flujo.
-      } finally {
-        setOnboardingCheckPending(false);
+      if (cachedProfile && cachedProfile.onboardingCompleted === false) {
+        Alert.alert(
+          'Completa tu nivelación',
+          'Para elegir tipo de partido y reservar en WeMatch necesitas completar la nivelación inicial en tu perfil.',
+          [
+            { text: 'Ahora no', style: 'cancel' },
+            onNavigateToCompleteOnboarding
+              ? {
+                  text: 'Ir a completar',
+                  onPress: () => onNavigateToCompleteOnboarding(),
+                }
+              : { text: 'Entendido', style: 'default' },
+          ],
+        );
+        return;
       }
 
       setCreateError(null);

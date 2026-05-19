@@ -21,7 +21,7 @@ import { fetchMyTournamentEntryRequests, fetchMyTournaments, fetchPublicTourname
 import { TournamentListCard } from '../components/competiciones/TournamentListCard';
 import { TournamentDetailScreen } from './TournamentDetailScreen';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchMyPlayerProfile } from '../api/players';
+import { useHomeData } from '../contexts/HomeDataContext';
 import {
   formatFormatLabel,
   matchesFormatFilter,
@@ -82,13 +82,16 @@ export function CompeticionesScreen({
   const [formatFilter, setFormatFilter] = useState<TournamentFormatFilter>('all');
   const [levelFilter, setLevelFilter] = useState<TournamentLevelFilter>('all');
   const [joinableOnly, setJoinableOnly] = useState(true);
-  const [myElo, setMyElo] = useState<number | null>(null);
+  // elo y onboarding del profile compartido (HomeDataContext) — evita un GET
+  // /players/me al montar esta pantalla.
+  const { profile } = useHomeData();
+  const myElo = profile?.eloRating ?? null;
   /**
    * Soft block: torneos competitivos bloquean inscripción si el usuario no
    * ha completado el cuestionario de nivelación (backend tournaments.ts
    * gatea por elo, que es NULL sin onboarding).
    */
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const needsOnboarding = profile != null && profile.onboardingCompleted === false;
   const [items, setItems] = useState<PublicTournamentRow[]>([]);
   const [requestItems, setRequestItems] = useState<MyTournamentEntryRequest[]>([]);
   const [requestUnreadCount, setRequestUnreadCount] = useState(0);
@@ -173,20 +176,6 @@ export function CompeticionesScreen({
       setRequestUnreadCount(0);
     })();
   }, [activeTab, requestItems]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const p = await fetchMyPlayerProfile(session?.access_token ?? null);
-      if (!cancelled) {
-        setMyElo(p?.eloRating ?? null);
-        setNeedsOnboarding(p != null && p.onboardingCompleted === false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.access_token]);
 
   useEffect(() => {
     let cancelled = false;

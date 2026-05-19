@@ -21,7 +21,7 @@ import {
   type MatchmakingProposalResponse,
   type MatchmakingStatusResponse,
 } from '../api/matchmaking';
-import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
+import { useHomeData } from '../contexts/HomeDataContext';
 
 type Step = 'home' | 'prefs' | 'queue' | 'found';
 type MainTab = 'liga' | 'ranking';
@@ -93,7 +93,8 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
   const [loading, setLoading] = useState(false);
   const [openingProposal, setOpeningProposal] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
-  const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
+  // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
+  const { profile } = useHomeData();
   const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
   const [status, setStatus] = useState<MatchmakingStatusResponse | null>(null);
   const [proposal, setProposal] = useState<MatchmakingProposalResponse | null>(null);
@@ -164,7 +165,6 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
 
   useEffect(() => {
     if (!session?.access_token) return;
-    void fetchMyPlayerProfile(session.access_token).then(setProfile);
     void refreshStatus();
     return () => clearPollTimer();
   }, [clearPollTimer, refreshStatus, session?.access_token]);

@@ -34,7 +34,7 @@ import type {
   TournamentCourtBookingSlot,
   TournamentPlayerAgenda,
 } from '../api/tournaments';
-import { fetchMyPlayerProfile } from '../api/players';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { OnboardingSoftBlockBanner } from '../components/onboarding/OnboardingSoftBlockBanner';
 import {
   fetchTournamentCompetitionPlayerView,
@@ -355,9 +355,12 @@ export function TournamentDetailScreen({
     pending: 0,
   });
   const [myStatus, setMyStatus] = useState<string | null>(null);
-  const [myElo, setMyElo] = useState<number | null>(null);
+  // elo y onboarding del profile compartido (HomeDataContext) — evita un GET
+  // /players/me extra en cada apertura del detalle de torneo.
+  const { profile: meProfile } = useHomeData();
+  const myElo = meProfile?.eloRating ?? null;
   /** Soft block: si torneo competitivo + onboarding pendiente, bloqueamos CTA. */
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const needsOnboarding = meProfile != null && meProfile.onboardingCompleted === false;
   const [myEntryRequest, setMyEntryRequest] = useState<{
     id?: string;
     status?: 'pending' | 'approved' | 'rejected' | 'dismissed' | string;
@@ -452,14 +455,6 @@ export function TournamentDetailScreen({
         }
         prevMyStatusRef.current = nextMyStatus;
         prevEntryStatusRef.current = nextEntryStatus;
-        if (session?.access_token) {
-          const me = await fetchMyPlayerProfile(session.access_token);
-          setMyElo(me?.eloRating ?? null);
-          setNeedsOnboarding(me != null && me.onboardingCompleted === false);
-        } else {
-          setMyElo(null);
-          setNeedsOnboarding(false);
-        }
         if (session?.access_token) {
           const [competitionRes, agendaRes] = await Promise.all([
             fetchTournamentCompetitionPlayerView(tournamentId, session.access_token),

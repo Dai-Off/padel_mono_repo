@@ -29,7 +29,8 @@ import {
   type SubmitMatchFeedbackBody,
 } from '../api/matches';
 import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
-import { fetchMyPlayerId, fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
+import { fetchMyPlayerId } from '../api/players';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { OnboardingSoftBlockBanner } from '../components/onboarding/OnboardingSoftBlockBanner';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { rejectMatchmakingProposal } from '../api/matchmaking';
@@ -119,12 +120,12 @@ export function PartidoDetailScreen({
   const [favorite, setFavorite] = useState(false);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   /**
-   * Necesitamos saber si el usuario ha completado el cuestionario de
-   * nivelación para soft-bloquear la inscripción en partidos competitivos.
-   * Si aún no se ha cargado tratamos como "completado" para no mostrar el
+   * Profile compartido (HomeDataContext) para saber si el usuario ha
+   * completado el cuestionario y soft-bloquear partidos competitivos. Si
+   * todavía no ha llegado, tratamos como "completado" para no mostrar el
    * candado durante el flicker inicial.
    */
-  const [myProfile, setMyProfile] = useState<MyPlayerProfile | null>(null);
+  const { profile: myProfile } = useHomeData();
   /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido (fetch async). */
   const [playerContextResolved, setPlayerContextResolved] = useState(() => !session?.access_token);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
@@ -151,9 +152,6 @@ export function PartidoDetailScreen({
       .then(setCurrentPlayerId)
       .catch(() => setCurrentPlayerId(null))
       .finally(() => setPlayerContextResolved(true));
-    fetchMyPlayerProfile(session.access_token)
-      .then(setMyProfile)
-      .catch(() => setMyProfile(null));
   }, [session?.access_token]);
 
   /**

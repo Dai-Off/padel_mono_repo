@@ -18,7 +18,7 @@ import { ScalePressable } from './ScalePressable';
 import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
 import { useAuth } from '../../../contexts/AuthContext';
-import { fetchMyPlayerProfile } from '../../../api/players';
+import { useHomeData } from '../../../contexts/HomeDataContext';
 import { loadProgress } from '../../../lib/dailyLessonStorage';
 
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
@@ -156,19 +156,10 @@ export function DailyLessonCard({
   streakRefreshKey = 0,
 }: Props) {
   const { session } = useAuth();
-  // Estado del cuestionario de nivelación. Fetch ligero (un GET /players/me) en
-  // mount para saber si bloqueamos visualmente la card. Si onboardingCompleted
-  // es false, mostramos un candado discreto en vez de "Empezar"/"Hecha".
-  // null mientras carga → no se renderiza candado (la card se ve normal).
-  const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
-  useEffect(() => {
-    let mounted = true;
-    fetchMyPlayerProfile(session?.access_token).then((p) => {
-      if (mounted && p) setOnboardingCompleted(p.onboardingCompleted);
-    });
-    return () => { mounted = false; };
-  }, [session?.access_token]);
-  const locked = onboardingCompleted === false;
+  // Profile cacheado a nivel de app (HomeDataContext). Evita el GET /players/me
+  // que esta card hacía al montar — el dato ya está cargado tras el login.
+  const { profile } = useHomeData();
+  const locked = profile?.onboardingCompleted === false;
 
   // ¿Tiene una lección a medias guardada en local? Mostramos "Continuar"
   // en lugar de "Empezar" para que sepa que puede retomar desde el home.
