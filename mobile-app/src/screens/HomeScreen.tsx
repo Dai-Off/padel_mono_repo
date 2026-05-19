@@ -14,6 +14,7 @@ import {
   INICIO_PAD_H,
   INICIO_PAD_TOP,
   INICIO_STACK_GAP,
+  HomeSkeleton,
   MissionsHomeSection,
   type HomeMission,
   OnboardingBanner,
@@ -107,6 +108,7 @@ export function HomeScreen({
   // cuando navegas a otras pantallas y vuelves). Ver HomeDataContext.
   const {
     profile: myPlayerProfile,
+    profileLoading,
     partidos,
     misProximosPartidos,
     matchesLoading,
@@ -235,6 +237,15 @@ export function HomeScreen({
           nextRewardName: null as string | null,
         };
 
+  /**
+   * Primera carga del Home: ninguno de los datos clave ha llegado aún. El
+   * context expone `loading=true` SOLO en la primera carga (las revalidaciones
+   * posteriores son silenciosas, ver HomeDataContext), así que esto es seguro
+   * para distinguir "primera vez" de "volviendo al Home con cache caliente".
+   */
+  const isFirstLoading =
+    profileLoading && matchesLoading && tournamentsLoading && seasonPassLoading;
+
   return (
     <>
       <View style={styles.screenRoot}>
@@ -250,6 +261,10 @@ export function HomeScreen({
           ]}
           showsVerticalScrollIndicator={false}
         >
+        {isFirstLoading ? <HomeSkeleton /> : (<>
+        {/* Contenido real del Home a partir de aquí. Cuando los datos llegan
+            todos a la vez, el skeleton desaparece y entra el contenido — la
+            animación de `InicioEnterBlock` sigue funcionando como siempre. */}
         {/* Banner proactivo: visible arriba de todo si el jugador no ha
             completado el cuestionario de nivelación. Tap → perfil con modal
             del onboarding auto-abierto. */}
@@ -348,6 +363,7 @@ export function HomeScreen({
             onOpenPartidos={() => onNavigateToTab?.('partidos')}
           />
         </InicioEnterBlock>
+        </>)}
         </ScrollView>
       </View>
 
