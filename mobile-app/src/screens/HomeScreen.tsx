@@ -238,13 +238,18 @@ export function HomeScreen({
         };
 
   /**
-   * Primera carga del Home: ninguno de los datos clave ha llegado aún. El
-   * context expone `loading=true` SOLO en la primera carga (las revalidaciones
-   * posteriores son silenciosas, ver HomeDataContext), así que esto es seguro
-   * para distinguir "primera vez" de "volviendo al Home con cache caliente".
+   * Primera carga del Home: mantenemos el skeleton hasta que TODOS los
+   * datasets hayan llegado. Si usáramos `&&` el skeleton desaparecería con
+   * el primer fetch y las cards que llegan más tarde aparecerían bruscas —
+   * exactamente el problema que el skeleton intenta evitar.
+   *
+   * El context expone `loading=true` SOLO en la primera carga (las
+   * revalidaciones posteriores son silenciosas, ver HomeDataContext), así
+   * que esto es seguro para distinguir "primera vez" de "volviendo al Home
+   * con cache caliente".
    */
   const isFirstLoading =
-    profileLoading && matchesLoading && tournamentsLoading && seasonPassLoading;
+    profileLoading || matchesLoading || tournamentsLoading || seasonPassLoading;
 
   return (
     <>
