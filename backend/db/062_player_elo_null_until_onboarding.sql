@@ -1,5 +1,5 @@
 -- ============================================================================
--- 061_player_elo_null_until_onboarding.sql
+-- 062_player_elo_null_until_onboarding.sql
 --
 -- Limpia los defaults ficticios de elo_rating ('3.5') y liga ('bronce') para
 -- que los jugadores que no han completado el cuestionario de nivelación tengan
