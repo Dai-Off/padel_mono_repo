@@ -601,6 +601,7 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
             matchType: isMaintenance ? 'MANTENIMIENTO' : undefined,
             status: b.status ?? 'pending_payment',
             booking_type: bookingType,
+            reservation_type: bookingType,
             source_channel: b.source_channel ?? 'manual',
             notes: b.notes ?? undefined,
             locationId: 'sede-central',

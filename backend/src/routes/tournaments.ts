@@ -2557,6 +2557,7 @@ router.get('/public/list', async (req: Request, res: Response) => {
       confirmed_count: countsByTournament[t.id]?.confirmed ?? 0,
       pending_count: countsByTournament[t.id]?.pending ?? 0,
     }));
+
     return res.json({
       ok: true,
       tournaments: enriched,

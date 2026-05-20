@@ -215,7 +215,7 @@ export function CompeticionesScreen({
       const pending = Number(row.pending_count ?? 0);
       if (confirmed + pending >= Number(row.max_players ?? 0)) return false;
       const mode = String(row.registration_mode ?? 'individual');
-      if (!['individual', 'both'].includes(mode)) return false;
+      if (!['individual', 'pair', 'both'].includes(mode)) return false;
       const eloMin = row.elo_min != null ? Number(row.elo_min) : null;
       const eloMax = row.elo_max != null ? Number(row.elo_max) : null;
       if (eloMin == null && eloMax == null) return true;
@@ -233,6 +233,13 @@ export function CompeticionesScreen({
     await load({ append: false });
     setRefreshing(false);
   }, [load]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (loading || loadingMore || !hasMore || activeTab === 'solicitudes') return;
+    setLoadingMore(true);
+    await load({ append: true, offset: items.length });
+    setLoadingMore(false);
+  }, [loading, loadingMore, hasMore, activeTab, items.length, load]);
 
   const filtered = useMemo((): PublicTournamentRow[] => {
     if (activeTab === 'solicitudes') return [];
@@ -485,6 +492,8 @@ export function CompeticionesScreen({
               colors={[theme.auth.accent]}
             />
           }
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.5}
           renderItem={({ item }) =>
             item.kind === 'request' ? (
               <Pressable

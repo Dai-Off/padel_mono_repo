@@ -44,6 +44,7 @@ export interface Reservation {
     matchType?: string;
     status: ReservationStatus;
     booking_type: ReservationType;
+    reservation_type?: ReservationType;
     source_channel?: 'mobile' | 'web' | 'manual' | 'system';
     playerEmail?: string;
     totalPrice?: number;
