@@ -23,7 +23,6 @@ import {
 } from '../components/home/inicio';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { useHomeStats } from '../hooks/useHomeStats';
 import type { PartidoItem } from './PartidosScreen';
 import { IAAfinidadModal } from '../components/home/IAAfinidadModal';
 import { OnboardingHardBlockModal } from '../components/onboarding/OnboardingHardBlockModal';
@@ -102,7 +101,6 @@ export function HomeScreen({
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const { stats, loading: statsLoading } = useHomeStats();
   // Datos del home cacheados a nivel de app (sobreviven a remounts del Home
   // cuando navegas a otras pantallas y vuelves). Ver HomeDataContext.
   const {
@@ -116,6 +114,9 @@ export function HomeScreen({
     seasonPassMe,
     seasonPassLoading,
     refreshSeasonPass,
+    stats,
+    statsLoading,
+    refreshStreak,
   } = useHomeData();
   const [affinityModalVisible, setAffinityModalVisible] = useState(false);
   const [affinityLoading, setAffinityLoading] = useState(false);
@@ -152,14 +153,15 @@ export function HomeScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [affinityReopenSignal]);
 
-  // Refrescamos season pass cuando volvemos de la lección diaria (la racha y
-  // los SP del pase pueden haber cambiado). El resto de datos del home se
-  // refrescan a través de su TTL en HomeDataContext.
+  // Refrescamos season pass y racha cuando volvemos de la lección diaria
+  // (ambos pueden haber cambiado). El resto de datos del home se refrescan
+  // a través de su TTL en HomeDataContext.
   useEffect(() => {
     if (streakRefreshKey > 0) {
       void refreshSeasonPass({ force: true });
+      void refreshStreak({ force: true });
     }
-  }, [streakRefreshKey, refreshSeasonPass]);
+  }, [streakRefreshKey, refreshSeasonPass, refreshStreak]);
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 

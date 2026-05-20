@@ -13,12 +13,13 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { androidReadableText } from './textStyles';
-import { useStreak } from '../../../hooks/useDailyLesson';
 import { ScalePressable } from './ScalePressable';
 import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useHomeData } from '../../../contexts/HomeDataContext';
+// Nota: el hook useStreak local sigue existiendo (lo usa DailyLessonScreen
+// con su propia frescura). En esta card consumimos del HomeDataContext.
 import { loadProgress } from '../../../lib/dailyLessonStorage';
 
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
@@ -158,7 +159,7 @@ export function DailyLessonCard({
   const { session } = useAuth();
   // Profile cacheado a nivel de app (HomeDataContext). Evita el GET /players/me
   // que esta card hacía al montar — el dato ya está cargado tras el login.
-  const { profile } = useHomeData();
+  const { profile, streak, streakLoading } = useHomeData();
   const locked = profile?.onboardingCompleted === false;
 
   // ¿Tiene una lección a medias guardada en local? Mostramos "Continuar"
@@ -177,10 +178,11 @@ export function DailyLessonCard({
     return () => { mounted = false; };
   }, [session?.user?.id, streakRefreshKey]);
   const isCarousel = variant === 'carousel';
-  const { currentStreak, multiplier, lastCompleted, loading } = useStreak(
-    TIMEZONE,
-    streakRefreshKey,
-  );
+  // Racha desde el HomeDataContext (compartida, cacheada). HomeScreen ya
+  // fuerza refresh tras completar la lección, así que el dato viene
+  // actualizado cuando esta card re-renderiza.
+  const { currentStreak, multiplier, lastCompleted } = streak;
+  const loading = streakLoading;
   const theme = useAmbientTheme(OPENWEATHER_API_KEY);
   const color1 = `rgb(${theme.orb1Color})`;
   const color2 = `rgb(${theme.orb2Color})`;

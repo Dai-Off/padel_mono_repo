@@ -14,9 +14,20 @@ import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId, fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
+import { fetchHomeStats, type HomeStats } from '../api/home';
+import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
 import { selectMyUpcomingMatches } from '../domain/selectMyUpcomingMatches';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
+
+const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+type StreakState = {
+  currentStreak: number;
+  longestStreak: number;
+  multiplier: number;
+  lastCompleted: string | null;
+};
 
 /**
  * TTL global de cache (60 s). Si pides datos antes de que pasen, devolvemos
@@ -50,6 +61,16 @@ type HomeDataValue = {
   seasonPassMe: SeasonPassMeOk | null;
   seasonPassLoading: boolean;
   refreshSeasonPass: (opts?: { force?: boolean }) => Promise<void>;
+
+  // Home stats (count pistas libres + jugadores) — quick actions del home.
+  stats: HomeStats | null;
+  statsLoading: boolean;
+  refreshStats: (opts?: { force?: boolean }) => Promise<void>;
+
+  // Racha de la lección diaria (current/longest/multiplier/lastCompleted).
+  streak: StreakState;
+  streakLoading: boolean;
+  refreshStreak: (opts?: { force?: boolean }) => Promise<void>;
 };
 
 const HomeDataContext = createContext<HomeDataValue | null>(null);
@@ -91,6 +112,19 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const [seasonPassMe, setSeasonPassMe] = useState<SeasonPassMeOk | null>(null);
   const [seasonPassLoading, setSeasonPassLoading] = useState(false);
   const seasonPassLoadedAt = useRef(0);
+
+  const [stats, setStats] = useState<HomeStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const statsLoadedAt = useRef(0);
+
+  const [streak, setStreak] = useState<StreakState>({
+    currentStreak: 0,
+    longestStreak: 0,
+    multiplier: 0,
+    lastCompleted: null,
+  });
+  const [streakLoading, setStreakLoading] = useState(false);
+  const streakLoadedAt = useRef(0);
 
   // -----------------------------------------------------------------
   // Refrescos (uno por entidad). Todos respetan TTL salvo `force: true`.
@@ -194,6 +228,52 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
+  const refreshStats = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!force && Date.now() - statsLoadedAt.current < TTL_MS) return;
+      const isFirst = statsLoadedAt.current === 0;
+      if (isFirst) setStatsLoading(true);
+      try {
+        const data = await fetchHomeStats(token);
+        setStats(data);
+      } catch {
+        // Fallback consistente con el comportamiento del antiguo useHomeStats.
+        setStats({ courtsFree: 0, playersLooking: 0, classesToday: 0, tournaments: 0 });
+      }
+      statsLoadedAt.current = Date.now();
+      if (isFirst) setStatsLoading(false);
+    },
+    [token],
+  );
+
+  const refreshStreak = useCallback(
+    async ({ force = false }: { force?: boolean } = {}) => {
+      if (!token) return;
+      if (!force && Date.now() - streakLoadedAt.current < TTL_MS) return;
+      const isFirst = streakLoadedAt.current === 0;
+      if (isFirst) setStreakLoading(true);
+      try {
+        const res = await fetchStreak(token, TIMEZONE);
+        if ('ok' in res && res.ok === false) {
+          // 401/500: dejamos los valores previos (o defaults) y no rompemos.
+        } else {
+          const data = res as StreakInfo;
+          setStreak({
+            currentStreak: data.current_streak,
+            longestStreak: data.longest_streak,
+            multiplier: data.multiplier,
+            lastCompleted: data.last_lesson_completed_at,
+          });
+        }
+      } catch {
+        // Silencioso. Mantiene valores previos.
+      }
+      streakLoadedAt.current = Date.now();
+      if (isFirst) setStreakLoading(false);
+    },
+    [token],
+  );
+
   // -----------------------------------------------------------------
   // Auto-fetch inicial al montar / al cambiar de token.
   // Resetea timestamps para forzar primera carga "loading visible".
@@ -204,18 +284,24 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     matchesLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
     seasonPassLoadedAt.current = 0;
+    statsLoadedAt.current = 0;
+    streakLoadedAt.current = 0;
     if (!token) {
       setProfile(null);
       setPartidos([]);
       setMisProximosPartidos([]);
       setPublicTournamentsCount(null);
       setSeasonPassMe(null);
+      setStats(null);
+      setStreak({ currentStreak: 0, longestStreak: 0, multiplier: 0, lastCompleted: null });
       return;
     }
     void refreshProfile({ force: true });
     void refreshMatches({ force: true });
     void refreshTournaments({ force: true });
     void refreshSeasonPass({ force: true });
+    void refreshStats({ force: true });
+    void refreshStreak({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -232,10 +318,19 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         void refreshMatches();
         void refreshTournaments();
         void refreshSeasonPass();
+        void refreshStats();
+        void refreshStreak();
       }
     });
     return () => sub.remove();
-  }, [refreshProfile, refreshMatches, refreshTournaments, refreshSeasonPass]);
+  }, [
+    refreshProfile,
+    refreshMatches,
+    refreshTournaments,
+    refreshSeasonPass,
+    refreshStats,
+    refreshStreak,
+  ]);
 
   const value = useMemo<HomeDataValue>(
     () => ({
@@ -252,6 +347,12 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       seasonPassMe,
       seasonPassLoading,
       refreshSeasonPass,
+      stats,
+      statsLoading,
+      refreshStats,
+      streak,
+      streakLoading,
+      refreshStreak,
     }),
     [
       profile,
@@ -267,6 +368,12 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       seasonPassMe,
       seasonPassLoading,
       refreshSeasonPass,
+      stats,
+      statsLoading,
+      refreshStats,
+      streak,
+      streakLoading,
+      refreshStreak,
     ],
   );
 
