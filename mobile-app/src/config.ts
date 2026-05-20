@@ -32,3 +32,6 @@ export const MATCHMAKING_DEFAULT_CLUB_ID =
 
 export const OPENWEATHER_API_KEY =
   (process.env.EXPO_PUBLIC_OPENWEATHER_API_KEY as string | undefined) || 'ce6363aacdfb1e34753f831d3a9cd0b2';
+
+export const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ?? '';
+export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? '';

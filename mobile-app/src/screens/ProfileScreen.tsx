@@ -4,11 +4,12 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Image,
   Pressable,
   Alert,
   ActivityIndicator,
+  Image,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,12 +17,18 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { useHomeData } from '../contexts/HomeDataContext';
+import { PlayerAvatarCircle } from '../components/profile/PlayerAvatarCircle';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
 import { fetchMyCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
 import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
+import {
+  patchMyCoverUrl,
+  uploadPlayerCoverToStorage,
+  type PickedImage,
+} from '../api/playerAvatar';
 
 type ProfileScreenProps = {
   onBack: () => void;
@@ -64,6 +71,8 @@ export function ProfileScreen({
   const [activeSport, setActiveSport] = useState('Pádel');
   const [activeLogroTab, setActiveLogroTab] = useState('Todos');
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [uploadingCover, setUploadingCover] = useState(false);
 
   // Auto-abrir el modal del cuestionario de nivelación cuando el padre lo pide
   // (p.ej. el usuario viene desde la pantalla bloqueada de Daily Lesson). Una
@@ -89,6 +98,7 @@ export function ProfileScreen({
       const p = await fetchMyPlayerProfile(token);
       if (p) {
         setProfile(p);
+        setCoverUrl(p.coverUrl);
         fetchMyPeerFeedbackInsight(token, p.id).then(setPeerInsight).catch(() => {});
         setProfileLoading(false);
         return;
@@ -135,6 +145,86 @@ export function ProfileScreen({
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).
     void refreshGlobalProfile({ force: true });
+  };
+
+  const applyCoverImage = async (image: PickedImage) => {
+    if (!session?.user?.id || !session.access_token || !session.refresh_token) {
+      Alert.alert('Sesión', 'Inicia sesión para cambiar la portada.');
+      return;
+    }
+    setCoverUrl(image.uri);
+    setUploadingCover(true);
+    try {
+      const publicUrl = await uploadPlayerCoverToStorage(
+        session.user.id,
+        session.access_token,
+        session.refresh_token,
+        image,
+      );
+      const patch = await patchMyCoverUrl(session.access_token, publicUrl);
+      if (!patch.ok) {
+        setCoverUrl(profile?.coverUrl ?? null);
+        Alert.alert('Error', patch.error);
+        return;
+      }
+      setCoverUrl(publicUrl);
+      setProfile((prev) => (prev ? { ...prev, coverUrl: publicUrl } : prev));
+      void refreshGlobalProfile({ force: true });
+    } catch (err) {
+      setCoverUrl(profile?.coverUrl ?? null);
+      Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo subir la portada');
+    } finally {
+      setUploadingCover(false);
+    }
+  };
+
+  const pickCoverImage = async (source: 'library' | 'camera') => {
+    if (source === 'library') {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [3, 1],
+        quality: 0.85,
+      });
+      if (result.canceled || !result.assets[0]) return;
+      await applyCoverImage({
+        uri: result.assets[0].uri,
+        mimeType: result.assets[0].mimeType,
+        fileName: result.assets[0].fileName,
+      });
+      return;
+    }
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permiso denegado', 'Necesitamos acceso a la cámara.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [3, 1],
+      quality: 0.85,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    await applyCoverImage({
+      uri: result.assets[0].uri,
+      mimeType: result.assets[0].mimeType,
+      fileName: result.assets[0].fileName,
+    });
+  };
+
+  const handleChangeCover = () => {
+    if (uploadingCover) return;
+    Alert.alert('Foto de portada', 'Elige una opción', [
+      { text: 'Galería', onPress: () => void pickCoverImage('library') },
+      { text: 'Cámara', onPress: () => void pickCoverImage('camera') },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
   };
 
   if (profileLoading && !profile) {
@@ -194,17 +284,33 @@ export function ProfileScreen({
         contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Cover Photo */}
+        {/* Cover */}
         <View style={styles.coverWrap}>
-          <Image 
-            source={{ uri: 'https://images.unsplash.com/photo-1657704358775-ed705c7388d2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxwYWRlbCUyMHNwb3J0JTIwcmFja2V0JTIwY291cnR8ZW58MXx8fHwxNzczNjEwMzA3fDA&ixlib=rb-4.1.0&q=80&w=1080' }} 
-            style={styles.coverImg} 
+          {coverUrl?.trim() ? (
+            <Image source={{ uri: coverUrl }} style={styles.coverImg} resizeMode="cover" />
+          ) : (
+            <LinearGradient
+              colors={['#1a1a1a', '#0F0F0F', '#0F0F0F']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.coverImg}
+            />
+          )}
+          <LinearGradient
+            colors={['rgba(241,143,52,0.25)', 'transparent', '#0F0F0F']}
+            style={StyleSheet.absoluteFill}
           />
-          <LinearGradient 
-            colors={['rgba(15,15,15,0.6)', 'transparent', '#0F0F0F']} 
-            style={StyleSheet.absoluteFill} 
-          />
-          <Pressable style={styles.cameraBtn}>
+          {uploadingCover ? (
+            <View style={styles.coverLoading}>
+              <ActivityIndicator color="#F18F34" />
+            </View>
+          ) : null}
+          <Pressable
+            style={styles.cameraBtn}
+            onPress={handleChangeCover}
+            disabled={uploadingCover}
+            accessibilityLabel="Cambiar foto de portada"
+          >
             <Ionicons name="camera-outline" size={14} color="rgba(255,255,255,0.8)" />
           </Pressable>
         </View>
@@ -222,19 +328,22 @@ export function ProfileScreen({
             </View>
             <View style={styles.profileHeader}>
               <View style={styles.avatarContainer}>
-                <LinearGradient
-                  colors={['#F18F34', '#E95F32']}
-                  style={styles.avatar}
-                >
-                  <Text style={styles.avatarText}>{initials}</Text>
-                </LinearGradient>
+                <PlayerAvatarCircle
+                  avatarUrl={profile?.avatarUrl}
+                  initials={initials}
+                  size={80}
+                />
               </View>
               <View style={styles.profileInfo}>
                 <Text style={styles.profileName}>{displayName}</Text>
-                <Pressable style={styles.locationBtn}>
-                  <Ionicons name="location-outline" size={12} color="#F18F34" />
-                  <Text style={styles.locationText}>Añadir mi localización</Text>
-                </Pressable>
+                {(profile?.email ?? session?.user?.email) ? (
+                  <View style={styles.emailRow}>
+                    <Ionicons name="mail-outline" size={12} color="#9CA3AF" />
+                    <Text style={styles.emailText} numberOfLines={1}>
+                      {profile?.email ?? session?.user?.email}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
             </View>
 
@@ -261,9 +370,9 @@ export function ProfileScreen({
               <Pressable style={styles.editBtn} onPress={() => onEditProfilePress?.()}>
                 <Text style={styles.editBtnText}>Editar perfil</Text>
               </Pressable>
-              <Pressable style={styles.personalizeBtn}>
-                <Ionicons name="color-palette-outline" size={14} color="#F18F34" />
-                <Text style={styles.personalizeBtnText}>Personalizar</Text>
+              <Pressable style={styles.personalizeBtn} onPress={() => onPreferencesPress?.()}>
+                <Ionicons name="options-outline" size={14} color="#F18F34" />
+                <Text style={styles.personalizeBtnText}>Preferencias</Text>
               </Pressable>
             </View>
           </View>
@@ -450,6 +559,13 @@ const styles = StyleSheet.create({
   coverWrap: {
     position: 'relative',
     height: 128,
+    overflow: 'hidden',
+  },
+  coverLoading: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   cameraBtn: {
     position: 'absolute',
@@ -540,16 +656,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
-  locationBtn: {
+  emailRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 2,
+    marginTop: 4,
+    maxWidth: '100%',
   },
-  locationText: {
+  emailText: {
     fontSize: 12,
-    color: '#F18F34',
-    fontWeight: '500',
+    color: '#9CA3AF',
+    flex: 1,
   },
   statsRow: {
     flexDirection: 'row',
