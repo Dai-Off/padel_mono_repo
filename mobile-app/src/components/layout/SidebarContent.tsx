@@ -168,10 +168,20 @@ export function SidebarContent() {
             onPress={close}
           />
           <SidebarRowItem
+            icon="cash-outline"
+            title="Monedero"
+            subtitle="Saldo a favor en tus clubes"
+            iconVariant="emerald"
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToMonedero?.();
+            }}
+          />
+          <SidebarRowItem
             icon="wallet-outline"
             title="Tus pagos"
-            subtitle="Transacciones, reembolsos y métodos de pago"
-            iconVariant="emerald"
+            subtitle="Tarjeta, reservas pendientes y Stripe"
+            iconVariant="sky"
             onPress={() => {
               close?.();
               ctx?.onNavigateToTusPagos?.();

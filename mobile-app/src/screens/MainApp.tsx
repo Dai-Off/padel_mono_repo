@@ -28,6 +28,7 @@ import { PartidoPrivadoDetailScreen } from './PartidoPrivadoDetailScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
+import { MonederoScreen } from './MonederoScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
 import { DailyLessonScreen } from './DailyLessonScreen';
@@ -72,6 +73,7 @@ export function MainApp() {
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [showTusPagos, setShowTusPagos] = useState(false);
+  const [showMonedero, setShowMonedero] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
   const [showDailyLesson, setShowDailyLesson] = useState(false);
   /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
@@ -313,6 +315,11 @@ export function MainApp() {
         setShowTransacciones(false);
         return true;
       }
+      // Monedero
+      if (showMonedero) {
+        setShowMonedero(false);
+        return true;
+      }
       // Tus Pagos
       if (showTusPagos) {
         setShowTusPagos(false);
@@ -359,6 +366,7 @@ export function MainApp() {
     showCompetitiveLeague,
     showSeasonPass,
     showTransacciones,
+    showMonedero,
     showTusPagos,
     selectedPartido,
     clubDetailCourt,
@@ -581,11 +589,18 @@ export function MainApp() {
         <TransaccionesScreen onBack={() => setShowTransacciones(false)} />
       );
     }
+    if (showMonedero) {
+      return <MonederoScreen onBack={() => setShowMonedero(false)} />;
+    }
     if (showTusPagos) {
       return (
         <TusPagosScreen
           onBack={() => setShowTusPagos(false)}
           onTransaccionesPress={() => setShowTransacciones(true)}
+          onMonederoPress={() => {
+            setShowTusPagos(false);
+            setShowMonedero(true);
+          }}
         />
       );
     }
@@ -692,6 +707,7 @@ export function MainApp() {
   const showMainTabs =
     bookingSuccessData == null &&
     !showTusPagos &&
+    !showMonedero &&
     !showTransacciones &&
     !showProfile &&
     !showPreferences &&
@@ -711,6 +727,7 @@ export function MainApp() {
   const customHeader =
     bookingSuccessData != null ||
     showTusPagos ||
+    showMonedero ||
     showTransacciones ||
     showProfile ||
     showPreferences ||
@@ -789,7 +806,7 @@ export function MainApp() {
       ? '#000000'
       : showMessages || !!affinityDmPeer
         ? '#0A0A0A'
-        : showPreferences
+        : showPreferences || showMonedero
           ? '#0F0F0F'
         : showDailyLesson
           ? '#0F0F0F'
@@ -824,6 +841,7 @@ export function MainApp() {
       <SidebarProvider
         close={sidebar.close}
         onNavigateToTusPagos={() => setShowTusPagos(true)}
+        onNavigateToMonedero={() => setShowMonedero(true)}
         onProfilePress={() => setShowProfile(true)}
       >
         <View style={styles.mainColumn}>
@@ -839,6 +857,7 @@ export function MainApp() {
               showCompetitiveLeague ||
               showSeasonPass ||
               showTusPagos ||
+              showMonedero ||
               showTransacciones ||
               crearPartidoFlow.open ||
               showDailyLesson ||
@@ -864,6 +883,7 @@ export function MainApp() {
             !showClubDetail &&
             !showPartidoDetail &&
             !showTusPagos &&
+            !showMonedero &&
             !showTransacciones &&
             !showPreferences &&
             !crearPartidoFlow.open &&
