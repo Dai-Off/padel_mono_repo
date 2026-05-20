@@ -14,7 +14,6 @@ export type HomeMission = {
   progress: string;
   pct: string;
   pctNum: number;
-  claim?: boolean;
   highlight?: boolean;
 };
 
@@ -88,27 +87,20 @@ export function MissionsHomeSection({ missions = [] }: Props) {
             <Text style={styles.cardDesc} numberOfLines={2}>
               {m.desc}
             </Text>
-            {m.claim === true ? (
-              <Pressable style={styles.claimBtn}>
-                <Ionicons name="checkmark-circle" size={18} color="#fff" />
-                <Text style={styles.claimText}>Reclamar Recompensa</Text>
-              </Pressable>
-            ) : (
-              <View style={styles.progressBlock}>
-                <View style={styles.progressMeta}>
-                  <Text style={styles.progressLeft}>{m.progress}</Text>
-                  <Text style={styles.progressRight}>{m.pct}</Text>
-                </View>
-                <View style={styles.barBg}>
-                  <LinearGradient
-                    colors={[ACCENT, '#E95F32']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={[styles.barFill, { width: `${m.pctNum}%` }]}
-                  />
-                </View>
+            <View style={styles.progressBlock}>
+              <View style={styles.progressMeta}>
+                <Text style={styles.progressLeft}>{m.progress}</Text>
+                <Text style={styles.progressRight}>{m.pct}</Text>
               </View>
-            )}
+              <View style={styles.barBg}>
+                <LinearGradient
+                  colors={[ACCENT, '#E95F32']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[styles.barFill, { width: `${m.pctNum}%` }]}
+                />
+              </View>
+            </View>
           </View>
         ))}
       </ScrollView>
@@ -237,19 +229,4 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   barFill: { height: '100%', borderRadius: 999 },
-  claimBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    borderRadius: 12,
-    backgroundColor: ACCENT,
-    zIndex: 1,
-  },
-  claimText: androidReadableText({
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#fff',
-  }),
 });

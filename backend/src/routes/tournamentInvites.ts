@@ -207,6 +207,60 @@ router.post('/:id/invites', requireClubOwnerOrAdminOrPortalStaff, async (req: Re
 /**
  * @openapi
  * /tournaments/invites/{token}/accept:
+ *   get:
+ *     tags: [Tournaments]
+ *     summary: Página de aceptación de invitación (enlace email/WhatsApp)
+ *     description: |
+ *       Sirve HTML con enlace profundo a la app (`padelapp://`) para aceptar la invitación.
+ *       Query opcional `tournament_id` para abrir el torneo correcto en la app.
+ *     parameters:
+ *       - in: path
+ *         name: token
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: tournament_id
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Página HTML
+ *         content:
+ *           text/html:
+ *             schema: { type: string }
+ */
+router.get('/invites/:token/accept', (req: Request, res: Response) => {
+  const token = String(req.params.token ?? '').trim();
+  const tournamentId = String(req.query.tournament_id ?? '').trim();
+  if (!token) {
+    return res.status(400).type('text/html').send('<h1>Invitación inválida</h1>');
+  }
+  const appUrl = `padelapp://tournament-invite?token=${encodeURIComponent(token)}&tournament_id=${encodeURIComponent(tournamentId)}`;
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Invitación al torneo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 420px; margin: 48px auto; padding: 0 16px; text-align: center; color: #1a1a1a; }
+    a.btn { display: inline-block; margin-top: 24px; padding: 14px 28px; background: #E31E24; color: #fff; text-decoration: none; border-radius: 12px; font-weight: 700; }
+    p { color: #555; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>Invitación al torneo</h1>
+  <p>Abre la app Padel para confirmar tu inscripción.</p>
+  <a class="btn" href="${appUrl}">Abrir en la app</a>
+  <p style="margin-top:32px;font-size:13px;">Si no se abre automáticamente, instala o abre la app y vuelve a pulsar el enlace.</p>
+  <script>setTimeout(function(){ window.location.href = ${JSON.stringify(appUrl)}; }, 400);</script>
+</body>
+</html>`;
+  return res.status(200).type('text/html').send(html);
+});
+
+/**
+ * @openapi
+ * /tournaments/invites/{token}/accept:
  *   post:
  *     tags: [Tournaments]
  *     summary: Aceptar invitaci?n de torneo

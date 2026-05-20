@@ -22,6 +22,7 @@ import type { SearchCourtResult } from "../api/search";
 import { fetchSearchCourts } from "../api/search";
 import { fetchAvailableSlots } from "../api/availability";
 import { fetchClubById } from "../api/clubs";
+import { fetchPublicClubReviews, type PublicClubReview } from "../api/clubReviews";
 import { fetchCourtsByClubId, type Court } from "../api/courts";
 import { fetchMatches } from "../api/matches";
 import { mapMatchToPartido } from "../api/mapMatchToPartido";
@@ -356,12 +357,15 @@ export function ClubDetailScreen({
   const [scheduleText, setScheduleText] = useState<string | null>(null);
   const [clubCourtsLoading, setClubCourtsLoading] = useState(true);
   const [duration, setDuration] = useState(DURATION_MIN);
+  const [clubReviews, setClubReviews] = useState<PublicClubReview[]>([]);
+  const [reviewsAverage, setReviewsAverage] = useState<number | null>(null);
 
   const loadClubData = useCallback(async () => {
     setClubCourtsLoading(true);
-    const [club, courts] = await Promise.all([
+    const [club, courts, reviewsRes] = await Promise.all([
       fetchClubById(court.clubId, session?.access_token),
       fetchCourtsByClubId(court.clubId),
+      fetchPublicClubReviews(court.clubId),
     ]);
     setClubCourts(courts);
     setScheduleText(
@@ -369,6 +373,13 @@ export function ClubDetailScreen({
         ? formatWeeklySchedule(club.weekly_schedule as Record<string, unknown>)
         : null,
     );
+    if (reviewsRes) {
+      setClubReviews(reviewsRes.reviews.slice(0, 8));
+      setReviewsAverage(reviewsRes.summary.average);
+    } else {
+      setClubReviews([]);
+      setReviewsAverage(null);
+    }
     setClubCourtsLoading(false);
   }, [court.clubId, session?.access_token]);
 
@@ -853,7 +864,9 @@ export function ClubDetailScreen({
               <View style={styles.heroStats}>
                 <View style={styles.heroStat} collapsable={false}>
                   <Ionicons name="star" size={12} color="#fbbf24" style={styles.heroStatStar} />
-                  <Text style={[styles.heroStatText, styles.heroStatTextRating]}>4.8</Text>
+                  <Text style={[styles.heroStatText, styles.heroStatTextRating]}>
+                    {reviewsAverage != null ? reviewsAverage.toFixed(1) : "—"}
+                  </Text>
                 </View>
                 <View style={styles.heroStat} collapsable={false}>
                   <Text style={[styles.heroStatText, styles.heroStatTextCourts]}>
@@ -1273,6 +1286,34 @@ export function ClubDetailScreen({
                   {scheduleText ?? "Consulta en el club"}
                 </Text>
               </View>
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Reseñas</Text>
+              {clubReviews.length === 0 ? (
+                <Text style={styles.partidosEmptySubtitle}>Aún no hay reseñas públicas.</Text>
+              ) : (
+                clubReviews.map((rev) => {
+                  const playerName = `${rev.player.first_name ?? ""} ${rev.player.last_name ?? ""}`.trim() || "Jugador";
+                  return (
+                    <View key={rev.id} style={styles.reviewCard}>
+                      <View style={styles.reviewHead}>
+                        <Text style={styles.reviewAuthor}>{playerName}</Text>
+                        <Text style={styles.reviewStars}>{"★".repeat(rev.rating)}</Text>
+                      </View>
+                      {rev.comment ? (
+                        <Text style={styles.reviewComment}>{rev.comment}</Text>
+                      ) : null}
+                      {rev.club_response ? (
+                        <View style={styles.reviewClubReply}>
+                          <Text style={styles.reviewClubReplyLabel}>Respuesta del club</Text>
+                          <Text style={styles.reviewClubReplyText}>{rev.club_response}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })
+              )}
             </View>
 
             <View style={styles.section}>
@@ -2302,6 +2343,54 @@ const styles = StyleSheet.create({
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
     paddingHorizontal: theme.spacing.xs,
     ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  reviewCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#e5e7eb",
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: "#fff",
+  },
+  reviewHead: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  reviewAuthor: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: "700",
+    color: "#111827",
+    flex: 1,
+  },
+  reviewStars: {
+    fontSize: 12,
+    color: "#fbbf24",
+    marginLeft: 8,
+  },
+  reviewComment: {
+    fontSize: theme.fontSize.xs,
+    color: "#4b5563",
+    lineHeight: 18,
+  },
+  reviewClubReply: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: "#f3f4f6",
+  },
+  reviewClubReplyLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: theme.auth.accent,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
+  reviewClubReplyText: {
+    fontSize: theme.fontSize.xs,
+    color: "#374151",
+    lineHeight: 18,
   },
   partidosAlertHeader: {
     flexDirection: "row",
