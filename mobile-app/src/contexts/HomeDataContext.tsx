@@ -71,6 +71,20 @@ type HomeDataValue = {
   streak: StreakState;
   streakLoading: boolean;
   refreshStreak: (opts?: { force?: boolean }) => Promise<void>;
+
+  /**
+   * `true` si en algún momento un fetch ha fallado y todavía NO tenemos datos
+   * cargados de ese dataset (= primera carga falló). Se usa para mostrar un
+   * banner discreto "No se pudo cargar — Reintentar" en la pantalla, en lugar
+   * de cards vacías sin contexto.
+   *
+   * Política silenciosa: las revalidaciones fallidas con datos previos en
+   * cache NO suben este flag — se quedan los datos viejos sin avisar al
+   * usuario (patrón stale-while-error).
+   */
+  hasInitialError: boolean;
+  /** Re-fetch forzado de todos los datasets. CTA del banner de error. */
+  refreshAll: () => Promise<void>;
 };
 
 const HomeDataContext = createContext<HomeDataValue | null>(null);
@@ -126,8 +140,17 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const [streakLoading, setStreakLoading] = useState(false);
   const streakLoadedAt = useRef(0);
 
+  /**
+   * Indica si la PRIMERA carga de cualquiera de los datasets falló y aún no
+   * tenemos datos. Permite a HomeScreen mostrar un banner de error en lugar
+   * de cards vacías sin contexto. Cuando llegan datos válidos vuelve a false.
+   */
+  const [hasInitialError, setHasInitialError] = useState(false);
+
   // -----------------------------------------------------------------
   // Refrescos (uno por entidad). Todos respetan TTL salvo `force: true`.
+  // Política: si la primera carga (sin datos previos) falla, marcamos el
+  // flag global. Si la revalidación con datos previos falla, silencio.
   // -----------------------------------------------------------------
 
   const refreshProfile = useCallback(
@@ -140,10 +163,16 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       // Solo mostramos loading si no había nada cacheado.
       const isFirst = profileLoadedAt.current === 0;
       if (isFirst) setProfileLoading(true);
-      const p = await fetchMyPlayerProfile(token);
-      setProfile(p);
-      profileLoadedAt.current = Date.now();
-      if (isFirst) setProfileLoading(false);
+      try {
+        const p = await fetchMyPlayerProfile(token);
+        setProfile(p);
+        profileLoadedAt.current = Date.now();
+        if (p == null && isFirst) setHasInitialError(true);
+      } catch {
+        if (isFirst) setHasInitialError(true);
+      } finally {
+        if (isFirst) setProfileLoading(false);
+      }
     },
     [token],
   );
@@ -154,38 +183,43 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       const isFirst = matchesLoadedAt.current === 0;
       if (isFirst) setMatchesLoading(true);
 
-      let tk: string | null = token;
-      let [playerId, matches] = await Promise.all([
-        tk ? fetchMyPlayerId(tk) : Promise.resolve(null),
-        fetchMatches({ expand: true, token: tk }),
-      ]);
+      try {
+        let tk: string | null = token;
+        let [playerId, matches] = await Promise.all([
+          tk ? fetchMyPlayerId(tk) : Promise.resolve(null),
+          fetchMatches({ expand: true, token: tk }),
+        ]);
 
-      // Si el token caducó silenciosamente, reintentamos UNA vez con refresh.
-      if (!playerId && session?.refresh_token) {
-        const newToken = await refreshAccessToken();
-        if (newToken) {
-          tk = newToken;
-          [playerId, matches] = await Promise.all([
-            fetchMyPlayerId(newToken),
-            fetchMatches({ expand: true, token: newToken }),
-          ]);
+        // Si el token caducó silenciosamente, reintentamos UNA vez con refresh.
+        if (!playerId && session?.refresh_token) {
+          const newToken = await refreshAccessToken();
+          if (newToken) {
+            tk = newToken;
+            [playerId, matches] = await Promise.all([
+              fetchMyPlayerId(newToken),
+              fetchMatches({ expand: true, token: newToken }),
+            ]);
+          }
         }
+
+        const mineRaw = selectMyUpcomingMatches(matches as MatchEnriched[], playerId);
+        const misProximos = mineRaw
+          .map(mapMatchToPartido)
+          .filter((p): p is PartidoItem => p != null);
+        setMisProximosPartidos(misProximos);
+
+        const all = (matches as MatchEnriched[])
+          .map(mapMatchToPartido)
+          .filter((p): p is PartidoItem => p != null)
+          .filter((p) => p.matchPhase !== 'past');
+        setPartidos(all);
+
+        matchesLoadedAt.current = Date.now();
+      } catch {
+        if (isFirst) setHasInitialError(true);
+      } finally {
+        if (isFirst) setMatchesLoading(false);
       }
-
-      const mineRaw = selectMyUpcomingMatches(matches as MatchEnriched[], playerId);
-      const misProximos = mineRaw
-        .map(mapMatchToPartido)
-        .filter((p): p is PartidoItem => p != null);
-      setMisProximosPartidos(misProximos);
-
-      const all = (matches as MatchEnriched[])
-        .map(mapMatchToPartido)
-        .filter((p): p is PartidoItem => p != null)
-        .filter((p) => p.matchPhase !== 'past');
-      setPartidos(all);
-
-      matchesLoadedAt.current = Date.now();
-      if (isFirst) setMatchesLoading(false);
     },
     [token, session?.refresh_token, refreshAccessToken],
   );
@@ -195,14 +229,19 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       if (!force && Date.now() - tournamentsLoadedAt.current < TTL_MS) return;
       const isFirst = tournamentsLoadedAt.current === 0;
       if (isFirst) setTournamentsLoading(true);
-      const r = await fetchPublicTournaments(token);
-      if (r.ok) {
-        setPublicTournamentsCount(r.tournaments.length);
-      } else {
-        setPublicTournamentsCount(null);
+      try {
+        const r = await fetchPublicTournaments(token);
+        if (r.ok) {
+          setPublicTournamentsCount(r.tournaments.length);
+        } else if (isFirst) {
+          setHasInitialError(true);
+        }
+        tournamentsLoadedAt.current = Date.now();
+      } catch {
+        if (isFirst) setHasInitialError(true);
+      } finally {
+        if (isFirst) setTournamentsLoading(false);
       }
-      tournamentsLoadedAt.current = Date.now();
-      if (isFirst) setTournamentsLoading(false);
     },
     [token],
   );
@@ -216,14 +255,23 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       if (!force && Date.now() - seasonPassLoadedAt.current < TTL_MS) return;
       const isFirst = seasonPassLoadedAt.current === 0;
       if (isFirst) setSeasonPassLoading(true);
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-      /** No refrescamos token ante 4xx/5xx: si /season-pass/me falla (p. ej.
-       * 500 sin migración 050), refrescar token cambia access_token, re-dispara
-       * efectos y entra en bucle infinito. */
-      const data = await fetchSeasonPassMe(token, tz);
-      setSeasonPassMe(data);
-      seasonPassLoadedAt.current = Date.now();
-      if (isFirst) setSeasonPassLoading(false);
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        /** No refrescamos token ante 4xx/5xx: si /season-pass/me falla (p. ej.
+         * 500 sin migración 050), refrescar token cambia access_token, re-dispara
+         * efectos y entra en bucle infinito. */
+        const data = await fetchSeasonPassMe(token, tz);
+        setSeasonPassMe(data);
+        seasonPassLoadedAt.current = Date.now();
+        // No tocamos hasInitialError aquí: el season pass puede dar 500 sin
+        // migración aplicada en clubs en desarrollo, no es bloqueante para
+        // el Home. Las cards principales (profile, matches, tournaments)
+        // mandan en este flag.
+      } catch {
+        // Silencioso, mismo motivo.
+      } finally {
+        if (isFirst) setSeasonPassLoading(false);
+      }
     },
     [token],
   );
@@ -274,6 +322,32 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
+  /**
+   * Re-fetch forzado de todos los datasets. CTA del banner "Reintentar"
+   * cuando la primera carga falló. También útil para pull-to-refresh.
+   *
+   * Resetea `hasInitialError` optimistamente: si alguno vuelve a fallar
+   * sin datos previos, su `setHasInitialError(true)` lo vuelve a marcar.
+   */
+  const refreshAll = useCallback(async () => {
+    setHasInitialError(false);
+    await Promise.all([
+      refreshProfile({ force: true }),
+      refreshMatches({ force: true }),
+      refreshTournaments({ force: true }),
+      refreshSeasonPass({ force: true }),
+      refreshStats({ force: true }),
+      refreshStreak({ force: true }),
+    ]);
+  }, [
+    refreshProfile,
+    refreshMatches,
+    refreshTournaments,
+    refreshSeasonPass,
+    refreshStats,
+    refreshStreak,
+  ]);
+
   // -----------------------------------------------------------------
   // Auto-fetch inicial al montar / al cambiar de token.
   // Resetea timestamps para forzar primera carga "loading visible".
@@ -286,6 +360,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     seasonPassLoadedAt.current = 0;
     statsLoadedAt.current = 0;
     streakLoadedAt.current = 0;
+    setHasInitialError(false);
     if (!token) {
       setProfile(null);
       setPartidos([]);
@@ -353,6 +428,8 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       streak,
       streakLoading,
       refreshStreak,
+      hasInitialError,
+      refreshAll,
     }),
     [
       profile,
@@ -374,6 +451,8 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       streak,
       streakLoading,
       refreshStreak,
+      hasInitialError,
+      refreshAll,
     ],
   );
 

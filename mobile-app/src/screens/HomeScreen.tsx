@@ -14,6 +14,7 @@ import {
   INICIO_PAD_H,
   INICIO_PAD_TOP,
   INICIO_STACK_GAP,
+  HomeErrorBanner,
   HomeSkeleton,
   MissionsHomeSection,
   type HomeMission,
@@ -117,7 +118,19 @@ export function HomeScreen({
     stats,
     statsLoading,
     refreshStreak,
+    hasInitialError,
+    refreshAll,
   } = useHomeData();
+  // Feedback visual mientras "Reintentar" del banner de error está en vuelo.
+  const [retrying, setRetrying] = useState(false);
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await refreshAll();
+    } finally {
+      setRetrying(false);
+    }
+  };
   const [affinityModalVisible, setAffinityModalVisible] = useState(false);
   const [affinityLoading, setAffinityLoading] = useState(false);
   // Inicializar desde caché para sobrevivir remounts (ej. al volver del chat de IA Afinidad)
@@ -267,7 +280,14 @@ export function HomeScreen({
           ]}
           showsVerticalScrollIndicator={false}
         >
-        {isFirstLoading ? <HomeSkeleton /> : (<>
+        {isFirstLoading ? (
+          <HomeSkeleton />
+        ) : hasInitialError && myPlayerProfile == null && partidos.length === 0 ? (
+          // Primera carga falló y no hay nada en cache: banner discreto con
+          // "Reintentar" en lugar de cards vacías sin contexto. Si hubiera
+          // datos parciales, mostraríamos el contenido (stale-while-error).
+          <HomeErrorBanner onRetry={handleRetry} retrying={retrying} />
+        ) : (<>
         {/* Contenido real del Home a partir de aquí. Cuando los datos llegan
             todos a la vez, el skeleton desaparece y entra el contenido — la
             animación de `InicioEnterBlock` sigue funcionando como siempre. */}
