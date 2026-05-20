@@ -164,6 +164,11 @@ export interface Question {
   // nota. Se usa para calcular "nota no vista" comparando contra
   // last_admin_edit_at. NULL = nunca vista tras la nota más reciente.
   notes_seen_at?: string | null;
+  // Agregados de valoración (like/dislike) por pregunta. Se cuenta el voto
+  // más reciente por jugador → un usuario que vio la pregunta varias veces
+  // influye una sola vez. Útil para detectar preguntas mal redactadas.
+  feedback_up?: number;
+  feedback_down?: number;
   created_at: string;
   // Solo presente si type='puzzle'. Metadata de la fila learning_puzzles (id propio,
   // thumbnail_url, timestamps). El árbol también se mergea en content.

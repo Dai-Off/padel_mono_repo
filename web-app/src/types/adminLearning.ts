@@ -15,6 +15,9 @@ export interface AdminQuestion extends Omit<Question, 'club_id'> {
   // preguntas que ningún admin ha tocado todavía.
   moderation_notes?: string | null;
   last_admin_edit_at?: string | null;
+  // Agregados de valoración (like/dislike) — mismo formato que Question.
+  feedback_up?: number;
+  feedback_down?: number;
 }
 
 export interface ClubStat {

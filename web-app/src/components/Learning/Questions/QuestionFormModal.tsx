@@ -417,14 +417,19 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved, us
             </div>
           </div>
 
-          {/* Video — no aplica para puzzles */}
-          {type !== 'puzzle' && (
+          {/* Vídeo opcional. Para puzzles, el vídeo se reproduce en el
+              mobile antes de mostrar la pregunta (paridad con el resto de
+              tipos). Si no se sube, el puzzle sigue funcionando con su
+              intro_frame → initial_frame habitual. */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">
               {t('learning_field_video')}
               <span className="text-gray-300 font-normal ml-1">
                 (máx {VIDEO_LIMITS.question.maxSizeMB}MB, {VIDEO_LIMITS.question.maxDurationSec}s)
               </span>
+              {type === 'puzzle' && (
+                <span className="text-gray-300 font-normal ml-1">— opcional, intro previa</span>
+              )}
             </label>
             {validating ? (
               <div className="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-indigo-200 text-xs font-bold text-indigo-400">
@@ -470,7 +475,6 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved, us
               className="hidden"
             />
           </div>
-          )}
 
           {/* Separador */}
           <div className="border-t border-gray-100" />

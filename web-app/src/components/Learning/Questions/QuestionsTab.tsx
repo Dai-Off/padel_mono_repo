@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Plus, Edit, HelpCircle, Trash2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { learningContentService, hasUnreadNotes } from '../../../services/learningContent';
+import { learningContentService, hasUnreadNotes, summarizeFeedback } from '../../../services/learningContent';
 import { QuestionFormModal } from './QuestionFormModal';
 import { FilterDropdown } from './FilterDropdown';
 import { StatusSwitcher } from './StatusSwitcher';
@@ -317,6 +317,26 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
                 <HelpCircle className="w-4 h-4 text-gray-300 mt-0.5 shrink-0" />
                 <p className="text-xs text-[#1A1A1A] line-clamp-2">{extractPreview(q)}</p>
               </div>
+
+              {/* Valoración (like / dislike) — agregados del último voto por
+                  jugador. El % solo aparece a partir del umbral mínimo. */}
+              {(() => {
+                const fb = summarizeFeedback(q);
+                if (fb.total === 0) return null;
+                return (
+                  <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                    <span>👍 {fb.up}</span>
+                    <span>·</span>
+                    <span>👎 {fb.down}</span>
+                    {fb.positive_pct !== null && (
+                      <>
+                        <span>·</span>
+                        <span className="font-semibold text-gray-500">{fb.positive_pct}% positivo</span>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Acciones */}
               <div className="flex items-center gap-2 pt-1 flex-wrap">

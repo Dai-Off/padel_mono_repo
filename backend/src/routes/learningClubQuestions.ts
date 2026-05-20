@@ -116,7 +116,9 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
     }
 
     const isPuzzle = type === 'puzzle';
-    const hasVideo = !isPuzzle && !!video_url && typeof video_url === 'string';
+    // Vídeo opcional para todos los tipos, incluido puzzle (intro previa al
+    // puzzle reproducida por el mobile antes del intro_frame).
+    const hasVideo = !!video_url && typeof video_url === 'string';
     const supabase = getSupabaseServiceRoleClient();
 
     // 1. Insert en learning_questions. Para puzzles, content queda vacío; el árbol va en learning_puzzles.
@@ -457,6 +459,17 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
       }
     }
 
+    // Agregamos contadores de feedback (like / dislike) por pregunta. Para
+    // cada par (player, question) contamos el voto MÁS RECIENTE — un usuario
+    // que vio la pregunta varias veces influye una sola vez en la métrica.
+    const allIds = rows.map((r: any) => r.id as string);
+    const feedbackAgg = await aggregateFeedback(supabase, allIds);
+    for (const row of rows) {
+      const agg = feedbackAgg.get((row as any).id) ?? { up: 0, down: 0 };
+      (row as any).feedback_up = agg.up;
+      (row as any).feedback_down = agg.down;
+    }
+
     // Ordenamos primero las preguntas con nota de moderación no vista para
     // que el club las encuentre rápido. El resto mantiene el orden por
     // created_at desc que vino de la query.
@@ -478,6 +491,48 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
+
+// Helper: agrega votos like / dislike para un set de question_ids. Devuelve
+// un Map<question_id, { up, down }> donde cada par (player, question) cuenta
+// su voto MÁS RECIENTE — un jugador con varios logs de la misma pregunta
+// influye una sola vez en la métrica.
+//
+// Implementación en JS porque Supabase no soporta DISTINCT ON trivialmente.
+// Si el volumen crece mucho, considerar materializar como vista.
+export async function aggregateFeedback(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  questionIds: string[],
+): Promise<Map<string, { up: number; down: number }>> {
+  const empty = new Map<string, { up: number; down: number }>();
+  if (questionIds.length === 0) return empty;
+
+  const { data, error } = await supabase
+    .from('learning_question_log')
+    .select('question_id, player_id, vote, answered_at')
+    .in('question_id', questionIds)
+    .not('vote', 'is', null);
+  if (error || !data) return empty;
+
+  // Quedarnos con el voto más reciente por (question_id, player_id).
+  const latest = new Map<string, { vote: 'up' | 'down'; at: number }>();
+  for (const row of data as Array<{ question_id: string; player_id: string; vote: 'up' | 'down'; answered_at: string }>) {
+    const key = `${row.question_id}::${row.player_id}`;
+    const at = new Date(row.answered_at).getTime();
+    const cur = latest.get(key);
+    if (!cur || at > cur.at) latest.set(key, { vote: row.vote, at });
+  }
+
+  // Reducir a contadores por question_id.
+  const out = new Map<string, { up: number; down: number }>();
+  for (const [key, { vote }] of latest) {
+    const qid = key.split('::')[0];
+    const cur = out.get(qid) ?? { up: 0, down: 0 };
+    if (vote === 'up') cur.up++;
+    else cur.down++;
+    out.set(qid, cur);
+  }
+  return out;
+}
 
 // Helper: cuenta preguntas del club con `moderation_notes` no NULL cuya
 // `notes_seen_at` sea NULL o anterior a `last_admin_edit_at`. Se usa tanto en

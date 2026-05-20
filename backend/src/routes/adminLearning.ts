@@ -7,6 +7,7 @@ import {
   VALID_AREAS,
   VALID_STATUS,
   validateQuestionContent,
+  aggregateFeedback,
   type QuestionStatusValue,
 } from './learningClubQuestions';
 
@@ -246,7 +247,7 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
 
     let query = supabase
       .from('learning_questions')
-      .select('id, created_by_club, type, level, area, has_video, video_url, content, status, created_at, clubs:created_by_club(name)')
+      .select('id, created_by_club, type, level, area, has_video, video_url, content, status, moderation_notes, last_admin_edit_at, created_at, clubs:created_by_club(name)')
       .order('created_at', { ascending: false });
 
     if (club_id) query = query.eq('created_by_club', club_id as string);
@@ -272,12 +273,20 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
       for (const p of puzzles ?? []) puzzleByQuestion.set(p.question_id, p);
     }
 
+    // Agregados de feedback (like / dislike) por pregunta — último voto por
+    // (player, question), evita sobre-pesar usuarios recurrentes.
+    const allIds = (questions || []).map((q: any) => q.id as string);
+    const feedbackAgg = await aggregateFeedback(supabase, allIds);
+
     const result = (questions || []).map((q: any) => {
+      const fb = feedbackAgg.get(q.id) ?? { up: 0, down: 0 };
       const base = {
         ...q,
         club_id: q.created_by_club,
         club_name: (q.clubs as any)?.name ?? null,
         clubs: undefined,
+        feedback_up: fb.up,
+        feedback_down: fb.down,
       };
       if (q.type === 'puzzle') {
         const p = puzzleByQuestion.get(q.id);

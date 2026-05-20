@@ -36,6 +36,28 @@ export function hasUnreadNotes(q: Pick<Question, 'moderation_notes' | 'notes_see
   return new Date(q.notes_seen_at).getTime() < new Date(q.last_admin_edit_at).getTime();
 }
 
+// Umbral mínimo de votos para mostrar el % de positividad en card. Por debajo
+// se muestra solo el conteo bruto (👍 N · 👎 M) para no inducir a interpretar
+// ruido como señal.
+export const FEEDBACK_MIN_VOTES = 10;
+
+/**
+ * Resumen de la valoración (like/dislike) para pintar en una card. Devuelve
+ * los conteos y, si supera el umbral mínimo, el % de positividad redondeado.
+ */
+export function summarizeFeedback(q: Pick<Question, 'feedback_up' | 'feedback_down'>): {
+  up: number;
+  down: number;
+  total: number;
+  positive_pct: number | null;
+} {
+  const up = q.feedback_up ?? 0;
+  const down = q.feedback_down ?? 0;
+  const total = up + down;
+  const positive_pct = total >= FEEDBACK_MIN_VOTES ? Math.round((up / total) * 100) : null;
+  return { up, down, total, positive_pct };
+}
+
 /** Obtiene la duración de un video en segundos */
 export function getVideoDuration(file: File): Promise<number> {
   return new Promise((resolve, reject) => {
