@@ -5,8 +5,8 @@ const VALID_SIZES = [10, 20, 50];
 
 /**
  * Persiste la preferencia de page_size del usuario en localStorage por clave
- * lógica (ej: 'questions:club', 'questions:admin'). Si el valor guardado no
- * es válido, cae al default 30.
+ * lógica (ej: 'questions:club:{clubId}', 'questions:admin'). Si el valor
+ * guardado no es válido, cae al default (20).
  */
 export function usePageSizePref(storageKey: string): [number, (n: number) => void] {
   const fullKey = `learning_page_size:${storageKey}`;

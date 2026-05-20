@@ -299,9 +299,10 @@ router.get('/courses', requireAdmin, async (req: Request, res: Response) => {
     let query = supabase
       .from('learning_courses')
       .select('id, club_id, title, description, elo_min, elo_max, staff_id, status, created_at, updated_at, clubs(name)', { count: 'exact' })
-      // Pending arriba siempre, después por fecha. Permite que con paginación
-      // los cursos en revisión nunca se "pierdan" en páginas posteriores.
-      .order('status', { ascending: true })
+      // Pending arriba siempre, después por fecha. ascending:false en status
+      // ordena alfabéticamente al revés → pending_review > inactive > draft >
+      // active, así pending queda primero sin necesidad de RPC.
+      .order('status', { ascending: false })
       .order('created_at', { ascending });
 
     if (status && status !== 'all') query = query.eq('status', status as string);

@@ -63,7 +63,8 @@ router.get('/club-courses', requireClubOwnerOrAdminOrPortalStaff, async (req: Re
         { count: 'exact' },
       )
       .eq('club_id', club_id)
-      .order('status', { ascending: true })
+      // Pending arriba siempre. Ver nota en adminLearning.ts.
+      .order('status', { ascending: false })
       .order('created_at', { ascending });
     if (status && status !== 'all') query = query.eq('status', status);
     if (search) {

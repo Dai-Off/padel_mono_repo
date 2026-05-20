@@ -1270,7 +1270,10 @@ export async function computeQuestionDetailStats(
     if (typeof elo !== 'number') continue;
     const bucket = eloDistribution.find((_, i) => {
       const b = ELO_BUCKETS[i];
-      return elo >= b.min && elo < b.max;
+      // Último bucket inclusive arriba para que un elo exactamente igual al
+      // máximo (ej. 7) no se quede fuera.
+      const isLast = i === ELO_BUCKETS.length - 1;
+      return elo >= b.min && (isLast ? elo <= b.max : elo < b.max);
     });
     if (bucket) {
       bucket.attempts++;

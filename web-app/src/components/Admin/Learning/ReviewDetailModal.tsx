@@ -4,6 +4,7 @@ import { X, Check, XCircle, Video, BookOpen, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { adminLearningService } from '../../../services/adminLearning';
+import { useEscapeClose } from '../../Learning/Questions/useEscapeClose';
 import type { AdminCourse, AdminCourseWithLessons } from '../../../types/adminLearning';
 import type { CourseStatus } from '../../../types/learningContent';
 
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export function ReviewDetailModal({ course, onClose, onActionDone, readOnly = false }: Props) {
+  useEscapeClose(onClose);
   const { t } = useTranslation();
   const [detail, setDetail] = useState<AdminCourseWithLessons | null>(null);
   const [loading, setLoading] = useState(true);

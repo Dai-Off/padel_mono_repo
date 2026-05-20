@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { learningContentService } from '../../../services/learningContent';
 import { adminLearningService } from '../../../services/adminLearning';
+import { useEscapeClose } from '../Questions/useEscapeClose';
 import type { CourseDetailStats } from '../../../types/adminLearning';
 
 /**
@@ -26,6 +27,7 @@ const TOOLTIP_STYLE = {
 };
 
 export function CourseStatsModal({ courseId, courseTitle, useAdminEndpoint, onClose }: Props) {
+  useEscapeClose(onClose);
   const [stats, setStats] = useState<CourseDetailStats | null>(null);
   const [loading, setLoading] = useState(true);
 

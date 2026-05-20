@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
 import { CourseFormModal } from './CourseFormModal';
 import { LessonFormModal } from './LessonFormModal';
+import { useEscapeClose } from '../Questions/useEscapeClose';
 import type { Course, CourseLesson, CourseWithLessons, CourseStatus } from '../../../types/learningContent';
 
 const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export function CourseDetailModal({ course, clubId, staffName, onClose, onUpdated }: Props) {
+  useEscapeClose(onClose);
   const { t } = useTranslation();
   const [detail, setDetail] = useState<CourseWithLessons | null>(null);
   const [loading, setLoading] = useState(true);

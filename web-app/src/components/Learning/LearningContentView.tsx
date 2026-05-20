@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { BookOpen, Building2, ChevronRight } from 'lucide-react';
@@ -73,14 +73,18 @@ export function LearningContentView() {
 
   // Refresca el contador de avisos cada vez que cambia el club seleccionado.
   // El badge debe reflejar el club que está viendo el usuario.
-  useEffect(() => {
-    if (!selectedClubId) { setWarningsCount(0); return; }
+  const refreshWarningsCount = useCallback((clubId: string | null) => {
+    if (!clubId) { setWarningsCount(0); return; }
     let cancelled = false;
-    learningContentService.getClubWarnings(selectedClubId)
+    learningContentService.getClubWarnings(clubId)
       .then((r) => { if (!cancelled) setWarningsCount(r.count); })
       .catch(() => { if (!cancelled) setWarningsCount(0); });
     return () => { cancelled = true; };
-  }, [selectedClubId]);
+  }, []);
+  useEffect(() => {
+    const cleanup = refreshWarningsCount(selectedClubId);
+    return cleanup;
+  }, [selectedClubId, refreshWarningsCount]);
 
   // Estado de carga
   if (loading) {
@@ -222,7 +226,11 @@ export function LearningContentView() {
             transition={{ duration: 0.15 }}
           >
             {selectedClubId && activeTab === 'questions' && (
-              <QuestionsTab clubId={selectedClubId} onUnreadCountChange={setUnreadNotesCount} />
+              <QuestionsTab
+                clubId={selectedClubId}
+                onUnreadCountChange={setUnreadNotesCount}
+                onContentChanged={() => refreshWarningsCount(selectedClubId)}
+              />
             )}
             {selectedClubId && activeTab === 'courses' && (
               <CoursesTab clubId={selectedClubId} />

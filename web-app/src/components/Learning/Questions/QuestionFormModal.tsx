@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService, validateVideo, VIDEO_LIMITS } from '../../../services/learningContent';
 import { adminLearningService } from '../../../services/adminLearning';
+import { useEscapeClose } from './useEscapeClose';
 import { PuzzleEditor } from './PuzzleEditor/PuzzleEditor';
 import { validatePuzzleContentAll } from '../../../lib/puzzleValidator';
 import type {
@@ -84,6 +85,7 @@ function buildModerationNoteTemplate(): string {
 }
 
 export function QuestionFormModal({ mode, question, clubId, onClose, onSaved, useAdminEndpoints = false }: Props) {
+  useEscapeClose(onClose);
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
 

@@ -51,7 +51,7 @@ export function CoursesTab({ clubId }: { clubId: string }) {
 
   const [courses, setCourses] = useState<Course[]>([]);
   const [total, setTotal] = useState(0);
-  const [pageSize, setPageSize] = usePageSizePref('courses:club');
+  const [pageSize, setPageSize] = usePageSizePref(`courses:club:${clubId}`);
   const [staff, setStaff] = useState<ClubStaffMember[]>([]);
   const [loading, setLoading] = useState(false);
   const [createModal, setCreateModal] = useState(false);

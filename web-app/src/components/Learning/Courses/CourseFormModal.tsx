@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
 import { clubStaffService } from '../../../services/clubStaff';
+import { useEscapeClose } from '../Questions/useEscapeClose';
 import type { Course } from '../../../types/learningContent';
 import type { ClubStaffMember } from '../../../types/clubStaff';
 
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Props) {
+  useEscapeClose(onClose);
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);

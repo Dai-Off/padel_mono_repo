@@ -170,6 +170,14 @@ function QuestionsModeration() {
     setSelectedIds(new Set());
   };
 
+  // Si el usuario pagina mientras está en modo selección, salimos. Las cards
+  // de la nueva página no muestran check y mantener IDs huérfanos en el
+  // contador es confuso (y al ejecutar bulk borraría las invisibles).
+  useEffect(() => {
+    if (selectionMode) exitSelectionMode();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+
   // Lista de clubs con contenido: una llamada dedicada (no depende del listing
   // paginado, que solo trae 30 a la vez).
   useEffect(() => {

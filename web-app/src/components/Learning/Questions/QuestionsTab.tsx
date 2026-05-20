@@ -38,9 +38,13 @@ interface QuestionsTabProps {
   // Permite a la página padre (LearningContentView) pintar un badge sobre la
   // tab "Preguntas" con el contador de preguntas con nota de moderación no vista.
   onUnreadCountChange?: (count: number) => void;
+  // Aviso al padre de que el contenido del club ha cambiado (editar, borrar,
+  // cambio de estado). Útil para refrescar contadores que dependen del estado
+  // global (ej. avisos abiertos).
+  onContentChanged?: () => void;
 }
 
-export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps) {
+export function QuestionsTab({ clubId, onUnreadCountChange, onContentChanged }: QuestionsTabProps) {
   const { t } = useTranslation();
   // URL params como fuente de verdad para filtros + paginación. Permite linkar
   // a vistas concretas y conserva estado entre refrescos del navegador.
@@ -72,7 +76,9 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [total, setTotal] = useState(0);
-  const [pageSize, setPageSize] = usePageSizePref('questions:club');
+  // Preferencia por club: un admin con varios clubs puede preferir distintos
+  // tamaños de página según el volumen de cada uno.
+  const [pageSize, setPageSize] = usePageSizePref(`questions:club:${clubId}`);
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; question?: Question } | null>(null);
   const [statsQuestion, setStatsQuestion] = useState<Question | null>(null);
@@ -91,6 +97,13 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
     setSelectionMode(false);
     setSelectedIds(new Set());
   };
+
+  // Salimos de selección al paginar — las cards de la nueva página no muestran
+  // check y mantener IDs huérfanos en el contador es confuso.
+  useEffect(() => {
+    if (selectionMode) exitSelectionMode();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   // Ref a un setter externo (lo provee LearningContentView) para que el badge
   // sobre la tab "Preguntas" use el contador EXACTO calculado por el backend,
@@ -184,6 +197,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
         await learningContentService.updateQuestion(q.id, { status: 'draft' });
       }
       toast.success(t('learning_save_success'));
+      onContentChanged?.();
     } catch (e) {
       patchLocal(q.id, { status: prev }); // revert
       const msg = (e as Error).message ?? '';
@@ -209,6 +223,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
     try {
       await learningContentService.deleteQuestion(q.id);
       toast.success('Pregunta borrada definitivamente');
+      onContentChanged?.();
     } catch (e) {
       setQuestions(snapshot);
       toast.error((e as Error).message || 'Error al borrar');
@@ -221,6 +236,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
   const handleSaved = () => {
     setModal(null);
     load({ silent: true });
+    onContentChanged?.();
   };
 
   // Helper genérico para acciones bulk (club). Patrón idéntico al de admin.
@@ -249,6 +265,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
     if (ko === 0) toast.success(`${label}: ${ok}/${items.length}`);
     else toast.error(`${label}: ${ok}/${items.length} (${ko} fallos)`);
     exitSelectionMode();
+    onContentChanged?.();
   };
 
   const handleBulkPublish = () => runBulk(
@@ -286,6 +303,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
     if (fail === 0) toast.success(`Borradas: ${succ}/${items.length}`);
     else { setQuestions(snapshot); toast.error(`Borradas: ${succ}/${items.length} (${fail} fallos)`); }
     exitSelectionMode();
+    onContentChanged?.();
   };
 
   // Al abrir el modal de edición, si la pregunta tiene una nota de moderación
