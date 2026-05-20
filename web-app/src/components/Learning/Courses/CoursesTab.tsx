@@ -91,13 +91,6 @@ export function CoursesTab({ clubId }: { clubId: string }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const stats = useMemo(() => ({
-    total: courses.length,
-    draft: courses.filter((c) => c.status === 'draft').length,
-    pending: courses.filter((c) => c.status === 'pending_review').length,
-    active: courses.filter((c) => c.status === 'active').length,
-  }), [courses]);
-
   return (
     <div className="space-y-5">
       {/* Header + botón crear */}
@@ -113,25 +106,6 @@ export function CoursesTab({ clubId }: { clubId: string }) {
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <p className="text-lg font-black text-[#1A1A1A]">{stats.total}</p>
-          <p className="text-[10px] text-gray-400">{t('learning_tab_courses')}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <p className="text-lg font-black text-[#1A1A1A]">{stats.draft}</p>
-          <p className="text-[10px] text-gray-400">{t('learning_status_draft')}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <p className="text-lg font-black text-[#1A1A1A]">{stats.pending}</p>
-          <p className="text-[10px] text-gray-400">{t('learning_status_pending_review')}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <p className="text-lg font-black text-[#1A1A1A]">{stats.active}</p>
-          <p className="text-[10px] text-gray-400">{t('learning_status_active')}</p>
-        </div>
-      </div>
 
       {/* Dos filas: filtros arriba y abajo orden + buscador. */}
       <div className="bg-white rounded-2xl border border-gray-100 p-3 space-y-2">

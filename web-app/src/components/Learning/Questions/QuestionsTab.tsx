@@ -149,12 +149,6 @@ export function QuestionsTab({ clubId, onUnreadCountChange, onContentChanged }: 
     setQuestions((prev) => prev.filter((x) => x.id !== id));
   };
 
-  const stats = useMemo(() => {
-    const total = questions.length;
-    const published = questions.filter((q) => q.status === 'published').length;
-    return { total, published };
-  }, [questions]);
-
   // Filtro client-side de vídeo aplicado tras cargar.
   const visibleQuestions = useMemo(() => questions.filter((q) => {
     if (videoFilter === 'with_video') return !!q.has_video;
@@ -338,17 +332,6 @@ export function QuestionsTab({ clubId, onUnreadCountChange, onContentChanged }: 
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <p className="text-lg font-black text-[#1A1A1A]">{stats.total}</p>
-          <p className="text-[10px] text-gray-400">{t('learning_tab_questions')}</p>
-        </div>
-        <div className="bg-white rounded-2xl border border-gray-100 p-4">
-          <p className="text-lg font-black text-[#1A1A1A]">{stats.published}</p>
-          <p className="text-[10px] text-gray-400">Publicadas</p>
-        </div>
-      </div>
 
       {/* Dos filas: filtros arriba y abajo orden + buscador + selección. */}
       <div className="bg-white rounded-2xl border border-gray-100 p-3 space-y-2">
