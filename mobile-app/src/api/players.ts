@@ -40,6 +40,12 @@ type MeResponse = {
     /** Presente solo si el backend lo incluye en `/players/me`. */
     onboarding_completed?: boolean | null;
     avatar_url?: string | null;
+    cover_url?: string | null;
+    matches_played_total?: number | null;
+    gender?: string | null;
+    birth_date?: string | null;
+    profile_description?: string | null;
+    play_location?: string | null;
   };
   error?: string;
 };
@@ -65,6 +71,7 @@ export type MyPlayerProfile = {
   email: string | null;
   phone: string | null;
   avatarUrl: string | null;
+  coverUrl: string | null;
   eloRating: number | null;
   status: string | null;
   /** Código de liga MM global: bronce | plata | oro | elite */
@@ -82,7 +89,19 @@ export type MyPlayerProfile = {
    * para no bloquear la app.
    */
   onboardingCompleted: boolean;
+  gender: 'male' | 'female' | 'other';
+  birthDate: string | null;
+  profileDescription: string | null;
+  playLocation: string | null;
 };
+
+export type PlayerGender = MyPlayerProfile['gender'];
+
+function parseGender(raw: unknown): PlayerGender {
+  const v = String(raw ?? 'other').trim().toLowerCase();
+  if (v === 'male' || v === 'female') return v;
+  return 'other';
+}
 
 /** Obtiene el jugador actual según la sesión (Bearer token). */
 export async function fetchMyPlayerId(
@@ -127,6 +146,11 @@ export async function fetchMyPlayerProfile(
     const mpcNum = rawMpc == null ? 0 : Math.max(0, Math.round(Number(rawMpc)));
     const mpfNum = rawMpf == null ? 0 : Math.max(0, Math.round(Number(rawMpf)));
     const mpmNum = rawMpm == null ? 0 : Math.max(0, Math.round(Number(rawMpm)));
+    const rawTotal = json.player.matches_played_total;
+    const totalFromApi =
+      rawTotal != null && !Number.isNaN(Number(rawTotal))
+        ? Math.max(0, Math.round(Number(rawTotal)))
+        : null;
     const rawFiab = json.player.fiabilidad;
     const fiabNum = rawFiab == null ? null : Number(rawFiab);
     const parseInt0 = (v: unknown): number => {
@@ -179,6 +203,7 @@ export async function fetchMyPlayerProfile(
       email: json.player.email ?? null,
       phone: json.player.phone ?? null,
       avatarUrl: json.player.avatar_url ?? null,
+      coverUrl: json.player.cover_url ?? null,
       eloRating: eloNum != null && !Number.isNaN(eloNum) ? eloNum : null,
       status: json.player.status ?? null,
       liga:
@@ -194,7 +219,7 @@ export async function fetchMyPlayerProfile(
         String(json.player.mm_peak_liga).trim() !== ""
           ? String(json.player.mm_peak_liga)
           : null,
-      matchesPlayedTotal: mpcNum + mpfNum + mpmNum,
+      matchesPlayedTotal: totalFromApi ?? mpcNum + mpfNum + mpmNum,
       fiabilidad:
         fiabNum != null && !Number.isNaN(fiabNum)
           ? Math.max(0, Math.min(100, Math.round(fiabNum)))
@@ -217,6 +242,20 @@ export async function fetchMyPlayerProfile(
         notifChatMessages: json.player.notif_chat_messages !== false,
       },
       onboardingCompleted: json.player.onboarding_completed !== false,
+      gender: parseGender(json.player.gender),
+      birthDate:
+        json.player.birth_date != null && String(json.player.birth_date).trim() !== ''
+          ? String(json.player.birth_date).slice(0, 10)
+          : null,
+      profileDescription:
+        json.player.profile_description != null &&
+        String(json.player.profile_description).trim() !== ''
+          ? String(json.player.profile_description)
+          : null,
+      playLocation:
+        json.player.play_location != null && String(json.player.play_location).trim() !== ''
+          ? String(json.player.play_location)
+          : null,
     };
   } catch (err) {
     console.error("[fetchMyPlayerProfile]", err);
@@ -224,13 +263,40 @@ export async function fetchMyPlayerProfile(
   }
 }
 
+export type UpdateMyPlayerProfilePayload = {
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  avatar_url?: string | null;
+  gender?: PlayerGender;
+  birth_date?: string | null;
+  profile_description?: string | null;
+  play_location?: string | null;
+};
+
 export async function updateMyPlayerProfile(
   token: string | null | undefined,
-  data: { first_name: string; last_name: string; phone: string },
+  data: UpdateMyPlayerProfilePayload,
 ): Promise<{ ok: true; player: MyPlayerProfile } | { ok: false; error: string }> {
   if (!token) {
     return { ok: false, error: 'Inicia sesión para actualizar tu perfil' };
   }
+  const body: Record<string, unknown> = {};
+  if (data.first_name !== undefined) body.first_name = data.first_name.trim();
+  if (data.last_name !== undefined) body.last_name = data.last_name.trim();
+  if (data.phone !== undefined) body.phone = data.phone.trim();
+  if (data.avatar_url !== undefined) body.avatar_url = data.avatar_url;
+  if (data.gender !== undefined) body.gender = data.gender;
+  if (data.birth_date !== undefined) body.birth_date = data.birth_date;
+  if (data.profile_description !== undefined) {
+    body.profile_description = data.profile_description;
+  }
+  if (data.play_location !== undefined) body.play_location = data.play_location;
+
+  if (Object.keys(body).length === 0) {
+    return { ok: false, error: 'No hay datos para guardar' };
+  }
+
   try {
     const res = await fetch(`${API_URL}/players/me`, {
       method: 'PATCH',
@@ -238,11 +304,7 @@ export async function updateMyPlayerProfile(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({
-        first_name: data.first_name.trim(),
-        last_name: data.last_name.trim(),
-        phone: data.phone.trim(),
-      }),
+      body: JSON.stringify(body),
     });
     const json = (await res.json()) as MeResponse;
     if (!res.ok || !json.ok || !json.player) {

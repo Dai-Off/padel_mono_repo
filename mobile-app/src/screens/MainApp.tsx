@@ -28,6 +28,7 @@ import { PartidoPrivadoDetailScreen } from './PartidoPrivadoDetailScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
+import { MonederoScreen } from './MonederoScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
 import { DailyLessonScreen } from './DailyLessonScreen';
@@ -36,6 +37,7 @@ import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
 import { PublicCourseDetailScreen } from './PublicCourseDetailScreen';
 import { ProfileScreen } from './ProfileScreen';
 import { EditProfileScreen } from './EditProfileScreen';
+import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
 import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
@@ -72,6 +74,7 @@ export function MainApp() {
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [showTusPagos, setShowTusPagos] = useState(false);
+  const [showMonedero, setShowMonedero] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
   const [showDailyLesson, setShowDailyLesson] = useState(false);
   /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
@@ -88,6 +91,7 @@ export function MainApp() {
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
   const [showProfile, setShowProfile] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   const [openTournamentId, setOpenTournamentId] = useState<string | null>(null);
   // Si llegamos al perfil desde una feature bloqueada por falta de onboarding
@@ -251,6 +255,17 @@ export function MainApp() {
         setPartidosRefreshNonce((n) => n + 1);
         return true;
       }
+      // Cambiar contraseña (desde editar perfil)
+      if (showChangePassword) {
+        setShowChangePassword(false);
+        return true;
+      }
+      // Editar perfil
+      if (showEditProfile) {
+        setShowEditProfile(false);
+        setShowProfile(true);
+        return true;
+      }
       // Preferences → vuelve a perfil (igual que su onBack)
       if (showPreferences) {
         setShowPreferences(false);
@@ -313,6 +328,11 @@ export function MainApp() {
         setShowTransacciones(false);
         return true;
       }
+      // Monedero
+      if (showMonedero) {
+        setShowMonedero(false);
+        return true;
+      }
       // Tus Pagos
       if (showTusPagos) {
         setShowTusPagos(false);
@@ -348,6 +368,8 @@ export function MainApp() {
     showCourses,
     showDailyLesson,
     crearPartidoFlow.open,
+    showChangePassword,
+    showEditProfile,
     showPreferences,
     showProfile,
     showCommunity,
@@ -359,6 +381,7 @@ export function MainApp() {
     showCompetitiveLeague,
     showSeasonPass,
     showTransacciones,
+    showMonedero,
     showTusPagos,
     selectedPartido,
     clubDetailCourt,
@@ -451,15 +474,27 @@ export function MainApp() {
         />
       );
     }
+    if (showChangePassword) {
+      return (
+        <ChangePasswordScreen
+          userEmail={session?.user?.email}
+          onBack={() => setShowChangePassword(false)}
+        />
+      );
+    }
     if (showEditProfile) {
       return (
         <EditProfileScreen
-          onBack={() => setShowEditProfile(false)}
-          onSaved={() => {
-            setProfileRefreshKey((k) => k + 1);
+          onBack={() => {
             setShowEditProfile(false);
             setShowProfile(true);
           }}
+          onSaved={() => setProfileRefreshKey((k) => k + 1)}
+          onPreferencesPress={() => {
+            setShowEditProfile(false);
+            setShowPreferences(true);
+          }}
+          onChangePasswordPress={() => setShowChangePassword(true)}
         />
       );
     }
@@ -471,6 +506,7 @@ export function MainApp() {
             setShowProfile(false);
             setShowPreferences(false);
             setShowEditProfile(false);
+            setShowChangePassword(false);
             setProfileAutoOpenOnboarding(false);
           }}
           onMenuPress={sidebar.toggle}
@@ -581,11 +617,18 @@ export function MainApp() {
         <TransaccionesScreen onBack={() => setShowTransacciones(false)} />
       );
     }
+    if (showMonedero) {
+      return <MonederoScreen onBack={() => setShowMonedero(false)} />;
+    }
     if (showTusPagos) {
       return (
         <TusPagosScreen
           onBack={() => setShowTusPagos(false)}
           onTransaccionesPress={() => setShowTransacciones(true)}
+          onMonederoPress={() => {
+            setShowTusPagos(false);
+            setShowMonedero(true);
+          }}
         />
       );
     }
@@ -692,8 +735,11 @@ export function MainApp() {
   const showMainTabs =
     bookingSuccessData == null &&
     !showTusPagos &&
+    !showMonedero &&
     !showTransacciones &&
     !showProfile &&
+    !showEditProfile &&
+    !showChangePassword &&
     !showPreferences &&
     !showPartidoDetail &&
     !showClubDetail &&
@@ -711,8 +757,11 @@ export function MainApp() {
   const customHeader =
     bookingSuccessData != null ||
     showTusPagos ||
+    showMonedero ||
     showTransacciones ||
     showProfile ||
+    showEditProfile ||
+    showChangePassword ||
     showPreferences ||
     showPartidoDetail ||
     showCompetitiveLeague ||
@@ -789,7 +838,7 @@ export function MainApp() {
       ? '#000000'
       : showMessages || !!affinityDmPeer
         ? '#0A0A0A'
-        : showPreferences
+        : showEditProfile || showChangePassword || showPreferences || showMonedero
           ? '#0F0F0F'
         : showDailyLesson
           ? '#0F0F0F'
@@ -812,6 +861,8 @@ export function MainApp() {
   const handleTabChange = (tab: MainTabId) => {
     setActiveTab(tab);
     setShowProfile(false);
+    setShowEditProfile(false);
+    setShowChangePassword(false);
     setShowPreferences(false);
     setShowMessages(false);
     setMessagesPeer(null);
@@ -824,6 +875,7 @@ export function MainApp() {
       <SidebarProvider
         close={sidebar.close}
         onNavigateToTusPagos={() => setShowTusPagos(true)}
+        onNavigateToMonedero={() => setShowMonedero(true)}
         onProfilePress={() => setShowProfile(true)}
       >
         <View style={styles.mainColumn}>
@@ -833,12 +885,15 @@ export function MainApp() {
             hideHeader={
               bookingSuccessData != null ||
                 showProfile ||
+              showEditProfile ||
+              showChangePassword ||
               showPreferences ||
               showClubDetail ||
               showPartidoDetail ||
               showCompetitiveLeague ||
               showSeasonPass ||
               showTusPagos ||
+              showMonedero ||
               showTransacciones ||
               crearPartidoFlow.open ||
               showDailyLesson ||
@@ -864,6 +919,7 @@ export function MainApp() {
             !showClubDetail &&
             !showPartidoDetail &&
             !showTusPagos &&
+            !showMonedero &&
             !showTransacciones &&
             !showPreferences &&
             !crearPartidoFlow.open &&
