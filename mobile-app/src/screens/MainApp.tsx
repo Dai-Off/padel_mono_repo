@@ -534,7 +534,10 @@ export function MainApp() {
     }
     if (showCommunity) {
       return (
-        <CommunityScreen onBack={() => setShowCommunity(false)} />
+        <CommunityScreen
+          onBack={() => setShowCommunity(false)}
+          onMessagesPress={() => { setShowCommunity(false); setShowMessages(true); }}
+        />
       );
     }
     if (showMessages) {
@@ -868,6 +871,7 @@ export function MainApp() {
     setMessagesPeer(null);
     setShowCompetitiveLeague(false);
     setShowSeasonPass(false);
+    setShowCommunity(false);
   };
 
   return (
@@ -901,6 +905,7 @@ export function MainApp() {
               selectedEducationalCourse != null ||
               selectedPublicCourse != null ||
               showMessages ||
+              showCommunity ||
               !!affinityDmPeer ||
               showPublicProfile ||
               affinityPublicProfileId !== null ||
@@ -909,7 +914,7 @@ export function MainApp() {
             }
             layoutBackgroundColor={layoutBackgroundColor}
             navbarActions={{
-              onMessagesPress: () => setShowMessages(true),
+              onMessagesPress: () => { setShowCommunity(false); setShowMessages(true); },
               onGroupsPress: () => setShowCommunity(true),
             }}
           >
