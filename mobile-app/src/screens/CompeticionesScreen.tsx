@@ -45,6 +45,9 @@ type CompeticionesListRow =
 
 type CompeticionesScreenProps = {
   onBack?: () => void;
+  /** Abre el detalle de un torneo (p. ej. tras aceptar invitación). */
+  initialOpenTournamentId?: string | null;
+  onInitialTournamentOpened?: () => void;
   /** Abre el perfil con el cuestionario auto-abierto (banner soft block). */
   onOpenProfileForOnboarding?: () => void;
 };
@@ -73,6 +76,8 @@ function FilterChipButton({
 
 export function CompeticionesScreen({
   onBack,
+  initialOpenTournamentId,
+  onInitialTournamentOpened,
   onOpenProfileForOnboarding,
 }: CompeticionesScreenProps) {
   const PAGE_SIZE = 20;
@@ -100,6 +105,14 @@ export function CompeticionesScreen({
   const [error, setError] = useState<string | null>(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [detailOpen, setDetailOpen] = useState<{ id: string } | null>(null);
+
+  useEffect(() => {
+    if (initialOpenTournamentId) {
+      setActiveTab('inscritas');
+      setDetailOpen({ id: initialOpenTournamentId });
+      onInitialTournamentOpened?.();
+    }
+  }, [initialOpenTournamentId, onInitialTournamentOpened]);
 
   const load = useCallback(async (opts?: { append?: boolean; offset?: number }) => {
     const append = Boolean(opts?.append);
@@ -247,7 +260,7 @@ export function CompeticionesScreen({
           matchesSearch(row, searchQuery) &&
           matchesFormatFilter(row, formatFilter) &&
           matchesLevelFilter(row, levelFilter) &&
-          (!joinableOnly || canJoinTournament(row)),
+          (activeTab !== 'disponibles' || !joinableOnly || canJoinTournament(row)),
       )
       .sort((a, b) => {
         const da = new Date(String(a.start_at ?? '')).getTime();
@@ -377,7 +390,9 @@ export function CompeticionesScreen({
           />
           <FilterChipButton label={formatChipLabel} onPress={() => setFilterModalVisible(true)} />
           <FilterChipButton label={levelChipLabel} onPress={() => setFilterModalVisible(true)} />
-          <FilterChipButton label={joinableChipLabel} onPress={() => setJoinableOnly((v) => !v)} />
+          {activeTab === 'disponibles' ? (
+            <FilterChipButton label={joinableChipLabel} onPress={() => setJoinableOnly((v) => !v)} />
+          ) : null}
         </ScrollView>
 
         <View style={styles.segmented}>
@@ -646,29 +661,33 @@ export function CompeticionesScreen({
                 ),
               )}
             </ScrollView>
-            <Text style={styles.modalSectionLabel}>Disponibilidad</Text>
-            <Pressable
-              style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-              onPress={() => setJoinableOnly(true)}
-            >
-              <Text style={[styles.modalRowText, joinableOnly && styles.modalRowTextActive]}>
-                Solo torneos a los que me puedo unir
-              </Text>
-              {joinableOnly ? (
-                <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-              ) : null}
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-              onPress={() => setJoinableOnly(false)}
-            >
-              <Text style={[styles.modalRowText, !joinableOnly && styles.modalRowTextActive]}>
-                Mostrar todos (incluye no cumplo requisitos)
-              </Text>
-              {!joinableOnly ? (
-                <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-              ) : null}
-            </Pressable>
+            {activeTab === 'disponibles' ? (
+              <>
+                <Text style={styles.modalSectionLabel}>Disponibilidad</Text>
+                <Pressable
+                  style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
+                  onPress={() => setJoinableOnly(true)}
+                >
+                  <Text style={[styles.modalRowText, joinableOnly && styles.modalRowTextActive]}>
+                    Solo torneos a los que me puedo unir
+                  </Text>
+                  {joinableOnly ? (
+                    <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
+                  ) : null}
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
+                  onPress={() => setJoinableOnly(false)}
+                >
+                  <Text style={[styles.modalRowText, !joinableOnly && styles.modalRowTextActive]}>
+                    Mostrar todos (incluye no cumplo requisitos)
+                  </Text>
+                  {!joinableOnly ? (
+                    <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
+                  ) : null}
+                </Pressable>
+              </>
+            ) : null}
             <Pressable
               style={styles.modalClose}
               onPress={() => setFilterModalVisible(false)}

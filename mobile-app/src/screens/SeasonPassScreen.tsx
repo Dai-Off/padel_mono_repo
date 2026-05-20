@@ -229,13 +229,11 @@ function LevelTrackColumn({
   isUnlocked,
   isCurrent,
   hasElite,
-  onPress,
 }: {
   level: number;
   isUnlocked: boolean;
   isCurrent: boolean;
   hasElite: boolean;
-  onPress: () => void;
 }) {
   const scaleNode = useRef(new Animated.Value(1)).current;
   const ringScale = useRef(new Animated.Value(1)).current;
@@ -289,7 +287,7 @@ function LevelTrackColumn({
   const w = 74;
 
   return (
-    <Pressable onPress={onPress} style={{ width: w, alignItems: 'center' }}>
+    <View style={{ width: w, alignItems: 'center' }}>
       <View style={{ height: thumbSize + 20, justifyContent: 'center' }}>
         <View style={{ opacity: hasElite && isUnlocked ? 1 : hasElite ? 0.28 : 0.2 }}>
           <LinearGradient
@@ -396,7 +394,7 @@ function LevelTrackColumn({
           </LinearGradient>
         </View>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -878,7 +876,6 @@ export function SeasonPassScreen({ onBack }: Props) {
                     isUnlocked={level >= lvl}
                     isCurrent={level === lvl}
                     hasElite={eliteActive}
-                    onPress={() => {}}
                   />
                 ))}
               </ScrollView>

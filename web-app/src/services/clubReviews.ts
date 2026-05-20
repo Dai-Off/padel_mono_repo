@@ -12,6 +12,8 @@ export type ClubReviewListItem = {
     comment: string | null;
     created_at: string;
     updated_at: string;
+    club_response: string | null;
+    club_response_at: string | null;
     player: { id: string; first_name: string; last_name: string };
 };
 
@@ -43,4 +45,14 @@ export async function patchPlayerReview(
 
 export async function deletePlayerReview(id: string): Promise<{ ok: true }> {
     return apiFetchWithAuth(`/club-reviews/${id}`, { method: 'DELETE' });
+}
+
+export async function patchClubReviewResponse(
+    id: string,
+    club_response: string,
+): Promise<{ ok: true; review: ClubReviewListItem }> {
+    return apiFetchWithAuth(`/club-reviews/${id}/response`, {
+        method: 'PATCH',
+        body: JSON.stringify({ club_response }),
+    });
 }
