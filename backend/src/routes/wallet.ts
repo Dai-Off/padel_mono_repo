@@ -75,6 +75,57 @@ router.get('/transactions', async (req: Request, res: Response) => {
   }
 });
 
+// ─── GET /wallet/player-balances?player_id= ───────────────────────────────────
+// Saldos del jugador agrupados por club (para app móvil / vista jugador).
+router.get('/player-balances', async (req: Request, res: Response) => {
+  const { player_id } = req.query as Record<string, string>;
+  if (!player_id) {
+    return res.status(400).json({ ok: false, error: 'player_id es requerido' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+
+    const { data, error } = await supabase
+      .from('wallet_transactions')
+      .select('club_id, amount_cents, clubs ( id, name )')
+      .eq('player_id', player_id);
+
+    if (error) {
+      if (error.code === '42P01' || error.message?.includes('does not exist')) {
+        return res.json({ ok: true, balances: [], total_balance_cents: 0 });
+      }
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+
+    const map = new Map<
+      string,
+      { club_id: string; club_name: string | null; balance_cents: number }
+    >();
+    for (const row of data ?? []) {
+      const cid = row.club_id as string;
+      const club = row.clubs as { id?: string; name?: string | null } | null;
+      if (!map.has(cid)) {
+        map.set(cid, {
+          club_id: cid,
+          club_name: club?.name ?? null,
+          balance_cents: 0,
+        });
+      }
+      map.get(cid)!.balance_cents += Number(row.amount_cents ?? 0);
+    }
+
+    const balances = Array.from(map.values())
+      .filter((b) => b.balance_cents !== 0)
+      .sort((a, b) => b.balance_cents - a.balance_cents);
+
+    const total_balance_cents = balances.reduce((acc, b) => acc + b.balance_cents, 0);
+
+    return res.json({ ok: true, balances, total_balance_cents });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // ─── GET /wallet/club-balances?club_id= ───────────────────────────────────────
 // Todos los jugadores con saldo distinto de cero en el club (vista admin).
 router.get('/club-balances', async (req: Request, res: Response) => {

@@ -5,7 +5,7 @@
     "scheme": "padelapp",
     "version": "1.0.0",
     "orientation": "default",
-    "icon": "../wechat/images/wematch-logo.png",
+    "icon": "./assets/images/wematch-logo.png",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
@@ -24,9 +24,19 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "WeMatch usa tu ubicación para buscar partidos de liga competitiva en un radio a tu alrededor."
+          "locationWhenInUsePermission": "WeMatch usa tu ubicación para buscar partidos, el clima y elegir dónde juegas en tu perfil."
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "WeMatch necesita acceso a tus fotos para la foto de perfil y la portada.",
+          "cameraPermission": "WeMatch necesita la cámara para hacer tu foto de perfil o portada.",
+          "microphonePermission": false
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-localization"
     ],
     "ios": {
       "supportsTablet": true,
@@ -40,8 +50,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "../wechat/images/wematch-logo.png",
-        "backgroundColor": "#0F0F0F"
+        "foregroundImage": "./assets/images/wematch-logo.png",
+        "backgroundColor": "#000000"
       },
       "softwareKeyboardLayoutMode": "pan",
       "package": "com.anonymous.padelapp",

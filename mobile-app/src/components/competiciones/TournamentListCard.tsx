@@ -28,9 +28,20 @@ type TournamentListCardProps = {
   row: PublicTournamentRow;
   onPress?: () => void;
   userElo?: number | null;
+  /**
+   * Si true, dibuja un overlay de candado encima de la card para indicar que
+   * la inscripción está bloqueada (típicamente: torneo competitivo + usuario
+   * sin onboarding). La card sigue tappable para que pueda ver el detalle.
+   */
+  lockedByOnboarding?: boolean;
 };
 
-export function TournamentListCard({ row, onPress, userElo }: TournamentListCardProps) {
+export function TournamentListCard({
+  row,
+  onPress,
+  userElo,
+  lockedByOnboarding = false,
+}: TournamentListCardProps) {
   const title = tournamentTitle(row);
   const uri = placeholderImageForId(row.id);
   const formatKey = inferTournamentFormatKey(row.description);
@@ -133,6 +144,18 @@ export function TournamentListCard({ row, onPress, userElo }: TournamentListCard
             </View>
           </View>
         </View>
+
+        {/* Overlay candado: solo afecta a torneos competitivos cuando el
+            usuario aún no ha completado el onboarding. El padre decide a qué
+            cards aplicar esto. La card sigue tappable. */}
+        {lockedByOnboarding && (
+          <View pointerEvents="none" style={styles.lockOverlay}>
+            <View style={styles.lockBadge}>
+              <Ionicons name="lock-closed" size={14} color="#FCD34D" />
+              <Text style={styles.lockBadgeText}>Requiere nivel</Text>
+            </View>
+          </View>
+        )}
       </LinearGradient>
     </Pressable>
   );
@@ -278,5 +301,33 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#F87171',
     textTransform: 'uppercase',
+  },
+  // Overlay translúcido encima de cards de torneos competitivos cuando el
+  // usuario no tiene onboarding. Solo señalización visual: el tap sigue
+  // funcionando para abrir el detalle (donde verá el banner sticky).
+  lockOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderRadius: 14,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
+    padding: 10,
+  },
+  lockBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15,15,15,0.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(252,211,77,0.45)',
+  },
+  lockBadgeText: {
+    color: '#FCD34D',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
 });

@@ -115,6 +115,61 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
+const PLAYER_IN_BATCH = 150;
+
+type PlayerListQueryOpts = {
+  created_from: string | null;
+  created_to: string | null;
+  tier: Tier | '';
+  elo_min: number | null;
+  elo_max: number | null;
+  q: string;
+  orderBy: 'created_at_desc' | 'last_name_asc';
+  limit?: number;
+};
+
+async function fetchPlayersByIds(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  ids: string[],
+  opts: PlayerListQueryOpts,
+): Promise<Array<Record<string, unknown>>> {
+  const rows: Array<Record<string, unknown>> = [];
+  for (const batch of chunk(ids, PLAYER_IN_BATCH)) {
+    let query = supabase.from('players').select(PLAYER_LIST_FIELDS).in('id', batch);
+    if (opts.created_from) query = query.gte('created_at', opts.created_from);
+    if (opts.created_to) query = query.lte('created_at', opts.created_to);
+    if (opts.tier && (opts.tier === 'vip' || opts.tier === 'premium' || opts.tier === 'standard' || opts.tier === 'basic')) {
+      const r = tierToEloRange(opts.tier);
+      query = query.gte('elo_rating', r.elo_min);
+      if (r.elo_max != null) query = query.lte('elo_rating', r.elo_max);
+    }
+    if (opts.elo_min !== null) query = query.gte('elo_rating', opts.elo_min);
+    if (opts.elo_max !== null) query = query.lte('elo_rating', opts.elo_max);
+    if (opts.q) {
+      const esc = opts.q.replace(/%/g, '\\%').replace(/_/g, '\\_');
+      query = query.or(`first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,phone.ilike.%${esc}%`);
+    }
+    const { data, error } = await query;
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as Array<Record<string, unknown>>));
+  }
+  if (opts.orderBy === 'created_at_desc') {
+    rows.sort((a, b) => {
+      const ta = new Date(String(a.created_at ?? 0)).getTime();
+      const tb = new Date(String(b.created_at ?? 0)).getTime();
+      return tb - ta;
+    });
+  } else {
+    rows.sort((a, b) => {
+      const la = `${a.last_name ?? ''} ${a.first_name ?? ''}`.toLowerCase();
+      const lb = `${b.last_name ?? ''} ${b.first_name ?? ''}`.toLowerCase();
+      return la.localeCompare(lb);
+    });
+  }
+  if (opts.limit != null && opts.limit > 0) return rows.slice(0, opts.limit);
+  return rows;
+}
+
 /** Devuelve los player_ids con al menos una reserva en curso o futura (no cancelada) en el club. */
 async function getPlayersWithCurrentBooking(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
@@ -301,33 +356,16 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
     const ids = await getClubClientPlayerIds(supabase, club_id);
     if (ids.length === 0) return res.json({ ok: true, players: [] });
 
-    let query = supabase
-      .from('players')
-      .select(PLAYER_LIST_FIELDS)
-      .in('id', ids)
-      .order('created_at', { ascending: false });
-
-    if (created_from) query = query.gte('created_at', created_from);
-    if (created_to) query = query.lte('created_at', created_to);
-
-    if (tier && (tier === 'vip' || tier === 'premium' || tier === 'standard' || tier === 'basic')) {
-      const r = tierToEloRange(tier);
-      query = query.gte('elo_rating', r.elo_min);
-      if (r.elo_max != null) query = query.lte('elo_rating', r.elo_max);
-    }
-    if (elo_min !== null) query = query.gte('elo_rating', elo_min);
-    if (elo_max !== null) query = query.lte('elo_rating', elo_max);
-
-    if (q) {
-      const esc = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
-      query = query.or(`first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,phone.ilike.%${esc}%`);
-      query = query.limit(60);
-    }
-
-    const { data, error } = await query;
-    if (error) return res.status(500).json({ ok: false, error: error.message });
-
-    let players = (data ?? []) as Array<Record<string, unknown>>;
+    let players = await fetchPlayersByIds(supabase, ids, {
+      created_from,
+      created_to,
+      tier,
+      elo_min,
+      elo_max,
+      q,
+      orderBy: 'created_at_desc',
+      ...(q ? { limit: 60 } : {}),
+    });
     const playerIds = players.map((p) => String(p.id));
 
     if ((has_wallet !== null || has_school !== null || bookings_min !== null || bookings_max !== null) && playerIds.length > 0) {
@@ -575,24 +613,15 @@ router.get('/export', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
       return res.send(bom + header);
     }
 
-    let query = supabase.from('players').select(PLAYER_LIST_FIELDS).in('id', ids).order('last_name', { ascending: true });
-    if (created_from) query = query.gte('created_at', created_from);
-    if (created_to) query = query.lte('created_at', created_to);
-    if (tier && (tier === 'vip' || tier === 'premium' || tier === 'standard' || tier === 'basic')) {
-      const r = tierToEloRange(tier);
-      query = query.gte('elo_rating', r.elo_min);
-      if (r.elo_max != null) query = query.lte('elo_rating', r.elo_max);
-    }
-    if (elo_min !== null) query = query.gte('elo_rating', elo_min);
-    if (elo_max !== null) query = query.lte('elo_rating', elo_max);
-    if (q) {
-      const esc = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
-      query = query.or(`first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,phone.ilike.%${esc}%`);
-    }
-    const { data, error } = await query;
-    if (error) return res.status(500).json({ ok: false, error: error.message });
-
-    let rows = (data ?? []) as Array<Record<string, unknown>>;
+    let rows = await fetchPlayersByIds(supabase, ids, {
+      created_from,
+      created_to,
+      tier,
+      elo_min,
+      elo_max,
+      q,
+      orderBy: 'last_name_asc',
+    });
     const playerIds = rows.map((p) => String(p.id));
 
     // Apply same advanced filters as list (wallet/school/bookings)

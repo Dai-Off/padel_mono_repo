@@ -6,6 +6,7 @@ import Svg, { Circle, Path, Polyline } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile, updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { fetchClubAvailabilityForCreate } from '../api/partidoClubs';
 import { theme } from '../theme';
 
@@ -208,6 +209,9 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
   const [base, setBase] = useState<PlayerPreferences>(DEFAULT_PREFERENCES);
   const [prefs, setPrefs] = useState<PlayerPreferences>(DEFAULT_PREFERENCES);
   const [clubCandidates, setClubCandidates] = useState(FALLBACK_FAVORITE_CLUB_CANDIDATES);
+  // Invalidamos la cache global del profile tras guardar — el resto de
+  // pantallas que leen `useHomeData().profile` verán los cambios.
+  const { refreshProfile: refreshGlobalProfile } = useHomeData();
 
   useEffect(() => {
     if (!token) {
@@ -302,6 +306,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
     }
     setBase(res.player.preferences);
     setPrefs(res.player.preferences);
+    void refreshGlobalProfile({ force: true });
     Alert.alert('Preferencias', 'Cambios guardados.');
   };
 

@@ -506,8 +506,12 @@ router.post('/movements', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
  *               player_id: { type: string, format: uuid, description: Jugador/cliente que realizó la compra }
  *               payment_method:
  *                 type: string
- *                 enum: [cash, card]
- *                 description: Método de cobro de la compra extra
+ *                 enum: [cash, card, wallet]
+ *                 description: Método de cobro (wallet = saldo bono/monedero; cash/card pueden combinarse con wallet_amount_cents)
+ *               wallet_amount_cents:
+ *                 type: integer
+ *                 minimum: 0
+ *                 description: Importe a descontar del monedero (pago parcial o total)
  *               lines:
  *                 type: array
  *                 minItems: 1
@@ -555,18 +559,19 @@ router.post('/movements', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
  *       500: { description: Error interno }
  */
 router.post('/sales', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
-  const { club_id, booking_id, player_id, payment_method, lines } = req.body ?? {};
+  const { club_id, booking_id, player_id, payment_method, wallet_amount_cents, lines } = req.body ?? {};
   const clubIdStr = String(club_id ?? '').trim();
   const bookingIdStr = String(booking_id ?? '').trim();
   const playerIdStr = String(player_id ?? '').trim();
   const methodStr = String(payment_method ?? '').trim();
+  const requestedWalletCents = Math.max(0, Math.trunc(Number(wallet_amount_cents ?? 0)));
   const rawLines = Array.isArray(lines) ? lines as InventorySaleLineInput[] : [];
 
   if (!clubIdStr || !bookingIdStr || !playerIdStr) {
     return res.status(400).json({ ok: false, error: 'club_id, booking_id y player_id son obligatorios' });
   }
-  if (methodStr !== 'cash' && methodStr !== 'card') {
-    return res.status(400).json({ ok: false, error: 'payment_method debe ser cash o card' });
+  if (methodStr !== 'cash' && methodStr !== 'card' && methodStr !== 'wallet') {
+    return res.status(400).json({ ok: false, error: 'payment_method debe ser cash, card o wallet' });
   }
   if (!canAccessClub(req, clubIdStr, 'gestion')) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
@@ -688,27 +693,79 @@ router.post('/sales', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
     let customTotalCents = 0;
     let currency = String((booking as any).currency ?? 'EUR') || 'EUR';
 
-    const movementInserts = [...quantitiesByItem.entries()].map(([itemId, quantity]) => {
+    const inventoryLineTotals: Array<{ itemId: string; lineTotal: number; item: any }> = [];
+    for (const [itemId, quantity] of quantitiesByItem) {
       const item = itemById.get(itemId) as any;
       const unitPrice = Math.max(0, Math.trunc(Number(item.unit_price_cents ?? 0)));
       const lineTotal = unitPrice * quantity;
       totalCents += lineTotal;
       currency = String(item.currency ?? currency) || currency;
-      return {
-        club_id: clubIdStr,
-        item_id: itemId,
-        movement_type: 'out',
-        quantity,
-        reason: `SALE|${saleId}|${methodStr}|${lineTotal}|${String(item.name ?? '').replace(/\|/g, ' ')}|booking:${bookingIdStr}|player:${playerIdStr}`,
-        movement_at: movementAt,
-      };
-    });
+      inventoryLineTotals.push({ itemId, lineTotal, item });
+    }
 
     for (const line of customSaleLines) {
       const lineTotal = line.unit_price_cents * line.quantity;
       totalCents += lineTotal;
       customTotalCents += lineTotal;
     }
+
+    let walletDebitCents = 0;
+    let cashCardMethod = methodStr;
+    if (methodStr === 'wallet' || requestedWalletCents > 0) {
+      const { data: walletRows, error: walletSumErr } = await supabase
+        .from('wallet_transactions')
+        .select('amount_cents')
+        .eq('player_id', playerIdStr)
+        .eq('club_id', clubIdStr);
+      if (walletSumErr) {
+        if (walletSumErr.code === '42P01' || walletSumErr.message?.includes('does not exist')) {
+          return res.status(400).json({ ok: false, error: 'El jugador no tiene saldo bono disponible' });
+        }
+        return res.status(500).json({ ok: false, error: walletSumErr.message });
+      }
+      const balanceCents = (walletRows ?? []).reduce((acc, row) => acc + Number((row as { amount_cents?: number }).amount_cents ?? 0), 0);
+      if (balanceCents <= 0) {
+        return res.status(400).json({ ok: false, error: 'El jugador no tiene saldo bono disponible' });
+      }
+      const targetWallet =
+        methodStr === 'wallet' && requestedWalletCents <= 0
+          ? totalCents
+          : requestedWalletCents > 0
+            ? requestedWalletCents
+            : 0;
+      walletDebitCents = Math.min(targetWallet, totalCents, balanceCents);
+      if (walletDebitCents <= 0) {
+        return res.status(400).json({ ok: false, error: 'Saldo bono insuficiente para esta compra' });
+      }
+      const remainderCents = totalCents - walletDebitCents;
+      if (remainderCents > 0) {
+        if (methodStr !== 'cash' && methodStr !== 'card') {
+          return res.status(400).json({
+            ok: false,
+            error: 'Saldo bono insuficiente. Elige efectivo o tarjeta para el resto.',
+          });
+        }
+        cashCardMethod = methodStr;
+      } else {
+        cashCardMethod = 'wallet';
+      }
+    }
+
+    const saleMethodLabel =
+      walletDebitCents > 0 && walletDebitCents < totalCents
+        ? `${cashCardMethod}+wallet`
+        : walletDebitCents >= totalCents && totalCents > 0
+          ? 'wallet'
+          : cashCardMethod;
+
+    const movementInserts = inventoryLineTotals.map(({ itemId, lineTotal, item }) => ({
+      club_id: clubIdStr,
+      item_id: itemId,
+      movement_type: 'out' as const,
+      quantity: quantitiesByItem.get(itemId) ?? 0,
+      reason: `SALE|${saleId}|${saleMethodLabel}|${lineTotal}|${String(item.name ?? '').replace(/\|/g, ' ')}|booking:${bookingIdStr}|player:${playerIdStr}|wallet:${walletDebitCents}`,
+      movement_at: movementAt,
+    }));
 
     let inserted: unknown[] = [];
     if (movementInserts.length > 0) {
@@ -724,16 +781,30 @@ router.post('/sales', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
       inserted = data ?? [];
     }
 
-    if (customTotalCents > 0) {
+    const customCashCardCents = Math.max(0, customTotalCents - Math.min(walletDebitCents, customTotalCents));
+    if (customCashCardCents > 0 && cashCardMethod !== 'wallet') {
       const { error: txErr } = await supabase.from('payment_transactions').insert({
         booking_id: bookingIdStr,
         payer_player_id: playerIdStr,
-        amount_cents: customTotalCents,
+        amount_cents: customCashCardCents,
         currency,
-        stripe_payment_intent_id: `STORE_SALE_${methodStr}_${saleId}`,
+        stripe_payment_intent_id: `STORE_SALE_${cashCardMethod}_${saleId}`,
         status: 'succeeded',
       });
       if (txErr) return res.status(500).json({ ok: false, error: txErr.message });
+    }
+
+    if (walletDebitCents > 0) {
+      const { error: walletErr } = await supabase.from('wallet_transactions').insert({
+        player_id: playerIdStr,
+        club_id: clubIdStr,
+        amount_cents: -walletDebitCents,
+        concept: `Compra tienda #${saleId.slice(-6)}`,
+        type: 'debit',
+        booking_id: bookingIdStr,
+        notes: `store_sale_id=${saleId}`,
+      });
+      if (walletErr) return res.status(500).json({ ok: false, error: walletErr.message });
     }
 
     return res.status(201).json({
@@ -742,7 +813,8 @@ router.post('/sales', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
         id: saleId,
         booking_id: bookingIdStr,
         player_id: playerIdStr,
-        payment_method: methodStr,
+        payment_method: saleMethodLabel,
+        wallet_amount_cents: walletDebitCents,
         total_cents: totalCents,
         currency,
         movements: inserted ?? [],

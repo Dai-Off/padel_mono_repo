@@ -71,6 +71,11 @@ export async function closeActiveMatchmakingSeason(
       .from('players')
       .select('id, liga, lps, mm_peak_liga')
       .eq('league_season_id', activeId)
+      // Solo jugadores con liga real entran en el snapshot histórico. Los que
+      // no han completado el cuestionario de nivelación tienen liga = NULL
+      // (migración 061) y `player_league_history.liga` es NOT NULL — un insert
+      // con liga null reventaría el reset de temporada.
+      .not('liga', 'is', null)
       .order('id')
       .range(from, from + pageSize - 1);
     if (e2) throw new Error(e2.message);

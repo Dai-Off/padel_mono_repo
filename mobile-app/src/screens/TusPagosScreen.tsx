@@ -29,6 +29,7 @@ import { theme } from '../theme';
 type TusPagosScreenProps = {
   onBack: () => void;
   onTransaccionesPress?: () => void;
+  onMonederoPress?: () => void;
 };
 
 type PayOptionProps = {
@@ -50,7 +51,7 @@ function PayOption({ icon, title, onPress }: PayOptionProps) {
   );
 }
 
-export function TusPagosScreen({ onBack, onTransaccionesPress }: TusPagosScreenProps) {
+export function TusPagosScreen({ onBack, onTransaccionesPress, onMonederoPress }: TusPagosScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -176,6 +177,8 @@ export function TusPagosScreen({ onBack, onTransaccionesPress }: TusPagosScreenP
             <Text style={styles.optionTitle}>Métodos de pago</Text>
             <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
           </Pressable>
+          <View style={styles.optionDivider} />
+          <PayOption icon="cash-outline" title="Monedero del club" onPress={onMonederoPress} />
           <View style={styles.optionDivider} />
           <PayOption
             icon="document-text-outline"

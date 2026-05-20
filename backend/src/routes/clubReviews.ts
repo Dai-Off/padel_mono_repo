@@ -22,7 +22,27 @@ type ReviewRow = {
   player_id: string;
   rating: number;
   comment: string | null;
+  club_response: string | null;
+  club_response_at: string | null;
 };
+
+function mapReviewOut(
+  r: ReviewRow,
+  player?: { first_name: string; last_name: string },
+) {
+  return {
+    id: r.id,
+    rating: r.rating,
+    comment: r.comment,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    club_response: r.club_response ?? null,
+    club_response_at: r.club_response_at ?? null,
+    player: player
+      ? { id: r.player_id, first_name: player.first_name, last_name: player.last_name }
+      : { id: r.player_id, first_name: '', last_name: '' },
+  };
+}
 
 function buildSummary(rows: { rating: number }[]) {
   const count = rows.length;
@@ -87,6 +107,59 @@ async function resolvePlayerIdFromToken(token: string): Promise<string | null> {
  *       401: { description: Sin token }
  *       403: { description: Sin acceso al club }
  */
+/**
+ * @openapi
+ * /club-reviews/public:
+ *   get:
+ *     tags: [Club reviews]
+ *     summary: Listar reseñas públicas de un club (jugadores)
+ *     description: Reseñas con respuesta del club visible. No requiere permisos de staff.
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200: { description: OK }
+ */
+router.get('/public', async (req: Request, res: Response) => {
+  const club_id = String(req.query.club_id ?? '').trim();
+  if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: reviews, error } = await supabase
+      .from('club_reviews')
+      .select('id, created_at, updated_at, club_id, player_id, rating, comment, club_response, club_response_at')
+      .eq('club_id', club_id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    const rows = (reviews ?? []) as ReviewRow[];
+    const summary = buildSummary(rows);
+
+    const playerIds = [...new Set(rows.map((r) => r.player_id))];
+    let playersMap = new Map<string, { first_name: string; last_name: string }>();
+    if (playerIds.length > 0) {
+      const { data: players, error: pe } = await supabase
+        .from('players')
+        .select('id, first_name, last_name')
+        .in('id', playerIds);
+      if (pe) return res.status(500).json({ ok: false, error: pe.message });
+      for (const p of players ?? []) {
+        playersMap.set(p.id, { first_name: p.first_name, last_name: p.last_name });
+      }
+    }
+
+    const out = rows.map((r) => mapReviewOut(r, playersMap.get(r.player_id)));
+    return res.json({ ok: true, summary, reviews: out });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const club_id = String(req.query.club_id ?? '').trim();
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
@@ -98,7 +171,7 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
     const supabase = getSupabaseServiceRoleClient();
     const { data: reviews, error } = await supabase
       .from('club_reviews')
-      .select('id, created_at, updated_at, club_id, player_id, rating, comment')
+      .select('id, created_at, updated_at, club_id, player_id, rating, comment, club_response, club_response_at')
       .eq('club_id', club_id)
       .order('created_at', { ascending: false });
 
@@ -120,19 +193,7 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
       }
     }
 
-    const out = rows.map((r) => {
-      const p = playersMap.get(r.player_id);
-      return {
-        id: r.id,
-        rating: r.rating,
-        comment: r.comment,
-        created_at: r.created_at,
-        updated_at: r.updated_at,
-        player: p
-          ? { id: r.player_id, first_name: p.first_name, last_name: p.last_name }
-          : { id: r.player_id, first_name: '', last_name: '' },
-      };
-    });
+    const out = rows.map((r) => mapReviewOut(r, playersMap.get(r.player_id)));
 
     return res.json({ ok: true, summary, reviews: out });
   } catch (err) {
@@ -242,6 +303,79 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, review: saved });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /club-reviews/{id}/response:
+ *   patch:
+ *     tags: [Club reviews]
+ *     summary: Responder a una reseña (staff del club)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [club_response]
+ *             properties:
+ *               club_response: { type: string }
+ *           example:
+ *             club_response: "Gracias por tu valoración. Nos alegra que hayas disfrutado."
+ *     responses:
+ *       200: { description: Respuesta guardada }
+ *       400: { description: Datos inválidos }
+ *       403: { description: Sin acceso al club }
+ *       404: { description: Reseña no encontrada }
+ */
+router.patch('/:id/response', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  const id = String(req.params.id ?? '').trim();
+  const clubResponseRaw = typeof req.body?.club_response === 'string' ? req.body.club_response.trim() : '';
+  if (!id) return res.status(400).json({ ok: false, error: 'id inválido' });
+  if (!clubResponseRaw) {
+    return res.status(400).json({ ok: false, error: 'club_response es obligatorio (texto no vacío)' });
+  }
+  if (clubResponseRaw.length > 4000) {
+    return res.status(400).json({ ok: false, error: 'club_response admite como máximo 4000 caracteres' });
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: existing, error: fe } = await supabase
+      .from('club_reviews')
+      .select('id, club_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (fe) return res.status(500).json({ ok: false, error: fe.message });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Reseña no encontrada' });
+    if (!canAccessClub(req, String((existing as { club_id: string }).club_id), 'gestion')) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const now = new Date().toISOString();
+    const { data: updated, error } = await supabase
+      .from('club_reviews')
+      .update({
+        club_response: clubResponseRaw,
+        club_response_at: now,
+        updated_at: now,
+      })
+      .eq('id', id)
+      .select(
+        'id, created_at, updated_at, club_id, player_id, rating, comment, club_response, club_response_at',
+      )
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, review: updated });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

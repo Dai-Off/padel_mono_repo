@@ -79,7 +79,9 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     const [customProductName, setCustomProductName] = useState('');
     const [customProductPrice, setCustomProductPrice] = useState('');
     const [cartLines, setCartLines] = useState<CartLine[]>([]);
-    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
+    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'wallet'>('cash');
+    const [useWallet, setUseWallet] = useState(false);
+    const [walletBalanceCents, setWalletBalanceCents] = useState(0);
     const [playerSearch, setPlayerSearch] = useState('');
     const [playerResults, setPlayerResults] = useState<Player[]>([]);
     const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
@@ -178,6 +180,29 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
         return () => { cancelled = true; };
     }, [clubId, selectedPlayer]);
 
+    useEffect(() => {
+        if (!clubId || !selectedPlayer) {
+            setWalletBalanceCents(0);
+            setUseWallet(false);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            try {
+                const q = new URLSearchParams({ player_id: selectedPlayer.id, club_id: clubId });
+                const res = await apiFetchWithAuth<{ ok: true; balance_cents: number }>(`/wallet/balance?${q}`);
+                if (!cancelled) {
+                    const balance = Math.max(0, res.balance_cents ?? 0);
+                    setWalletBalanceCents(balance);
+                    if (balance <= 0) setUseWallet(false);
+                }
+            } catch {
+                if (!cancelled) setWalletBalanceCents(0);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [clubId, selectedPlayer]);
+
     const itemById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
     const saleItems = useMemo(() => {
         const normalizedSearch = searchText.trim().toLowerCase();
@@ -204,6 +229,9 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
         return sum + (line.unitPriceCents ?? 0) * line.quantity;
     }, 0);
     const currency = cartLines.map((line) => line.itemId ? itemById.get(line.itemId)?.currency : null).find(Boolean) ?? items[0]?.currency ?? 'EUR';
+    const walletAppliedCents = useWallet ? Math.min(walletBalanceCents, cartTotalCents) : 0;
+    const remainderCents = Math.max(0, cartTotalCents - walletAppliedCents);
+    const needsSecondaryPayment = useWallet && remainderCents > 0;
 
     const addItem = (item: InventoryItem) => {
         const stock = getCurrentQty(item);
@@ -279,13 +307,31 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
             toast.error('Selecciona el turno al que pertenece la compra');
             return;
         }
+        if (useWallet && walletBalanceCents <= 0) {
+            toast.error('El jugador no tiene saldo bono disponible');
+            return;
+        }
+        if (needsSecondaryPayment && paymentMethod === 'wallet') {
+            toast.error('Elige efectivo o tarjeta para el importe restante');
+            return;
+        }
+        const effectiveMethod =
+            useWallet && walletAppliedCents >= cartTotalCents
+                ? 'wallet'
+                : needsSecondaryPayment
+                    ? paymentMethod === 'wallet'
+                        ? 'cash'
+                        : paymentMethod
+                    : paymentMethod;
+
         setSubmitting(true);
         try {
             await inventoryService.createSale({
                 club_id: clubId,
                 booking_id: selectedBookingId,
                 player_id: selectedPlayer.id,
-                payment_method: paymentMethod,
+                payment_method: effectiveMethod,
+                wallet_amount_cents: useWallet ? walletAppliedCents : undefined,
                 lines: cartLines.map((line) => ({
                     item_id: line.itemId,
                     quantity: line.quantity,
@@ -525,17 +571,75 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
 
                     <div>
                         <label className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/40">Forma de pago</label>
-                        <div className="mt-1 grid grid-cols-2 gap-2">
-                            {(['cash', 'card'] as const).map((method) => (
-                                <button
-                                    key={method}
-                                    type="button"
-                                    onClick={() => setPaymentMethod(method)}
-                                    className={`${paymentMethod === method ? 'bg-[#E31E24] text-white' : 'bg-white/10 text-white/60'} rounded-xl px-3 py-2 text-xs font-black transition hover:bg-white/15`}
-                                >
-                                    {method === 'cash' ? 'Efectivo' : 'Tarjeta'}
-                                </button>
-                            ))}
+                        <div className="mt-1 space-y-2">
+                            <label
+                                className={`flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2 ${
+                                    selectedPlayer && walletBalanceCents > 0 ? 'cursor-pointer' : 'opacity-70'
+                                }`}
+                            >
+                                <span className="text-xs font-bold text-white/80">Usar saldo bono</span>
+                                <div className="flex items-center gap-2">
+                                    <span
+                                        className={`text-[10px] font-semibold ${
+                                            selectedPlayer && walletBalanceCents > 0 ? 'text-emerald-300' : 'text-white/40'
+                                        }`}
+                                    >
+                                        {formatMoneyFromCents(selectedPlayer ? walletBalanceCents : 0, currency)}
+                                    </span>
+                                    <input
+                                        type="checkbox"
+                                        checked={useWallet}
+                                        disabled={!selectedPlayer || walletBalanceCents <= 0}
+                                        onChange={(e) => {
+                                            setUseWallet(e.target.checked);
+                                            if (e.target.checked && walletBalanceCents >= cartTotalCents) {
+                                                setPaymentMethod('wallet');
+                                            } else if (!e.target.checked) {
+                                                setPaymentMethod('cash');
+                                            }
+                                        }}
+                                        className="h-4 w-4 accent-[#E31E24] disabled:opacity-40"
+                                    />
+                                </div>
+                            </label>
+                            {selectedPlayer && walletBalanceCents <= 0 ? (
+                                <p className="text-[10px] font-semibold text-white/35">Sin saldo bono disponible</p>
+                            ) : !selectedPlayer ? (
+                                <p className="text-[10px] font-semibold text-white/35">
+                                    Selecciona un jugador para ver y usar su saldo bono.
+                                </p>
+                            ) : null}
+                            <div className={`grid gap-2 ${needsSecondaryPayment || !useWallet ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                                {(['cash', 'card'] as const).map((method) => {
+                                    if (useWallet && !needsSecondaryPayment) return null;
+                                    return (
+                                        <button
+                                            key={method}
+                                            type="button"
+                                            onClick={() => setPaymentMethod(method)}
+                                            className={`${paymentMethod === method ? 'bg-[#E31E24] text-white' : 'bg-white/10 text-white/60'} rounded-xl px-3 py-2 text-xs font-black transition hover:bg-white/15`}
+                                        >
+                                            {method === 'cash' ? 'Efectivo' : 'Tarjeta'}
+                                            {needsSecondaryPayment ? ` (${formatMoneyFromCents(remainderCents, currency)})` : ''}
+                                        </button>
+                                    );
+                                })}
+                                {useWallet && walletAppliedCents >= cartTotalCents && cartTotalCents > 0 ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setPaymentMethod('wallet')}
+                                        className={`${paymentMethod === 'wallet' ? 'bg-[#E31E24] text-white' : 'bg-white/10 text-white/60'} col-span-2 rounded-xl px-3 py-2 text-xs font-black transition hover:bg-white/15`}
+                                    >
+                                        Pago total con saldo bono
+                                    </button>
+                                ) : null}
+                            </div>
+                            {useWallet && walletAppliedCents > 0 ? (
+                                <p className="text-[10px] font-semibold text-emerald-200/90">
+                                    Bono: {formatMoneyFromCents(walletAppliedCents, currency)}
+                                    {remainderCents > 0 ? ` · Resto: ${formatMoneyFromCents(remainderCents, currency)}` : ''}
+                                </p>
+                            ) : null}
                         </div>
                     </div>
                 </div>

@@ -20,8 +20,9 @@ import type { MyTournamentEntryRequest, PublicTournamentRow } from '../api/tourn
 import { fetchMyTournamentEntryRequests, fetchMyTournaments, fetchPublicTournaments } from '../api/tournaments';
 import { TournamentListCard } from '../components/competiciones/TournamentListCard';
 import { TournamentDetailScreen } from './TournamentDetailScreen';
+import { OnboardingInlineBanner } from '../components/onboarding/OnboardingInlineBanner';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchMyPlayerProfile } from '../api/players';
+import { useHomeData } from '../contexts/HomeDataContext';
 import {
   formatFormatLabel,
   matchesFormatFilter,
@@ -44,6 +45,11 @@ type CompeticionesListRow =
 
 type CompeticionesScreenProps = {
   onBack?: () => void;
+  /** Abre el detalle de un torneo (p. ej. tras aceptar invitación). */
+  initialOpenTournamentId?: string | null;
+  onInitialTournamentOpened?: () => void;
+  /** Abre el perfil con el cuestionario auto-abierto (banner soft block). */
+  onOpenProfileForOnboarding?: () => void;
 };
 
 function FilterChipButton({
@@ -68,7 +74,12 @@ function FilterChipButton({
   );
 }
 
-export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
+export function CompeticionesScreen({
+  onBack,
+  initialOpenTournamentId,
+  onInitialTournamentOpened,
+  onOpenProfileForOnboarding,
+}: CompeticionesScreenProps) {
   const PAGE_SIZE = 20;
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -77,7 +88,16 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   const [formatFilter, setFormatFilter] = useState<TournamentFormatFilter>('all');
   const [levelFilter, setLevelFilter] = useState<TournamentLevelFilter>('all');
   const [joinableOnly, setJoinableOnly] = useState(true);
-  const [myElo, setMyElo] = useState<number | null>(null);
+  // elo y onboarding del profile compartido (HomeDataContext) — evita un GET
+  // /players/me al montar esta pantalla.
+  const { profile } = useHomeData();
+  const myElo = profile?.eloRating ?? null;
+  /**
+   * Soft block: torneos competitivos bloquean inscripción si el usuario no
+   * ha completado el cuestionario de nivelación (backend tournaments.ts
+   * gatea por elo, que es NULL sin onboarding).
+   */
+  const needsOnboarding = profile != null && profile.onboardingCompleted === false;
   const [items, setItems] = useState<PublicTournamentRow[]>([]);
   const [requestItems, setRequestItems] = useState<MyTournamentEntryRequest[]>([]);
   const [requestUnreadCount, setRequestUnreadCount] = useState(0);
@@ -88,6 +108,14 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   const [error, setError] = useState<string | null>(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [detailOpen, setDetailOpen] = useState<{ id: string } | null>(null);
+
+  useEffect(() => {
+    if (initialOpenTournamentId) {
+      setActiveTab('inscritas');
+      setDetailOpen({ id: initialOpenTournamentId });
+      onInitialTournamentOpened?.();
+    }
+  }, [initialOpenTournamentId, onInitialTournamentOpened]);
 
   const load = useCallback(async (opts?: { append?: boolean; offset?: number }) => {
     const append = Boolean(opts?.append);
@@ -165,17 +193,6 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      const p = await fetchMyPlayerProfile(session?.access_token ?? null);
-      if (!cancelled) setMyElo(p?.eloRating ?? null);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.access_token]);
-
-  useEffect(() => {
-    let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
@@ -232,7 +249,7 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
           matchesSearch(row, searchQuery) &&
           matchesFormatFilter(row, formatFilter) &&
           matchesLevelFilter(row, levelFilter) &&
-          (!joinableOnly || canJoinTournament(row)),
+          (activeTab !== 'disponibles' || !joinableOnly || canJoinTournament(row)),
       )
       .sort((a, b) => {
         const da = new Date(String(a.start_at ?? '')).getTime();
@@ -264,27 +281,40 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
   const joinableChipLabel = joinableOnly ? 'Solo me puedo unir' : 'Mostrar todas';
 
   const listHeader = (
-    <View style={styles.sectionHead}>
-      <Text style={styles.sectionTitle}>
-        {activeTab === 'disponibles'
-          ? 'Torneos disponibles'
-          : activeTab === 'inscritas'
-            ? 'Mis torneos'
-            : 'Mis solicitudes'}
-      </Text>
-      <Text style={styles.sectionSub}>
-        {activeTab === 'solicitudes'
-          ? requestItems.length === 1
-            ? '1 solicitud'
-            : `${requestItems.length} solicitudes`
-          : filtered.length === 1
-            ? '1 torneo'
-            : `${filtered.length} torneos`}
-        {activeTab === 'inscritas' && !session?.access_token
-          ? ' · inicia sesión para ver inscripciones'
-          : ''}
-      </Text>
-    </View>
+    <>
+      {/* Banner inline (no sticky) cuando el usuario aún no tiene nivel.
+          Solo en tab 'disponibles' — en 'inscritas'/'solicitudes' ya está
+          dentro de su flujo. Mismo componente que en Cursos para consistencia. */}
+      {needsOnboarding && activeTab === 'disponibles' && (
+        <OnboardingInlineBanner
+          icon="trophy-outline"
+          message="Descubre tu nivel para inscribirte en torneos competitivos"
+          onPress={() => onOpenProfileForOnboarding?.()}
+        />
+      )}
+
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionTitle}>
+          {activeTab === 'disponibles'
+            ? 'Torneos disponibles'
+            : activeTab === 'inscritas'
+              ? 'Mis torneos'
+              : 'Mis solicitudes'}
+        </Text>
+        <Text style={styles.sectionSub}>
+          {activeTab === 'solicitudes'
+            ? requestItems.length === 1
+              ? '1 solicitud'
+              : `${requestItems.length} solicitudes`
+            : filtered.length === 1
+              ? '1 torneo'
+              : `${filtered.length} torneos`}
+          {activeTab === 'inscritas' && !session?.access_token
+            ? ' · inicia sesión para ver inscripciones'
+            : ''}
+        </Text>
+      </View>
+    </>
   );
 
   return (
@@ -349,7 +379,9 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
           />
           <FilterChipButton label={formatChipLabel} onPress={() => setFilterModalVisible(true)} />
           <FilterChipButton label={levelChipLabel} onPress={() => setFilterModalVisible(true)} />
-          <FilterChipButton label={joinableChipLabel} onPress={() => setJoinableOnly((v) => !v)} />
+          {activeTab === 'disponibles' ? (
+            <FilterChipButton label={joinableChipLabel} onPress={() => setJoinableOnly((v) => !v)} />
+          ) : null}
         </ScrollView>
 
         <View style={styles.segmented}>
@@ -497,6 +529,13 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
               <TournamentListCard
                 row={item.row}
                 userElo={myElo}
+                // Solo torneos competitivos (rango de elo definido) llevan
+                // candado cuando falta onboarding. Los abiertos sin rango se
+                // muestran normales y el usuario puede inscribirse.
+                lockedByOnboarding={
+                  needsOnboarding &&
+                  (item.row.elo_min != null || item.row.elo_max != null)
+                }
                 onPress={() => setDetailOpen({ id: item.row.id })}
               />
             )
@@ -539,6 +578,10 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
             <TournamentDetailScreen
               tournamentId={detailOpen.id}
               onClose={() => setDetailOpen(null)}
+              onOpenProfileForOnboarding={() => {
+                setDetailOpen(null);
+                onOpenProfileForOnboarding?.();
+              }}
             />
           </View>
         ) : null}
@@ -607,29 +650,33 @@ export function CompeticionesScreen({ onBack }: CompeticionesScreenProps) {
                 ),
               )}
             </ScrollView>
-            <Text style={styles.modalSectionLabel}>Disponibilidad</Text>
-            <Pressable
-              style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-              onPress={() => setJoinableOnly(true)}
-            >
-              <Text style={[styles.modalRowText, joinableOnly && styles.modalRowTextActive]}>
-                Solo torneos a los que me puedo unir
-              </Text>
-              {joinableOnly ? (
-                <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-              ) : null}
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-              onPress={() => setJoinableOnly(false)}
-            >
-              <Text style={[styles.modalRowText, !joinableOnly && styles.modalRowTextActive]}>
-                Mostrar todos (incluye no cumplo requisitos)
-              </Text>
-              {!joinableOnly ? (
-                <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-              ) : null}
-            </Pressable>
+            {activeTab === 'disponibles' ? (
+              <>
+                <Text style={styles.modalSectionLabel}>Disponibilidad</Text>
+                <Pressable
+                  style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
+                  onPress={() => setJoinableOnly(true)}
+                >
+                  <Text style={[styles.modalRowText, joinableOnly && styles.modalRowTextActive]}>
+                    Solo torneos a los que me puedo unir
+                  </Text>
+                  {joinableOnly ? (
+                    <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
+                  ) : null}
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
+                  onPress={() => setJoinableOnly(false)}
+                >
+                  <Text style={[styles.modalRowText, !joinableOnly && styles.modalRowTextActive]}>
+                    Mostrar todos (incluye no cumplo requisitos)
+                  </Text>
+                  {!joinableOnly ? (
+                    <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
+                  ) : null}
+                </Pressable>
+              </>
+            ) : null}
             <Pressable
               style={styles.modalClose}
               onPress={() => setFilterModalVisible(false)}
