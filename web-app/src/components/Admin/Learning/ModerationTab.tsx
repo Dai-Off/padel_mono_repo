@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { BookOpen, HelpCircle } from 'lucide-react';
+import { BookOpen, HelpCircle, Edit, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { adminLearningService } from '../../../services/adminLearning';
 import { ReviewDetailModal } from './ReviewDetailModal';
+import { ReviewTab } from './ReviewTab';
+import { QuestionFormModal } from '../../Learning/Questions/QuestionFormModal';
+import { FilterDropdown } from '../../Learning/Questions/FilterDropdown';
+import { StatusSwitcher } from '../../Learning/Questions/StatusSwitcher';
 import type { AdminCourse, AdminQuestion } from '../../../types/adminLearning';
-import type { QuestionType, QuestionArea, CourseStatus } from '../../../types/learningContent';
+import type { Question, QuestionType, QuestionArea, CourseStatus } from '../../../types/learningContent';
 
-const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence'];
+const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence', 'puzzle'];
 const QUESTION_AREAS: QuestionArea[] = ['technique', 'tactics', 'physical', 'mental', 'rules'];
 const COURSE_STATUSES: CourseStatus[] = ['draft', 'pending_review', 'active', 'inactive'];
 
@@ -19,7 +23,16 @@ const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
   inactive: { bg: 'bg-red-50', text: 'text-red-600' },
 };
 
-type SubTab = 'questions' | 'courses';
+type SubTab = 'review' | 'questions' | 'courses';
+
+interface ModerationTabProps {
+  // Permite a la página padre mostrar el badge global sobre la tab de Moderación
+  // sin tener que reabrir el sub-tab de Revisión.
+  onPendingCountChange?: (count: number) => void;
+  // Valor inicial conocido por el padre (que ya hizo el fetch en init).
+  // Evita esperar a que el usuario entre en el sub-tab Revisión para pintar el badge.
+  initialPendingCount?: number;
+}
 
 function extractPreview(q: AdminQuestion): string {
   const c = q.content;
@@ -30,28 +43,48 @@ function extractPreview(q: AdminQuestion): string {
   return '—';
 }
 
-export function ModerationTab() {
+export function ModerationTab({ onPendingCountChange, initialPendingCount = 0 }: ModerationTabProps = {}) {
   const { t } = useTranslation();
+  // Default 'questions' (lo que el admin verá la mayoría de las veces).
+  // Revisión vive aquí dentro porque suele estar vacía y no merece su propia tab.
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('questions');
+  const [pendingCount, setPendingCount] = useState(initialPendingCount);
+
+  const handlePendingChange = (count: number) => {
+    setPendingCount(count);
+    onPendingCountChange?.(count);
+  };
+
+  const subTabs: { key: SubTab; label: string; badge?: number }[] = [
+    { key: 'review', label: t('admin_learning_review'), badge: pendingCount > 0 ? pendingCount : undefined },
+    { key: 'questions', label: t('learning_tab_questions') },
+    { key: 'courses', label: t('learning_tab_courses') },
+  ];
 
   return (
     <div className="space-y-5">
       {/* Sub-tabs */}
-      <div className="flex gap-1.5">
-        {(['questions', 'courses'] as const).map((tab) => (
+      <div className="flex gap-1.5 flex-wrap">
+        {subTabs.map((tab) => (
           <button
-            key={tab}
-            onClick={() => setActiveSubTab(tab)}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-              activeSubTab === tab ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
+            key={tab.key}
+            onClick={() => setActiveSubTab(tab.key)}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              activeSubTab === tab.key ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
             }`}
           >
-            {tab === 'questions' ? t('learning_tab_questions') : t('learning_tab_courses')}
+            {tab.label}
+            {tab.badge && (
+              <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold min-w-[18px] text-center">
+                {tab.badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
       <motion.div key={activeSubTab} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
+        {activeSubTab === 'review' && <ReviewTab onPendingCountChange={handlePendingChange} />}
         {activeSubTab === 'questions' && <QuestionsModeration />}
         {activeSubTab === 'courses' && <CoursesModeration />}
       </motion.div>
@@ -72,6 +105,8 @@ function QuestionsModeration() {
   const [areaFilter, setAreaFilter] = useState<QuestionArea | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published' | 'inactive'>('all');
   const [clubFilter, setClubFilter] = useState<string>('all');
+  // Filtro tri-estado de vídeo. Se aplica client-side sobre has_video.
+  const [videoFilter, setVideoFilter] = useState<'all' | 'with_video' | 'without_video'>('all');
 
   // Cargar lista de clubs una vez (sin filtro de club)
   useEffect(() => {
@@ -84,8 +119,11 @@ function QuestionsModeration() {
     }).catch(() => {});
   }, []);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // Variante con flag `silent`: cuando silent=true, NO se marca loading=true,
+  // evitando que la lista se vacíe y el spinner provoque "salto arriba" del
+  // scroll. Lo usamos tras acciones puntuales (ej. cerrar el modal de edición).
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true);
     try {
       const filters: {
         type?: QuestionType;
@@ -102,82 +140,111 @@ function QuestionsModeration() {
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   }, [typeFilter, areaFilter, statusFilter, clubFilter]);
 
   useEffect(() => { load(); }, [load]);
 
-  // Toggle published ↔ inactive. Los drafts no se toggle-ean.
-  const handleToggle = async (q: AdminQuestion) => {
-    if (q.status === 'draft') return;
+  // Filtro client-side de vídeo aplicado tras cargar.
+  const visibleQuestions = questions.filter((q) => {
+    if (videoFilter === 'with_video') return !!q.has_video;
+    if (videoFilter === 'without_video') return !q.has_video;
+    return true;
+  });
+
+  // Estado de los modales auxiliares de moderación.
+  const [editing, setEditing] = useState<AdminQuestion | null>(null);
+  // Cuando el admin pide cambiar a 'draft' o 'inactive' desde el StatusSwitcher,
+  // mostramos un mini-modal con checkbox "Avisar al club" + nota opcional.
+  const [statusPrompt, setStatusPrompt] = useState<{ q: AdminQuestion; target: 'draft' | 'inactive' } | null>(null);
+
+  // Helper: actualiza un item en el listado sin tocar el resto. Usado para
+  // optimistic updates que preservan el scroll.
+  const patchLocal = (id: string, patch: Partial<AdminQuestion>) => {
+    setQuestions((prev) => prev.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  };
+  const removeLocal = (id: string) => {
+    setQuestions((prev) => prev.filter((x) => x.id !== id));
+  };
+
+  // Cambio de estado directo a 'published' (sin nota). Lo usamos cuando el
+  // admin elige "Publicada" en el StatusSwitcher. Si la pregunta venía de
+  // 'draft', el backend valida el contenido y puede devolver 400. Optimistic.
+  const handlePublish = async (q: AdminQuestion) => {
+    const prev = q.status;
+    patchLocal(q.id, { status: 'published' });
     try {
-      if (q.status === 'published') {
-        await adminLearningService.deactivateQuestion(q.id);
-        toast.success(t('learning_deactivate_success'));
-      } else {
-        await adminLearningService.activateQuestion(q.id);
-        toast.success(t('learning_save_success'));
-      }
-      load();
+      await adminLearningService.activateQuestion(q.id);
+      toast.success(t('learning_save_success'));
     } catch (e) {
+      patchLocal(q.id, { status: prev }); // revert
+      toast.error((e as Error).message);
+      // Si el contenido del borrador no era válido, abrimos el editor para
+      // que el admin lo arregle. Reconocemos el error 400 por el texto del
+      // backend ("contenido incompleto").
+      const msg = (e as Error).message ?? '';
+      if (prev === 'draft' && /incompleto/i.test(msg)) {
+        setEditing(q);
+      }
+    }
+  };
+
+  // Borrado forzado (admin). Doble confirm si la pregunta está published.
+  // Optimistic: la quitamos local primero; si falla, la insertamos de vuelta.
+  const handleDelete = async (q: AdminQuestion) => {
+    const preview = extractPreview(q).slice(0, 60);
+    const firstOk = window.confirm(`¿Borrar definitivamente "${preview}"?\n\nEsta acción no se puede deshacer.`);
+    if (!firstOk) return;
+    if (q.status === 'published') {
+      const secondOk = window.confirm('La pregunta está publicada y se está sirviendo en lecciones. ¿Seguro que quieres borrarla sin despublicarla primero?');
+      if (!secondOk) return;
+    }
+    const snapshot = questions;
+    removeLocal(q.id);
+    try {
+      await adminLearningService.deleteQuestion(q.id);
+      toast.success('Pregunta borrada definitivamente');
+    } catch (e) {
+      setQuestions(snapshot); // revert al snapshot completo
       toast.error((e as Error).message);
     }
   };
 
+  // Opciones de los dropdowns: prefijamos siempre con la opción "todos/as".
+  const clubOptions = [
+    { value: 'all', label: t('admin_learning_all_clubs') },
+    ...clubs.map((c) => ({ value: c.id, label: c.name })),
+  ];
+  const typeOptions: { value: QuestionType | 'all'; label: string }[] = [
+    { value: 'all', label: t('learning_filter_all_types') },
+    ...QUESTION_TYPES.map((qt) => ({ value: qt, label: t(`learning_type_${qt}`) })),
+  ];
+  const areaOptions: { value: QuestionArea | 'all'; label: string }[] = [
+    { value: 'all', label: t('learning_filter_all_areas') },
+    ...QUESTION_AREAS.map((qa) => ({ value: qa, label: t(`learning_area_${qa}`) })),
+  ];
+  const statusOptions: { value: 'all' | 'draft' | 'published' | 'inactive'; label: string }[] = [
+    { value: 'all', label: 'Todas' },
+    { value: 'published', label: 'Publicadas' },
+    { value: 'draft', label: 'Borradores' },
+    { value: 'inactive', label: 'Inactivas' },
+  ];
+  const videoOptions: { value: 'all' | 'with_video' | 'without_video'; label: string }[] = [
+    { value: 'all', label: 'Todos' },
+    { value: 'with_video', label: 'Con vídeo' },
+    { value: 'without_video', label: 'Sin vídeo' },
+  ];
+
   return (
     <div className="space-y-4">
-      {/* Filtros */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
-        {/* Club */}
-        <select
-          value={clubFilter}
-          onChange={(e) => setClubFilter(e.target.value)}
-          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
-        >
-          <option value="all">{t('admin_learning_all_clubs')}</option>
-          {clubs.map((c) => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-        </select>
-
-        {/* Tipo */}
-        <div className="flex flex-wrap gap-1.5">
-          <button onClick={() => setTypeFilter('all')} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${typeFilter === 'all' ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A]'}`}>
-            {t('learning_filter_all_types')}
-          </button>
-          {QUESTION_TYPES.map((qt) => (
-            <button key={qt} onClick={() => setTypeFilter(qt)} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${typeFilter === qt ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A]'}`}>
-              {t(`learning_type_${qt}`)}
-            </button>
-          ))}
-        </div>
-
-        {/* Área */}
-        <div className="flex flex-wrap gap-1.5">
-          <button onClick={() => setAreaFilter('all')} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${areaFilter === 'all' ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A]'}`}>
-            {t('learning_filter_all_areas')}
-          </button>
-          {QUESTION_AREAS.map((qa) => (
-            <button key={qa} onClick={() => setAreaFilter(qa)} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${areaFilter === qa ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A]'}`}>
-              {t(`learning_area_${qa}`)}
-            </button>
-          ))}
-        </div>
-
-        {/* Estado */}
-        <div className="flex flex-wrap gap-1.5">
-          {([
-            { key: 'all', label: 'Todas' },
-            { key: 'published', label: 'Publicadas' },
-            { key: 'draft', label: 'Borradores' },
-            { key: 'inactive', label: 'Inactivas' },
-          ] as const).map((s) => (
-            <button key={s.key} onClick={() => setStatusFilter(s.key)} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition-all ${statusFilter === s.key ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A]'}`}>
-              {s.label}
-            </button>
-          ))}
-        </div>
+      {/* Filtros: una sola fila horizontal compacta con dropdowns por categoría. */}
+      <div className="flex flex-wrap gap-1.5 bg-white rounded-2xl border border-gray-100 p-3">
+        <FilterDropdown label="Club" value={clubFilter} allValue="all" options={clubOptions} onChange={setClubFilter} />
+        <FilterDropdown label="Tipo" value={typeFilter} allValue="all" options={typeOptions} onChange={setTypeFilter} />
+        <FilterDropdown label="Área" value={areaFilter} allValue="all" options={areaOptions} onChange={setAreaFilter} />
+        <FilterDropdown label="Estado" value={statusFilter} allValue="all" options={statusOptions} onChange={setStatusFilter} />
+        <FilterDropdown label="Vídeo" value={videoFilter} allValue="all" options={videoOptions} onChange={setVideoFilter} />
       </div>
 
       {/* Lista */}
@@ -185,11 +252,11 @@ function QuestionsModeration() {
         <div className="flex justify-center py-16">
           <div className="w-10 h-10 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
         </div>
-      ) : questions.length === 0 ? (
+      ) : visibleQuestions.length === 0 ? (
         <div className="text-center py-12 text-gray-400 text-sm">{t('learning_empty_questions')}</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {questions.map((q, i) => (
+          {visibleQuestions.map((q, i) => (
             <motion.div
               key={q.id}
               initial={{ opacity: 0, y: 10 }}
@@ -197,44 +264,78 @@ function QuestionsModeration() {
               transition={{ delay: i * 0.02 }}
               className={`bg-white rounded-2xl border p-4 space-y-3 ${q.status === 'published' ? 'border-gray-100' : 'border-gray-100 opacity-60'}`}
             >
+              {/* Cabecera de chips: tipo / área / nivel / club. El estado vive
+                  en el StatusSwitcher de abajo (no duplicamos el chip). */}
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-600 text-[10px] font-bold">{t(`learning_type_${q.type}`)}</span>
                 <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-600 text-[10px] font-bold">{t(`learning_area_${q.area}`)}</span>
                 <span className="px-2 py-0.5 rounded-lg bg-gray-100 text-gray-500 text-[10px] font-bold">Lv. {q.level}</span>
                 <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-[10px] font-bold">{q.club_name}</span>
-                {q.status === 'draft' && (
-                  <span className="px-2 py-0.5 rounded-lg bg-yellow-50 text-yellow-600 text-[10px] font-bold">Borrador</span>
-                )}
-                {q.status === 'inactive' && (
-                  <span className="px-2 py-0.5 rounded-lg bg-red-50 text-red-500 text-[10px] font-bold">Inactiva</span>
-                )}
               </div>
               <div className="flex items-start gap-2">
                 <HelpCircle className="w-4 h-4 text-gray-300 mt-0.5 shrink-0" />
                 <p className="text-xs text-[#1A1A1A] line-clamp-2">{extractPreview(q)}</p>
               </div>
-              <div className="flex items-center gap-2 pt-1">
-                {/* Toggle solo para published/inactive. Drafts no se moderan
-                    desde aquí (publicación vía el editor del club). */}
-                {q.status !== 'draft' && (
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={q.status === 'published'}
-                    onClick={() => handleToggle(q)}
-                    className="relative w-9 h-5 rounded-full transition-colors shrink-0"
-                    style={{ backgroundColor: q.status === 'published' ? '#22C55E' : '#D1D5DB' }}
-                  >
-                    <span
-                      className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform"
-                      style={{ transform: q.status === 'published' ? 'translateX(16px)' : 'translateX(0)' }}
-                    />
-                  </button>
-                )}
+              <div className="flex items-center gap-2 pt-1 flex-wrap">
+                <StatusSwitcher
+                  status={q.status}
+                  onPickPublished={() => handlePublish(q)}
+                  onPickDraft={() => setStatusPrompt({ q, target: 'draft' })}
+                  onPickInactive={() => setStatusPrompt({ q, target: 'inactive' })}
+                />
+                <button
+                  type="button"
+                  onClick={() => setEditing(q)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-50 text-[#1A1A1A] text-[10px] font-bold hover:bg-gray-100 transition-all"
+                  title="Editar pregunta como admin"
+                >
+                  <Edit className="w-3 h-3" />
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(q)}
+                  className="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-50 text-red-600 text-[10px] font-bold hover:bg-red-100 transition-all"
+                  title="Borrar definitivamente"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  Borrar
+                </button>
               </div>
             </motion.div>
           ))}
         </div>
+      )}
+
+      {/* Modal de edición admin. Al cerrar tras guardar hacemos un refresh
+          silencioso (sin spinner) para que el scroll no salte. */}
+      {editing && (
+        <QuestionFormModal
+          mode="edit"
+          question={editing as unknown as Question}
+          clubId={editing.club_id}
+          useAdminEndpoints
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load({ silent: true }); }}
+        />
+      )}
+
+      {/* Mini-prompt: pasar a borrador o inactiva con nota opcional. Patch
+          local optimista para evitar el salto del scroll. */}
+      {statusPrompt && (
+        <StatusChangePromptModal
+          question={statusPrompt.q}
+          target={statusPrompt.target}
+          onClose={() => setStatusPrompt(null)}
+          onConfirmed={(notes) => {
+            patchLocal(statusPrompt.q.id, {
+              status: statusPrompt.target,
+              moderation_notes: notes,
+              last_admin_edit_at: new Date().toISOString(),
+            });
+            setStatusPrompt(null);
+          }}
+        />
       )}
     </div>
   );
@@ -281,32 +382,21 @@ function CoursesModeration() {
 
   useEffect(() => { load(); }, [load]);
 
+  const courseClubOptions = [
+    { value: 'all', label: t('admin_learning_all_clubs') },
+    ...clubs.map((c) => ({ value: c.id, label: c.name })),
+  ];
+  const courseStatusOptions = [
+    { value: 'all', label: t('learning_filter_all_status') },
+    ...COURSE_STATUSES.map((s) => ({ value: s, label: t(`learning_status_${s}`) })),
+  ];
+
   return (
     <div className="space-y-4">
-      {/* Filtros */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
-        <div className="grid grid-cols-2 gap-2">
-          <select
-            value={clubFilter}
-            onChange={(e) => setClubFilter(e.target.value)}
-            className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
-          >
-            <option value="all">{t('admin_learning_all_clubs')}</option>
-            {clubs.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
-          >
-            <option value="all">{t('learning_filter_all_status')}</option>
-            {COURSE_STATUSES.map((s) => (
-              <option key={s} value={s}>{t(`learning_status_${s}`)}</option>
-            ))}
-          </select>
-        </div>
+      {/* Filtros compactos: dropdowns en una sola fila. */}
+      <div className="flex flex-wrap gap-1.5 bg-white rounded-2xl border border-gray-100 p-3">
+        <FilterDropdown label="Club" value={clubFilter} allValue="all" options={courseClubOptions} onChange={setClubFilter} />
+        <FilterDropdown label="Estado" value={statusFilter} allValue="all" options={courseStatusOptions} onChange={setStatusFilter} />
       </div>
 
       {/* Lista */}
@@ -355,6 +445,118 @@ function CoursesModeration() {
           readOnly={selected.status !== 'pending_review'}
         />
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mini-modal: cambiar estado a 'draft' o 'inactive' con nota opcional al club
+// ---------------------------------------------------------------------------
+
+function buildModerationNoteTemplate(): string {
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, '0');
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const yyyy = today.getFullYear();
+  return `Modificado por admin el ${dd}/${mm}/${yyyy}. Razón: `;
+}
+
+function StatusChangePromptModal({
+  question,
+  target,
+  onClose,
+  onConfirmed,
+}: {
+  question: AdminQuestion;
+  target: 'draft' | 'inactive';
+  onClose: () => void;
+  // Pasa las notas finales (o null si no se quería avisar) para que el padre
+  // pueda hacer patch local sin re-fetch.
+  onConfirmed: (notes: string | null) => void;
+}) {
+  const [notify, setNotify] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleToggle = (next: boolean) => {
+    setNotify(next);
+    if (next && !notes.trim()) setNotes(buildModerationNoteTemplate());
+  };
+
+  const titleByTarget = target === 'draft' ? 'Pasar pregunta a borrador' : 'Desactivar pregunta';
+  const descByTarget =
+    target === 'draft'
+      ? 'La pregunta dejará de servirse en las lecciones hasta que el club la republique.'
+      : 'La pregunta dejará de servirse en las lecciones pero conservará el contenido (se puede reactivar).';
+  const ctaByTarget = target === 'draft' ? 'Pasar a borrador' : 'Desactivar';
+
+  const handleConfirm = async () => {
+    setSaving(true);
+    try {
+      const finalNotes = notify && notes.trim() ? notes.trim() : null;
+      if (target === 'draft') {
+        await adminLearningService.moveQuestionToDraft(question.id, finalNotes);
+        toast.success('Pregunta movida a borrador');
+      } else {
+        await adminLearningService.deactivateQuestion(question.id, finalNotes);
+        toast.success('Pregunta desactivada');
+      }
+      onConfirmed(finalNotes);
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] bg-black/40 flex items-center justify-center px-4">
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-white rounded-2xl w-full max-w-md shadow-xl"
+      >
+        <div className="p-5 space-y-4">
+          <h3 className="text-sm font-bold text-[#1A1A1A]">{titleByTarget}</h3>
+          <p className="text-xs text-gray-600">{descByTarget}</p>
+          <label className="flex items-center gap-2 cursor-pointer text-xs text-[#1A1A1A]">
+            <input
+              type="checkbox"
+              checked={notify}
+              onChange={(e) => handleToggle(e.target.checked)}
+              className="rounded"
+            />
+            <span className="font-semibold">Avisar al club</span>
+          </label>
+          {notify && (
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              placeholder="Explica qué debe revisar el club"
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs resize-none"
+            />
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={saving}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-[#1A1A1A] bg-gray-50 hover:bg-gray-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              disabled={saving}
+              className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-50"
+            >
+              {saving ? '...' : ctaByTarget}
+            </button>
+          </div>
+        </div>
+      </motion.div>
     </div>
   );
 }

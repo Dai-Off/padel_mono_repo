@@ -66,12 +66,50 @@ export const adminLearningService = {
     return res.data ?? [];
   },
 
-  async activateQuestion(id: string): Promise<void> {
-    await apiFetchWithAuth(`/admin/learning/questions/${id}/activate`, { method: 'PATCH' });
+  async activateQuestion(id: string, moderationNotes?: string | null): Promise<void> {
+    const body = moderationNotes !== undefined ? JSON.stringify({ moderation_notes: moderationNotes }) : undefined;
+    await apiFetchWithAuth(`/admin/learning/questions/${id}/activate`, {
+      method: 'PATCH',
+      ...(body ? { body } : {}),
+    });
   },
 
-  async deactivateQuestion(id: string): Promise<void> {
-    await apiFetchWithAuth(`/admin/learning/questions/${id}/deactivate`, { method: 'PATCH' });
+  async deactivateQuestion(id: string, moderationNotes?: string | null): Promise<void> {
+    const body = moderationNotes !== undefined ? JSON.stringify({ moderation_notes: moderationNotes }) : undefined;
+    await apiFetchWithAuth(`/admin/learning/questions/${id}/deactivate`, {
+      method: 'PATCH',
+      ...(body ? { body } : {}),
+    });
+  },
+
+  // Edición completa de cualquier pregunta como admin. Acepta moderation_notes
+  // opcional. `last_admin_edit_at` lo escribe el backend.
+  async updateQuestion(id: string, body: Record<string, unknown>): Promise<void> {
+    await apiFetchWithAuth(`/admin/learning/questions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+
+  // Pasa una pregunta published|inactive a draft. moderation_notes opcional.
+  async moveQuestionToDraft(id: string, moderationNotes?: string | null): Promise<void> {
+    await apiFetchWithAuth(`/admin/learning/questions/${id}/draft`, {
+      method: 'PATCH',
+      body: JSON.stringify({ moderation_notes: moderationNotes ?? null }),
+    });
+  },
+
+  // Actualiza solo moderation_notes (sin tocar estado).
+  async updateModerationNotes(id: string, moderationNotes: string | null): Promise<void> {
+    await apiFetchWithAuth(`/admin/learning/questions/${id}/notes`, {
+      method: 'PATCH',
+      body: JSON.stringify({ moderation_notes: moderationNotes }),
+    });
+  },
+
+  // Borrado forzado. No requiere que la pregunta esté en draft/inactive.
+  async deleteQuestion(id: string): Promise<void> {
+    await apiFetchWithAuth(`/admin/learning/questions/${id}`, { method: 'DELETE' });
   },
 
   // ---------------------------------------------------------------------------
@@ -81,5 +119,11 @@ export const adminLearningService = {
   async getStats(): Promise<LearningStats> {
     const res = await apiFetchWithAuth<ApiOk<{ data: LearningStats }>>('/admin/learning/stats');
     return res.data;
+  },
+
+  // Endpoint ligero para mostrar burbuja sin traer toda la lista de pendientes.
+  async getPendingCount(): Promise<number> {
+    const res = await apiFetchWithAuth<{ ok: true; count: number }>('/admin/learning/pending-courses/count');
+    return res.count ?? 0;
   },
 };

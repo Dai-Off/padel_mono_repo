@@ -10,10 +10,12 @@ const router = Router();
 // Constants and validation
 // ---------------------------------------------------------------------------
 
-const VALID_QUESTION_TYPES = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence', 'puzzle'] as const;
-const VALID_AREAS = ['technique', 'tactics', 'physical', 'mental', 'rules'] as const;
+export const VALID_QUESTION_TYPES = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence', 'puzzle'] as const;
+export const VALID_AREAS = ['technique', 'tactics', 'physical', 'mental', 'rules'] as const;
+export const VALID_STATUS = ['draft', 'published', 'inactive'] as const;
+export type QuestionStatusValue = (typeof VALID_STATUS)[number];
 
-function validateQuestionContent(type: string, content: unknown): string | null {
+export function validateQuestionContent(type: string, content: unknown): string | null {
   if (!content || typeof content !== 'object') return 'content es obligatorio y debe ser un objeto';
   const c = content as Record<string, unknown>;
 
@@ -76,8 +78,7 @@ function validateQuestionContent(type: string, content: unknown): string | null 
 // ---------------------------------------------------------------------------
 
 // POST /questions
-const VALID_STATUS = ['draft', 'published', 'inactive'] as const;
-type QuestionStatus = (typeof VALID_STATUS)[number];
+type QuestionStatus = QuestionStatusValue;
 
 router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
@@ -456,7 +457,85 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
       }
     }
 
-    return res.json({ ok: true, data: rows });
+    // Ordenamos primero las preguntas con nota de moderación no vista para
+    // que el club las encuentre rápido. El resto mantiene el orden por
+    // created_at desc que vino de la query.
+    rows.sort((a: any, b: any) => {
+      const aUnread = !!a.moderation_notes && (!a.notes_seen_at || (a.last_admin_edit_at && a.notes_seen_at < a.last_admin_edit_at));
+      const bUnread = !!b.moderation_notes && (!b.notes_seen_at || (b.last_admin_edit_at && b.notes_seen_at < b.last_admin_edit_at));
+      if (aUnread !== bUnread) return aUnread ? -1 : 1;
+      return 0;
+    });
+
+    // Meta: contador total de preguntas del club con nota de moderación no
+    // vista, INDEPENDIENTE de los filtros aplicados al listing. Se calcula
+    // aquí mismo para que el cliente pueda pintar el badge correctamente
+    // aunque esté filtrando por estado/tipo/área/vídeo. Una sola query extra.
+    const unreadCount = await countUnreadNotes(supabase, clubId);
+
+    return res.json({ ok: true, data: rows, meta: { unread_count: unreadCount } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Helper: cuenta preguntas del club con `moderation_notes` no NULL cuya
+// `notes_seen_at` sea NULL o anterior a `last_admin_edit_at`. Se usa tanto en
+// el GET del listing (meta) como en el PATCH de acknowledge (respuesta).
+async function countUnreadNotes(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+): Promise<number> {
+  // Supabase no soporta OR entre columnas en `or()` con comparación cruzada
+  // de forma trivial, así que pedimos las filas candidatas y filtramos en JS.
+  // El conjunto candidato son las que tienen moderation_notes IS NOT NULL,
+  // que es siempre un volumen pequeño.
+  const { data, error } = await supabase
+    .from('learning_questions')
+    .select('moderation_notes, notes_seen_at, last_admin_edit_at')
+    .eq('created_by_club', clubId)
+    .not('moderation_notes', 'is', null);
+  if (error) return 0;
+  return (data ?? []).filter((r: any) => {
+    if (!r.notes_seen_at) return true;
+    if (!r.last_admin_edit_at) return false;
+    return new Date(r.notes_seen_at).getTime() < new Date(r.last_admin_edit_at).getTime();
+  }).length;
+}
+
+// PATCH /questions/:id/acknowledge-notes
+// El club confirma que ha visto la nota de moderación. Setea notes_seen_at = NOW().
+// La lógica de "no vista" se calcula client-side comparando notes_seen_at con
+// last_admin_edit_at (si admin vuelve a editar, last_admin_edit_at > notes_seen_at
+// y la pregunta vuelve a aparecer como no vista).
+router.patch('/questions/:id/acknowledge-notes', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const questionId = req.params.id;
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('learning_questions')
+      .select('id, created_by_club')
+      .eq('id', questionId)
+      .maybeSingle();
+
+    if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
+    if (!canAccessClub(req, existing.created_by_club, 'escuela')) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const { error } = await supabase
+      .from('learning_questions')
+      .update({ notes_seen_at: new Date().toISOString() })
+      .eq('id', questionId);
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    // Devolvemos el contador actualizado para que el cliente pinte el badge
+    // sin tener que hacer otra llamada al listing.
+    const unreadCount = await countUnreadNotes(supabase, existing.created_by_club);
+    return res.json({ ok: true, data: { id: questionId }, unread_count: unreadCount });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

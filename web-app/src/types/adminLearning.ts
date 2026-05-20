@@ -11,6 +11,10 @@ export interface AdminCourseWithLessons extends AdminCourse {
 export interface AdminQuestion extends Omit<Question, 'club_id'> {
   club_id: string;
   club_name: string;
+  // Campos de moderación añadidos en migración 062. Pueden venir null en
+  // preguntas que ningún admin ha tocado todavía.
+  moderation_notes?: string | null;
+  last_admin_edit_at?: string | null;
 }
 
 export interface ClubStat {
@@ -19,12 +23,32 @@ export interface ClubStat {
   count: number;
 }
 
+// Desglose por categoría (tipo / área / nivel): count + agregados de respuestas.
+export interface StatBucket {
+  count: number;
+  attempts: number;
+  correct: number;
+}
+
+export interface TopAnsweredEntry {
+  question_id: string;
+  preview: string;
+  attempts: number;
+  success_rate: number; // 0..1
+}
+
 export interface LearningStats {
   total_questions: number;
   active_questions: number;
   total_courses: number;
   active_courses: number;
   pending_courses: number;
+  by_type: Record<string, StatBucket>;
+  by_area: Record<string, StatBucket>;
+  by_level: Record<string, StatBucket>;
+  top_answered: TopAnsweredEntry[];
+  volume_last_7d: number;
+  volume_last_30d: number;
   questions_by_club: ClubStat[];
   courses_by_club: ClubStat[];
 }

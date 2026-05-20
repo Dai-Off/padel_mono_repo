@@ -154,6 +154,16 @@ export interface Question {
   //   - 'published' → válida y servida en lecciones.
   //   - 'inactive'  → pausada (no se sirve, conserva contenido válido).
   status: QuestionStatus;
+  // Nota de moderación escrita por un admin. Visible para el club al editar.
+  // NULL = sin nota.
+  moderation_notes?: string | null;
+  // Timestamp de la última edición por un admin (server-side). El cliente no
+  // lo modifica; viene del backend.
+  last_admin_edit_at?: string | null;
+  // Timestamp de la última vez que el club abrió la pregunta tras recibir una
+  // nota. Se usa para calcular "nota no vista" comparando contra
+  // last_admin_edit_at. NULL = nunca vista tras la nota más reciente.
+  notes_seen_at?: string | null;
   created_at: string;
   // Solo presente si type='puzzle'. Metadata de la fila learning_puzzles (id propio,
   // thumbnail_url, timestamps). El árbol también se mergea en content.

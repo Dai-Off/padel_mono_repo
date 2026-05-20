@@ -6,27 +6,35 @@ import { AdminHeader } from '../AdminHeader';
 import { PageSpinner } from '../../Layout/PageSpinner';
 import { authService } from '../../../services/auth';
 import { HttpError } from '../../../services/api';
-import { ReviewTab } from './ReviewTab';
+import { adminLearningService } from '../../../services/adminLearning';
 import { WeMatchTab } from './WeMatchTab';
 import { ModerationTab } from './ModerationTab';
 import { StatsTab } from './StatsTab';
 
-type Tab = 'review' | 'wematch' | 'moderation' | 'stats';
+type Tab = 'moderation' | 'wematch' | 'stats';
 
 export const AdminLearningPage = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<Tab>('review');
+  // Default Moderación. Revisión vive como sub-tab dentro de Moderación.
+  const [activeTab, setActiveTab] = useState<Tab>('moderation');
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Auth check + cargar count de pendientes
+  // Auth check + cargar count de pendientes ya en el init para que el badge
+  // sobre "Moderación" aparezca sin necesidad de entrar al sub-tab.
   const init = useCallback(async () => {
     try {
       const token = authService.getSession()?.access_token;
       if (!token) { navigate('/login'); return; }
       const me = await authService.getMe();
       if (!me.ok || !me.roles?.admin_id) { navigate('/'); return; }
+      try {
+        const count = await adminLearningService.getPendingCount();
+        setPendingCount(count);
+      } catch {
+        // No bloquear la carga del panel si falla el count.
+      }
     } catch (e) {
       if (e instanceof HttpError) {
         if (e.status === 401) { authService.logout(); navigate('/login'); return; }
@@ -41,9 +49,8 @@ export const AdminLearningPage = () => {
   useEffect(() => { init(); }, [init]);
 
   const tabs: { key: Tab; label: string; badge?: number }[] = [
-    { key: 'review', label: t('admin_learning_review'), badge: pendingCount > 0 ? pendingCount : undefined },
+    { key: 'moderation', label: t('admin_learning_moderation'), badge: pendingCount > 0 ? pendingCount : undefined },
     { key: 'wematch', label: t('admin_learning_wematch') },
-    { key: 'moderation', label: t('admin_learning_moderation') },
     { key: 'stats', label: t('admin_learning_stats') },
   ];
 
@@ -88,9 +95,13 @@ export const AdminLearningPage = () => {
           </div>
 
           {/* Contenido del tab activo */}
-          {activeTab === 'review' && <ReviewTab onPendingCountChange={setPendingCount} />}
+          {activeTab === 'moderation' && (
+            <ModerationTab
+              onPendingCountChange={setPendingCount}
+              initialPendingCount={pendingCount}
+            />
+          )}
           {activeTab === 'wematch' && <WeMatchTab />}
-          {activeTab === 'moderation' && <ModerationTab />}
           {activeTab === 'stats' && <StatsTab />}
         </div>
       </main>

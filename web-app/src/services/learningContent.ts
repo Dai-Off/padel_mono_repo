@@ -22,6 +22,20 @@ export const VIDEO_LIMITS = {
   course:   { maxSizeMB: 300, maxDurationSec: 420 }, // 7 minutos
 };
 
+/**
+ * Devuelve true si la pregunta tiene una nota de moderación que el club aún
+ * no ha visto. Una nota se considera "no vista" si:
+ *  - moderation_notes no es null/vacío, Y
+ *  - notes_seen_at es null, O notes_seen_at < last_admin_edit_at
+ *    (el admin editó tras la última vez que el club abrió la pregunta).
+ */
+export function hasUnreadNotes(q: Pick<Question, 'moderation_notes' | 'notes_seen_at' | 'last_admin_edit_at'>): boolean {
+  if (!q.moderation_notes) return false;
+  if (!q.notes_seen_at) return true;
+  if (!q.last_admin_edit_at) return false;
+  return new Date(q.notes_seen_at).getTime() < new Date(q.last_admin_edit_at).getTime();
+}
+
 /** Obtiene la duración de un video en segundos */
 export function getVideoDuration(file: File): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -134,13 +148,16 @@ export const learningContentService = {
       // 'published'. Si quieres ver borradores o inactivas, pásalo explícito.
       status?: 'all' | 'draft' | 'published' | 'inactive';
     },
-  ): Promise<Question[]> {
+  ): Promise<{ data: Question[]; unread_count: number }> {
     const q = new URLSearchParams({ club_id: clubId });
     if (filters?.type) q.set('type', filters.type);
     if (filters?.area) q.set('area', filters.area);
     if (filters?.status) q.set('status', filters.status);
-    const res = await apiFetchWithAuth<ApiOk<{ data: Question[] }>>(`/learning/questions?${q}`);
-    return res.data ?? [];
+    // El backend devuelve { data, meta: { unread_count } }. El unread_count
+    // es independiente de los filtros aplicados — cuenta TODAS las preguntas
+    // del club con nota de moderación pendiente.
+    const res = await apiFetchWithAuth<ApiOk<{ data: Question[]; meta?: { unread_count?: number } }>>(`/learning/questions?${q}`);
+    return { data: res.data ?? [], unread_count: res.meta?.unread_count ?? 0 };
   },
 
   async createQuestion(body: {
@@ -189,6 +206,17 @@ export const learningContentService = {
   // Borrado permanente. El backend exige que la pregunta esté ya desactivada.
   async deleteQuestion(id: string): Promise<void> {
     await apiFetchWithAuth(`/learning/questions/${id}`, { method: 'DELETE' });
+  },
+
+  // Marca como vistas las notas de moderación de una pregunta. Devuelve el
+  // contador total de preguntas del club con nota pendiente tras el update
+  // para que el badge se actualice sin re-fetch del listing.
+  async acknowledgeQuestionNotes(id: string): Promise<{ unread_count: number }> {
+    const res = await apiFetchWithAuth<ApiOk<{ unread_count?: number }>>(
+      `/learning/questions/${id}/acknowledge-notes`,
+      { method: 'PATCH' },
+    );
+    return { unread_count: res.unread_count ?? 0 };
   },
 
   // ---------------------------------------------------------------------------

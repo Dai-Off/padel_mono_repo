@@ -21,6 +21,9 @@ export function LearningContentView() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [clubs, setClubs] = useState<Club[]>([]);
   const [selectedClubId, setSelectedClubId] = useState<string | null>(null);
+  // Contador de preguntas con nota de moderación no vista. Lo alimenta
+  // QuestionsTab vía callback y lo pintamos como badge sobre la tab "Preguntas".
+  const [unreadNotesCount, setUnreadNotesCount] = useState(0);
   const [activeTab, setActiveTab] = useState<Tab>('questions');
 
   useEffect(() => {
@@ -118,8 +121,8 @@ export function LearningContentView() {
     );
   }
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'questions', label: t('learning_tab_questions') },
+  const tabs: { key: Tab; label: string; badge?: number }[] = [
+    { key: 'questions', label: t('learning_tab_questions'), badge: unreadNotesCount > 0 ? unreadNotesCount : undefined },
     { key: 'courses', label: t('learning_tab_courses') },
   ];
 
@@ -176,13 +179,18 @@ export function LearningContentView() {
               <button
                 key={tab.key}
                 onClick={() => setActiveTab(tab.key)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                   activeTab === tab.key
                     ? 'bg-[#1A1A1A] text-white'
                     : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
                 }`}
               >
                 {tab.label}
+                {tab.badge && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[9px] font-bold min-w-[18px] text-center">
+                    {tab.badge}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -195,7 +203,7 @@ export function LearningContentView() {
             transition={{ duration: 0.15 }}
           >
             {selectedClubId && activeTab === 'questions' && (
-              <QuestionsTab clubId={selectedClubId} />
+              <QuestionsTab clubId={selectedClubId} onUnreadCountChange={setUnreadNotesCount} />
             )}
             {selectedClubId && activeTab === 'courses' && (
               <CoursesTab clubId={selectedClubId} />
