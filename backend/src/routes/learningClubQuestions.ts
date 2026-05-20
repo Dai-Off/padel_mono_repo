@@ -405,12 +405,21 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
     if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio como query param' });
     if (!canAccessClub(req, clubId, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
+    // Paginación + búsqueda + ordenación. Default 30 por página; máximo 100.
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const requestedSize = parseInt(String(req.query.page_size ?? '20'), 10) || 20;
+    const pageSize = Math.min(100, Math.max(1, requestedSize));
+    const offset = (page - 1) * pageSize;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const orderBy = String(req.query.order_by ?? 'created_desc');
+    const ascending = orderBy === 'created_asc';
+
     const supabase = getSupabaseServiceRoleClient();
     let query = supabase
       .from('learning_questions')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('created_by_club', clubId)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending });
 
     const { type, area, status } = req.query;
     if (type) query = query.eq('type', type as string);
@@ -425,10 +434,22 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
       query = query.eq('status', 'published');
     }
 
-    const { data, error } = await query;
+    // Búsqueda libre dentro del JSON content. Usamos la columna generada
+    // `content_search` (text) que se materializa automáticamente (ver
+    // migración 065). Permite ILIKE directo y se puede indexar si crece.
+    if (search) {
+      const escaped = search.replace(/[%_]/g, '\\$&');
+      query = query.ilike('content_search', `%${escaped}%`);
+    }
+
+    // Paginación: range usa índices inclusivos [from, to].
+    query = query.range(offset, offset + pageSize - 1);
+
+    const { data, error, count } = await query;
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
     const rows = data ?? [];
+    const totalCount = count ?? 0;
     const puzzleQuestionIds = rows.filter((r) => r.type === 'puzzle').map((r) => r.id);
 
     if (puzzleQuestionIds.length > 0) {
@@ -486,7 +507,16 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
     // aunque esté filtrando por estado/tipo/área/vídeo. Una sola query extra.
     const unreadCount = await countUnreadNotes(supabase, clubId);
 
-    return res.json({ ok: true, data: rows, meta: { unread_count: unreadCount } });
+    return res.json({
+      ok: true,
+      data: rows,
+      meta: {
+        unread_count: unreadCount,
+        total: totalCount,
+        page,
+        page_size: pageSize,
+      },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

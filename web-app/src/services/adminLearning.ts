@@ -50,20 +50,41 @@ export const adminLearningService = {
     return res.data ?? [];
   },
 
+  async listClubsWithContent(): Promise<Array<{ id: string; name: string }>> {
+    const res = await apiFetchWithAuth<ApiOk<{ data: Array<{ id: string; name: string }> }>>('/admin/learning/clubs-with-content');
+    return res.data ?? [];
+  },
+
   async listAllQuestions(filters?: {
     club_id?: string;
     type?: QuestionType;
     area?: QuestionArea;
     status?: 'all' | 'draft' | 'published' | 'inactive';
-  }): Promise<AdminQuestion[]> {
+    search?: string;
+    order_by?: 'created_desc' | 'created_asc';
+    page?: number;
+    page_size?: number;
+  }): Promise<{ data: AdminQuestion[]; total: number; page: number; page_size: number }> {
     const q = new URLSearchParams();
     if (filters?.club_id) q.set('club_id', filters.club_id);
     if (filters?.type) q.set('type', filters.type);
     if (filters?.area) q.set('area', filters.area);
     if (filters?.status && filters.status !== 'all') q.set('status', filters.status);
+    if (filters?.search) q.set('search', filters.search);
+    if (filters?.order_by) q.set('order_by', filters.order_by);
+    if (filters?.page) q.set('page', String(filters.page));
+    if (filters?.page_size) q.set('page_size', String(filters.page_size));
     const qs = q.toString();
-    const res = await apiFetchWithAuth<ApiOk<{ data: AdminQuestion[] }>>(`/admin/learning/questions${qs ? `?${qs}` : ''}`);
-    return res.data ?? [];
+    const res = await apiFetchWithAuth<ApiOk<{
+      data: AdminQuestion[];
+      meta?: { total?: number; page?: number; page_size?: number };
+    }>>(`/admin/learning/questions${qs ? `?${qs}` : ''}`);
+    return {
+      data: res.data ?? [],
+      total: res.meta?.total ?? 0,
+      page: res.meta?.page ?? 1,
+      page_size: res.meta?.page_size ?? 20,
+    };
   },
 
   async activateQuestion(id: string, moderationNotes?: string | null): Promise<void> {

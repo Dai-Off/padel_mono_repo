@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Edit, HelpCircle, Trash2, AlertTriangle } from 'lucide-react';
+import { Plus, Edit, HelpCircle, Trash2, AlertTriangle, CheckSquare, Check, FileText, PowerOff, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { learningContentService, hasUnreadNotes, summarizeFeedback } from '../../../services/learningContent';
 import { QuestionFormModal } from './QuestionFormModal';
 import { FilterDropdown } from './FilterDropdown';
 import { StatusSwitcher } from './StatusSwitcher';
+import { SearchInput } from './SearchInput';
+import { Paginator } from './Paginator';
+import { usePageSizePref } from './usePageSizePref';
+import { BulkActionsBar, type BulkAction } from './BulkActionsBar';
 import type { Question, QuestionType, QuestionArea, QuestionStatus } from '../../../types/learningContent';
 
 const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence', 'puzzle'];
@@ -34,19 +39,52 @@ interface QuestionsTabProps {
 }
 
 export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps) {
-  // Mantenemos la callback en un ref para no provocar re-runs del useCallback
-  // de `load` cuando el padre la cambie por re-render.
-  // (El ref se sincroniza vía useEffect debajo.)
   const { t } = useTranslation();
+  // URL params como fuente de verdad para filtros + paginación. Permite linkar
+  // a vistas concretas y conserva estado entre refrescos del navegador.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const typeFilter = (searchParams.get('type') ?? 'all') as QuestionType | 'all';
+  const areaFilter = (searchParams.get('area') ?? 'all') as QuestionArea | 'all';
+  const statusFilter = (searchParams.get('status') ?? 'published') as 'all' | 'draft' | 'published' | 'inactive';
+  const videoFilter = (searchParams.get('video') ?? 'all') as 'all' | 'with_video' | 'without_video';
+  const search = searchParams.get('q') ?? '';
+  const orderBy = (searchParams.get('order') ?? 'created_desc') as 'created_desc' | 'created_asc';
+  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
+
+  // Helper para mutar query params manteniendo el resto. Cualquier cambio de
+  // filtro resetea a page=1.
+  const updateParam = useCallback((patch: Record<string, string | null>, resetPage = true) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const [k, v] of Object.entries(patch)) {
+        if (v == null || v === '') next.delete(k);
+        else next.set(k, v);
+      }
+      if (resetPage) next.delete('page');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = usePageSizePref('questions:club');
   const [loading, setLoading] = useState(false);
-  const [typeFilter, setTypeFilter] = useState<QuestionType | 'all'>('all');
-  const [areaFilter, setAreaFilter] = useState<QuestionArea | 'all'>('all');
-  // Filtro único de estado. Default 'published' (contenido vivo).
-  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published' | 'inactive'>('published');
-  // Filtro tri-estado de vídeo (client-side sobre has_video).
-  const [videoFilter, setVideoFilter] = useState<'all' | 'with_video' | 'without_video'>('all');
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; question?: Question } | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  };
 
   // Ref a un setter externo (lo provee LearningContentView) para que el badge
   // sobre la tab "Preguntas" use el contador EXACTO calculado por el backend,
@@ -58,24 +96,25 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     try {
-      const filters: {
-        type?: QuestionType;
-        area?: QuestionArea;
-        status?: 'all' | 'draft' | 'published' | 'inactive';
-      } = {};
+      const filters: Parameters<typeof learningContentService.listQuestions>[1] = {
+        status: statusFilter,
+        order_by: orderBy,
+        page,
+        page_size: pageSize,
+      };
       if (typeFilter !== 'all') filters.type = typeFilter;
       if (areaFilter !== 'all') filters.area = areaFilter;
-      filters.status = statusFilter;
-      const { data, unread_count } = await learningContentService.listQuestions(clubId, filters);
+      if (search) filters.search = search;
+      const { data, unread_count, total } = await learningContentService.listQuestions(clubId, filters);
       setQuestions(data);
-      // El meta.unread_count es total del club, sin importar filtros locales.
+      setTotal(total);
       onUnreadCountChangeRef.current?.(unread_count);
     } catch (e) {
       toast.error((e as Error).message || t('learning_save_error'));
     } finally {
       if (!opts?.silent) setLoading(false);
     }
-  }, [clubId, typeFilter, areaFilter, statusFilter, t]);
+  }, [clubId, typeFilter, areaFilter, statusFilter, search, orderBy, page, pageSize, t]);
 
   // Sincronizamos la callback recibida del padre con el ref usado por `load`.
   useEffect(() => { onUnreadCountChangeRef.current = onUnreadCountChange; }, [onUnreadCountChange]);
@@ -177,6 +216,71 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
     load({ silent: true });
   };
 
+  // Helper genérico para acciones bulk (club). Patrón idéntico al de admin.
+  const runBulk = async (
+    label: string,
+    fn: (id: string, q: Question) => Promise<unknown>,
+    optimisticPatch?: (q: Question) => Partial<Question>,
+  ) => {
+    const items = questions.filter((q) => selectedIds.has(q.id));
+    if (items.length === 0) return;
+    const snapshot = new Map(items.map((q) => [q.id, q]));
+    if (optimisticPatch) {
+      for (const q of items) patchLocal(q.id, optimisticPatch(q));
+    }
+    const results = await Promise.allSettled(items.map((q) => fn(q.id, q)));
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    const ko = results.length - ok;
+    if (ko > 0 && optimisticPatch) {
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          const orig = snapshot.get(items[i].id);
+          if (orig) patchLocal(items[i].id, orig);
+        }
+      });
+    }
+    if (ko === 0) toast.success(`${label}: ${ok}/${items.length}`);
+    else toast.error(`${label}: ${ok}/${items.length} (${ko} fallos)`);
+    exitSelectionMode();
+  };
+
+  const handleBulkPublish = () => runBulk(
+    'Publicadas',
+    (id, q) => q.status === 'inactive'
+      ? learningContentService.activateQuestion(id)
+      : learningContentService.updateQuestion(id, { status: 'published' }),
+    () => ({ status: 'published' }),
+  );
+  const handleBulkDraft = () => runBulk(
+    'Movidas a borrador',
+    (id) => learningContentService.updateQuestion(id, { status: 'draft' }),
+    () => ({ status: 'draft' }),
+  );
+  const handleBulkInactivate = () => runBulk(
+    'Desactivadas',
+    (id, q) => q.status === 'published'
+      ? learningContentService.deactivateQuestion(id)
+      : learningContentService.updateQuestion(id, { status: 'inactive' }),
+    () => ({ status: 'inactive' }),
+  );
+  const handleBulkDelete = async () => {
+    const items = questions.filter((q) => selectedIds.has(q.id) && q.status !== 'published');
+    if (items.length === 0) {
+      toast.error('Solo se pueden borrar borradores o inactivas. Quita las publicadas de la selección o cambia su estado primero.');
+      return;
+    }
+    const ok = window.confirm(`¿Borrar definitivamente ${items.length} pregunta${items.length === 1 ? '' : 's'}?\n\nEsta acción no se puede deshacer.`);
+    if (!ok) return;
+    const snapshot = questions;
+    setQuestions((prev) => prev.filter((q) => !items.some((it) => it.id === q.id)));
+    const results = await Promise.allSettled(items.map((q) => learningContentService.deleteQuestion(q.id)));
+    const succ = results.filter((r) => r.status === 'fulfilled').length;
+    const fail = results.length - succ;
+    if (fail === 0) toast.success(`Borradas: ${succ}/${items.length}`);
+    else { setQuestions(snapshot); toast.error(`Borradas: ${succ}/${items.length} (${fail} fallos)`); }
+    exitSelectionMode();
+  };
+
   // Al abrir el modal de edición, si la pregunta tiene una nota de moderación
   // no vista, la marcamos como vista. El backend devuelve el contador total
   // actualizado, que propagamos al padre para que el badge sea fiel a BBDD
@@ -221,8 +325,8 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
         </div>
       </div>
 
-      {/* Filtros compactos: dropdowns en una sola fila horizontal. */}
-      <div className="flex flex-wrap gap-1.5 bg-white rounded-2xl border border-gray-100 p-3">
+      {/* Filtros compactos + buscador + orden en una sola fila horizontal. */}
+      <div className="flex flex-wrap items-center gap-1.5 bg-white rounded-2xl border border-gray-100 p-3">
         <FilterDropdown
           label="Tipo"
           value={typeFilter}
@@ -231,7 +335,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
             { value: 'all' as const, label: t('learning_filter_all_types') },
             ...QUESTION_TYPES.map((qt) => ({ value: qt, label: t(`learning_type_${qt}`) })),
           ]}
-          onChange={setTypeFilter}
+          onChange={(v) => updateParam({ type: v === 'all' ? null : v })}
         />
         <FilterDropdown
           label="Área"
@@ -241,7 +345,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
             { value: 'all' as const, label: t('learning_filter_all_areas') },
             ...QUESTION_AREAS.map((qa) => ({ value: qa, label: t(`learning_area_${qa}`) })),
           ]}
-          onChange={setAreaFilter}
+          onChange={(v) => updateParam({ area: v === 'all' ? null : v })}
         />
         <FilterDropdown
           label="Estado"
@@ -253,7 +357,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
             { value: 'draft', label: 'Borradores' },
             { value: 'inactive', label: 'Inactivas' },
           ]}
-          onChange={setStatusFilter}
+          onChange={(v) => updateParam({ status: v === 'published' ? null : v })}
         />
         <FilterDropdown
           label="Vídeo"
@@ -264,9 +368,51 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
             { value: 'with_video', label: 'Con vídeo' },
             { value: 'without_video', label: 'Sin vídeo' },
           ]}
-          onChange={setVideoFilter}
+          onChange={(v) => updateParam({ video: v === 'all' ? null : v })}
         />
+        <FilterDropdown
+          label="Orden"
+          value={orderBy}
+          allValue="created_desc"
+          options={[
+            { value: 'created_desc', label: 'Más recientes' },
+            { value: 'created_asc', label: 'Más antiguas' },
+          ]}
+          onChange={(v) => updateParam({ order: v === 'created_desc' ? null : v })}
+        />
+        <div className="ml-auto flex items-center gap-1.5">
+          <SearchInput
+            value={search}
+            onChange={(v) => updateParam({ q: v || null })}
+            placeholder="Buscar pregunta..."
+          />
+          <button
+            type="button"
+            onClick={() => { if (selectionMode) exitSelectionMode(); else setSelectionMode(true); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all ${
+              selectionMode ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
+            }`}
+            title="Seleccionar varias preguntas para acciones bulk"
+          >
+            <CheckSquare className="w-3.5 h-3.5" />
+            {selectionMode ? 'Cancelar' : 'Seleccionar varias'}
+          </button>
+        </div>
       </div>
+
+      {/* Barra sticky de acciones bulk en modo selección (encima de la lista). */}
+      {selectionMode && (
+        <BulkActionsBar
+          selectedCount={selectedIds.size}
+          onCancel={exitSelectionMode}
+          actions={[
+            { key: 'publish', label: 'Publicar', icon: <Send className="w-3 h-3" />, variant: 'success', onClick: handleBulkPublish },
+            { key: 'draft', label: 'A borrador', icon: <FileText className="w-3 h-3" />, variant: 'warning', onClick: handleBulkDraft },
+            { key: 'inactivate', label: 'Desactivar', icon: <PowerOff className="w-3 h-3" />, variant: 'neutral', onClick: handleBulkInactivate },
+            { key: 'delete', label: 'Borrar', icon: <Trash2 className="w-3 h-3" />, variant: 'danger', onClick: handleBulkDelete },
+          ] satisfies BulkAction[]}
+        />
+      )}
 
       {/* Lista de preguntas */}
       {loading ? (
@@ -279,26 +425,43 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {visibleQuestions.map((q, i) => {
             const unread = hasUnreadNotes(q);
+            const checked = selectedIds.has(q.id);
             return (
             <motion.div
               key={q.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.03 }}
+              onClick={selectionMode ? () => toggleSelect(q.id) : undefined}
               className={`bg-white rounded-2xl border-2 p-4 space-y-3 ${
-                unread
-                  ? 'border-amber-300 shadow-sm'
-                  : q.status === 'published'
-                    ? 'border-gray-100'
-                    : 'border-gray-100 opacity-60'
+                selectionMode
+                  ? `cursor-pointer ${checked ? 'border-indigo-400 bg-indigo-50/30' : 'border-gray-100 hover:border-gray-200'}`
+                  : unread
+                    ? 'border-amber-300 shadow-sm'
+                    : q.status === 'published'
+                      ? 'border-gray-100'
+                      : 'border-gray-100 opacity-60'
               }`}
             >
               {/* Badges (sin chip de estado: vive en el StatusSwitcher abajo). */}
               <div className="flex items-center gap-2 flex-wrap">
+                {selectionMode && (
+                  <span className="flex items-center justify-center w-5 h-5 rounded-md border-2 border-indigo-300 bg-white">
+                    {checked && <Check className="w-3 h-3 text-indigo-500" />}
+                  </span>
+                )}
                 {unread && (
                   <span className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-100 text-amber-700 text-[10px] font-bold">
                     <AlertTriangle className="w-3 h-3" />
                     Notas nuevas
+                  </span>
+                )}
+                {selectionMode && (
+                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                    q.status === 'published' ? 'bg-emerald-50 text-emerald-700' :
+                    q.status === 'draft' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'
+                  }`}>
+                    {q.status === 'published' ? 'Publicada' : q.status === 'draft' ? 'Borrador' : 'Inactiva'}
                   </span>
                 )}
                 <span className="px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-600 text-[10px] font-bold">
@@ -338,7 +501,8 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
                 );
               })()}
 
-              {/* Acciones */}
+              {/* Acciones: ocultas en modo selección. */}
+              {!selectionMode && (
               <div className="flex items-center gap-2 pt-1 flex-wrap">
                 <StatusSwitcher
                   status={q.status}
@@ -368,11 +532,21 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
                   </button>
                 )}
               </div>
+              )}
             </motion.div>
             );
           })}
         </div>
       )}
+
+      {/* Paginador: solo si hay más de una página. */}
+      <Paginator
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={(p) => updateParam({ page: p === 1 ? null : String(p) }, false)}
+        onPageSizeChange={(s) => { setPageSize(s); updateParam({}); }}
+      />
 
       {/* Modal crear/editar */}
       {modal && (

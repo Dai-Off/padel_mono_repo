@@ -169,17 +169,31 @@ export const learningContentService = {
       // 'all' devuelve todas; los valores concretos filtran. Default backend:
       // 'published'. Si quieres ver borradores o inactivas, pásalo explícito.
       status?: 'all' | 'draft' | 'published' | 'inactive';
+      search?: string;
+      order_by?: 'created_desc' | 'created_asc';
+      page?: number;
+      page_size?: number;
     },
-  ): Promise<{ data: Question[]; unread_count: number }> {
+  ): Promise<{ data: Question[]; unread_count: number; total: number; page: number; page_size: number }> {
     const q = new URLSearchParams({ club_id: clubId });
     if (filters?.type) q.set('type', filters.type);
     if (filters?.area) q.set('area', filters.area);
     if (filters?.status) q.set('status', filters.status);
-    // El backend devuelve { data, meta: { unread_count } }. El unread_count
-    // es independiente de los filtros aplicados — cuenta TODAS las preguntas
-    // del club con nota de moderación pendiente.
-    const res = await apiFetchWithAuth<ApiOk<{ data: Question[]; meta?: { unread_count?: number } }>>(`/learning/questions?${q}`);
-    return { data: res.data ?? [], unread_count: res.meta?.unread_count ?? 0 };
+    if (filters?.search) q.set('search', filters.search);
+    if (filters?.order_by) q.set('order_by', filters.order_by);
+    if (filters?.page) q.set('page', String(filters.page));
+    if (filters?.page_size) q.set('page_size', String(filters.page_size));
+    const res = await apiFetchWithAuth<ApiOk<{
+      data: Question[];
+      meta?: { unread_count?: number; total?: number; page?: number; page_size?: number };
+    }>>(`/learning/questions?${q}`);
+    return {
+      data: res.data ?? [],
+      unread_count: res.meta?.unread_count ?? 0,
+      total: res.meta?.total ?? 0,
+      page: res.meta?.page ?? 1,
+      page_size: res.meta?.page_size ?? 20,
+    };
   },
 
   async createQuestion(body: {

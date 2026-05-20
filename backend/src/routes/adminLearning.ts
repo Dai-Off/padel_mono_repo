@@ -82,6 +82,34 @@ router.get('/pending-courses/count', requireAdmin, async (_req: Request, res: Re
   }
 });
 
+// GET /clubs-with-content — lista de clubs únicos que tienen al menos una
+// pregunta o curso. Sirve para alimentar el filtro de club en moderación sin
+// depender del listing paginado.
+router.get('/clubs-with-content', requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const [qRes, cRes] = await Promise.all([
+      supabase.from('learning_questions').select('created_by_club, clubs:created_by_club(name)'),
+      supabase.from('learning_courses').select('club_id, clubs(name)'),
+    ]);
+    const map = new Map<string, string>();
+    for (const r of qRes.data ?? []) {
+      const id = (r as any).created_by_club as string | undefined;
+      const name = ((r as any).clubs as any)?.name as string | undefined;
+      if (id && name) map.set(id, name);
+    }
+    for (const r of cRes.data ?? []) {
+      const id = (r as any).club_id as string | undefined;
+      const name = ((r as any).clubs as any)?.name as string | undefined;
+      if (id && name) map.set(id, name);
+    }
+    const data = Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+    return res.json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // GET /courses/:id — detalle de curso con lecciones (admin, sin verificar club)
 router.get('/courses/:id', requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -239,16 +267,28 @@ router.get('/courses', requireAdmin, async (req: Request, res: Response) => {
   }
 });
 
-// GET /questions — todas las preguntas (filtros opcionales: club_id, type, area, status)
+// GET /questions — todas las preguntas (filtros opcionales: club_id, type, area, status, search)
 router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { club_id, type, area, status } = req.query;
 
+    // Paginación + búsqueda + ordenación. Default 30 por página; máximo 100.
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const requestedSize = parseInt(String(req.query.page_size ?? '20'), 10) || 20;
+    const pageSize = Math.min(100, Math.max(1, requestedSize));
+    const offset = (page - 1) * pageSize;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const orderBy = String(req.query.order_by ?? 'created_desc');
+    const ascending = orderBy === 'created_asc';
+
     let query = supabase
       .from('learning_questions')
-      .select('id, created_by_club, type, level, area, has_video, video_url, content, status, moderation_notes, last_admin_edit_at, created_at, clubs:created_by_club(name)')
-      .order('created_at', { ascending: false });
+      .select(
+        'id, created_by_club, type, level, area, has_video, video_url, content, status, moderation_notes, last_admin_edit_at, created_at, clubs:created_by_club(name)',
+        { count: 'exact' },
+      )
+      .order('created_at', { ascending });
 
     if (club_id) query = query.eq('created_by_club', club_id as string);
     if (type) query = query.eq('type', type as string);
@@ -256,10 +296,17 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
     if (status === 'draft' || status === 'published' || status === 'inactive') {
       query = query.eq('status', status);
     }
+    if (search) {
+      const escaped = search.replace(/[%_]/g, '\\$&');
+      query = query.ilike('content_search', `%${escaped}%`);
+    }
 
-    const { data: questions, error } = await query;
+    query = query.range(offset, offset + pageSize - 1);
+
+    const { data: questions, error, count } = await query;
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
+    const totalCount = count ?? 0;
 
     // JOIN con learning_puzzles para preguntas type='puzzle'.
     const puzzleIds = (questions || []).filter((q: any) => q.type === 'puzzle').map((q: any) => q.id);
@@ -307,7 +354,11 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
       return base;
     });
 
-    return res.json({ ok: true, data: result });
+    return res.json({
+      ok: true,
+      data: result,
+      meta: { total: totalCount, page, page_size: pageSize },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

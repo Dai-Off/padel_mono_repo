@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { BookOpen, HelpCircle, Edit, Trash2 } from 'lucide-react';
+import { BookOpen, HelpCircle, Edit, Trash2, CheckSquare, Check, FileText, PowerOff, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { adminLearningService } from '../../../services/adminLearning';
 import { summarizeFeedback } from '../../../services/learningContent';
 import { ReviewDetailModal } from './ReviewDetailModal';
@@ -10,6 +11,10 @@ import { ReviewTab } from './ReviewTab';
 import { QuestionFormModal } from '../../Learning/Questions/QuestionFormModal';
 import { FilterDropdown } from '../../Learning/Questions/FilterDropdown';
 import { StatusSwitcher } from '../../Learning/Questions/StatusSwitcher';
+import { SearchInput } from '../../Learning/Questions/SearchInput';
+import { Paginator } from '../../Learning/Questions/Paginator';
+import { usePageSizePref } from '../../Learning/Questions/usePageSizePref';
+import { BulkActionsBar, type BulkAction } from '../../Learning/Questions/BulkActionsBar';
 import type { AdminCourse, AdminQuestion } from '../../../types/adminLearning';
 import type { Question, QuestionType, QuestionArea, CourseStatus } from '../../../types/learningContent';
 
@@ -99,25 +104,59 @@ export function ModerationTab({ onPendingCountChange, initialPendingCount = 0 }:
 
 function QuestionsModeration() {
   const { t } = useTranslation();
+  // URL params como fuente de verdad para filtros + paginación.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const typeFilter = (searchParams.get('type') ?? 'all') as QuestionType | 'all';
+  const areaFilter = (searchParams.get('area') ?? 'all') as QuestionArea | 'all';
+  const statusFilter = (searchParams.get('status') ?? 'all') as 'all' | 'draft' | 'published' | 'inactive';
+  const clubFilter = searchParams.get('club') ?? 'all';
+  const videoFilter = (searchParams.get('video') ?? 'all') as 'all' | 'with_video' | 'without_video';
+  const search = searchParams.get('q') ?? '';
+  const orderBy = (searchParams.get('order') ?? 'created_desc') as 'created_desc' | 'created_asc';
+  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
+
+  const updateParam = useCallback((patch: Record<string, string | null>, resetPage = true) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      for (const [k, v] of Object.entries(patch)) {
+        if (v == null || v === '') next.delete(k);
+        else next.set(k, v);
+      }
+      if (resetPage) next.delete('page');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   const [questions, setQuestions] = useState<AdminQuestion[]>([]);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = usePageSizePref('questions:admin');
   const [clubs, setClubs] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
-  const [typeFilter, setTypeFilter] = useState<QuestionType | 'all'>('all');
-  const [areaFilter, setAreaFilter] = useState<QuestionArea | 'all'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'published' | 'inactive'>('all');
-  const [clubFilter, setClubFilter] = useState<string>('all');
-  // Filtro tri-estado de vídeo. Se aplica client-side sobre has_video.
-  const [videoFilter, setVideoFilter] = useState<'all' | 'with_video' | 'without_video'>('all');
+  // Modo selección múltiple. Cuando está activo, las cards muestran checkbox
+  // en lugar de los botones de acción individuales y aparece la barra de
+  // acciones bulk en el fondo.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Cargar lista de clubs una vez (sin filtro de club)
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const exitSelectionMode = () => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  };
+
+  // Lista de clubs con contenido: una llamada dedicada (no depende del listing
+  // paginado, que solo trae 30 a la vez).
   useEffect(() => {
-    adminLearningService.listAllQuestions().then((all) => {
-      const map = new Map<string, string>();
-      for (const q of all) {
-        if (q.club_id && q.club_name) map.set(q.club_id, q.club_name);
-      }
-      setClubs(Array.from(map.entries()).map(([id, name]) => ({ id, name })));
-    }).catch(() => {});
+    adminLearningService.listClubsWithContent()
+      .then((list) => setClubs(list))
+      .catch(() => {});
   }, []);
 
   // Variante con flag `silent`: cuando silent=true, NO se marca loading=true,
@@ -126,24 +165,25 @@ function QuestionsModeration() {
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     try {
-      const filters: {
-        type?: QuestionType;
-        area?: QuestionArea;
-        status?: 'all' | 'draft' | 'published' | 'inactive';
-        club_id?: string;
-      } = {};
+      const filters: Parameters<typeof adminLearningService.listAllQuestions>[0] = {
+        status: statusFilter,
+        order_by: orderBy,
+        page,
+        page_size: pageSize,
+      };
       if (typeFilter !== 'all') filters.type = typeFilter;
       if (areaFilter !== 'all') filters.area = areaFilter;
-      filters.status = statusFilter;
       if (clubFilter !== 'all') filters.club_id = clubFilter;
-      const list = await adminLearningService.listAllQuestions(filters);
-      setQuestions(list);
+      if (search) filters.search = search;
+      const { data, total } = await adminLearningService.listAllQuestions(filters);
+      setQuestions(data);
+      setTotal(total);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
       if (!opts?.silent) setLoading(false);
     }
-  }, [typeFilter, areaFilter, statusFilter, clubFilter]);
+  }, [typeFilter, areaFilter, statusFilter, clubFilter, search, orderBy, page, pageSize]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -189,6 +229,75 @@ function QuestionsModeration() {
         setEditing(q);
       }
     }
+  };
+
+  // Helper genérico para acciones bulk: dispara `fn(id)` en paralelo para
+  // todos los IDs seleccionados, hace patch local optimista y muestra un toast
+  // con resumen ("4/5 aplicadas"). Si una falla, revierte solo esa.
+  const runBulk = async (
+    label: string,
+    fn: (id: string, q: AdminQuestion) => Promise<void>,
+    optimisticPatch?: (q: AdminQuestion) => Partial<AdminQuestion>,
+  ) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const items = questions.filter((q) => selectedIds.has(q.id));
+    const snapshot = new Map(items.map((q) => [q.id, q]));
+
+    if (optimisticPatch) {
+      for (const q of items) patchLocal(q.id, optimisticPatch(q));
+    }
+
+    const results = await Promise.allSettled(items.map((q) => fn(q.id, q)));
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    const ko = results.length - ok;
+
+    // Revert solo los que fallaron.
+    if (ko > 0 && optimisticPatch) {
+      results.forEach((r, i) => {
+        if (r.status === 'rejected') {
+          const orig = snapshot.get(items[i].id);
+          if (orig) patchLocal(items[i].id, orig);
+        }
+      });
+    }
+
+    if (ko === 0) toast.success(`${label}: ${ok}/${items.length}`);
+    else toast.error(`${label}: ${ok}/${items.length} (${ko} fallos)`);
+    exitSelectionMode();
+  };
+
+  const handleBulkPublish = () => runBulk(
+    'Publicadas',
+    (id) => adminLearningService.activateQuestion(id),
+    () => ({ status: 'published' }),
+  );
+  const handleBulkDraft = () => runBulk(
+    'Movidas a borrador',
+    (id) => adminLearningService.moveQuestionToDraft(id, null),
+    () => ({ status: 'draft' }),
+  );
+  const handleBulkInactivate = () => runBulk(
+    'Desactivadas',
+    (id) => adminLearningService.deactivateQuestion(id),
+    () => ({ status: 'inactive' }),
+  );
+  const handleBulkDelete = async () => {
+    const n = selectedIds.size;
+    if (n === 0) return;
+    const firstOk = window.confirm(`¿Borrar definitivamente ${n} pregunta${n === 1 ? '' : 's'}?\n\nEsta acción no se puede deshacer.`);
+    if (!firstOk) return;
+    const secondOk = window.confirm('Confirmación final: el borrado es irreversible. ¿Continuar?');
+    if (!secondOk) return;
+    const ids = Array.from(selectedIds);
+    const snapshot = questions;
+    setQuestions((prev) => prev.filter((q) => !selectedIds.has(q.id)));
+    const results = await Promise.allSettled(ids.map((id) => adminLearningService.deleteQuestion(id)));
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    const ko = results.length - ok;
+    if (ko === 0) toast.success(`Borradas: ${ok}/${ids.length}`);
+    else { setQuestions(snapshot); toast.error(`Borradas: ${ok}/${ids.length} (${ko} fallos)`); }
+    exitSelectionMode();
   };
 
   // Borrado forzado (admin). Doble confirm si la pregunta está published.
@@ -237,16 +346,60 @@ function QuestionsModeration() {
     { value: 'without_video', label: 'Sin vídeo' },
   ];
 
+  const orderOptions: { value: 'created_desc' | 'created_asc'; label: string }[] = [
+    { value: 'created_desc', label: 'Más recientes' },
+    { value: 'created_asc', label: 'Más antiguas' },
+  ];
+
   return (
     <div className="space-y-4">
-      {/* Filtros: una sola fila horizontal compacta con dropdowns por categoría. */}
-      <div className="flex flex-wrap gap-1.5 bg-white rounded-2xl border border-gray-100 p-3">
-        <FilterDropdown label="Club" value={clubFilter} allValue="all" options={clubOptions} onChange={setClubFilter} />
-        <FilterDropdown label="Tipo" value={typeFilter} allValue="all" options={typeOptions} onChange={setTypeFilter} />
-        <FilterDropdown label="Área" value={areaFilter} allValue="all" options={areaOptions} onChange={setAreaFilter} />
-        <FilterDropdown label="Estado" value={statusFilter} allValue="all" options={statusOptions} onChange={setStatusFilter} />
-        <FilterDropdown label="Vídeo" value={videoFilter} allValue="all" options={videoOptions} onChange={setVideoFilter} />
+      {/* Filtros + buscador + orden en una sola fila horizontal. */}
+      <div className="flex flex-wrap items-center gap-1.5 bg-white rounded-2xl border border-gray-100 p-3">
+        <FilterDropdown label="Club" value={clubFilter} allValue="all" options={clubOptions}
+          onChange={(v) => updateParam({ club: v === 'all' ? null : v })} />
+        <FilterDropdown label="Tipo" value={typeFilter} allValue="all" options={typeOptions}
+          onChange={(v) => updateParam({ type: v === 'all' ? null : v })} />
+        <FilterDropdown label="Área" value={areaFilter} allValue="all" options={areaOptions}
+          onChange={(v) => updateParam({ area: v === 'all' ? null : v })} />
+        <FilterDropdown label="Estado" value={statusFilter} allValue="all" options={statusOptions}
+          onChange={(v) => updateParam({ status: v === 'all' ? null : v })} />
+        <FilterDropdown label="Vídeo" value={videoFilter} allValue="all" options={videoOptions}
+          onChange={(v) => updateParam({ video: v === 'all' ? null : v })} />
+        <FilterDropdown label="Orden" value={orderBy} allValue="created_desc" options={orderOptions}
+          onChange={(v) => updateParam({ order: v === 'created_desc' ? null : v })} />
+        <div className="ml-auto flex items-center gap-1.5">
+          <SearchInput
+            value={search}
+            onChange={(v) => updateParam({ q: v || null })}
+            placeholder="Buscar pregunta..."
+          />
+          <button
+            type="button"
+            onClick={() => { if (selectionMode) exitSelectionMode(); else setSelectionMode(true); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all ${
+              selectionMode ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
+            }`}
+            title="Seleccionar varias preguntas para acciones bulk"
+          >
+            <CheckSquare className="w-3.5 h-3.5" />
+            {selectionMode ? 'Cancelar' : 'Seleccionar varias'}
+          </button>
+        </div>
       </div>
+
+      {/* Barra sticky de acciones bulk en modo selección (encima de la lista). */}
+      {selectionMode && (
+        <BulkActionsBar
+          selectedCount={selectedIds.size}
+          onCancel={exitSelectionMode}
+          actions={[
+            { key: 'publish', label: 'Publicar', icon: <Send className="w-3 h-3" />, variant: 'success', onClick: handleBulkPublish },
+            { key: 'draft', label: 'A borrador', icon: <FileText className="w-3 h-3" />, variant: 'warning', onClick: handleBulkDraft },
+            { key: 'inactivate', label: 'Desactivar', icon: <PowerOff className="w-3 h-3" />, variant: 'neutral', onClick: handleBulkInactivate },
+            { key: 'delete', label: 'Borrar', icon: <Trash2 className="w-3 h-3" />, variant: 'danger', onClick: handleBulkDelete },
+          ] satisfies BulkAction[]}
+        />
+      )}
 
       {/* Lista */}
       {loading ? (
@@ -257,21 +410,41 @@ function QuestionsModeration() {
         <div className="text-center py-12 text-gray-400 text-sm">{t('learning_empty_questions')}</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {visibleQuestions.map((q, i) => (
+          {visibleQuestions.map((q, i) => {
+            const checked = selectedIds.has(q.id);
+            return (
             <motion.div
               key={q.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.02 }}
-              className={`bg-white rounded-2xl border p-4 space-y-3 ${q.status === 'published' ? 'border-gray-100' : 'border-gray-100 opacity-60'}`}
+              onClick={selectionMode ? () => toggleSelect(q.id) : undefined}
+              className={`bg-white rounded-2xl border p-4 space-y-3 ${
+                selectionMode
+                  ? `cursor-pointer ${checked ? 'border-indigo-400 bg-indigo-50/30' : 'border-gray-100 hover:border-gray-200'}`
+                  : q.status === 'published' ? 'border-gray-100' : 'border-gray-100 opacity-60'
+              }`}
             >
               {/* Cabecera de chips: tipo / área / nivel / club. El estado vive
                   en el StatusSwitcher de abajo (no duplicamos el chip). */}
               <div className="flex items-center gap-2 flex-wrap">
+                {selectionMode && (
+                  <span className="flex items-center justify-center w-5 h-5 rounded-md border-2 border-indigo-300 bg-white">
+                    {checked && <Check className="w-3 h-3 text-indigo-500" />}
+                  </span>
+                )}
                 <span className="px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-600 text-[10px] font-bold">{t(`learning_type_${q.type}`)}</span>
                 <span className="px-2 py-0.5 rounded-lg bg-emerald-50 text-emerald-600 text-[10px] font-bold">{t(`learning_area_${q.area}`)}</span>
                 <span className="px-2 py-0.5 rounded-lg bg-gray-100 text-gray-500 text-[10px] font-bold">Lv. {q.level}</span>
                 <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-[10px] font-bold">{q.club_name}</span>
+                {selectionMode && (
+                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${
+                    q.status === 'published' ? 'bg-emerald-50 text-emerald-700' :
+                    q.status === 'draft' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-600'
+                  }`}>
+                    {q.status === 'published' ? 'Publicada' : q.status === 'draft' ? 'Borrador' : 'Inactiva'}
+                  </span>
+                )}
               </div>
               <div className="flex items-start gap-2">
                 <HelpCircle className="w-4 h-4 text-gray-300 mt-0.5 shrink-0" />
@@ -294,6 +467,7 @@ function QuestionsModeration() {
                   </div>
                 );
               })()}
+              {!selectionMode && (
               <div className="flex items-center gap-2 pt-1 flex-wrap">
                 <StatusSwitcher
                   status={q.status}
@@ -320,10 +494,20 @@ function QuestionsModeration() {
                   Borrar
                 </button>
               </div>
+              )}
             </motion.div>
-          ))}
+            );
+          })}
         </div>
       )}
+
+      <Paginator
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={(p) => updateParam({ page: p === 1 ? null : String(p) }, false)}
+        onPageSizeChange={(s) => { setPageSize(s); updateParam({}); }}
+      />
 
       {/* Modal de edición admin. Al cerrar tras guardar hacemos un refresh
           silencioso (sin spinner) para que el scroll no salte. */}
