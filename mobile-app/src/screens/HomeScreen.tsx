@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, type AppStateStatus, ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { fetchMatches } from '../api/matches';
-import { fetchPublicTournaments } from '../api/tournaments';
-import { mapMatchToPartido } from '../api/mapMatchToPartido';
-import { fetchMyPlayerId, fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import {
   CompetitiveLeagueHomeCard,
   DailyLessonCard,
@@ -18,20 +14,21 @@ import {
   INICIO_PAD_H,
   INICIO_PAD_TOP,
   INICIO_STACK_GAP,
+  HomeErrorBanner,
+  HomeSkeleton,
   MissionsHomeSection,
   type HomeMission,
   OnboardingBanner,
   ProximosPartidosSection,
   SeasonPassHomeCard,
 } from '../components/home/inicio';
-import { selectMyUpcomingMatches } from '../domain/selectMyUpcomingMatches';
 import { useAuth } from '../contexts/AuthContext';
-import { useHomeStats } from '../hooks/useHomeStats';
+import { useHomeData } from '../contexts/HomeDataContext';
 import type { PartidoItem } from './PartidosScreen';
 import { IAAfinidadModal } from '../components/home/IAAfinidadModal';
 import { OnboardingHardBlockModal } from '../components/onboarding/OnboardingHardBlockModal';
 import { searchAiMatch } from '../api/aiMatch';
-import { fetchSeasonPassMe, type SeasonPassMeOk, type SeasonPassMissionDto } from '../api/seasonPass';
+import { type SeasonPassMissionDto } from '../api/seasonPass';
 import {
   isSeasonPassSpCapped,
   seasonPassHomeNextLine,
@@ -104,14 +101,36 @@ export function HomeScreen({
   onOpenProfileForOnboarding,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
-  const { session, refreshAccessToken } = useAuth();
-  const { stats, loading: statsLoading } = useHomeStats();
-  const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
-  const [tournamentsLoading, setTournamentsLoading] = useState(true);
-  const [partidos, setPartidos] = useState<PartidoItem[]>([]);
-  const [misProximosPartidos, setMisProximosPartidos] = useState<PartidoItem[]>([]);
-  const [matchesLoading, setMatchesLoading] = useState(true);
-  const [myPlayerProfile, setMyPlayerProfile] = useState<MyPlayerProfile | null>(null);
+  const { session } = useAuth();
+  // Datos del home cacheados a nivel de app (sobreviven a remounts del Home
+  // cuando navegas a otras pantallas y vuelves). Ver HomeDataContext.
+  const {
+    profile: myPlayerProfile,
+    profileLoading,
+    partidos,
+    misProximosPartidos,
+    matchesLoading,
+    publicTournamentsCount,
+    tournamentsLoading,
+    seasonPassMe,
+    seasonPassLoading,
+    refreshSeasonPass,
+    stats,
+    statsLoading,
+    refreshStreak,
+    hasInitialError,
+    refreshAll,
+  } = useHomeData();
+  // Feedback visual mientras "Reintentar" del banner de error está en vuelo.
+  const [retrying, setRetrying] = useState(false);
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await refreshAll();
+    } finally {
+      setRetrying(false);
+    }
+  };
   const [affinityModalVisible, setAffinityModalVisible] = useState(false);
   const [affinityLoading, setAffinityLoading] = useState(false);
   // Inicializar desde caché para sobrevivir remounts (ej. al volver del chat de IA Afinidad)
@@ -127,8 +146,6 @@ export function HomeScreen({
     _affinityCache.sentIds = newSet;
     setAffinitySentIds(newSet);
   };
-  const [seasonPassMe, setSeasonPassMe] = useState<SeasonPassMeOk | null>(null);
-  const [seasonPassLoading, setSeasonPassLoading] = useState(false);
   /**
    * Cuál de los hard block modals está abierto. Se renderiza como Modal RN
    * fullScreen encima del Home, así "Ahora no" lo cierra sin remontar el Home
@@ -149,100 +166,15 @@ export function HomeScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [affinityReopenSignal]);
 
-  const loadMatches = useCallback(async () => {
-    setMatchesLoading(true);
-    let token = session?.access_token ?? null;
-    let [playerId, matches] = await Promise.all([
-      token ? fetchMyPlayerId(token) : Promise.resolve(null),
-      fetchMatches({ expand: true, token }),
-    ]);
-
-    if (!playerId && session?.refresh_token) {
-      const newToken = await refreshAccessToken();
-      if (newToken) {
-        token = newToken;
-        [playerId, matches] = await Promise.all([
-          fetchMyPlayerId(newToken),
-          fetchMatches({ expand: true, token: newToken }),
-        ]);
-      }
+  // Refrescamos season pass y racha cuando volvemos de la lección diaria
+  // (ambos pueden haber cambiado). El resto de datos del home se refrescan
+  // a través de su TTL en HomeDataContext.
+  useEffect(() => {
+    if (streakRefreshKey > 0) {
+      void refreshSeasonPass({ force: true });
+      void refreshStreak({ force: true });
     }
-
-    const mineRaw = selectMyUpcomingMatches(matches, playerId);
-    const misProximos = mineRaw
-      .map(mapMatchToPartido)
-      .filter((p): p is PartidoItem => p != null);
-    setMisProximosPartidos(misProximos);
-
-    const all = matches
-      .map(mapMatchToPartido)
-      .filter((p): p is PartidoItem => p != null)
-      .filter((p) => p.matchPhase !== 'past');
-    setPartidos(all);
-    setMatchesLoading(false);
-  }, [session?.access_token, session?.refresh_token, refreshAccessToken]);
-
-  const loadSeasonPass = useCallback(async () => {
-    let token = session?.access_token ?? null;
-    if (!token) {
-      setSeasonPassMe(null);
-      setSeasonPassLoading(false);
-      return;
-    }
-    setSeasonPassLoading(true);
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    /** No llamar a `refreshAccessToken` aquí ante 4xx/5xx: si `/season-pass/me` falla (p. ej. 500 sin migración 050), refrescar token cambia `access_token`, re-dispara este effect y genera bucle infinito. */
-    const data = await fetchSeasonPassMe(token, tz);
-    setSeasonPassMe(data);
-    setSeasonPassLoading(false);
-  }, [session?.access_token, streakRefreshKey]);
-
-  useEffect(() => {
-    loadMatches();
-  }, [loadMatches]);
-
-  useEffect(() => {
-    void loadSeasonPass();
-  }, [loadSeasonPass]);
-
-  useEffect(() => {
-    let last: AppStateStatus = AppState.currentState;
-    const sub = AppState.addEventListener('change', (next) => {
-      const prev = last;
-      last = next;
-      if (prev.match(/inactive|background/) && next === 'active') {
-        loadMatches();
-        void loadSeasonPass();
-      }
-    });
-    return () => sub.remove();
-  }, [loadMatches, loadSeasonPass]);
-
-  useEffect(() => {
-    let mounted = true;
-    setTournamentsLoading(true);
-    fetchPublicTournaments(session?.access_token ?? null).then((r) => {
-      if (!mounted) return;
-      if (r.ok) {
-        /** Misma lista que Competiciones → públicos y no cancelados (open + closed). */
-        setPublicTournamentsCount(r.tournaments.length);
-      } else {
-        setPublicTournamentsCount(null);
-      }
-      setTournamentsLoading(false);
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [session?.access_token]);
-
-  useEffect(() => {
-    if (!session?.access_token) {
-      setMyPlayerProfile(null);
-      return;
-    }
-    void fetchMyPlayerProfile(session.access_token).then(setMyPlayerProfile);
-  }, [session?.access_token]);
+  }, [streakRefreshKey, refreshSeasonPass, refreshStreak]);
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 
@@ -319,6 +251,20 @@ export function HomeScreen({
           nextRewardName: null as string | null,
         };
 
+  /**
+   * Primera carga del Home: mantenemos el skeleton hasta que TODOS los
+   * datasets hayan llegado. Si usáramos `&&` el skeleton desaparecería con
+   * el primer fetch y las cards que llegan más tarde aparecerían bruscas —
+   * exactamente el problema que el skeleton intenta evitar.
+   *
+   * El context expone `loading=true` SOLO en la primera carga (las
+   * revalidaciones posteriores son silenciosas, ver HomeDataContext), así
+   * que esto es seguro para distinguir "primera vez" de "volviendo al Home
+   * con cache caliente".
+   */
+  const isFirstLoading =
+    profileLoading || matchesLoading || tournamentsLoading || seasonPassLoading;
+
   return (
     <>
       <View style={styles.screenRoot}>
@@ -334,6 +280,17 @@ export function HomeScreen({
           ]}
           showsVerticalScrollIndicator={false}
         >
+        {isFirstLoading ? (
+          <HomeSkeleton />
+        ) : hasInitialError && myPlayerProfile == null && partidos.length === 0 ? (
+          // Primera carga falló y no hay nada en cache: banner discreto con
+          // "Reintentar" en lugar de cards vacías sin contexto. Si hubiera
+          // datos parciales, mostraríamos el contenido (stale-while-error).
+          <HomeErrorBanner onRetry={handleRetry} retrying={retrying} />
+        ) : (<>
+        {/* Contenido real del Home a partir de aquí. Cuando los datos llegan
+            todos a la vez, el skeleton desaparece y entra el contenido — la
+            animación de `InicioEnterBlock` sigue funcionando como siempre. */}
         {/* Banner proactivo: visible arriba de todo si el jugador no ha
             completado el cuestionario de nivelación. Tap → perfil con modal
             del onboarding auto-abierto. */}
@@ -432,6 +389,7 @@ export function HomeScreen({
             onOpenPartidos={() => onNavigateToTab?.('partidos')}
           />
         </InicioEnterBlock>
+        </>)}
         </ScrollView>
       </View>
 

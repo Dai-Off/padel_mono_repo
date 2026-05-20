@@ -15,8 +15,8 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EducationalCourse, fetchCourseDetail, completeCourseLesson, type CourseLesson } from "../api/learning";
-import { fetchMyPlayerProfile } from "../api/players";
 import { useAuth } from "../contexts/AuthContext";
+import { useHomeData } from "../contexts/HomeDataContext";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { androidReadableText } from "../components/home/inicio/textStyles";
 
@@ -47,8 +47,11 @@ export function EducationalCourseDetailScreen({
    * Necesitamos diferenciar dos motivos por los que `course.locked` puede ser
    * true: (a) usuario sin onboarding — mostramos CTA "Descubrir mi nivel";
    * (b) onboarding hecho pero nivel insuficiente — solo informamos sin CTA.
+   *
+   * Profile viene del HomeDataContext (cacheado). No hace falta fetch local.
    */
-  const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const { profile } = useHomeData();
+  const needsOnboarding = profile != null && profile.onboardingCompleted === false;
 
   useEffect(() => {
     let mounted = true;
@@ -59,15 +62,6 @@ export function EducationalCourseDetailScreen({
     });
     return () => { mounted = false; };
   }, [session?.access_token, course.id]);
-
-  useEffect(() => {
-    let mounted = true;
-    fetchMyPlayerProfile(session?.access_token ?? null).then((p) => {
-      if (!mounted) return;
-      setNeedsOnboarding(p != null && p.onboardingCompleted === false);
-    });
-    return () => { mounted = false; };
-  }, [session?.access_token]);
 
   const toggleLesson = (id: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);

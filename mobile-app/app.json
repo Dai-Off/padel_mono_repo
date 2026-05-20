@@ -5,7 +5,7 @@
     "scheme": "padelapp",
     "version": "1.0.0",
     "orientation": "default",
-    "icon": "../wechat/images/wematch-logo.png",
+    "icon": "./assets/images/wematch-logo.png",
     "userInterfaceStyle": "automatic",
     "assetBundlePatterns": [
       "**/*"
@@ -40,8 +40,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "../wechat/images/wematch-logo.png",
-        "backgroundColor": "#0F0F0F"
+        "foregroundImage": "./assets/images/wematch-logo.png",
+        "backgroundColor": "#000000"
       },
       "softwareKeyboardLayoutMode": "pan",
       "package": "com.anonymous.padelapp",

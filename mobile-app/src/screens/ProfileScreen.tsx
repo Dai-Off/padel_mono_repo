@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
@@ -76,6 +77,10 @@ export function ProfileScreen({
   }, [autoOpenOnboarding]);
   const [assessment, setAssessment] = useState<CoachAssessment | null>(null);
   const [peerInsight, setPeerInsight] = useState<PeerFeedbackInsight | null>(null);
+  // Invalidar el cache global del HomeDataContext tras completar onboarding /
+  // editar el profile, para que el resto de pantallas (DailyLessonCard,
+  // CompetitiveLeague, etc.) vean el dato fresco sin re-fetch local.
+  const { refreshProfile: refreshGlobalProfile } = useHomeData();
 
   const loadProfile = React.useCallback(async (token: string, attempt = 0) => {
     setProfileLoading(true);
@@ -126,6 +131,10 @@ export function ProfileScreen({
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
     fetchMyCoachAssessment(session.access_token).then(setAssessment).catch(() => {});
+    // Invalidamos también la cache global para que el resto de pantallas se
+    // entere del cambio (ej. tras completar onboarding la card de Daily
+    // Lesson en Home deja de salir bloqueada).
+    void refreshGlobalProfile({ force: true });
   };
 
   if (profileLoading && !profile) {

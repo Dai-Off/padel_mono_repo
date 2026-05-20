@@ -19,3 +19,5 @@ export { InicioEnterBlock } from './InicioEnterBlock';
 export { InicioAmbientBackground } from './InicioAmbientBackground';
 export { InicioWidgetsCarousel } from './InicioWidgetsCarousel';
 export { OnboardingBanner } from './OnboardingBanner';
+export { HomeSkeleton } from './HomeSkeleton';
+export { HomeErrorBanner } from './HomeErrorBanner';
