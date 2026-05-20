@@ -18,6 +18,18 @@ import { RequireAuth } from './src/components/auth';
 import { STRIPE_PUBLISHABLE_KEY } from './src/config';
 import { theme } from './src/theme';
 import { isRecoveryDeepLink, parseSupabaseRecoveryFromUrl } from './src/lib/parseAuthRecoveryUrl';
+import { parseTournamentInviteUrl } from './src/lib/parseTournamentInviteUrl';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const PENDING_TOURNAMENT_INVITE_KEY = 'pending_tournament_invite';
+
+async function stashTournamentInviteFromUrl(url: string | null) {
+  if (!url) return;
+  const parsed = parseTournamentInviteUrl(url);
+  if (parsed) {
+    await AsyncStorage.setItem(PENDING_TOURNAMENT_INVITE_KEY, JSON.stringify(parsed));
+  }
+}
 
 type AuthScreen = 'login' | 'register' | 'forgot_password' | 'reset_password';
 
@@ -26,7 +38,9 @@ function AuthFlowWrapper() {
   const [recovery, setRecovery] = useState<RecoveryPayload | null>(null);
 
   const consumeRecoveryUrl = useCallback((url: string | null) => {
-    if (!url || !isRecoveryDeepLink(url)) return;
+    if (!url) return;
+    void stashTournamentInviteFromUrl(url);
+    if (!isRecoveryDeepLink(url)) return;
     const parsed = parseSupabaseRecoveryFromUrl(url);
     setRecovery({
       access_token: parsed.access_token,

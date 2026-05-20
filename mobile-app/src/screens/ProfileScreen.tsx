@@ -26,6 +26,7 @@ import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/pee
 type ProfileScreenProps = {
   onBack: () => void;
   onMenuPress: () => void;
+  onEditProfilePress?: () => void;
   onPreferencesPress?: () => void;
   // Si true, abre automáticamente el modal del cuestionario de nivelación al
   // montar. Usado cuando se llega aquí desde una feature bloqueada (Daily
@@ -49,6 +50,7 @@ function getInitials(firstName?: string | null, lastName?: string | null): strin
 export function ProfileScreen({
   onBack,
   onMenuPress,
+  onEditProfilePress,
   onPreferencesPress,
   autoOpenOnboarding = false,
   onOnboardingAutoOpened,
@@ -57,7 +59,8 @@ export function ProfileScreen({
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
-  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [activeSport, setActiveSport] = useState('Pádel');
   const [activeLogroTab, setActiveLogroTab] = useState('Todos');
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
@@ -79,32 +82,43 @@ export function ProfileScreen({
   // CompetitiveLeague, etc.) vean el dato fresco sin re-fetch local.
   const { refreshProfile: refreshGlobalProfile } = useHomeData();
 
-  const loadProfile = React.useCallback(async (token: string, isInitial = false, attempt = 0) => {
-    if (isInitial) setProfileLoading(true);
+  const loadProfile = React.useCallback(async (token: string, attempt = 0) => {
+    setProfileLoading(true);
+    setProfileError(null);
     try {
       const p = await fetchMyPlayerProfile(token);
       if (p) {
         setProfile(p);
         fetchMyPeerFeedbackInsight(token, p.id).then(setPeerInsight).catch(() => {});
-      } else if (attempt < 2) {
-        setTimeout(() => loadProfile(token, false, attempt + 1), 1500);
+        setProfileLoading(false);
+        return;
       }
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 1500));
+        return loadProfile(token, attempt + 1);
+      }
+      setProfileError('No se pudo cargar tu perfil. Comprueba la conexión e inténtalo de nuevo.');
     } catch {
       if (attempt < 2) {
-        setTimeout(() => loadProfile(token, false, attempt + 1), 1500);
+        await new Promise((r) => setTimeout(r, 1500));
+        return loadProfile(token, attempt + 1);
       }
+      setProfileError('Error al cargar el perfil.');
     } finally {
-      if (isInitial) setProfileLoading(false);
+      setProfileLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!session?.access_token) return;
-    const isInitial = profile === null;
-    loadProfile(session.access_token, isInitial);
-    fetchMyCoachAssessment(session.access_token).then(setAssessment).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.access_token]);
+    const token = session?.access_token;
+    if (!token) {
+      setProfileLoading(false);
+      setProfileError('Inicia sesión para ver tu perfil.');
+      return;
+    }
+    void loadProfile(token);
+    fetchMyCoachAssessment(token).then(setAssessment).catch(() => {});
+  }, [session?.access_token, loadProfile]);
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
   const displayName = profile
@@ -115,7 +129,7 @@ export function ProfileScreen({
 
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
-    loadProfile(session.access_token, false);
+    void loadProfile(session.access_token);
     fetchMyCoachAssessment(session.access_token).then(setAssessment).catch(() => {});
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
@@ -123,10 +137,30 @@ export function ProfileScreen({
     void refreshGlobalProfile({ force: true });
   };
 
-  if (profileLoading) {
+  if (profileLoading && !profile) {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#F18F34" />
+      </View>
+    );
+  }
+
+  if (profileError && !profile) {
+    return (
+      <View style={[styles.container, styles.centered, { paddingHorizontal: 24 }]}>
+        <Ionicons name="alert-circle-outline" size={40} color="#F18F34" />
+        <Text style={[styles.profileName, { marginTop: 16, textAlign: 'center' }]}>{profileError}</Text>
+        {session?.access_token ? (
+          <Pressable
+            style={[styles.editBtn, { marginTop: 20, paddingHorizontal: 24 }]}
+            onPress={() => void loadProfile(session.access_token!)}
+          >
+            <Text style={styles.editBtnText}>Reintentar</Text>
+          </Pressable>
+        ) : null}
+        <Pressable style={{ marginTop: 16 }} onPress={onBack}>
+          <Text style={{ color: '#9CA3AF' }}>Volver</Text>
+        </Pressable>
       </View>
     );
   }
@@ -224,7 +258,7 @@ export function ProfileScreen({
 
             {/* Action Buttons */}
             <View style={styles.actionButtonsRow}>
-              <Pressable style={styles.editBtn}>
+              <Pressable style={styles.editBtn} onPress={() => onEditProfilePress?.()}>
                 <Text style={styles.editBtnText}>Editar perfil</Text>
               </Pressable>
               <Pressable style={styles.personalizeBtn}>

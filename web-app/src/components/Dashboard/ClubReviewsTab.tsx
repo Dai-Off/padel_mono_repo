@@ -2,7 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { Star } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { listClubReviews, type ClubReviewListItem, type ClubReviewSummary } from '../../services/clubReviews';
+import { toast } from 'sonner';
+import {
+    listClubReviews,
+    patchClubReviewResponse,
+    type ClubReviewListItem,
+    type ClubReviewSummary,
+} from '../../services/clubReviews';
 import { PageSpinner } from '../Layout/PageSpinner';
 
 function AnimSection({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
@@ -50,7 +56,15 @@ function RatingBar({ stars, count, total }: { stars: number; count: number; tota
     );
 }
 
-function ReviewCard({ item }: { item: ClubReviewListItem }) {
+function ReviewCard({ item, onSaved }: { item: ClubReviewListItem; onSaved: () => void }) {
+    const { t } = useTranslation();
+    const [draft, setDraft] = useState(item.club_response ?? '');
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        setDraft(item.club_response ?? '');
+    }, [item.id, item.club_response]);
+
     const dateStr = new Date(item.created_at).toLocaleDateString(undefined, {
         day: '2-digit',
         month: '2-digit',
@@ -58,6 +72,22 @@ function ReviewCard({ item }: { item: ClubReviewListItem }) {
     });
     const initials = initialsFromPlayer(item.player);
     const name = displayName(item.player);
+
+    const handleSave = async () => {
+        const text = draft.trim();
+        if (!text) return;
+        setSaving(true);
+        try {
+            await patchClubReviewResponse(item.id, text);
+            toast.success(t('club_reviews_response_saved'));
+            onSaved();
+        } catch (e: unknown) {
+            toast.error(e instanceof Error ? e.message : t('club_reviews_response_error'));
+        } finally {
+            setSaving(false);
+        }
+    };
+
     return (
         <div className="bg-white rounded-2xl border border-gray-100 p-5">
             <div className="flex items-center justify-between mb-3">
@@ -77,8 +107,33 @@ function ReviewCard({ item }: { item: ClubReviewListItem }) {
                 </div>
             </div>
             {item.comment ? (
-                <p className="text-xs text-gray-500 leading-relaxed">{item.comment}</p>
+                <p className="text-xs text-gray-500 leading-relaxed mb-3">{item.comment}</p>
             ) : null}
+            <motion.div className="border-t border-gray-100 pt-3">
+                <p className="text-[10px] font-bold uppercase text-gray-400 mb-2">
+                    {t('club_reviews_response_label')}
+                </p>
+                {item.club_response ? (
+                    <p className="text-xs text-gray-600 leading-relaxed mb-2 whitespace-pre-wrap">
+                        {item.club_response}
+                    </p>
+                ) : null}
+                <textarea
+                    className="w-full rounded-xl border border-gray-200 px-3 py-2 text-xs min-h-[72px] resize-y"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    placeholder={t('club_reviews_response_placeholder')}
+                    maxLength={4000}
+                />
+                <button
+                    type="button"
+                    disabled={saving || !draft.trim()}
+                    onClick={() => void handleSave()}
+                    className="mt-2 w-full py-2.5 rounded-xl bg-[#E31E24] text-white text-xs font-bold disabled:opacity-50"
+                >
+                    {saving ? t('club_reviews_response_saving') : t('club_reviews_response_save')}
+                </button>
+            </motion.div>
         </div>
     );
 }
@@ -97,13 +152,8 @@ export function ClubReviewsTab({
     const [reviews, setReviews] = useState<ClubReviewListItem[]>([]);
     const seq = useRef(0);
 
-    useEffect(() => {
-        if (!clubResolved || !clubId) {
-            setLoading(false);
-            setSummary(null);
-            setReviews([]);
-            return;
-        }
+    const reload = () => {
+        if (!clubId) return;
         const n = ++seq.current;
         setLoading(true);
         setError(null);
@@ -121,6 +171,16 @@ export function ClubReviewsTab({
                 if (seq.current !== n) return;
                 setLoading(false);
             });
+    };
+
+    useEffect(() => {
+        if (!clubResolved || !clubId) {
+            setLoading(false);
+            setSummary(null);
+            setReviews([]);
+            return;
+        }
+        reload();
     }, [clubId, clubResolved, t]);
 
     if (!clubResolved) {
@@ -201,7 +261,7 @@ export function ClubReviewsTab({
                 ) : (
                     reviews.map((item, i) => (
                         <AnimSection key={item.id} delay={i * 0.05}>
-                            <ReviewCard item={item} />
+                            <ReviewCard item={item} onSaved={reload} />
                         </AnimSection>
                     ))
                 )}

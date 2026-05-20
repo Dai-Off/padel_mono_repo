@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { BackHandler, Pressable, View, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, BackHandler, Pressable, View, StyleSheet } from 'react-native';
+import * as Linking from 'expo-linking';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { SearchCourtResult } from '../api/search';
@@ -33,6 +35,10 @@ import { CoursesScreen } from './CoursesScreen';
 import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
 import { PublicCourseDetailScreen } from './PublicCourseDetailScreen';
 import { ProfileScreen } from './ProfileScreen';
+import { EditProfileScreen } from './EditProfileScreen';
+import { useAuth } from '../contexts/AuthContext';
+import { acceptTournamentInvite } from '../api/tournamentInvites';
+import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
 import { CommunityScreen } from './CommunityScreen';
 import { MessagesScreen, type MessagePeerNav } from './MessagesScreen';
 import { DirectMessageThreadScreen } from './DirectMessageThreadScreen';
@@ -48,6 +54,8 @@ import type { PublicCourse } from '../api/schoolCourses';
  * desde una feature bloqueada, al completarlo lo devolvemos a esa sección en
  * vez de dejarlo en el perfil.
  */
+const PENDING_TOURNAMENT_INVITE_KEY = 'pending_tournament_invite';
+
 type PostOnboardingReturn =
   | 'home'
   | 'daily-lesson'
@@ -59,6 +67,7 @@ type PostOnboardingReturn =
 
 export function MainApp() {
   const sidebar = useSidebar(false);
+  const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
@@ -78,6 +87,9 @@ export function MainApp() {
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
+  const [openTournamentId, setOpenTournamentId] = useState<string | null>(null);
   // Si llegamos al perfil desde una feature bloqueada por falta de onboarding
   // (p.ej. Daily Lesson), pedimos a ProfileScreen que abra el modal del
   // cuestionario de nivelación automáticamente al montar.
@@ -109,6 +121,58 @@ export function MainApp() {
    * sección de origen para devolver al usuario al completarlo. Usado por todos
    * los bloqueos (banner home, hard blocks, soft blocks).
    */
+  const processTournamentInvite = useCallback(
+    async (inviteToken: string, tournamentId: string) => {
+      const accessToken = session?.access_token;
+      if (!accessToken) return;
+      const result = await acceptTournamentInvite(accessToken, inviteToken, tournamentId);
+      if (result.ok) {
+        Alert.alert('Invitación aceptada', 'Ya estás inscrito en el torneo.');
+        setActiveTab('torneos');
+        setOpenTournamentId(tournamentId);
+      } else {
+        Alert.alert('Invitación al torneo', result.error);
+      }
+    },
+    [session?.access_token],
+  );
+
+  const consumeInviteUrl = useCallback(
+    async (url: string | null) => {
+      if (!url) return;
+      const parsed = parseTournamentInviteUrl(url);
+      if (!parsed) return;
+      await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
+      await processTournamentInvite(parsed.token, parsed.tournamentId);
+    },
+    [processTournamentInvite],
+  );
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    void (async () => {
+      const raw = await AsyncStorage.getItem(PENDING_TOURNAMENT_INVITE_KEY);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as { token: string; tournamentId: string };
+          if (parsed.token && parsed.tournamentId) {
+            await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
+            await processTournamentInvite(parsed.token, parsed.tournamentId);
+            return;
+          }
+        } catch {
+          await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
+        }
+      }
+      const initial = await Linking.getInitialURL();
+      if (initial) await consumeInviteUrl(initial);
+    })();
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      void consumeInviteUrl(url);
+    });
+    return () => sub.remove();
+  }, [session?.access_token, consumeInviteUrl, processTournamentInvite]);
+
   const openOnboardingFromSection = (returnTo: PostOnboardingReturn) => {
     setPendingOnboardingReturn(returnTo);
     setProfileAutoOpenOnboarding(true);
@@ -387,15 +451,33 @@ export function MainApp() {
         />
       );
     }
+    if (showEditProfile) {
+      return (
+        <EditProfileScreen
+          onBack={() => setShowEditProfile(false)}
+          onSaved={() => {
+            setProfileRefreshKey((k) => k + 1);
+            setShowEditProfile(false);
+            setShowProfile(true);
+          }}
+        />
+      );
+    }
     if (showProfile) {
       return (
         <ProfileScreen
+          key={profileRefreshKey}
           onBack={() => {
             setShowProfile(false);
             setShowPreferences(false);
+            setShowEditProfile(false);
             setProfileAutoOpenOnboarding(false);
           }}
           onMenuPress={sidebar.toggle}
+          onEditProfilePress={() => {
+            setShowProfile(false);
+            setShowEditProfile(true);
+          }}
           onPreferencesPress={() => {
             setShowProfile(false);
             setShowPreferences(true);
@@ -586,6 +668,8 @@ export function MainApp() {
         return (
           <CompeticionesScreen
             onBack={() => setActiveTab('inicio')}
+            initialOpenTournamentId={openTournamentId}
+            onInitialTournamentOpened={() => setOpenTournamentId(null)}
             onOpenProfileForOnboarding={() => openOnboardingFromSection('torneos')}
           />
         );

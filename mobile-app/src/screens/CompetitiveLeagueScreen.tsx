@@ -332,12 +332,10 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
     void pollStatus();
   }, [pollStatus, proposal?.match_id, session?.access_token]);
 
-  const handleOpenProposal = useCallback(async () => {
-    const token = session?.access_token ?? null;
-    const matchId = proposal?.match_id;
-    if (!token || !matchId || !onPartidoPress) return;
-    setOpeningProposal(true);
-    try {
+  const openMatchDetail = useCallback(
+    async (matchId: string, matchmakingPayment?: PartidoItem['matchmakingPayment']) => {
+      const token = session?.access_token ?? null;
+      if (!token || !matchId || !onPartidoPress) return;
       const match = await fetchMatchById(matchId, token);
       if (!match) {
         Alert.alert('Error', 'No se pudo cargar el partido.');
@@ -348,18 +346,30 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
         Alert.alert('Error', 'No se pudo mostrar el partido.');
         return;
       }
-      if (proposal.booking_id && proposal.your_participant_id && proposal.your_payment_status !== 'paid') {
-        mapped.matchmakingPayment = {
-          bookingId: proposal.booking_id,
-          participantId: proposal.your_participant_id,
-          shareAmountCents: proposal.your_share_cents ?? undefined,
-        };
-      }
+      if (matchmakingPayment) mapped.matchmakingPayment = matchmakingPayment;
       onPartidoPress(mapped);
+    },
+    [onPartidoPress, session?.access_token],
+  );
+
+  const handleOpenProposal = useCallback(async () => {
+    const matchId = proposal?.match_id;
+    if (!matchId) return;
+    setOpeningProposal(true);
+    try {
+      const payment =
+        proposal?.booking_id && proposal.your_participant_id && proposal.your_payment_status !== 'paid'
+          ? {
+              bookingId: proposal.booking_id,
+              participantId: proposal.your_participant_id,
+              shareAmountCents: proposal.your_share_cents ?? undefined,
+            }
+          : undefined;
+      await openMatchDetail(matchId, payment);
     } finally {
       setOpeningProposal(false);
     }
-  }, [onPartidoPress, proposal, session?.access_token]);
+  }, [openMatchDetail, proposal]);
 
   useEffect(() => {
     const token = session?.access_token ?? null;
@@ -575,7 +585,11 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
               </View>
               <View style={styles.recentWrap}>
                 {recentMatchRows.map((row) => (
-                  <Pressable key={row.id} style={styles.recentCard}>
+                  <Pressable
+                    key={row.id}
+                    style={styles.recentCard}
+                    onPress={() => void openMatchDetail(row.id)}
+                  >
                     <View style={styles.recentHead}>
                       <Text style={styles.recentTitle}>{row.title}</Text>
                       <Text style={[styles.recentLp, styles.lpZero]}>—</Text>

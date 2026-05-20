@@ -39,6 +39,7 @@ type MeResponse = {
     notif_chat_messages?: boolean | null;
     /** Presente solo si el backend lo incluye en `/players/me`. */
     onboarding_completed?: boolean | null;
+    avatar_url?: string | null;
   };
   error?: string;
 };
@@ -63,6 +64,7 @@ export type MyPlayerProfile = {
   lastName: string | null;
   email: string | null;
   phone: string | null;
+  avatarUrl: string | null;
   eloRating: number | null;
   status: string | null;
   /** Código de liga MM global: bronce | plata | oro | elite */
@@ -176,6 +178,7 @@ export async function fetchMyPlayerProfile(
       lastName: json.player.last_name ?? null,
       email: json.player.email ?? null,
       phone: json.player.phone ?? null,
+      avatarUrl: json.player.avatar_url ?? null,
       eloRating: eloNum != null && !Number.isNaN(eloNum) ? eloNum : null,
       status: json.player.status ?? null,
       liga:
@@ -218,6 +221,40 @@ export async function fetchMyPlayerProfile(
   } catch (err) {
     console.error("[fetchMyPlayerProfile]", err);
     return null;
+  }
+}
+
+export async function updateMyPlayerProfile(
+  token: string | null | undefined,
+  data: { first_name: string; last_name: string; phone: string },
+): Promise<{ ok: true; player: MyPlayerProfile } | { ok: false; error: string }> {
+  if (!token) {
+    return { ok: false, error: 'Inicia sesión para actualizar tu perfil' };
+  }
+  try {
+    const res = await fetch(`${API_URL}/players/me`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        first_name: data.first_name.trim(),
+        last_name: data.last_name.trim(),
+        phone: data.phone.trim(),
+      }),
+    });
+    const json = (await res.json()) as MeResponse;
+    if (!res.ok || !json.ok || !json.player) {
+      return { ok: false, error: json.error ?? 'No se pudo guardar el perfil' };
+    }
+    const refreshed = await fetchMyPlayerProfile(token);
+    if (!refreshed) {
+      return { ok: false, error: 'No se pudo refrescar tu perfil' };
+    }
+    return { ok: true, player: refreshed };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
   }
 }
 

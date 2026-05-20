@@ -50,7 +50,6 @@ function mapSeasonMissionToHome(m: SeasonPassMissionDto): HomeMission {
     progress: `${m.current}/${m.target}`,
     pct: `${pctNum}%`,
     pctNum,
-    claim: false,
     highlight: m.done,
   };
 }

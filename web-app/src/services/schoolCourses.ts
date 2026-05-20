@@ -1,6 +1,7 @@
 import { apiFetchWithAuth } from './api';
 import type {
   SchoolCourse,
+  SchoolCourseInstallment,
   SchoolLevel,
   SchoolSport,
   SchoolWeekday,
@@ -10,6 +11,7 @@ import type {
   SchoolPrivateLessonSlot,
   SchoolFeeRule,
   SchoolCharge,
+  SchoolPriceType,
 } from '../types/schoolCourses';
 
 type ApiOk<T> = T & { ok: true };
@@ -30,7 +32,8 @@ export const schoolCoursesService = {
     level: SchoolLevel;
     staff_id: string;
     court_id: string;
-    price_cents: number;
+    price_cents?: number;
+    price_type_id?: string | null;
     capacity: number;
     weekdays: SchoolWeekday[];
     start_time: string;
@@ -38,6 +41,7 @@ export const schoolCoursesService = {
     starts_on?: string | null;
     ends_on?: string | null;
     is_active?: boolean;
+    installments?: SchoolCourseInstallment[];
   }): Promise<SchoolCourse> {
     const res = await apiFetchWithAuth<ApiOk<{ course: SchoolCourse }>>('/school-courses', {
       method: 'POST',
@@ -55,6 +59,7 @@ export const schoolCoursesService = {
       staff_id: string;
       court_id: string;
       price_cents: number;
+      price_type_id: string | null;
       capacity: number;
       weekdays: SchoolWeekday[];
       start_time: string;
@@ -62,6 +67,7 @@ export const schoolCoursesService = {
       starts_on: string | null;
       ends_on: string | null;
       is_active: boolean;
+      installments: SchoolCourseInstallment[];
     }>
   ): Promise<SchoolCourse> {
     const res = await apiFetchWithAuth<ApiOk<{ course: SchoolCourse }>>(`/school-courses/${id}`, {
@@ -137,7 +143,8 @@ export const schoolCoursesService = {
     student_phone?: string | null;
     staff_id: string;
     court_id: string;
-    price_cents: number;
+    price_cents?: number;
+    student_count?: 1 | 2 | 3;
     weekday: SchoolWeekday;
     start_time: string;
     end_time: string;
@@ -178,7 +185,8 @@ export const schoolCoursesService = {
 
   async upsertFeeRule(body: {
     club_id: string;
-    group_size: 2 | 3 | 4;
+    staff_id?: string | null;
+    group_size: 1 | 2 | 3 | 4;
     time_band: 'morning' | 'afternoon' | 'weekend';
     price_cents: number;
     is_active?: boolean;
@@ -227,5 +235,31 @@ export const schoolCoursesService = {
   async cancelCharge(id: string): Promise<SchoolCharge> {
     const res = await apiFetchWithAuth<ApiOk<{ charge: SchoolCharge }>>(`/school-payments/charges/${id}/cancel`, { method: 'PUT' });
     return res.charge;
+  },
+
+  async listPriceTypes(clubId: string): Promise<SchoolPriceType[]> {
+    const q = new URLSearchParams({ club_id: clubId });
+    const res = await apiFetchWithAuth<ApiOk<{ price_types: SchoolPriceType[] }>>(`/school-price-types?${q}`);
+    return res.price_types ?? [];
+  },
+
+  async createPriceType(body: { club_id: string; name: string; price_cents: number }): Promise<SchoolPriceType> {
+    const res = await apiFetchWithAuth<ApiOk<{ price_type: SchoolPriceType }>>('/school-price-types', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return res.price_type;
+  },
+
+  async updatePriceType(id: string, body: Partial<{ name: string; price_cents: number; is_active: boolean }>): Promise<SchoolPriceType> {
+    const res = await apiFetchWithAuth<ApiOk<{ price_type: SchoolPriceType }>>(`/school-price-types/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    return res.price_type;
+  },
+
+  async removePriceType(id: string): Promise<void> {
+    await apiFetchWithAuth(`/school-price-types/${id}`, { method: 'DELETE' });
   },
 };
