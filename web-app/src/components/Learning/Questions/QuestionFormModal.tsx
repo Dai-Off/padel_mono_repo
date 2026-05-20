@@ -107,6 +107,19 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved, us
   const [notifyClub, setNotifyClub] = useState<boolean>(!!question?.moderation_notes);
   const [moderationNotes, setModerationNotes] = useState<string>(question?.moderation_notes ?? '');
 
+  // Snapshot del estado inicial. Sirve para detectar si ha habido cambios
+  // antes de llamar al backend — evita updates innecesarios (y en
+  // particular evita marcar la pregunta como editada si el content no cambió).
+  const initialSnapshot = useRef({
+    type: question?.type ?? 'test_classic',
+    level: question?.level ?? null,
+    area: question?.area ?? 'technique',
+    videoUrl: question?.video_url ?? '',
+    contentJson: JSON.stringify(question?.content ?? defaultContent(question?.type ?? 'test_classic')),
+    status: question?.status ?? 'draft',
+    moderationNotes: question?.moderation_notes ?? '',
+  });
+
   const handleTypeChange = (newType: QuestionType) => {
     if (newType === type) return;
     setType(newType);
@@ -256,6 +269,31 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved, us
         'Esto revertirá la pregunta a borrador y dejará de aparecer en las lecciones. ¿Continuar?',
       );
       if (!ok) return;
+    }
+
+    // Detección de "sin cambios" en modo edit. Si nada del state ni el status
+    // destino difieren del snapshot inicial, no llamamos al backend (evita
+    // actualizar content_updated_at y otras escrituras innecesarias).
+    if (mode === 'edit') {
+      const snap = initialSnapshot.current;
+      const targetStatus = saveMode === 'draft' ? 'draft' : 'published';
+      const currentNotes = useAdminEndpoints
+        ? (notifyClub && moderationNotes.trim() ? moderationNotes.trim() : '')
+        : snap.moderationNotes;
+      const noChanges =
+        type === snap.type &&
+        level === snap.level &&
+        area === snap.area &&
+        (videoUrl ?? '') === snap.videoUrl &&
+        !videoFile &&
+        JSON.stringify(content) === snap.contentJson &&
+        targetStatus === snap.status &&
+        currentNotes === snap.moderationNotes;
+      if (noChanges) {
+        toast('Sin cambios');
+        onClose();
+        return;
+      }
     }
 
     setSaving(true);

@@ -402,6 +402,7 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
       question_id: string;
       answered_correctly: boolean;
       response_time_ms: number;
+      selected_answer: unknown;
     }[] = [];
 
     let totalScore = 0;
@@ -428,6 +429,9 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
         question_id: answer.question_id,
         answered_correctly: isCorrect,
         response_time_ms: answer.response_time_ms,
+        // Guardamos la respuesta concreta del jugador para poder calcular
+        // distribución de respuestas en el panel de stats por pregunta.
+        selected_answer: answer.selected_answer ?? null,
       });
     }
 

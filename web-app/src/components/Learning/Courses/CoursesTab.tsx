@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, BookOpen } from 'lucide-react';
+import { Plus, BookOpen, BarChart3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -8,6 +8,7 @@ import { learningContentService } from '../../../services/learningContent';
 import { clubStaffService } from '../../../services/clubStaff';
 import { CourseFormModal } from './CourseFormModal';
 import { CourseDetailModal } from './CourseDetailModal';
+import { CourseStatsModal } from './CourseStatsModal';
 import { FilterDropdown } from '../Questions/FilterDropdown';
 import { LevelFilter } from '../Questions/LevelFilter';
 import { SearchInput } from '../Questions/SearchInput';
@@ -55,6 +56,7 @@ export function CoursesTab({ clubId }: { clubId: string }) {
   const [loading, setLoading] = useState(false);
   const [createModal, setCreateModal] = useState(false);
   const [detailCourse, setDetailCourse] = useState<Course | null>(null);
+  const [statsCourse, setStatsCourse] = useState<Course | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -185,14 +187,13 @@ export function CoursesTab({ clubId }: { clubId: string }) {
           {courses.map((course, i) => {
             const isPending = course.status === 'pending_review';
             return (
-            <motion.button
+            <motion.div
               key={course.id}
-              type="button"
               onClick={() => setDetailCourse(course)}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.03 }}
-              className={`bg-white rounded-2xl border-2 p-4 text-left space-y-3 transition-all ${
+              className={`bg-white rounded-2xl border-2 p-4 text-left space-y-3 transition-all cursor-pointer ${
                 isPending ? 'border-amber-300 shadow-sm' : 'border-gray-100 hover:border-gray-200'
               }`}
             >
@@ -213,14 +214,25 @@ export function CoursesTab({ clubId }: { clubId: string }) {
               )}
 
               {/* Meta */}
-              <div className="flex items-center gap-3 text-[10px] text-gray-400 flex-wrap">
-                <span>{course.lesson_count} {course.lesson_count === 1 ? t('learning_lessons_count').replace('{{count}}', '1') : t('learning_lessons_count_plural').replace('{{count}}', String(course.lesson_count))}</span>
-                <span>{t('learning_level_short')} {course.elo_min}–{course.elo_max}</span>
-                {course.staff_id && staffMap[course.staff_id] && (
-                  <span>{staffMap[course.staff_id]}</span>
-                )}
+              <div className="flex items-center justify-between gap-3 text-[10px] text-gray-400 flex-wrap">
+                <span className="flex items-center gap-3 flex-wrap">
+                  <span>{course.lesson_count} {course.lesson_count === 1 ? t('learning_lessons_count').replace('{{count}}', '1') : t('learning_lessons_count_plural').replace('{{count}}', String(course.lesson_count))}</span>
+                  <span>{t('learning_level_short')} {course.elo_min}–{course.elo_max}</span>
+                  {course.staff_id && staffMap[course.staff_id] && (
+                    <span>{staffMap[course.staff_id]}</span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setStatsCourse(course); }}
+                  className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-50 text-[#1A1A1A] text-[10px] font-bold hover:bg-gray-100 transition-all"
+                  title="Ver estadísticas detalladas"
+                >
+                  <BarChart3 className="w-3 h-3" />
+                  Stats
+                </button>
               </div>
-            </motion.button>
+            </motion.div>
             );
           })}
         </div>
@@ -252,6 +264,14 @@ export function CoursesTab({ clubId }: { clubId: string }) {
           staffName={detailCourse.staff_id ? staffMap[detailCourse.staff_id] : undefined}
           onClose={() => setDetailCourse(null)}
           onUpdated={() => { setDetailCourse(null); load(); }}
+        />
+      )}
+
+      {statsCourse && (
+        <CourseStatsModal
+          courseId={statsCourse.id}
+          courseTitle={statsCourse.title}
+          onClose={() => setStatsCourse(null)}
         />
       )}
     </div>

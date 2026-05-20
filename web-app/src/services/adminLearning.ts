@@ -165,6 +165,16 @@ export const adminLearningService = {
   // Estadísticas
   // ---------------------------------------------------------------------------
 
+  async getQuestionStats(id: string): Promise<import('../types/adminLearning').QuestionDetailStats> {
+    const res = await apiFetchWithAuth<ApiOk<{ data: import('../types/adminLearning').QuestionDetailStats }>>(`/admin/learning/questions/${id}/stats`);
+    return res.data;
+  },
+
+  async getCourseStats(id: string): Promise<import('../types/adminLearning').CourseDetailStats> {
+    const res = await apiFetchWithAuth<ApiOk<{ data: import('../types/adminLearning').CourseDetailStats }>>(`/admin/learning/courses/${id}/stats`);
+    return res.data;
+  },
+
   async getStats(): Promise<LearningStats> {
     const res = await apiFetchWithAuth<ApiOk<{ data: LearningStats }>>('/admin/learning/stats');
     return res.data;

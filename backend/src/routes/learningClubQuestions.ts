@@ -247,6 +247,10 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
       } else {
         updates.content = content ?? {};
       }
+      // Marcamos cambio de contenido. Las stats por pregunta filtran logs
+      // anteriores a esta fecha para que la distribución refleje la versión
+      // actual y no opciones que ya no existen.
+      updates.content_updated_at = new Date().toISOString();
     }
 
     if (Object.keys(updates).length === 0) {
@@ -708,6 +712,67 @@ router.patch('/questions/:id/acknowledge-notes', requireClubOwnerOrAdminOrPortal
   }
 });
 
+// GET /questions/:id/stats — stats detalladas de una pregunta (club).
+// Verifica que la pregunta sea del club del usuario.
+router.get('/questions/:id/stats', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: q } = await supabase
+      .from('learning_questions')
+      .select('id, created_by_club')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (!q) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
+    if (!canAccessClub(req, (q as any).created_by_club, 'escuela')) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    const stats = await computeQuestionDetailStats(supabase, req.params.id);
+    if (!stats) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
+    return res.json({ ok: true, data: stats });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// GET /club-courses/:id/stats — stats detalladas de un curso del club.
+router.get('/club-courses/:id/stats', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: c } = await supabase
+      .from('learning_courses')
+      .select('id, club_id')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (!c) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
+    if (!canAccessClub(req, (c as any).club_id, 'escuela')) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+    const stats = await computeCourseDetailStats(supabase, req.params.id);
+    return res.json({ ok: true, data: stats });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// GET /clubs/:clubId/stats
+// Estadísticas filtradas a un club concreto + benchmark con la media global
+// para que el club pueda comparar su contenido contra el resto. Protegido
+// con canAccessClub (el club no puede pedir stats de otros).
+router.get('/clubs/:clubId/stats', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  try {
+    const clubId = req.params.clubId;
+    if (!canAccessClub(req, clubId, 'escuela')) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+    const data = await computeClubStats(supabase, clubId);
+    return res.json({ ok: true, data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 // GET /clubs/:clubId/warnings
 // Devuelve las preguntas del club que tienen al menos un aviso según
 // detectWarnings (muy fáciles, muy difíciles, sin tracción, calidad
@@ -727,6 +792,617 @@ router.get('/clubs/:clubId/warnings', requireClubOwnerOrAdminOrPortalStaff, asyn
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
+
+// Calcula stats accionables del club + benchmark con la media global. Devuelve
+// el mismo shape que stats admin para que el frontend reuse los componentes.
+export async function computeClubStats(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  clubId: string,
+): Promise<Record<string, unknown>> {
+  const now = new Date();
+  const since7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const since30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  // Preguntas del club + cursos del club.
+  const [clubQRes, clubCRes, allLogsRes, clubLessonsRes, allLessonsRes, allProgressRes] = await Promise.all([
+    supabase.from('learning_questions').select('id, type, area, level, status').eq('created_by_club', clubId),
+    supabase.from('learning_courses').select('id, status, elo_min, elo_max').eq('club_id', clubId),
+    supabase.from('learning_question_log').select('question_id, player_id, answered_correctly, vote, answered_at'),
+    // Lecciones de cursos del club (para finalización local).
+    supabase.from('learning_course_lessons').select('id, course_id, learning_courses!inner(club_id)').eq('learning_courses.club_id', clubId),
+    supabase.from('learning_course_lessons').select('id, course_id'),
+    supabase.from('learning_course_progress').select('player_id, lesson_id, completed_at'),
+  ]);
+
+  const clubQs = clubQRes.data ?? [];
+  const clubCs = clubCRes.data ?? [];
+  const clubQuestionIds = new Set(clubQs.map((q: any) => q.id as string));
+  const clubPublished = clubQs.filter((q: any) => q.status === 'published');
+
+  const activeQuestions = clubPublished.length;
+  const activeCourses = clubCs.filter((c: any) => c.status === 'active').length;
+  const pendingCourses = clubCs.filter((c: any) => c.status === 'pending_review').length;
+
+  // Filtro de logs a los del club.
+  const allLogs = (allLogsRes.data ?? []) as Array<{ question_id: string; player_id: string; answered_correctly: boolean; vote: 'up' | 'down' | null; answered_at: string }>;
+  const clubLogs = allLogs.filter((l) => clubQuestionIds.has(l.question_id));
+
+  // Volumen y daily series del club (últimos 30d).
+  const clubLogs7d = clubLogs.filter((l) => l.answered_at >= since7d);
+  const clubLogs30d = clubLogs.filter((l) => l.answered_at >= since30d);
+  const dailyMap = new Map<string, number>();
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    dailyMap.set(d.toISOString().slice(0, 10), 0);
+  }
+  for (const l of clubLogs30d) {
+    const day = l.answered_at.slice(0, 10);
+    dailyMap.set(day, (dailyMap.get(day) ?? 0) + 1);
+  }
+  const dailyResponses30d = Array.from(dailyMap.entries())
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const clubActivePlayers7d = new Set(clubLogs7d.map((l) => l.player_id));
+
+  // attempts/correct y feedback agregados por pregunta del club.
+  const attemptsByQ = new Map<string, { attempts: number; correct: number }>();
+  const latestVote = new Map<string, { vote: 'up' | 'down'; at: number }>();
+  for (const l of clubLogs) {
+    const acc = attemptsByQ.get(l.question_id) ?? { attempts: 0, correct: 0 };
+    acc.attempts++;
+    if (l.answered_correctly) acc.correct++;
+    attemptsByQ.set(l.question_id, acc);
+    if (l.vote === 'up' || l.vote === 'down') {
+      const key = `${l.question_id}::${l.player_id}`;
+      const at = new Date(l.answered_at).getTime();
+      const cur = latestVote.get(key);
+      if (!cur || at > cur.at) latestVote.set(key, { vote: l.vote, at });
+    }
+  }
+
+  // Breakdowns por tipo/área/nivel sobre published del club.
+  type Bucket = { count: number; attempts: number; correct: number };
+  const byType: Record<string, Bucket> = {};
+  const byArea: Record<string, Bucket> = {};
+  const byLevel: Record<string, Bucket> = {};
+  for (const q of clubPublished) {
+    const agg = attemptsByQ.get((q as any).id) ?? { attempts: 0, correct: 0 };
+    const lvl = String(Math.floor((q as any).level));
+    for (const [bucket, key] of [[byType, (q as any).type], [byArea, (q as any).area], [byLevel, lvl]] as const) {
+      if (!bucket[key]) bucket[key] = { count: 0, attempts: 0, correct: 0 };
+      bucket[key].count++;
+      bucket[key].attempts += agg.attempts;
+      bucket[key].correct += agg.correct;
+    }
+  }
+
+  // Feedback total del club.
+  let feedbackUp = 0;
+  let feedbackDown = 0;
+  const upDownByQ = new Map<string, { up: number; down: number }>();
+  for (const [key, { vote }] of latestVote) {
+    const qid = key.split('::')[0];
+    const cur = upDownByQ.get(qid) ?? { up: 0, down: 0 };
+    if (vote === 'up') { cur.up++; feedbackUp++; } else { cur.down++; feedbackDown++; }
+    upDownByQ.set(qid, cur);
+  }
+
+  // Avisos del club aplicando mismos criterios.
+  const warningsByKind = { too_easy: 0, too_hard: 0, low_quality: 0 };
+  for (const q of clubPublished) {
+    const id = (q as any).id as string;
+    const at = attemptsByQ.get(id) ?? { attempts: 0, correct: 0 };
+    const fb = upDownByQ.get(id) ?? { up: 0, down: 0 };
+    const kinds = detectWarnings({
+      attempts: at.attempts,
+      correct: at.correct,
+      votes_up: fb.up,
+      votes_down: fb.down,
+    });
+    for (const k of kinds) warningsByKind[k]++;
+  }
+
+  // Cursos del club: distribución por nivel + tasa de finalización local.
+  const COURSE_LEVEL_PRESETS = [
+    { label: 'Principiante', min: 0, max: 2 },
+    { label: 'Intermedio', min: 2, max: 3.5 },
+    { label: 'Avanzado', min: 3.5, max: 4.5 },
+    { label: 'Competición', min: 4.5, max: 6 },
+    { label: 'Profesional', min: 6, max: 7 },
+  ];
+  const courseLevels: Record<string, number> = {};
+  for (const p of COURSE_LEVEL_PRESETS) courseLevels[p.label] = 0;
+  const clubActiveCourses = clubCs.filter((c: any) => c.status === 'active');
+  for (const c of clubActiveCourses) {
+    const eMin = (c as any).elo_min as number;
+    const eMax = (c as any).elo_max as number;
+    for (const p of COURSE_LEVEL_PRESETS) {
+      if (eMin <= p.max && eMax >= p.min) courseLevels[p.label]++;
+    }
+  }
+
+  const clubLessonIds = new Set((clubLessonsRes.data ?? []).map((l: any) => l.id as string));
+  const lessonsByCourseClub = new Map<string, Set<string>>();
+  for (const l of clubLessonsRes.data ?? []) {
+    const cid = (l as any).course_id as string;
+    const lid = (l as any).id as string;
+    if (!lessonsByCourseClub.has(cid)) lessonsByCourseClub.set(cid, new Set());
+    lessonsByCourseClub.get(cid)!.add(lid);
+  }
+  const lessonToCourseClub = new Map<string, string>();
+  for (const [cid, lessons] of lessonsByCourseClub) {
+    for (const lid of lessons) lessonToCourseClub.set(lid, cid);
+  }
+  let coursesStartedClub = 0;
+  let coursesCompletedClub = 0;
+  const progressByPairClub = new Map<string, Set<string>>();
+  let lessonsCompleted7dClub = 0;
+  const coursePlayers30dClub = new Set<string>();
+  for (const r of allProgressRes.data ?? []) {
+    const playerId = (r as any).player_id as string;
+    const lessonId = (r as any).lesson_id as string;
+    const completedAt = (r as any).completed_at as string;
+    if (!clubLessonIds.has(lessonId)) continue;
+    if (completedAt >= since7d) lessonsCompleted7dClub++;
+    if (completedAt >= since30d) coursePlayers30dClub.add(playerId);
+    const cid = lessonToCourseClub.get(lessonId)!;
+    const key = `${playerId}::${cid}`;
+    if (!progressByPairClub.has(key)) progressByPairClub.set(key, new Set());
+    progressByPairClub.get(key)!.add(lessonId);
+  }
+  for (const [key, set] of progressByPairClub) {
+    const cid = key.split('::')[1];
+    const totalLessons = lessonsByCourseClub.get(cid)?.size ?? 0;
+    if (totalLessons === 0) continue;
+    coursesStartedClub++;
+    if (set.size >= totalLessons) coursesCompletedClub++;
+  }
+  const courseCompletionRate = coursesStartedClub > 0 ? coursesCompletedClub / coursesStartedClub : null;
+
+  // Métricas numéricas adicionales para los cursos activos del club.
+  const activeClubCourseIds = new Set(clubActiveCourses.map((c: any) => c.id as string));
+  const activeClubLessons = (clubLessonsRes.data ?? []).filter((l: any) => activeClubCourseIds.has(l.course_id));
+  const totalLessonsPublished = activeClubLessons.length;
+  const avgLessonsPerCourse = activeClubCourseIds.size > 0
+    ? totalLessonsPublished / activeClubCourseIds.size
+    : null;
+
+  let avgDurationSeconds: number | null = null;
+  let coursesWithFullVideoRate: number | null = null;
+  let avgDepthCompleted: number | null = null;
+  if (activeClubCourseIds.size > 0) {
+    const { data: detailedLessons } = await supabase
+      .from('learning_course_lessons')
+      .select('course_id, duration_seconds, video_url')
+      .in('course_id', Array.from(activeClubCourseIds));
+    const ds = detailedLessons ?? [];
+    const withDuration = ds.filter((l: any) => typeof l.duration_seconds === 'number');
+    avgDurationSeconds = withDuration.length > 0
+      ? withDuration.reduce((s: number, l: any) => s + l.duration_seconds, 0) / withDuration.length
+      : null;
+    const lessonsByCourse = new Map<string, Array<{ video_url: string | null }>>();
+    for (const l of ds) {
+      const cid = (l as any).course_id as string;
+      if (!lessonsByCourse.has(cid)) lessonsByCourse.set(cid, []);
+      lessonsByCourse.get(cid)!.push({ video_url: (l as any).video_url });
+    }
+    let coursesAllVideos = 0;
+    for (const lessons of lessonsByCourse.values()) {
+      if (lessons.length > 0 && lessons.every((x) => !!x.video_url)) coursesAllVideos++;
+    }
+    coursesWithFullVideoRate = coursesAllVideos / activeClubCourseIds.size;
+  }
+  if (progressByPairClub.size > 0) {
+    let totalLessonsByPair = 0;
+    for (const set of progressByPairClub.values()) totalLessonsByPair += set.size;
+    avgDepthCompleted = totalLessonsByPair / progressByPairClub.size;
+  }
+
+  // Benchmarks globales (sobre TODOS los clubes). Permite comparar.
+  const allLessons = (allLessonsRes.data ?? []) as Array<{ id: string; course_id: string }>;
+  const allLessonsByCourse = new Map<string, Set<string>>();
+  for (const l of allLessons) {
+    if (!allLessonsByCourse.has(l.course_id)) allLessonsByCourse.set(l.course_id, new Set());
+    allLessonsByCourse.get(l.course_id)!.add(l.id);
+  }
+  const allLessonToCourse = new Map<string, string>();
+  for (const [cid, ls] of allLessonsByCourse) {
+    for (const lid of ls) allLessonToCourse.set(lid, cid);
+  }
+  const allCompletedByPair = new Map<string, Set<string>>();
+  for (const r of allProgressRes.data ?? []) {
+    const playerId = (r as any).player_id as string;
+    const lessonId = (r as any).lesson_id as string;
+    const cid = allLessonToCourse.get(lessonId);
+    if (!cid) continue;
+    const key = `${playerId}::${cid}`;
+    if (!allCompletedByPair.has(key)) allCompletedByPair.set(key, new Set());
+    allCompletedByPair.get(key)!.add(lessonId);
+  }
+  let allStarted = 0;
+  let allCompleted = 0;
+  for (const [key, set] of allCompletedByPair) {
+    const cid = key.split('::')[1];
+    const totalLessons = allLessonsByCourse.get(cid)?.size ?? 0;
+    if (totalLessons === 0) continue;
+    allStarted++;
+    if (set.size >= totalLessons) allCompleted++;
+  }
+  const globalCompletionRate = allStarted > 0 ? allCompleted / allStarted : null;
+
+  // Benchmark: tasa de acierto media global y % positivo medio global.
+  let allAttempts = 0;
+  let allCorrect = 0;
+  const allLatestVote = new Map<string, 'up' | 'down'>();
+  for (const l of allLogs) {
+    allAttempts++;
+    if (l.answered_correctly) allCorrect++;
+    if (l.vote === 'up' || l.vote === 'down') {
+      const key = `${l.question_id}::${l.player_id}`;
+      // (sin tiebreak por timestamp para ahorrar; aproximación buena)
+      allLatestVote.set(key, l.vote);
+    }
+  }
+  const globalSuccessRate = allAttempts > 0 ? allCorrect / allAttempts : null;
+  let globalUp = 0;
+  let globalDown = 0;
+  for (const v of allLatestVote.values()) v === 'up' ? globalUp++ : globalDown++;
+  const globalPositiveRate = (globalUp + globalDown) > 0 ? globalUp / (globalUp + globalDown) : null;
+
+  // Tasa local de acierto y positividad.
+  let clubAttempts = 0;
+  let clubCorrect = 0;
+  for (const l of clubLogs) { clubAttempts++; if (l.answered_correctly) clubCorrect++; }
+  const clubSuccessRate = clubAttempts > 0 ? clubCorrect / clubAttempts : null;
+  const clubPositiveRate = (feedbackUp + feedbackDown) > 0 ? feedbackUp / (feedbackUp + feedbackDown) : null;
+
+  return {
+    active_questions: activeQuestions,
+    active_courses: activeCourses,
+    pending_courses: pendingCourses,
+    active_players_7d: clubActivePlayers7d.size,
+    by_type: byType,
+    by_area: byArea,
+    by_level: byLevel,
+    volume_last_7d: clubLogs7d.length,
+    volume_last_30d: clubLogs30d.length,
+    daily_responses_30d: dailyResponses30d,
+    warnings_by_kind: warningsByKind,
+    feedback_up_total: feedbackUp,
+    feedback_down_total: feedbackDown,
+    lessons_completed_7d: lessonsCompleted7dClub,
+    course_players_30d: coursePlayers30dClub.size,
+    course_levels: courseLevels,
+    course_completion_rate: courseCompletionRate,
+    courses_started: coursesStartedClub,
+    courses_completed: coursesCompletedClub,
+    total_lessons_published: totalLessonsPublished,
+    avg_lessons_per_course: avgLessonsPerCourse,
+    avg_lesson_duration_seconds: avgDurationSeconds,
+    courses_with_full_video_rate: coursesWithFullVideoRate,
+    avg_depth_completed: avgDepthCompleted,
+    // Benchmark con la media global. null si no hay muestra.
+    benchmark: {
+      success_rate: globalSuccessRate,
+      positive_rate: globalPositiveRate,
+      completion_rate: globalCompletionRate,
+    },
+  };
+}
+
+// ===========================================================================
+// Stats detalladas por pregunta
+// ===========================================================================
+
+/**
+ * Calcula estadísticas detalladas de UNA pregunta. Solo cuenta logs cuya
+ * `answered_at >= question.content_updated_at` para que la distribución
+ * de respuestas no incluya versiones antiguas del contenido.
+ */
+export async function computeQuestionDetailStats(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  questionId: string,
+): Promise<Record<string, unknown> | null> {
+  // Datos base de la pregunta.
+  const { data: q } = await supabase
+    .from('learning_questions')
+    .select('id, type, level, area, content, content_updated_at, created_at')
+    .eq('id', questionId)
+    .maybeSingle();
+  if (!q) return null;
+
+  const contentUpdatedAt = (q as any).content_updated_at as string;
+
+  // Logs frescos (de la versión actual del contenido) y todos los logs
+  // (para mostrar nota informativa si hay anteriores).
+  const { data: freshLogs } = await supabase
+    .from('learning_question_log')
+    .select('player_id, answered_correctly, response_time_ms, vote, selected_answer, answered_at')
+    .eq('question_id', questionId)
+    .gte('answered_at', contentUpdatedAt);
+  const { count: totalLogs } = await supabase
+    .from('learning_question_log')
+    .select('id', { count: 'exact', head: true })
+    .eq('question_id', questionId);
+
+  const logs = freshLogs ?? [];
+  const totalAttempts = logs.length;
+  const totalCorrect = logs.filter((l: any) => l.answered_correctly).length;
+  const avgResponseMs = totalAttempts > 0
+    ? logs.reduce((s: number, l: any) => s + (l.response_time_ms ?? 0), 0) / totalAttempts
+    : null;
+
+  // Tendencia 30d (sobre fresh logs).
+  const now = new Date();
+  const since30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const dailyMap = new Map<string, number>();
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    dailyMap.set(d.toISOString().slice(0, 10), 0);
+  }
+  for (const l of logs) {
+    if (l.answered_at >= since30d) {
+      const day = l.answered_at.slice(0, 10);
+      if (dailyMap.has(day)) dailyMap.set(day, (dailyMap.get(day) ?? 0) + 1);
+    }
+  }
+  const dailyResponses30d = Array.from(dailyMap.entries())
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Feedback: último voto por jugador.
+  const latestVote = new Map<string, 'up' | 'down'>();
+  for (const l of logs) {
+    if (l.vote === 'up' || l.vote === 'down') {
+      // No re-resolvemos timestamps porque dentro de freshLogs el último
+      // suele ser el más reciente. Aproximación buena.
+      latestVote.set(l.player_id, l.vote);
+    }
+  }
+  let votesUp = 0;
+  let votesDown = 0;
+  for (const v of latestVote.values()) v === 'up' ? votesUp++ : votesDown++;
+
+  // Distribución de respuestas. Solo para tipos con opciones discretas.
+  // Para los demás (match_columns, order_sequence) no es agrupable de forma
+  // sencilla y devolvemos null.
+  const type = (q as any).type as string;
+  let answerDistribution: Array<{ key: string; label: string; count: number; is_correct: boolean }> | null = null;
+  if (type === 'test_classic') {
+    const c = (q as any).content as { options?: string[]; correct_index?: number };
+    const options = c.options ?? [];
+    const correctIdx = c.correct_index;
+    const counts = new Array(options.length).fill(0);
+    for (const l of logs) {
+      const sel = (l as any).selected_answer;
+      if (typeof sel === 'number' && sel >= 0 && sel < options.length) counts[sel]++;
+    }
+    answerDistribution = options.map((opt, i) => ({
+      key: String(i),
+      label: opt,
+      count: counts[i],
+      is_correct: i === correctIdx,
+    }));
+  } else if (type === 'true_false') {
+    const c = (q as any).content as { correct_answer?: boolean };
+    let trueCount = 0;
+    let falseCount = 0;
+    for (const l of logs) {
+      const sel = (l as any).selected_answer;
+      if (sel === true) trueCount++;
+      else if (sel === false) falseCount++;
+    }
+    answerDistribution = [
+      { key: 'true', label: 'Verdadero', count: trueCount, is_correct: c.correct_answer === true },
+      { key: 'false', label: 'Falso', count: falseCount, is_correct: c.correct_answer === false },
+    ];
+  } else if (type === 'multi_select') {
+    const c = (q as any).content as { options?: string[]; correct_indices?: number[] };
+    const options = c.options ?? [];
+    const correctSet = new Set(c.correct_indices ?? []);
+    const counts = new Array(options.length).fill(0);
+    for (const l of logs) {
+      const sel = (l as any).selected_answer;
+      if (Array.isArray(sel)) {
+        for (const idx of sel) {
+          if (typeof idx === 'number' && idx >= 0 && idx < options.length) counts[idx]++;
+        }
+      }
+    }
+    answerDistribution = options.map((opt, i) => ({
+      key: String(i),
+      label: opt,
+      count: counts[i],
+      is_correct: correctSet.has(i),
+    }));
+  } else if (type === 'puzzle') {
+    // Para puzzles, las opciones viven en learning_puzzles.options. selected_answer
+    // es el id de la opción elegida.
+    const { data: puzzle } = await supabase
+      .from('learning_puzzles')
+      .select('options')
+      .eq('question_id', questionId)
+      .maybeSingle();
+    if (puzzle?.options && Array.isArray(puzzle.options)) {
+      const opts = puzzle.options as Array<{ id: number; text: string; is_correct: boolean }>;
+      const counts = new Map<string, number>();
+      for (const l of logs) {
+        const sel = (l as any).selected_answer;
+        const id = sel != null ? String(sel) : null;
+        if (id !== null) counts.set(id, (counts.get(id) ?? 0) + 1);
+      }
+      answerDistribution = opts.map((o) => ({
+        key: String(o.id),
+        label: o.text,
+        count: counts.get(String(o.id)) ?? 0,
+        is_correct: !!o.is_correct,
+      }));
+    }
+  }
+
+  // Acierto por nivel ELO del jugador. Trae el elo_rating actual de cada
+  // jugador con respuesta a esta pregunta. (No tenemos histórico de elo; usamos
+  // el actual como aproximación — info útil aunque no perfecta.)
+  const playerIds = Array.from(new Set(logs.map((l: any) => l.player_id as string)));
+  const eloByPlayer = new Map<string, number>();
+  if (playerIds.length > 0) {
+    const { data: players } = await supabase
+      .from('players')
+      .select('id, elo_rating')
+      .in('id', playerIds);
+    for (const p of players ?? []) {
+      const elo = (p as any).elo_rating as number | null;
+      if (typeof elo === 'number') eloByPlayer.set((p as any).id as string, elo);
+    }
+  }
+  // Buckets por rangos predefinidos (los mismos del LevelFilter).
+  const ELO_BUCKETS = [
+    { label: 'Principiante', min: 0, max: 2 },
+    { label: 'Intermedio', min: 2, max: 3.5 },
+    { label: 'Avanzado', min: 3.5, max: 4.5 },
+    { label: 'Competición', min: 4.5, max: 6 },
+    { label: 'Profesional', min: 6, max: 7 },
+  ];
+  const eloDistribution = ELO_BUCKETS.map((b) => ({ label: b.label, attempts: 0, correct: 0 }));
+  for (const l of logs) {
+    const elo = eloByPlayer.get((l as any).player_id);
+    if (typeof elo !== 'number') continue;
+    const bucket = eloDistribution.find((_, i) => {
+      const b = ELO_BUCKETS[i];
+      return elo >= b.min && elo < b.max;
+    });
+    if (bucket) {
+      bucket.attempts++;
+      if ((l as any).answered_correctly) bucket.correct++;
+    }
+  }
+
+  return {
+    question_id: questionId,
+    content_updated_at: contentUpdatedAt,
+    has_pre_edit_logs: (totalLogs ?? 0) > logs.length,
+    total_attempts: totalAttempts,
+    total_correct: totalCorrect,
+    success_rate: totalAttempts > 0 ? totalCorrect / totalAttempts : null,
+    avg_response_ms: avgResponseMs,
+    votes_up: votesUp,
+    votes_down: votesDown,
+    daily_responses_30d: dailyResponses30d,
+    answer_distribution: answerDistribution,
+    elo_distribution: eloDistribution,
+  };
+}
+
+// ===========================================================================
+// Stats detalladas por curso
+// ===========================================================================
+
+/**
+ * Estadísticas detalladas de un curso: iniciados, completados, funnel de
+ * progreso por lección, tendencia 30d. NO filtra por content_updated_at
+ * porque el "contenido" de un curso son sus lecciones, y cambiarlas
+ * requiere acciones explícitas (añadir/eliminar lección) que ya se reflejan
+ * en learning_course_progress vía FK.
+ */
+export async function computeCourseDetailStats(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  courseId: string,
+): Promise<Record<string, unknown> | null> {
+  const { data: course } = await supabase
+    .from('learning_courses')
+    .select('id, title, status')
+    .eq('id', courseId)
+    .maybeSingle();
+  if (!course) return null;
+
+  const { data: lessons } = await supabase
+    .from('learning_course_lessons')
+    .select('id, "order", title, duration_seconds, video_url')
+    .eq('course_id', courseId)
+    .order('order', { ascending: true });
+  const lessonsList = (lessons ?? []) as Array<{ id: string; order: number; title: string; duration_seconds: number | null; video_url: string | null }>;
+  const lessonIds = lessonsList.map((l) => l.id);
+  const totalLessons = lessonsList.length;
+
+  if (lessonIds.length === 0) {
+    return {
+      course_id: courseId,
+      total_lessons: 0,
+      players_started: 0,
+      players_completed: 0,
+      completion_rate: null,
+      lessons_completed_30d: 0,
+      lesson_funnel: [],
+      daily_progress_30d: [],
+    };
+  }
+
+  const { data: progress } = await supabase
+    .from('learning_course_progress')
+    .select('player_id, lesson_id, completed_at')
+    .in('lesson_id', lessonIds);
+  const allProgress = (progress ?? []) as Array<{ player_id: string; lesson_id: string; completed_at: string }>;
+
+  // Jugadores iniciados y completados.
+  const completedByPlayer = new Map<string, Set<string>>();
+  for (const p of allProgress) {
+    if (!completedByPlayer.has(p.player_id)) completedByPlayer.set(p.player_id, new Set());
+    completedByPlayer.get(p.player_id)!.add(p.lesson_id);
+  }
+  const playersStarted = completedByPlayer.size;
+  let playersCompleted = 0;
+  for (const set of completedByPlayer.values()) {
+    if (set.size >= totalLessons) playersCompleted++;
+  }
+  const completionRate = playersStarted > 0 ? playersCompleted / playersStarted : null;
+
+  // Funnel por lección: cuántos jugadores únicos completaron cada una.
+  const lessonFunnel = lessonsList.map((l) => {
+    const count = allProgress.filter((p) => p.lesson_id === l.id)
+      .reduce((set, p) => set.add(p.player_id), new Set<string>())
+      .size;
+    return {
+      lesson_id: l.id,
+      order: l.order,
+      title: l.title,
+      duration_seconds: l.duration_seconds,
+      has_video: !!l.video_url,
+      completions: count,
+    };
+  });
+
+  // Tendencia 30d.
+  const now = new Date();
+  const since30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const dailyMap = new Map<string, number>();
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+    dailyMap.set(d.toISOString().slice(0, 10), 0);
+  }
+  let lessonsCompleted30d = 0;
+  for (const p of allProgress) {
+    if (p.completed_at >= since30d) {
+      lessonsCompleted30d++;
+      const day = p.completed_at.slice(0, 10);
+      if (dailyMap.has(day)) dailyMap.set(day, (dailyMap.get(day) ?? 0) + 1);
+    }
+  }
+  const dailyProgress30d = Array.from(dailyMap.entries())
+    .map(([date, count]) => ({ date, count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    course_id: courseId,
+    total_lessons: totalLessons,
+    players_started: playersStarted,
+    players_completed: playersCompleted,
+    completion_rate: completionRate,
+    lessons_completed_30d: lessonsCompleted30d,
+    lesson_funnel: lessonFunnel,
+    daily_progress_30d: dailyProgress30d,
+  };
+}
 
 // Helper compartido para collectar avisos por club (o todos, para admin).
 // Devuelve cada pregunta con su array de warnings ya calculado.

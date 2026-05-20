@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { BookOpen, HelpCircle, Edit, Trash2, CheckSquare, Check, FileText, PowerOff, Send } from 'lucide-react';
+import { BookOpen, HelpCircle, Edit, Trash2, CheckSquare, Check, FileText, PowerOff, Send, BarChart3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -8,6 +8,8 @@ import { adminLearningService } from '../../../services/adminLearning';
 import { summarizeFeedback, summarizeAttempts } from '../../../services/learningContent';
 import { ReviewDetailModal } from './ReviewDetailModal';
 import { QuestionFormModal } from '../../Learning/Questions/QuestionFormModal';
+import { QuestionStatsModal } from '../../Learning/Questions/QuestionStatsModal';
+import { CourseStatsModal } from '../../Learning/Courses/CourseStatsModal';
 import { FilterDropdown } from '../../Learning/Questions/FilterDropdown';
 import { StatusSwitcher } from '../../Learning/Questions/StatusSwitcher';
 import { SearchInput } from '../../Learning/Questions/SearchInput';
@@ -214,6 +216,7 @@ function QuestionsModeration() {
 
   // Estado de los modales auxiliares de moderación.
   const [editing, setEditing] = useState<AdminQuestion | null>(null);
+  const [statsQuestion, setStatsQuestion] = useState<AdminQuestion | null>(null);
   // Cuando el admin pide cambiar a 'draft' o 'inactive' desde el StatusSwitcher,
   // mostramos un mini-modal con checkbox "Avisar al club" + nota opcional.
   const [statusPrompt, setStatusPrompt] = useState<{ q: AdminQuestion; target: 'draft' | 'inactive' } | null>(null);
@@ -517,6 +520,15 @@ function QuestionsModeration() {
                 </button>
                 <button
                   type="button"
+                  onClick={() => setStatsQuestion(q)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-50 text-[#1A1A1A] text-[10px] font-bold hover:bg-gray-100 transition-all"
+                  title="Ver estadísticas detalladas"
+                >
+                  <BarChart3 className="w-3 h-3" />
+                  Stats
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleDelete(q)}
                   className="ml-auto flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-red-50 text-red-600 text-[10px] font-bold hover:bg-red-100 transition-all"
                   title="Borrar definitivamente"
@@ -550,6 +562,15 @@ function QuestionsModeration() {
           useAdminEndpoints
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load({ silent: true }); }}
+        />
+      )}
+
+      {/* Modal de estadísticas detalladas de la pregunta. */}
+      {statsQuestion && (
+        <QuestionStatsModal
+          questionId={statsQuestion.id}
+          useAdminEndpoint
+          onClose={() => setStatsQuestion(null)}
         />
       )}
 
@@ -608,6 +629,7 @@ function CoursesModeration({ onPendingCountChange }: { onPendingCountChange: (n:
   const [clubs, setClubs] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<AdminCourse | null>(null);
+  const [statsCourse, setStatsCourse] = useState<AdminCourse | null>(null);
 
   useEffect(() => {
     adminLearningService.listClubsWithContent().then((list) => setClubs(list)).catch(() => {});
@@ -698,14 +720,13 @@ function CoursesModeration({ onPendingCountChange }: { onPendingCountChange: (n:
           {courses.map((course, i) => {
             const isPending = course.status === 'pending_review';
             return (
-              <motion.button
+              <motion.div
                 key={course.id}
-                type="button"
                 onClick={() => setSelected(course)}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.02 }}
-                className={`bg-white rounded-2xl border-2 p-4 text-left space-y-3 transition-all ${
+                className={`bg-white rounded-2xl border-2 p-4 text-left space-y-3 transition-all cursor-pointer ${
                   isPending ? 'border-amber-300 shadow-sm' : 'border-gray-100 hover:border-gray-200'
                 }`}
               >
@@ -719,11 +740,22 @@ function CoursesModeration({ onPendingCountChange }: { onPendingCountChange: (n:
                   </span>
                 </div>
                 <p className="text-[10px] text-gray-500">{course.club_name}</p>
-                <div className="flex items-center gap-3 text-[10px] text-gray-400">
-                  <span>{course.lesson_count} {course.lesson_count === 1 ? t('learning_lessons_count').replace('{{count}}', '1') : t('learning_lessons_count_plural').replace('{{count}}', String(course.lesson_count))}</span>
-                  <span>{t('learning_level_short')} {course.elo_min}–{course.elo_max}</span>
+                <div className="flex items-center justify-between gap-3 text-[10px] text-gray-400">
+                  <span className="flex items-center gap-3">
+                    <span>{course.lesson_count} {course.lesson_count === 1 ? t('learning_lessons_count').replace('{{count}}', '1') : t('learning_lessons_count_plural').replace('{{count}}', String(course.lesson_count))}</span>
+                    <span>{t('learning_level_short')} {course.elo_min}–{course.elo_max}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setStatsCourse(course); }}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-50 text-[#1A1A1A] text-[10px] font-bold hover:bg-gray-100 transition-all"
+                    title="Ver estadísticas detalladas"
+                  >
+                    <BarChart3 className="w-3 h-3" />
+                    Stats
+                  </button>
                 </div>
-              </motion.button>
+              </motion.div>
             );
           })}
         </div>
@@ -743,6 +775,15 @@ function CoursesModeration({ onPendingCountChange }: { onPendingCountChange: (n:
           onClose={() => setSelected(null)}
           onActionDone={() => { setSelected(null); load(); }}
           readOnly={selected.status !== 'pending_review'}
+        />
+      )}
+
+      {statsCourse && (
+        <CourseStatsModal
+          courseId={statsCourse.id}
+          courseTitle={statsCourse.title}
+          useAdminEndpoint
+          onClose={() => setStatsCourse(null)}
         />
       )}
     </div>

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Edit, HelpCircle, Trash2, AlertTriangle, CheckSquare, Check, FileText, PowerOff, Send } from 'lucide-react';
+import { Plus, Edit, HelpCircle, Trash2, AlertTriangle, CheckSquare, Check, FileText, PowerOff, Send, BarChart3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { learningContentService, hasUnreadNotes, summarizeFeedback, summarizeAttempts } from '../../../services/learningContent';
 import { QuestionFormModal } from './QuestionFormModal';
+import { QuestionStatsModal } from './QuestionStatsModal';
 import { FilterDropdown } from './FilterDropdown';
 import { StatusSwitcher } from './StatusSwitcher';
 import { SearchInput } from './SearchInput';
@@ -74,6 +75,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
   const [pageSize, setPageSize] = usePageSizePref('questions:club');
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState<{ mode: 'create' | 'edit'; question?: Question } | null>(null);
+  const [statsQuestion, setStatsQuestion] = useState<Question | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -539,6 +541,15 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
                   <Edit className="w-3 h-3" />
                   {t('learning_edit_question')}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setStatsQuestion(q)}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-gray-50 text-[#1A1A1A] text-[10px] font-bold hover:bg-gray-100 transition-all"
+                  title="Ver estadísticas detalladas"
+                >
+                  <BarChart3 className="w-3 h-3" />
+                  Stats
+                </button>
                 {/* Borrar: drafts o inactivas. Las published deben pasar antes
                     a borrador/inactiva desde el StatusSwitcher. */}
                 {q.status !== 'published' && (
@@ -577,6 +588,13 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
           clubId={clubId}
           onClose={() => setModal(null)}
           onSaved={handleSaved}
+        />
+      )}
+
+      {statsQuestion && (
+        <QuestionStatsModal
+          questionId={statsQuestion.id}
+          onClose={() => setStatsQuestion(null)}
         />
       )}
     </div>

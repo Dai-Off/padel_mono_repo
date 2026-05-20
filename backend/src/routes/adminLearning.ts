@@ -10,6 +10,9 @@ import {
   aggregateFeedback,
   aggregateAttempts,
   collectWarnings,
+  detectWarnings,
+  computeQuestionDetailStats,
+  computeCourseDetailStats,
   type QuestionStatusValue,
 } from './learningClubQuestions';
 
@@ -79,6 +82,30 @@ router.get('/pending-courses/count', requireAdmin, async (_req: Request, res: Re
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, count: count ?? 0 });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// GET /questions/:id/stats — stats detalladas de una pregunta (admin).
+router.get('/questions/:id/stats', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const stats = await computeQuestionDetailStats(supabase, req.params.id);
+    if (!stats) return res.status(404).json({ ok: false, error: 'Pregunta no encontrada' });
+    return res.json({ ok: true, data: stats });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// GET /courses/:id/stats — stats detalladas de un curso (admin).
+router.get('/courses/:id/stats', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const stats = await computeCourseDetailStats(supabase, req.params.id);
+    if (!stats) return res.status(404).json({ ok: false, error: 'Curso no encontrado' });
+    return res.json({ ok: true, data: stats });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -603,6 +630,7 @@ router.put('/questions/:id', requireAdmin, async (req: Request, res: Response) =
       } else {
         updates.content = content ?? {};
       }
+      updates.content_updated_at = new Date().toISOString();
     }
 
     // moderation_notes: aceptamos string, null o ausente.
@@ -758,22 +786,9 @@ router.delete('/questions/:id', requireAdmin, async (req: Request, res: Response
 // Estadísticas
 // ---------------------------------------------------------------------------
 
-// Función auxiliar para extraer un preview legible del content de una pregunta.
-// Usada para `top_answered` en stats.
-function extractContentPreview(type: string, content: unknown, puzzleStatement?: string): string {
-  if (type === 'puzzle' && puzzleStatement) return puzzleStatement;
-  if (!content || typeof content !== 'object') return '—';
-  const c = content as Record<string, unknown>;
-  if (typeof c.question === 'string') return c.question;
-  if (typeof c.statement === 'string') return c.statement;
-  if (Array.isArray(c.pairs)) return `${c.pairs.length} pares`;
-  if (Array.isArray(c.steps)) return `${c.steps.length} pasos`;
-  return '—';
-}
-
-// GET /stats — estadísticas globales de aprendizaje (shape ampliado).
-// Devuelve totales, distribución por tipo / área / nivel, top respondidas,
-// volumen 7d/30d y top clubs.
+// GET /stats — estadísticas accionables de aprendizaje.
+// Pensadas para que admin/club detecte de un vistazo: actividad, equilibrio
+// del contenido, calidad agregada y avisos abiertos.
 router.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -781,45 +796,71 @@ router.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
     const since7d = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
     const since30d = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    // Ejecutamos en paralelo todas las queries que no dependen unas de otras.
+    // Ejecutamos en paralelo todas las queries independientes.
     const [
-      totalsQ,
       activeQ,
-      totalsC,
       activeC,
       pendingC,
       questionsByClubRes,
       coursesByClubRes,
       allQuestionsRes,
+      activeCoursesRes,
+      allLessonsRes,
+      allProgressRes,
       logsAllRes,
       logs7dRes,
       logs30dRes,
+      logs30dDailyRes,
+      activePlayersRes,
+      lessonsCompleted7dRes,
+      coursePlayers30dRes,
+      streaksRes,
     ] = await Promise.all([
-      supabase.from('learning_questions').select('id', { count: 'exact', head: true }),
       supabase.from('learning_questions').select('id', { count: 'exact', head: true }).eq('status', 'published'),
-      supabase.from('learning_courses').select('id', { count: 'exact', head: true }),
       supabase.from('learning_courses').select('id', { count: 'exact', head: true }).eq('status', 'active'),
       supabase.from('learning_courses').select('id', { count: 'exact', head: true }).eq('status', 'pending_review'),
       supabase.from('learning_questions').select('created_by_club, clubs:created_by_club(name)').eq('status', 'published'),
       supabase.from('learning_courses').select('club_id, clubs(name)').eq('status', 'active'),
-      // Para breakdowns por tipo/área/nivel necesitamos todas las publicadas con metadatos.
-      supabase.from('learning_questions').select('id, type, area, level, content').eq('status', 'published'),
-      // Logs totales para tasa de acierto agregada por pregunta.
-      supabase.from('learning_question_log').select('question_id, answered_correctly'),
-      // Volumen últimos 7 días.
+      supabase.from('learning_questions').select('id, type, area, level').eq('status', 'published'),
+      // Cursos activos con sus elo_min/elo_max para distribución por nivel y
+      // cálculo de tasa de finalización (necesitamos saber sus lecciones).
+      supabase.from('learning_courses').select('id, elo_min, elo_max').eq('status', 'active'),
+      // Lecciones de cursos activos (para mapear progress → course).
+      supabase.from('learning_course_lessons').select('id, course_id'),
+      // Progresos (player, lesson) — base para finalización y engagement.
+      supabase.from('learning_course_progress').select('player_id, lesson_id, completed_at'),
+      // Logs totales — para attempts/correct/feedback por pregunta.
+      supabase.from('learning_question_log').select('question_id, player_id, answered_correctly, vote, answered_at'),
       supabase.from('learning_question_log').select('id', { count: 'exact', head: true }).gte('answered_at', since7d),
-      // Volumen últimos 30 días.
       supabase.from('learning_question_log').select('id', { count: 'exact', head: true }).gte('answered_at', since30d),
+      // Para tendencia diaria, traemos los timestamps de los últimos 30 días.
+      supabase.from('learning_question_log').select('answered_at').gte('answered_at', since30d),
+      // Jugadores únicos últimos 7 días.
+      supabase.from('learning_question_log').select('player_id').gte('answered_at', since7d),
+      // Lecciones completadas últimos 7 días (engagement reciente).
+      supabase.from('learning_course_progress').select('id', { count: 'exact', head: true }).gte('completed_at', since7d),
+      // Jugadores únicos con progreso en cursos últimos 30 días.
+      supabase.from('learning_course_progress').select('player_id').gte('completed_at', since30d),
+      supabase.from('learning_streaks').select('current_streak, longest_streak, last_lesson_completed_at'),
     ]);
 
     // Agregados por question_id desde los logs (attempts / correct).
+    // También: voto más reciente por (player, question) para feedback.
     const attemptsByQ = new Map<string, { attempts: number; correct: number }>();
+    const latestVoteByPair = new Map<string, { vote: 'up' | 'down'; at: number }>();
     for (const l of logsAllRes.data ?? []) {
-      const qid = (l as any).question_id as string;
-      const acc = attemptsByQ.get(qid) ?? { attempts: 0, correct: 0 };
+      const r = l as { question_id: string; player_id: string; answered_correctly: boolean; vote: 'up' | 'down' | null; answered_at: string };
+      const acc = attemptsByQ.get(r.question_id) ?? { attempts: 0, correct: 0 };
       acc.attempts++;
-      if ((l as any).answered_correctly) acc.correct++;
-      attemptsByQ.set(qid, acc);
+      if (r.answered_correctly) acc.correct++;
+      attemptsByQ.set(r.question_id, acc);
+
+      if (r.vote === 'up' || r.vote === 'down') {
+        const key = `${r.question_id}::${r.player_id}`;
+        const at = new Date(r.answered_at).getTime();
+        const cur = latestVoteByPair.get(key);
+        if (!cur || at > cur.at) latestVoteByPair.set(key, { vote: r.vote, at });
+      }
     }
 
     // Breakdowns por tipo / área / nivel: count + attempts + correct.
@@ -828,7 +869,7 @@ router.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
     const byArea: Record<string, Bucket> = {};
     const byLevel: Record<string, Bucket> = {};
 
-    const allPublished = (allQuestionsRes.data ?? []) as Array<{ id: string; type: string; area: string; level: number; content: unknown }>;
+    const allPublished = (allQuestionsRes.data ?? []) as Array<{ id: string; type: string; area: string; level: number }>;
     for (const q of allPublished) {
       const agg = attemptsByQ.get(q.id) ?? { attempts: 0, correct: 0 };
       const levelKey = String(Math.floor(q.level));
@@ -840,36 +881,195 @@ router.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
       }
     }
 
-    // Top 10 más respondidas (de las publicadas).
-    const topAnswered = allPublished
-      .map((q) => {
-        const agg = attemptsByQ.get(q.id) ?? { attempts: 0, correct: 0 };
-        return {
-          question_id: q.id,
-          attempts: agg.attempts,
-          success_rate: agg.attempts > 0 ? agg.correct / agg.attempts : 0,
-          preview: extractContentPreview(q.type, q.content),
-        };
-      })
-      .filter((x) => x.attempts > 0)
-      .sort((a, b) => b.attempts - a.attempts)
-      .slice(0, 10);
+    // Feedback agregado global (último voto por par).
+    let feedbackUp = 0;
+    let feedbackDown = 0;
+    for (const { vote } of latestVoteByPair.values()) {
+      if (vote === 'up') feedbackUp++;
+      else feedbackDown++;
+    }
 
-    // Para puzzles cuyo preview vino vacío ('—'), traemos statement de learning_puzzles.
-    const puzzleIdsForTop = topAnswered.filter((x) => x.preview === '—').map((x) => x.question_id);
-    if (puzzleIdsForTop.length > 0) {
-      const { data: puzzles } = await supabase
-        .from('learning_puzzles')
-        .select('question_id, statement')
-        .in('question_id', puzzleIdsForTop);
-      const byQ = new Map((puzzles ?? []).map((p: any) => [String(p.question_id), p.statement as string]));
-      for (const row of topAnswered) {
-        if (row.preview === '—') {
-          const s = byQ.get(row.question_id);
-          if (s) row.preview = s;
-        }
+    // Avisos: aplicamos el mismo detector que usa el listado de warnings.
+    const warningsByKind = { too_easy: 0, too_hard: 0, low_quality: 0 };
+    const upDownByQ = new Map<string, { up: number; down: number }>();
+    for (const [key, { vote }] of latestVoteByPair) {
+      const qid = key.split('::')[0];
+      const cur = upDownByQ.get(qid) ?? { up: 0, down: 0 };
+      if (vote === 'up') cur.up++; else cur.down++;
+      upDownByQ.set(qid, cur);
+    }
+    for (const q of allPublished) {
+      const at = attemptsByQ.get(q.id) ?? { attempts: 0, correct: 0 };
+      const fb = upDownByQ.get(q.id) ?? { up: 0, down: 0 };
+      const kinds = detectWarnings({
+        attempts: at.attempts,
+        correct: at.correct,
+        votes_up: fb.up,
+        votes_down: fb.down,
+      });
+      for (const k of kinds) warningsByKind[k]++;
+    }
+
+    // Tendencia diaria de respuestas: bucketizamos los 30 días.
+    const dailyMap = new Map<string, number>();
+    // Inicializamos con 0s para todos los días en el rango (incluir días sin actividad).
+    for (let i = 0; i < 30; i++) {
+      const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
+      dailyMap.set(d.toISOString().slice(0, 10), 0);
+    }
+    for (const l of logs30dDailyRes.data ?? []) {
+      const day = (l as any).answered_at.slice(0, 10);
+      dailyMap.set(day, (dailyMap.get(day) ?? 0) + 1);
+    }
+    const dailyResponses30d = Array.from(dailyMap.entries())
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    // Jugadores activos últimos 7d (únicos).
+    const activePlayers = new Set<string>();
+    for (const r of activePlayersRes.data ?? []) activePlayers.add((r as any).player_id);
+
+    // Engagement de cursos: jugadores únicos con progreso 30d.
+    const coursePlayers30d = new Set<string>();
+    for (const r of coursePlayers30dRes.data ?? []) coursePlayers30d.add((r as any).player_id);
+
+    // Distribución de cursos por rango de nivel. Un curso "encaja" en un rango
+    // si su rango [elo_min, elo_max] se solapa con el del preset (usamos
+    // mismos criterios que el LevelFilter del frontend).
+    const COURSE_LEVEL_PRESETS: { label: string; min: number; max: number }[] = [
+      { label: 'Principiante', min: 0, max: 2 },
+      { label: 'Intermedio', min: 2, max: 3.5 },
+      { label: 'Avanzado', min: 3.5, max: 4.5 },
+      { label: 'Competición', min: 4.5, max: 6 },
+      { label: 'Profesional', min: 6, max: 7 },
+    ];
+    const courseLevels: Record<string, number> = {};
+    for (const p of COURSE_LEVEL_PRESETS) courseLevels[p.label] = 0;
+    for (const c of activeCoursesRes.data ?? []) {
+      const eMin = (c as any).elo_min as number;
+      const eMax = (c as any).elo_max as number;
+      for (const p of COURSE_LEVEL_PRESETS) {
+        if (eMin <= p.max && eMax >= p.min) courseLevels[p.label]++;
       }
     }
+
+    // Tasa de finalización: cada par (player, course) que ha tocado al menos
+    // una lección cuenta como "iniciado". Si ha completado todas las lecciones
+    // del curso, cuenta también como "completado". rate = completados/iniciados.
+    const lessonsByCourse = new Map<string, Set<string>>();
+    for (const l of allLessonsRes.data ?? []) {
+      const cid = (l as any).course_id as string;
+      const lid = (l as any).id as string;
+      if (!lessonsByCourse.has(cid)) lessonsByCourse.set(cid, new Set());
+      lessonsByCourse.get(cid)!.add(lid);
+    }
+    // Mapa lesson_id → course_id para resolver progresos.
+    const lessonToCourse = new Map<string, string>();
+    for (const [cid, lessons] of lessonsByCourse) {
+      for (const lid of lessons) lessonToCourse.set(lid, cid);
+    }
+    // Por par (player, course), cuántas lecciones completadas.
+    const completedByPair = new Map<string, Set<string>>();
+    for (const r of allProgressRes.data ?? []) {
+      const playerId = (r as any).player_id as string;
+      const lessonId = (r as any).lesson_id as string;
+      const cid = lessonToCourse.get(lessonId);
+      if (!cid) continue;
+      const key = `${playerId}::${cid}`;
+      if (!completedByPair.has(key)) completedByPair.set(key, new Set());
+      completedByPair.get(key)!.add(lessonId);
+    }
+    let coursesStarted = 0;
+    let coursesCompleted = 0;
+    for (const [key, set] of completedByPair) {
+      const cid = key.split('::')[1];
+      const totalLessons = lessonsByCourse.get(cid)?.size ?? 0;
+      if (totalLessons === 0) continue;
+      coursesStarted++;
+      if (set.size >= totalLessons) coursesCompleted++;
+    }
+    const courseCompletionRate = coursesStarted > 0 ? coursesCompleted / coursesStarted : null;
+
+    // Métricas numéricas adicionales de cursos. Calculadas sobre cursos activos.
+    const activeCourseIds = new Set((activeCoursesRes.data ?? []).map((c: any) => c.id as string));
+    const activeLessons = (allLessonsRes.data ?? []).filter((l: any) => activeCourseIds.has(l.course_id));
+    const totalLessonsPublished = activeLessons.length;
+    const avgLessonsPerCourse = activeCourseIds.size > 0 ? totalLessonsPublished / activeCourseIds.size : null;
+
+    // Para duración y % con vídeo necesitamos los campos extra de lessons.
+    // Hacemos una query adicional solo si hay cursos activos.
+    let avgDurationSeconds: number | null = null;
+    let coursesWithFullVideoRate: number | null = null;
+    let avgDepthCompleted: number | null = null;
+    if (activeCourseIds.size > 0) {
+      const { data: detailedLessons } = await supabase
+        .from('learning_course_lessons')
+        .select('course_id, duration_seconds, video_url')
+        .in('course_id', Array.from(activeCourseIds));
+      const ds = detailedLessons ?? [];
+      const withDuration = ds.filter((l: any) => typeof l.duration_seconds === 'number');
+      avgDurationSeconds = withDuration.length > 0
+        ? withDuration.reduce((s: number, l: any) => s + l.duration_seconds, 0) / withDuration.length
+        : null;
+
+      // % de cursos donde TODAS sus lecciones tienen video_url no nulo.
+      const lessonsByCourseAll = new Map<string, Array<{ video_url: string | null }>>();
+      for (const l of ds) {
+        const cid = (l as any).course_id as string;
+        if (!lessonsByCourseAll.has(cid)) lessonsByCourseAll.set(cid, []);
+        lessonsByCourseAll.get(cid)!.push({ video_url: (l as any).video_url });
+      }
+      let coursesWithAllVideos = 0;
+      for (const lessons of lessonsByCourseAll.values()) {
+        if (lessons.length > 0 && lessons.every((x) => !!x.video_url)) coursesWithAllVideos++;
+      }
+      coursesWithFullVideoRate = activeCourseIds.size > 0 ? coursesWithAllVideos / activeCourseIds.size : null;
+    }
+
+    // Profundidad media completada por jugador iniciador.
+    if (completedByPair.size > 0) {
+      let totalLessonsByPair = 0;
+      for (const set of completedByPair.values()) totalLessonsByPair += set.size;
+      avgDepthCompleted = totalLessonsByPair / completedByPair.size;
+    }
+
+    // Estadísticas de rachas. El `current_streak` guardado en BD NO decae
+    // automáticamente: solo se actualiza cuando el jugador completa otra
+    // lección. Eso significa que un jugador que perdió la racha hace días
+    // sigue mostrando su valor viejo. Para que las stats reflejen la
+    // realidad, calculamos la racha "efectiva" comparando con
+    // last_lesson_completed_at: si fue hoy o ayer (UTC) → racha viva;
+    // si fue antes → la racha está rota y cuenta como 0.
+    const streaks = (streaksRes.data ?? []) as Array<{ current_streak: number; longest_streak: number; last_lesson_completed_at: string | null }>;
+    const todayUTC = new Date(now.toISOString().slice(0, 10) + 'T00:00:00Z').getTime();
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    const effective = streaks.map((s) => {
+      if (!s.last_lesson_completed_at) return 0;
+      const lastDay = new Date(s.last_lesson_completed_at.slice(0, 10) + 'T00:00:00Z').getTime();
+      const daysAgo = Math.round((todayUTC - lastDay) / ONE_DAY);
+      // Aceptamos hoy (0) o ayer (1) como racha viva. Más viejo → rota.
+      return daysAgo <= 1 ? s.current_streak : 0;
+    });
+    const activeEffective = effective.filter((v) => v > 0);
+    const streakStats = {
+      players_with_active_streak: activeEffective.length,
+      avg_current_streak: activeEffective.length > 0
+        ? activeEffective.reduce((s, x) => s + x, 0) / activeEffective.length
+        : null,
+      longest_ever: streaks.reduce((max, x) => Math.max(max, x.longest_streak), 0),
+      // Distribución por buckets de duración (días). El bucket "0" incluye
+      // jugadores que alguna vez entraron al módulo pero ahora no tienen
+      // racha viva — útil para ver la retención real frente a los activos.
+      buckets: {
+        '0': effective.filter((v) => v === 0).length,
+        '1': activeEffective.filter((v) => v === 1).length,
+        '2-3': activeEffective.filter((v) => v >= 2 && v <= 3).length,
+        '4-7': activeEffective.filter((v) => v >= 4 && v <= 7).length,
+        '8-14': activeEffective.filter((v) => v >= 8 && v <= 14).length,
+        '15-30': activeEffective.filter((v) => v >= 15 && v <= 30).length,
+        '31+': activeEffective.filter((v) => v > 30).length,
+      },
+    };
 
     // Agrupaciones por club (mantenidas).
     const qByClub: Record<string, { club_name: string; count: number }> = {};
@@ -888,17 +1088,31 @@ router.get('/stats', requireAdmin, async (_req: Request, res: Response) => {
     return res.json({
       ok: true,
       data: {
-        total_questions: totalsQ.count ?? 0,
         active_questions: activeQ.count ?? 0,
-        total_courses: totalsC.count ?? 0,
         active_courses: activeC.count ?? 0,
         pending_courses: pendingC.count ?? 0,
+        active_players_7d: activePlayers.size,
         by_type: byType,
         by_area: byArea,
         by_level: byLevel,
-        top_answered: topAnswered,
         volume_last_7d: logs7dRes.count ?? 0,
         volume_last_30d: logs30dRes.count ?? 0,
+        daily_responses_30d: dailyResponses30d,
+        warnings_by_kind: warningsByKind,
+        feedback_up_total: feedbackUp,
+        feedback_down_total: feedbackDown,
+        lessons_completed_7d: lessonsCompleted7dRes.count ?? 0,
+        course_players_30d: coursePlayers30d.size,
+        course_levels: courseLevels,
+        course_completion_rate: courseCompletionRate,
+        courses_started: coursesStarted,
+        courses_completed: coursesCompleted,
+        total_lessons_published: totalLessonsPublished,
+        avg_lessons_per_course: avgLessonsPerCourse,
+        avg_lesson_duration_seconds: avgDurationSeconds,
+        courses_with_full_video_rate: coursesWithFullVideoRate,
+        avg_depth_completed: avgDepthCompleted,
+        streaks: streakStats,
         questions_by_club: Object.entries(qByClub)
           .map(([club_id, v]) => ({ club_id, club_name: v.club_name, count: v.count }))
           .sort((a, b) => b.count - a.count),

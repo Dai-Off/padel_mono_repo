@@ -11,10 +11,11 @@ import { clubService, type Club } from '../../services/club';
 import { QuestionsTab } from './Questions/QuestionsTab';
 import { CoursesTab } from './Courses/CoursesTab';
 import { ClubWarningsView } from './Questions/ClubWarningsView';
+import { ClubStatsView } from './Questions/ClubStatsView';
 import { learningContentService } from '../../services/learningContent';
 import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
 
-type Tab = 'questions' | 'courses' | 'warnings';
+type Tab = 'questions' | 'courses' | 'warnings' | 'stats';
 
 export function LearningContentView() {
   const { t } = useTranslation();
@@ -141,6 +142,7 @@ export function LearningContentView() {
     { key: 'questions', label: t('learning_tab_questions'), badge: unreadNotesCount > 0 ? unreadNotesCount : undefined },
     { key: 'courses', label: t('learning_tab_courses') },
     { key: 'warnings', label: 'Avisos', badge: warningsCount > 0 ? warningsCount : undefined },
+    { key: 'stats', label: 'Estadísticas' },
   ];
 
   return (
@@ -227,6 +229,9 @@ export function LearningContentView() {
             )}
             {selectedClubId && activeTab === 'warnings' && (
               <ClubWarningsView clubId={selectedClubId} onCountChange={setWarningsCount} />
+            )}
+            {selectedClubId && activeTab === 'stats' && (
+              <ClubStatsView clubId={selectedClubId} />
             )}
           </motion.div>
         </div>

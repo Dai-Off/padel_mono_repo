@@ -268,6 +268,25 @@ export const learningContentService = {
     await apiFetchWithAuth(`/learning/questions/${id}`, { method: 'DELETE' });
   },
 
+  // Estadísticas locales del club + benchmark con la media global. Protegido
+  // por canAccessClub en el backend.
+  async getClubStats(clubId: string): Promise<import('../types/adminLearning').ClubLearningStats> {
+    const res = await apiFetchWithAuth<ApiOk<{ data: import('../types/adminLearning').ClubLearningStats }>>(`/learning/clubs/${clubId}/stats`);
+    return res.data;
+  },
+
+  // Stats detalladas de una pregunta del club.
+  async getQuestionStats(id: string): Promise<import('../types/adminLearning').QuestionDetailStats> {
+    const res = await apiFetchWithAuth<ApiOk<{ data: import('../types/adminLearning').QuestionDetailStats }>>(`/learning/questions/${id}/stats`);
+    return res.data;
+  },
+
+  // Stats detalladas de un curso del club.
+  async getCourseStats(id: string): Promise<import('../types/adminLearning').CourseDetailStats> {
+    const res = await apiFetchWithAuth<ApiOk<{ data: import('../types/adminLearning').CourseDetailStats }>>(`/learning/club-courses/${id}/stats`);
+    return res.data;
+  },
+
   // Trae las preguntas del club con al menos un aviso de calidad. Devuelve
   // la lista enriquecida con el array `warnings` por cada pregunta. No se
   // pagina; el panel muestra todas. Si crece mucho, lo paginamos en cliente.
