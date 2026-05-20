@@ -113,7 +113,7 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
+    <div className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

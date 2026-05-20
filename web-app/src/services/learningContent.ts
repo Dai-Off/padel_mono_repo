@@ -2,6 +2,7 @@ import { apiFetchWithAuth } from './api';
 import { getSupabaseClient } from '../lib/supabase';
 import type {
   Question,
+  QuestionWithWarnings,
   QuestionType,
   QuestionArea,
   QuestionContent,
@@ -40,6 +41,25 @@ export function hasUnreadNotes(q: Pick<Question, 'moderation_notes' | 'notes_see
 // se muestra solo el conteo bruto (👍 N · 👎 M) para no inducir a interpretar
 // ruido como señal.
 export const FEEDBACK_MIN_VOTES = 10;
+
+// Umbral mínimo de respuestas para mostrar el % de acierto en card. Por
+// debajo, mostramos "Pocas respuestas" para no inducir falsa señal.
+export const ATTEMPTS_MIN_FOR_RATE = 20;
+
+/**
+ * Resumen de respuestas/aciertos para pintar en card. Si attempts < umbral,
+ * success_pct = null (mostrar "Pocas respuestas" en su lugar).
+ */
+export function summarizeAttempts(q: Pick<Question, 'attempts_count' | 'correct_count'>): {
+  attempts: number;
+  correct: number;
+  success_pct: number | null;
+} {
+  const attempts = q.attempts_count ?? 0;
+  const correct = q.correct_count ?? 0;
+  const success_pct = attempts >= ATTEMPTS_MIN_FOR_RATE ? Math.round((correct / attempts) * 100) : null;
+  return { attempts, correct, success_pct };
+}
 
 /**
  * Resumen de la valoración (like/dislike) para pintar en una card. Devuelve
@@ -171,6 +191,8 @@ export const learningContentService = {
       status?: 'all' | 'draft' | 'published' | 'inactive';
       search?: string;
       order_by?: 'created_desc' | 'created_asc';
+      elo_min?: number;
+      elo_max?: number;
       page?: number;
       page_size?: number;
     },
@@ -181,6 +203,8 @@ export const learningContentService = {
     if (filters?.status) q.set('status', filters.status);
     if (filters?.search) q.set('search', filters.search);
     if (filters?.order_by) q.set('order_by', filters.order_by);
+    if (typeof filters?.elo_min === 'number') q.set('elo_min', String(filters.elo_min));
+    if (typeof filters?.elo_max === 'number') q.set('elo_max', String(filters.elo_max));
     if (filters?.page) q.set('page', String(filters.page));
     if (filters?.page_size) q.set('page_size', String(filters.page_size));
     const res = await apiFetchWithAuth<ApiOk<{
@@ -244,6 +268,14 @@ export const learningContentService = {
     await apiFetchWithAuth(`/learning/questions/${id}`, { method: 'DELETE' });
   },
 
+  // Trae las preguntas del club con al menos un aviso de calidad. Devuelve
+  // la lista enriquecida con el array `warnings` por cada pregunta. No se
+  // pagina; el panel muestra todas. Si crece mucho, lo paginamos en cliente.
+  async getClubWarnings(clubId: string): Promise<{ data: QuestionWithWarnings[]; count: number }> {
+    const res = await apiFetchWithAuth<ApiOk<{ data: QuestionWithWarnings[]; meta?: { count?: number } }>>(`/learning/clubs/${clubId}/warnings`);
+    return { data: res.data ?? [], count: res.meta?.count ?? (res.data?.length ?? 0) };
+  },
+
   // Marca como vistas las notas de moderación de una pregunta. Devuelve el
   // contador total de preguntas del club con nota pendiente tras el update
   // para que el badge se actualice sin re-fetch del listing.
@@ -259,9 +291,36 @@ export const learningContentService = {
   // Cursos
   // ---------------------------------------------------------------------------
 
-  async listCourses(clubId: string): Promise<Course[]> {
-    const res = await apiFetchWithAuth<ApiOk<{ data: Course[] }>>(`/learning/club-courses?club_id=${clubId}`);
-    return res.data ?? [];
+  async listCourses(
+    clubId: string,
+    filters?: {
+      status?: string;
+      search?: string;
+      order_by?: 'created_desc' | 'created_asc';
+      elo_min?: number;
+      elo_max?: number;
+      page?: number;
+      page_size?: number;
+    },
+  ): Promise<{ data: Course[]; total: number; page: number; page_size: number }> {
+    const q = new URLSearchParams({ club_id: clubId });
+    if (filters?.status) q.set('status', filters.status);
+    if (filters?.search) q.set('search', filters.search);
+    if (filters?.order_by) q.set('order_by', filters.order_by);
+    if (typeof filters?.elo_min === 'number') q.set('elo_min', String(filters.elo_min));
+    if (typeof filters?.elo_max === 'number') q.set('elo_max', String(filters.elo_max));
+    if (filters?.page) q.set('page', String(filters.page));
+    if (filters?.page_size) q.set('page_size', String(filters.page_size));
+    const res = await apiFetchWithAuth<ApiOk<{
+      data: Course[];
+      meta?: { total?: number; page?: number; page_size?: number };
+    }>>(`/learning/club-courses?${q}`);
+    return {
+      data: res.data ?? [],
+      total: res.meta?.total ?? 0,
+      page: res.meta?.page ?? 1,
+      page_size: res.meta?.page_size ?? 20,
+    };
   },
 
   async getCourse(courseId: string): Promise<CourseWithLessons> {

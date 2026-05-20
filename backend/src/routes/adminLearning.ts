@@ -8,6 +8,8 @@ import {
   VALID_STATUS,
   validateQuestionContent,
   aggregateFeedback,
+  aggregateAttempts,
+  collectWarnings,
   type QuestionStatusValue,
 } from './learningClubQuestions';
 
@@ -77,6 +79,39 @@ router.get('/pending-courses/count', requireAdmin, async (_req: Request, res: Re
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, count: count ?? 0 });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// GET /warnings — avisos de calidad para todas las preguntas (o filtrado
+// por club). Devuelve cada pregunta enriquecida con su array `warnings`.
+// No paginado: si hay muchos avisos, el panel los muestra todos (problema
+// que justamente queremos resolver).
+router.get('/warnings', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const clubId = typeof req.query.club_id === 'string' && req.query.club_id ? req.query.club_id : undefined;
+    const rows = await collectWarnings(supabase, { clubId });
+
+    // Para admin, enriquecemos cada fila con club_name (vienen ya con
+    // created_by_club). Una query agrupada por club.
+    const ids = Array.from(new Set(rows.map((r: any) => r.created_by_club).filter(Boolean)));
+    const nameByClub = new Map<string, string>();
+    if (ids.length > 0) {
+      const { data: clubs } = await supabase
+        .from('clubs')
+        .select('id, name')
+        .in('id', ids);
+      for (const c of clubs ?? []) nameByClub.set((c as any).id, (c as any).name);
+    }
+    const enriched = rows.map((r: any) => ({
+      ...r,
+      club_id: r.created_by_club,
+      club_name: nameByClub.get(r.created_by_club) ?? null,
+    }));
+
+    return res.json({ ok: true, data: enriched, meta: { count: enriched.length } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -215,24 +250,54 @@ router.post('/courses/:id/reject', requireAdmin, async (req: Request, res: Respo
 // Moderación global
 // ---------------------------------------------------------------------------
 
-// GET /courses — todos los cursos (filtros opcionales: status, club_id)
+// GET /courses — todos los cursos. Filtros: status, club_id, search,
+// elo_min, elo_max. Paginación: page, page_size. Orden: created_desc/asc.
+// El orden hace que pending_review aparezca SIEMPRE primero (independiente
+// del orden secundario por fecha), para que el admin los encuentre rápido.
 router.get('/courses', requireAdmin, async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { status, club_id } = req.query;
 
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const requestedSize = parseInt(String(req.query.page_size ?? '20'), 10) || 20;
+    const pageSize = Math.min(100, Math.max(1, requestedSize));
+    const offset = (page - 1) * pageSize;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const orderBy = String(req.query.order_by ?? 'created_desc');
+    const ascending = orderBy === 'created_asc';
+    const eloMin = req.query.elo_min ? Number(req.query.elo_min) : undefined;
+    const eloMax = req.query.elo_max ? Number(req.query.elo_max) : undefined;
+
     let query = supabase
       .from('learning_courses')
-      .select('id, club_id, title, description, elo_min, elo_max, staff_id, status, created_at, updated_at, clubs(name)')
-      .order('created_at', { ascending: false });
+      .select('id, club_id, title, description, elo_min, elo_max, staff_id, status, created_at, updated_at, clubs(name)', { count: 'exact' })
+      // Pending arriba siempre, después por fecha. Permite que con paginación
+      // los cursos en revisión nunca se "pierdan" en páginas posteriores.
+      .order('status', { ascending: true })
+      .order('created_at', { ascending });
 
     if (status && status !== 'all') query = query.eq('status', status as string);
     if (club_id) query = query.eq('club_id', club_id as string);
+    if (search) {
+      const escaped = search.replace(/[%_]/g, '\\$&');
+      query = query.ilike('title', `%${escaped}%`);
+    }
+    // Filtro por rango de nivel: el curso "encaja" si su rango se solapa con
+    // el pedido (elo_min curso <= eloMax filtro y elo_max curso >= eloMin).
+    if (typeof eloMin === 'number' && !Number.isNaN(eloMin)) query = query.gte('elo_max', eloMin);
+    if (typeof eloMax === 'number' && !Number.isNaN(eloMax)) query = query.lte('elo_min', eloMax);
 
-    const { data: courses, error } = await query;
+    query = query.range(offset, offset + pageSize - 1);
+
+    const { data: courses, error, count } = await query;
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    if (!courses || courses.length === 0) return res.json({ ok: true, data: [] });
+    const totalCount = count ?? 0;
+
+    if (!courses || courses.length === 0) {
+      return res.json({ ok: true, data: [], meta: { total: totalCount, page, page_size: pageSize } });
+    }
 
     // Lesson counts
     const courseIds = courses.map((c: any) => c.id);
@@ -261,7 +326,7 @@ router.get('/courses', requireAdmin, async (req: Request, res: Response) => {
       updated_at: c.updated_at,
     }));
 
-    return res.json({ ok: true, data: result });
+    return res.json({ ok: true, data: result, meta: { total: totalCount, page, page_size: pageSize } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -300,6 +365,11 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
       const escaped = search.replace(/[%_]/g, '\\$&');
       query = query.ilike('content_search', `%${escaped}%`);
     }
+    // Filtro por rango de nivel (pregunta tiene level escalar).
+    const eloMin = req.query.elo_min ? Number(req.query.elo_min) : undefined;
+    const eloMax = req.query.elo_max ? Number(req.query.elo_max) : undefined;
+    if (typeof eloMin === 'number' && !Number.isNaN(eloMin)) query = query.gte('level', eloMin);
+    if (typeof eloMax === 'number' && !Number.isNaN(eloMax)) query = query.lte('level', eloMax);
 
     query = query.range(offset, offset + pageSize - 1);
 
@@ -320,13 +390,16 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
       for (const p of puzzles ?? []) puzzleByQuestion.set(p.question_id, p);
     }
 
-    // Agregados de feedback (like / dislike) por pregunta — último voto por
-    // (player, question), evita sobre-pesar usuarios recurrentes.
+    // Agregados de feedback (like/dislike) y attempts (respuestas/aciertos).
     const allIds = (questions || []).map((q: any) => q.id as string);
-    const feedbackAgg = await aggregateFeedback(supabase, allIds);
+    const [feedbackAgg, attemptsAgg] = await Promise.all([
+      aggregateFeedback(supabase, allIds),
+      aggregateAttempts(supabase, allIds),
+    ]);
 
     const result = (questions || []).map((q: any) => {
       const fb = feedbackAgg.get(q.id) ?? { up: 0, down: 0 };
+      const at = attemptsAgg.get(q.id) ?? { attempts: 0, correct: 0 };
       const base = {
         ...q,
         club_id: q.created_by_club,
@@ -334,6 +407,8 @@ router.get('/questions', requireAdmin, async (req: Request, res: Response) => {
         clubs: undefined,
         feedback_up: fb.up,
         feedback_down: fb.down,
+        attempts_count: at.attempts,
+        correct_count: at.correct,
       };
       if (q.type === 'puzzle') {
         const p = puzzleByQuestion.get(q.id);

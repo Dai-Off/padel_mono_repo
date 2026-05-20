@@ -23,9 +23,12 @@ interface Props<T extends string> {
   allValue: T;
   options: FilterOption<T>[];
   onChange: (value: T) => void;
+  // Si true, el botón no muestra el label "Label:" delante del valor.
+  // Útil cuando el label se pinta aparte (ej: "ORDENAR POR:" externo).
+  hideLabel?: boolean;
 }
 
-export function FilterDropdown<T extends string>({ label, value, allValue, options, onChange }: Props<T>) {
+export function FilterDropdown<T extends string>({ label, value, allValue, options, onChange, hideLabel }: Props<T>) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -57,7 +60,7 @@ export function FilterDropdown<T extends string>({ label, value, allValue, optio
             : 'bg-gray-50 text-[#1A1A1A] hover:bg-gray-100'
         }`}
       >
-        <span className="opacity-70">{label}:</span>
+        {!hideLabel && <span className="opacity-70">{label}:</span>}
         <span>{current?.label ?? '—'}</span>
         <ChevronDown className="w-3 h-3 opacity-60" />
       </button>

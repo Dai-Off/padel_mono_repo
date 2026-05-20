@@ -3,6 +3,7 @@ import type {
   AdminCourse,
   AdminCourseWithLessons,
   AdminQuestion,
+  AdminQuestionWithWarnings,
   LearningStats,
 } from '../types/adminLearning';
 import type { QuestionType, QuestionArea } from '../types/learningContent';
@@ -41,13 +42,36 @@ export const adminLearningService = {
   // Moderación global
   // ---------------------------------------------------------------------------
 
-  async listAllCourses(filters?: { status?: string; club_id?: string }): Promise<AdminCourse[]> {
+  async listAllCourses(filters?: {
+    status?: string;
+    club_id?: string;
+    search?: string;
+    order_by?: 'created_desc' | 'created_asc';
+    elo_min?: number;
+    elo_max?: number;
+    page?: number;
+    page_size?: number;
+  }): Promise<{ data: AdminCourse[]; total: number; page: number; page_size: number }> {
     const q = new URLSearchParams();
     if (filters?.status) q.set('status', filters.status);
     if (filters?.club_id) q.set('club_id', filters.club_id);
+    if (filters?.search) q.set('search', filters.search);
+    if (filters?.order_by) q.set('order_by', filters.order_by);
+    if (typeof filters?.elo_min === 'number') q.set('elo_min', String(filters.elo_min));
+    if (typeof filters?.elo_max === 'number') q.set('elo_max', String(filters.elo_max));
+    if (filters?.page) q.set('page', String(filters.page));
+    if (filters?.page_size) q.set('page_size', String(filters.page_size));
     const qs = q.toString();
-    const res = await apiFetchWithAuth<ApiOk<{ data: AdminCourse[] }>>(`/admin/learning/courses${qs ? `?${qs}` : ''}`);
-    return res.data ?? [];
+    const res = await apiFetchWithAuth<ApiOk<{
+      data: AdminCourse[];
+      meta?: { total?: number; page?: number; page_size?: number };
+    }>>(`/admin/learning/courses${qs ? `?${qs}` : ''}`);
+    return {
+      data: res.data ?? [],
+      total: res.meta?.total ?? 0,
+      page: res.meta?.page ?? 1,
+      page_size: res.meta?.page_size ?? 20,
+    };
   },
 
   async listClubsWithContent(): Promise<Array<{ id: string; name: string }>> {
@@ -62,10 +86,14 @@ export const adminLearningService = {
     status?: 'all' | 'draft' | 'published' | 'inactive';
     search?: string;
     order_by?: 'created_desc' | 'created_asc';
+    elo_min?: number;
+    elo_max?: number;
     page?: number;
     page_size?: number;
   }): Promise<{ data: AdminQuestion[]; total: number; page: number; page_size: number }> {
     const q = new URLSearchParams();
+    if (typeof filters?.elo_min === 'number') q.set('elo_min', String(filters.elo_min));
+    if (typeof filters?.elo_max === 'number') q.set('elo_max', String(filters.elo_max));
     if (filters?.club_id) q.set('club_id', filters.club_id);
     if (filters?.type) q.set('type', filters.type);
     if (filters?.area) q.set('area', filters.area);
@@ -140,6 +168,14 @@ export const adminLearningService = {
   async getStats(): Promise<LearningStats> {
     const res = await apiFetchWithAuth<ApiOk<{ data: LearningStats }>>('/admin/learning/stats');
     return res.data;
+  },
+
+  // Trae todas las preguntas con avisos de calidad (todos los clubs o
+  // filtrado por uno). No se pagina; si crece, paginamos en cliente.
+  async getWarnings(clubId?: string): Promise<{ data: AdminQuestionWithWarnings[]; count: number }> {
+    const q = clubId ? `?club_id=${encodeURIComponent(clubId)}` : '';
+    const res = await apiFetchWithAuth<ApiOk<{ data: AdminQuestionWithWarnings[]; meta?: { count?: number } }>>(`/admin/learning/warnings${q}`);
+    return { data: res.data ?? [], count: res.meta?.count ?? (res.data?.length ?? 0) };
   },
 
   // Endpoint ligero para mostrar burbuja sin traer toda la lista de pendientes.

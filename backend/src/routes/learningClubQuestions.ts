@@ -47,6 +47,7 @@ export function validateQuestionContent(type: string, content: unknown): string 
       return null;
     }
     case 'match_columns': {
+      if (!c.question || typeof c.question !== 'string') return 'content.question debe ser un string no vacío';
       if (!Array.isArray(c.pairs) || c.pairs.length < 3 || c.pairs.length > 5)
         return 'content.pairs debe ser un array de 3 a 5 objetos';
       for (const pair of c.pairs as Record<string, unknown>[]) {
@@ -56,6 +57,7 @@ export function validateQuestionContent(type: string, content: unknown): string 
       return null;
     }
     case 'order_sequence': {
+      if (!c.question || typeof c.question !== 'string') return 'content.question debe ser un string no vacío';
       if (!Array.isArray(c.steps) || c.steps.length < 3 || c.steps.length > 6)
         return 'content.steps debe ser un array de 3 a 6 strings';
       if (!c.steps.every((s: unknown) => typeof s === 'string' && (s as string).length > 0))
@@ -441,6 +443,11 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
       const escaped = search.replace(/[%_]/g, '\\$&');
       query = query.ilike('content_search', `%${escaped}%`);
     }
+    // Filtro por rango de nivel.
+    const eloMin = req.query.elo_min ? Number(req.query.elo_min) : undefined;
+    const eloMax = req.query.elo_max ? Number(req.query.elo_max) : undefined;
+    if (typeof eloMin === 'number' && !Number.isNaN(eloMin)) query = query.gte('level', eloMin);
+    if (typeof eloMax === 'number' && !Number.isNaN(eloMax)) query = query.lte('level', eloMax);
 
     // Paginación: range usa índices inclusivos [from, to].
     query = query.range(offset, offset + pageSize - 1);
@@ -480,15 +487,19 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
       }
     }
 
-    // Agregamos contadores de feedback (like / dislike) por pregunta. Para
-    // cada par (player, question) contamos el voto MÁS RECIENTE — un usuario
-    // que vio la pregunta varias veces influye una sola vez en la métrica.
+    // Agregados por pregunta: feedback (like/dislike) y attempts (respuestas).
     const allIds = rows.map((r: any) => r.id as string);
-    const feedbackAgg = await aggregateFeedback(supabase, allIds);
+    const [feedbackAgg, attemptsAgg] = await Promise.all([
+      aggregateFeedback(supabase, allIds),
+      aggregateAttempts(supabase, allIds),
+    ]);
     for (const row of rows) {
-      const agg = feedbackAgg.get((row as any).id) ?? { up: 0, down: 0 };
-      (row as any).feedback_up = agg.up;
-      (row as any).feedback_down = agg.down;
+      const fb = feedbackAgg.get((row as any).id) ?? { up: 0, down: 0 };
+      const at = attemptsAgg.get((row as any).id) ?? { attempts: 0, correct: 0 };
+      (row as any).feedback_up = fb.up;
+      (row as any).feedback_down = fb.down;
+      (row as any).attempts_count = at.attempts;
+      (row as any).correct_count = at.correct;
     }
 
     // Ordenamos primero las preguntas con nota de moderación no vista para
@@ -521,6 +532,33 @@ router.get('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
+
+// Helper: agrega contadores de respuestas (attempts / correct) para un set de
+// question_ids. Cada fila de learning_question_log cuenta una vez (todos los
+// intentos importan — si un jugador ve la pregunta varias veces, todas sus
+// respuestas se promedian, que es lo que queremos para "tasa de acierto").
+export async function aggregateAttempts(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  questionIds: string[],
+): Promise<Map<string, { attempts: number; correct: number }>> {
+  const empty = new Map<string, { attempts: number; correct: number }>();
+  if (questionIds.length === 0) return empty;
+
+  const { data, error } = await supabase
+    .from('learning_question_log')
+    .select('question_id, answered_correctly')
+    .in('question_id', questionIds);
+  if (error || !data) return empty;
+
+  const out = new Map<string, { attempts: number; correct: number }>();
+  for (const row of data as Array<{ question_id: string; answered_correctly: boolean }>) {
+    const cur = out.get(row.question_id) ?? { attempts: 0, correct: 0 };
+    cur.attempts++;
+    if (row.answered_correctly) cur.correct++;
+    out.set(row.question_id, cur);
+  }
+  return out;
+}
 
 // Helper: agrega votos like / dislike para un set de question_ids. Devuelve
 // un Map<question_id, { up, down }> donde cada par (player, question) cuenta
@@ -561,6 +599,50 @@ export async function aggregateFeedback(
     else cur.down++;
     out.set(qid, cur);
   }
+  return out;
+}
+
+// Tipos de aviso que un panel admin/club puede detectar sobre una pregunta.
+// Decisión: NO incluimos "sin tracción" — depende del algoritmo de scheduling
+// y el creador no puede actuar sobre ello.
+//   - too_easy:    respuestas suficientes y casi todos aciertan (poca señal de aprendizaje)
+//   - too_hard:    respuestas suficientes y casi todos fallan (mal redactada o demasiado difícil)
+//   - low_quality: votos suficientes y proporción alta de dislike (señal subjetiva)
+export type WarningKind = 'too_easy' | 'too_hard' | 'low_quality';
+
+// Umbrales centralizados. Si cambian, se ajustan aquí y en el cliente.
+export const WARNING_THRESHOLDS = {
+  MIN_ATTEMPTS_FOR_RATE: 20,
+  TOO_EASY_RATE: 0.95,
+  TOO_HARD_RATE: 0.20,
+  MIN_VOTES_FOR_QUALITY: 10,
+  LOW_QUALITY_DOWN_RATE: 0.20,
+};
+
+// Determina qué avisos aplican a una pregunta dada sus agregados. Devuelve
+// array vacío si todo está bien. Centralizado para que cliente y backend
+// usen los mismos criterios.
+export function detectWarnings(input: {
+  attempts: number;
+  correct: number;
+  votes_up: number;
+  votes_down: number;
+}): WarningKind[] {
+  const out: WarningKind[] = [];
+  const T = WARNING_THRESHOLDS;
+  const attempts = input.attempts ?? 0;
+  const correct = input.correct ?? 0;
+  const successRate = attempts > 0 ? correct / attempts : 0;
+
+  if (attempts >= T.MIN_ATTEMPTS_FOR_RATE && successRate >= T.TOO_EASY_RATE) out.push('too_easy');
+  if (attempts >= T.MIN_ATTEMPTS_FOR_RATE && successRate <= T.TOO_HARD_RATE) out.push('too_hard');
+
+  const totalVotes = (input.votes_up ?? 0) + (input.votes_down ?? 0);
+  if (totalVotes >= T.MIN_VOTES_FOR_QUALITY) {
+    const downRate = (input.votes_down ?? 0) / totalVotes;
+    if (downRate >= T.LOW_QUALITY_DOWN_RATE) out.push('low_quality');
+  }
+
   return out;
 }
 
@@ -625,5 +707,97 @@ router.patch('/questions/:id/acknowledge-notes', requireClubOwnerOrAdminOrPortal
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
+
+// GET /clubs/:clubId/warnings
+// Devuelve las preguntas del club que tienen al menos un aviso según
+// detectWarnings (muy fáciles, muy difíciles, sin tracción, calidad
+// cuestionable). No se pagina porque los warnings deberían ser pocos —
+// si crecen mucho, ese es justamente el síntoma a atender.
+router.get('/clubs/:clubId/warnings', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
+  try {
+    const clubId = req.params.clubId;
+    if (!canAccessClub(req, clubId, 'escuela')) {
+      return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+    const result = await collectWarnings(supabase, { clubId });
+    return res.json({ ok: true, data: result, meta: { count: result.length } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// Helper compartido para collectar avisos por club (o todos, para admin).
+// Devuelve cada pregunta con su array de warnings ya calculado.
+export async function collectWarnings(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  opts: { clubId?: string },
+): Promise<Array<Record<string, unknown> & { warnings: WarningKind[] }>> {
+  let query = supabase
+    .from('learning_questions')
+    .select('*');
+  if (opts.clubId) query = query.eq('created_by_club', opts.clubId);
+
+  const { data, error } = await query;
+  if (error || !data) return [];
+
+  const ids = data.map((q: any) => q.id as string);
+  const [feedbackAgg, attemptsAgg] = await Promise.all([
+    aggregateFeedback(supabase, ids),
+    aggregateAttempts(supabase, ids),
+  ]);
+
+  // Para puzzles, mergear content desde learning_puzzles igual que el listing.
+  const puzzleIds = data.filter((q: any) => q.type === 'puzzle').map((q: any) => q.id);
+  const puzzleByQ = new Map<string, any>();
+  if (puzzleIds.length > 0) {
+    const { data: puzzles } = await supabase
+      .from('learning_puzzles')
+      .select('*')
+      .in('question_id', puzzleIds);
+    for (const p of puzzles ?? []) puzzleByQ.set((p as any).question_id, p);
+  }
+
+  const out: Array<Record<string, unknown> & { warnings: WarningKind[] }> = [];
+  for (const q of data as Array<Record<string, unknown>>) {
+    const id = q.id as string;
+    const fb = feedbackAgg.get(id) ?? { up: 0, down: 0 };
+    const at = attemptsAgg.get(id) ?? { attempts: 0, correct: 0 };
+    const warnings = detectWarnings({
+      attempts: at.attempts,
+      correct: at.correct,
+      votes_up: fb.up,
+      votes_down: fb.down,
+    });
+    if (warnings.length === 0) continue;
+
+    const enriched: any = {
+      ...q,
+      feedback_up: fb.up,
+      feedback_down: fb.down,
+      attempts_count: at.attempts,
+      correct_count: at.correct,
+      warnings,
+    };
+    if (q.type === 'puzzle') {
+      const p = puzzleByQ.get(id);
+      if (p) {
+        enriched.content = {
+          schema_version: p.schema_version,
+          statement: p.statement,
+          intro_frame: p.intro_frame,
+          initial_frame: p.initial_frame,
+          options: p.options,
+        };
+        enriched.puzzle = p;
+      } else {
+        enriched.puzzle = null;
+      }
+    }
+    out.push(enriched);
+  }
+  return out;
+}
 
 export default router;

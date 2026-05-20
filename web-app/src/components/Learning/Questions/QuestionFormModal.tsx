@@ -53,9 +53,9 @@ function defaultContent(type: QuestionType): QuestionContent {
     case 'multi_select':
       return { question: '', options: ['', '', '', ''], correct_indices: [] } as MultiSelectContent;
     case 'match_columns':
-      return { pairs: [{ left: '', right: '' }, { left: '', right: '' }, { left: '', right: '' }] } as MatchColumnsContent;
+      return { question: '', pairs: [{ left: '', right: '' }, { left: '', right: '' }, { left: '', right: '' }] } as MatchColumnsContent;
     case 'order_sequence':
-      return { steps: ['', '', ''] } as OrderSequenceContent;
+      return { question: '', steps: ['', '', ''] } as OrderSequenceContent;
     case 'puzzle':
       return { ...PUZZLE_TEMPLATE } as PuzzleContent;
   }
@@ -187,12 +187,14 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved, us
       }
       case 'match_columns': {
         const c = content as MatchColumnsContent;
+        if (!c.question?.trim()) return t('learning_field_question');
         if (c.pairs.some((p) => !p.left.trim() || !p.right.trim()))
           return `${t('learning_field_pair_left')} / ${t('learning_field_pair_right')}`;
         return null;
       }
       case 'order_sequence': {
         const c = content as OrderSequenceContent;
+        if (!c.question?.trim()) return t('learning_field_question');
         if (c.steps.some((s) => !s.trim())) return t('learning_field_step');
         return null;
       }
@@ -747,6 +749,16 @@ function MatchColumnsFields({ content, onChange, t }: { content: MatchColumnsCon
 
   return (
     <div className="space-y-3">
+      <div>
+        <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_question')}</label>
+        <textarea
+          value={content.question ?? ''}
+          onChange={(e) => onChange({ ...content, question: e.target.value })}
+          rows={2}
+          placeholder="Relaciona cada elemento de la izquierda con el de la derecha"
+          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-none"
+        />
+      </div>
       <div className="flex items-center justify-between">
         <label className="text-[10px] font-bold text-gray-500 uppercase">{t('learning_field_pair_left')} / {t('learning_field_pair_right')}</label>
         {content.pairs.length < 5 && (
@@ -808,6 +820,16 @@ function OrderSequenceFields({ content, onChange, t }: { content: OrderSequenceC
 
   return (
     <div className="space-y-3">
+      <div>
+        <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_question')}</label>
+        <textarea
+          value={content.question ?? ''}
+          onChange={(e) => onChange({ ...content, question: e.target.value })}
+          rows={2}
+          placeholder="Ordena correctamente los siguientes pasos"
+          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-none"
+        />
+      </div>
       <div className="flex items-center justify-between">
         <label className="text-[10px] font-bold text-gray-500 uppercase">{t('learning_field_step')}</label>
         {content.steps.length < 6 && (

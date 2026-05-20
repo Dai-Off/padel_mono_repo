@@ -1,4 +1,4 @@
-import type { Course, CourseLesson, Question } from './learningContent';
+import type { Course, CourseLesson, Question, WarningKind } from './learningContent';
 
 export interface AdminCourse extends Course {
   club_name: string;
@@ -18,7 +18,14 @@ export interface AdminQuestion extends Omit<Question, 'club_id'> {
   // Agregados de valoración (like/dislike) — mismo formato que Question.
   feedback_up?: number;
   feedback_down?: number;
+  attempts_count?: number;
+  correct_count?: number;
 }
+
+// Forma que devuelve el endpoint de warnings: una pregunta admin enriquecida
+// con su array `warnings`. WarningKind viene de learningContent.ts.
+export type AdminQuestionWithWarnings = AdminQuestion & { warnings: WarningKind[] };
+export type { WarningKind };
 
 export interface ClubStat {
   club_id: string;

@@ -10,9 +10,11 @@ import { authService } from '../../services/auth';
 import { clubService, type Club } from '../../services/club';
 import { QuestionsTab } from './Questions/QuestionsTab';
 import { CoursesTab } from './Courses/CoursesTab';
+import { ClubWarningsView } from './Questions/ClubWarningsView';
+import { learningContentService } from '../../services/learningContent';
 import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
 
-type Tab = 'questions' | 'courses';
+type Tab = 'questions' | 'courses' | 'warnings';
 
 export function LearningContentView() {
   const { t } = useTranslation();
@@ -24,6 +26,9 @@ export function LearningContentView() {
   // Contador de preguntas con nota de moderación no vista. Lo alimenta
   // QuestionsTab vía callback y lo pintamos como badge sobre la tab "Preguntas".
   const [unreadNotesCount, setUnreadNotesCount] = useState(0);
+  // Contador de preguntas con avisos de calidad. Se alimenta tras el primer
+  // fetch del endpoint warnings o cuando WarningsView se monta y refresca.
+  const [warningsCount, setWarningsCount] = useState(0);
   const [activeTab, setActiveTab] = useState<Tab>('questions');
 
   useEffect(() => {
@@ -64,6 +69,17 @@ export function LearningContentView() {
   const selectedClub = clubs.find((c) => c.id === selectedClubId) ?? null;
   const showClubSwitcher = isAdmin && clubs.length > 1;
   const { permissionKeys: portalMenuPermissionKeys, loading: permissionsLoading } = usePortalMenuPermissions(selectedClubId);
+
+  // Refresca el contador de avisos cada vez que cambia el club seleccionado.
+  // El badge debe reflejar el club que está viendo el usuario.
+  useEffect(() => {
+    if (!selectedClubId) { setWarningsCount(0); return; }
+    let cancelled = false;
+    learningContentService.getClubWarnings(selectedClubId)
+      .then((r) => { if (!cancelled) setWarningsCount(r.count); })
+      .catch(() => { if (!cancelled) setWarningsCount(0); });
+    return () => { cancelled = true; };
+  }, [selectedClubId]);
 
   // Estado de carga
   if (loading) {
@@ -124,6 +140,7 @@ export function LearningContentView() {
   const tabs: { key: Tab; label: string; badge?: number }[] = [
     { key: 'questions', label: t('learning_tab_questions'), badge: unreadNotesCount > 0 ? unreadNotesCount : undefined },
     { key: 'courses', label: t('learning_tab_courses') },
+    { key: 'warnings', label: 'Avisos', badge: warningsCount > 0 ? warningsCount : undefined },
   ];
 
   return (
@@ -137,7 +154,7 @@ export function LearningContentView() {
       </div>
 
       <main className="px-4 sm:px-5 py-5 pb-20">
-        <div className="max-w-5xl mx-auto space-y-5">
+        <div className="max-w-7xl mx-auto space-y-5">
           {/* Título */}
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-indigo-50">
@@ -207,6 +224,9 @@ export function LearningContentView() {
             )}
             {selectedClubId && activeTab === 'courses' && (
               <CoursesTab clubId={selectedClubId} />
+            )}
+            {selectedClubId && activeTab === 'warnings' && (
+              <ClubWarningsView clubId={selectedClubId} onCountChange={setWarningsCount} />
             )}
           </motion.div>
         </div>

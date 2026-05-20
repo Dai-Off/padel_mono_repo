@@ -4,7 +4,7 @@ import { Plus, Edit, HelpCircle, Trash2, AlertTriangle, CheckSquare, Check, File
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { learningContentService, hasUnreadNotes, summarizeFeedback } from '../../../services/learningContent';
+import { learningContentService, hasUnreadNotes, summarizeFeedback, summarizeAttempts } from '../../../services/learningContent';
 import { QuestionFormModal } from './QuestionFormModal';
 import { FilterDropdown } from './FilterDropdown';
 import { StatusSwitcher } from './StatusSwitcher';
@@ -12,6 +12,7 @@ import { SearchInput } from './SearchInput';
 import { Paginator } from './Paginator';
 import { usePageSizePref } from './usePageSizePref';
 import { BulkActionsBar, type BulkAction } from './BulkActionsBar';
+import { LevelFilter } from './LevelFilter';
 import type { Question, QuestionType, QuestionArea, QuestionStatus } from '../../../types/learningContent';
 
 const QUESTION_TYPES: QuestionType[] = ['test_classic', 'true_false', 'multi_select', 'match_columns', 'order_sequence', 'puzzle'];
@@ -50,6 +51,9 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
   const search = searchParams.get('q') ?? '';
   const orderBy = (searchParams.get('order') ?? 'created_desc') as 'created_desc' | 'created_asc';
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1);
+  const levelMin = searchParams.get('lmin') ? Number(searchParams.get('lmin')) : null;
+  const levelMax = searchParams.get('lmax') ? Number(searchParams.get('lmax')) : null;
+  const levelRange = levelMin !== null && levelMax !== null ? { min: levelMin, max: levelMax } : null;
 
   // Helper para mutar query params manteniendo el resto. Cualquier cambio de
   // filtro resetea a page=1.
@@ -105,6 +109,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
       if (typeFilter !== 'all') filters.type = typeFilter;
       if (areaFilter !== 'all') filters.area = areaFilter;
       if (search) filters.search = search;
+      if (levelRange) { filters.elo_min = levelRange.min; filters.elo_max = levelRange.max; }
       const { data, unread_count, total } = await learningContentService.listQuestions(clubId, filters);
       setQuestions(data);
       setTotal(total);
@@ -114,7 +119,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
     } finally {
       if (!opts?.silent) setLoading(false);
     }
-  }, [clubId, typeFilter, areaFilter, statusFilter, search, orderBy, page, pageSize, t]);
+  }, [clubId, typeFilter, areaFilter, statusFilter, search, orderBy, page, pageSize, levelRange, t]);
 
   // Sincronizamos la callback recibida del padre con el ref usado por `load`.
   useEffect(() => { onUnreadCountChangeRef.current = onUnreadCountChange; }, [onUnreadCountChange]);
@@ -325,62 +330,72 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
         </div>
       </div>
 
-      {/* Filtros compactos + buscador + orden en una sola fila horizontal. */}
-      <div className="flex flex-wrap items-center gap-1.5 bg-white rounded-2xl border border-gray-100 p-3">
-        <FilterDropdown
-          label="Tipo"
-          value={typeFilter}
-          allValue="all"
-          options={[
-            { value: 'all' as const, label: t('learning_filter_all_types') },
-            ...QUESTION_TYPES.map((qt) => ({ value: qt, label: t(`learning_type_${qt}`) })),
-          ]}
-          onChange={(v) => updateParam({ type: v === 'all' ? null : v })}
-        />
-        <FilterDropdown
-          label="Área"
-          value={areaFilter}
-          allValue="all"
-          options={[
-            { value: 'all' as const, label: t('learning_filter_all_areas') },
-            ...QUESTION_AREAS.map((qa) => ({ value: qa, label: t(`learning_area_${qa}`) })),
-          ]}
-          onChange={(v) => updateParam({ area: v === 'all' ? null : v })}
-        />
-        <FilterDropdown
-          label="Estado"
-          value={statusFilter}
-          allValue="all"
-          options={[
-            { value: 'all', label: 'Todas' },
-            { value: 'published', label: 'Publicadas' },
-            { value: 'draft', label: 'Borradores' },
-            { value: 'inactive', label: 'Inactivas' },
-          ]}
-          onChange={(v) => updateParam({ status: v === 'published' ? null : v })}
-        />
-        <FilterDropdown
-          label="Vídeo"
-          value={videoFilter}
-          allValue="all"
-          options={[
-            { value: 'all', label: 'Todos' },
-            { value: 'with_video', label: 'Con vídeo' },
-            { value: 'without_video', label: 'Sin vídeo' },
-          ]}
-          onChange={(v) => updateParam({ video: v === 'all' ? null : v })}
-        />
-        <FilterDropdown
-          label="Orden"
-          value={orderBy}
-          allValue="created_desc"
-          options={[
-            { value: 'created_desc', label: 'Más recientes' },
-            { value: 'created_asc', label: 'Más antiguas' },
-          ]}
-          onChange={(v) => updateParam({ order: v === 'created_desc' ? null : v })}
-        />
-        <div className="ml-auto flex items-center gap-1.5">
+      {/* Dos filas: filtros arriba y abajo orden + buscador + selección. */}
+      <div className="bg-white rounded-2xl border border-gray-100 p-3 space-y-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-bold text-gray-400 uppercase mr-1">Filtros:</span>
+          <FilterDropdown
+            label="Tipo"
+            value={typeFilter}
+            allValue="all"
+            options={[
+              { value: 'all' as const, label: t('learning_filter_all_types') },
+              ...QUESTION_TYPES.map((qt) => ({ value: qt, label: t(`learning_type_${qt}`) })),
+            ]}
+            onChange={(v) => updateParam({ type: v === 'all' ? null : v })}
+          />
+          <FilterDropdown
+            label="Área"
+            value={areaFilter}
+            allValue="all"
+            options={[
+              { value: 'all' as const, label: t('learning_filter_all_areas') },
+              ...QUESTION_AREAS.map((qa) => ({ value: qa, label: t(`learning_area_${qa}`) })),
+            ]}
+            onChange={(v) => updateParam({ area: v === 'all' ? null : v })}
+          />
+          <FilterDropdown
+            label="Estado"
+            value={statusFilter}
+            allValue="all"
+            options={[
+              { value: 'all', label: 'Todas' },
+              { value: 'published', label: 'Publicadas' },
+              { value: 'draft', label: 'Borradores' },
+              { value: 'inactive', label: 'Inactivas' },
+            ]}
+            onChange={(v) => updateParam({ status: v === 'published' ? null : v })}
+          />
+          <FilterDropdown
+            label="Vídeo"
+            value={videoFilter}
+            allValue="all"
+            options={[
+              { value: 'all', label: 'Todos' },
+              { value: 'with_video', label: 'Con vídeo' },
+              { value: 'without_video', label: 'Sin vídeo' },
+            ]}
+            onChange={(v) => updateParam({ video: v === 'all' ? null : v })}
+          />
+          <LevelFilter
+            value={levelRange}
+            onChange={(r) => updateParam({ lmin: r ? String(r.min) : null, lmax: r ? String(r.max) : null })}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-bold text-gray-400 uppercase mr-1">Ordenar por:</span>
+          <FilterDropdown
+            label="Orden"
+            hideLabel
+            value={orderBy}
+            allValue="created_desc"
+            options={[
+              { value: 'created_desc', label: 'Más recientes' },
+              { value: 'created_asc', label: 'Más antiguas' },
+            ]}
+            onChange={(v) => updateParam({ order: v === 'created_desc' ? null : v })}
+          />
+          <div className="ml-auto flex items-center gap-1.5">
           <SearchInput
             value={search}
             onChange={(v) => updateParam({ q: v || null })}
@@ -397,6 +412,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
             <CheckSquare className="w-3.5 h-3.5" />
             {selectionMode ? 'Cancelar' : 'Seleccionar varias'}
           </button>
+        </div>
         </div>
       </div>
 
@@ -484,17 +500,22 @@ export function QuestionsTab({ clubId, onUnreadCountChange }: QuestionsTabProps)
               {/* Valoración (like / dislike) — agregados del último voto por
                   jugador. El % solo aparece a partir del umbral mínimo. */}
               {(() => {
+                const at = summarizeAttempts(q);
                 const fb = summarizeFeedback(q);
-                if (fb.total === 0) return null;
+                // Stats solo si hay muestra suficiente. Por debajo del umbral
+                // no enseñamos nada para no inducir señal falsa.
+                const showAttempts = at.success_pct !== null;
+                if (!showAttempts && fb.total === 0) return null;
                 return (
-                  <div className="flex items-center gap-2 text-[10px] text-gray-400">
-                    <span>👍 {fb.up}</span>
-                    <span>·</span>
-                    <span>👎 {fb.down}</span>
-                    {fb.positive_pct !== null && (
+                  <div className="flex items-center gap-x-2 gap-y-1 text-[10px] text-gray-400 flex-wrap">
+                    {showAttempts && (
+                      <span>{at.attempts} respuestas · <span className="font-semibold text-gray-500">{at.success_pct}% acierto</span></span>
+                    )}
+                    {showAttempts && fb.total > 0 && <span>·</span>}
+                    {fb.total > 0 && (
                       <>
-                        <span>·</span>
-                        <span className="font-semibold text-gray-500">{fb.positive_pct}% positivo</span>
+                        <span>👍 {fb.up} · 👎 {fb.down}</span>
+                        {fb.positive_pct !== null && <span className="font-semibold text-gray-500">({fb.positive_pct}%)</span>}
                       </>
                     )}
                   </div>
