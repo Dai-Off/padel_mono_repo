@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
 import { clubStaffService } from '../../../services/clubStaff';
+import { useEscapeClose } from '../Questions/useEscapeClose';
 import type { Course } from '../../../types/learningContent';
 import type { ClubStaffMember } from '../../../types/clubStaff';
 
@@ -17,6 +18,7 @@ interface Props {
 }
 
 export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Props) {
+  useEscapeClose(onClose);
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -113,7 +115,7 @@ export function CourseFormModal({ mode, course, clubId, onClose, onSaved }: Prop
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
+    <div className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

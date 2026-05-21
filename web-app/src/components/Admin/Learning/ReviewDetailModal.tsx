@@ -4,6 +4,7 @@ import { X, Check, XCircle, Video, BookOpen, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { adminLearningService } from '../../../services/adminLearning';
+import { useEscapeClose } from '../../Learning/Questions/useEscapeClose';
 import type { AdminCourse, AdminCourseWithLessons } from '../../../types/adminLearning';
 import type { CourseStatus } from '../../../types/learningContent';
 
@@ -22,6 +23,7 @@ interface Props {
 }
 
 export function ReviewDetailModal({ course, onClose, onActionDone, readOnly = false }: Props) {
+  useEscapeClose(onClose);
   const { t } = useTranslation();
   const [detail, setDetail] = useState<AdminCourseWithLessons | null>(null);
   const [loading, setLoading] = useState(true);
@@ -86,19 +88,19 @@ export function ReviewDetailModal({ course, onClose, onActionDone, readOnly = fa
   return (
     <AnimatePresence>
       <motion.div
-        className="fixed inset-0 z-[60] flex justify-end"
+        className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto px-4 py-10"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
       >
-        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
         <motion.div
           key={course.id}
-          className="relative w-full max-w-lg bg-white shadow-2xl overflow-y-auto"
-          initial={{ x: '100%' }}
-          animate={{ x: 0 }}
-          exit={{ x: '100%' }}
-          transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+          className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[calc(100vh-5rem)] flex flex-col"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 20 }}
+          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
         >
           {/* Header sticky */}
           <div className="sticky top-0 bg-white border-b border-gray-100 px-5 py-4 flex items-center justify-between z-10">
@@ -118,7 +120,7 @@ export function ReviewDetailModal({ course, onClose, onActionDone, readOnly = fa
               <div className="w-8 h-8 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
             </div>
           ) : detail ? (
-            <div className="p-5 space-y-6 pb-24">
+            <div className="p-5 space-y-6 overflow-y-auto">
               {/* Info del curso */}
               <section>
                 <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">

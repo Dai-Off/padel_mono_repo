@@ -28,7 +28,7 @@
     "cancel": "Cancel",
     "save": "Save",
     "placeholder_name": "e.g. Center Court",
-    "login_title": "X7 Padel Sabadell Sur",
+    "login_title": "WeMatch",
     "login_subtitle": "Club management portal",
     "email_label": "Email",
     "email_placeholder": "example@email.com",
@@ -827,7 +827,7 @@
 
     "admin_learning_title": "Learning",
     "admin_learning_review": "Review",
-    "admin_learning_wematch": "WeMatch",
+    "admin_learning_wematch": "WeMatch content",
     "admin_learning_moderation": "Moderation",
     "admin_learning_stats": "Statistics",
     "admin_learning_approve": "Approve",

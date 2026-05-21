@@ -402,6 +402,7 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
       question_id: string;
       answered_correctly: boolean;
       response_time_ms: number;
+      selected_answer: unknown;
     }[] = [];
 
     let totalScore = 0;
@@ -428,6 +429,9 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
         question_id: answer.question_id,
         answered_correctly: isCorrect,
         response_time_ms: answer.response_time_ms,
+        // Guardamos la respuesta concreta del jugador para poder calcular
+        // distribución de respuestas en el panel de stats por pregunta.
+        selected_answer: answer.selected_answer ?? null,
       });
     }
 
@@ -498,6 +502,66 @@ router.post('/daily-lesson/complete', requireAuth, async (req: Request, res: Res
       season_pass_grant_error,
       results,
     });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+// POST /daily-lesson/feedback
+// Recibe en bulk los votos like/dislike que el jugador ha dado en la pantalla
+// de resultados de una lección. Cada voto se aplica al log MÁS RECIENTE del
+// jugador para esa pregunta. Idempotente: re-enviar los mismos votos no rompe.
+//
+// Body: { votes: [{ question_id: string, vote: 'up' | 'down' | null }, ...] }
+//
+// Fire-and-forget desde mobile: si falla, el cliente no reintenta. La feature
+// es secundaria (los datos de respuesta ya están guardados en learning_question_log).
+router.post('/daily-lesson/feedback', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const player = await getPlayerFromAuth(req.authContext!.userId);
+    if (!player) {
+      return res.status(404).json({ ok: false, error: 'No se encontró jugador vinculado a tu cuenta' });
+    }
+
+    const votes = (req.body?.votes ?? []) as Array<{ question_id: unknown; vote: unknown }>;
+    if (!Array.isArray(votes) || votes.length === 0) {
+      return res.json({ ok: true, applied: 0 });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+
+    // Para cada voto, localizamos el log más reciente del jugador para esa
+    // pregunta y lo actualizamos. Hacemos las queries en paralelo (volumen
+    // bajo: máximo 5 votos por lección).
+    const results = await Promise.all(
+      votes.map(async (entry) => {
+        const qid = typeof entry?.question_id === 'string' ? entry.question_id : null;
+        const voteRaw = entry?.vote;
+        const vote: 'up' | 'down' | null =
+          voteRaw === 'up' || voteRaw === 'down' ? voteRaw : voteRaw === null ? null : null;
+        if (!qid) return { ok: false };
+
+        // Localizamos el último log del jugador para esta pregunta.
+        const { data: latestLog, error: findErr } = await supabase
+          .from('learning_question_log')
+          .select('id')
+          .eq('player_id', player.id)
+          .eq('question_id', qid)
+          .order('answered_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (findErr || !latestLog) return { ok: false };
+
+        const { error: updErr } = await supabase
+          .from('learning_question_log')
+          .update({ vote })
+          .eq('id', latestLog.id);
+        return { ok: !updErr };
+      }),
+    );
+
+    const applied = results.filter((r) => r.ok).length;
+    return res.json({ ok: true, applied });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

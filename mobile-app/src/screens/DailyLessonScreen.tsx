@@ -13,7 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
-import { submitDailyLesson, fetchTodayResults, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
+import { submitDailyLesson, submitLessonFeedback, fetchTodayResults, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
 import { loadProgress, saveProgress, clearProgress, type DailyLessonProgress } from '../lib/dailyLessonStorage';
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
 import { QuestionCard } from '../components/learning/QuestionCard';
@@ -107,6 +107,37 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   const [showingVideo, setShowingVideo] = useState(false);
   const [baseSkills, setBaseSkills] = useState<SkillValues>(DEFAULT_SKILLS);
   const [questionVotes, setQuestionVotes] = useState<Record<string, 'up' | 'down' | null>>({});
+
+  // Refs para envío bulk de votos like/dislike. Mantenemos el state actual en
+  // un ref para poder leerlo desde cleanup de useEffect sin closures stale.
+  const questionVotesRef = useRef(questionVotes);
+  useEffect(() => { questionVotesRef.current = questionVotes; }, [questionVotes]);
+  // Flag para no enviar dos veces (al cambiar de fase + al desmontar).
+  const votesFlushedRef = useRef(false);
+  const tokenRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => { tokenRef.current = session?.access_token; }, [session?.access_token]);
+
+  const flushLessonVotes = useCallback(() => {
+    if (votesFlushedRef.current) return;
+    const votes = Object.entries(questionVotesRef.current)
+      .filter(([, v]) => v === 'up' || v === 'down')
+      .map(([question_id, vote]) => ({ question_id, vote: vote as 'up' | 'down' }));
+    if (votes.length === 0) return;
+    votesFlushedRef.current = true;
+    submitLessonFeedback(tokenRef.current, votes);
+  }, []);
+
+  // Disparo del bulk cuando el usuario sale de la fase results (por ejemplo
+  // pulsando "Continuar" o "Repasar fallos"). También al desmontar la pantalla
+  // por completo (back del SO, navegación lateral, etc.).
+  const lastPhaseRef = useRef(phase);
+  useEffect(() => {
+    if (lastPhaseRef.current === 'results' && phase !== 'results') {
+      flushLessonVotes();
+    }
+    lastPhaseRef.current = phase;
+  }, [phase, flushLessonVotes]);
+  useEffect(() => () => { flushLessonVotes(); }, [flushLessonVotes]);
 
   // Refs para timers y animaciones
   const questionStartTime = useRef(Date.now());
@@ -882,7 +913,9 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     const nextMilestone = getNextStreakMilestone(results.streak.current);
 
     const toggleVote = (questionId: string, vote: 'up' | 'down') => {
-      // TODO: persistir cuando se cree endpoint de feedback por pregunta
+      // Mutuamente excluyente: re-pulsar el mismo botón lo desmarca; pulsar
+      // el opuesto cambia el voto. Los votos se mandan en bulk al salir de la
+      // pantalla de results (ver flushLessonVotes arriba).
       setQuestionVotes((prev) => ({
         ...prev,
         [questionId]: prev[questionId] === vote ? null : vote,
