@@ -38,13 +38,13 @@ export const AdminHeader = () => {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div
-              className="w-9 h-9 rounded-xl overflow-hidden bg-white border border-border-subtle p-1 cursor-pointer shrink-0"
+              className="w-9 h-9 rounded-xl overflow-hidden bg-primary border border-border-subtle flex items-center justify-center cursor-pointer shrink-0"
               onClick={() => navigate("/admin")}
             >
               <img
-                src="/logo.png"
-                alt="Logo"
-                className="w-full h-full object-contain"
+                src="/wematch-logo.png"
+                alt="WeMatch"
+                className="w-full h-full object-contain scale-[1.15]"
               />
             </div>
             <div className="flex flex-col">

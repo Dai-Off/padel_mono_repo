@@ -197,25 +197,45 @@ export const Login: React.FC = () => {
                     <div className="relative z-10 p-8">
                         <div className="text-center mb-8">
                             <motion.div
-                                className="w-20 h-20 mx-auto mb-5 rounded-2xl overflow-hidden bg-white p-2 shadow-lg shadow-white/5"
+                                className="w-36 h-36 mx-auto -mb-3 -mt-3 flex items-center justify-center"
                                 whileHover={{ scale: 1.05 }}
                                 transition={{ type: "spring", stiffness: 300 }}
                             >
                                 <img
-                                    src="/logo.png"
-                                    alt={t('login_title')}
-                                    className="w-full h-full object-contain"
+                                    src="/wematch-logo.png"
+                                    alt="WeMatch"
+                                    className="w-full h-full object-contain scale-[1.45] drop-shadow-[0_12px_16px_rgba(0,0,0,0.4)]"
                                 />
                             </motion.div>
-                            <motion.h1
-                                className="text-2xl font-black text-white tracking-tight"
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 1 }}
-                            >
-                                {isInviteRegisterMode ? 'Completa tu invitación' : t('login_title')}
-                            </motion.h1>
+                            {isInviteRegisterMode ? (
+                                <motion.h1
+                                    className="text-2xl font-black text-white tracking-tight"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                >
+                                    Completa tu invitación
+                                </motion.h1>
+                            ) : (
+                                <motion.div
+                                    className="flex flex-col items-center"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                >
+                                    <h1 className="text-3xl font-bold tracking-tight leading-none" aria-label="WeMatch">
+                                        <span className="text-white">We</span>
+                                        <span className="text-[#F18F34]">Match</span>
+                                    </h1>
+                                    <div
+                                        className="h-[2px] w-40 max-w-[92%] mt-3 rounded-sm"
+                                        style={{
+                                            background: 'linear-gradient(90deg, transparent 0%, #F18F34 50%, transparent 100%)',
+                                            boxShadow: '0 0 2px rgba(241, 143, 52, 0.35)',
+                                        }}
+                                    />
+                                </motion.div>
+                            )}
                             <motion.p
-                                className="text-xs text-white/40 mt-2"
+                                className="text-xs text-white/40 mt-3"
                                 initial={{ opacity: 0 }}
                                 animate={{ opacity: 1 }}
                             >
