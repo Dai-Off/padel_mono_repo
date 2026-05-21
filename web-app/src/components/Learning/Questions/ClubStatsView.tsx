@@ -92,7 +92,7 @@ export function ClubStatsView({ clubId }: { clubId: string }) {
 // Sub-tab: Preguntas (panel club)
 // ---------------------------------------------------------------------------
 
-function QuestionsStats({ stats, t }: { stats: ClubLearningStats; t: (k: string, def?: string) => string }) {
+function QuestionsStats({ stats, t }: { stats: ClubLearningStats; t: ReturnType<typeof useTranslation>['t'] }) {
   const typeData = Object.entries(stats.by_type).map(([k, v]) => ({
     name: t(`learning_type_${k}`, k),
     value: v.count,
@@ -203,7 +203,7 @@ function QuestionsStats({ stats, t }: { stats: ClubLearningStats; t: (k: string,
                 <BarChart data={successByArea} layout="vertical" margin={{ top: 0, right: 10, left: 50, bottom: 0 }}>
                   <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 9, fill: '#9CA3AF' }} unit="%" />
                   <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#1A1A1A' }} width={60} />
-                  <Tooltip {...TOOLTIP_STYLE} formatter={(v: number) => [`${v}%`, 'Acierto']} />
+                  <Tooltip {...TOOLTIP_STYLE} formatter={(v) => [`${Number(v) || 0}%`, 'Acierto']} />
                   <Bar dataKey="pct" fill="#6366F1" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>

@@ -108,7 +108,7 @@ export function QuestionsTab({ clubId, onUnreadCountChange, onContentChanged }: 
   // Ref a un setter externo (lo provee LearningContentView) para que el badge
   // sobre la tab "Preguntas" use el contador EXACTO calculado por el backend,
   // independientemente de los filtros que el usuario tenga aplicados aquí.
-  const onUnreadCountChangeRef = useRef<((n: number) => void) | undefined>();
+  const onUnreadCountChangeRef = useRef<((n: number) => void) | undefined>(undefined);
 
   // Variante silent: no marca loading=true para evitar que la lista se vacíe
   // y el scroll salte arriba tras una acción puntual.

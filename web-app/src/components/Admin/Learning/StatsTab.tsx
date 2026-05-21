@@ -92,7 +92,7 @@ export function StatsTab() {
 // Sub-tab: Preguntas
 // ---------------------------------------------------------------------------
 
-function QuestionsStats({ stats, t }: { stats: LearningStats; t: (k: string, def?: string) => string }) {
+function QuestionsStats({ stats, t }: { stats: LearningStats; t: ReturnType<typeof useTranslation>['t'] }) {
   const typeData = Object.entries(stats.by_type).map(([k, v]) => ({
     name: t(`learning_type_${k}`, k),
     value: v.count,
@@ -207,7 +207,7 @@ function QuestionsStats({ stats, t }: { stats: LearningStats; t: (k: string, def
                 <BarChart data={successByArea} layout="vertical" margin={{ top: 0, right: 10, left: 50, bottom: 0 }}>
                   <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 9, fill: '#9CA3AF' }} unit="%" />
                   <YAxis dataKey="name" type="category" tick={{ fontSize: 10, fill: '#1A1A1A' }} width={60} />
-                  <Tooltip {...TOOLTIP_STYLE} formatter={(v: number) => [`${v}%`, 'Acierto']} />
+                  <Tooltip {...TOOLTIP_STYLE} formatter={(v) => [`${Number(v) || 0}%`, 'Acierto']} />
                   <Bar dataKey="pct" fill="#6366F1" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -262,7 +262,7 @@ function QuestionsStats({ stats, t }: { stats: LearningStats; t: (k: string, def
               <BarChart data={streakBucketData} margin={{ top: 6, right: 6, left: -16, bottom: 0 }}>
                 <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#9CA3AF' }} interval={0} />
                 <YAxis tick={{ fontSize: 9, fill: '#9CA3AF' }} width={28} allowDecimals={false} />
-                <Tooltip {...TOOLTIP_STYLE} formatter={(v: number) => [`${v} jugadores`, 'Racha']} />
+                <Tooltip {...TOOLTIP_STYLE} formatter={(v) => [`${Number(v) || 0} jugadores`, 'Racha']} />
                 <Bar dataKey="count" fill="#F97316" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>

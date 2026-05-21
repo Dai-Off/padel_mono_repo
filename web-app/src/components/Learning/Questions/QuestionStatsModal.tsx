@@ -187,7 +187,10 @@ function StatsBody({ stats }: { stats: QuestionDetailStats }) {
                     <YAxis tick={{ fontSize: 9, fill: '#9CA3AF' }} width={28} unit="%" domain={[0, 100]} />
                     <Tooltip
                       {...TOOLTIP_STYLE}
-                      formatter={(v: number, _key, item: { payload?: { attempts?: number } }) => [`${v}% (${item?.payload?.attempts ?? 0} respuestas)`, 'Acierto']}
+                      formatter={(v, _key, item) => {
+                        const payload = (item as { payload?: { attempts?: number } })?.payload;
+                        return [`${Number(v) || 0}% (${payload?.attempts ?? 0} respuestas)`, 'Acierto'];
+                      }}
                     />
                     <Bar dataKey="pct" radius={[4, 4, 0, 0]}>
                       {stats.elo_distribution.map((b, i) => (
