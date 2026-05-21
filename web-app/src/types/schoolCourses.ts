@@ -16,6 +16,25 @@ export type SchoolCourseDay = {
   end_time: string;
 };
 
+export type SchoolPriceType = {
+  id: string;
+  club_id: string;
+  name: string;
+  price_cents: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SchoolCourseInstallment = {
+  id?: string;
+  course_id?: string;
+  label: string | null;
+  amount_cents: number;
+  due_date: string;
+  sort_order?: number;
+};
+
 export type SchoolCourse = {
   id: string;
   club_id: string;
@@ -25,6 +44,9 @@ export type SchoolCourse = {
   staff_id: string;
   court_id: string;
   price_cents: number;
+  price_type_id?: string | null;
+  price_type_name?: string | null;
+  installments?: SchoolCourseInstallment[];
   capacity: number;
   is_active: boolean;
   starts_on: string | null;
@@ -77,6 +99,7 @@ export type SchoolPrivateLesson = {
   staff_id: string;
   court_id: string;
   price_cents: number;
+  student_count: 1 | 2 | 3;
   weekday: SchoolWeekday;
   start_time: string;
   end_time: string;
@@ -101,7 +124,8 @@ export type SchoolPrivateLessonSlot = {
 export type SchoolFeeRule = {
   id: string;
   club_id: string;
-  group_size: 2 | 3 | 4;
+  staff_id?: string | null;
+  group_size: 1 | 2 | 3 | 4;
   time_band: 'morning' | 'afternoon' | 'weekend';
   price_cents: number;
   is_active: boolean;

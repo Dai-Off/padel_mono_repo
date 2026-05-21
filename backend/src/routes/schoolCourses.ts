@@ -3,6 +3,8 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { canAccessClub, isOnlyTeacher, getStaffIdForUser } from '../lib/clubAccess';
+import { assertSchoolCoachStaff } from '../lib/schoolStaffRoles';
+import { resolvePriceTypeCents } from '../lib/schoolPricing';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -29,7 +31,71 @@ const LEVELS: Level[] = [
 ];
 
 const COURSE_FIELDS =
-  'id, club_id, name, sport, level, staff_id, court_id, price_cents, capacity, is_active, starts_on, ends_on, created_at, updated_at';
+  'id, club_id, name, sport, level, staff_id, court_id, price_cents, price_type_id, capacity, is_active, starts_on, ends_on, created_by_auth_user_id, created_at, updated_at';
+
+async function enrichCoursesWithPriceTypes(supabase: ReturnType<typeof getSupabaseServiceRoleClient>, courses: any[]) {
+  const typeIds = [...new Set(courses.map((c) => c.price_type_id).filter(Boolean))];
+  const typeById = new Map<string, { name: string; price_cents: number }>();
+  if (typeIds.length) {
+    const { data: types } = await supabase
+      .from('club_school_price_types')
+      .select('id, name, price_cents, is_active')
+      .in('id', typeIds);
+    for (const t of types ?? []) {
+      if ((t as { is_active?: boolean }).is_active !== false) {
+        typeById.set(String((t as { id: string }).id), {
+          name: String((t as { name?: string }).name ?? ''),
+          price_cents: Math.round(Number((t as { price_cents?: number }).price_cents ?? 0)),
+        });
+      }
+    }
+  }
+  return courses.map((c) => {
+    const pt = c.price_type_id ? typeById.get(String(c.price_type_id)) : null;
+    const effectivePrice = pt ? pt.price_cents : Math.round(Number(c.price_cents ?? 0));
+    return {
+      ...c,
+      price_cents: effectivePrice,
+      price_type_name: pt?.name ?? null,
+    };
+  });
+}
+
+async function loadCourseInstallments(supabase: ReturnType<typeof getSupabaseServiceRoleClient>, courseIds: string[]) {
+  const byCourse = new Map<string, any[]>();
+  if (!courseIds.length) return byCourse;
+  const { data, error } = await supabase
+    .from('club_school_course_installments')
+    .select('id, course_id, label, amount_cents, due_date, sort_order')
+    .in('course_id', courseIds)
+    .order('sort_order', { ascending: true })
+    .order('due_date', { ascending: true });
+  if (error) return byCourse;
+  for (const row of data ?? []) {
+    const list = byCourse.get((row as { course_id: string }).course_id) ?? [];
+    list.push(row);
+    byCourse.set((row as { course_id: string }).course_id, list);
+  }
+  return byCourse;
+}
+
+async function replaceCourseInstallments(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  courseId: string,
+  installments: Array<{ label?: string | null; amount_cents: number; due_date: string; sort_order?: number }>,
+) {
+  await supabase.from('club_school_course_installments').delete().eq('course_id', courseId);
+  if (!installments.length) return;
+  const rows = installments.map((inst, idx) => ({
+    course_id: courseId,
+    label: inst.label?.trim() || null,
+    amount_cents: Math.round(inst.amount_cents),
+    due_date: inst.due_date,
+    sort_order: inst.sort_order ?? idx,
+  }));
+  const { error } = await supabase.from('club_school_course_installments').insert(rows);
+  if (error) throw new Error(error.message);
+}
 
 function validHHMM(v: string): boolean {
   return /^\d{2}:\d{2}$/.test(v) && Number(v.slice(0, 2)) <= 23 && Number(v.slice(3, 5)) <= 59;
@@ -182,15 +248,8 @@ async function ensureCourseRelations(
   const supabase = getSupabaseServiceRoleClient();
   if (!canAccessClub(req, clubId, 'escuela')) return 'No tienes acceso a este club';
 
-  const { data: staffRow, error: staffErr } = await supabase
-    .from('club_staff')
-    .select('id, club_id')
-    .eq('id', staffId)
-    .maybeSingle();
-  if (staffErr) return staffErr.message;
-  if (!staffRow || (staffRow as { club_id: string }).club_id !== clubId) {
-    return 'staff_id inválido para este club';
-  }
+  const coachErr = await assertSchoolCoachStaff(supabase, clubId, staffId);
+  if (coachErr) return coachErr;
 
   const { data: courtRow, error: courtErr } = await supabase
     .from('courts')
@@ -266,9 +325,16 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
       if (staffId) {
+        // Profesor físico: ver solo cursos donde es el staff asignado
         q = q.eq('staff_id', staffId);
       } else {
-        return res.json({ ok: true, courses: [] });
+        // Coordinador/profesor del portal sin vínculo a staff: ver solo los que creó
+        const userId = req.authContext?.userId;
+        if (userId) {
+          q = q.eq('created_by_auth_user_id', userId);
+        } else {
+          return res.json({ ok: true, courses: [] });
+        }
       }
     }
 
@@ -317,12 +383,15 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
     const staffById = new Map((staffRes.data ?? []).map((s: { id: string; name: string }) => [s.id, s.name]));
     const courtById = new Map((courtRes.data ?? []).map((c: { id: string; name: string }) => [c.id, c.name]));
 
-    const out = (courses ?? []).map((c: any) => ({
+    const enriched = await enrichCoursesWithPriceTypes(supabase, courses ?? []);
+    const installmentsByCourse = await loadCourseInstallments(supabase, courseIds);
+    const out = enriched.map((c: any) => ({
       ...c,
       days: byCourseDays.get(c.id) ?? [],
       enrolled_count: enrolledCount.get(c.id) ?? 0,
       staff_name: staffById.get(c.staff_id) ?? null,
       court_name: courtById.get(c.court_id) ?? null,
+      installments: installmentsByCourse.get(c.id) ?? [],
     }));
     return res.json({ ok: true, courses: out });
   } catch (err) {
@@ -485,7 +554,11 @@ router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((course as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (course as any).staff_id === staffId
+        : userId && (course as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para ver este curso' });
       }
     }
@@ -613,9 +686,15 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
   }
   const cap = Number(capacity);
   if (!Number.isFinite(cap) || cap <= 0) return res.status(400).json({ ok: false, error: 'capacity inválido' });
-  const price = Number(price_cents);
-  if (!Number.isFinite(price) || price < 0) {
-    return res.status(400).json({ ok: false, error: 'price_cents inválido' });
+  const priceTypeId = req.body?.price_type_id ? String(req.body.price_type_id).trim() : null;
+  let price = Number(price_cents);
+  if (priceTypeId) {
+    const supabaseCheck = getSupabaseServiceRoleClient();
+    const resolved = await resolvePriceTypeCents(supabaseCheck, priceTypeId);
+    if (resolved == null) return res.status(400).json({ ok: false, error: 'price_type_id inválido' });
+    price = resolved;
+  } else if (!Number.isFinite(price) || price < 0) {
+    return res.status(400).json({ ok: false, error: 'price_type_id o price_cents es obligatorio' });
   }
   let days: Weekday[];
   try {
@@ -650,10 +729,12 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
       staff_id: String(staff_id),
       court_id: String(court_id),
       price_cents: Math.round(price),
+      price_type_id: priceTypeId,
       capacity: Math.round(cap),
       is_active: is_active !== false,
       starts_on: starts_on || null,
       ends_on: ends_on || null,
+      created_by_auth_user_id: req.authContext?.userId ?? null,
     };
     const { data: created, error } = await supabase
       .from('club_school_courses')
@@ -674,7 +755,34 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
       .order('weekday')
       .order('start_time');
     if (dayErr) return res.status(500).json({ ok: false, error: dayErr.message });
-    return res.status(201).json({ ok: true, course: { ...created, days: createdDays ?? [], enrolled_count: 0 } });
+    const rawInstallments = Array.isArray(req.body?.installments) ? req.body.installments : [];
+    if (rawInstallments.length) {
+      try {
+        await replaceCourseInstallments(
+          supabase,
+          created.id,
+          rawInstallments.map((inst: any, idx: number) => ({
+            label: inst?.label ?? null,
+            amount_cents: Number(inst?.amount_cents ?? 0),
+            due_date: String(inst?.due_date ?? ''),
+            sort_order: Number(inst?.sort_order ?? idx),
+          })).filter((inst: { due_date: string; amount_cents: number }) => inst.due_date && inst.amount_cents >= 0),
+        );
+      } catch (e) {
+        return res.status(500).json({ ok: false, error: (e as Error).message });
+      }
+    }
+    const [enriched] = await enrichCoursesWithPriceTypes(supabase, [created]);
+    const installmentsByCourse = await loadCourseInstallments(supabase, [created.id]);
+    return res.status(201).json({
+      ok: true,
+      course: {
+        ...enriched,
+        days: createdDays ?? [],
+        enrolled_count: 0,
+        installments: installmentsByCourse.get(created.id) ?? [],
+      },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -727,7 +835,11 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((existing as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (existing as any).staff_id === staffId
+        : userId && (existing as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para editar este curso' });
       }
     }
@@ -760,7 +872,15 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
     if (level !== undefined) update.level = level;
     if (staff_id !== undefined) update.staff_id = String(staff_id);
     if (court_id !== undefined) update.court_id = String(court_id);
-    if (price_cents !== undefined) {
+    if (req.body?.price_type_id !== undefined) {
+      const ptId = req.body.price_type_id ? String(req.body.price_type_id).trim() : null;
+      update.price_type_id = ptId;
+      if (ptId) {
+        const resolved = await resolvePriceTypeCents(supabase, ptId);
+        if (resolved == null) return res.status(400).json({ ok: false, error: 'price_type_id inválido' });
+        update.price_cents = resolved;
+      }
+    } else if (price_cents !== undefined) {
       const p = Number(price_cents);
       if (!Number.isFinite(p) || p < 0) return res.status(400).json({ ok: false, error: 'price_cents inválido' });
       update.price_cents = Math.round(p);
@@ -877,7 +997,34 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
       .neq('status', 'cancelled');
     if (countErr) return res.status(500).json({ ok: false, error: countErr.message });
 
-    return res.json({ ok: true, course: { ...updated, days: days ?? [], enrolled_count: enrolledCount ?? 0 } });
+    if (req.body?.installments !== undefined && Array.isArray(req.body.installments)) {
+      try {
+        await replaceCourseInstallments(
+          supabase,
+          id,
+          req.body.installments.map((inst: any, idx: number) => ({
+            label: inst?.label ?? null,
+            amount_cents: Number(inst?.amount_cents ?? 0),
+            due_date: String(inst?.due_date ?? ''),
+            sort_order: Number(inst?.sort_order ?? idx),
+          })).filter((inst: { due_date: string; amount_cents: number }) => inst.due_date && inst.amount_cents >= 0),
+        );
+      } catch (e) {
+        return res.status(500).json({ ok: false, error: (e as Error).message });
+      }
+    }
+
+    const [enriched] = await enrichCoursesWithPriceTypes(supabase, [updated]);
+    const installmentsByCourse = await loadCourseInstallments(supabase, [id]);
+    return res.json({
+      ok: true,
+      course: {
+        ...enriched,
+        days: days ?? [],
+        enrolled_count: enrolledCount ?? 0,
+        installments: installmentsByCourse.get(id) ?? [],
+      },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -917,7 +1064,11 @@ router.delete('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((existing as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (existing as any).staff_id === staffId
+        : userId && (existing as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para eliminar este curso' });
       }
     }
@@ -981,7 +1132,11 @@ router.post('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((course as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (course as any).staff_id === staffId
+        : userId && (course as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para anotar alumnos en este curso' });
       }
     }
@@ -1041,7 +1196,11 @@ router.get('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req:
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((course as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (course as any).staff_id === staffId
+        : userId && (course as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para ver inscripciones de este curso' });
       }
     }
@@ -1088,7 +1247,11 @@ router.put('/:id/enrollments/:enrollmentId', requireClubOwnerOrAdminOrPortalStaf
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((course as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (course as any).staff_id === staffId
+        : userId && (course as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para gestionar esta inscripción' });
       }
     }

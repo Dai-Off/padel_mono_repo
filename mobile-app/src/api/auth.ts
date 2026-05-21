@@ -84,6 +84,38 @@ export type ApplyRecoveryPasswordResponse = {
   error?: string;
 };
 
+export type ChangePasswordResponse = {
+  ok?: boolean;
+  message?: string;
+  error?: string;
+};
+
+/** Cambia la contraseña del usuario con sesión activa. */
+export async function changePassword(
+  accessToken: string,
+  refreshToken: string,
+  password: string,
+): Promise<ChangePasswordResponse & { httpStatus: number }> {
+  try {
+    const res = await fetch(`${API_URL}/auth/change-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        password,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      }),
+    });
+    const json = (await res.json()) as ChangePasswordResponse;
+    return { ...json, httpStatus: res.status };
+  } catch {
+    return { ok: false, httpStatus: 0, error: 'Error de conexión' };
+  }
+}
+
 export async function applyRecoveryPassword(params: {
   password: string;
   access_token?: string;

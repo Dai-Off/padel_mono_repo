@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import { BackHandler, Pressable, View, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { Alert, BackHandler, Pressable, View, StyleSheet } from 'react-native';
+import * as Linking from 'expo-linking';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { SearchCourtResult } from '../api/search';
@@ -26,6 +28,7 @@ import { PartidoPrivadoDetailScreen } from './PartidoPrivadoDetailScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
+import { MonederoScreen } from './MonederoScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
 import { DailyLessonScreen } from './DailyLessonScreen';
@@ -33,6 +36,11 @@ import { CoursesScreen } from './CoursesScreen';
 import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
 import { PublicCourseDetailScreen } from './PublicCourseDetailScreen';
 import { ProfileScreen } from './ProfileScreen';
+import { EditProfileScreen } from './EditProfileScreen';
+import { ChangePasswordScreen } from './ChangePasswordScreen';
+import { useAuth } from '../contexts/AuthContext';
+import { acceptTournamentInvite } from '../api/tournamentInvites';
+import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
 import { CommunityScreen } from './CommunityScreen';
 import { MessagesScreen, type MessagePeerNav } from './MessagesScreen';
 import { DirectMessageThreadScreen } from './DirectMessageThreadScreen';
@@ -48,6 +56,8 @@ import type { PublicCourse } from '../api/schoolCourses';
  * desde una feature bloqueada, al completarlo lo devolvemos a esa sección en
  * vez de dejarlo en el perfil.
  */
+const PENDING_TOURNAMENT_INVITE_KEY = 'pending_tournament_invite';
+
 type PostOnboardingReturn =
   | 'home'
   | 'daily-lesson'
@@ -59,10 +69,12 @@ type PostOnboardingReturn =
 
 export function MainApp() {
   const sidebar = useSidebar(false);
+  const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [showTusPagos, setShowTusPagos] = useState(false);
+  const [showMonedero, setShowMonedero] = useState(false);
   const [showTransacciones, setShowTransacciones] = useState(false);
   const [showDailyLesson, setShowDailyLesson] = useState(false);
   /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
@@ -78,6 +90,10 @@ export function MainApp() {
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
   const [showProfile, setShowProfile] = useState(false);
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
+  const [openTournamentId, setOpenTournamentId] = useState<string | null>(null);
   // Si llegamos al perfil desde una feature bloqueada por falta de onboarding
   // (p.ej. Daily Lesson), pedimos a ProfileScreen que abra el modal del
   // cuestionario de nivelación automáticamente al montar.
@@ -109,6 +125,58 @@ export function MainApp() {
    * sección de origen para devolver al usuario al completarlo. Usado por todos
    * los bloqueos (banner home, hard blocks, soft blocks).
    */
+  const processTournamentInvite = useCallback(
+    async (inviteToken: string, tournamentId: string) => {
+      const accessToken = session?.access_token;
+      if (!accessToken) return;
+      const result = await acceptTournamentInvite(accessToken, inviteToken, tournamentId);
+      if (result.ok) {
+        Alert.alert('Invitación aceptada', 'Ya estás inscrito en el torneo.');
+        setActiveTab('torneos');
+        setOpenTournamentId(tournamentId);
+      } else {
+        Alert.alert('Invitación al torneo', result.error);
+      }
+    },
+    [session?.access_token],
+  );
+
+  const consumeInviteUrl = useCallback(
+    async (url: string | null) => {
+      if (!url) return;
+      const parsed = parseTournamentInviteUrl(url);
+      if (!parsed) return;
+      await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
+      await processTournamentInvite(parsed.token, parsed.tournamentId);
+    },
+    [processTournamentInvite],
+  );
+
+  useEffect(() => {
+    if (!session?.access_token) return;
+    void (async () => {
+      const raw = await AsyncStorage.getItem(PENDING_TOURNAMENT_INVITE_KEY);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as { token: string; tournamentId: string };
+          if (parsed.token && parsed.tournamentId) {
+            await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
+            await processTournamentInvite(parsed.token, parsed.tournamentId);
+            return;
+          }
+        } catch {
+          await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
+        }
+      }
+      const initial = await Linking.getInitialURL();
+      if (initial) await consumeInviteUrl(initial);
+    })();
+    const sub = Linking.addEventListener('url', ({ url }) => {
+      void consumeInviteUrl(url);
+    });
+    return () => sub.remove();
+  }, [session?.access_token, consumeInviteUrl, processTournamentInvite]);
+
   const openOnboardingFromSection = (returnTo: PostOnboardingReturn) => {
     setPendingOnboardingReturn(returnTo);
     setProfileAutoOpenOnboarding(true);
@@ -187,6 +255,17 @@ export function MainApp() {
         setPartidosRefreshNonce((n) => n + 1);
         return true;
       }
+      // Cambiar contraseña (desde editar perfil)
+      if (showChangePassword) {
+        setShowChangePassword(false);
+        return true;
+      }
+      // Editar perfil
+      if (showEditProfile) {
+        setShowEditProfile(false);
+        setShowProfile(true);
+        return true;
+      }
       // Preferences → vuelve a perfil (igual que su onBack)
       if (showPreferences) {
         setShowPreferences(false);
@@ -249,6 +328,11 @@ export function MainApp() {
         setShowTransacciones(false);
         return true;
       }
+      // Monedero
+      if (showMonedero) {
+        setShowMonedero(false);
+        return true;
+      }
       // Tus Pagos
       if (showTusPagos) {
         setShowTusPagos(false);
@@ -284,6 +368,8 @@ export function MainApp() {
     showCourses,
     showDailyLesson,
     crearPartidoFlow.open,
+    showChangePassword,
+    showEditProfile,
     showPreferences,
     showProfile,
     showCommunity,
@@ -295,6 +381,7 @@ export function MainApp() {
     showCompetitiveLeague,
     showSeasonPass,
     showTransacciones,
+    showMonedero,
     showTusPagos,
     selectedPartido,
     clubDetailCourt,
@@ -387,15 +474,46 @@ export function MainApp() {
         />
       );
     }
+    if (showChangePassword) {
+      return (
+        <ChangePasswordScreen
+          userEmail={session?.user?.email}
+          onBack={() => setShowChangePassword(false)}
+        />
+      );
+    }
+    if (showEditProfile) {
+      return (
+        <EditProfileScreen
+          onBack={() => {
+            setShowEditProfile(false);
+            setShowProfile(true);
+          }}
+          onSaved={() => setProfileRefreshKey((k) => k + 1)}
+          onPreferencesPress={() => {
+            setShowEditProfile(false);
+            setShowPreferences(true);
+          }}
+          onChangePasswordPress={() => setShowChangePassword(true)}
+        />
+      );
+    }
     if (showProfile) {
       return (
         <ProfileScreen
+          key={profileRefreshKey}
           onBack={() => {
             setShowProfile(false);
             setShowPreferences(false);
+            setShowEditProfile(false);
+            setShowChangePassword(false);
             setProfileAutoOpenOnboarding(false);
           }}
           onMenuPress={sidebar.toggle}
+          onEditProfilePress={() => {
+            setShowProfile(false);
+            setShowEditProfile(true);
+          }}
           onPreferencesPress={() => {
             setShowProfile(false);
             setShowPreferences(true);
@@ -416,7 +534,10 @@ export function MainApp() {
     }
     if (showCommunity) {
       return (
-        <CommunityScreen onBack={() => setShowCommunity(false)} />
+        <CommunityScreen
+          onBack={() => setShowCommunity(false)}
+          onMessagesPress={() => { setShowCommunity(false); setShowMessages(true); }}
+        />
       );
     }
     if (showMessages) {
@@ -499,11 +620,18 @@ export function MainApp() {
         <TransaccionesScreen onBack={() => setShowTransacciones(false)} />
       );
     }
+    if (showMonedero) {
+      return <MonederoScreen onBack={() => setShowMonedero(false)} />;
+    }
     if (showTusPagos) {
       return (
         <TusPagosScreen
           onBack={() => setShowTusPagos(false)}
           onTransaccionesPress={() => setShowTransacciones(true)}
+          onMonederoPress={() => {
+            setShowTusPagos(false);
+            setShowMonedero(true);
+          }}
         />
       );
     }
@@ -586,6 +714,8 @@ export function MainApp() {
         return (
           <CompeticionesScreen
             onBack={() => setActiveTab('inicio')}
+            initialOpenTournamentId={openTournamentId}
+            onInitialTournamentOpened={() => setOpenTournamentId(null)}
             onOpenProfileForOnboarding={() => openOnboardingFromSection('torneos')}
           />
         );
@@ -608,8 +738,11 @@ export function MainApp() {
   const showMainTabs =
     bookingSuccessData == null &&
     !showTusPagos &&
+    !showMonedero &&
     !showTransacciones &&
     !showProfile &&
+    !showEditProfile &&
+    !showChangePassword &&
     !showPreferences &&
     !showPartidoDetail &&
     !showClubDetail &&
@@ -627,8 +760,11 @@ export function MainApp() {
   const customHeader =
     bookingSuccessData != null ||
     showTusPagos ||
+    showMonedero ||
     showTransacciones ||
     showProfile ||
+    showEditProfile ||
+    showChangePassword ||
     showPreferences ||
     showPartidoDetail ||
     showCompetitiveLeague ||
@@ -705,7 +841,7 @@ export function MainApp() {
       ? '#000000'
       : showMessages || !!affinityDmPeer
         ? '#0A0A0A'
-        : showPreferences
+        : showEditProfile || showChangePassword || showPreferences || showMonedero
           ? '#0F0F0F'
         : showDailyLesson
           ? '#0F0F0F'
@@ -728,11 +864,14 @@ export function MainApp() {
   const handleTabChange = (tab: MainTabId) => {
     setActiveTab(tab);
     setShowProfile(false);
+    setShowEditProfile(false);
+    setShowChangePassword(false);
     setShowPreferences(false);
     setShowMessages(false);
     setMessagesPeer(null);
     setShowCompetitiveLeague(false);
     setShowSeasonPass(false);
+    setShowCommunity(false);
   };
 
   return (
@@ -740,6 +879,7 @@ export function MainApp() {
       <SidebarProvider
         close={sidebar.close}
         onNavigateToTusPagos={() => setShowTusPagos(true)}
+        onNavigateToMonedero={() => setShowMonedero(true)}
         onProfilePress={() => setShowProfile(true)}
       >
         <View style={styles.mainColumn}>
@@ -749,12 +889,15 @@ export function MainApp() {
             hideHeader={
               bookingSuccessData != null ||
                 showProfile ||
+              showEditProfile ||
+              showChangePassword ||
               showPreferences ||
               showClubDetail ||
               showPartidoDetail ||
               showCompetitiveLeague ||
               showSeasonPass ||
               showTusPagos ||
+              showMonedero ||
               showTransacciones ||
               crearPartidoFlow.open ||
               showDailyLesson ||
@@ -762,6 +905,7 @@ export function MainApp() {
               selectedEducationalCourse != null ||
               selectedPublicCourse != null ||
               showMessages ||
+              showCommunity ||
               !!affinityDmPeer ||
               showPublicProfile ||
               affinityPublicProfileId !== null ||
@@ -770,7 +914,7 @@ export function MainApp() {
             }
             layoutBackgroundColor={layoutBackgroundColor}
             navbarActions={{
-              onMessagesPress: () => setShowMessages(true),
+              onMessagesPress: () => { setShowCommunity(false); setShowMessages(true); },
               onGroupsPress: () => setShowCommunity(true),
             }}
           >
@@ -780,6 +924,7 @@ export function MainApp() {
             !showClubDetail &&
             !showPartidoDetail &&
             !showTusPagos &&
+            !showMonedero &&
             !showTransacciones &&
             !showPreferences &&
             !crearPartidoFlow.open &&

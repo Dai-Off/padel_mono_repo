@@ -20,6 +20,7 @@ import type { MyTournamentEntryRequest, PublicTournamentRow } from '../api/tourn
 import { fetchMyTournamentEntryRequests, fetchMyTournaments, fetchPublicTournaments } from '../api/tournaments';
 import { TournamentListCard } from '../components/competiciones/TournamentListCard';
 import { TournamentDetailScreen } from './TournamentDetailScreen';
+import { OnboardingInlineBanner } from '../components/onboarding/OnboardingInlineBanner';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import {
@@ -44,6 +45,9 @@ type CompeticionesListRow =
 
 type CompeticionesScreenProps = {
   onBack?: () => void;
+  /** Abre el detalle de un torneo (p. ej. tras aceptar invitación). */
+  initialOpenTournamentId?: string | null;
+  onInitialTournamentOpened?: () => void;
   /** Abre el perfil con el cuestionario auto-abierto (banner soft block). */
   onOpenProfileForOnboarding?: () => void;
 };
@@ -72,6 +76,8 @@ function FilterChipButton({
 
 export function CompeticionesScreen({
   onBack,
+  initialOpenTournamentId,
+  onInitialTournamentOpened,
   onOpenProfileForOnboarding,
 }: CompeticionesScreenProps) {
   const PAGE_SIZE = 20;
@@ -102,6 +108,14 @@ export function CompeticionesScreen({
   const [error, setError] = useState<string | null>(null);
   const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [detailOpen, setDetailOpen] = useState<{ id: string } | null>(null);
+
+  useEffect(() => {
+    if (initialOpenTournamentId) {
+      setActiveTab('inscritas');
+      setDetailOpen({ id: initialOpenTournamentId });
+      onInitialTournamentOpened?.();
+    }
+  }, [initialOpenTournamentId, onInitialTournamentOpened]);
 
   const load = useCallback(async (opts?: { append?: boolean; offset?: number }) => {
     const append = Boolean(opts?.append);
@@ -201,7 +215,7 @@ export function CompeticionesScreen({
       const pending = Number(row.pending_count ?? 0);
       if (confirmed + pending >= Number(row.max_players ?? 0)) return false;
       const mode = String(row.registration_mode ?? 'individual');
-      if (!['individual', 'both'].includes(mode)) return false;
+      if (!['individual', 'pair', 'both'].includes(mode)) return false;
       const eloMin = row.elo_min != null ? Number(row.elo_min) : null;
       const eloMax = row.elo_max != null ? Number(row.elo_max) : null;
       if (eloMin == null && eloMax == null) return true;
@@ -220,6 +234,13 @@ export function CompeticionesScreen({
     setRefreshing(false);
   }, [load]);
 
+  const handleLoadMore = useCallback(async () => {
+    if (loading || loadingMore || !hasMore || activeTab === 'solicitudes') return;
+    setLoadingMore(true);
+    await load({ append: true, offset: items.length });
+    setLoadingMore(false);
+  }, [loading, loadingMore, hasMore, activeTab, items.length, load]);
+
   const filtered = useMemo((): PublicTournamentRow[] => {
     if (activeTab === 'solicitudes') return [];
     const now = Date.now();
@@ -235,7 +256,7 @@ export function CompeticionesScreen({
           matchesSearch(row, searchQuery) &&
           matchesFormatFilter(row, formatFilter) &&
           matchesLevelFilter(row, levelFilter) &&
-          (!joinableOnly || canJoinTournament(row)),
+          (activeTab !== 'disponibles' || !joinableOnly || canJoinTournament(row)),
       )
       .sort((a, b) => {
         const da = new Date(String(a.start_at ?? '')).getTime();
@@ -269,27 +290,14 @@ export function CompeticionesScreen({
   const listHeader = (
     <>
       {/* Banner inline (no sticky) cuando el usuario aún no tiene nivel.
-          Avisa que los torneos competitivos no son inscribibles hasta
-          completar el cuestionario, con CTA al perfil. Solo en tab
-          'disponibles' — en 'inscritas'/'solicitudes' ya está dentro de su
-          flujo. */}
+          Solo en tab 'disponibles' — en 'inscritas'/'solicitudes' ya está
+          dentro de su flujo. Mismo componente que en Cursos para consistencia. */}
       {needsOnboarding && activeTab === 'disponibles' && (
-        <View style={styles.onboardingBanner}>
-          <View style={styles.onboardingBannerIcon}>
-            <Ionicons name="lock-closed" size={14} color="#F18F34" />
-          </View>
-          <Text style={styles.onboardingBannerText}>
-            Completa el cuestionario de nivelación para inscribirte en torneos competitivos
-          </Text>
-          <Pressable
-            onPress={() => onOpenProfileForOnboarding?.()}
-            hitSlop={6}
-            style={styles.onboardingBannerCta}
-          >
-            <Text style={styles.onboardingBannerCtaText}>Completar</Text>
-            <Ionicons name="arrow-forward" size={12} color="#F18F34" />
-          </Pressable>
-        </View>
+        <OnboardingInlineBanner
+          icon="trophy-outline"
+          message="Descubre tu nivel para inscribirte en torneos competitivos"
+          onPress={() => onOpenProfileForOnboarding?.()}
+        />
       )}
 
       <View style={styles.sectionHead}>
@@ -378,7 +386,9 @@ export function CompeticionesScreen({
           />
           <FilterChipButton label={formatChipLabel} onPress={() => setFilterModalVisible(true)} />
           <FilterChipButton label={levelChipLabel} onPress={() => setFilterModalVisible(true)} />
-          <FilterChipButton label={joinableChipLabel} onPress={() => setJoinableOnly((v) => !v)} />
+          {activeTab === 'disponibles' ? (
+            <FilterChipButton label={joinableChipLabel} onPress={() => setJoinableOnly((v) => !v)} />
+          ) : null}
         </ScrollView>
 
         <View style={styles.segmented}>
@@ -482,6 +492,8 @@ export function CompeticionesScreen({
               colors={[theme.auth.accent]}
             />
           }
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.5}
           renderItem={({ item }) =>
             item.kind === 'request' ? (
               <Pressable
@@ -647,29 +659,33 @@ export function CompeticionesScreen({
                 ),
               )}
             </ScrollView>
-            <Text style={styles.modalSectionLabel}>Disponibilidad</Text>
-            <Pressable
-              style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-              onPress={() => setJoinableOnly(true)}
-            >
-              <Text style={[styles.modalRowText, joinableOnly && styles.modalRowTextActive]}>
-                Solo torneos a los que me puedo unir
-              </Text>
-              {joinableOnly ? (
-                <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-              ) : null}
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-              onPress={() => setJoinableOnly(false)}
-            >
-              <Text style={[styles.modalRowText, !joinableOnly && styles.modalRowTextActive]}>
-                Mostrar todos (incluye no cumplo requisitos)
-              </Text>
-              {!joinableOnly ? (
-                <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-              ) : null}
-            </Pressable>
+            {activeTab === 'disponibles' ? (
+              <>
+                <Text style={styles.modalSectionLabel}>Disponibilidad</Text>
+                <Pressable
+                  style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
+                  onPress={() => setJoinableOnly(true)}
+                >
+                  <Text style={[styles.modalRowText, joinableOnly && styles.modalRowTextActive]}>
+                    Solo torneos a los que me puedo unir
+                  </Text>
+                  {joinableOnly ? (
+                    <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
+                  ) : null}
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
+                  onPress={() => setJoinableOnly(false)}
+                >
+                  <Text style={[styles.modalRowText, !joinableOnly && styles.modalRowTextActive]}>
+                    Mostrar todos (incluye no cumplo requisitos)
+                  </Text>
+                  {!joinableOnly ? (
+                    <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
+                  ) : null}
+                </Pressable>
+              </>
+            ) : null}
             <Pressable
               style={styles.modalClose}
               onPress={() => setFilterModalVisible(false)}
@@ -813,53 +829,6 @@ const styles = StyleSheet.create({
   },
   sectionHead: {
     marginBottom: 12,
-  },
-  // Banner inline (no sticky) que aparece arriba del listado cuando falta
-  // onboarding. Mismo lenguaje visual que el banner de Cursos: borde naranja
-  // tenue, fondo oscuro, icono candado, CTA inline a la derecha.
-  onboardingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(241,143,52,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.30)',
-    marginBottom: 14,
-  },
-  onboardingBannerIcon: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'rgba(241,143,52,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  onboardingBannerText: {
-    flex: 1,
-    color: '#E5E7EB',
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '600',
-  },
-  onboardingBannerCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(241,143,52,0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(241,143,52,0.45)',
-  },
-  onboardingBannerCtaText: {
-    color: '#F18F34',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.2,
   },
   sectionTitle: {
     fontSize: theme.fontSize.base,

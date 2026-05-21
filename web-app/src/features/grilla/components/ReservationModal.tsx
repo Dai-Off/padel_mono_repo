@@ -591,22 +591,32 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             const initPayments: SlotPayment[] = [defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()];
             const txByPlayer = new Map<string, { paidAmountCents: number; walletAmountCents: number; paymentMethod: PaymentMethod }>();
             (bd.payment_transactions || [])
-                .filter((t: any) => t.status === 'succeeded' && typeof t.stripe_payment_intent_id === 'string' && t.stripe_payment_intent_id.startsWith('manual_'))
+                .filter((t: any) => t.status === 'succeeded')
                 .forEach((t: any) => {
-                    // Format: manual_cash_<bookingId>_<playerId> — method is the second segment
-                    const method = t.stripe_payment_intent_id.split('_')[1];
-                    const pm: PaymentMethod = (method === 'cash' || method === 'card' || method === 'wallet') ? method as PaymentMethod : null;
+                    const stripeId = typeof t.stripe_payment_intent_id === 'string' ? t.stripe_payment_intent_id : '';
+                    const method = stripeId.startsWith('manual_') ? (stripeId.split('_')[1] ?? null) : 'card';
+                    const pm: PaymentMethod = (method === 'cash' || method === 'card' || method === 'wallet') ? method as PaymentMethod : 'card';
+                    const prev = txByPlayer.get(t.payer_player_id) ?? { paidAmountCents: 0, walletAmountCents: 0, paymentMethod: pm };
                     txByPlayer.set(t.payer_player_id, {
-                        paidAmountCents: pm === 'wallet' ? 0 : t.amount_cents,
-                        walletAmountCents: pm === 'wallet' ? t.amount_cents : 0,
+                        paidAmountCents: prev.paidAmountCents + (pm === 'wallet' ? 0 : (t.amount_cents ?? 0)),
+                        walletAmountCents: prev.walletAmountCents + (pm === 'wallet' ? (t.amount_cents ?? 0) : 0),
                         paymentMethod: pm,
                     });
                 });
             const orgTx = txByPlayer.get(bd.organizer_player_id);
-            if (orgTx) initPayments[0] = { ...defaultSlot(), ...orgTx };
+            const orgBp = (bd.booking_participants || []).find((p: any) => p.player_id === bd.organizer_player_id);
+            if (orgTx) {
+                initPayments[0] = { ...defaultSlot(), ...orgTx };
+            } else if (orgBp && (orgBp.paid_amount_cents > 0 || orgBp.wallet_amount_cents > 0)) {
+                initPayments[0] = { ...defaultSlot(), paidAmountCents: orgBp.paid_amount_cents ?? 0, walletAmountCents: orgBp.wallet_amount_cents ?? 0, paymentMethod: orgBp.payment_method ?? 'cash' };
+            }
             (bd.booking_participants || []).filter((p: any) => p.role === 'guest').slice(0, 3).forEach((p: any, i: number) => {
                 const tx = txByPlayer.get(p.player_id);
-                if (tx) initPayments[i + 1] = { ...defaultSlot(), ...tx };
+                if (tx) {
+                    initPayments[i + 1] = { ...defaultSlot(), ...tx };
+                } else if (p.paid_amount_cents > 0 || p.wallet_amount_cents > 0) {
+                    initPayments[i + 1] = { ...defaultSlot(), paidAmountCents: p.paid_amount_cents ?? 0, walletAmountCents: p.wallet_amount_cents ?? 0, paymentMethod: p.payment_method ?? 'cash' };
+                }
             });
             setSlotPayments(initPayments);
             setIsMultipleReservation(false);

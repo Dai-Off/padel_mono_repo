@@ -1,5 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 /** Evita re-escanear todas las reservas del club en cada tecla de búsqueda CRM / invitar. */
 const clubPlayerIdsCache = new Map<string, { ids: string[]; expiresAt: number }>();
 const CLUB_PLAYER_IDS_TTL_MS = 90_000;
@@ -27,12 +33,14 @@ export async function fetchBookingRelatedPlayerIds(
     if (org) ids.add(org);
   }
   if (bookingIds.length) {
-    const { data: parts, error: pErr } = await supabase
-      .from('booking_participants')
-      .select('player_id')
-      .in('booking_id', bookingIds);
-    if (pErr) throw new Error(pErr.message);
-    for (const p of parts ?? []) ids.add((p as { player_id: string }).player_id);
+    for (const bookingBatch of chunk(bookingIds, 300)) {
+      const { data: parts, error: pErr } = await supabase
+        .from('booking_participants')
+        .select('player_id')
+        .in('booking_id', bookingBatch);
+      if (pErr) throw new Error(pErr.message);
+      for (const p of parts ?? []) ids.add((p as { player_id: string }).player_id);
+    }
   }
   return [...ids];
 }

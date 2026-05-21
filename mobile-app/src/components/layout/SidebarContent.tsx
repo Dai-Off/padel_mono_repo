@@ -1,9 +1,10 @@
 import type { ComponentProps } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
+import { useHomeData } from '../../contexts/HomeDataContext';
 import { useSidebarContext } from '../../contexts/SidebarContext';
 import { theme } from '../../theme';
 
@@ -19,11 +20,16 @@ function getInitials(fullName?: string | null, email?: string): string {
 function SidebarUserHeader() {
   const ctx = useSidebarContext();
   const { session } = useAuth();
+  const { profile } = useHomeData();
   const close = ctx?.close;
-  const name = session?.user?.user_metadata?.full_name ?? null;
-  const email = session?.user?.email ?? '';
+  const name =
+    profile?.firstName && profile?.lastName
+      ? `${profile.firstName} ${profile.lastName}`.trim()
+      : (session?.user?.user_metadata?.full_name ?? null);
+  const email = profile?.email ?? session?.user?.email ?? '';
   const initials = getInitials(name, email);
   const displayName = name?.trim() || email || 'Usuario';
+  const avatarUrl = profile?.avatarUrl?.trim() || null;
 
   return (
     <View style={styles.userSection}>
@@ -37,14 +43,22 @@ function SidebarUserHeader() {
           accessibilityLabel="Perfil de usuario"
         >
           <View style={styles.avatarWrap}>
-            <LinearGradient
-              colors={[theme.sidebar.avatarGradientFrom, theme.sidebar.avatarGradientTo]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.avatar}
-            >
-              <Text style={styles.avatarText}>{initials}</Text>
-            </LinearGradient>
+            {avatarUrl ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={styles.avatarImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <LinearGradient
+                colors={[theme.sidebar.avatarGradientFrom, theme.sidebar.avatarGradientTo]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.avatar}
+              >
+                <Text style={styles.avatarText}>{initials}</Text>
+              </LinearGradient>
+            )}
             <View style={styles.statusDot} />
           </View>
           <View style={styles.userInfo}>
@@ -168,10 +182,20 @@ export function SidebarContent() {
             onPress={close}
           />
           <SidebarRowItem
+            icon="cash-outline"
+            title="Monedero"
+            subtitle="Saldo a favor en tus clubes"
+            iconVariant="emerald"
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToMonedero?.();
+            }}
+          />
+          <SidebarRowItem
             icon="wallet-outline"
             title="Tus pagos"
-            subtitle="Transacciones, reembolsos y métodos de pago"
-            iconVariant="emerald"
+            subtitle="Tarjeta, reservas pendientes y Stripe"
+            iconVariant="sky"
             onPress={() => {
               close?.();
               ctx?.onNavigateToTusPagos?.();
@@ -245,6 +269,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 8,
+  },
+  avatarImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
   },
   avatarText: { color: theme.auth.text, fontSize: 18, fontWeight: '700' },
   statusDot: {

@@ -14,6 +14,7 @@ import {
   INICIO_PAD_H,
   INICIO_PAD_TOP,
   INICIO_STACK_GAP,
+  HomeErrorBanner,
   HomeSkeleton,
   MissionsHomeSection,
   type HomeMission,
@@ -23,7 +24,6 @@ import {
 } from '../components/home/inicio';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { useHomeStats } from '../hooks/useHomeStats';
 import type { PartidoItem } from './PartidosScreen';
 import { IAAfinidadModal } from '../components/home/IAAfinidadModal';
 import { OnboardingHardBlockModal } from '../components/onboarding/OnboardingHardBlockModal';
@@ -50,7 +50,6 @@ function mapSeasonMissionToHome(m: SeasonPassMissionDto): HomeMission {
     progress: `${m.current}/${m.target}`,
     pct: `${pctNum}%`,
     pctNum,
-    claim: false,
     highlight: m.done,
   };
 }
@@ -103,7 +102,6 @@ export function HomeScreen({
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const { stats, loading: statsLoading } = useHomeStats();
   // Datos del home cacheados a nivel de app (sobreviven a remounts del Home
   // cuando navegas a otras pantallas y vuelves). Ver HomeDataContext.
   const {
@@ -117,7 +115,22 @@ export function HomeScreen({
     seasonPassMe,
     seasonPassLoading,
     refreshSeasonPass,
+    stats,
+    statsLoading,
+    refreshStreak,
+    hasInitialError,
+    refreshAll,
   } = useHomeData();
+  // Feedback visual mientras "Reintentar" del banner de error está en vuelo.
+  const [retrying, setRetrying] = useState(false);
+  const handleRetry = async () => {
+    setRetrying(true);
+    try {
+      await refreshAll();
+    } finally {
+      setRetrying(false);
+    }
+  };
   const [affinityModalVisible, setAffinityModalVisible] = useState(false);
   const [affinityLoading, setAffinityLoading] = useState(false);
   // Inicializar desde caché para sobrevivir remounts (ej. al volver del chat de IA Afinidad)
@@ -153,14 +166,15 @@ export function HomeScreen({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [affinityReopenSignal]);
 
-  // Refrescamos season pass cuando volvemos de la lección diaria (la racha y
-  // los SP del pase pueden haber cambiado). El resto de datos del home se
-  // refrescan a través de su TTL en HomeDataContext.
+  // Refrescamos season pass y racha cuando volvemos de la lección diaria
+  // (ambos pueden haber cambiado). El resto de datos del home se refrescan
+  // a través de su TTL en HomeDataContext.
   useEffect(() => {
     if (streakRefreshKey > 0) {
       void refreshSeasonPass({ force: true });
+      void refreshStreak({ force: true });
     }
-  }, [streakRefreshKey, refreshSeasonPass]);
+  }, [streakRefreshKey, refreshSeasonPass, refreshStreak]);
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 
@@ -266,7 +280,14 @@ export function HomeScreen({
           ]}
           showsVerticalScrollIndicator={false}
         >
-        {isFirstLoading ? <HomeSkeleton /> : (<>
+        {isFirstLoading ? (
+          <HomeSkeleton />
+        ) : hasInitialError && myPlayerProfile == null && partidos.length === 0 ? (
+          // Primera carga falló y no hay nada en cache: banner discreto con
+          // "Reintentar" en lugar de cards vacías sin contexto. Si hubiera
+          // datos parciales, mostraríamos el contenido (stale-while-error).
+          <HomeErrorBanner onRetry={handleRetry} retrying={retrying} />
+        ) : (<>
         {/* Contenido real del Home a partir de aquí. Cuando los datos llegan
             todos a la vez, el skeleton desaparece y entra el contenido — la
             animación de `InicioEnterBlock` sigue funcionando como siempre. */}
