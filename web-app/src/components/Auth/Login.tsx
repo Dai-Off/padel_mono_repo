@@ -166,23 +166,31 @@ export const Login: React.FC = () => {
         <div className="fixed inset-0 bg-[#0D0D0D] z-50 flex items-center justify-center p-5">
             {/* Background Decorations */}
             <motion.div
-                className="absolute top-[10%] left-[10%] w-[40%] h-[40%] rounded-full"
-                style={{ background: 'radial-gradient(circle, rgba(227, 30, 36, 0.12) 0%, transparent 65%)' }}
+                className="absolute w-[80vmin] h-[80vmin] rounded-full pointer-events-none"
+                style={{
+                    top: 'calc(30% - 40vmin)',
+                    left: 'calc(30% - 40vmin)',
+                    background: 'radial-gradient(circle, rgba(227, 30, 36, 0.12) 0%, transparent 70%)',
+                }}
                 animate={{
-                    x: [0, 15, 0],
-                    y: [0, -10, 0],
-                    scale: [1, 1.05, 1]
+                    x: [0, 40, 0],
+                    y: [0, -30, 0],
+                    scale: [1, 1.3, 1]
                 }}
                 transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
             />
             <motion.div
-                className="absolute bottom-[10%] right-[10%] w-[35%] h-[35%] rounded-full"
-                style={{ background: 'radial-gradient(circle, rgba(91, 141, 238, 0.08) 0%, transparent 65%)' }}
-                animate={{
-                    x: [0, -20, 0],
-                    y: [0, 15, 0]
+                className="absolute w-[70vmin] h-[70vmin] rounded-full pointer-events-none"
+                style={{
+                    top: 'calc(72.5% - 35vmin)',
+                    left: 'calc(72.5% - 35vmin)',
+                    background: 'radial-gradient(circle, rgba(91, 141, 238, 0.08) 0%, transparent 70%)',
                 }}
-                transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+                animate={{
+                    x: [0, -30, 0],
+                    y: [0, 30, 0]
+                }}
+                transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 2 }}
             />
 
             <motion.div
@@ -190,7 +198,7 @@ export const Login: React.FC = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
             >
-                <div className="relative overflow-hidden rounded-3xl border-2 border-[#E31E24]/80 shadow-[0_0_24px_rgba(227,30,36,0.15)]"
+                <div className="relative overflow-hidden rounded-3xl border border-white/10"
                     style={{ background: 'linear-gradient(170deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%)' }}>
                     <div className="absolute inset-0 backdrop-blur-xl"></div>
 
@@ -256,7 +264,7 @@ export const Login: React.FC = () => {
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
                                         readOnly={isInviteRegisterMode}
-                                        className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
+                                        className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#F18F34]/50 focus:border-[#F18F34]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
                                         placeholder={t('email_placeholder')}
                                     />
                                     <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
@@ -275,7 +283,7 @@ export const Login: React.FC = () => {
                                                 type="text"
                                                 value={registerName}
                                                 onChange={(e) => setRegisterName(e.target.value)}
-                                                className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
+                                                className="w-full px-4 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#F18F34]/50 focus:border-[#F18F34]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
                                                 placeholder="Tu nombre"
                                             />
                                         </div>
@@ -290,7 +298,7 @@ export const Login: React.FC = () => {
                                                 required
                                                 value={registerPassword}
                                                 onChange={(e) => setRegisterPassword(e.target.value)}
-                                                className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
+                                                className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#F18F34]/50 focus:border-[#F18F34]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
                                                 placeholder={t('password_placeholder')}
                                             />
                                             <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
@@ -313,7 +321,7 @@ export const Login: React.FC = () => {
                                                 required
                                                 value={registerPassword2}
                                                 onChange={(e) => setRegisterPassword2(e.target.value)}
-                                                className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
+                                                className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#F18F34]/50 focus:border-[#F18F34]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
                                                 placeholder="Repite tu contraseña"
                                             />
                                             <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
@@ -326,7 +334,7 @@ export const Login: React.FC = () => {
                                     <label className="block text-[10px] font-semibold text-white/30 uppercase tracking-wider">
                                         {t('password_label')}
                                     </label>
-                                    <Link to="/forgot-password" className="text-[10px] text-[#E31E24]/90 hover:text-[#E31E24] uppercase tracking-wider">
+                                    <Link to="/forgot-password" className="text-[10px] text-[#F18F34]/90 hover:text-[#F18F34] uppercase tracking-wider">
                                         {t('forgot_password_link')}
                                     </Link>
                                 </div>
@@ -336,7 +344,7 @@ export const Login: React.FC = () => {
                                         required
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
-                                        className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/50 focus:border-[#E31E24]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
+                                        className="w-full px-10 py-3.5 bg-white/5 border border-white/10 rounded-2xl focus:ring-2 focus:ring-[#F18F34]/50 focus:border-[#F18F34]/50 text-white placeholder-white/20 text-sm outline-none transition-all"
                                         placeholder={t('password_placeholder')}
                                     />
                                     <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
@@ -357,7 +365,7 @@ export const Login: React.FC = () => {
                                         initial={{ opacity: 0, height: 0 }}
                                         animate={{ opacity: 1, height: 'auto' }}
                                         exit={{ opacity: 0, height: 0 }}
-                                        className="flex items-center gap-2 text-red-500 text-xs font-medium bg-red-500/10 p-3 rounded-xl border border-red-500/20"
+                                        className="flex items-center gap-2 text-[#F18F34] text-xs font-medium bg-[#F18F34]/10 p-3 rounded-xl border border-[#F18F34]/20"
                                     >
                                         <AlertCircle className="w-3.5 h-3.5" />
                                         {error}
@@ -369,7 +377,7 @@ export const Login: React.FC = () => {
                                 type="submit"
                                 disabled={isLoading || isInviteRegistering}
                                 className="w-full relative overflow-hidden py-4 rounded-2xl text-white font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-                                style={{ background: 'linear-gradient(135deg, rgb(227, 30, 36) 0%, rgb(192, 26, 32) 100%)' }}
+                                style={{ background: 'linear-gradient(135deg, #F18F34 0%, #E95F32 100%)' }}
                                 whileHover={{ scale: 1.02 }}
                                 whileTap={{ scale: 0.98 }}
                             >
@@ -399,15 +407,15 @@ export const Login: React.FC = () => {
 
                         {!isInviteRegisterMode && !inviteModeLoading && (
                             <>
-                        <div className="flex items-center gap-3 my-6">
-                            <div className="flex-1 h-px bg-white/20" />
-                            <span className="w-8 h-8 rounded-full border border-white/20 flex items-center justify-center text-white/40 text-xs">o</span>
-                            <div className="flex-1 h-px bg-white/20" />
+                        <div className="flex items-center gap-3 mt-6 mb-4">
+                            <div className="flex-1 h-px bg-white/10" />
+                            <span className="text-[10px] text-white/30 font-semibold uppercase tracking-wider">o</span>
+                            <div className="flex-1 h-px bg-white/10" />
                         </div>
 
                         <Link
                             to="/registro"
-                            className="w-full py-3.5 rounded-2xl border-2 border-[#E31E24] bg-transparent text-white font-bold text-sm flex items-center justify-center gap-2 hover:bg-[#E31E24]/10 transition-colors"
+                            className="w-full py-3.5 rounded-2xl border border-white/15 bg-transparent text-white/70 font-bold text-sm flex items-center justify-center gap-2 hover:bg-white/5 hover:text-white transition-all"
                         >
                             <Plus className="w-4 h-4" />
                             {t('register_my_club')}
