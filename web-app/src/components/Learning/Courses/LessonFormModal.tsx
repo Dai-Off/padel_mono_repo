@@ -4,6 +4,7 @@ import { X, Upload, Video, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService, validateVideo, getVideoDuration, VIDEO_LIMITS } from '../../../services/learningContent';
+import { useEscapeClose } from '../Questions/useEscapeClose';
 import type { CourseLesson } from '../../../types/learningContent';
 
 interface Props {
@@ -16,6 +17,7 @@ interface Props {
 }
 
 export function LessonFormModal({ mode, lesson, courseId, clubId, onClose, onSaved }: Props) {
+  useEscapeClose(onClose);
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -101,7 +103,7 @@ export function LessonFormModal({ mode, lesson, courseId, clubId, onClose, onSav
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
+    <div className="fixed inset-0 z-[110] bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

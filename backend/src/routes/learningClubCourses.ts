@@ -43,16 +43,46 @@ router.get('/club-courses', requireClubOwnerOrAdminOrPortalStaff, async (req: Re
     if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
     if (!canAccessClub(req, club_id, 'escuela')) return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
 
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const requestedSize = parseInt(String(req.query.page_size ?? '20'), 10) || 20;
+    const pageSize = Math.min(100, Math.max(1, requestedSize));
+    const offset = (page - 1) * pageSize;
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    const status = typeof req.query.status === 'string' ? req.query.status : '';
+    const orderBy = String(req.query.order_by ?? 'created_desc');
+    const ascending = orderBy === 'created_asc';
+    const eloMin = req.query.elo_min ? Number(req.query.elo_min) : undefined;
+    const eloMax = req.query.elo_max ? Number(req.query.elo_max) : undefined;
+
     const supabase = getSupabaseServiceRoleClient();
 
-    const { data: courses, error } = await supabase
+    let query = supabase
       .from('learning_courses')
-      .select('id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, review_notes, created_at, updated_at')
+      .select(
+        'id, club_id, title, description, banner_url, elo_min, elo_max, pedagogical_goal, staff_id, status, review_notes, created_at, updated_at',
+        { count: 'exact' },
+      )
       .eq('club_id', club_id)
-      .order('created_at', { ascending: false });
+      // Pending arriba siempre. Ver nota en adminLearning.ts.
+      .order('status', { ascending: false })
+      .order('created_at', { ascending });
+    if (status && status !== 'all') query = query.eq('status', status);
+    if (search) {
+      const escaped = search.replace(/[%_]/g, '\\$&');
+      query = query.ilike('title', `%${escaped}%`);
+    }
+    if (typeof eloMin === 'number' && !Number.isNaN(eloMin)) query = query.gte('elo_max', eloMin);
+    if (typeof eloMax === 'number' && !Number.isNaN(eloMax)) query = query.lte('elo_min', eloMax);
+
+    query = query.range(offset, offset + pageSize - 1);
+
+    const { data: courses, error, count } = await query;
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    if (!courses || courses.length === 0) return res.json({ ok: true, data: [] });
+    const totalCount = count ?? 0;
+    if (!courses || courses.length === 0) {
+      return res.json({ ok: true, data: [], meta: { total: totalCount, page, page_size: pageSize } });
+    }
 
     // Obtener count de lecciones por curso
     const courseIds = courses.map((c: any) => c.id);
@@ -73,7 +103,7 @@ router.get('/club-courses', requireClubOwnerOrAdminOrPortalStaff, async (req: Re
       lesson_count: lessonCountMap[c.id] || 0,
     }));
 
-    return res.json({ ok: true, data: result });
+    return res.json({ ok: true, data: result, meta: { total: totalCount, page, page_size: pageSize } });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

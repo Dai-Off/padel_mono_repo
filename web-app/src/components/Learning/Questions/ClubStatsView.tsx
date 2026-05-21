@@ -15,9 +15,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { adminLearningService } from '../../../services/adminLearning';
-import { LEVEL_PRESETS } from '../../Learning/Questions/LevelFilter';
-import type { LearningStats, StatBucket } from '../../../types/adminLearning';
+import { learningContentService } from '../../../services/learningContent';
+import { LEVEL_PRESETS } from './LevelFilter';
+import type { ClubLearningStats, StatBucket } from '../../../types/adminLearning';
 
 const PALETTE_TYPE = ['#6366F1', '#22C55E', '#F59E0B', '#06B6D4', '#EC4899', '#8B5CF6'];
 const PALETTE_AREA = ['#F43F5E', '#10B981', '#3B82F6', '#A855F7', '#EAB308'];
@@ -30,23 +30,23 @@ const TOOLTIP_STYLE = {
   itemStyle: { color: 'white' },
 };
 
-export function StatsTab() {
+export function ClubStatsView({ clubId }: { clubId: string }) {
   const { t } = useTranslation();
-  const [stats, setStats] = useState<LearningStats | null>(null);
+  const [stats, setStats] = useState<ClubLearningStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('questions');
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await adminLearningService.getStats();
+      const data = await learningContentService.getClubStats(clubId);
       setStats(data);
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clubId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -89,10 +89,10 @@ export function StatsTab() {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-tab: Preguntas
+// Sub-tab: Preguntas (panel club)
 // ---------------------------------------------------------------------------
 
-function QuestionsStats({ stats, t }: { stats: LearningStats; t: ReturnType<typeof useTranslation>['t'] }) {
+function QuestionsStats({ stats, t }: { stats: ClubLearningStats; t: ReturnType<typeof useTranslation>['t'] }) {
   const typeData = Object.entries(stats.by_type).map(([k, v]) => ({
     name: t(`learning_type_${k}`, k),
     value: v.count,
@@ -127,37 +127,33 @@ function QuestionsStats({ stats, t }: { stats: LearningStats; t: ReturnType<type
     return out;
   }, [stats]);
 
-  const totalVotes = stats.feedback_up_total + stats.feedback_down_total;
-  const positivePct = totalVotes > 0 ? Math.round((stats.feedback_up_total / totalVotes) * 100) : null;
-  const totalWarnings = stats.warnings_by_kind.too_easy + stats.warnings_by_kind.too_hard + stats.warnings_by_kind.low_quality;
+  const totalVotesClub = stats.feedback_up_total + stats.feedback_down_total;
+  const clubPositiveRate = totalVotesClub > 0 ? stats.feedback_up_total / totalVotesClub : null;
 
-  const streakBucketData = Object.entries(stats.streaks.buckets).map(([label, count]) => ({ label, count }));
+  const totalAttemptsClub = Object.values(stats.by_area).reduce((s, b) => s + b.attempts, 0);
+  const totalCorrectClub = Object.values(stats.by_area).reduce((s, b) => s + b.correct, 0);
+  const clubSuccessRate = totalAttemptsClub > 0 ? totalCorrectClub / totalAttemptsClub : null;
+
+  const totalWarnings = stats.warnings_by_kind.too_easy + stats.warnings_by_kind.too_hard + stats.warnings_by_kind.low_quality;
 
   return (
     <div className="space-y-5">
       {/* Cards superiores */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SimpleStatCard label="Preguntas activas" value={stats.active_questions} />
+        <SimpleStatCard label="Tus preguntas activas" value={stats.active_questions} />
         <SimpleStatCard label="Jugadores activos (7d)" value={stats.active_players_7d} />
-        <SimpleStatCard label="Jugadores con racha" value={stats.streaks.players_with_active_streak} />
-        <SimpleStatCard label="Racha más larga" value={stats.streaks.longest_ever} suffix=" días" />
+        <SimpleStatCard label="Respuestas en 7d" value={stats.volume_last_7d} />
+        <SimpleStatCard label="Respuestas en 30d" value={stats.volume_last_30d} />
       </div>
 
       {/* Tendencia 30d */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-xs font-bold text-[#1A1A1A]">Respuestas en los últimos 30 días</h3>
-          <div className="text-[10px] text-gray-400">
-            <span className="font-semibold text-gray-600">{stats.volume_last_7d.toLocaleString('es')}</span> en 7d
-            {' · '}
-            <span className="font-semibold text-gray-600">{stats.volume_last_30d.toLocaleString('es')}</span> en 30d
-          </div>
-        </div>
+        <h3 className="text-xs font-bold text-[#1A1A1A]">Respuestas a tus preguntas (30 días)</h3>
         <div className="h-44">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={stats.daily_responses_30d} margin={{ top: 6, right: 6, left: -10, bottom: 0 }}>
               <defs>
-                <linearGradient id="volumeGrad" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="clubVolumeGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#6366F1" stopOpacity={0.4} />
                   <stop offset="100%" stopColor="#6366F1" stopOpacity={0} />
                 </linearGradient>
@@ -170,7 +166,7 @@ function QuestionsStats({ stats, t }: { stats: LearningStats; t: ReturnType<type
               />
               <YAxis tick={{ fontSize: 9, fill: '#9CA3AF' }} width={28} />
               <Tooltip {...TOOLTIP_STYLE} />
-              <Area type="monotone" dataKey="count" stroke="#6366F1" strokeWidth={2} fill="url(#volumeGrad)" />
+              <Area type="monotone" dataKey="count" stroke="#6366F1" strokeWidth={2} fill="url(#clubVolumeGrad)" />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -178,10 +174,10 @@ function QuestionsStats({ stats, t }: { stats: LearningStats; t: ReturnType<type
 
       {/* Distribuciones */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <DistributionCard title="Distribución por tipo" data={typeData} colors={PALETTE_TYPE} />
-        <DistributionCard title="Distribución por área" data={areaData} colors={PALETTE_AREA} />
+        <DistributionCard title="Tus preguntas por tipo" data={typeData} colors={PALETTE_TYPE} />
+        <DistributionCard title="Tus preguntas por área" data={areaData} colors={PALETTE_AREA} />
         <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
-          <h3 className="text-xs font-bold text-[#1A1A1A]">Distribución por nivel</h3>
+          <h3 className="text-xs font-bold text-[#1A1A1A]">Tus preguntas por nivel</h3>
           <div className="h-44">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={levelByPreset} margin={{ top: 6, right: 6, left: -16, bottom: 0 }}>
@@ -195,7 +191,7 @@ function QuestionsStats({ stats, t }: { stats: LearningStats; t: ReturnType<type
         </div>
       </div>
 
-      {/* Calidad agregada */}
+      {/* Calidad agregada con benchmark */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3 lg:col-span-2">
           <h3 className="text-xs font-bold text-[#1A1A1A]">Tasa de acierto por área</h3>
@@ -215,26 +211,16 @@ function QuestionsStats({ stats, t }: { stats: LearningStats; t: ReturnType<type
           )}
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
-          <h3 className="text-xs font-bold text-[#1A1A1A]">Satisfacción media</h3>
-          {positivePct === null ? (
-            <p className="text-[10px] text-gray-400">Aún no hay votos.</p>
-          ) : (
-            <div className="flex flex-col items-center justify-center py-3">
-              <p className="text-4xl font-black text-[#1A1A1A]">{positivePct}%</p>
-              <p className="text-[10px] text-gray-400 mt-1">positivo</p>
-              <p className="text-[10px] text-gray-400 mt-2">
-                👍 {stats.feedback_up_total.toLocaleString('es')} · 👎 {stats.feedback_down_total.toLocaleString('es')}
-              </p>
-            </div>
-          )}
+        <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-4">
+          <ComparisonCard label="Acierto medio" value={clubSuccessRate} benchmark={stats.benchmark.success_rate} />
+          <ComparisonCard label="Satisfacción media" value={clubPositiveRate} benchmark={stats.benchmark.positive_rate} />
         </div>
       </div>
 
       {/* Avisos */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
         <div className="flex items-baseline justify-between">
-          <h3 className="text-xs font-bold text-[#1A1A1A]">Avisos abiertos</h3>
+          <h3 className="text-xs font-bold text-[#1A1A1A]">Avisos abiertos en tu contenido</h3>
           <span className="text-[10px] text-gray-400">{totalWarnings} en total</span>
         </div>
         <div className="grid grid-cols-3 gap-3">
@@ -243,105 +229,52 @@ function QuestionsStats({ stats, t }: { stats: LearningStats; t: ReturnType<type
           <WarningStatCard label="Calidad cuestionable" value={stats.warnings_by_kind.low_quality} bg="bg-fuchsia-50" text="text-fuchsia-700" />
         </div>
       </div>
-
-      {/* Rachas — solo admin (las rachas son por jugador, no por club) */}
-      <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h3 className="text-xs font-bold text-[#1A1A1A]">Rachas</h3>
-          <span className="text-[10px] text-gray-400">
-            Media actual: <span className="font-semibold text-gray-600">
-              {stats.streaks.avg_current_streak !== null ? `${stats.streaks.avg_current_streak.toFixed(1)} días` : '—'}
-            </span>
-          </span>
-        </div>
-        {stats.streaks.players_with_active_streak === 0 ? (
-          <p className="text-[10px] text-gray-400">Aún no hay jugadores con racha activa.</p>
-        ) : (
-          <div className="h-44">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={streakBucketData} margin={{ top: 6, right: 6, left: -16, bottom: 0 }}>
-                <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#9CA3AF' }} interval={0} />
-                <YAxis tick={{ fontSize: 9, fill: '#9CA3AF' }} width={28} allowDecimals={false} />
-                <Tooltip {...TOOLTIP_STYLE} formatter={(v) => [`${Number(v) || 0} jugadores`, 'Racha']} />
-                <Bar dataKey="count" fill="#F97316" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-
-      {/* Top clubes (lo que ya había) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <ClubRanking title="Top clubes por preguntas" rows={stats.questions_by_club} />
-        <ClubRanking title="Top clubes por cursos" rows={stats.courses_by_club} />
-      </div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Sub-tab: Cursos
+// Sub-tab: Cursos (panel club)
 // ---------------------------------------------------------------------------
 
-function CoursesStats({ stats }: { stats: LearningStats }) {
+function CoursesStats({ stats }: { stats: ClubLearningStats }) {
   const courseLevelsData = Object.entries(stats.course_levels).map(([label, count]) => ({ label, count }));
   const allLevelsZero = courseLevelsData.every((x) => x.count === 0);
 
   return (
     <div className="space-y-5">
-      {/* Cards superiores */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SimpleStatCard label="Cursos activos" value={stats.active_courses} />
+        <SimpleStatCard label="Tus cursos activos" value={stats.active_courses} />
         <SimpleStatCard label="Pendientes revisión" value={stats.pending_courses} highlight={stats.pending_courses > 0} />
         <SimpleStatCard label="Lecciones completadas (7d)" value={stats.lessons_completed_7d} />
         <SimpleStatCard label="Jugadores con cursos (30d)" value={stats.course_players_30d} />
       </div>
 
-      {/* Métricas numéricas adicionales */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <NumberCard
-          label="Lecciones totales"
-          value={stats.total_lessons_published}
-          subtitle="en cursos activos"
-        />
-        <NumberCard
-          label="Lecciones por curso"
-          value={stats.avg_lessons_per_course !== null ? stats.avg_lessons_per_course.toFixed(1) : '—'}
-          subtitle="media"
-        />
+        <NumberCard label="Lecciones totales" value={stats.total_lessons_published} subtitle="en tus cursos activos" />
+        <NumberCard label="Lecciones por curso" value={stats.avg_lessons_per_course !== null ? stats.avg_lessons_per_course.toFixed(1) : '—'} subtitle="media" />
         <NumberCard
           label="Duración media"
-          value={
-            stats.avg_lesson_duration_seconds !== null
-              ? formatDuration(stats.avg_lesson_duration_seconds)
-              : '—'
-          }
+          value={stats.avg_lesson_duration_seconds !== null ? formatDuration(stats.avg_lesson_duration_seconds) : '—'}
           subtitle="por lección"
         />
         <NumberCard
           label="Cursos con vídeo"
-          value={
-            stats.courses_with_full_video_rate !== null
-              ? `${Math.round(stats.courses_with_full_video_rate * 100)}%`
-              : '—'
-          }
+          value={stats.courses_with_full_video_rate !== null ? `${Math.round(stats.courses_with_full_video_rate * 100)}%` : '—'}
           subtitle="todas las lecciones"
         />
       </div>
 
-      {/* Finalización */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <NumberCard label="Cursos iniciados" value={stats.courses_started} />
         <NumberCard label="Cursos completados" value={stats.courses_completed} />
-        <NumberCard
-          label="Finalización"
-          value={
-            stats.course_completion_rate !== null
-              ? `${Math.round(stats.course_completion_rate * 100)}%`
-              : '—'
-          }
-          subtitle="completados/iniciados"
-        />
+        <div className="rounded-2xl border border-gray-100 bg-white p-4">
+          <ComparisonCard
+            label="Finalización vs media"
+            value={stats.course_completion_rate}
+            benchmark={stats.benchmark.completion_rate}
+          />
+        </div>
         <NumberCard
           label="Profundidad media"
           value={stats.avg_depth_completed !== null ? stats.avg_depth_completed.toFixed(1) : '—'}
@@ -349,9 +282,8 @@ function CoursesStats({ stats }: { stats: LearningStats }) {
         />
       </div>
 
-      {/* Distribución por nivel */}
       <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
-        <h3 className="text-xs font-bold text-[#1A1A1A]">Cursos activos por nivel</h3>
+        <h3 className="text-xs font-bold text-[#1A1A1A]">Tus cursos activos por nivel</h3>
         {allLevelsZero ? (
           <p className="text-[10px] text-gray-400">Sin cursos activos.</p>
         ) : (
@@ -375,17 +307,14 @@ function CoursesStats({ stats }: { stats: LearningStats }) {
 // Sub-componentes
 // ---------------------------------------------------------------------------
 
-function SimpleStatCard({ label, value, suffix, highlight }: { label: string; value: number | string; suffix?: string; highlight?: boolean }) {
+function SimpleStatCard({ label, value, highlight }: { label: string; value: number; highlight?: boolean }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       className={`rounded-2xl border p-4 ${highlight ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-100'}`}
     >
-      <p className="text-2xl font-black text-[#1A1A1A]">
-        {typeof value === 'number' ? value.toLocaleString('es') : value}
-        {suffix && <span className="text-sm font-bold text-gray-400">{suffix}</span>}
-      </p>
+      <p className="text-2xl font-black text-[#1A1A1A]">{value.toLocaleString('es')}</p>
       <p className="text-[10px] text-gray-500 mt-1">{label}</p>
     </motion.div>
   );
@@ -408,6 +337,35 @@ function WarningStatCard({ label, value, bg, text }: { label: string; value: num
     <div className={`rounded-xl ${bg} p-3`}>
       <p className={`text-2xl font-black ${text}`}>{value}</p>
       <p className="text-[10px] text-gray-500 mt-1">{label}</p>
+    </div>
+  );
+}
+
+function ComparisonCard({ label, value, benchmark }: { label: string; value: number | null; benchmark: number | null }) {
+  if (value === null) {
+    return (
+      <div>
+        <p className="text-[10px] text-gray-500">{label}</p>
+        <p className="text-2xl font-black text-gray-300">—</p>
+      </div>
+    );
+  }
+  const pct = Math.round(value * 100);
+  const diff = benchmark !== null ? Math.round((value - benchmark) * 100) : null;
+  const positive = diff !== null && diff > 0;
+  const neutral = diff === null || diff === 0;
+  return (
+    <div>
+      <p className="text-[10px] text-gray-500">{label}</p>
+      <div className="flex items-baseline gap-2">
+        <p className="text-2xl font-black text-[#1A1A1A]">{pct}%</p>
+        {diff !== null && (
+          <span className={`text-[10px] font-bold ${neutral ? 'text-gray-400' : positive ? 'text-emerald-600' : 'text-red-500'}`}>
+            {neutral ? '' : positive ? '▲ ' : '▼ '}
+            {Math.abs(diff)} pts vs media
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -449,29 +407,6 @@ function DistributionCard({ title, data, colors }: { title: string; data: Distri
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-function ClubRanking({ title, rows }: { title: string; rows: { club_id: string; club_name: string; count: number }[] }) {
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-5 space-y-3">
-      <h3 className="text-xs font-bold text-[#1A1A1A]">{title}</h3>
-      {rows.length === 0 ? (
-        <p className="text-[10px] text-gray-400">—</p>
-      ) : (
-        <div className="space-y-2">
-          {rows.slice(0, 10).map((c, i) => (
-            <div key={c.club_id} className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold text-gray-300 w-4">{i + 1}</span>
-                <span className="text-xs text-[#1A1A1A]">{c.club_name}</span>
-              </div>
-              <span className="text-xs font-bold text-[#1A1A1A]">{c.count}</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
