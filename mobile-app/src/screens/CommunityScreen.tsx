@@ -29,9 +29,10 @@ import { ComingSoon } from '../components/community/ComingSoon';
 
 interface CommunityScreenProps {
   onBack: () => void;
+  onMessagesPress?: () => void;
 }
 
-export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack }) => {
+export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMessagesPress }) => {
   const { session } = useAuth();
   const token = session?.access_token;
   
@@ -122,7 +123,9 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack }) => {
           <Ionicons name="chevron-back" size={24} color="#FFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Comunidad</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity onPress={onMessagesPress} style={styles.backBtn}>
+          <Ionicons name="chatbubble-outline" size={22} color="#FFF" />
+        </TouchableOpacity>
       </View>
       
       {loading ? (
