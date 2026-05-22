@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Calendar, Minus, Package, Plus, Search, ShoppingCart, Trash2 } from 'lucide-react';
+import { Calendar, Minus, Package, Plus, Search, ShoppingCart, Trash2, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { inventoryService } from '../../services/inventory';
@@ -113,6 +113,9 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     const [cartBookingLines, setCartBookingLines] = useState<CartBookingLine[]>([]);
     const [saleWithoutBooking, setSaleWithoutBooking] = useState(false);
     const [bookingChargeScope, setBookingChargeScope] = useState<'full' | 'player_share'>('full');
+    const [showAddBookingsModal, setShowAddBookingsModal] = useState(false);
+    const [modalBookingSelection, setModalBookingSelection] = useState<string[]>([]);
+    const pendingDeepLinkBookingIdRef = useRef<string | null>(null);
 
     const load = useCallback(async () => {
         if (!clubId) return;
@@ -150,7 +153,10 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                 if (!cancelled && player) {
                     setSelectedPlayer(player);
                     setPlayerSearch('');
-                    if (deepLinkBookingId) setSaleWithoutBooking(false);
+                    if (deepLinkBookingId) {
+                        setSaleWithoutBooking(false);
+                        pendingDeepLinkBookingIdRef.current = deepLinkBookingId;
+                    }
                 }
             } catch {
                 /* ignore */
@@ -253,6 +259,19 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                             };
                         }),
                 );
+                const pendingBookingId = pendingDeepLinkBookingIdRef.current;
+                if (pendingBookingId) {
+                    pendingDeepLinkBookingIdRef.current = null;
+                    const linkedBooking = options.find((booking) => booking.id === pendingBookingId);
+                    if (linkedBooking) {
+                        const result = tryAddBookingToCart(linkedBooking);
+                        if (result === 'added') toast.success('Turno del enlace añadido al ticket');
+                        else if (result === 'paid') toast.info('El turno del enlace ya está pagado');
+                        else if (result === 'duplicate') toast.info('El turno del enlace ya está en el carrito');
+                    } else {
+                        toast.error('No se encontró el turno del enlace para hoy');
+                    }
+                }
             } catch (e) {
                 if (!cancelled) {
                     setBookingOptions([]);
@@ -322,30 +341,108 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     const walletAppliedCents = useWallet ? Math.min(walletBalanceCents, cartTotalCents) : 0;
     const remainderCents = Math.max(0, cartTotalCents - walletAppliedCents);
 
+    type AddBookingResult = 'added' | 'duplicate' | 'paid' | 'blocked';
+
+    const buildBookingCartLine = (booking: BookingOption, scope: 'full' | 'player_share'): CartBookingLine | null => {
+        const amountCents = computeChargeCents(booking, scope);
+        if (amountCents <= 0) return null;
+        return {
+            bookingId: booking.id,
+            chargeScope: scope,
+            label: `${bookingTimeLabel(booking)} · ${scope === 'full' ? 'Turno completo' : 'Su parte'}`,
+            amountCents,
+            currency: booking.currency,
+        };
+    };
+
+    const tryAddBookingToCart = (booking: BookingOption, scope = bookingChargeScope): AddBookingResult => {
+        if (saleWithoutBooking) return 'blocked';
+        if (cartBookingLines.some((line) => line.bookingId === booking.id)) return 'duplicate';
+        const line = buildBookingCartLine(booking, scope);
+        if (!line) return 'paid';
+        setCartBookingLines((prev) => [...prev, line]);
+        return 'added';
+    };
+
     const addBookingToCart = (booking: BookingOption) => {
+        const result = tryAddBookingToCart(booking);
+        if (result === 'blocked') {
+            toast.error('Desactiva «Venta sin turno» para cobrar reservas');
+            return;
+        }
+        if (result === 'duplicate') {
+            toast.error('Ese turno ya está en el carrito');
+            return;
+        }
+        if (result === 'paid') {
+            toast.error(bookingChargeScope === 'full' ? 'El turno ya está pagado' : 'La parte de este jugador ya está pagada');
+            return;
+        }
+        toast.success('Turno añadido al ticket');
+    };
+
+    const openAddBookingsModal = () => {
+        if (!selectedPlayer) {
+            toast.error('Selecciona un jugador/cliente primero');
+            return;
+        }
         if (saleWithoutBooking) {
             toast.error('Desactiva «Venta sin turno» para cobrar reservas');
             return;
         }
-        if (cartBookingLines.some((line) => line.bookingId === booking.id)) {
-            toast.error('Ese turno ya está en el carrito');
+        setModalBookingSelection([]);
+        setShowAddBookingsModal(true);
+    };
+
+    const toggleModalBookingSelection = (bookingId: string) => {
+        setModalBookingSelection((prev) =>
+            prev.includes(bookingId) ? prev.filter((id) => id !== bookingId) : [...prev, bookingId],
+        );
+    };
+
+    const confirmAddBookingsFromModal = () => {
+        if (modalBookingSelection.length === 0) {
+            toast.error('Selecciona al menos un turno');
             return;
         }
-        const amountCents = computeChargeCents(booking, bookingChargeScope);
-        if (amountCents <= 0) {
-            toast.error(bookingChargeScope === 'full' ? 'El turno ya está pagado' : 'La parte de este jugador ya está pagada');
-            return;
+        const newLines: CartBookingLine[] = [];
+        let skippedPaid = 0;
+        let skippedDuplicate = 0;
+        const existingIds = new Set(cartBookingLines.map((line) => line.bookingId));
+        for (const bookingId of modalBookingSelection) {
+            const booking = bookingOptions.find((option) => option.id === bookingId);
+            if (!booking) continue;
+            if (existingIds.has(booking.id) || newLines.some((line) => line.bookingId === booking.id)) {
+                skippedDuplicate += 1;
+                continue;
+            }
+            const line = buildBookingCartLine(booking, bookingChargeScope);
+            if (!line) {
+                skippedPaid += 1;
+                continue;
+            }
+            newLines.push(line);
+            existingIds.add(booking.id);
         }
-        setCartBookingLines((prev) => [
-            ...prev,
-            {
-                bookingId: booking.id,
-                chargeScope: bookingChargeScope,
-                label: `${bookingTimeLabel(booking)} · ${bookingChargeScope === 'full' ? 'Turno completo' : 'Su parte'}`,
-                amountCents,
-                currency: booking.currency,
-            },
-        ]);
+        setShowAddBookingsModal(false);
+        setModalBookingSelection([]);
+        if (newLines.length > 0) {
+            setCartBookingLines((prev) => [...prev, ...newLines]);
+            toast.success(
+                newLines.length === 1 ? 'Turno añadido al ticket' : `${newLines.length} turnos añadidos al ticket`,
+            );
+        }
+        if (newLines.length === 0) {
+            if (skippedPaid > 0) {
+                toast.error('Los turnos seleccionados ya están pagados');
+            } else if (skippedDuplicate > 0) {
+                toast.error('Los turnos seleccionados ya están en el carrito');
+            } else {
+                toast.error('No se pudo añadir ningún turno');
+            }
+        } else if (skippedPaid > 0 || skippedDuplicate > 0) {
+            toast.info('Algunos turnos no se añadieron (ya pagados o ya en el ticket)');
+        }
     };
 
     const removeBookingLine = (bookingId: string) => {
@@ -490,7 +587,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
         { label: 'Productos', onClick: () => setShowProductCatalog((value) => !value), tone: 'blue' },
         { label: 'Editar venta', onClick: () => setEditMode((value) => !value), tone: 'blue' },
         { label: 'Anular venta', onClick: () => { setCartLines([]); setCartBookingLines([]); }, tone: 'red' },
-        { label: 'Añadir reservado', onClick: () => toast.info('Reservado añadido al ticket'), tone: 'blue' },
+        { label: 'Añadir reservas', onClick: openAddBookingsModal, tone: 'blue' },
         { label: 'Buscar producto', onClick: () => searchInputRef.current?.focus(), tone: 'blue' },
         { label: 'Cargar ticket', onClick: submitSale, tone: 'blue', disabled: !canSubmitSale },
     ];
@@ -512,6 +609,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     }
 
     return (
+        <>
         <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
             <section className="rounded-3xl border border-gray-200 bg-gray-100 p-4">
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
@@ -935,5 +1033,137 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                 </div>
             </aside>
         </div>
+
+        {showAddBookingsModal ? (
+            <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="add-bookings-modal-title"
+            >
+                <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-gray-200 bg-white shadow-2xl">
+                    <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-5 py-4">
+                        <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-gray-400">Carrito</p>
+                            <h3 id="add-bookings-modal-title" className="text-lg font-black text-[#1A1A1A]">
+                                Añadir reservas
+                            </h3>
+                            {selectedPlayer ? (
+                                <p className="mt-1 text-xs font-semibold text-gray-500">
+                                    {selectedPlayer.first_name} {selectedPlayer.last_name} · turnos de hoy
+                                </p>
+                            ) : null}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowAddBookingsModal(false);
+                                setModalBookingSelection([]);
+                            }}
+                            className="rounded-xl border border-gray-200 p-2 text-gray-500 hover:bg-gray-50"
+                            aria-label="Cerrar"
+                        >
+                            <X className="h-4 w-4" />
+                        </button>
+                    </div>
+
+                    <div className="space-y-4 overflow-y-auto px-5 py-4">
+                        <div>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400">Cobrar</p>
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setBookingChargeScope('full')}
+                                    className={`${bookingChargeScope === 'full' ? 'bg-[#0B5B7A] text-white' : 'bg-gray-100 text-gray-600'} rounded-xl px-3 py-2 text-xs font-black`}
+                                >
+                                    Turno completo
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setBookingChargeScope('player_share')}
+                                    className={`${bookingChargeScope === 'player_share' ? 'bg-[#0B5B7A] text-white' : 'bg-gray-100 text-gray-600'} rounded-xl px-3 py-2 text-xs font-black`}
+                                >
+                                    Su parte
+                                </button>
+                            </div>
+                        </div>
+
+                        {bookingOptions.length === 0 ? (
+                            <p className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm font-semibold text-gray-500">
+                                No hay turnos activos hoy para este jugador.
+                            </p>
+                        ) : (
+                            <ul className="space-y-2">
+                                {bookingOptions.map((booking) => {
+                                    const preview = computeChargeCents(booking, bookingChargeScope);
+                                    const inCart = cartBookingLines.some((line) => line.bookingId === booking.id);
+                                    const selectable = !inCart && preview > 0;
+                                    const selected = modalBookingSelection.includes(booking.id);
+                                    return (
+                                        <li key={booking.id}>
+                                            <button
+                                                type="button"
+                                                disabled={!selectable}
+                                                onClick={() => {
+                                                    if (selectable) toggleModalBookingSelection(booking.id);
+                                                }}
+                                                className={`flex w-full items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-left transition ${
+                                                    selected
+                                                        ? 'border-[#0B5B7A] bg-[#0B5B7A]/5'
+                                                        : 'border-gray-200 bg-white hover:border-gray-300'
+                                                } disabled:cursor-not-allowed disabled:opacity-45`}
+                                            >
+                                                <div className="min-w-0">
+                                                    <p className="truncate text-xs font-black text-[#1A1A1A]">
+                                                        {bookingTimeLabel(booking)}
+                                                    </p>
+                                                    <p className="mt-0.5 text-[10px] font-semibold text-gray-400">
+                                                        {inCart
+                                                            ? 'Ya en el ticket'
+                                                            : preview <= 0
+                                                                ? 'Ya pagado'
+                                                                : selected
+                                                                    ? 'Seleccionado'
+                                                                    : 'Toca para seleccionar'}
+                                                    </p>
+                                                </div>
+                                                <span className="shrink-0 text-xs font-black text-[#0B5B7A]">
+                                                    {preview > 0
+                                                        ? formatMoneyFromCents(preview, booking.currency)
+                                                        : '—'}
+                                                </span>
+                                            </button>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        )}
+                    </div>
+
+                    <div className="flex gap-2 border-t border-gray-100 px-5 py-4">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setShowAddBookingsModal(false);
+                                setModalBookingSelection([]);
+                            }}
+                            className="flex-1 rounded-2xl border border-gray-200 px-4 py-3 text-sm font-black text-gray-600 hover:bg-gray-50"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="button"
+                            onClick={confirmAddBookingsFromModal}
+                            disabled={modalBookingSelection.length === 0}
+                            className="flex-1 rounded-2xl bg-[#0B5B7A] px-4 py-3 text-sm font-black text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                            Añadir al ticket
+                            {modalBookingSelection.length > 0 ? ` (${modalBookingSelection.length})` : ''}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        ) : null}
+        </>
     );
 }
