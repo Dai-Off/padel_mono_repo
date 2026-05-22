@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { learningContentService } from '../../../services/learningContent';
 import { CourseFormModal } from './CourseFormModal';
 import { LessonFormModal } from './LessonFormModal';
+import { useEscapeClose } from '../Questions/useEscapeClose';
 import type { Course, CourseLesson, CourseWithLessons, CourseStatus } from '../../../types/learningContent';
 
 const STATUS_STYLES: Record<CourseStatus, { bg: string; text: string }> = {
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export function CourseDetailModal({ course, clubId, staffName, onClose, onUpdated }: Props) {
+  useEscapeClose(onClose);
   const { t } = useTranslation();
   const [detail, setDetail] = useState<CourseWithLessons | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,7 +82,7 @@ export function CourseDetailModal({ course, clubId, staffName, onClose, onUpdate
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
+    <div className="fixed inset-0 z-[100] bg-black/40 flex items-center justify-center overflow-y-auto py-20 px-4">
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

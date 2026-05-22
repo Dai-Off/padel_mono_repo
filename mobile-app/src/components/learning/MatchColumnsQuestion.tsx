@@ -7,6 +7,7 @@ type Pair = { left: string; right: string };
 
 type Props = {
   content: {
+    question?: string;
     pairs: Pair[];
     explanation?: string;
   };
@@ -125,7 +126,7 @@ export function MatchColumnsQuestion({ content, onAnswered }: Props) {
 
   return (
     <View>
-      <Text style={styles.question}>Empareja cada elemento</Text>
+      <Text style={styles.question}>{content.question?.trim() || 'Empareja cada elemento'}</Text>
       <View style={styles.hintRow}>
         <Ionicons name="link-outline" size={12} color="#9CA3AF" />
         <Text style={styles.hint}>{matchedCount}/{lefts.length} EMPAREJADOS</Text>
