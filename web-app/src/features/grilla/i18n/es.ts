@@ -48,6 +48,14 @@ export const es: TranslationKeys = {
         virtualCourt: 'Pista Virtual',
     },
 
+    legend: {
+        iconsTitle: 'Iconos en el turno',
+        mobileBadge: 'Reserva desde app móvil (WM)',
+        paidDot: 'Pagado',
+        pendingDot: 'Pendiente de cobro',
+        alertDot: 'Aviso / revisar turno',
+    },
+
     badPractice: {
         title: 'Optimización de Parrilla',
         subtitle: 'Se detectó una mala práctica en la distribución',

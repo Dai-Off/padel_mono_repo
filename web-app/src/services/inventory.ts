@@ -97,14 +97,29 @@ export const inventoryService = {
         return res.movements ?? [];
     },
 
+    updateSaleLineAmount: async (movementId: string, body: { club_id: string; amount_cents: number }): Promise<void> => {
+        await apiFetchWithAuth<ApiOk<{ movement: { id: string } }>>(`/inventario/movements/${movementId}/sale-amount`, {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+        });
+    },
+
     createSale: async (body: {
         club_id: string;
-        booking_id: string;
+        booking_id?: string;
         player_id: string;
         payment_method: 'cash' | 'card' | 'wallet';
         wallet_amount_cents?: number;
+        booking_charges?: Array<{ booking_id: string; charge_scope: 'full' | 'player_share' }>;
         lines: Array<{ item_id?: string; quantity: number; name?: string; unit_price_cents?: number }>;
-    }): Promise<{ id: string; total_cents: number; currency: string; wallet_amount_cents?: number }> => {
+    }): Promise<{
+        id: string;
+        total_cents: number;
+        products_cents?: number;
+        bookings_cents?: number;
+        currency: string;
+        wallet_amount_cents?: number;
+    }> => {
         const res = await apiFetchWithAuth<ApiOk<{ sale: { id: string; total_cents: number; currency: string } }>>('/inventario/sales', {
             method: 'POST',
             body: JSON.stringify(body),

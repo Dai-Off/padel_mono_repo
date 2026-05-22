@@ -11,11 +11,12 @@ import type { ClubSport } from '../../types/clubSports';
 
 interface CourtFormProps {
     court?: Court;
+    clubId?: string | null;
     onClose: () => void;
     onSubmit: (data: Partial<Court>) => void;
 }
 
-export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
+export const CourtForm = ({ court, clubId: clubIdProp, onClose, onSubmit }: CourtFormProps) => {
     const { t } = useTranslation();
     const isEdit = !!court;
     const [clubs, setClubs] = useState<Club[]>([]);
@@ -70,10 +71,13 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
             setIsAdmin(admin);
             const list = ownerId ? await clubService.getAll(ownerId) : await clubService.getAll();
             setClubs(list ?? []);
-            if (!court && list?.length === 1) setValue('club_id', list[0].id);
+            if (!court) {
+                if (clubIdProp) setValue('club_id', clubIdProp);
+                else if (list?.length === 1) setValue('club_id', list[0].id);
+            }
             setClubsReady(true);
         })();
-    }, [court, setValue]);
+    }, [court, clubIdProp, setValue]);
 
     useEffect(() => {
         if (court) {
@@ -82,7 +86,7 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
     }, [court, reset]);
 
     useEffect(() => {
-        const clubId = selectedClubId || court?.club_id;
+        const clubId = clubIdProp || selectedClubId || court?.club_id;
         if (!clubId) {
             setSports([]);
             return;
@@ -92,10 +96,13 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
             try {
                 const data = await clubSportsService.getAll(clubId);
                 if (!cancelled) {
-                    const active = data.filter((sport) => sport.is_active);
+                    const active = data.filter((sport) => sport.is_active !== false);
                     setSports(active);
-                    if (!selectedSport && active.length > 0) {
-                        setValue('sport', active[0].slug);
+                    const slugs = new Set(active.map((s) => s.slug));
+                    if (court?.sport && slugs.has(court.sport)) {
+                        setValue('sport', court.sport);
+                    } else if (!selectedSport || !slugs.has(String(selectedSport))) {
+                        setValue('sport', active[0]?.slug ?? 'padel');
                     }
                 }
             } catch {
@@ -103,7 +110,7 @@ export const CourtForm = ({ court, onClose, onSubmit }: CourtFormProps) => {
             }
         })();
         return () => { cancelled = true; };
-    }, [selectedClubId, selectedSport, court?.club_id, setValue]);
+    }, [clubIdProp, selectedClubId, selectedSport, court?.club_id, court?.sport, setValue]);
 
     const submitCourt = useCallback((data: Partial<Court>) => {
         setWindowsError('');

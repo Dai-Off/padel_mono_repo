@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PageSpinner } from '../Layout/PageSpinner';
 import { clubStaffService } from '../../services/clubStaff';
@@ -7,6 +8,7 @@ import { HttpError } from '../../services/api';
 import {
   paymentsService,
   type CashClosingBookingExpected,
+  type CashClosingStoreSaleLine,
   type CashOpeningSavedRecord,
   type CashClosingSavedRecord,
   type CashRecordKind,
@@ -14,6 +16,7 @@ import {
   type CashMovementType,
 } from '../../services/payments';
 import type { ClubStaffMember } from '../../types/clubStaff';
+import { inventoryService } from '../../services/inventory';
 import {
   CashCountForm,
   CashDayTimeline,
@@ -56,6 +59,7 @@ export function ClubCashClosingTab({
   clubResolved?: boolean;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [section, setSection] = useState<CashSection>('listado');
   const [staff, setStaff] = useState<ClubStaffMember[]>([]);
   const [observations, setObservations] = useState('');
@@ -63,6 +67,8 @@ export function ClubCashClosingTab({
   const [cashBreakdown, setCashBreakdown] = useState<CashBreakdown>(emptyBreakdown);
   const [historyRecords, setHistoryRecords] = useState<CashLedgerRecord[]>([]);
   const [expectedBookings, setExpectedBookings] = useState<CashClosingBookingExpected[]>([]);
+  const [storeSaleLines, setStoreSaleLines] = useState<CashClosingStoreSaleLine[]>([]);
+  const [editingMovementId, setEditingMovementId] = useState<string | null>(null);
   const [systemCashTotal, setSystemCashTotal] = useState(0);
   const [systemCardTotal, setSystemCardTotal] = useState(0);
   const [storeSalesCashTotal, setStoreSalesCashTotal] = useState(0);
@@ -149,8 +155,9 @@ export function ClubCashClosingTab({
   const sessionActive = openingAppliesToSelectedDay && !needsNewOpeningAfterClosing;
   const showOpeningTab = openingPending && !sessionActive;
 
-  const applyExpected = (expected: Awaited<ReturnType<typeof paymentsService.getCashClosingExpected>>) => {
+  const applyExpected = useCallback((expected: Awaited<ReturnType<typeof paymentsService.getCashClosingExpected>>) => {
     setExpectedBookings(expected.bookings ?? []);
+    setStoreSaleLines(expected.store_sale_lines ?? []);
     setSystemCashTotal(expected.systemCashTotal_eur ?? 0);
     setSystemCardTotal(expected.systemCardTotal_eur ?? 0);
     setStoreSalesCashTotal(expected.storeSalesCash_eur ?? 0);
@@ -158,7 +165,33 @@ export function ClubCashClosingTab({
     setNeedsNewOpeningAfterClosing(expected.needs_new_opening_after_closing === true);
     setCashMovements((expected.cash_movements ?? []) as CashMovementRecord[]);
     setOpeningsForDay((expected.openings ?? []) as CashOpeningSavedRecord[]);
-  };
+  }, []);
+
+  const openBookingInGrilla = useCallback((bookingId: string) => {
+    navigate(`/grilla?booking=${encodeURIComponent(bookingId)}`);
+  }, [navigate]);
+
+  const openCart = useCallback((playerId: string | null, bookingId: string | null) => {
+    const q = new URLSearchParams();
+    if (playerId) q.set('player', playerId);
+    if (bookingId) q.set('booking', bookingId);
+    navigate(q.toString() ? `/carrito?${q}` : '/carrito');
+  }, [navigate]);
+
+  const handleEditStoreLine = useCallback(async (movementId: string, amountCents: number) => {
+    if (!clubId) return;
+    setEditingMovementId(movementId);
+    try {
+      await inventoryService.updateSaleLineAmount(movementId, { club_id: clubId, amount_cents: amountCents });
+      const expected = await paymentsService.getCashClosingExpected(clubId, operativeDate, operativeTimezone);
+      applyExpected(expected);
+      toast.success('Importe actualizado');
+    } catch (e) {
+      toast.error((e as Error).message || 'No se pudo actualizar el importe');
+    } finally {
+      setEditingMovementId(null);
+    }
+  }, [clubId, operativeDate, operativeTimezone, applyExpected]);
 
   useEffect(() => {
     if (!showOpeningTab && section === 'apertura') setSection('listado');
@@ -407,10 +440,29 @@ export function ClubCashClosingTab({
         tone: 'neutral',
         amountEur: total,
         subtitle: `Efectivo ${(b.cash_paid_cents / 100).toFixed(2)} € · Tarjeta ${(b.card_paid_cents / 100).toFixed(2)} €`,
+        booking_id: b.booking_id,
+        onOpenBooking: openBookingInGrilla,
+        onOpenCart: openCart,
+      });
+    }
+    for (const line of storeSaleLines) {
+      if (!line.movement_at) continue;
+      items.push({
+        id: `store-${line.movement_id}`,
+        at: new Date(line.movement_at),
+        kind: 'sale',
+        title: line.name,
+        tone: 'neutral',
+        amountEur: line.amount_cents / 100,
+        subtitle: `Tienda · ${line.payment_method}`,
+        booking_id: line.booking_id ?? undefined,
+        player_id: line.player_id,
+        onOpenBooking: line.booking_id ? openBookingInGrilla : undefined,
+        onOpenCart: openCart,
       });
     }
     return items;
-  }, [openingsForDay, historyRecords, cashMovements, expectedBookings, t]);
+  }, [openingsForDay, historyRecords, cashMovements, expectedBookings, storeSaleLines, openBookingInGrilla, openCart, t]);
 
   const movementPanelProps = {
     sessionActive,
@@ -446,6 +498,7 @@ export function ClubCashClosingTab({
     storeSalesCashTotal,
     storeSalesCardTotal,
     expectedBookings,
+    storeSaleLines,
     operativeDate,
     saving,
     canSave,
@@ -453,6 +506,10 @@ export function ClubCashClosingTab({
     operatorReady,
     canDelegate,
     delegatePanelProps,
+    onOpenBooking: openBookingInGrilla,
+    onOpenCart: openCart,
+    onEditStoreLine: (movementId: string, amountCents: number) => void handleEditStoreLine(movementId, amountCents),
+    editingMovementId,
   };
 
   if (!clubResolved) return <PageSpinner />;
