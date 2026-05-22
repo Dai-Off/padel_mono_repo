@@ -381,7 +381,7 @@ export const ClubDashboard = () => {
             />
 
             {!isInventoryPage && isFormOpen && (
-                <CourtForm court={editingItem} onClose={() => setIsFormOpen(false)} onSubmit={handleFormSubmit} />
+                <CourtForm clubId={clubId} court={editingItem} onClose={() => setIsFormOpen(false)} onSubmit={handleFormSubmit} />
             )}
 
             <AnimatePresence>

@@ -53,6 +53,14 @@ export interface TranslationKeys {
         virtualCourt: string;
     };
 
+    legend: {
+        iconsTitle: string;
+        mobileBadge: string;
+        paidDot: string;
+        pendingDot: string;
+        alertDot: string;
+    };
+
     // BadPractice Modal
     badPractice: {
         title: string;

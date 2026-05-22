@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Minus, Package, Plus, Search, ShoppingCart, Trash2 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Calendar, Minus, Package, Plus, Search, ShoppingCart, Trash2 } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { inventoryService } from '../../services/inventory';
 import { playerService } from '../../services/player';
@@ -41,7 +41,30 @@ type BookingOption = {
     status: string;
     courtName: string;
     playerIds: string[];
+    total_price_cents: number;
+    currency: string;
+    bookingPaidCents: number;
+    playerShareCents: number;
+    playerPaidCents: number;
 };
+
+type CartBookingLine = {
+    bookingId: string;
+    chargeScope: 'full' | 'player_share';
+    label: string;
+    amountCents: number;
+    currency: string;
+};
+
+function computeChargeCents(booking: BookingOption, scope: 'full' | 'player_share'): number {
+    if (scope === 'full') {
+        return Math.max(0, booking.total_price_cents - booking.bookingPaidCents);
+    }
+    const share = booking.playerShareCents > 0
+        ? booking.playerShareCents
+        : (booking.total_price_cents > 0 ? Math.ceil(booking.total_price_cents / 4) : 0);
+    return Math.max(0, share - booking.playerPaidCents);
+}
 
 function todayIsoDate(): string {
     const now = new Date();
@@ -67,6 +90,7 @@ function isQuickSaleItem(item: InventoryItem): boolean {
 
 export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string | null; clubResolved?: boolean }) {
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const searchInputRef = useRef<HTMLInputElement | null>(null);
     const [items, setItems] = useState<InventoryItem[]>([]);
     const [categories, setCategories] = useState<InventoryCategory[]>([]);
@@ -86,7 +110,9 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     const [playerResults, setPlayerResults] = useState<Player[]>([]);
     const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
     const [bookingOptions, setBookingOptions] = useState<BookingOption[]>([]);
-    const [selectedBookingId, setSelectedBookingId] = useState('');
+    const [cartBookingLines, setCartBookingLines] = useState<CartBookingLine[]>([]);
+    const [saleWithoutBooking, setSaleWithoutBooking] = useState(false);
+    const [bookingChargeScope, setBookingChargeScope] = useState<'full' | 'player_share'>('full');
 
     const load = useCallback(async () => {
         if (!clubId) return;
@@ -110,6 +136,35 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     useEffect(() => {
         load();
     }, [load]);
+
+    const deepLinkPlayerId = searchParams.get('player');
+    const deepLinkBookingId = searchParams.get('booking');
+
+    useEffect(() => {
+        if (!clubId || !deepLinkPlayerId) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const players = await playerService.getAll('', clubId);
+                const player = players.find((p) => p.id === deepLinkPlayerId);
+                if (!cancelled && player) {
+                    setSelectedPlayer(player);
+                    setPlayerSearch('');
+                    if (deepLinkBookingId) setSaleWithoutBooking(false);
+                }
+            } catch {
+                /* ignore */
+            } finally {
+                if (!cancelled) {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete('player');
+                    next.delete('booking');
+                    setSearchParams(next, { replace: true });
+                }
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [clubId, deepLinkPlayerId, deepLinkBookingId, searchParams, setSearchParams]);
 
     useEffect(() => {
         if (!clubId) return;
@@ -136,7 +191,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     useEffect(() => {
         if (!clubId || !selectedPlayer) {
             setBookingOptions([]);
-            setSelectedBookingId('');
+            setCartBookingLines([]);
             return;
         }
         let cancelled = false;
@@ -157,6 +212,16 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                             ...participants.map((participant: any) => participant?.player_id),
                         ].filter(Boolean).map(String);
                         const rawCourt = Array.isArray(booking.courts) ? booking.courts[0] : booking.courts;
+                        const bookingPaidCents = (booking.payment_transactions ?? [])
+                            .filter((t: any) => t.status === 'succeeded')
+                            .reduce((sum: number, t: any) => sum + Math.trunc(Number(t.amount_cents ?? 0)), 0);
+                        const playerParticipant = participants.find(
+                            (p: any) => String(p.player_id) === selectedPlayer.id,
+                        );
+                        const playerPaidCents =
+                            (playerParticipant?.paid_amount_cents ?? 0) + (playerParticipant?.wallet_amount_cents ?? 0);
+                        const totalPrice = Math.trunc(Number(booking.total_price_cents ?? 0));
+                        const playerShare = Math.trunc(Number(playerParticipant?.share_amount_cents ?? 0));
                         return {
                             id: String(booking.id),
                             start_at: String(booking.start_at ?? ''),
@@ -164,15 +229,34 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                             status: String(booking.status ?? ''),
                             courtName: String(rawCourt?.name ?? 'Pista'),
                             playerIds,
+                            total_price_cents: totalPrice,
+                            currency: String(booking.currency ?? 'EUR'),
+                            bookingPaidCents,
+                            playerShareCents: playerShare,
+                            playerPaidCents,
                         };
                     })
                     .filter((booking) => booking.status !== 'cancelled' && booking.playerIds.includes(selectedPlayer.id));
                 setBookingOptions(options);
-                setSelectedBookingId((current) => options.some((booking) => booking.id === current) ? current : options[0]?.id ?? '');
+                setCartBookingLines((prev) =>
+                    prev
+                        .filter((line) => options.some((booking) => booking.id === line.bookingId))
+                        .map((line) => {
+                            const booking = options.find((b) => b.id === line.bookingId);
+                            if (!booking) return line;
+                            const amountCents = computeChargeCents(booking, line.chargeScope);
+                            return {
+                                ...line,
+                                amountCents,
+                                currency: booking.currency,
+                                label: `${bookingTimeLabel(booking)} · ${line.chargeScope === 'full' ? 'Turno completo' : 'Su parte'}`,
+                            };
+                        }),
+                );
             } catch (e) {
                 if (!cancelled) {
                     setBookingOptions([]);
-                    setSelectedBookingId('');
+                    setCartBookingLines([]);
                     toast.error((e as Error).message || 'Error al cargar turnos del jugador');
                 }
             }
@@ -221,16 +305,52 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
             .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }));
     }, [items, searchText, selectedCategoryId, showProductCatalog]);
 
-    const cartTotalCents = cartLines.reduce((sum, line) => {
+    const productsTotalCents = cartLines.reduce((sum, line) => {
         if (line.itemId) {
             const item = itemById.get(line.itemId);
             return sum + (item?.unit_price_cents ?? 0) * line.quantity;
         }
         return sum + (line.unitPriceCents ?? 0) * line.quantity;
     }, 0);
-    const currency = cartLines.map((line) => line.itemId ? itemById.get(line.itemId)?.currency : null).find(Boolean) ?? items[0]?.currency ?? 'EUR';
+    const bookingsTotalCents = cartBookingLines.reduce((sum, line) => sum + line.amountCents, 0);
+    const cartTotalCents = productsTotalCents + bookingsTotalCents;
+    const currency =
+        cartBookingLines[0]?.currency
+        ?? cartLines.map((line) => (line.itemId ? itemById.get(line.itemId)?.currency : null)).find(Boolean)
+        ?? items[0]?.currency
+        ?? 'EUR';
     const walletAppliedCents = useWallet ? Math.min(walletBalanceCents, cartTotalCents) : 0;
     const remainderCents = Math.max(0, cartTotalCents - walletAppliedCents);
+
+    const addBookingToCart = (booking: BookingOption) => {
+        if (saleWithoutBooking) {
+            toast.error('Desactiva «Venta sin turno» para cobrar reservas');
+            return;
+        }
+        if (cartBookingLines.some((line) => line.bookingId === booking.id)) {
+            toast.error('Ese turno ya está en el carrito');
+            return;
+        }
+        const amountCents = computeChargeCents(booking, bookingChargeScope);
+        if (amountCents <= 0) {
+            toast.error(bookingChargeScope === 'full' ? 'El turno ya está pagado' : 'La parte de este jugador ya está pagada');
+            return;
+        }
+        setCartBookingLines((prev) => [
+            ...prev,
+            {
+                bookingId: booking.id,
+                chargeScope: bookingChargeScope,
+                label: `${bookingTimeLabel(booking)} · ${bookingChargeScope === 'full' ? 'Turno completo' : 'Su parte'}`,
+                amountCents,
+                currency: booking.currency,
+            },
+        ]);
+    };
+
+    const removeBookingLine = (bookingId: string) => {
+        setCartBookingLines((prev) => prev.filter((line) => line.bookingId !== bookingId));
+    };
     const needsSecondaryPayment = useWallet && remainderCents > 0;
 
     const addItem = (item: InventoryItem) => {
@@ -295,16 +415,17 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
         });
     };
 
-    const canSubmitSale = Boolean(clubId && selectedPlayer && selectedBookingId && cartLines.length > 0 && !submitting);
+    const hasCartContent = cartLines.length > 0 || cartBookingLines.length > 0;
+    const canSubmitSale = Boolean(clubId && selectedPlayer && hasCartContent && !submitting);
 
     const submitSale = async () => {
-        if (!clubId || cartLines.length === 0) return;
+        if (!clubId || !hasCartContent) return;
         if (!selectedPlayer) {
             toast.error('Selecciona un jugador/cliente');
             return;
         }
-        if (!selectedBookingId) {
-            toast.error('Selecciona el turno al que pertenece la compra');
+        if (saleWithoutBooking && cartBookingLines.length > 0) {
+            toast.error('Quita los turnos del carrito o desactiva «Venta sin turno»');
             return;
         }
         if (useWallet && walletBalanceCents <= 0) {
@@ -326,12 +447,20 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
 
         setSubmitting(true);
         try {
+            const linkBookingId =
+                !saleWithoutBooking && cartBookingLines.length > 0
+                    ? cartBookingLines[0].bookingId
+                    : undefined;
             await inventoryService.createSale({
                 club_id: clubId,
-                booking_id: selectedBookingId,
+                booking_id: linkBookingId,
                 player_id: selectedPlayer.id,
                 payment_method: effectiveMethod,
                 wallet_amount_cents: useWallet ? walletAppliedCents : undefined,
+                booking_charges: cartBookingLines.map((line) => ({
+                    booking_id: line.bookingId,
+                    charge_scope: line.chargeScope,
+                })),
                 lines: cartLines.map((line) => ({
                     item_id: line.itemId,
                     quantity: line.quantity,
@@ -341,6 +470,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
             });
             toast.success('Ticket cargado');
             setCartLines([]);
+            setCartBookingLines([]);
             setEditMode(false);
             await load();
         } catch (e) {
@@ -359,7 +489,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     const topActions: TopBarAction[] = [
         { label: 'Productos', onClick: () => setShowProductCatalog((value) => !value), tone: 'blue' },
         { label: 'Editar venta', onClick: () => setEditMode((value) => !value), tone: 'blue' },
-        { label: 'Anular venta', onClick: () => setCartLines([]), tone: 'red' },
+        { label: 'Anular venta', onClick: () => { setCartLines([]); setCartBookingLines([]); }, tone: 'red' },
         { label: 'Añadir reservado', onClick: () => toast.info('Reservado añadido al ticket'), tone: 'blue' },
         { label: 'Buscar producto', onClick: () => searchInputRef.current?.focus(), tone: 'blue' },
         { label: 'Cargar ticket', onClick: submitSale, tone: 'blue', disabled: !canSubmitSale },
@@ -522,7 +652,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                             value={selectedPlayer ? `${selectedPlayer.first_name} ${selectedPlayer.last_name}` : playerSearch}
                             onChange={(e) => {
                                 setSelectedPlayer(null);
-                                setSelectedBookingId('');
+                                setCartBookingLines([]);
                                 setPlayerSearch(e.target.value);
                             }}
                             placeholder="Buscar jugador"
@@ -549,25 +679,66 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                         ) : null}
                     </div>
 
-                    <div>
-                        <label className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/40">Turno de hoy</label>
-                        <select
-                            value={selectedBookingId}
-                            onChange={(e) => setSelectedBookingId(e.target.value)}
-                            disabled={!selectedPlayer || bookingOptions.length === 0}
-                            className="mt-1 w-full rounded-xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-semibold text-white outline-none disabled:opacity-50"
-                        >
-                            <option value="">Seleccionar turno</option>
-                            {bookingOptions.map((booking) => (
-                                <option key={booking.id} value={booking.id} className="text-black">
-                                    {bookingTimeLabel(booking)}
-                                </option>
-                            ))}
-                        </select>
-                        {selectedPlayer && bookingOptions.length === 0 ? (
-                            <p className="mt-1 text-[10px] font-semibold text-red-200">Este jugador no tiene turnos activos hoy.</p>
-                        ) : null}
-                    </div>
+                    <label className="flex cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                        <span className="text-xs font-bold text-white/80">Venta sin turno</span>
+                        <input
+                            type="checkbox"
+                            checked={saleWithoutBooking}
+                            onChange={(e) => {
+                                setSaleWithoutBooking(e.target.checked);
+                                if (e.target.checked) setCartBookingLines([]);
+                            }}
+                            className="h-4 w-4 accent-[#E31E24]"
+                        />
+                    </label>
+
+                    {!saleWithoutBooking && selectedPlayer ? (
+                        <div>
+                            <label className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/40">Turnos de hoy</label>
+                            <div className="mt-1 grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setBookingChargeScope('full')}
+                                    className={`${bookingChargeScope === 'full' ? 'bg-[#E31E24] text-white' : 'bg-white/10 text-white/60'} rounded-xl px-2 py-2 text-[10px] font-black`}
+                                >
+                                    Turno completo
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setBookingChargeScope('player_share')}
+                                    className={`${bookingChargeScope === 'player_share' ? 'bg-[#E31E24] text-white' : 'bg-white/10 text-white/60'} rounded-xl px-2 py-2 text-[10px] font-black`}
+                                >
+                                    Su parte
+                                </button>
+                            </div>
+                            {bookingOptions.length === 0 ? (
+                                <p className="mt-2 text-[10px] font-semibold text-red-200">Sin turnos activos hoy para este jugador.</p>
+                            ) : (
+                                <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                                    {bookingOptions.map((booking) => {
+                                        const preview = computeChargeCents(booking, bookingChargeScope);
+                                        const inCart = cartBookingLines.some((line) => line.bookingId === booking.id);
+                                        return (
+                                            <button
+                                                key={booking.id}
+                                                type="button"
+                                                disabled={inCart || preview <= 0}
+                                                onClick={() => addBookingToCart(booking)}
+                                                className="flex w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-left disabled:opacity-40"
+                                            >
+                                                <span className="min-w-0 truncate text-[10px] font-semibold text-white/80">
+                                                    {bookingTimeLabel(booking)}
+                                                </span>
+                                                <span className="shrink-0 text-[10px] font-black text-emerald-300">
+                                                    {preview > 0 ? formatMoneyFromCents(preview, booking.currency) : 'Pagado'}
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    ) : null}
 
                     <div>
                         <label className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/40">Forma de pago</label>
@@ -645,13 +816,38 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                 </div>
 
                 <div className="min-h-[260px] space-y-2 p-4">
-                    {cartLines.length === 0 ? (
+                    {cartLines.length === 0 && cartBookingLines.length === 0 ? (
                         <div className="flex h-56 flex-col items-center justify-center rounded-2xl border border-dashed border-white/15 text-center">
                             <Package className="h-8 w-8 text-white/30" />
-                            <p className="mt-3 text-xs font-semibold text-white/50">Selecciona productos para iniciar la venta.</p>
+                            <p className="mt-3 text-xs font-semibold text-white/50">
+                                Añade productos o turnos para iniciar la venta.
+                            </p>
                         </div>
                     ) : (
-                        cartLines.map((line) => {
+                        <>
+                        {cartBookingLines.map((line) => (
+                            <div key={line.bookingId} className="rounded-2xl border border-emerald-400/20 bg-emerald-500/[0.08] p-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5">
+                                            <Calendar className="h-3 w-3 text-emerald-300" />
+                                            <p className="truncate text-xs font-black text-emerald-100">{line.label}</p>
+                                        </div>
+                                    </div>
+                                    <p className="text-xs font-black">{formatMoneyFromCents(line.amountCents, line.currency)}</p>
+                                </div>
+                                {editMode ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => removeBookingLine(line.bookingId)}
+                                        className="mt-2 text-[10px] font-bold text-red-200 hover:text-red-100"
+                                    >
+                                        Quitar turno
+                                    </button>
+                                ) : null}
+                            </div>
+                        ))}
+                        {cartLines.map((line) => {
                             const item = line.itemId ? itemById.get(line.itemId) : null;
                             const name = item?.name ?? line.customName ?? 'Venta excepcional';
                             const unitPriceCents = item?.unit_price_cents ?? line.unitPriceCents ?? 0;
@@ -702,11 +898,28 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                                     ) : null}
                                 </div>
                             );
-                        })
+                        })}
+                        </>
                     )}
                 </div>
 
                 <div className="border-t border-white/10 p-4">
+                    {(bookingsTotalCents > 0 || productsTotalCents > 0) && cartTotalCents > 0 ? (
+                        <div className="mb-2 space-y-1 text-[10px] font-semibold text-white/45">
+                            {bookingsTotalCents > 0 ? (
+                                <div className="flex justify-between">
+                                    <span>Turnos</span>
+                                    <span>{formatMoneyFromCents(bookingsTotalCents, currency)}</span>
+                                </div>
+                            ) : null}
+                            {productsTotalCents > 0 ? (
+                                <div className="flex justify-between">
+                                    <span>Productos</span>
+                                    <span>{formatMoneyFromCents(productsTotalCents, currency)}</span>
+                                </div>
+                            ) : null}
+                        </div>
+                    ) : null}
                     <div className="mb-3 flex items-center justify-between">
                         <span className="text-xs font-bold text-white/50">Total</span>
                         <span className="text-2xl font-black">{formatMoneyFromCents(cartTotalCents, currency)}</span>

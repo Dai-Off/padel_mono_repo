@@ -11,6 +11,7 @@ import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubO
 import { insertClubChatMention } from '../lib/clubChatMentions';
 import { zonedDayRangeUtcIso } from '../lib/zonedDayBounds';
 import { ensureOpenMatchRecordForBooking } from '../lib/matchFromBookingSync';
+import { checkWalletBalances, computeBookingStatus, upsertManualPayments } from '../lib/bookingManualPayment';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -21,88 +22,10 @@ const SELECT_LIST =
 const SELECT_ONE =
   'id, created_at, updated_at, court_id, organizer_player_id, start_at, end_at, started_at, timezone, total_price_cents, currency, pricing_rule_ids, status, reservation_type, source_channel, cancelled_at, cancelled_by, cancellation_reason, notes, courts(name, club_id, clubs(name)), players!bookings_organizer_player_id_fkey(id, first_name, last_name, email, elo_rating), booking_participants(id, player_id, role, share_amount_cents, payment_status, players!booking_participants_player_id_fkey(id, first_name, last_name, email, elo_rating)), payment_transactions(id, payer_player_id, amount_cents, stripe_payment_intent_id, status), tournament_booking_links(tournament_id, court_id, tournaments(id, name))';
 
-// ─── Helpers de pago ─────────────────────────────────────────────────────────
-
-function computeBookingStatus(
-  totalPriceCents: number,
-  participants: Array<{ paid_amount_cents?: number; wallet_amount_cents?: number }>,
-): 'pending_payment' | 'confirmed' {
-  const totalPaid = participants.reduce(
-    (sum, p) => sum + (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0),
-    0,
-  );
-  if (totalPaid >= totalPriceCents && totalPriceCents > 0) return 'confirmed';
-  return 'pending_payment';
-}
-
 /** Maps frontend status values to DB-safe values (partial_payment is not in DB constraint) */
 function toDbStatus(status: string): string {
   if (status === 'partial_payment') return 'pending_payment';
   return status;
-}
-
-/** Stores per-player manual payments in payment_transactions (works without migration 015) */
-async function upsertManualPayments(
-  supabase: ReturnType<typeof import('../lib/supabase').getSupabaseServiceRoleClient>,
-  bookingId: string,
-  participants: Array<{ player_id: string; paid_amount_cents?: number; wallet_amount_cents?: number; payment_method?: string | null }>,
-): Promise<void> {
-  // Remove previous manual payments for this booking
-  const { error: delErr } = await supabase
-    .from('payment_transactions')
-    .delete()
-    .eq('booking_id', bookingId)
-    .like('stripe_payment_intent_id', 'manual_%');
-  if (delErr) console.error('[upsertManualPayments] delete error:', delErr.message);
-
-  // Insert one row per player with paid > 0 (cash/card/wallet)
-  // stripe_payment_intent_id must be globally unique — encode booking+player+method
-  for (const p of participants) {
-    const cashCardCents = p.paid_amount_cents ?? 0;
-    const walletCents = p.wallet_amount_cents ?? 0;
-    const totalPaid = cashCardCents + walletCents;
-    if (totalPaid <= 0) continue;
-
-    const method = p.payment_method === 'wallet' ? 'wallet'
-      : p.payment_method === 'card' ? 'card' : 'cash';
-    const uniqueId = `manual_${method}_${bookingId}_${p.player_id}`;
-    const { error: insErr } = await supabase.from('payment_transactions').insert({
-      booking_id: bookingId,
-      payer_player_id: p.player_id,
-      amount_cents: totalPaid,
-      currency: 'EUR',
-      stripe_payment_intent_id: uniqueId,
-      status: 'succeeded',
-    });
-    if (insErr) console.error('[upsertManualPayments] insert error:', insErr.message, { uniqueId, totalPaid });
-  }
-}
-
-async function checkWalletBalances(
-  supabase: ReturnType<typeof import('../lib/supabase').getSupabaseServiceRoleClient>,
-  clubId: string,
-  participants: Array<{ player_id: string; wallet_amount_cents?: number; payment_method?: string | null }>,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  for (const p of participants) {
-    const walletCents = p.wallet_amount_cents ?? 0;
-    if (p.payment_method !== 'wallet' || walletCents <= 0) continue;
-
-    const { data: txs, error } = await supabase
-      .from('wallet_transactions')
-      .select('amount_cents')
-      .eq('player_id', p.player_id)
-      .eq('club_id', clubId);
-    if (error) return { ok: false, error: `Error al consultar saldo: ${error.message}` };
-
-    const balance = (txs ?? []).reduce((sum: number, t: { amount_cents: number }) => sum + t.amount_cents, 0);
-    if (balance < walletCents) {
-      return {
-        ok: false,
-        error: `Saldo insuficiente para jugador ${p.player_id.slice(0, 8)}: disponible ${balance} cents, requerido ${walletCents} cents`,
-      };
-    }
-  }
-  return { ok: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1060,8 +983,11 @@ router.post('/', async (req: Request, res: Response) => {
 
     const supabase = getSupabaseServiceRoleClient();
 
+    // Reservas manuales desde grilla: el mismo cliente puede figurar en varias pistas a la misma hora (bloqueo grupal).
+    const skipOrganizerOverlap = source_channel === 'manual';
+
     // Check player conflict — block only if the player is already in another booking at the SAME time
-    if (organizer_player_id) {
+    if (organizer_player_id && !skipOrganizerOverlap) {
       const newStartMs = new Date(String(start_at)).getTime();
       const newEndMs = new Date(String(end_at)).getTime();
 

@@ -41,6 +41,17 @@ export type CashClosingBookingExpected = {
   card_paid_cents: number;
 };
 
+export type CashClosingStoreSaleLine = {
+  movement_id: string;
+  sale_id: string;
+  name: string;
+  payment_method: string;
+  amount_cents: number;
+  movement_at: string | null;
+  booking_id: string | null;
+  player_id: string | null;
+};
+
 export type CashMovementType = 'withdrawal' | 'deposit';
 
 export type CashMovementRecord = {
@@ -83,6 +94,7 @@ export type CashClosingExpected = {
   openings?: CashOpeningSavedRecord[];
   cash_movements?: CashMovementRecord[];
   bookings: CashClosingBookingExpected[];
+  store_sale_lines?: CashClosingStoreSaleLine[];
 };
 
 export type CashCurrentOperator = {

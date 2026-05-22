@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   ArrowDownCircle,
   ArrowUpCircle,
@@ -15,6 +16,7 @@ import {
 import type { TFunction } from 'i18next';
 import type {
   CashClosingBookingExpected,
+  CashClosingStoreSaleLine,
   CashMovementRecord,
   CashMovementType,
 } from '../../services/payments';
@@ -88,16 +90,27 @@ export function staffRoleAllowsCashLedger(role: string | null | undefined): bool
 
 export function SalesRows({
   bookings,
+  storeLines,
   storeCash,
   storeCard,
   emptyLabel,
+  onOpenBooking,
+  onOpenCart,
+  onEditStoreLine,
+  editingMovementId,
 }: {
   bookings: CashClosingBookingExpected[];
+  storeLines?: CashClosingStoreSaleLine[];
   storeCash: number;
   storeCard: number;
   emptyLabel: string;
+  onOpenBooking?: (bookingId: string) => void;
+  onOpenCart?: (playerId: string | null, bookingId: string | null) => void;
+  onEditStoreLine?: (movementId: string, amountCents: number) => void;
+  editingMovementId?: string | null;
 }) {
-  if (bookings.length === 0 && storeCash <= 0 && storeCard <= 0) {
+  const lines = storeLines ?? [];
+  if (bookings.length === 0 && lines.length === 0 && storeCash <= 0 && storeCard <= 0) {
     return <p className="text-xs text-gray-400 py-4 text-center">{emptyLabel}</p>;
   }
   return (
@@ -110,8 +123,23 @@ export function SalesRows({
         return (
           <div key={b.booking_id} className="flex items-start justify-between gap-3 py-3 px-1">
             <div className="min-w-0">
-              <p className="text-xs font-bold text-[#1A1A1A] truncate">{b.court_name ?? 'Reserva'}</p>
+              <button
+                type="button"
+                onClick={() => onOpenBooking?.(b.booking_id)}
+                className="text-left text-xs font-bold text-[#0B5B7A] truncate hover:underline"
+              >
+                {b.court_name ?? 'Reserva'}
+              </button>
               <p className="text-[10px] text-gray-400">{time}</p>
+              {onOpenCart ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenCart(null, b.booking_id)}
+                  className="mt-1 text-[10px] font-bold text-[#E31E24] hover:underline"
+                >
+                  Carrito
+                </button>
+              ) : null}
             </div>
             <div className="text-right shrink-0">
               <p className="text-xs font-bold text-[#1A1A1A]">{total} €</p>
@@ -121,7 +149,17 @@ export function SalesRows({
           </div>
         );
       })}
-      {(storeCash > 0 || storeCard > 0) && (
+      {lines.map((line) => (
+        <StoreSaleLineRow
+          key={line.movement_id}
+          line={line}
+          onOpenBooking={onOpenBooking}
+          onOpenCart={onOpenCart}
+          onEditStoreLine={onEditStoreLine}
+          saving={editingMovementId === line.movement_id}
+        />
+      ))}
+      {lines.length === 0 && (storeCash > 0 || storeCard > 0) && (
         <div className="flex items-start justify-between gap-3 py-3 px-1">
           <div>
             <p className="text-xs font-bold text-[#1A1A1A]">Tienda</p>
@@ -133,6 +171,69 @@ export function SalesRows({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function StoreSaleLineRow({
+  line,
+  onOpenBooking,
+  onOpenCart,
+  onEditStoreLine,
+  saving,
+}: {
+  line: CashClosingStoreSaleLine;
+  onOpenBooking?: (bookingId: string) => void;
+  onOpenCart?: (playerId: string | null, bookingId: string | null) => void;
+  onEditStoreLine?: (movementId: string, amountCents: number) => void;
+  saving?: boolean;
+}) {
+  const [editValue, setEditValue] = useState((line.amount_cents / 100).toFixed(2));
+  useEffect(() => {
+    setEditValue((line.amount_cents / 100).toFixed(2));
+  }, [line.amount_cents]);
+
+  const commitEdit = () => {
+    const parsed = Math.round(Number(editValue.replace(',', '.')) * 100);
+    if (!Number.isFinite(parsed) || parsed <= 0) return;
+    if (parsed !== line.amount_cents) onEditStoreLine?.(line.movement_id, parsed);
+  };
+
+  return (
+    <div className="flex items-start justify-between gap-3 py-3 px-1">
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-bold text-[#1A1A1A] truncate">{line.name}</p>
+        <p className="text-[10px] text-gray-400 capitalize">{line.payment_method}</p>
+        <div className="mt-1 flex flex-wrap gap-2">
+          {line.booking_id && onOpenBooking ? (
+            <button type="button" onClick={() => onOpenBooking(line.booking_id!)} className="text-[10px] font-bold text-[#0B5B7A] hover:underline">
+              Ver turno
+            </button>
+          ) : null}
+          {onOpenCart ? (
+            <button
+              type="button"
+              onClick={() => onOpenCart(line.player_id, line.booking_id)}
+              className="text-[10px] font-bold text-[#E31E24] hover:underline"
+            >
+              Carrito
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="text-right shrink-0">
+        <input
+          type="text"
+          inputMode="decimal"
+          value={editValue}
+          disabled={saving || !onEditStoreLine}
+          onChange={(e) => setEditValue(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); }}
+          className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-xs font-bold text-right"
+        />
+        <span className="text-[10px] text-gray-400 ml-0.5">€</span>
+      </div>
     </div>
   );
 }
@@ -326,6 +427,7 @@ type CountFormProps = {
   storeSalesCashTotal: number;
   storeSalesCardTotal: number;
   expectedBookings: CashClosingBookingExpected[];
+  storeSaleLines?: CashClosingStoreSaleLine[];
   operativeDate: string;
   showSalesDetail: boolean;
   saveLabel: string;
@@ -335,6 +437,10 @@ type CountFormProps = {
   operatorName?: string | null;
   operatorReady?: boolean;
   canDelegate?: boolean;
+  onOpenBooking?: (bookingId: string) => void;
+  onOpenCart?: (playerId: string | null, bookingId: string | null) => void;
+  onEditStoreLine?: (movementId: string, amountCents: number) => void;
+  editingMovementId?: string | null;
 };
 
 export function CashCountForm({
@@ -354,6 +460,7 @@ export function CashCountForm({
   storeSalesCashTotal,
   storeSalesCardTotal,
   expectedBookings,
+  storeSaleLines,
   operativeDate,
   showSalesDetail,
   saveLabel,
@@ -363,6 +470,10 @@ export function CashCountForm({
   operatorName,
   operatorReady = true,
   canDelegate = false,
+  onOpenBooking,
+  onOpenCart,
+  onEditStoreLine,
+  editingMovementId,
 }: CountFormProps) {
   return (
     <div className="grid lg:grid-cols-3 gap-6">
@@ -422,9 +533,14 @@ export function CashCountForm({
             </h4>
             <SalesRows
               bookings={expectedBookings}
+              storeLines={storeSaleLines}
               storeCash={storeSalesCashTotal}
               storeCard={storeSalesCardTotal}
               emptyLabel={t('cash_sales_empty')}
+              onOpenBooking={onOpenBooking}
+              onOpenCart={onOpenCart}
+              onEditStoreLine={onEditStoreLine}
+              editingMovementId={editingMovementId}
             />
           </div>
         )}
@@ -643,6 +759,11 @@ export type CashTimelineEntry = {
   amountEur?: number;
   tone: 'green' | 'blue' | 'red' | 'emerald' | 'neutral';
   details?: string[];
+  booking_id?: string;
+  player_id?: string | null;
+  movement_id?: string;
+  onOpenBooking?: (bookingId: string) => void;
+  onOpenCart?: (playerId: string | null, bookingId: string | null) => void;
 };
 
 const toneRowClass: Record<CashTimelineEntry['tone'], string> = {
@@ -663,7 +784,14 @@ export function CashDayTimeline({ entries, emptyLabel }: { entries: CashTimeline
       {sorted.map((e) => (
         <div key={e.id} className={`rounded-2xl border px-4 py-3 ${toneRowClass[e.tone]}`}>
           <p className="text-xs font-bold">
-            {e.at.toLocaleString('es-ES')} — {e.employeeName ?? '—'} — {e.title}
+            {e.at.toLocaleString('es-ES')} — {e.employeeName ?? '—'} —{' '}
+            {e.booking_id && e.onOpenBooking ? (
+              <button type="button" onClick={() => e.onOpenBooking!(e.booking_id!)} className="text-[#0B5B7A] hover:underline">
+                {e.title}
+              </button>
+            ) : (
+              e.title
+            )}
           </p>
           {e.subtitle ? <p className="text-[10px] mt-1 opacity-80">{e.subtitle}</p> : null}
           {e.amountEur != null && (
@@ -672,10 +800,24 @@ export function CashDayTimeline({ entries, emptyLabel }: { entries: CashTimeline
               {e.amountEur.toFixed(2)} €
             </p>
           )}
+          {(e.onOpenBooking && e.booking_id) || e.onOpenCart ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {e.onOpenBooking && e.booking_id ? (
+                <button type="button" onClick={() => e.onOpenBooking!(e.booking_id!)} className="text-[10px] font-bold text-[#0B5B7A] hover:underline">
+                  Ver en grilla
+                </button>
+              ) : null}
+              {e.onOpenCart ? (
+                <button type="button" onClick={() => e.onOpenCart!(e.player_id ?? null, e.booking_id ?? null)} className="text-[10px] font-bold text-[#E31E24] hover:underline">
+                  Carrito
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           {e.details && e.details.length > 0 && (
             <ul className="mt-2 space-y-0.5 text-[10px] opacity-90">
               {e.details.map((line) => (
-                <li key={line}>{line}</li>
+                <li key={line} className={line.startsWith('✕') || line.startsWith('×') ? 'text-red-700 font-semibold' : ''}>{line}</li>
               ))}
             </ul>
           )}

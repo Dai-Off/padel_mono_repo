@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireAuthUser } from '../middleware/requireAuthUser';
-import { canAccessClub } from '../lib/clubAccess';
+import { canAccessClub, isClubOwnerOrAdmin } from '../lib/clubAccess';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -53,7 +53,7 @@ function normalizeSlug(input: unknown): string {
 router.get('/', async (req: Request, res: Response) => {
   const club_id = String(req.query.club_id ?? '').trim();
   if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
-  if (!canAccessClub(req, club_id, ['configuracion', 'grilla'])) {
+  if (!isClubOwnerOrAdmin(req, club_id) && !canAccessClub(req, club_id, ['configuracion', 'grilla', 'gestion'])) {
     return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
   }
   try {

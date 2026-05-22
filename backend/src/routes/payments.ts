@@ -1700,9 +1700,20 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       systemCardTotalCents += b.card_paid_cents;
     }
 
+    const storeSaleLines: Array<{
+      movement_id: string;
+      sale_id: string;
+      name: string;
+      payment_method: string;
+      amount_cents: number;
+      movement_at: string | null;
+      booking_id: string | null;
+      player_id: string | null;
+    }> = [];
+
     const { data: inventorySaleMovements, error: saleMovementsErr } = await supabase
       .from('inventory_movements')
-      .select('reason, movement_at, created_at')
+      .select('id, reason, movement_at, created_at')
       .eq('club_id', clubId)
       .eq('movement_type', 'out')
       .gte('movement_at', startUtc.toISOString())
@@ -1712,19 +1723,36 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       for (const movement of inventorySaleMovements) {
         const reason = typeof (movement as any).reason === 'string' ? (movement as any).reason : '';
         if (!reason.startsWith('SALE|')) continue;
-        if (closingCutoffMs != null) {
-          const movementAtSource = (movement as any).movement_at ?? (movement as any).created_at;
-          if (typeof movementAtSource === 'string') {
-            const movementMs = new Date(movementAtSource).getTime();
-            if (Number.isFinite(movementMs) && movementMs <= closingCutoffMs) continue;
-          }
+        const movementAtSource = (movement as any).movement_at ?? (movement as any).created_at;
+        if (closingCutoffMs != null && typeof movementAtSource === 'string') {
+          const movementMs = new Date(movementAtSource).getTime();
+          if (Number.isFinite(movementMs) && movementMs <= closingCutoffMs) continue;
         }
         const parts = reason.split('|');
-        const method = parts[2];
+        const saleId = String(parts[1] ?? '');
+        const method = String(parts[2] ?? '');
         const amountCents = Number(parts[3] ?? 0);
         if (!Number.isFinite(amountCents) || amountCents <= 0) continue;
-        if (method === 'cash') storeSalesCashCents += Math.trunc(amountCents);
-        if (method === 'card') storeSalesCardCents += Math.trunc(amountCents);
+        const name = String(parts[4] ?? 'Producto').replace(/\|/g, ' ');
+        let bookingId: string | null = null;
+        let playerId: string | null = null;
+        for (const extra of parts.slice(5)) {
+          if (extra.startsWith('booking:')) bookingId = extra.slice('booking:'.length) || null;
+          if (extra.startsWith('player:')) playerId = extra.slice('player:'.length) || null;
+        }
+        const normalizedMethod = method.includes('cash') ? 'cash' : method.includes('card') ? 'card' : method.includes('wallet') ? 'wallet' : method;
+        if (normalizedMethod === 'cash') storeSalesCashCents += Math.trunc(amountCents);
+        if (normalizedMethod === 'card') storeSalesCardCents += Math.trunc(amountCents);
+        storeSaleLines.push({
+          movement_id: String((movement as any).id ?? ''),
+          sale_id: saleId,
+          name,
+          payment_method: normalizedMethod,
+          amount_cents: Math.trunc(amountCents),
+          movement_at: typeof movementAtSource === 'string' ? movementAtSource : null,
+          booking_id: bookingId && bookingId !== 'none' ? bookingId : null,
+          player_id: playerId || null,
+        });
       }
     }
 
@@ -1817,6 +1845,7 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       openings: openingsForDay,
       cash_movements: cashMovements,
       bookings: Array.from(byBooking.values()).sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? '')),
+      store_sale_lines: storeSaleLines.sort((a, b) => (a.movement_at ?? '').localeCompare(b.movement_at ?? '')),
     });
   } catch (err) {
     console.error('[payments/cash-closing/expected]', err);
