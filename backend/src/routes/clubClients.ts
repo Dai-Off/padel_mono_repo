@@ -6,12 +6,16 @@ import { getClubClientPlayerIds, invalidateClubClientPlayerIdsCache } from '../l
 import { sendClubCrmEmail, syncPlayerVector } from '../lib/mailer';
 import { getPlayerClubDebt } from '../lib/players/playerDebt';
 import { canAccessClub } from '../lib/clubAccess';
+import {
+  assertUsernameAvailable,
+  normalizeUsernameOptional,
+} from '../lib/playerUsername';
 
 const router = Router();
 router.use(attachAuthContext);
 
 const PLAYER_LIST_FIELDS =
-  'id, created_at, first_name, last_name, email, phone, elo_rating, status, auth_user_id';
+  'id, created_at, first_name, last_name, email, phone, username, elo_rating, status, auth_user_id';
 
 type Tier = 'vip' | 'premium' | 'standard' | 'basic';
 
@@ -147,7 +151,9 @@ async function fetchPlayersByIds(
     if (opts.elo_max !== null) query = query.lte('elo_rating', opts.elo_max);
     if (opts.q) {
       const esc = opts.q.replace(/%/g, '\\%').replace(/_/g, '\\_');
-      query = query.or(`first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,phone.ilike.%${esc}%`);
+      query = query.or(
+        `first_name.ilike.%${esc}%,last_name.ilike.%${esc}%,phone.ilike.%${esc}%,username.ilike.%${esc}%`,
+      );
     }
     const { data, error } = await query;
     if (error) throw new Error(error.message);
@@ -814,12 +820,14 @@ router.get('/export', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
  *               last_name: { type: string }
  *               phone: { type: string }
  *               email: { type: string, nullable: true }
+ *               username: { type: string, nullable: true, description: '3–30 chars, a-z, 0-9, _' }
  *           example:
  *             club_id: "uuid-club"
  *             first_name: "Luis"
  *             last_name: "García"
  *             phone: "+34600111222"
  *             email: "luis@example.com"
+ *             username: "luis_padel"
  *     responses:
  *       201:
  *         description: Jugador creado
@@ -831,7 +839,7 @@ router.get('/export', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
  *       409: { description: Teléfono o email duplicado }
  */
 router.post('/manual', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
-  const { club_id, first_name, last_name, phone, email } = req.body ?? {};
+  const { club_id, first_name, last_name, phone, email, username } = req.body ?? {};
   const clubId = typeof club_id === 'string' ? club_id.trim() : '';
   const firstName = typeof first_name === 'string' ? first_name.trim() : '';
   const lastName = typeof last_name === 'string' ? last_name.trim() : '';
@@ -869,6 +877,15 @@ router.post('/manual', requireClubOwnerOrAdminOrPortalStaff, async (req: Request
       }
     }
 
+    const usernameNorm = normalizeUsernameOptional(username);
+    if (!usernameNorm.ok) {
+      return res.status(400).json({ ok: false, error: usernameNorm.error });
+    }
+    if (usernameNorm.value) {
+      const avail = await assertUsernameAvailable(supabase, usernameNorm.value);
+      if (!avail.ok) return res.status(avail.status).json({ ok: false, error: avail.error });
+    }
+
     const { data: created, error } = await supabase
       .from('players')
       .insert([
@@ -877,6 +894,7 @@ router.post('/manual', requireClubOwnerOrAdminOrPortalStaff, async (req: Request
           last_name: lastName,
           phone: phoneStr,
           email: emailStr,
+          username: usernameNorm.value,
           auth_user_id: null,
         },
       ])
@@ -1060,6 +1078,7 @@ function escapeHtmlSnippet(s: string): string {
  *               last_name: { type: string }
  *               email: { type: string, nullable: true }
  *               phone: { type: string, nullable: true }
+ *               username: { type: string, nullable: true }
  *               elo_rating: { type: integer }
  *               status: { type: string, enum: [active, blocked, deleted] }
  *     responses:
@@ -1070,7 +1089,7 @@ function escapeHtmlSnippet(s: string): string {
  */
 router.put('/:playerId', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { playerId } = req.params;
-  const { club_id, first_name, last_name, email, phone, elo_rating, status } = req.body ?? {};
+  const { club_id, first_name, last_name, email, phone, username, elo_rating, status } = req.body ?? {};
   const clubId = typeof club_id === 'string' ? club_id.trim() : '';
 
   if (!clubId) return res.status(400).json({ ok: false, error: 'club_id es obligatorio en el body' });
@@ -1081,6 +1100,20 @@ router.put('/:playerId', requireClubOwnerOrAdminOrPortalStaff, async (req: Reque
   if (last_name !== undefined) update.last_name = last_name;
   if (email !== undefined) update.email = email;
   if (phone !== undefined) update.phone = phone;
+  if (username !== undefined) {
+    const usernameNorm = normalizeUsernameOptional(username);
+    if (!usernameNorm.ok) {
+      return res.status(400).json({ ok: false, error: usernameNorm.error });
+    }
+    if (usernameNorm.value) {
+      const supabasePre = getSupabaseServiceRoleClient();
+      const avail = await assertUsernameAvailable(supabasePre, usernameNorm.value, playerId);
+      if (!avail.ok) return res.status(avail.status).json({ ok: false, error: avail.error });
+      update.username = usernameNorm.value;
+    } else {
+      update.username = null;
+    }
+  }
   if (elo_rating !== undefined) update.elo_rating = elo_rating;
   if (status !== undefined) update.status = status;
   update.updated_at = new Date().toISOString();

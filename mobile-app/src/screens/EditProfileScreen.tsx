@@ -22,6 +22,8 @@ import {
   updateMyPlayerProfile,
   type PlayerGender,
 } from '../api/players';
+import { checkUsernameAvailable } from '../api/auth';
+import { validateUsernameLocal } from '../lib/username';
 import {
   patchMyAvatarUrl,
   uploadPlayerAvatarToStorage,
@@ -63,6 +65,7 @@ const GENDER_LABEL: Record<PlayerGender, string> = {
 
 type SavedSnapshot = {
   fullName: string;
+  username: string;
   email: string;
   phoneCountry: CountryCode;
   phoneNational: string;
@@ -74,6 +77,7 @@ type SavedSnapshot = {
 
 const EMPTY_SNAPSHOT: SavedSnapshot = {
   fullName: '',
+  username: '',
   email: '',
   phoneCountry: 'ES',
   phoneNational: '',
@@ -86,6 +90,7 @@ const EMPTY_SNAPSHOT: SavedSnapshot = {
 function isFormDirty(
   form: {
     fullName: string;
+    username: string;
     phoneCountry: CountryCode;
     phoneNational: string;
     gender: PlayerGender;
@@ -97,6 +102,7 @@ function isFormDirty(
 ): boolean {
   return (
     form.fullName.trim() !== baseline.fullName.trim() ||
+    form.username.trim() !== baseline.username.trim() ||
     phonePartsToComparable(form.phoneCountry, form.phoneNational) !==
       phonePartsToComparable(baseline.phoneCountry, baseline.phoneNational) ||
     form.gender !== baseline.gender ||
@@ -116,6 +122,7 @@ function snapshotFromProfile(
   const { country, national } = parseStoredPhone(p?.phone ?? '');
   return {
     fullName: fn,
+    username: p?.username ?? '',
     email: p?.email ?? fallbackEmail,
     phoneCountry: country,
     phoneNational: national ? formatNationalInput(country, national) : '',
@@ -223,6 +230,7 @@ export function EditProfileScreen({
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [phoneCountry, setPhoneCountry] = useState<CountryCode>('ES');
   const [phoneNational, setPhoneNational] = useState('');
@@ -238,6 +246,7 @@ export function EditProfileScreen({
 
   const applySnapshotToForm = useCallback((snap: SavedSnapshot) => {
     setFullName(snap.fullName);
+    setUsername(snap.username);
     setEmail(snap.email);
     setPhoneCountry(snap.phoneCountry);
     setPhoneNational(snap.phoneNational);
@@ -257,10 +266,10 @@ export function EditProfileScreen({
   const isDirty = useMemo(
     () =>
       isFormDirty(
-        { fullName, phoneCountry, phoneNational, gender, birthDate, description, playWhere },
+        { fullName, username, phoneCountry, phoneNational, gender, birthDate, description, playWhere },
         baseline,
       ),
-    [fullName, phoneCountry, phoneNational, gender, birthDate, description, playWhere, baseline],
+    [fullName, username, phoneCountry, phoneNational, gender, birthDate, description, playWhere, baseline],
   );
 
   useEffect(() => {
@@ -373,6 +382,7 @@ export function EditProfileScreen({
     const { first, last } = splitFullName(fullName);
 
     const nameChanged = fullName.trim() !== baseline.fullName.trim();
+    const usernameChanged = username.trim().toLowerCase() !== baseline.username.trim().toLowerCase();
     const phoneChanged =
       phonePartsToComparable(phoneCountry, phoneNational) !==
       phonePartsToComparable(baseline.phoneCountry, baseline.phoneNational);
@@ -397,6 +407,25 @@ export function EditProfileScreen({
 
     const birthTrim = birthDate.trim();
 
+    if (usernameChanged) {
+      const usernameErr = validateUsernameLocal(username);
+      if (usernameErr) {
+        Alert.alert('Usuario', usernameErr);
+        return false;
+      }
+      const normalized = username.trim().toLowerCase();
+      const profile = await fetchMyPlayerProfile(token);
+      const check = await checkUsernameAvailable(normalized, profile?.id);
+      if (!check.ok) {
+        Alert.alert('Usuario', check.error);
+        return false;
+      }
+      if (!check.available) {
+        Alert.alert('Usuario', 'Este usuario ya está en uso');
+        return false;
+      }
+    }
+
     setSaving(true);
     const payload: Parameters<typeof updateMyPlayerProfile>[1] = {
       gender,
@@ -410,6 +439,9 @@ export function EditProfileScreen({
     }
     if (phoneChanged && phoneE164) {
       payload.phone = phoneE164;
+    }
+    if (usernameChanged) {
+      payload.username = username.trim().toLowerCase();
     }
 
     const result = await updateMyPlayerProfile(token, payload);
@@ -425,6 +457,7 @@ export function EditProfileScreen({
     return true;
   }, [
     fullName,
+    username,
     phoneNational,
     phoneCountry,
     email,
@@ -552,6 +585,18 @@ export function EditProfileScreen({
               placeholder="Tu nombre"
               placeholderTextColor="#4b5563"
               autoCapitalize="words"
+            />
+          </FieldCard>
+
+          <FieldCard label="Usuario">
+            <TextInput
+              style={styles.fieldInput}
+              value={username}
+              onChangeText={(t) => setUsername(t.replace(/\s/g, '').toLowerCase())}
+              placeholder="tu_usuario"
+              placeholderTextColor="#4b5563"
+              autoCapitalize="none"
+              autoCorrect={false}
             />
           </FieldCard>
 

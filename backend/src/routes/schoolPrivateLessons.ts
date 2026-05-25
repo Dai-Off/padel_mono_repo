@@ -5,6 +5,10 @@ import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubO
 import { canAccessClub, isOnlyTeacher, getStaffIdForUser } from '../lib/clubAccess';
 import { lookupFeeRulePriceCents, type SchoolWeekday } from '../lib/schoolPricing';
 import { assertSchoolCoachStaff } from '../lib/schoolStaffRoles';
+import { mapLessonRow, normalizePrivateLessonBody } from '../lib/schoolPrivateLessonPayload';
+
+const LESSON_FIELDS =
+  'id, club_id, student_player_id, student_name, student_email, student_phone, staff_id, court_id, court_ids, students, price_cents, student_count, weekday, start_time, end_time, starts_on, ends_on, is_active, created_at, updated_at';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -39,7 +43,7 @@ async function resolvePrivateLessonPriceCents(
   req: Request,
   clubId: string,
   staffId: string,
-  studentCount: 1 | 2 | 3,
+  studentCount: 1 | 2 | 3 | 4,
   weekday: Weekday,
   startTime: string,
 ): Promise<number | { error: string }> {
@@ -69,7 +73,7 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
   const supabase = getSupabaseServiceRoleClient();
   let q = supabase
     .from('club_school_private_lessons')
-    .select('id, club_id, student_player_id, student_name, student_email, student_phone, staff_id, court_id, price_cents, student_count, weekday, start_time, end_time, starts_on, ends_on, is_active, created_at, updated_at')
+    .select(LESSON_FIELDS)
     .eq('club_id', clubId);
 
   if (isOnlyTeacher(req, clubId)) {
@@ -83,7 +87,7 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
 
   const { data, error } = await q.order('created_at', { ascending: false });
   if (error) return res.status(500).json({ ok: false, error: error.message });
-  return res.json({ ok: true, lessons: data ?? [] });
+  return res.json({ ok: true, lessons: (data ?? []).map((row) => mapLessonRow(row as Record<string, unknown>)) });
 });
 
 router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
@@ -97,13 +101,11 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
   if (!validHHMM(startTime) || !validHHMM(endTime) || startTime >= endTime) {
     return res.status(400).json({ ok: false, error: 'Horario inválido' });
   }
-  const studentCount = Math.trunc(Number(req.body?.student_count ?? 1));
-  if (![1, 2, 3].includes(studentCount)) {
-    return res.status(400).json({ ok: false, error: 'student_count debe ser 1, 2 o 3' });
-  }
   const staffId = String(req.body?.staff_id ?? '').trim();
-  const courtId = String(req.body?.court_id ?? '').trim();
-  if (!staffId || !courtId) return res.status(400).json({ ok: false, error: 'staff_id y court_id son obligatorios' });
+  if (!staffId) return res.status(400).json({ ok: false, error: 'staff_id es obligatorio' });
+
+  const normalized = normalizePrivateLessonBody(req.body ?? {});
+  if ('error' in normalized) return res.status(400).json({ ok: false, error: normalized.error });
 
   const supabase = getSupabaseServiceRoleClient();
   const coachErr = await assertSchoolCoachStaff(supabase, clubId, staffId);
@@ -114,7 +116,7 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
     req,
     clubId,
     staffId,
-    studentCount as 1 | 2 | 3,
+    normalized.studentCount,
     weekday,
     startTime,
   );
@@ -126,13 +128,15 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
     .from('club_school_private_lessons')
     .insert({
       club_id: clubId,
-      student_player_id: req.body?.student_player_id || null,
-      student_name: req.body?.student_name || null,
-      student_email: req.body?.student_email || null,
-      student_phone: req.body?.student_phone || null,
+      student_player_id: normalized.primaryStudent.player_id,
+      student_name: normalized.primaryStudent.name,
+      student_email: normalized.primaryStudent.email,
+      student_phone: normalized.primaryStudent.phone,
       staff_id: staffId,
-      court_id: courtId,
-      student_count: studentCount,
+      court_id: normalized.courtIds[0],
+      court_ids: normalized.courtIds,
+      students: normalized.students,
+      student_count: normalized.studentCount,
       price_cents: feePrice,
       weekday,
       start_time: startTime,
@@ -141,10 +145,10 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
       ends_on: req.body?.ends_on || null,
       is_active: req.body?.is_active !== false,
     })
-    .select('id, club_id, student_player_id, student_name, student_email, student_phone, staff_id, court_id, price_cents, student_count, weekday, start_time, end_time, starts_on, ends_on, is_active, created_at, updated_at')
+    .select(LESSON_FIELDS)
     .single();
   if (error) return res.status(500).json({ ok: false, error: error.message });
-  return res.status(201).json({ ok: true, lesson: data });
+  return res.status(201).json({ ok: true, lesson: mapLessonRow(data as Record<string, unknown>) });
 });
 
 router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
@@ -196,10 +200,26 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
     update.start_time = startTime;
     update.end_time = endTime;
   }
-  if (req.body?.student_count !== undefined) {
-    const sc = Math.trunc(Number(req.body.student_count));
-    if (![1, 2, 3].includes(sc)) return res.status(400).json({ ok: false, error: 'student_count debe ser 1, 2 o 3' });
-    update.student_count = sc;
+  if (
+    req.body?.student_count !== undefined ||
+    req.body?.students !== undefined ||
+    req.body?.student_name !== undefined
+  ) {
+    const normalized = normalizePrivateLessonBody({ ...req.body, court_ids: req.body?.court_ids ?? req.body?.court_id });
+    if ('error' in normalized) return res.status(400).json({ ok: false, error: normalized.error });
+    update.student_count = normalized.studentCount;
+    update.students = normalized.students;
+    update.student_player_id = normalized.primaryStudent.player_id;
+    update.student_name = normalized.primaryStudent.name;
+    update.student_email = normalized.primaryStudent.email;
+    update.student_phone = normalized.primaryStudent.phone;
+  }
+
+  if (req.body?.court_ids !== undefined || req.body?.court_id !== undefined) {
+    const normalized = normalizePrivateLessonBody(req.body ?? {});
+    if ('error' in normalized) return res.status(400).json({ ok: false, error: normalized.error });
+    update.court_ids = normalized.courtIds;
+    update.court_id = normalized.courtIds[0];
   }
 
   const { data: currentLesson } = await supabase
@@ -210,7 +230,7 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
 
   const nextWeekday = (update.weekday ?? (currentLesson as any)?.weekday) as Weekday;
   const nextStart = String(update.start_time ?? (currentLesson as any)?.start_time ?? '');
-  const nextStudentCount = Math.trunc(Number(update.student_count ?? (currentLesson as any)?.student_count ?? 1)) as 1 | 2 | 3;
+  const nextStudentCount = Math.trunc(Number(update.student_count ?? (currentLesson as any)?.student_count ?? 1)) as 1 | 2 | 3 | 4;
   const nextStaffId = String(update.staff_id ?? (existing as { staff_id?: string }).staff_id ?? '').trim();
   if (!nextStaffId) return res.status(400).json({ ok: false, error: 'staff_id es obligatorio' });
 
@@ -221,6 +241,7 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
     req.body?.price_cents !== undefined ||
     req.body?.staff_id !== undefined ||
     req.body?.student_count !== undefined ||
+    req.body?.students !== undefined ||
     req.body?.weekday !== undefined ||
     req.body?.start_time !== undefined;
 
@@ -244,10 +265,10 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
     .from('club_school_private_lessons')
     .update(update)
     .eq('id', id)
-    .select('id, club_id, student_player_id, student_name, student_email, student_phone, staff_id, court_id, price_cents, student_count, weekday, start_time, end_time, starts_on, ends_on, is_active, created_at, updated_at')
+    .select(LESSON_FIELDS)
     .single();
   if (error) return res.status(500).json({ ok: false, error: error.message });
-  return res.json({ ok: true, lesson: data });
+  return res.json({ ok: true, lesson: mapLessonRow(data as Record<string, unknown>) });
 });
 
 router.delete('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
@@ -288,7 +309,7 @@ router.get('/slots', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, 
   const supabase = getSupabaseServiceRoleClient();
   let q = supabase
     .from('club_school_private_lessons')
-    .select('id, student_name, student_player_id, staff_id, court_id, price_cents, weekday, start_time, end_time, starts_on, ends_on, is_active')
+    .select('id, student_name, student_player_id, staff_id, court_id, court_ids, students, price_cents, weekday, start_time, end_time, starts_on, ends_on, is_active')
     .eq('club_id', clubId)
     .eq('is_active', true)
     .eq('weekday', weekday);
@@ -306,16 +327,27 @@ router.get('/slots', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, 
   if (error) return res.status(500).json({ ok: false, error: error.message });
   const out = (data ?? [])
     .filter((x: any) => (!x.starts_on || date >= x.starts_on) && (!x.ends_on || date <= x.ends_on))
-    .map((x: any) => ({
-      id: `${x.id}:${date}`,
-      private_lesson_id: x.id,
-      date,
-      court_id: x.court_id,
-      start_time: x.start_time,
-      end_time: x.end_time,
-      student_name: x.student_name ?? null,
-      price_cents: x.price_cents ?? 0,
-    }));
+    .flatMap((x: any) => {
+      const mapped = mapLessonRow(x as Record<string, unknown>);
+      const courtIds = (mapped.court_ids as string[])?.length
+        ? (mapped.court_ids as string[])
+        : [String(mapped.court_id ?? '')].filter(Boolean);
+      const students = mapped.students as Array<{ name?: string | null }>;
+      const label =
+        students.length > 0
+          ? students.map((s) => s.name).filter(Boolean).join(', ') || (x.student_name ?? null)
+          : (x.student_name ?? null);
+      return courtIds.map((courtId) => ({
+        id: `${x.id}:${date}:${courtId}`,
+        private_lesson_id: x.id,
+        date,
+        court_id: courtId,
+        start_time: x.start_time,
+        end_time: x.end_time,
+        student_name: label,
+        price_cents: x.price_cents ?? 0,
+      }));
+    });
   return res.json({ ok: true, slots: out });
 });
 

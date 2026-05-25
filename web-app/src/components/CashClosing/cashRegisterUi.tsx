@@ -96,6 +96,7 @@ export function SalesRows({
   emptyLabel,
   onOpenBooking,
   onOpenCart,
+  onEditSale,
   onEditStoreLine,
   editingMovementId,
 }: {
@@ -105,7 +106,8 @@ export function SalesRows({
   storeCard: number;
   emptyLabel: string;
   onOpenBooking?: (bookingId: string) => void;
-  onOpenCart?: (playerId: string | null, bookingId: string | null) => void;
+  onOpenCart?: (playerId: string | null, bookingId: string | null, saleId?: string | null) => void;
+  onEditSale?: (saleId: string) => void;
   onEditStoreLine?: (movementId: string, amountCents: number) => void;
   editingMovementId?: string | null;
 }) {
@@ -154,7 +156,7 @@ export function SalesRows({
           key={line.movement_id}
           line={line}
           onOpenBooking={onOpenBooking}
-          onOpenCart={onOpenCart}
+          onEditSale={onEditSale}
           onEditStoreLine={onEditStoreLine}
           saving={editingMovementId === line.movement_id}
         />
@@ -178,13 +180,13 @@ export function SalesRows({
 function StoreSaleLineRow({
   line,
   onOpenBooking,
-  onOpenCart,
+  onEditSale,
   onEditStoreLine,
   saving,
 }: {
   line: CashClosingStoreSaleLine;
   onOpenBooking?: (bookingId: string) => void;
-  onOpenCart?: (playerId: string | null, bookingId: string | null) => void;
+  onEditSale?: (saleId: string) => void;
   onEditStoreLine?: (movementId: string, amountCents: number) => void;
   saving?: boolean;
 }) {
@@ -210,29 +212,35 @@ function StoreSaleLineRow({
               Ver turno
             </button>
           ) : null}
-          {onOpenCart ? (
+          {line.sale_id && onEditSale ? (
             <button
               type="button"
-              onClick={() => onOpenCart(line.player_id, line.booking_id)}
-              className="text-[10px] font-bold text-[#E31E24] hover:underline"
+              onClick={() => onEditSale(line.sale_id)}
+              className="text-[10px] font-bold text-[#0B5B7A] hover:underline"
             >
-              Carrito
+              Editar
             </button>
           ) : null}
         </div>
       </div>
       <div className="text-right shrink-0">
-        <input
-          type="text"
-          inputMode="decimal"
-          value={editValue}
-          disabled={saving || !onEditStoreLine}
-          onChange={(e) => setEditValue(e.target.value)}
-          onBlur={commitEdit}
-          onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); }}
-          className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-xs font-bold text-right"
-        />
-        <span className="text-[10px] text-gray-400 ml-0.5">€</span>
+        {onEditSale ? (
+          <p className="text-xs font-bold text-[#1A1A1A]">{(line.amount_cents / 100).toFixed(2)} €</p>
+        ) : (
+          <>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={editValue}
+              disabled={saving || !onEditStoreLine}
+              onChange={(e) => setEditValue(e.target.value)}
+              onBlur={commitEdit}
+              onKeyDown={(e) => { if (e.key === 'Enter') commitEdit(); }}
+              className="w-20 rounded-lg border border-gray-200 px-2 py-1 text-xs font-bold text-right"
+            />
+            <span className="text-[10px] text-gray-400 ml-0.5">€</span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -438,7 +446,8 @@ type CountFormProps = {
   operatorReady?: boolean;
   canDelegate?: boolean;
   onOpenBooking?: (bookingId: string) => void;
-  onOpenCart?: (playerId: string | null, bookingId: string | null) => void;
+  onOpenCart?: (playerId: string | null, bookingId: string | null, saleId?: string | null) => void;
+  onEditSale?: (saleId: string) => void;
   onEditStoreLine?: (movementId: string, amountCents: number) => void;
   editingMovementId?: string | null;
 };
@@ -472,6 +481,7 @@ export function CashCountForm({
   canDelegate = false,
   onOpenBooking,
   onOpenCart,
+  onEditSale,
   onEditStoreLine,
   editingMovementId,
 }: CountFormProps) {
@@ -539,6 +549,7 @@ export function CashCountForm({
               emptyLabel={t('cash_sales_empty')}
               onOpenBooking={onOpenBooking}
               onOpenCart={onOpenCart}
+              onEditSale={onEditSale}
               onEditStoreLine={onEditStoreLine}
               editingMovementId={editingMovementId}
             />
@@ -762,8 +773,10 @@ export type CashTimelineEntry = {
   booking_id?: string;
   player_id?: string | null;
   movement_id?: string;
+  sale_id?: string;
   onOpenBooking?: (bookingId: string) => void;
-  onOpenCart?: (playerId: string | null, bookingId: string | null) => void;
+  onOpenCart?: (playerId: string | null, bookingId: string | null, saleId?: string | null) => void;
+  onEditSale?: (saleId: string) => void;
 };
 
 const toneRowClass: Record<CashTimelineEntry['tone'], string> = {
@@ -800,15 +813,19 @@ export function CashDayTimeline({ entries, emptyLabel }: { entries: CashTimeline
               {e.amountEur.toFixed(2)} €
             </p>
           )}
-          {(e.onOpenBooking && e.booking_id) || e.onOpenCart ? (
+          {(e.onOpenBooking && e.booking_id) || e.onEditSale || e.onOpenCart ? (
             <div className="mt-2 flex flex-wrap gap-2">
               {e.onOpenBooking && e.booking_id ? (
                 <button type="button" onClick={() => e.onOpenBooking!(e.booking_id!)} className="text-[10px] font-bold text-[#0B5B7A] hover:underline">
                   Ver en grilla
                 </button>
               ) : null}
-              {e.onOpenCart ? (
-                <button type="button" onClick={() => e.onOpenCart!(e.player_id ?? null, e.booking_id ?? null)} className="text-[10px] font-bold text-[#E31E24] hover:underline">
+              {e.sale_id && e.onEditSale ? (
+                <button type="button" onClick={() => e.onEditSale!(e.sale_id!)} className="text-[10px] font-bold text-[#0B5B7A] hover:underline">
+                  Editar
+                </button>
+              ) : e.onOpenCart ? (
+                <button type="button" onClick={() => e.onOpenCart!(e.player_id ?? null, e.booking_id ?? null, e.sale_id ?? null)} className="text-[10px] font-bold text-[#E31E24] hover:underline">
                   Carrito
                 </button>
               ) : null}

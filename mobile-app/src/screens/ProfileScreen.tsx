@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
+import { formatPlayerLabel } from '../lib/username';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { PlayerAvatarCircle } from '../components/profile/PlayerAvatarCircle';
 import { theme } from '../theme';
@@ -132,8 +133,12 @@ export function ProfileScreen({
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
   const displayName = profile
-    ? `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim()
-    : profileLoading ? 'Cargando...' : '—';
+    ? `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() ||
+      formatPlayerLabel(profile)
+    : profileLoading
+      ? 'Cargando...'
+      : '—';
+  const usernameLine = profile?.username ? `@${profile.username}` : null;
 
   const needsLevelOnboarding = profile != null && profile.onboardingCompleted === false;
 
@@ -336,6 +341,9 @@ export function ProfileScreen({
               </View>
               <View style={styles.profileInfo}>
                 <Text style={styles.profileName}>{displayName}</Text>
+                {usernameLine ? (
+                  <Text style={styles.usernameText}>{usernameLine}</Text>
+                ) : null}
                 {(profile?.email ?? session?.user?.email) ? (
                   <View style={styles.emailRow}>
                     <Ionicons name="mail-outline" size={12} color="#9CA3AF" />
@@ -667,6 +675,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     flex: 1,
+  },
+  usernameText: {
+    fontSize: 13,
+    color: '#F18F34',
+    marginTop: 2,
+    marginBottom: 2,
   },
   statsRow: {
     flexDirection: 'row',

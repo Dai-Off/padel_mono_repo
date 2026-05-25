@@ -34,6 +34,7 @@ import {
   type CashSection,
   type CashTimelineEntry,
 } from './cashRegisterUi';
+import { EditCartSaleModal } from './EditCartSaleModal';
 
 function mapSavedToLocal(r: CashClosingSavedRecord): CashLedgerRecord {
   return {
@@ -69,6 +70,7 @@ export function ClubCashClosingTab({
   const [expectedBookings, setExpectedBookings] = useState<CashClosingBookingExpected[]>([]);
   const [storeSaleLines, setStoreSaleLines] = useState<CashClosingStoreSaleLine[]>([]);
   const [editingMovementId, setEditingMovementId] = useState<string | null>(null);
+  const [editSaleId, setEditSaleId] = useState<string | null>(null);
   const [systemCashTotal, setSystemCashTotal] = useState(0);
   const [systemCardTotal, setSystemCardTotal] = useState(0);
   const [storeSalesCashTotal, setStoreSalesCashTotal] = useState(0);
@@ -171,27 +173,37 @@ export function ClubCashClosingTab({
     navigate(`/grilla?booking=${encodeURIComponent(bookingId)}`);
   }, [navigate]);
 
-  const openCart = useCallback((playerId: string | null, bookingId: string | null) => {
+  const openCart = useCallback((playerId: string | null, bookingId: string | null, saleId?: string | null) => {
     const q = new URLSearchParams();
     if (playerId) q.set('player', playerId);
     if (bookingId) q.set('booking', bookingId);
+    if (saleId) q.set('sale', saleId);
     navigate(q.toString() ? `/carrito?${q}` : '/carrito');
   }, [navigate]);
+
+  const refreshExpected = useCallback(async () => {
+    if (!clubId) return;
+    const expected = await paymentsService.getCashClosingExpected(clubId, operativeDate, operativeTimezone);
+    applyExpected(expected);
+  }, [clubId, operativeDate, operativeTimezone, applyExpected]);
+
+  const openEditSale = useCallback((saleId: string) => {
+    setEditSaleId(saleId);
+  }, []);
 
   const handleEditStoreLine = useCallback(async (movementId: string, amountCents: number) => {
     if (!clubId) return;
     setEditingMovementId(movementId);
     try {
       await inventoryService.updateSaleLineAmount(movementId, { club_id: clubId, amount_cents: amountCents });
-      const expected = await paymentsService.getCashClosingExpected(clubId, operativeDate, operativeTimezone);
-      applyExpected(expected);
+      await refreshExpected();
       toast.success('Importe actualizado');
     } catch (e) {
       toast.error((e as Error).message || 'No se pudo actualizar el importe');
     } finally {
       setEditingMovementId(null);
     }
-  }, [clubId, operativeDate, operativeTimezone, applyExpected]);
+  }, [clubId, refreshExpected]);
 
   useEffect(() => {
     if (!showOpeningTab && section === 'apertura') setSection('listado');
@@ -457,12 +469,14 @@ export function ClubCashClosingTab({
         subtitle: `Tienda · ${line.payment_method}`,
         booking_id: line.booking_id ?? undefined,
         player_id: line.player_id,
+        sale_id: line.sale_id,
         onOpenBooking: line.booking_id ? openBookingInGrilla : undefined,
         onOpenCart: openCart,
+        onEditSale: openEditSale,
       });
     }
     return items;
-  }, [openingsForDay, historyRecords, cashMovements, expectedBookings, storeSaleLines, openBookingInGrilla, openCart, t]);
+  }, [openingsForDay, historyRecords, cashMovements, expectedBookings, storeSaleLines, openBookingInGrilla, openCart, openEditSale, t]);
 
   const movementPanelProps = {
     sessionActive,
@@ -508,6 +522,7 @@ export function ClubCashClosingTab({
     delegatePanelProps,
     onOpenBooking: openBookingInGrilla,
     onOpenCart: openCart,
+    onEditSale: openEditSale,
     onEditStoreLine: (movementId: string, amountCents: number) => void handleEditStoreLine(movementId, amountCents),
     editingMovementId,
   };
@@ -667,6 +682,15 @@ export function ClubCashClosingTab({
           </div>
         </div>
       )}
+
+      {editSaleId && clubId ? (
+        <EditCartSaleModal
+          clubId={clubId}
+          saleId={editSaleId}
+          onClose={() => setEditSaleId(null)}
+          onSaved={() => void refreshExpected()}
+        />
+      ) : null}
     </div>
   );
 }

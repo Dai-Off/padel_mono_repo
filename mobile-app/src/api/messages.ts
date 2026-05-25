@@ -11,6 +11,7 @@ export type DirectConversation = {
   peer_player_id: string;
   peer_first_name: string;
   peer_last_name: string;
+  peer_username?: string | null;
   peer_avatar_url: string | null;
   last_message_at: string;
   last_message_preview: string;

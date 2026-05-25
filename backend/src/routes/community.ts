@@ -38,7 +38,7 @@ router.get('/feed', async (req: Request, res: Response) => {
       .from('community_posts')
       .select(`
         *,
-        player:players(id, first_name, last_name, avatar_url),
+        player:players(id, first_name, last_name, username, avatar_url),
         images:community_post_images(id, image_url, display_order)
       `)
       .eq('status', 'published')
@@ -101,7 +101,7 @@ router.get('/stories', async (req: Request, res: Response) => {
       .from('community_posts')
       .select(`
         *,
-        player:players(id, first_name, last_name, avatar_url),
+        player:players(id, first_name, last_name, username, avatar_url),
         images:community_post_images(id, image_url, display_order)
       `)
       .eq('status', 'published')
@@ -326,7 +326,7 @@ router.get('/posts/:id/comments', async (req: Request, res: Response) => {
       .from('community_comments')
       .select(`
         *,
-        player:players(id, first_name, last_name, avatar_url)
+        player:players(id, first_name, last_name, username, avatar_url)
       `)
       .eq('post_id', id)
       .order('created_at', { ascending: true })
@@ -372,7 +372,7 @@ router.post('/posts/:id/comments', async (req: Request, res: Response) => {
       })
       .select(`
         *,
-        player:players(id, first_name, last_name, avatar_url)
+        player:players(id, first_name, last_name, username, avatar_url)
       `)
       .single();
 

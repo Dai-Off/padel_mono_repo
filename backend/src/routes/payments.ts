@@ -1665,7 +1665,9 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       const court = (Array.isArray(rawCourts) ? rawCourts[0] : rawCourts) as Record<string, unknown> | null;
 
       const stripeRef = r.stripe_payment_intent_id as string | null;
+      const txStatus = String((r as { status?: string }).status ?? '');
       const isStoreSaleTx = typeof stripeRef === 'string' && stripeRef.startsWith('STORE_SALE_');
+      if (isStoreSaleTx && txStatus === 'refunded') continue;
       const sourceChannel = (b.source_channel as string | null) ?? null;
       const isCash =
         (typeof stripeRef === 'string' && stripeRef.startsWith('CASH_')) ||
@@ -1722,7 +1724,7 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
     if (!saleMovementsErr && Array.isArray(inventorySaleMovements)) {
       for (const movement of inventorySaleMovements) {
         const reason = typeof (movement as any).reason === 'string' ? (movement as any).reason : '';
-        if (!reason.startsWith('SALE|')) continue;
+        if (!reason.startsWith('SALE|') || reason.startsWith('VOID|')) continue;
         const movementAtSource = (movement as any).movement_at ?? (movement as any).created_at;
         if (closingCutoffMs != null && typeof movementAtSource === 'string') {
           const movementMs = new Date(movementAtSource).getTime();

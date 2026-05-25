@@ -2,6 +2,30 @@ import { apiFetchWithAuth, getApiBase } from './api';
 import type { ApiResponse } from '../types/api';
 import type { InventoryCategory, InventoryItem, InventoryMovement, InventoryMovementType } from '../types/inventory';
 
+export type CartSaleDetail = {
+    id: string;
+    club_id: string;
+    player_id: string;
+    payment_method: string;
+    wallet_amount_cents: number;
+    link_booking_id: string | null;
+    currency: string;
+    total_cents: number;
+    voided: boolean;
+    lines: Array<{
+        movement_id?: string;
+        item_id?: string;
+        custom_name?: string;
+        unit_price_cents: number;
+        quantity: number;
+    }>;
+    booking_charges: Array<{
+        booking_id: string;
+        charge_scope: 'full' | 'player_share';
+        amount_cents: number;
+    }>;
+};
+
 type ApiOk<T> = T & { ok: true };
 
 export const inventoryService = {
@@ -101,6 +125,38 @@ export const inventoryService = {
         await apiFetchWithAuth<ApiOk<{ movement: { id: string } }>>(`/inventario/movements/${movementId}/sale-amount`, {
             method: 'PATCH',
             body: JSON.stringify(body),
+        });
+    },
+
+    getSale: async (clubId: string, saleId: string) => {
+        const q = new URLSearchParams({ club_id: clubId });
+        const res = await apiFetchWithAuth<ApiOk<{ sale: CartSaleDetail }>>(`/inventario/sales/${saleId}?${q}`);
+        return res.sale;
+    },
+
+    updateSale: async (
+        saleId: string,
+        body: {
+            club_id: string;
+            booking_id?: string;
+            player_id: string;
+            payment_method: 'cash' | 'card' | 'wallet';
+            wallet_amount_cents?: number;
+            booking_charges?: Array<{ booking_id: string; charge_scope: 'full' | 'player_share' }>;
+            lines: Array<{ item_id?: string; quantity: number; name?: string; unit_price_cents?: number }>;
+        },
+    ) => {
+        const res = await apiFetchWithAuth<ApiOk<{ sale: { id: string; total_cents: number; currency: string } }>>(
+            `/inventario/sales/${saleId}`,
+            { method: 'PUT', body: JSON.stringify(body) },
+        );
+        return res.sale;
+    },
+
+    voidSale: async (clubId: string, saleId: string) => {
+        const q = new URLSearchParams({ club_id: clubId });
+        await apiFetchWithAuth<ApiOk<{ sale: { id: string; voided: boolean } }>>(`/inventario/sales/${saleId}?${q}`, {
+            method: 'DELETE',
         });
     },
 
