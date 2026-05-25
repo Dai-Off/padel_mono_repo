@@ -184,6 +184,30 @@ export async function submitDailyLesson(
   }
 }
 
+// Envía en bulk los votos like/dislike que el jugador ha dado en la pantalla
+// de resultados de la lección. Fire-and-forget: si falla no se reintenta y
+// no muestra error al usuario (la feature es secundaria).
+export type LessonVote = { question_id: string; vote: 'up' | 'down' };
+
+export async function submitLessonFeedback(
+  token: string | null | undefined,
+  votes: LessonVote[],
+): Promise<void> {
+  if (!token || votes.length === 0) return;
+  try {
+    await fetch(`${API_URL}/learning/daily-lesson/feedback`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ votes }),
+    });
+  } catch {
+    // Silencioso. La feature es secundaria y el usuario ya se fue de la pantalla.
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Cursos educativos (learning courses)
 // ---------------------------------------------------------------------------

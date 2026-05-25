@@ -1,9 +1,11 @@
 import { useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { X, Plus, Trash2, Upload, Video } from 'lucide-react';
+import { X, Plus, Trash2, Upload, Video, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { learningContentService, validateVideo, VIDEO_LIMITS } from '../../../services/learningContent';
+import { adminLearningService } from '../../../services/adminLearning';
+import { useEscapeClose } from './useEscapeClose';
 import { PuzzleEditor } from './PuzzleEditor/PuzzleEditor';
 import { validatePuzzleContentAll } from '../../../lib/puzzleValidator';
 import type {
@@ -52,9 +54,9 @@ function defaultContent(type: QuestionType): QuestionContent {
     case 'multi_select':
       return { question: '', options: ['', '', '', ''], correct_indices: [] } as MultiSelectContent;
     case 'match_columns':
-      return { pairs: [{ left: '', right: '' }, { left: '', right: '' }, { left: '', right: '' }] } as MatchColumnsContent;
+      return { question: '', pairs: [{ left: '', right: '' }, { left: '', right: '' }, { left: '', right: '' }] } as MatchColumnsContent;
     case 'order_sequence':
-      return { steps: ['', '', ''] } as OrderSequenceContent;
+      return { question: '', steps: ['', '', ''] } as OrderSequenceContent;
     case 'puzzle':
       return { ...PUZZLE_TEMPLATE } as PuzzleContent;
   }
@@ -66,9 +68,24 @@ interface Props {
   clubId: string;
   onClose: () => void;
   onSaved: () => void;
+  // Si true, el modal usa los endpoints admin (PUT /admin/learning/questions/:id)
+  // y muestra la sección "Moderación" con checkbox "Avisar al club" + textarea.
+  // Si false (default), se comporta como hasta ahora (modo club).
+  useAdminEndpoints?: boolean;
 }
 
-export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: Props) {
+// Plantilla por defecto cuando el admin marca "Avisar al club". Se rellena con
+// la fecha del día y deja la razón en blanco para que el admin la complete.
+function buildModerationNoteTemplate(): string {
+  const today = new Date();
+  const dd = String(today.getDate()).padStart(2, '0');
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const yyyy = today.getFullYear();
+  return `Modificado por admin el ${dd}/${mm}/${yyyy}. Razón: `;
+}
+
+export function QuestionFormModal({ mode, question, clubId, onClose, onSaved, useAdminEndpoints = false }: Props) {
+  useEscapeClose(onClose);
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
 
@@ -85,6 +102,25 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
   const [content, setContent] = useState<QuestionContent>(
     question?.content ?? defaultContent(type),
   );
+
+  // Sección "Moderación" (solo admin). Si la pregunta ya trae una nota,
+  // arrancamos con el checkbox activado y la nota cargada para que el admin
+  // pueda editarla o limpiarla.
+  const [notifyClub, setNotifyClub] = useState<boolean>(!!question?.moderation_notes);
+  const [moderationNotes, setModerationNotes] = useState<string>(question?.moderation_notes ?? '');
+
+  // Snapshot del estado inicial. Sirve para detectar si ha habido cambios
+  // antes de llamar al backend — evita updates innecesarios (y en
+  // particular evita marcar la pregunta como editada si el content no cambió).
+  const initialSnapshot = useRef({
+    type: question?.type ?? 'test_classic',
+    level: question?.level ?? null,
+    area: question?.area ?? 'technique',
+    videoUrl: question?.video_url ?? '',
+    contentJson: JSON.stringify(question?.content ?? defaultContent(question?.type ?? 'test_classic')),
+    status: question?.status ?? 'draft',
+    moderationNotes: question?.moderation_notes ?? '',
+  });
 
   const handleTypeChange = (newType: QuestionType) => {
     if (newType === type) return;
@@ -166,12 +202,14 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
       }
       case 'match_columns': {
         const c = content as MatchColumnsContent;
+        if (!c.question?.trim()) return t('learning_field_question');
         if (c.pairs.some((p) => !p.left.trim() || !p.right.trim()))
           return `${t('learning_field_pair_left')} / ${t('learning_field_pair_right')}`;
         return null;
       }
       case 'order_sequence': {
         const c = content as OrderSequenceContent;
+        if (!c.question?.trim()) return t('learning_field_question');
         if (c.steps.some((s) => !s.trim())) return t('learning_field_step');
         return null;
       }
@@ -235,31 +273,67 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
       if (!ok) return;
     }
 
+    // Detección de "sin cambios" en modo edit. Si nada del state ni el status
+    // destino difieren del snapshot inicial, no llamamos al backend (evita
+    // actualizar content_updated_at y otras escrituras innecesarias).
+    if (mode === 'edit') {
+      const snap = initialSnapshot.current;
+      const targetStatus = saveMode === 'draft' ? 'draft' : 'published';
+      const currentNotes = useAdminEndpoints
+        ? (notifyClub && moderationNotes.trim() ? moderationNotes.trim() : '')
+        : snap.moderationNotes;
+      const noChanges =
+        type === snap.type &&
+        level === snap.level &&
+        area === snap.area &&
+        (videoUrl ?? '') === snap.videoUrl &&
+        !videoFile &&
+        JSON.stringify(content) === snap.contentJson &&
+        targetStatus === snap.status &&
+        currentNotes === snap.moderationNotes;
+      if (noChanges) {
+        toast('Sin cambios');
+        onClose();
+        return;
+      }
+    }
+
     setSaving(true);
     try {
-      // Los puzzles no llevan video. Para el resto de tipos, subir si hay archivo nuevo.
-      let finalVideoUrl = type === 'puzzle' ? null : videoUrl;
+      // Vídeo opcional para todos los tipos (incluido puzzle desde el Bloque 4).
+      let finalVideoUrl = videoUrl;
 
-      if (type !== 'puzzle' && videoFile) {
+      if (videoFile) {
         setUploading(true);
         finalVideoUrl = await learningContentService.uploadQuestionVideo(clubId, videoFile);
         setUploading(false);
       }
 
-      const body = {
+      const baseBody: Record<string, unknown> = {
         club_id: clubId,
         type,
         level: level as number,
         area,
         video_url: finalVideoUrl || null,
         content,
-        status: (saveMode === 'draft' ? 'draft' : 'published') as 'draft' | 'published',
+        status: saveMode === 'draft' ? 'draft' : 'published',
       };
 
+      // Si el admin está editando y marcó "Avisar al club", añadimos la nota.
+      // Si no marcó, ponemos null explícitamente para limpiar una nota previa.
+      if (useAdminEndpoints) {
+        baseBody.moderation_notes = notifyClub && moderationNotes.trim() ? moderationNotes.trim() : null;
+      }
+
       if (mode === 'create') {
-        await learningContentService.createQuestion(body);
+        // Crear siempre va al endpoint del club (el club es siempre el dueño del contenido).
+        await learningContentService.createQuestion(baseBody as Parameters<typeof learningContentService.createQuestion>[0]);
       } else if (question) {
-        await learningContentService.updateQuestion(question.id, body);
+        if (useAdminEndpoints) {
+          await adminLearningService.updateQuestion(question.id, baseBody);
+        } else {
+          await learningContentService.updateQuestion(question.id, baseBody as Parameters<typeof learningContentService.updateQuestion>[1]);
+        }
       }
       if (saveMode === 'draft') {
         toast.success('Guardado como borrador', {
@@ -274,6 +348,17 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
     } finally {
       setSaving(false);
       setUploading(false);
+    }
+  };
+
+  // Cuando el admin marca/desmarca "Avisar al club":
+  //   - Al marcar y la nota está vacía: precargamos plantilla.
+  //   - Al desmarcar: NO borramos la nota (por si vuelven a marcar — se conserva
+  //     en memoria local). Al guardar, si está desmarcado, se enviará null.
+  const handleToggleNotify = (next: boolean) => {
+    setNotifyClub(next);
+    if (next && !moderationNotes.trim()) {
+      setModerationNotes(buildModerationNoteTemplate());
     }
   };
 
@@ -301,6 +386,19 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
         </div>
 
         <form onSubmit={handleFormSubmit} className="p-5 space-y-4">
+          {/* Banner de notas de moderación. En modo club es informativo (read-only).
+              En modo admin se gestiona desde la sección de moderación de abajo, así
+              que no se muestra aquí para no duplicar. */}
+          {!useAdminEndpoints && question?.moderation_notes && (
+            <div className="flex gap-2 rounded-xl bg-amber-50 border border-amber-200 px-3 py-2.5">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold text-amber-700 uppercase">Notas del equipo de moderación</p>
+                <p className="text-xs text-amber-800 mt-0.5 whitespace-pre-wrap">{question.moderation_notes}</p>
+              </div>
+            </div>
+          )}
+
           {/* Tipo */}
           <div>
             <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_type')}</label>
@@ -361,14 +459,19 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
             </div>
           </div>
 
-          {/* Video — no aplica para puzzles */}
-          {type !== 'puzzle' && (
+          {/* Vídeo opcional. Para puzzles, el vídeo se reproduce en el
+              mobile antes de mostrar la pregunta (paridad con el resto de
+              tipos). Si no se sube, el puzzle sigue funcionando con su
+              intro_frame → initial_frame habitual. */}
           <div className="space-y-2">
             <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">
               {t('learning_field_video')}
               <span className="text-gray-300 font-normal ml-1">
                 (máx {VIDEO_LIMITS.question.maxSizeMB}MB, {VIDEO_LIMITS.question.maxDurationSec}s)
               </span>
+              {type === 'puzzle' && (
+                <span className="text-gray-300 font-normal ml-1">— opcional, intro previa</span>
+              )}
             </label>
             {validating ? (
               <div className="flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-indigo-200 text-xs font-bold text-indigo-400">
@@ -414,7 +517,6 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
               className="hidden"
             />
           </div>
-          )}
 
           {/* Separador */}
           <div className="border-t border-gray-100" />
@@ -461,6 +563,33 @@ export function QuestionFormModal({ mode, question, clubId, onClose, onSaved }: 
               onChange={(c) => setContent(c)}
               showErrors={hasAttemptedPublish}
             />
+          )}
+
+          {/* Sección "Moderación" — solo en modo admin editando. Permite enviar
+              una nota al club explicando por qué se ha modificado la pregunta. */}
+          {useAdminEndpoints && mode === 'edit' && (
+            <div className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 space-y-3">
+              <h4 className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider">Moderación</h4>
+              <label className="flex items-center gap-2 cursor-pointer text-xs text-[#1A1A1A]">
+                <input
+                  type="checkbox"
+                  checked={notifyClub}
+                  onChange={(e) => handleToggleNotify(e.target.checked)}
+                  className="rounded"
+                />
+                <span className="font-semibold">Avisar al club</span>
+                <span className="text-[10px] text-gray-500">(añade una nota visible cuando el club edite la pregunta)</span>
+              </label>
+              {notifyClub && (
+                <textarea
+                  value={moderationNotes}
+                  onChange={(e) => setModerationNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Explica por qué se ha cambiado o qué debe revisar el club"
+                  className="w-full rounded-xl border border-indigo-200 px-3 py-2 text-xs resize-none bg-white"
+                />
+              )}
+            </div>
           )}
 
           {/* Botones */}
@@ -660,6 +789,16 @@ function MatchColumnsFields({ content, onChange, t }: { content: MatchColumnsCon
 
   return (
     <div className="space-y-3">
+      <div>
+        <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_question')}</label>
+        <textarea
+          value={content.question ?? ''}
+          onChange={(e) => onChange({ ...content, question: e.target.value })}
+          rows={2}
+          placeholder="Relaciona cada elemento de la izquierda con el de la derecha"
+          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-none"
+        />
+      </div>
       <div className="flex items-center justify-between">
         <label className="text-[10px] font-bold text-gray-500 uppercase">{t('learning_field_pair_left')} / {t('learning_field_pair_right')}</label>
         {content.pairs.length < 5 && (
@@ -721,6 +860,16 @@ function OrderSequenceFields({ content, onChange, t }: { content: OrderSequenceC
 
   return (
     <div className="space-y-3">
+      <div>
+        <label className="text-[10px] font-bold text-gray-500 uppercase mb-1 block">{t('learning_field_question')}</label>
+        <textarea
+          value={content.question ?? ''}
+          onChange={(e) => onChange({ ...content, question: e.target.value })}
+          rows={2}
+          placeholder="Ordena correctamente los siguientes pasos"
+          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm resize-none"
+        />
+      </div>
       <div className="flex items-center justify-between">
         <label className="text-[10px] font-bold text-gray-500 uppercase">{t('learning_field_step')}</label>
         {content.steps.length < 6 && (

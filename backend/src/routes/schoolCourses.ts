@@ -31,7 +31,7 @@ const LEVELS: Level[] = [
 ];
 
 const COURSE_FIELDS =
-  'id, club_id, name, sport, level, staff_id, court_id, price_cents, price_type_id, capacity, is_active, starts_on, ends_on, created_at, updated_at';
+  'id, club_id, name, sport, level, staff_id, court_id, price_cents, price_type_id, capacity, is_active, starts_on, ends_on, created_by_auth_user_id, created_at, updated_at';
 
 async function enrichCoursesWithPriceTypes(supabase: ReturnType<typeof getSupabaseServiceRoleClient>, courses: any[]) {
   const typeIds = [...new Set(courses.map((c) => c.price_type_id).filter(Boolean))];
@@ -325,9 +325,16 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
       if (staffId) {
+        // Profesor físico: ver solo cursos donde es el staff asignado
         q = q.eq('staff_id', staffId);
       } else {
-        return res.json({ ok: true, courses: [] });
+        // Coordinador/profesor del portal sin vínculo a staff: ver solo los que creó
+        const userId = req.authContext?.userId;
+        if (userId) {
+          q = q.eq('created_by_auth_user_id', userId);
+        } else {
+          return res.json({ ok: true, courses: [] });
+        }
       }
     }
 
@@ -547,7 +554,11 @@ router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((course as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (course as any).staff_id === staffId
+        : userId && (course as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para ver este curso' });
       }
     }
@@ -723,6 +734,7 @@ router.post('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res:
       is_active: is_active !== false,
       starts_on: starts_on || null,
       ends_on: ends_on || null,
+      created_by_auth_user_id: req.authContext?.userId ?? null,
     };
     const { data: created, error } = await supabase
       .from('club_school_courses')
@@ -823,7 +835,11 @@ router.put('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, re
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((existing as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (existing as any).staff_id === staffId
+        : userId && (existing as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para editar este curso' });
       }
     }
@@ -1048,7 +1064,11 @@ router.delete('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request,
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((existing as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (existing as any).staff_id === staffId
+        : userId && (existing as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para eliminar este curso' });
       }
     }
@@ -1112,7 +1132,11 @@ router.post('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((course as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (course as any).staff_id === staffId
+        : userId && (course as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para anotar alumnos en este curso' });
       }
     }
@@ -1172,7 +1196,11 @@ router.get('/:id/enrollments', requireClubOwnerOrAdminOrPortalStaff, async (req:
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((course as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (course as any).staff_id === staffId
+        : userId && (course as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para ver inscripciones de este curso' });
       }
     }
@@ -1219,7 +1247,11 @@ router.put('/:id/enrollments/:enrollmentId', requireClubOwnerOrAdminOrPortalStaf
 
     if (isOnlyTeacher(req, clubId)) {
       const staffId = await getStaffIdForUser(req, clubId);
-      if ((course as any).staff_id !== staffId) {
+      const userId = req.authContext?.userId;
+      const canAccess = staffId
+        ? (course as any).staff_id === staffId
+        : userId && (course as any).created_by_auth_user_id === userId;
+      if (!canAccess) {
         return res.status(403).json({ ok: false, error: 'No tienes permiso para gestionar esta inscripción' });
       }
     }

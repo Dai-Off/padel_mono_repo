@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { StoryGroup } from '../../api/community';
 import { formatTimeAgo } from '../../utils/timeAgo';
+import { formatPlayerLabel } from '../../lib/username';
 
 const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 5000; // 5 seconds
@@ -172,7 +173,7 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
               />
               <View>
                 <Text style={styles.username}>
-                  {group.player.first_name} {group.player.last_name}
+                  {formatPlayerLabel(group.player)}
                 </Text>
                 <Text style={styles.timeAgo}>
                   {formatTimeAgo(currentStory.created_at)}

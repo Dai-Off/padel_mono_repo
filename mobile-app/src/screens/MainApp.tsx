@@ -39,6 +39,8 @@ import { ProfileScreen } from './ProfileScreen';
 import { EditProfileScreen } from './EditProfileScreen';
 import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { useAuth } from '../contexts/AuthContext';
+import { fetchMyPlayerProfile } from '../api/players';
+import { UsernameSetupModal } from '../components/profile/UsernameSetupModal';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
 import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
 import { CommunityScreen } from './CommunityScreen';
@@ -119,6 +121,26 @@ export function MainApp() {
    */
   const [pendingOnboardingReturn, setPendingOnboardingReturn] =
     useState<PostOnboardingReturn | null>(null);
+  const [needsUsernameSetup, setNeedsUsernameSetup] = useState(false);
+  const [usernameCheckDone, setUsernameCheckDone] = useState(false);
+
+  useEffect(() => {
+    if (!session?.access_token) {
+      setNeedsUsernameSetup(false);
+      setUsernameCheckDone(false);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const profile = await fetchMyPlayerProfile(session.access_token);
+      if (cancelled) return;
+      setNeedsUsernameSetup(Boolean(profile && !profile.username?.trim()));
+      setUsernameCheckDone(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, profileRefreshKey]);
 
   /**
    * Abre el perfil con el modal del cuestionario auto-abierto y guarda la
@@ -534,7 +556,10 @@ export function MainApp() {
     }
     if (showCommunity) {
       return (
-        <CommunityScreen onBack={() => setShowCommunity(false)} />
+        <CommunityScreen
+          onBack={() => setShowCommunity(false)}
+          onMessagesPress={() => { setShowCommunity(false); setShowMessages(true); }}
+        />
       );
     }
     if (showMessages) {
@@ -868,6 +893,7 @@ export function MainApp() {
     setMessagesPeer(null);
     setShowCompetitiveLeague(false);
     setShowSeasonPass(false);
+    setShowCommunity(false);
   };
 
   return (
@@ -901,6 +927,7 @@ export function MainApp() {
               selectedEducationalCourse != null ||
               selectedPublicCourse != null ||
               showMessages ||
+              showCommunity ||
               !!affinityDmPeer ||
               showPublicProfile ||
               affinityPublicProfileId !== null ||
@@ -909,7 +936,7 @@ export function MainApp() {
             }
             layoutBackgroundColor={layoutBackgroundColor}
             navbarActions={{
-              onMessagesPress: () => setShowMessages(true),
+              onMessagesPress: () => { setShowCommunity(false); setShowMessages(true); },
               onGroupsPress: () => setShowCommunity(true),
             }}
           >
@@ -957,6 +984,16 @@ export function MainApp() {
             onClose={() => setBookingSuccessData(null)}
           />
         </View>
+      ) : null}
+
+      {usernameCheckDone ? (
+        <UsernameSetupModal
+          visible={needsUsernameSetup}
+          onComplete={() => {
+            setNeedsUsernameSetup(false);
+            setProfileRefreshKey((k) => k + 1);
+          }}
+        />
       ) : null}
     </View>
   );

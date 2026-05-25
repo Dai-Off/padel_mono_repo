@@ -123,10 +123,13 @@ export interface MultiSelectContent {
 }
 
 export interface MatchColumnsContent {
+  // Enunciado opcional en draft; obligatorio al publicar (validado en backend).
+  question?: string;
   pairs: { left: string; right: string }[];
 }
 
 export interface OrderSequenceContent {
+  question?: string;
   steps: string[];
 }
 
@@ -154,6 +157,27 @@ export interface Question {
   //   - 'published' → válida y servida en lecciones.
   //   - 'inactive'  → pausada (no se sirve, conserva contenido válido).
   status: QuestionStatus;
+  // Nota de moderación escrita por un admin. Visible para el club al editar.
+  // NULL = sin nota.
+  moderation_notes?: string | null;
+  // Timestamp de la última edición por un admin (server-side). El cliente no
+  // lo modifica; viene del backend.
+  last_admin_edit_at?: string | null;
+  // Timestamp de la última vez que el club abrió la pregunta tras recibir una
+  // nota. Se usa para calcular "nota no vista" comparando contra
+  // last_admin_edit_at. NULL = nunca vista tras la nota más reciente.
+  notes_seen_at?: string | null;
+  // Agregados de valoración (like/dislike) por pregunta. Se cuenta el voto
+  // más reciente por jugador → un usuario que vio la pregunta varias veces
+  // influye una sola vez. Útil para detectar preguntas mal redactadas.
+  feedback_up?: number;
+  feedback_down?: number;
+  // Agregados de respuestas. attempts_count cuenta cada fila de
+  // learning_question_log (todos los intentos). correct_count cuántos
+  // fueron acertados. Útil para mostrar % de acierto y detectar preguntas
+  // muy fáciles / muy difíciles.
+  attempts_count?: number;
+  correct_count?: number;
   created_at: string;
   // Solo presente si type='puzzle'. Metadata de la fila learning_puzzles (id propio,
   // thumbnail_url, timestamps). El árbol también se mergea en content.
@@ -206,3 +230,9 @@ export interface CourseLesson {
 export interface CourseWithLessons extends Course {
   lessons: CourseLesson[];
 }
+
+// Avisos que el backend puede señalar sobre una pregunta. Coincide con
+// detectWarnings() en backend/src/routes/learningClubQuestions.ts.
+export type WarningKind = 'too_easy' | 'too_hard' | 'low_quality';
+
+export type QuestionWithWarnings = Question & { warnings: WarningKind[] };

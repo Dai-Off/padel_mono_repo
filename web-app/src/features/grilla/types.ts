@@ -1,3 +1,9 @@
+export type CreateBookingBatchResult = {
+    created: number;
+    failed: Array<{ date: string; court_id: string; reason: string }>;
+    skippedHolidays: string[];
+};
+
 // Lifecycle / payment status (maps to bookings.status in DB)
 export type ReservationStatus =
     | 'pending_payment'   // Pendiente de cobro
@@ -44,6 +50,7 @@ export interface Reservation {
     matchType?: string;
     status: ReservationStatus;
     booking_type: ReservationType;
+    reservation_type?: ReservationType;
     source_channel?: 'mobile' | 'web' | 'manual' | 'system';
     playerEmail?: string;
     totalPrice?: number;

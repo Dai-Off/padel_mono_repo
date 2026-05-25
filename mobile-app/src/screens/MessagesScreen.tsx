@@ -16,6 +16,7 @@ import { fetchDirectConversations, type DirectConversation } from '../api/messag
 import { fetchMyPlayerId, searchPlayers, type PlayerSearchHit } from '../api/players';
 import { subscribeMessagesSocket } from '../realtime/messagesSocket';
 import { theme } from '../theme';
+import { formatPlayerLabel } from '../lib/username';
 
 const ACCENT = '#F18F34';
 const BG = '#0A0A0A';
@@ -34,7 +35,11 @@ type MessagesScreenProps = {
 };
 
 function peerDisplayName(c: DirectConversation): string {
-  return [c.peer_first_name, c.peer_last_name].filter(Boolean).join(' ').trim() || 'Jugador';
+  return formatPlayerLabel({
+    username: c.peer_username,
+    first_name: c.peer_first_name,
+    last_name: c.peer_last_name,
+  });
 }
 
 function initials(name: string): string {
@@ -271,7 +276,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                 keyboardShouldPersistTaps="handled"
                 style={styles.modalList}
                 renderItem={({ item }) => {
-                  const dn = [item.first_name, item.last_name].filter(Boolean).join(' ').trim() || 'Jugador';
+                  const dn = formatPlayerLabel(item);
                   return (
                     <Pressable
                       style={({ pressed }) => [styles.searchRow, pressed && styles.rowPressed]}

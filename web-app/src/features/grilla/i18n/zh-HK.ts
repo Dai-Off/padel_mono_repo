@@ -48,6 +48,14 @@ export const zhHK: TranslationKeys = {
         virtualCourt: '虛擬球場',
     },
 
+    legend: {
+        iconsTitle: '時段圖示',
+        mobileBadge: '手機 App 預訂 (WM)',
+        paidDot: '已付款',
+        pendingDot: '待收款',
+        alertDot: '提醒 / 待核對',
+    },
+
     badPractice: {
         title: '排程優化',
         subtitle: '偵測到排程分配不良做法',

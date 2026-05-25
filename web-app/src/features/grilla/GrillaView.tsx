@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import { Calendar, Menu, ArrowLeft, X, Globe, Wallet, Gift, Plus, Loader2, MoreVertical, Trash2, Settings, Lock, LockOpen } from 'lucide-react';
 import { MainMenu } from '../../components/Layout/MainMenu';
 import { PageSpinner } from '../../components/Layout/PageSpinner';
@@ -24,7 +25,7 @@ import { restrictToWindowEdges } from '@dnd-kit/modifiers';
 import { TransformWrapper, TransformComponent, useTransformEffect } from 'react-zoom-pan-pinch';
 import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 
-import type { Court, Reservation } from './types';
+import type { Court, CreateBookingBatchResult, Reservation } from './types';
 import { TimeAxis } from './components/TimeAxis';
 import { GridBackground } from './components/GridBackground';
 import { CourtColumn } from './components/CourtColumn';
@@ -491,7 +492,7 @@ const useClubData = (dateOrStr: Date | string) => {
             }
         } catch(e) {
             console.error('Error addHiddenCourt:', e);
-            alert('Error creando nueva pista oculta');
+            toast.error('Error creando nueva pista oculta');
         } finally {
             setIsCreatingCourt(false);
         }
@@ -516,7 +517,7 @@ const useClubData = (dateOrStr: Date | string) => {
             }
         } catch(e) {
             console.error('Error removeCourt:', e);
-            alert('Error al eliminar pista oculta. Se restablecerá la grilla.');
+            toast.error('Error al eliminar pista oculta. Se restablecerá la grilla.');
             // Rollback
             setCourts(previousCourts);
             courtsRef.current = previousCourts;
@@ -601,6 +602,7 @@ function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
             matchType: isMaintenance ? 'MANTENIMIENTO' : undefined,
             status: b.status ?? 'pending_payment',
             booking_type: bookingType,
+            reservation_type: bookingType,
             source_channel: b.source_channel ?? 'manual',
             notes: b.notes ?? undefined,
             locationId: 'sede-central',
@@ -731,6 +733,7 @@ const ZoomScrollbars = () => {
 
 function GrillaViewInner() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { t, i18n } = useGrillaTranslation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [langMenuOpen, setLangMenuOpen] = useState(false);
@@ -1177,7 +1180,46 @@ function GrillaViewInner() {
     refresh();
   };
 
-  const handleCreateBooking = async (bookingData: any) => {
+  const openBookingById = useCallback(async (bookingId: string) => {
+      try {
+          const data = await apiFetchWithAuth<any>(`/bookings/${bookingId}`);
+          if (!data?.booking) return;
+          const b = data.booking;
+          const court = courts.find((c) => c.id === b.court_id);
+          const start = new Date(b.start_at);
+          const end = new Date(b.end_at);
+          const bookingType = b.reservation_type ?? b.booking_type ?? 'standard';
+          const mapped: Reservation = {
+              id: bookingId,
+              courtId: b.court_id,
+              courtName: court?.name ?? '',
+              startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
+              durationMinutes: Math.round((end.getTime() - start.getTime()) / 60000),
+              status: b.status,
+              booking_type: bookingType,
+              reservation_type: bookingType,
+              playerName: '',
+              isPaidIcon: b.status === 'confirmed',
+          };
+          setSelectedDate(start);
+          setReservations((prev) => (prev.some((r) => r.id === bookingId) ? prev : [...prev, mapped]));
+          setEditingBookingData(b);
+          setSelectedModalReservationId(bookingId);
+      } catch (e) {
+          toast.error((e as Error).message || 'No se pudo abrir el turno');
+      }
+  }, [courts]);
+
+  useEffect(() => {
+      const bookingId = searchParams.get('booking');
+      if (!bookingId || courts.length === 0) return;
+      void openBookingById(bookingId);
+      const next = new URLSearchParams(searchParams);
+      next.delete('booking');
+      setSearchParams(next, { replace: true });
+  }, [searchParams, courts.length, openBookingById, setSearchParams]);
+
+  const handleCreateBooking = async (bookingData: any): Promise<CreateBookingBatchResult> => {
       try {
           const includeHolidays = bookingData.include_holidays !== false;
           const courtIds: string[] = Array.isArray(bookingData.court_ids) && bookingData.court_ids.length > 0
@@ -1248,7 +1290,7 @@ function GrillaViewInner() {
                   delete payload.recurrence_weekdays;
                   delete payload.include_holidays;
 
-                  const res = await apiFetch<any>('/bookings', {
+                  const res = await apiFetchWithAuth<any>('/bookings', {
                       method: 'POST',
                       body: JSON.stringify(payload),
                   });
@@ -1285,18 +1327,29 @@ function GrillaViewInner() {
               throw new Error(`No se pudieron crear las reservas.\n${detail}`);
           }
           refresh();
+          const result: CreateBookingBatchResult = {
+              created: createdBookings.length,
+              failed: failedAttempts,
+              skippedHolidays: skippedHolidayDates,
+          };
+          if (createdBookings.length > 0) {
+              toast.success(`${createdBookings.length} reserva(s) creada(s)`);
+          }
           if (skippedHolidayDates.length > 0) {
-              alert(`Se omitieron ${skippedHolidayDates.length} fecha(s) festiva(s): ${skippedHolidayDates.join(', ')}`);
+              toast.message(`Festivos omitidos (${skippedHolidayDates.length})`, {
+                  description: skippedHolidayDates.slice(0, 5).join(', '),
+              });
           }
           if (failedAttempts.length > 0) {
-              const maxLines = 8;
-              const detail = failedAttempts
-                  .slice(0, maxLines)
-                  .map((f) => `${f.date} · ${courts.find((c) => c.id === f.court_id)?.name ?? f.court_id}: ${f.reason}`)
-                  .join('\n');
-              const remaining = failedAttempts.length > maxLines ? `\n... y ${failedAttempts.length - maxLines} más` : '';
-              alert(`Se emitieron ${createdBookings.length} reserva(s), pero ${failedAttempts.length} no se pudieron crear:\n${detail}${remaining}`);
+              toast.error(`${failedAttempts.length} reserva(s) no creada(s)`, {
+                  description: failedAttempts
+                      .slice(0, 4)
+                      .map((f) => `${f.date} · ${courts.find((c) => c.id === f.court_id)?.name ?? 'Pista'}: ${f.reason}`)
+                      .join(' · '),
+                  duration: 8000,
+              });
           }
+          return result;
       } catch (err) {
           console.error('Error creating booking:', err);
           throw err;
