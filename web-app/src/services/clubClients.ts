@@ -82,6 +82,7 @@ export const clubClientService = {
     last_name: string;
     phone: string;
     email?: string | null;
+    username?: string | null;
   }): Promise<Player> {
     const res = await apiFetchWithAuth<OkPlayer>('/club-clients/manual', {
       method: 'POST',
@@ -98,6 +99,7 @@ export const clubClientService = {
       last_name?: string;
       email?: string | null;
       phone?: string | null;
+      username?: string | null;
       elo_rating?: number;
       status?: Player['status'];
     }

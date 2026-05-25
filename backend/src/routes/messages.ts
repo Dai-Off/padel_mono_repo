@@ -47,11 +47,17 @@ router.get('/conversations', async (req: Request, res: Response) => {
     }
   }
 
-  let peersMeta: { id: string; first_name: string; last_name: string; avatar_url: string | null }[] = [];
+  let peersMeta: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    username: string | null;
+    avatar_url: string | null;
+  }[] = [];
   if (peerOrder.length > 0) {
     const { data: players, error: ep } = await supabase
       .from('players')
-      .select('id, first_name, last_name, avatar_url')
+      .select('id, first_name, last_name, username, avatar_url')
       .in('id', peerOrder);
     if (ep) return res.status(500).json({ ok: false, error: ep.message });
     peersMeta = (players ?? []) as typeof peersMeta;
@@ -79,6 +85,7 @@ router.get('/conversations', async (req: Request, res: Response) => {
       peer_player_id: peer,
       peer_first_name: meta?.first_name ?? '',
       peer_last_name: meta?.last_name ?? '',
+      peer_username: meta?.username ?? null,
       peer_avatar_url: meta?.avatar_url ?? null,
       last_message_at: last.created_at,
       last_message_preview: last.body.length > 120 ? `${last.body.slice(0, 117)}…` : last.body,

@@ -7,18 +7,24 @@ import { getFrontendUrl, getPasswordResetRedirectUrl } from '../lib/env';
 import { applyRedirectToActionLink } from '../lib/recoveryMobileBridge';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 import { assignActiveMatchmakingSeasonIfNull } from '../services/matchmakingSeasonService';
+import { assertUsernameAvailable, normalizeUsername } from '../lib/playerUsername';
 
 const router = Router();
 
 // POST /auth/register
 router.post('/register', async (req: Request, res: Response) => {
-  const { email, password, name, source, is_mobile } = req.body ?? {};
+  const { email, password, name, username, source, is_mobile } = req.body ?? {};
 
   if (!email || !password) {
     return res.status(400).json({
       ok: false,
       error: 'email y password son obligatorios',
     });
+  }
+
+  const usernameNorm = normalizeUsername(username);
+  if (!usernameNorm.ok) {
+    return res.status(400).json({ ok: false, error: usernameNorm.error });
   }
 
   const emailStr = String(email).trim().toLowerCase();
@@ -33,6 +39,11 @@ router.post('/register', async (req: Request, res: Response) => {
 
   try {
     const supabase = getSupabaseServiceRoleClient();
+
+    const avail = await assertUsernameAvailable(supabase, usernameNorm.value);
+    if (!avail.ok) {
+      return res.status(avail.status).json({ ok: false, error: avail.error });
+    }
     const baseUrl = getFrontendUrl();
     const redirectTo = `${baseUrl}/email-confirmed`;
 
@@ -111,6 +122,7 @@ router.post('/register', async (req: Request, res: Response) => {
         .update({
           auth_user_id: authUserId,
           email: emailStr,
+          username: usernameNorm.value,
           first_name: firstName || undefined,
           last_name: lastName || undefined,
           updated_at: new Date().toISOString(),
@@ -129,6 +141,7 @@ router.post('/register', async (req: Request, res: Response) => {
             first_name: firstName,
             last_name: lastName,
             email: emailStr,
+            username: usernameNorm.value,
             status: 'active',
             auth_user_id: authUserId,
           },
@@ -165,29 +178,64 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 });
 
+async function resolveLoginEmail(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  identifier: string,
+): Promise<{ ok: true; email: string } | { ok: false; error: string; status: number }> {
+  const raw = identifier.trim();
+  if (!raw) {
+    return { ok: false, error: 'email o usuario y password son obligatorios', status: 400 };
+  }
+  if (raw.includes('@')) {
+    return { ok: true, email: raw.toLowerCase() };
+  }
+  const un = normalizeUsername(raw);
+  if (!un.ok) {
+    return { ok: false, error: 'Credenciales incorrectas', status: 401 };
+  }
+  const { data: player, error } = await supabase
+    .from('players')
+    .select('email')
+    .eq('username', un.value)
+    .neq('status', 'deleted')
+    .maybeSingle();
+  if (error) return { ok: false, error: error.message, status: 500 };
+  const playerEmail = (player as { email?: string | null } | null)?.email;
+  if (!playerEmail) {
+    return { ok: false, error: 'Credenciales incorrectas', status: 401 };
+  }
+  return { ok: true, email: String(playerEmail).trim().toLowerCase() };
+}
+
 // POST /auth/login
 router.post('/login', async (req: Request, res: Response) => {
-  const { email, password } = req.body ?? {};
+  const { email, password, identifier } = req.body ?? {};
+  const loginId = identifier ?? email;
 
-  if (!email || !password) {
+  if (!loginId || !password) {
     return res.status(400).json({
       ok: false,
-      error: 'email y password son obligatorios',
+      error: 'email o usuario y password son obligatorios',
     });
   }
 
   try {
     const supabase = getSupabaseServiceRoleClient();
 
+    const resolved = await resolveLoginEmail(supabase, String(loginId));
+    if (!resolved.ok) {
+      return res.status(resolved.status).json({ ok: false, error: resolved.error });
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: String(email).trim().toLowerCase(),
+      email: resolved.email,
       password: String(password),
     });
 
     if (error) {
       const msg = error.message.toLowerCase();
       if (msg.includes('invalid login') || msg.includes('invalid_credentials')) {
-        return res.status(401).json({ ok: false, error: 'Email o contraseña incorrectos' });
+        return res.status(401).json({ ok: false, error: 'Credenciales incorrectas' });
       }
       if (msg.includes('email not confirmed')) {
         return res.status(403).json({
@@ -449,9 +497,17 @@ router.get('/me', async (req: Request, res: Response) => {
     if (error || !user) {
       return res.status(401).json({ ok: false, error: 'Sesión inválida o token expirado. Haz login de nuevo.', error_detail: error?.message });
     }
-    const roles: { player_id?: string; club_owner_id?: string; admin_id?: string } = {};
-    const { data: player } = await supabase.from('players').select('id').eq('auth_user_id', user.id).maybeSingle();
-    if (player) roles.player_id = player.id;
+    const roles: { player_id?: string; player_username?: string | null; club_owner_id?: string; admin_id?: string } = {};
+    const { data: player } = await supabase
+      .from('players')
+      .select('id, username')
+      .eq('auth_user_id', user.id)
+      .neq('status', 'deleted')
+      .maybeSingle();
+    if (player) {
+      roles.player_id = player.id;
+      roles.player_username = (player as { username?: string | null }).username ?? null;
+    }
     const { data: owner } = await supabase.from('club_owners').select('id').eq('auth_user_id', user.id).maybeSingle();
     if (owner) roles.club_owner_id = owner.id;
     const { data: admin } = await supabase.from('admins').select('id').eq('auth_user_id', user.id).maybeSingle();

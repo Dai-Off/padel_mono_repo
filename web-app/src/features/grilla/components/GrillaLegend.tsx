@@ -1,4 +1,5 @@
 import React from 'react';
+import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 
 interface LegendItem {
     color: string;
@@ -47,7 +48,36 @@ const TYPE_LABELS: Record<string, string> = {
     blocked: 'Bloqueado',
 };
 
+function TurnIconLegend({ t }: { t: ReturnType<typeof useGrillaTranslation>['t'] }) {
+    return (
+        <>
+            <span className="text-[10px] font-bold text-gray-500 whitespace-nowrap shrink-0 mr-0.5">
+                {t('legend.iconsTitle')}:
+            </span>
+            <div className="flex items-center gap-1 shrink-0">
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-yellow-400 shrink-0">
+                    <span className="text-[6px] font-black text-gray-900 leading-none">WM</span>
+                </span>
+                <span className="text-[10px] text-gray-600 whitespace-nowrap leading-none">{t('legend.mobileBadge')}</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+                <span className="inline-block w-3 h-3 rounded-full bg-emerald-700 border border-emerald-900 shrink-0" />
+                <span className="text-[10px] text-gray-600 whitespace-nowrap leading-none">{t('legend.paidDot')}</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+                <span className="inline-block w-3 h-3 rounded-full bg-red-600 border border-red-800 shrink-0" />
+                <span className="text-[10px] text-gray-600 whitespace-nowrap leading-none">{t('legend.pendingDot')}</span>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+                <span className="inline-block w-3.5 h-3.5 rounded-full bg-yellow-400 shrink-0" />
+                <span className="text-[10px] text-gray-600 whitespace-nowrap leading-none">{t('legend.alertDot')}</span>
+            </div>
+        </>
+    );
+}
+
 export const GrillaLegend: React.FC<Props> = ({ typeConfigs, typeColorOverrides }) => {
+    const { t } = useGrillaTranslation();
     const dynamicItems: LegendItem[] = [];
 
     if (typeConfigs) {
@@ -107,6 +137,8 @@ export const GrillaLegend: React.FC<Props> = ({ typeConfigs, typeColorOverrides 
                         </span>
                     </div>
                 ))}
+                <span className="hidden sm:inline w-px h-4 bg-gray-300 shrink-0 mx-0.5" aria-hidden />
+                <TurnIconLegend t={t} />
             </div>
         </div>
     );

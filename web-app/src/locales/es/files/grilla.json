@@ -44,6 +44,13 @@
     "virtualCourt": "Pista virtual",
     "noClient": "Sin cliente"
   },
+  "legend": {
+    "iconsTitle": "Iconos en el turno",
+    "mobileBadge": "Reserva desde app móvil (WM)",
+    "paidDot": "Pagado",
+    "pendingDot": "Pendiente de cobro",
+    "alertDot": "Aviso / revisar turno"
+  },
   "badPractice": {
     "title": "Optimización de parrilla",
     "subtitle": "Se detectó una mala práctica en la distribución",

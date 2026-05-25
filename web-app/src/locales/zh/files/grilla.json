@@ -44,6 +44,13 @@
     "virtualCourt": "虚拟球场",
     "noClient": "无客户"
   },
+  "legend": {
+    "iconsTitle": "时段图标",
+    "mobileBadge": "手机 App 预订 (WM)",
+    "paidDot": "已付款",
+    "pendingDot": "待收款",
+    "alertDot": "提醒 / 待核对"
+  },
   "badPractice": {
     "title": "排程优化",
     "subtitle": "检测到排程分配问题",

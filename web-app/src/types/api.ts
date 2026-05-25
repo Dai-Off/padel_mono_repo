@@ -3,6 +3,7 @@ export interface Player {
     created_at: string;
     first_name: string;
     last_name: string;
+    username?: string | null;
     email: string | null;
     phone: string | null;
     /** URL pública de foto de perfil (p. ej. Storage `player-avatars`). */

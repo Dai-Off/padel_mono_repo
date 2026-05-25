@@ -22,8 +22,8 @@ Usuarios en Supabase Auth. Un usuario puede ser **jugador** (fila en `players`),
 
 | Método | Ruta                        | Descripción                                                                                                                 |
 | ------ | --------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/auth/register`            | Registro como jugador. Body: `{ email, password, name? }`.                                                                  |
-| POST   | `/auth/login`               | Login. Body: `{ email, password }`. Devuelve `user` y `session` (`access_token`, `refresh_token`, `expires_at`).            |
+| POST   | `/auth/register`            | Registro como jugador. Body: `{ email, password, username, name? }`. `username` obligatorio (3–30 chars, a-z, 0-9, _).   |
+| POST   | `/auth/login`               | Login. Body: `{ email, password }` o `{ identifier, password }` (email o username). Devuelve `user` y `session`.          |
 | POST   | `/auth/forgot-password`     | Recuperación de contraseña. Body: `{ email }`.                                                                              |
 | GET    | `/auth/me`                  | Usuario actual y roles. **Bearer.** Respuesta: `{ user, roles: { player_id?, club_owner_id?, admin_id? }, clubs?: [...] }`. |
 | POST   | `/auth/register-club-owner` | Completar registro de dueño desde invite. Body: `{ application_id, token, password }`.                                      |
@@ -77,10 +77,11 @@ Crear solicitud y subir imagen son públicos. Listar, detalle, aprobar/rechazar/
 | Método | Ruta                            | Descripción                                                                                                                                   |
 | ------ | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/players/me`                   | Perfil del jugador autenticado (**Bearer**).                                                                                                  |
-| PATCH  | `/players/me`                   | Actualizar perfil propio: nombre, apellidos, `phone`, `avatar_url`. Con nombre+apellidos, el teléfono es obligatorio (en body o ya guardado). |
-| POST   | `/players/manual`               | Alta manual de jugador (sin cuenta Auth). Body: `first_name`, `last_name`, `phone`; `email` opcional.                                         |
+| GET    | `/players/username/check`       | Comprobar disponibilidad de username. Query: `q` (obligatorio), `exclude_player_id` (opcional).                                             |
+| PATCH  | `/players/me`                   | Actualizar perfil propio: nombre, apellidos, `username`, `phone`, `avatar_url`. Con nombre+apellidos, teléfono obligatorio si aplica.       |
+| POST   | `/players/manual`               | Alta manual de jugador (sin cuenta Auth). Body: `first_name`, `last_name`, `phone`; `email` y `username` opcionales.                          |
 | POST   | `/players/onboarding`           | Onboarding / cuestionario inicial del jugador.                                                                                                |
-| GET    | `/players`                      | Lista. Query opcional: `q` (nombre, apellido o teléfono).                                                                                     |
+| GET    | `/players`                      | Lista. Query opcional: `q` (nombre, apellido, teléfono o username).                                                                           |
 | GET    | `/players/:id`                  | Detalle.                                                                                                                                      |
 | GET    | `/players/:id/stats`            | Estadísticas del jugador.                                                                                                                     |
 | GET    | `/players/:id/feedback-summary` | Resumen de feedback del jugador.                                                                                                              |

@@ -89,6 +89,13 @@ export type SchoolEnrollment = {
   } | null;
 };
 
+export type SchoolPrivateLessonStudent = {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  player_id?: string | null;
+};
+
 export type SchoolPrivateLesson = {
   id: string;
   club_id: string;
@@ -98,8 +105,10 @@ export type SchoolPrivateLesson = {
   student_phone: string | null;
   staff_id: string;
   court_id: string;
+  court_ids?: string[];
+  students?: SchoolPrivateLessonStudent[];
   price_cents: number;
-  student_count: 1 | 2 | 3;
+  student_count: 1 | 2 | 3 | 4;
   weekday: SchoolWeekday;
   start_time: string;
   end_time: string;

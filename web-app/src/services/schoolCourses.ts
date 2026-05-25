@@ -142,9 +142,11 @@ export const schoolCoursesService = {
     student_email?: string | null;
     student_phone?: string | null;
     staff_id: string;
-    court_id: string;
+    court_id?: string;
+    court_ids?: string[];
+    students?: Array<{ name?: string | null; email?: string | null; phone?: string | null; player_id?: string | null }>;
     price_cents?: number;
-    student_count?: 1 | 2 | 3;
+    student_count?: 1 | 2 | 3 | 4;
     weekday: SchoolWeekday;
     start_time: string;
     end_time: string;

@@ -257,7 +257,7 @@ router.get('/summary', requireClubOwnerOrAdminOrPortalStaff, async (req: Request
     if (idsForPlayers.size > 0) {
       const { data: playersData, error: plErr } = await supabase
         .from('players')
-        .select('id, first_name, last_name, email, phone, created_at')
+        .select('id, first_name, last_name, email, phone, username, created_at')
         .in('id', [...idsForPlayers]);
       if (plErr) return res.status(500).json({ ok: false, error: plErr.message });
       for (const p of playersData ?? []) playerMap.set((p as any).id, p);
@@ -303,6 +303,7 @@ router.get('/summary', requireClubOwnerOrAdminOrPortalStaff, async (req: Request
               last_name: p.last_name,
               email: p.email,
               phone: p.phone,
+              username: p.username ?? null,
             }
           : null,
         booking: bk
@@ -472,7 +473,7 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
     if (playerIds.length) {
       const { data: players, error: pe } = await supabase
         .from('players')
-        .select('id, first_name, last_name, email, phone, created_at')
+        .select('id, first_name, last_name, email, phone, username, created_at')
         .in('id', playerIds);
       if (pe) return res.status(500).json({ ok: false, error: pe.message });
       for (const p of players ?? []) playerMap.set((p as any).id, p);
@@ -517,6 +518,7 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
               last_name: p.last_name,
               email: p.email,
               phone: p.phone,
+              username: p.username ?? null,
             }
           : {
               id: row.subject_player_id,
@@ -524,6 +526,7 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
               last_name: '',
               email: '',
               phone: '',
+              username: null,
             },
         booking: bk
           ? { start_at: bk.start_at, end_at: bk.end_at, court_name: bk.court_name }
@@ -535,9 +538,17 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
       out = out.filter((item) => {
         const name = `${item.subject_player.first_name} ${item.subject_player.last_name}`.toLowerCase();
         const phone = (item.subject_player.phone ?? '').toLowerCase();
+        const uname = String(item.subject_player.username ?? '').toLowerCase();
         const bid = (item.booking_id ?? '').toLowerCase();
         const pid = item.subject_player.id.toLowerCase();
-        return name.includes(q) || phone.includes(q) || bid.includes(q) || pid.includes(q);
+        const qq = q.startsWith('@') ? q.slice(1) : q;
+        return (
+          name.includes(qq) ||
+          phone.includes(qq) ||
+          uname.includes(qq) ||
+          bid.includes(qq) ||
+          pid.includes(qq)
+        );
       });
     }
 

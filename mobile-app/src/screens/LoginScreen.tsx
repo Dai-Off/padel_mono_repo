@@ -50,7 +50,7 @@ export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) 
     const p = password;
 
     if (!e || !p) {
-      setError('Email y contraseña son obligatorios');
+      setError('Email o usuario y contraseña son obligatorios');
       return;
     }
 
@@ -93,9 +93,9 @@ export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) 
         ) : null}
 
         <AuthInput
-          label="Correo Electrónico"
+          label="Email o usuario"
           icon="mail-outline"
-          placeholder="tu@email.com"
+          placeholder="tu@email.com o usuario"
           keyboardType="email-address"
           autoCapitalize="none"
           autoComplete="email"
