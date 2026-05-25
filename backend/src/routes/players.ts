@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
@@ -293,6 +294,95 @@ function normalizePreferencesPatch(body: Record<string, unknown>): PreferencesPa
 
   return { ok: true, hasAny, patch };
 }
+
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Formato no soportado. Usa JPEG, PNG, WEBP o GIF'));
+  },
+});
+
+function extFromMime(mime: string): string {
+  if (mime === 'image/png') return 'png';
+  if (mime === 'image/webp') return 'webp';
+  if (mime === 'image/gif') return 'gif';
+  return 'jpg';
+}
+
+/**
+ * @openapi
+ * /players/me/avatar:
+ *   post:
+ *     tags: [Players]
+ *     summary: Subir o reemplazar foto de perfil
+ *     description: Recibe multipart/form-data con campo `file`. Sube al bucket `player-avatars` y actualiza `avatar_url` del jugador.
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [file]
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Avatar actualizado
+ *         content:
+ *           application/json:
+ *             example: { ok: true, url: "https://..." }
+ *       400:
+ *         description: Archivo ausente o formato inválido
+ *       401:
+ *         description: Token inválido o ausente
+ *       404:
+ *         description: Jugador no encontrado
+ *       500:
+ *         description: Error interno
+ */
+router.post('/me/avatar', avatarUpload.single('file'), async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return res.status(401).json({ ok: false, error: 'Token requerido' });
+
+  if (!req.file) return res.status(400).json({ ok: false, error: 'Envía el archivo en el campo "file"' });
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user?.id) return res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+
+    const ext = extFromMime(req.file.mimetype);
+    const storagePath = `${user.id}/avatar.${ext}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('player-avatars')
+      .upload(storagePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: true,
+      });
+    if (uploadErr) return res.status(500).json({ ok: false, error: uploadErr.message });
+
+    const { data: pub } = supabase.storage.from('player-avatars').getPublicUrl(storagePath);
+    const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+    const { error: dbErr } = await supabase
+      .from('players')
+      .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
+      .eq('auth_user_id', user.id);
+    if (dbErr) return res.status(500).json({ ok: false, error: dbErr.message });
+
+    return res.json({ ok: true, url: publicUrl });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
 
 /**
  * @openapi
