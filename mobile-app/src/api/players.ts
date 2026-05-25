@@ -12,6 +12,7 @@ type MeResponse = {
     id: string;
     first_name?: string | null;
     last_name?: string | null;
+    username?: string | null;
     email?: string | null;
     phone?: string | null;
     elo_rating?: number | null;
@@ -68,6 +69,7 @@ export type MyPlayerProfile = {
   id: string;
   firstName: string | null;
   lastName: string | null;
+  username: string | null;
   email: string | null;
   phone: string | null;
   avatarUrl: string | null;
@@ -200,6 +202,7 @@ export async function fetchMyPlayerProfile(
       id: json.player.id,
       firstName: json.player.first_name ?? null,
       lastName: json.player.last_name ?? null,
+      username: json.player.username ?? null,
       email: json.player.email ?? null,
       phone: json.player.phone ?? null,
       avatarUrl: json.player.avatar_url ?? null,
@@ -266,6 +269,7 @@ export async function fetchMyPlayerProfile(
 export type UpdateMyPlayerProfilePayload = {
   first_name?: string;
   last_name?: string;
+  username?: string;
   phone?: string;
   avatar_url?: string | null;
   gender?: PlayerGender;
@@ -284,6 +288,7 @@ export async function updateMyPlayerProfile(
   const body: Record<string, unknown> = {};
   if (data.first_name !== undefined) body.first_name = data.first_name.trim();
   if (data.last_name !== undefined) body.last_name = data.last_name.trim();
+  if (data.username !== undefined) body.username = data.username.trim().toLowerCase();
   if (data.phone !== undefined) body.phone = data.phone.trim();
   if (data.avatar_url !== undefined) body.avatar_url = data.avatar_url;
   if (data.gender !== undefined) body.gender = data.gender;
@@ -372,6 +377,7 @@ export type PlayerSearchHit = {
   id: string;
   first_name?: string | null;
   last_name?: string | null;
+  username?: string | null;
 };
 
 /** Lista jugadores; con `q` filtra por nombre o teléfono (misma API que el panel). */

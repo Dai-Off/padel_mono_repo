@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Calendar, Minus, Package, Plus, Search, ShoppingCart, Trash2, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { inventoryService } from '../../services/inventory';
+import { inventoryService, type CartSaleDetail } from '../../services/inventory';
 import { playerService } from '../../services/player';
 import { apiFetchWithAuth } from '../../services/api';
 import { browserIanaTimeZone } from '../../lib/browserTimeZone';
@@ -30,6 +30,7 @@ type CartLine = {
     itemId?: string;
     customId?: string;
     customName?: string;
+    /** Precio manual al editar venta o línea excepcional */
     unitPriceCents?: number;
     quantity: number;
 };
@@ -115,7 +116,10 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     const [bookingChargeScope, setBookingChargeScope] = useState<'full' | 'player_share'>('full');
     const [showAddBookingsModal, setShowAddBookingsModal] = useState(false);
     const [modalBookingSelection, setModalBookingSelection] = useState<string[]>([]);
+    const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
+    const [loadingSale, setLoadingSale] = useState(false);
     const pendingDeepLinkBookingIdRef = useRef<string | null>(null);
+    const pendingSaleBookingChargesRef = useRef<CartSaleDetail['booking_charges'] | null>(null);
 
     const load = useCallback(async () => {
         if (!clubId) return;
@@ -142,6 +146,82 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
 
     const deepLinkPlayerId = searchParams.get('player');
     const deepLinkBookingId = searchParams.get('booking');
+    const deepLinkSaleId = searchParams.get('sale');
+
+    const clearDraftCart = useCallback(() => {
+        setCartLines([]);
+        setCartBookingLines([]);
+        setEditMode(false);
+        setEditingSaleId(null);
+        pendingSaleBookingChargesRef.current = null;
+    }, []);
+
+    const applySaleToCart = useCallback((sale: CartSaleDetail) => {
+        setEditingSaleId(sale.id);
+        setEditMode(true);
+        setCartLines(
+            sale.lines.map((line) => {
+                if (line.item_id) {
+                    return {
+                        itemId: line.item_id,
+                        quantity: line.quantity,
+                        unitPriceCents: line.unit_price_cents,
+                    };
+                }
+                return {
+                    customId: `custom_${line.custom_name ?? 'item'}_${line.unit_price_cents}`,
+                    customName: line.custom_name,
+                    unitPriceCents: line.unit_price_cents,
+                    quantity: line.quantity,
+                };
+            }),
+        );
+        pendingSaleBookingChargesRef.current = sale.booking_charges;
+        const method = sale.payment_method;
+        if (method.includes('wallet') && !method.includes('cash') && !method.includes('card')) {
+            setPaymentMethod('wallet');
+            setUseWallet(true);
+        } else if (method.includes('card')) {
+            setPaymentMethod('card');
+            setUseWallet(sale.wallet_amount_cents > 0);
+        } else {
+            setPaymentMethod('cash');
+            setUseWallet(sale.wallet_amount_cents > 0);
+        }
+        if (sale.wallet_amount_cents > 0) setUseWallet(true);
+        setSaleWithoutBooking(sale.booking_charges.length === 0 && !sale.link_booking_id);
+    }, []);
+
+    useEffect(() => {
+        if (!clubId || !deepLinkSaleId) return;
+        let cancelled = false;
+        setLoadingSale(true);
+        (async () => {
+            try {
+                const sale = await inventoryService.getSale(clubId, deepLinkSaleId);
+                if (cancelled) return;
+                if (sale.voided) {
+                    toast.error('Esta venta ya está anulada');
+                    return;
+                }
+                const players = await playerService.getAll('', clubId);
+                const player = players.find((p) => p.id === sale.player_id);
+                if (player) {
+                    setSelectedPlayer(player);
+                    setPlayerSearch('');
+                }
+                applySaleToCart(sale);
+                const next = new URLSearchParams(searchParams);
+                next.delete('sale');
+                setSearchParams(next, { replace: true });
+            } catch (e) {
+                if (!cancelled) toast.error((e as Error).message || 'No se pudo cargar la venta');
+            } finally {
+                if (!cancelled) setLoadingSale(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [clubId, deepLinkSaleId, applySaleToCart, searchParams, setSearchParams]);
 
     useEffect(() => {
         if (!clubId || !deepLinkPlayerId) return;
@@ -259,6 +339,25 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                             };
                         }),
                 );
+                const pendingCharges = pendingSaleBookingChargesRef.current;
+                if (pendingCharges && pendingCharges.length > 0) {
+                    pendingSaleBookingChargesRef.current = null;
+                    const newLines: CartBookingLine[] = [];
+                    for (const charge of pendingCharges) {
+                        const booking = options.find((b) => b.id === charge.booking_id);
+                        if (!booking) continue;
+                        const amountCents = charge.amount_cents;
+                        if (amountCents <= 0) continue;
+                        newLines.push({
+                            bookingId: charge.booking_id,
+                            chargeScope: charge.charge_scope,
+                            label: `${bookingTimeLabel(booking)} · ${charge.charge_scope === 'full' ? 'Turno completo' : 'Su parte'}`,
+                            amountCents,
+                            currency: booking.currency,
+                        });
+                    }
+                    if (newLines.length > 0) setCartBookingLines(newLines);
+                }
                 const pendingBookingId = pendingDeepLinkBookingIdRef.current;
                 if (pendingBookingId) {
                     pendingDeepLinkBookingIdRef.current = null;
@@ -327,7 +426,8 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
     const productsTotalCents = cartLines.reduce((sum, line) => {
         if (line.itemId) {
             const item = itemById.get(line.itemId);
-            return sum + (item?.unit_price_cents ?? 0) * line.quantity;
+            const unit = line.unitPriceCents ?? item?.unit_price_cents ?? 0;
+            return sum + unit * line.quantity;
         }
         return sum + (line.unitPriceCents ?? 0) * line.quantity;
     }, 0);
@@ -490,6 +590,17 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
         setCustomProductPrice('');
     };
 
+    const updateLineUnitPrice = (lineKey: string, unitPriceCents: number) => {
+        const nextPrice = Math.max(1, Math.trunc(unitPriceCents));
+        setCartLines((prev) =>
+            prev.map((line) => {
+                if (cartLineKey(line) !== lineKey) return line;
+                if (line.itemId) return { ...line, unitPriceCents: nextPrice };
+                return { ...line, unitPriceCents: nextPrice };
+            }),
+        );
+    };
+
     const updateLineQuantity = (lineKey: string, quantity: number) => {
         const target = cartLines.find((line) => cartLineKey(line) === lineKey);
         if (!target) return;
@@ -548,27 +659,34 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                 !saleWithoutBooking && cartBookingLines.length > 0
                     ? cartBookingLines[0].bookingId
                     : undefined;
-            await inventoryService.createSale({
+            const salePayload = {
                 club_id: clubId,
                 booking_id: linkBookingId,
                 player_id: selectedPlayer.id,
-                payment_method: effectiveMethod,
+                payment_method: effectiveMethod as 'cash' | 'card' | 'wallet',
                 wallet_amount_cents: useWallet ? walletAppliedCents : undefined,
                 booking_charges: cartBookingLines.map((line) => ({
                     booking_id: line.bookingId,
                     charge_scope: line.chargeScope,
                 })),
-                lines: cartLines.map((line) => ({
-                    item_id: line.itemId,
-                    quantity: line.quantity,
-                    name: line.customName,
-                    unit_price_cents: line.unitPriceCents,
-                })),
-            });
-            toast.success('Ticket cargado');
-            setCartLines([]);
-            setCartBookingLines([]);
-            setEditMode(false);
+                lines: cartLines.map((line) => {
+                    const item = line.itemId ? itemById.get(line.itemId) : null;
+                    return {
+                        item_id: line.itemId,
+                        quantity: line.quantity,
+                        name: line.customName,
+                        unit_price_cents: line.unitPriceCents ?? item?.unit_price_cents,
+                    };
+                }),
+            };
+            if (editingSaleId) {
+                await inventoryService.updateSale(editingSaleId, salePayload);
+                toast.success('Venta actualizada');
+            } else {
+                await inventoryService.createSale(salePayload);
+                toast.success('Ticket cargado');
+            }
+            clearDraftCart();
             await load();
         } catch (e) {
             toast.error((e as Error).message || 'No se pudo cargar el ticket');
@@ -583,13 +701,38 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
         tone: 'blue' | 'red';
         disabled?: boolean;
     };
+    const voidSale = async () => {
+        if (editingSaleId && clubId) {
+            if (!window.confirm('¿Anular esta venta? Se revertirá stock, pagos y saldo bono. Afectará el arqueo del día.')) return;
+            setSubmitting(true);
+            try {
+                await inventoryService.voidSale(clubId, editingSaleId);
+                toast.success('Venta anulada');
+                clearDraftCart();
+                await load();
+            } catch (e) {
+                toast.error((e as Error).message || 'No se pudo anular la venta');
+            } finally {
+                setSubmitting(false);
+            }
+            return;
+        }
+        clearDraftCart();
+        toast.info('Carrito vaciado');
+    };
+
     const topActions: TopBarAction[] = [
         { label: 'Productos', onClick: () => setShowProductCatalog((value) => !value), tone: 'blue' },
-        { label: 'Editar venta', onClick: () => setEditMode((value) => !value), tone: 'blue' },
-        { label: 'Anular venta', onClick: () => { setCartLines([]); setCartBookingLines([]); }, tone: 'red' },
+        { label: editMode ? 'Listo' : 'Editar venta', onClick: () => setEditMode((value) => !value), tone: 'blue' },
+        { label: editingSaleId ? 'Anular venta' : 'Vaciar carrito', onClick: voidSale, tone: 'red' },
         { label: 'Añadir reservas', onClick: openAddBookingsModal, tone: 'blue' },
         { label: 'Buscar producto', onClick: () => searchInputRef.current?.focus(), tone: 'blue' },
-        { label: 'Cargar ticket', onClick: submitSale, tone: 'blue', disabled: !canSubmitSale },
+        {
+            label: editingSaleId ? 'Guardar cambios' : 'Cargar ticket',
+            onClick: submitSale,
+            tone: 'blue',
+            disabled: !canSubmitSale,
+        },
     ];
     const categoryFilters = [
         { id: 'todos', label: 'Todos' },
@@ -690,7 +833,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                     />
                 </div>
 
-                {loading ? (
+                {loading || loadingSale ? (
                     <div className="flex justify-center py-16">
                         <div className="w-10 h-10 border-4 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
                     </div>
@@ -734,8 +877,10 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                 <div className="border-b border-white/10 p-4">
                     <div className="flex items-center justify-between gap-3">
                         <div>
-                            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/50">Nueva venta</p>
-                            <h2 className="text-lg font-black">Ticket</h2>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-white/50">
+                                {editingSaleId ? `Editando venta #${editingSaleId.slice(-6)}` : 'Nueva venta'}
+                            </p>
+                            <h2 className="text-lg font-black">{editingSaleId ? 'Modificar ticket' : 'Ticket'}</h2>
                         </div>
                         <div className="rounded-2xl bg-white/10 p-2">
                             <ShoppingCart className="h-5 w-5" />
@@ -948,7 +1093,7 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                         {cartLines.map((line) => {
                             const item = line.itemId ? itemById.get(line.itemId) : null;
                             const name = item?.name ?? line.customName ?? 'Venta excepcional';
-                            const unitPriceCents = item?.unit_price_cents ?? line.unitPriceCents ?? 0;
+                            const unitPriceCents = line.unitPriceCents ?? item?.unit_price_cents ?? 0;
                             const lineCurrency = item?.currency || currency;
                             const lineTotal = unitPriceCents * line.quantity;
                             const key = cartLineKey(line);
@@ -966,32 +1111,52 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                                     </div>
 
                                     {editMode ? (
-                                        <div className="mt-3 flex items-center justify-between gap-2">
-                                            <div className="flex items-center gap-2">
+                                        <div className="mt-3 space-y-2">
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => updateLineQuantity(key, line.quantity - 1)}
+                                                        className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/15"
+                                                    >
+                                                        <Minus className="h-3.5 w-3.5" />
+                                                    </button>
+                                                    <span className="w-7 text-center text-xs font-black">{line.quantity}</span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => updateLineQuantity(key, line.quantity + 1)}
+                                                        className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/15"
+                                                    >
+                                                        <Plus className="h-3.5 w-3.5" />
+                                                    </button>
+                                                </div>
                                                 <button
                                                     type="button"
-                                                    onClick={() => updateLineQuantity(key, line.quantity - 1)}
-                                                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/15"
+                                                    onClick={() => updateLineQuantity(key, 0)}
+                                                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E31E24]/20 text-red-200 hover:bg-[#E31E24]/30"
+                                                    aria-label="Quitar producto"
                                                 >
-                                                    <Minus className="h-3.5 w-3.5" />
-                                                </button>
-                                                <span className="w-7 text-center text-xs font-black">{line.quantity}</span>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => updateLineQuantity(key, line.quantity + 1)}
-                                                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 hover:bg-white/15"
-                                                >
-                                                    <Plus className="h-3.5 w-3.5" />
+                                                    <Trash2 className="h-3.5 w-3.5" />
                                                 </button>
                                             </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => updateLineQuantity(key, 0)}
-                                                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E31E24]/20 text-red-200 hover:bg-[#E31E24]/30"
-                                                aria-label="Quitar producto"
-                                            >
-                                                <Trash2 className="h-3.5 w-3.5" />
-                                            </button>
+                                            {editingSaleId || !item ? (
+                                                <label className="flex items-center justify-between gap-2 text-[10px] font-semibold text-white/50">
+                                                    <span>Precio unit.</span>
+                                                    <input
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        defaultValue={(unitPriceCents / 100).toFixed(2)}
+                                                        key={`${key}-${unitPriceCents}`}
+                                                        onBlur={(e) => {
+                                                            const parsed = Math.round(Number(e.target.value.replace(',', '.')) * 100);
+                                                            if (Number.isFinite(parsed) && parsed > 0) {
+                                                                updateLineUnitPrice(key, parsed);
+                                                            }
+                                                        }}
+                                                        className="w-20 rounded-lg border border-white/10 bg-white/10 px-2 py-1 text-right text-xs font-black text-white"
+                                                    />
+                                                </label>
+                                            ) : null}
                                         </div>
                                     ) : null}
                                 </div>
@@ -1028,7 +1193,13 @@ export function QuickSaleCart({ clubId, clubResolved = true }: { clubId: string 
                         disabled={!canSubmitSale}
                         className="w-full rounded-2xl bg-[#E31E24] px-4 py-3 text-sm font-black text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                        {submitting ? 'Cargando ticket...' : 'Cargar ticket'}
+                        {submitting
+                            ? editingSaleId
+                                ? 'Guardando...'
+                                : 'Cargando ticket...'
+                            : editingSaleId
+                                ? 'Guardar cambios'
+                                : 'Cargar ticket'}
                     </button>
                 </div>
             </aside>

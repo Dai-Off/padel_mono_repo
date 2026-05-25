@@ -26,6 +26,7 @@ import { calendarLocale } from '../i18n/calendarLocale';
 import { TournamentGridBookingEditor } from './TournamentGridBookingEditor';
 import { WEEKDAY_CHIPS } from '../utils/recurrenceDates';
 import { resolveJoinedPlayer } from '../utils/bookingDisplay';
+import { formatPlayerLabel, formatPlayerSubline } from '../../../lib/playerLabel';
 
 const PLAY_MODE_MARKER = '__PLAY_MODE__';
 
@@ -93,7 +94,7 @@ export const PlayerSearch: React.FC<{
     const [altaOpen, setAltaOpen] = useState(false);
     const [altaSubmitting, setAltaSubmitting] = useState(false);
     const [altaError, setAltaError] = useState('');
-    const [altaForm, setAltaForm] = useState({ first_name: '', last_name: '', phone: '', email: '' });
+    const [altaForm, setAltaForm] = useState({ first_name: '', last_name: '', phone: '', email: '', username: '' });
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -138,15 +139,17 @@ export const PlayerSearch: React.FC<{
         setAltaError('');
         try {
             const emailTrim = email.trim();
+            const usernameTrim = altaForm.username.trim().toLowerCase();
             const newPlayer = await playerService.createManual({
                 first_name: first_name.trim(),
                 last_name: last_name.trim(),
                 phone: phone.trim(),
                 email: emailTrim || undefined,
+                username: usernameTrim || undefined,
             });
             onSelect(newPlayer);
             setAltaOpen(false);
-            setAltaForm({ first_name: '', last_name: '', phone: '', email: '' });
+            setAltaForm({ first_name: '', last_name: '', phone: '', email: '', username: '' });
         } catch (err: unknown) {
             const msg =
                 err && typeof err === 'object' && 'message' in err
@@ -171,11 +174,9 @@ export const PlayerSearch: React.FC<{
                                 {selectedPlayer.first_name[0]}{selectedPlayer.last_name[0]}
                             </div>
                             <div>
-                                <p className="text-sm font-bold text-gray-900">{selectedPlayer.first_name} {selectedPlayer.last_name}</p>
+                                <p className="text-sm font-bold text-gray-900">{formatPlayerLabel(selectedPlayer)}</p>
                                 <p className="text-[10px] text-gray-500">
-                                    {selectedPlayer.phone?.trim()
-                                        ? `${selectedPlayer.phone} · Elo ${Math.round(Number(selectedPlayer.elo_rating) || 0)}`
-                                        : selectedPlayer.email || t('playerSearch.noContactLine')}
+                                    {formatPlayerSubline(selectedPlayer) || t('playerSearch.noContactLine')}
                                 </p>
                             </div>
                         </div>
@@ -241,11 +242,9 @@ export const PlayerSearch: React.FC<{
                                             {p.first_name[0]}{p.last_name[0]}
                                         </div>
                                         <div className="truncate">
-                                            <p className="text-sm font-bold text-gray-900 truncate">{p.first_name} {p.last_name}</p>
+                                            <p className="text-sm font-bold text-gray-900 truncate">{formatPlayerLabel(p)}</p>
                                             <p className="text-[11px] text-gray-500 truncate">
-                                                {p.phone?.trim()
-                                                    ? `${p.phone} · Elo ${Math.round(Number(p.elo_rating) || 0)}`
-                                                    : p.email || t('playerSearch.noContactLine')}
+                                                {formatPlayerSubline(p) || t('playerSearch.noContactLine')}
                                             </p>
                                         </div>
                                     </button>
@@ -273,10 +272,12 @@ export const PlayerSearch: React.FC<{
                         </div>
                         <form onSubmit={handleAltaSubmit} className="flex flex-col gap-3">
                             <p className="text-[11px] text-gray-500">{t('playerSearch.manualAddHint')}</p>
-                            {(['first_name', 'last_name', 'phone', 'email'] as const).map((field) => (
+                            {(['first_name', 'last_name', 'phone', 'username', 'email'] as const).map((field) => (
                                 <div key={field}>
-                                    {field === 'email' && (
-                                        <span className="text-[10px] text-gray-400 block mb-0.5">{t('playerSearch.emailOptional')}</span>
+                                    {(field === 'email' || field === 'username') && (
+                                        <span className="text-[10px] text-gray-400 block mb-0.5">
+                                            {field === 'email' ? t('playerSearch.emailOptional') : 'Usuario (opcional)'}
+                                        </span>
                                     )}
                                     <input
                                         type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'}
@@ -285,11 +286,20 @@ export const PlayerSearch: React.FC<{
                                                 first_name: t('playerSearch.namePh'),
                                                 last_name: t('playerSearch.lastNamePh'),
                                                 phone: t('playerSearch.phonePh'),
+                                                username: 'tu_usuario',
                                                 email: t('playerSearch.emailPh'),
                                             }[field]
                                         }
                                         value={altaForm[field]}
-                                        onChange={(e) => setAltaForm(prev => ({ ...prev, [field]: e.target.value }))}
+                                        onChange={(e) =>
+                                            setAltaForm((prev) => ({
+                                                ...prev,
+                                                [field]:
+                                                    field === 'username'
+                                                        ? e.target.value.replace(/\s/g, '').toLowerCase()
+                                                        : e.target.value,
+                                            }))
+                                        }
                                         className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-portal-header focus:border-transparent outline-none"
                                     />
                                 </div>

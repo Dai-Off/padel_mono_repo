@@ -5,6 +5,7 @@ import { CommunityPost, toggleLike, toggleBookmark } from '../../api/community';
 import { PostImageCarousel } from './PostImageCarousel';
 import { formatTimeAgo } from '../../utils/timeAgo';
 import { useAuth } from '../../contexts/AuthContext';
+import { formatPlayerLabel } from '../../lib/username';
 
 interface PostCardProps {
   post: CommunityPost;
@@ -57,7 +58,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments }) => 
           />
           <View style={styles.textInfo}>
             <Text style={styles.username}>
-              {post.player.first_name} {post.player.last_name}
+              {formatPlayerLabel(post.player)}
             </Text>
             {post.location && (
               <Text style={styles.location}>{post.location}</Text>

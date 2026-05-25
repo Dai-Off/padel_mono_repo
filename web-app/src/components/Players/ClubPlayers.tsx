@@ -10,6 +10,7 @@ import { apiFetchWithAuth } from '../../services/api';
 import type { ClubClientTier } from '../../services/clubClients';
 import type { Player } from '../../types/api';
 import { toast } from 'sonner';
+import { formatPlayerLabel } from '../../lib/playerLabel';
 
 function PulseDot({ color }: { color: string }) {
   return (
@@ -92,7 +93,9 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
   const [tournamentFilter, setTournamentFilter] = useState<'any' | 'yes' | 'no'>('any');
   const [manualOpen, setManualOpen] = useState(false);
   const [manualSubmitting, setManualSubmitting] = useState(false);
-  const [manualForm, setManualForm] = useState({ first_name: '', last_name: '', phone: '', email: '' });
+  const [manualForm, setManualForm] = useState({ first_name: '', last_name: '', phone: '', email: '', username: '' });
+  const [contactForm, setContactForm] = useState({ username: '', phone: '', email: '' });
+  const [contactSaving, setContactSaving] = useState(false);
   const [segmentSlug, setSegmentSlug] = useState<string>('standard');
   const [segmentDiscount, setSegmentDiscount] = useState('0');
   const [segmentSaving, setSegmentSaving] = useState(false);
@@ -150,7 +153,12 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
     if (!selectedPlayer) return;
     setSegmentSlug(selectedPlayer.segment_slug ?? 'standard');
     setSegmentDiscount(String(selectedPlayer.discount_percent ?? 0));
-  }, [selectedPlayer?.id, selectedPlayer?.segment_slug, selectedPlayer?.discount_percent]);
+    setContactForm({
+      username: selectedPlayer.username ?? '',
+      phone: selectedPlayer.phone ?? '',
+      email: selectedPlayer.email ?? '',
+    });
+  }, [selectedPlayer?.id, selectedPlayer?.segment_slug, selectedPlayer?.discount_percent, selectedPlayer?.username, selectedPlayer?.phone, selectedPlayer?.email]);
 
   const filteredPlayers = players.filter((p) => statusFilter === 'all' || p.status === statusFilter);
 
@@ -258,6 +266,28 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
     }
   };
 
+  const handleSaveContact = async () => {
+    if (!clubId || !selectedPlayer) return;
+    setContactSaving(true);
+    try {
+      const username = contactForm.username.trim().toLowerCase();
+      const updated = await clubClientService.update(selectedPlayer.id, {
+        club_id: clubId,
+        phone: contactForm.phone.trim() || null,
+        email: contactForm.email.trim() || null,
+        username: username || null,
+      });
+      setPlayers((prev) => prev.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
+      setSelectedPlayer(updated);
+      toast.success('Datos de contacto actualizados');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al guardar';
+      toast.error(msg);
+    } finally {
+      setContactSaving(false);
+    }
+  };
+
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clubId) return;
@@ -271,16 +301,18 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
     }
     setManualSubmitting(true);
     try {
+      const username = manualForm.username.trim().toLowerCase();
       await clubClientService.createManual({
         club_id: clubId,
         first_name: first,
         last_name: last,
         phone,
         email: email || null,
+        username: username || null,
       });
       toast.success(t('players_manual_success'));
       setManualOpen(false);
-      setManualForm({ first_name: '', last_name: '', phone: '', email: '' });
+      setManualForm({ first_name: '', last_name: '', phone: '', email: '', username: '' });
       fetchPlayers();
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'message' in err ? String((err as { message: string }).message) : t('error_occurred');
@@ -652,6 +684,9 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                         <Phone className="w-3 h-3 shrink-0 text-gray-400" />
                         {player.phone?.trim() ? player.phone : <span className="text-amber-600/90">{t('players_no_phone')}</span>}
                       </span>
+                      {player.username ? (
+                        <span className="text-[#F18F34]">@{player.username}</span>
+                      ) : null}
                       <span>{player.email ? player.email : t('players_no_email')}</span>
                     </div>
                     {clubId && typeof player.wallet_balance_cents === 'number' && (
@@ -733,7 +768,7 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                       </div>
                       <div>
                         <h2 className="text-sm font-bold text-[#1A1A1A]">
-                          {selectedPlayer.first_name} {selectedPlayer.last_name}
+                          {formatPlayerLabel(selectedPlayer)}
                         </h2>
                         <p className="text-[10px] text-gray-400">
                           {t('players_member_since')} {formatDate(selectedPlayer.created_at)}
@@ -784,7 +819,44 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                     )}
                   </div>
                   {clubId && (
-                    <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
+                    <div className="mt-4 pt-4 border-t border-gray-100 space-y-3">
+                      <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Contacto</p>
+                      <div className="grid grid-cols-1 gap-2">
+                        <input
+                          type="text"
+                          value={contactForm.username}
+                          onChange={(e) =>
+                            setContactForm((f) => ({
+                              ...f,
+                              username: e.target.value.replace(/\s/g, '').toLowerCase(),
+                            }))
+                          }
+                          placeholder="usuario (opcional)"
+                          className="w-full px-3 py-2 rounded-xl border border-gray-100 text-xs"
+                        />
+                        <input
+                          type="tel"
+                          value={contactForm.phone}
+                          onChange={(e) => setContactForm((f) => ({ ...f, phone: e.target.value }))}
+                          placeholder={t('phone')}
+                          className="w-full px-3 py-2 rounded-xl border border-gray-100 text-xs"
+                        />
+                        <input
+                          type="email"
+                          value={contactForm.email}
+                          onChange={(e) => setContactForm((f) => ({ ...f, email: e.target.value }))}
+                          placeholder={t('email_placeholder')}
+                          className="w-full px-3 py-2 rounded-xl border border-gray-100 text-xs"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        disabled={contactSaving}
+                        onClick={() => void handleSaveContact()}
+                        className="w-full py-2.5 rounded-xl border border-gray-200 text-[#1A1A1A] text-xs font-bold disabled:opacity-50"
+                      >
+                        {contactSaving ? 'Guardando…' : 'Guardar contacto'}
+                      </button>
                       <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">Tipo de cliente y descuento</p>
                       <p className="text-[10px] text-gray-400 leading-snug">
                         Afecta al cálculo de tarifa con jugador indicado (segmento y % de descuento en el club).
@@ -875,6 +947,23 @@ export function ClubPlayersTab({ clubId, currency = 'EUR' }: ClubPlayersTabProps
                     value={manualForm.last_name}
                     onChange={(e) => setManualForm((f) => ({ ...f, last_name: e.target.value }))}
                     placeholder={t('registration_last_name_placeholder')}
+                    className="w-full px-3 py-2.5 border border-gray-100 rounded-xl text-xs focus:ring-2 focus:ring-[#E31E24]/30"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-gray-500 mb-1">
+                    Usuario <span className="font-normal text-gray-400">({t('players_optional')})</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={manualForm.username}
+                    onChange={(e) =>
+                      setManualForm((f) => ({
+                        ...f,
+                        username: e.target.value.replace(/\s/g, '').toLowerCase(),
+                      }))
+                    }
+                    placeholder="tu_usuario"
                     className="w-full px-3 py-2.5 border border-gray-100 rounded-xl text-xs focus:ring-2 focus:ring-[#E31E24]/30"
                   />
                 </div>

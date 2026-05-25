@@ -26,13 +26,18 @@ export async function refreshSession(refreshToken: string): Promise<RefreshSessi
 }
 
 export async function login(
-  email: string,
+  identifier: string,
   password: string
 ): Promise<AuthResponse> {
+  const trimmed = identifier.trim();
+  const body =
+    trimmed.includes('@')
+      ? { email: trimmed.toLowerCase(), password }
+      : { identifier: trimmed.toLowerCase(), password };
   const res = await fetch(`${API_URL}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify(body),
   });
   return res.json();
 }
@@ -40,14 +45,40 @@ export async function login(
 export async function register(
   email: string,
   password: string,
+  username: string,
   name?: string
 ): Promise<AuthResponse> {
   const res = await fetch(`${API_URL}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, name: name || undefined, source: 'mobile' }),
+    body: JSON.stringify({
+      email,
+      password,
+      username: username.trim().toLowerCase(),
+      name: name || undefined,
+      source: 'mobile',
+    }),
   });
   return res.json();
+}
+
+export async function checkUsernameAvailable(
+  q: string,
+  excludePlayerId?: string,
+): Promise<{ ok: true; available: boolean } | { ok: false; error: string }> {
+  try {
+    const url = new URL(`${API_URL}/players/username/check`);
+    url.searchParams.set('q', q.trim().toLowerCase());
+    if (excludePlayerId) url.searchParams.set('exclude_player_id', excludePlayerId);
+    const res = await fetch(url.toString());
+    const json = (await res.json()) as { ok?: boolean; available?: boolean; error?: string };
+    if (!res.ok || !json.ok) {
+      return { ok: false, error: json.error ?? 'No se pudo comprobar el usuario' };
+    }
+    return { ok: true, available: json.available === true };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
 }
 
 export type ForgotPasswordResponse = {
