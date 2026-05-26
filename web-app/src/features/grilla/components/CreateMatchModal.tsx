@@ -11,6 +11,7 @@ import { reservationTypePricesService, type ReservationTypeConfig } from '../../
 import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { PlayerSearch } from './ReservationModal';
+import { zonedTimeToUtc } from '../../../lib/clubTimeZone';
 
 export type PaymentMethod = 'cash' | 'card' | 'wallet' | null;
 
@@ -391,7 +392,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
                 await releaseBlock(blockId);
                 setBlockId(null);
             }
-            const startAtIso = new Date(`${bookingDate}T${String(startHour).padStart(2, '0')}:${startMinute}:00`).toISOString();
+            const startAtIso = zonedTimeToUtc(`${bookingDate}T${String(startHour).padStart(2, '0')}:${startMinute}:00`).toISOString();
             const endAtIso = new Date(new Date(startAtIso).getTime() + duration * 60000).toISOString();
             // Create booking
             const bookingData = {

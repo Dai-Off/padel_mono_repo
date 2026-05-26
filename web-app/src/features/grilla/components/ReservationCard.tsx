@@ -4,7 +4,8 @@ import { CSS } from '@dnd-kit/utilities';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Reservation, ReservationType } from '../types';
-import { PIXELS_PER_MINUTE, START_HOUR } from '../utils/timeGrid';
+import { PIXELS_PER_MINUTE } from '../utils/timeGrid';
+import { useGridBounds } from '../context/GridBoundsContext';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { useZoom } from '../context/ZoomContext';
 
@@ -61,12 +62,14 @@ export const ReservationCard: React.FC<Props> = ({ reservation, isOverlay, justD
     const isSmallZoom = !isCompact && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
     const isShortBooking = reservation.durationMinutes <= 60;
     const ppm = compactPxPerMinute || PIXELS_PER_MINUTE;
+    const bounds = useGridBounds();
+    const gridStartMin = bounds.startHour * 60;
 
     const computedTop = (() => {
         const [h, m] = reservation.startTime.split(':').map(Number);
         let absoluteH = h;
-        if (h < START_HOUR && START_HOUR > 0) absoluteH += 24;
-        return ((absoluteH * 60 + m) - (START_HOUR * 60)) * ppm;
+        if (h < bounds.startHour && bounds.startHour > 0) absoluteH += 24;
+        return ((absoluteH * 60 + m) - gridStartMin) * ppm;
     })();
 
     const computedHeight = (reservation.durationMinutes * ppm) - 1;

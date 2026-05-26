@@ -506,7 +506,7 @@ export function SeasonPassScreen({ onBack }: Props) {
       return;
     }
     setLoadErr(null);
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const tz = 'Europe/Madrid';
     const data = await fetchSeasonPassMe(token, tz);
     if (!data) {
       setLoadErr('No se pudo cargar el pase. ¿Backend y migraciones 049 + 050 activas?');
