@@ -107,14 +107,14 @@ export function downloadReservationsExcel(opts: {
     const headerLabels = HEADERS.map((h) => h.label);
     const dataRows = rows.map((r) => HEADERS.map((h) => r[h.key] ?? ''));
 
-    const titleLine = [`Lista de reservas — ${clubName?.trim() || 'Club'} — ${dateStr}`];
-    const metaLine = filterSummary ? [`Filtros: ${filterSummary}`] : [];
-    const exportLine = [`Exportado: ${new Date().toLocaleString('es-ES')}`, `Total filas: ${rows.length}`];
-    const blank: string[] = [];
-    const headerRowIndex = titleLine.length + metaLine.length + exportLine.length + 1;
+    const titleLine: (string | number)[] = [`Lista de reservas — ${clubName?.trim() || 'Club'} — ${dateStr}`];
+    const metaRows: (string | number)[][] = filterSummary ? [[`Filtros: ${filterSummary}`]] : [];
+    const exportLine: (string | number)[] = [`Exportado: ${new Date().toLocaleString('es-ES')}`, `Total filas: ${rows.length}`];
+    const blank: (string | number)[] = [];
+    const headerRowIndex = 1 + metaRows.length + 1 + 1;
     const sheetData: (string | number)[][] = [
         titleLine,
-        ...metaLine,
+        ...metaRows,
         exportLine,
         blank,
         headerLabels,
