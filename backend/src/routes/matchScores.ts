@@ -198,9 +198,9 @@ router.post('/:id/score', async (req: Request, res: Response) => {
       sets,
       match_end_reason: mer,
       retired_team: rt,
-      score_status: mer === 'draw' ? 'confirmed' : 'pending_confirmation',
+      score_status: 'pending_confirmation',
       score_first_proposer_team: team,
-      score_confirmed_at: mer === 'draw' ? now : null,
+      score_confirmed_at: null,
       updated_at: now,
     })
     .eq('id', matchId)
