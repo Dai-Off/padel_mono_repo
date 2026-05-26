@@ -50,23 +50,32 @@ export function getGridIntervals(): string[] {
     });
 }
 
-export function parseTimeStr(time: string): number {
+export function timeToPixels(
+    time: string,
+    ppm: number = PIXELS_PER_MINUTE,
+    hours?: GridHours,
+): number {
+    const startH = hours?.startHour ?? START_HOUR;
+    const minSinceStart = parseTimeStr(time, startH) - startH * 60;
+    return minSinceStart * ppm;
+}
+
+function parseTimeStr(time: string, startHour: number = START_HOUR): number {
     const [h, m] = time.split(':').map(Number);
     let absoluteH = h;
-    if (h < START_HOUR && START_HOUR > 0) {
+    if (h < startHour && startHour > 0) {
         absoluteH += 24;
     }
     return absoluteH * 60 + m;
 }
 
-export function timeToPixels(time: string, ppm: number = PIXELS_PER_MINUTE): number {
-    const minSinceStart = parseTimeStr(time) - (START_HOUR * 60);
-    return minSinceStart * ppm;
-}
+export type GridHours = { startHour: number; endHour: number };
 
 /** Pixels-per-minute that fits the full day grid inside the available viewport height (mobile). */
-export function computeCompactPxPerMinute(availableHeightPx: number): number {
-    const totalMinutes = (END_HOUR - START_HOUR) * 60;
+export function computeCompactPxPerMinute(availableHeightPx: number, hours?: GridHours): number {
+    const start = hours?.startHour ?? START_HOUR;
+    const end = hours?.endHour ?? END_HOUR;
+    const totalMinutes = (end - start) * 60;
     const headerPx = 24;
     const usable = Math.max(100, availableHeightPx - headerPx - 8);
     const raw = usable / totalMinutes;
@@ -112,14 +121,20 @@ export function computeMobileGridFitScale(
     };
 }
 
-// Convert Y pixel position to snapped 30-min time
-export function pixelsToTime(pixels: number, ppm: number = PIXELS_PER_MINUTE): string {
+export function pixelsToTime(
+    pixels: number,
+    ppm: number = PIXELS_PER_MINUTE,
+    hours?: GridHours & { openMin?: number; closeMin?: number },
+): string {
+    const startH = hours?.startHour ?? START_HOUR;
+    const endH = hours?.endHour ?? END_HOUR;
+    const openMin = hours?.openMin ?? startH * 60;
+    const closeMin = hours?.closeMin ?? endH * 60;
     const minSinceStart = pixels / ppm;
-    let totalMins = (START_HOUR * 60) + minSinceStart;
+    let totalMins = startH * 60 + minSinceStart;
 
-    // Bound checks
-    if (totalMins < START_HOUR * 60) totalMins = START_HOUR * 60;
-    if (totalMins > END_HOUR * 60) totalMins = END_HOUR * 60;
+    if (totalMins < openMin) totalMins = openMin;
+    if (totalMins > closeMin) totalMins = closeMin;
 
     // Snap to nearest 30 mins
     const snappedMins = Math.round(totalMins / 30) * 30;

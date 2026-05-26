@@ -5,6 +5,7 @@
 export const PORTAL_MENU_ITEM_PERMS: Record<string, string[]> = {
     resumen: ['grilla'],
     reservas: ['grilla'],
+    'lista-reservas': ['grilla'],
     checkIn: ['grilla'],
     pistas: ['grilla'],
     horarios: ['grilla'],

@@ -26,6 +26,7 @@ import { fetchPublicClubReviews, type PublicClubReview } from "../api/clubReview
 import { fetchCourtsByClubId, type Court } from "../api/courts";
 import { fetchMatches } from "../api/matches";
 import { mapMatchToPartido } from "../api/mapMatchToPartido";
+import { clubLocalDateTimeToUtcIso } from "../lib/clubTimeZone";
 import {
   createIntentForNewMatch,
   confirmPaymentFromClient,
@@ -605,11 +606,8 @@ export function ClubDetailScreen({
         });
 
       const dateStr = localCalendarYmd(selectedDate);
-      // Parse as local time (no Z suffix) so JS converts correctly to UTC when sending to backend
-      const startDate = new Date(`${dateStr}T${selectedTimeSlot}:00`);
-      const start_at = startDate.toISOString();
-      const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
-      const end_at = endDate.toISOString();
+      const start_at = clubLocalDateTimeToUtcIso(dateStr, selectedTimeSlot);
+      const end_at = new Date(new Date(start_at).getTime() + duration * 60 * 1000).toISOString();
       const totalPriceCents = Math.max(finalPriceCents, 100);
       const payChoice = await askPayLaterChoice();
       if (payChoice === "cancel") return;

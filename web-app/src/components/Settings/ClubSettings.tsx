@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, useInView } from 'framer-motion';
-import { MapPin, Loader2, Save, Building2, ChevronRight } from 'lucide-react';
+import { MapPin, Loader2, Save, Building2, ChevronRight, Clock } from 'lucide-react';
+import {
+    ClubWeeklyScheduleEditor,
+    parseWeeklySchedule,
+    weeklyScheduleToPayload,
+    type WeeklyScheduleForm,
+} from './ClubWeeklyScheduleEditor';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { authService } from '../../services/auth';
@@ -102,6 +108,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
         notify_maintenance_reminders: true,
         notify_daily_email_summary: false,
     });
+    const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleForm>(() => parseWeeklySchedule({}));
 
     const selectedClub = selectedClubId ? clubs.find((c) => c.id === selectedClubId) ?? null : null;
     const skipNextSwitchEffect = useRef(true);
@@ -120,6 +127,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
             notify_maintenance_reminders: club.notify_maintenance_reminders !== false,
             notify_daily_email_summary: club.notify_daily_email_summary === true,
         });
+        setWeeklySchedule(parseWeeklySchedule(club.weekly_schedule));
     }, []);
 
     useEffect(() => {
@@ -203,6 +211,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                 notify_cancellations: form.notify_cancellations,
                 notify_maintenance_reminders: form.notify_maintenance_reminders,
                 notify_daily_email_summary: form.notify_daily_email_summary,
+                weekly_schedule: weeklyScheduleToPayload(weeklySchedule),
             };
             const updated = await clubService.update(selectedClub.id, payload);
             setClubs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
@@ -327,6 +336,18 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                                     />
                                 </div>
                             </div>
+                        </div>
+                    </AnimSection>
+
+                    <AnimSection delay={0.08}>
+                        <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                            <div className="flex items-center gap-2 mb-4">
+                                <div className="w-8 h-8 rounded-xl bg-[#006A6A]/10 flex items-center justify-center">
+                                    <Clock className="w-4 h-4 text-[#006A6A]" />
+                                </div>
+                                <h3 className="text-xs font-bold text-[#1A1A1A]">{t('club_schedule_title')}</h3>
+                            </div>
+                            <ClubWeeklyScheduleEditor value={weeklySchedule} onChange={setWeeklySchedule} />
                         </div>
                     </AnimSection>
 

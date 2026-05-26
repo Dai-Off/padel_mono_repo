@@ -1,9 +1,10 @@
 import React from 'react';
-import { getGridIntervals } from '../utils/timeGrid';
+import { getGridIntervalsForBounds, useGridBounds } from '../context/GridBoundsContext';
 import clsx from 'clsx';
 
 export const GridBackground: React.FC<{ compactPxPerMinute?: number }> = ({ compactPxPerMinute }) => {
-    const intervals = getGridIntervals();
+    const bounds = useGridBounds();
+    const intervals = getGridIntervalsForBounds(bounds);
     const rowHeight = compactPxPerMinute ? compactPxPerMinute * 30 : 60;
     const isCompact = !!compactPxPerMinute;
 

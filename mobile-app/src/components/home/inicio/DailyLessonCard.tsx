@@ -21,9 +21,10 @@ import { useHomeData } from '../../../contexts/HomeDataContext';
 // Nota: el hook useStreak local sigue existiendo (lo usa DailyLessonScreen
 // con su propia frescura). En esta card consumimos del HomeDataContext.
 import { loadProgress } from '../../../lib/dailyLessonStorage';
+import { CLUB_IANA_TIMEZONE } from '../../../lib/clubTimeZone';
 
 const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
-const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+const TIMEZONE = CLUB_IANA_TIMEZONE;
 
 // Tiers de bonus alineados con backend (learningStreaks.getMultiplier):
 //   racha 0-2  → sin bonus (countdown a x1.5)

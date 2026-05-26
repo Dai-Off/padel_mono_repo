@@ -1,10 +1,12 @@
 import React from 'react';
-import { getGridIntervals, PIXELS_PER_MINUTE } from '../utils/timeGrid';
+import { PIXELS_PER_MINUTE } from '../utils/timeGrid';
+import { getGridIntervalsForBounds, useGridBounds } from '../context/GridBoundsContext';
 import clsx from 'clsx';
 import { useZoom } from '../context/ZoomContext';
 
 export const TimeAxis: React.FC<{ position: 'left' | 'right'; isCompact?: boolean; compactPxPerMinute?: number }> = ({ position, isCompact, compactPxPerMinute }) => {
-    const intervals = getGridIntervals();
+    const bounds = useGridBounds();
+    const intervals = getGridIntervalsForBounds(bounds);
     const { zoomLevel } = useZoom();
     const isSmallZoom = !isCompact && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
 

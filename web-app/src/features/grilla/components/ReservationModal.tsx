@@ -18,7 +18,11 @@ import {
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
 import { apiFetchWithAuth } from '../../../services/api';
-import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
+import { clubIanaTimeZone, zonedTimeToUtc, formatTimeHHmmInClubTz } from '../../../lib/clubTimeZone';
+
+function clubSlotToUtcIso(dateBase: string, hour: string, minute: string): string {
+    return zonedTimeToUtc(`${dateBase}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`).toISOString();
+}
 import { reservationTypePricesService, type ReservationTypeConfig } from '../../../services/reservationTypePrices';
 import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
@@ -677,7 +681,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     useEffect(() => {
         if (!isOpen || !clubId || !reservation || isEditMode) return;
         const dateBase = bookingDate || new Date().toISOString().split('T')[0];
-        const start = new Date(`${dateBase}T${startHour}:${startMinute}`).toISOString();
+        const start = clubSlotToUtcIso(dateBase, startHour, startMinute);
         const end = new Date(new Date(start).getTime() + duration * 60000).toISOString();
         let cancelled = false;
         (async () => {
@@ -843,11 +847,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         // Validate no overlap with other bookings on the same court
         if (isEditMode && editingBookingData) {
             const dateBase = bookingDate || new Date().toISOString().split('T')[0];
-            const newStart = new Date(`${dateBase}T${startHour}:${startMinute}`);
+            const startAtCheck = clubSlotToUtcIso(dateBase, startHour, startMinute);
+            const newStart = new Date(startAtCheck);
             const newEnd = new Date(newStart.getTime() + duration * 60000);
             try {
                 const courtId = editingBookingData.court_id;
-                const tz = encodeURIComponent(browserIanaTimeZone());
+                const tz = encodeURIComponent(clubIanaTimeZone());
                 const bRes = await apiFetchWithAuth<any>(
                     `/bookings?court_id=${encodeURIComponent(courtId)}&date=${encodeURIComponent(dateBase)}&time_zone=${tz}`,
                 );
@@ -859,7 +864,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 });
                 if (conflicts.length > 0) {
                     const c = conflicts[0];
-                    const cTime = new Date(c.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const cTime = formatTimeHHmmInClubTz(c.start_at);
                     const cName = c.players ? `${c.players.first_name} ${c.players.last_name}` : t('reservation.otherBookingName');
                     setOverlapError(t('reservation.overlapConflict', { name: cName, time: cTime }));
                     return;
@@ -889,7 +894,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         try {
             if (isEditMode && onUpdate && editingBookingData) {
                 const dateBase = bookingDate || new Date().toISOString().split('T')[0];
-                const startAt = new Date(`${dateBase}T${startHour}:${startMinute}`).toISOString();
+                const startAt = clubSlotToUtcIso(dateBase, startHour, startMinute);
                 const endAt = new Date(new Date(startAt).getTime() + duration * 60000).toISOString();
                 await onUpdate(editingBookingData.id, {
                     notes: composeNotesWithPlayMode(notes, playMode),

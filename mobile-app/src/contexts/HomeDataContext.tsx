@@ -20,7 +20,9 @@ import { selectMyUpcomingMatches } from '../domain/selectMyUpcomingMatches';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
-const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+import { CLUB_IANA_TIMEZONE } from '../lib/clubTimeZone';
+
+const TIMEZONE = CLUB_IANA_TIMEZONE;
 
 type StreakState = {
   currentStreak: number;
@@ -256,7 +258,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       const isFirst = seasonPassLoadedAt.current === 0;
       if (isFirst) setSeasonPassLoading(true);
       try {
-        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+        const tz = CLUB_IANA_TIMEZONE;
         /** No refrescamos token ante 4xx/5xx: si /season-pass/me falla (p. ej.
          * 500 sin migración 050), refrescar token cambia access_token, re-dispara
          * efectos y entra en bucle infinito. */

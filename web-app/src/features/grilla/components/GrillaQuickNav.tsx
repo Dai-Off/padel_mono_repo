@@ -45,6 +45,7 @@ function buildSections(isAdmin: boolean): NavSection[] {
       children: [
         { id: 'resumen', path: '/grilla', label: 'Resumen', queryParam: 'resumen' },
         { id: 'reservas', path: '/grilla', label: 'Grilla de reservas', queryParam: 'reservas' },
+        { id: 'lista-reservas', path: '/grilla', label: 'Lista de reservas', queryParam: 'lista-reservas' },
         { id: 'checkIn', path: '/checkIn', label: 'Check-in' },
         { id: 'pistas', path: '/pistas', label: 'Pistas' },
         { id: 'horarios', path: '/horarios', label: 'Horarios' },
@@ -147,7 +148,8 @@ function isChildActive(
   if (child.path === '/grilla') {
     if (pathname !== '/grilla') return false;
     if (child.queryParam === 'reservas') return menuParam === 'reservas';
-    if (child.queryParam === 'resumen') return menuParam !== 'reservas';
+    if (child.queryParam === 'lista-reservas') return menuParam === 'lista-reservas';
+    if (child.queryParam === 'resumen') return menuParam !== 'reservas' && menuParam !== 'lista-reservas';
     return false;
   }
   if (child.path === '/torneos') {

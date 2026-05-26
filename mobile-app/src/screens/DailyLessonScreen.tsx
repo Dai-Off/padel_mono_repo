@@ -32,7 +32,9 @@ type Props = {
 
 type Phase = 'intro' | 'questions' | 'review' | 'results';
 
-const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+import { CLUB_IANA_TIMEZONE } from '../lib/clubTimeZone';
+
+const TIMEZONE = CLUB_IANA_TIMEZONE;
 
 const AREA_LABELS: Record<string, { label: string; color: string; bg: string; border: string }> = {
   technique: { label: 'Tecnica', color: '#3B82F6', bg: 'rgba(59,130,246,0.1)', border: 'rgba(59,130,246,0.2)' },
