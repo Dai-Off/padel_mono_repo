@@ -23,6 +23,7 @@ import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
+import { clubLocalDateTimeToUtcIso } from '../../lib/clubTimeZone';
 import { useSlotPrice } from '../../hooks/useSlotPrice';
 
 export type LocationType = 'club_wematch' | 'pista_externa';
@@ -63,12 +64,9 @@ function slotPriceForDuration(slot: SlotForCreate): string {
 }
 
 function buildStartEnd(dateStr: string, time: string): { start_at: string; end_at: string } {
-  const start = new Date(`${dateStr}T${time}:00`);
-  const end = new Date(start.getTime() + DURATION_MIN * 60 * 1000);
-  return {
-    start_at: start.toISOString(),
-    end_at: end.toISOString(),
-  };
+  const start_at = clubLocalDateTimeToUtcIso(dateStr, time);
+  const end_at = new Date(new Date(start_at).getTime() + DURATION_MIN * 60 * 1000).toISOString();
+  return { start_at, end_at };
 }
 
 function formatDateTimeForBookingConfirm(dateStr: string, time: string): string {

@@ -1,0 +1,1 @@
+-- Ver supabase/migrations/069_backfill_player_usernames.sql

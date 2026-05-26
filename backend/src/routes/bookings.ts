@@ -12,6 +12,7 @@ import { insertClubChatMention } from '../lib/clubChatMentions';
 import { zonedDayRangeUtcIso } from '../lib/zonedDayBounds';
 import { ensureOpenMatchRecordForBooking } from '../lib/matchFromBookingSync';
 import { checkWalletBalances, computeBookingStatus, upsertManualPayments } from '../lib/bookingManualPayment';
+import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -238,6 +239,15 @@ router.post('/block', async (req: Request, res: Response) => {
       .map((r: { id: string }) => r.id);
     if (expiredIds.length) {
       await supabase.from('bookings').delete().in('id', expiredIds);
+    }
+    const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+      courtId: String(court_id),
+      startAt: String(start_at),
+      endAt: String(end_at),
+      reservationType: 'blocked',
+    });
+    if (!hoursCheck.ok) {
+      return res.status(400).json({ ok: false, error: hoursCheck.error });
     }
     const conflict = await hasCourtConflict({ courtId: String(court_id), startAt: String(start_at), endAt: String(end_at) });
     if (conflict.conflict) {
@@ -972,6 +982,18 @@ router.post('/', async (req: Request, res: Response) => {
   }
 
   try {
+    const supabase = getSupabaseServiceRoleClient();
+
+    const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+      courtId: String(court_id),
+      startAt: String(start_at),
+      endAt: String(end_at),
+      reservationType: booking_type ?? 'standard',
+    });
+    if (!hoursCheck.ok) {
+      return res.status(400).json({ ok: false, error: hoursCheck.error });
+    }
+
     const conflict = await hasCourtConflict({
       courtId: String(court_id),
       startAt: String(start_at),
@@ -980,8 +1002,6 @@ router.post('/', async (req: Request, res: Response) => {
     if (conflict.conflict) {
       return res.status(409).json({ ok: false, error: conflict.reason ?? 'Conflicto de horario' });
     }
-
-    const supabase = getSupabaseServiceRoleClient();
 
     // Reservas manuales desde grilla: el mismo cliente puede figurar en varias pistas a la misma hora (bloqueo grupal).
     const skipOrganizerOverlap = source_channel === 'manual';
@@ -1218,7 +1238,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     if (court_id !== undefined || start_at !== undefined || end_at !== undefined) {
       const { data: existingBooking, error: exErr } = await supabase
         .from('bookings')
-        .select('court_id, start_at, end_at')
+        .select('court_id, start_at, end_at, reservation_type')
         .eq('id', id)
         .maybeSingle();
       if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
@@ -1226,6 +1246,16 @@ router.put('/:id', async (req: Request, res: Response) => {
       const nextCourt = String(court_id ?? (existingBooking as any).court_id);
       const nextStart = String(start_at ?? (existingBooking as any).start_at);
       const nextEnd = String(end_at ?? (existingBooking as any).end_at);
+      const nextType = booking_type ?? (existingBooking as any).reservation_type ?? 'standard';
+      const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+        courtId: nextCourt,
+        startAt: nextStart,
+        endAt: nextEnd,
+        reservationType: nextType,
+      });
+      if (!hoursCheck.ok) {
+        return res.status(400).json({ ok: false, error: hoursCheck.error });
+      }
       const conflict = await hasCourtConflict({
         courtId: nextCourt,
         startAt: nextStart,
