@@ -55,6 +55,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isA
                 items: [
                     { id: 'resumen', path: '/grilla', icon: BarChart3, label: t('menu_resumen'), color: 'rgb(227, 30, 36)', bgColor: 'rgba(227, 30, 36, 0.06)' },
                     { id: 'reservas', path: '/grilla', icon: Calendar, label: t('menu_reservas'), color: 'rgb(16, 185, 129)', bgColor: 'rgba(16, 185, 129, 0.06)' },
+                    { id: 'lista-reservas', path: '/grilla', icon: Calendar, label: t('menu_lista_reservas'), color: 'rgb(0, 106, 106)', bgColor: 'rgba(0, 106, 106, 0.06)' },
                     { id: 'checkIn', path: '/checkIn', icon: UserPlus, label: t('menu_checkin'), color: 'rgb(139, 92, 246)', bgColor: 'rgba(139, 92, 246, 0.06)' },
                     { id: 'pistas', path: '/pistas', icon: Grid3x3, label: t('menu_pistas'), color: 'rgb(91, 141, 238)', bgColor: 'rgba(91, 141, 238, 0.1)' },
                     { id: 'horarios', path: '/horarios', icon: Clock, label: t('menu_horarios'), color: 'rgb(245, 158, 11)', bgColor: 'rgba(245, 158, 11, 0.06)' },
@@ -133,7 +134,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isA
     const showChatsMentionBadge = chatMentionsCount > 0;
 
     const handleItemClick = (item: { path: string; id: string }) => {
-        if (item.path === '/grilla' && (item.id === 'resumen' || item.id === 'reservas')) {
+        if (item.path === '/grilla' && (item.id === 'resumen' || item.id === 'reservas' || item.id === 'lista-reservas')) {
             navigate(`/grilla?menu=${item.id}`);
         } else if (item.id === 'equipoRoles') {
             navigate('/equipo-portal');
@@ -192,7 +193,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({ isOpen, onClose, clubId, isA
                                         {section.items.map((item, itemIdx) => {
                                             const isGrillaEntry =
                                                 item.path === '/grilla' &&
-                                                (item.id === 'resumen' || item.id === 'reservas');
+                                                (item.id === 'resumen' || item.id === 'reservas' || item.id === 'lista-reservas');
                                             const isActive = isGrillaEntry
                                                 ? location.pathname === '/grilla' && grillaMenu === item.id
                                                 : location.pathname === item.path;

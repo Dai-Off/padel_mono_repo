@@ -35,6 +35,7 @@ import { ReservationModal } from './components/ReservationModal';
 import { SchoolCourseModal } from './components/SchoolCourseModal';
 import { BonusManagement } from './components/BonusManagement';
 import { MatchesManagementPanel } from './components/MatchesManagementPanel';
+import { ReservationsListPanel } from './components/ReservationsListPanel';
 import { WalletRecharge } from './components/WalletRecharge';
 
 import { GrillaQuickNav } from './components/GrillaQuickNav';
@@ -50,9 +51,6 @@ import {
 import {
   pixelsToTime,
   timeToPixels,
-  parseTimeStr,
-  START_HOUR,
-  END_HOUR,
   PIXELS_PER_MINUTE,
   computeCompactPxPerMinute,
   computeMobileCourtLayout,
@@ -60,6 +58,7 @@ import {
   estimateMobileGridViewportHeight,
   GRILLA_COMPACT_LAYOUT_MAX_PX,
 } from './utils/timeGrid';
+import { GridBoundsProvider, gridContentHeightPx, parseTimeStrInBounds } from './context/GridBoundsContext';
 import { enumerateDatesInRange } from './utils/recurrenceDates';
 import { courtVisibleInGridForDate } from './courtVisibility';
 import { ZoomContext, ZoomScales } from './context/ZoomContext';
@@ -70,7 +69,14 @@ import { apiFetch, apiFetchWithAuth } from '../../services/api';
 import { schoolCoursesService } from '../../services/schoolCourses';
 import { authService } from '../../services/auth';
 import { getSupabaseClient } from '../../lib/supabase';
-import { browserIanaTimeZone } from '../../lib/browserTimeZone';
+import {
+  clubIanaTimeZone,
+  formatTimeHHmmInClubTz,
+  dayKeyInClubTz,
+  nowMinutesInClubTz,
+  clubClockLabel,
+  gridBoundsForClubDay,
+} from '../../lib/clubTimeZone';
 import { listSpecialDates } from '../../services/clubSpecialDates';
 import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
 
@@ -95,13 +101,15 @@ function putBookingsCache(dateKey: string, data: any[]) {
   }
 }
 
+const addDaysToDateStr = (dateStr: string, days: number): string => {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
+
 const getWindowDates = (): string[] => {
-  const today = new Date();
-  return [-1, 0, 1, 2].map((offset) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() + offset);
-    return toDateStr(d);
-  });
+  const todayKey = dayKeyInClubTz();
+  return [-1, 0, 1, 2].map((offset) => addDaysToDateStr(todayKey, offset));
 };
 
 const toDateStr = (d: Date | string) =>
@@ -118,6 +126,7 @@ const useClubData = (dateOrStr: Date | string) => {
     const [clubId, setClubId] = useState<string | null>(null);
     const [typeColorOverrides, setTypeColorOverrides] = useState<Record<string, string>>({});
     const [typeConfigs, setTypeConfigs] = useState<Record<string, { color: string | null; display_name: string; is_system: boolean }>>({});
+    const [weeklySchedule, setWeeklySchedule] = useState<unknown>({});
     const courtsRef = useRef<Court[]>([]);
     const dateStr = toDateStr(dateOrStr);
 
@@ -151,6 +160,16 @@ const useClubData = (dateOrStr: Date | string) => {
                         }
                     } catch {
                         // Fail silently — cards fall back to hardcoded colors
+                    }
+                    try {
+                        const clubRes = await apiFetchWithAuth<{ ok: boolean; club?: { weekly_schedule?: unknown } }>(
+                            `/clubs/${encodeURIComponent(id)}`,
+                        );
+                        if (clubRes?.ok && clubRes.club) {
+                            setWeeklySchedule(clubRes.club.weekly_schedule ?? {});
+                        }
+                    } catch {
+                        setWeeklySchedule({});
                     }
                 }
             })
@@ -205,7 +224,7 @@ const useClubData = (dateOrStr: Date | string) => {
             return mapBookings(cached.data, courtsData);
         }
 
-        const tz = encodeURIComponent(browserIanaTimeZone());
+        const tz = encodeURIComponent(clubIanaTimeZone());
         const query = clubId
             ? `/bookings?date=${encodeURIComponent(date)}&club_id=${encodeURIComponent(clubId)}&time_zone=${tz}`
             : `/bookings?date=${encodeURIComponent(date)}&time_zone=${tz}`;
@@ -253,7 +272,7 @@ const useClubData = (dateOrStr: Date | string) => {
             try {
                 const [bRes, schoolSlots, privateSlots] = await Promise.all([
                     apiFetchWithAuth<any>(
-                        `/bookings?date=${encodeURIComponent(ds)}&club_id=${encodeURIComponent(clubId)}&time_zone=${encodeURIComponent(browserIanaTimeZone())}`,
+                        `/bookings?date=${encodeURIComponent(ds)}&club_id=${encodeURIComponent(clubId)}&time_zone=${encodeURIComponent(clubIanaTimeZone())}`,
                     ),
                     schoolCoursesService.slots(clubId, ds),
                     schoolCoursesService.slotsPrivate(clubId, ds),
@@ -524,7 +543,7 @@ const useClubData = (dateOrStr: Date | string) => {
         }
     }, []);
 
-    return { courts, reservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs };
+    return { courts, reservations, loading, authResolved, isCreatingCourt, refresh, clubId, weeklySchedule, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs };
 };
 
 function linkedTournamentDisplayName(b: any): string | null {
@@ -545,10 +564,7 @@ function linkedTournamentId(b: any): string | null {
 }
 
 function formatLocalTimeHHmm(value: string | Date): string {
-    const d = value instanceof Date ? value : new Date(value);
-    const hh = String(d.getHours()).padStart(2, '0');
-    const mm = String(d.getMinutes()).padStart(2, '0');
-    return `${hh}:${mm}`;
+    return formatTimeHHmmInClubTz(value);
 }
 
 function schedulePendingTournamentStartClear(tournamentId: string, expectedSeq: number, seqRef: React.MutableRefObject<Record<string, number>>) {
@@ -734,6 +750,8 @@ const ZoomScrollbars = () => {
 function GrillaViewInner() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const grillaMenu = searchParams.get('menu');
+  const isReservationsListView = grillaMenu === 'lista-reservas';
   const { t, i18n } = useGrillaTranslation();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [langMenuOpen, setLangMenuOpen] = useState(false);
@@ -752,31 +770,47 @@ function GrillaViewInner() {
         setIsAdmin(false);
       });
   }, []);
-  const today = new Date(); // Always current date — recomputed each render so chips are never stale
-  const [selectedDate, setSelectedDate] = useState<Date>(today);
+  const clubTodayKey = dayKeyInClubTz();
+  const clubToday = useMemo(() => {
+    const [y, mo, d] = clubTodayKey.split('-').map(Number);
+    return new Date(y, mo - 1, d);
+  }, [clubTodayKey]);
+  const [selectedDate, setSelectedDate] = useState<Date>(clubToday);
+  const [clubClock, setClubClock] = useState(clubClockLabel);
   const dateInputRef = useRef<HTMLInputElement>(null);
   // Derive active chip from selectedDate vs today — no separate state to go stale
+  const selectedDateKey = formatDateForInput(selectedDate);
+
   const activeChip = useMemo(() => {
-    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const selectedMidnight = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
-    const diff = Math.round((selectedMidnight.getTime() - todayMidnight.getTime()) / 86400000);
+    const diff = Math.round(
+      (new Date(`${selectedDateKey}T12:00:00Z`).getTime() - new Date(`${clubTodayKey}T12:00:00Z`).getTime()) / 86400000,
+    );
     if (diff === -1) return 'yesterday';
     if (diff === 0) return 'today';
     if (diff === 1) return 'tomorrow';
     if (diff === 2) return 'dayAfterTomorrow';
     return '';
-  }, [today, selectedDate]);
+  }, [clubTodayKey, selectedDateKey]);
 
   const gridDayKind = useMemo<'past' | 'today' | 'future'>(() => {
-    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    const selectedMidnight = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate());
-    const diffDays = Math.round((selectedMidnight.getTime() - todayMidnight.getTime()) / 86400000);
+    const diffDays = Math.round(
+      (new Date(`${selectedDateKey}T12:00:00Z`).getTime() - new Date(`${clubTodayKey}T12:00:00Z`).getTime()) / 86400000,
+    );
     if (diffDays < 0) return 'past';
     if (diffDays === 0) return 'today';
     return 'future';
-  }, [today, selectedDate]);
+  }, [clubTodayKey, selectedDateKey]);
 
-  const { courts, reservations: serverReservations, loading, authResolved, isCreatingCourt, refresh, clubId, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs } = useClubData(selectedDate);
+  const { courts, reservations: serverReservations, loading, authResolved, isCreatingCourt, refresh, clubId, weeklySchedule, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs } = useClubData(selectedDate);
+
+  const gridBounds = useMemo(
+    () => gridBoundsForClubDay(weeklySchedule, selectedDateKey),
+    [weeklySchedule, selectedDateKey],
+  );
+  const parseTime = useCallback(
+    (time: string) => parseTimeStrInBounds(time, gridBounds),
+    [gridBounds],
+  );
   const { permissionKeys: portalMenuPermissionKeys, loading: permissionsLoading } = usePortalMenuPermissions(clubId);
 
   const [isNonWorkingDay, setIsNonWorkingDay] = useState(false);
@@ -802,13 +836,13 @@ function GrillaViewInner() {
       return courts.filter((c) => c.is_hidden);
     }
     const dateStr = formatDateForInput(selectedDate);
-    const gridStartMin = START_HOUR * 60;
-    const gridEndMin = END_HOUR * 60 + 30;
+    const gridStartMin = gridBounds.openMin;
+    const gridEndMin = gridBounds.closeMin + 30;
     return courts.filter((c) => {
       if (c.is_hidden) return false;
       return courtVisibleInGridForDate(c.visibility_windows, dateStr, gridStartMin, gridEndMin);
     });
-  }, [courts, grillaTab, selectedDate]);
+  }, [courts, grillaTab, selectedDate, gridBounds.openMin, gridBounds.closeMin]);
 
   const gridCourts = activeCourts;
 
@@ -835,14 +869,11 @@ function GrillaViewInner() {
   }, [serverReservations, gridCourts]);
 
   // Current time indicator — updates every minute
-  const [nowMinutes, setNowMinutes] = useState<number>(() => {
-    const n = new Date();
-    return n.getHours() * 60 + n.getMinutes();
-  });
+  const [nowMinutes, setNowMinutes] = useState<number>(() => nowMinutesInClubTz());
   useEffect(() => {
     const tick = () => {
-      const n = new Date();
-      setNowMinutes(n.getHours() * 60 + n.getMinutes());
+      setNowMinutes(nowMinutesInClubTz());
+      setClubClock(clubClockLabel());
     };
     tick();
     const id = setInterval(tick, 60000);
@@ -883,7 +914,7 @@ function GrillaViewInner() {
   const mobileFullView = useCompactGridLayout && !focusedCourtId;
 
   const [compactPxPerMinute, setCompactPxPerMinute] = useState<number>(() =>
-    computeCompactPxPerMinute(estimateMobileGridViewportHeight())
+    computeCompactPxPerMinute(estimateMobileGridViewportHeight(), { startHour: 7, endHour: 23 })
   );
   const [gridViewportWidth, setGridViewportWidth] = useState(0);
   const [gridViewportHeight, setGridViewportHeight] = useState(0);
@@ -899,8 +930,11 @@ function GrillaViewInner() {
       : Math.min(window.innerWidth, GRILLA_COMPACT_LAYOUT_MAX_PX);
     setGridViewportWidth(width);
     setGridViewportHeight(height);
-    setCompactPxPerMinute(computeCompactPxPerMinute(height));
-  }, []);
+    setCompactPxPerMinute(computeCompactPxPerMinute(height, {
+      startHour: gridBounds.startHour,
+      endHour: gridBounds.endHour,
+    }));
+  }, [gridBounds.startHour, gridBounds.endHour]);
 
   useEffect(() => {
     const onResize = () => {
@@ -1059,21 +1093,27 @@ function GrillaViewInner() {
     }
   };
 
-  const handleDeleteBooking = async (bookingId: string, _sendEmail: boolean) => {
-      // Optimistic removal — remove from local state AND cache
-      setReservations(prev => prev.filter(r => r.id !== bookingId));
+  const removeBookingsFromCache = useCallback((bookingIds: string[]) => {
+      const idSet = new Set(bookingIds);
+      setReservations((prev) => prev.filter((r) => !idSet.has(r.id)));
       for (const ds of Object.keys(bookingsCache)) {
           const entry = bookingsCache[ds];
-          if (entry.data.some((b: any) => b.id === bookingId)) {
-              bookingsCache[ds] = { data: entry.data.filter((b: any) => b.id !== bookingId), ts: entry.ts };
+          if (entry.data.some((b: any) => idSet.has(b.id))) {
+              bookingsCache[ds] = {
+                  data: entry.data.filter((b: any) => !idSet.has(b.id)),
+                  ts: entry.ts,
+              };
           }
       }
+  }, []);
+
+  const handleDeleteBooking = async (bookingId: string, _sendEmail: boolean) => {
+      removeBookingsFromCache([bookingId]);
       setSelectedModalReservationId(null);
       setEditingBookingData(null);
       try {
           const res = await apiFetch<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
           if (!res.ok) {
-              // Revert on failure
               refresh();
               throw new Error(res.error || 'Unknown error');
           }
@@ -1082,6 +1122,22 @@ function GrillaViewInner() {
           throw err;
       }
   };
+
+  const handleDeleteBookings = useCallback(async (bookingIds: string[]) => {
+      const deletable = bookingIds.filter(
+          (id) => !id.startsWith('school-slot-') && !id.startsWith('school-private-slot-'),
+      );
+      if (deletable.length === 0) return;
+      removeBookingsFromCache(deletable);
+      const results = await Promise.all(
+          deletable.map((id) => apiFetch<any>(`/bookings/${id}`, { method: 'DELETE' })),
+      );
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length > 0) {
+          refresh();
+          throw new Error(`Failed to delete ${failed.length} booking(s)`);
+      }
+  }, [removeBookingsFromCache, refresh]);
 
   // toggleCourtHidden has been moved to useClubData.
 
@@ -1095,14 +1151,14 @@ function GrillaViewInner() {
     if (hiddenCourts.length === 0) throw new Error('No hay pistas ocultas configuradas');
 
     // Find the first hidden court with no overlap at this time
-    const startMin = parseTimeStr(booking.startTime);
+    const startMin = parseTime(booking.startTime);
     const endMin = startMin + booking.durationMinutes;
 
     let targetCourtId: string | null = null;
     for (const hc of hiddenCourts) {
       const courtReservations = reservations.filter(r => r.courtId === hc.id && r.id !== bookingId);
       const hasOverlap = courtReservations.some(r => {
-        const rStart = parseTimeStr(r.startTime);
+        const rStart = parseTime(r.startTime);
         const rEnd = rStart + r.durationMinutes;
         return startMin < rEnd && endMin > rStart;
       });
@@ -1142,14 +1198,14 @@ function GrillaViewInner() {
     const visibleCourts = courts.filter(c => !c.is_hidden);
     if (visibleCourts.length === 0) throw new Error('No hay pistas oficiales configuradas');
 
-    const startMin = parseTimeStr(booking.startTime);
+    const startMin = parseTime(booking.startTime);
     const endMin = startMin + booking.durationMinutes;
 
     let targetCourtId: string | null = null;
     for (const vc of visibleCourts) {
       const courtReservations = reservations.filter(r => r.courtId === vc.id && r.id !== bookingId);
       const hasOverlap = courtReservations.some(r => {
-        const rStart = parseTimeStr(r.startTime);
+        const rStart = parseTime(r.startTime);
         const rEnd = rStart + r.durationMinutes;
         return startMin < rEnd && endMin > rStart;
       });
@@ -1280,7 +1336,7 @@ function GrillaViewInner() {
                       court_id: courtId,
                       start_at: startAt,
                       end_at: endAt,
-                      timezone: browserIanaTimeZone(),
+                      timezone: clubIanaTimeZone(),
                       total_price_cents: totalPriceCents,
                   };
                   delete payload.court_ids;
@@ -1428,13 +1484,13 @@ function GrillaViewInner() {
   // Helper to validate drop (reused for ghost shadow and drop)
   const isValidDrop = (courtId: string, startTimeMin: number, duration: number, ignoreId: string) => {
     const endMin = startTimeMin + duration;
-    if (startTimeMin < START_HOUR * 60 || endMin > END_HOUR * 60) return false;
+    if (startTimeMin < gridBounds.openMin || endMin > gridBounds.closeMin) return false;
 
     const targetReservations = reservations.filter(r => r.courtId === courtId && r.id !== ignoreId);
     let hasOverlap = false;
 
     for (const other of targetReservations) {
-      const otherStart = parseTimeStr(other.startTime);
+      const otherStart = parseTime(other.startTime);
       const otherEnd = otherStart + other.durationMinutes;
 
       if (startTimeMin < otherEnd && endMin > otherStart) {
@@ -1520,10 +1576,10 @@ function GrillaViewInner() {
     // so we need to convert screen delta to grid-space delta
     const panScale = mobileFullView ? activeMobileScaleRef.current : scale;
     const ppm = mobileFullView ? compactPxPerMinute : PIXELS_PER_MINUTE;
-    const currentPixels = timeToPixels(activeReservation.startTime, ppm);
+    const currentPixels = timeToPixels(activeReservation.startTime, ppm, gridBounds);
     const newPixels = currentPixels + delta.y / panScale;
-    const newStartTime = pixelsToTime(newPixels, ppm);
-    const startMins = parseTimeStr(newStartTime);
+    const newStartTime = pixelsToTime(newPixels, ppm, gridBounds);
+    const startMins = parseTime(newStartTime);
 
     if (isValidDrop(over.id as string, startMins, activeReservation.durationMinutes, activeReservation.id)) {
       setDragState({
@@ -1585,9 +1641,9 @@ function GrillaViewInner() {
 
     const panScale = mobileFullView ? activeMobileScaleRef.current : scale;
     const ppm = mobileFullView ? compactPxPerMinute : PIXELS_PER_MINUTE;
-    const currentPixels = timeToPixels(reservation.startTime, ppm);
+    const currentPixels = timeToPixels(reservation.startTime, ppm, gridBounds);
     const newPixels = currentPixels + delta.y / panScale;
-    const newStartTime = pixelsToTime(newPixels, ppm);
+    const newStartTime = pixelsToTime(newPixels, ppm, gridBounds);
 
     let newStatus = reservation.status;
     const isHiddenCourt = (cId: string) => courts.find(c => c.id === cId)?.is_hidden === true;
@@ -1597,7 +1653,7 @@ function GrillaViewInner() {
       newStatus = 'confirmed';
     }
 
-    const newStartMin = parseTimeStr(newStartTime);
+    const newStartMin = parseTime(newStartTime);
 
     if (!isValidDrop(newCourtId, newStartMin, reservation.durationMinutes, reservation.id)) {
       console.warn(t('grid.dropRejected'));
@@ -1720,7 +1776,7 @@ function GrillaViewInner() {
     // Get all other reservations on this court (excluding the one being moved)
     const courtReservations = reservations
       .filter(r => r.courtId === courtId && r.id !== ignoreId)
-      .map(r => ({ start: parseTimeStr(r.startTime), end: parseTimeStr(r.startTime) + r.durationMinutes }))
+      .map(r => ({ start: parseTime(r.startTime), end: parseTime(r.startTime) + r.durationMinutes }))
       .sort((a, b) => a.start - b.start);
 
     // Add the proposed placement
@@ -1759,7 +1815,7 @@ function GrillaViewInner() {
         }
 
         // Verify the suggestion is valid
-        const suggestedMin = parseTimeStr(suggestedTime);
+        const suggestedMin = parseTime(suggestedTime);
         if (isValidDrop(courtId, suggestedMin, duration, ignoreId)) {
           warnings.push({
             courtName,
@@ -1818,10 +1874,9 @@ function GrillaViewInner() {
 
   // Compute the native (unscaled) grid height so we can set the scroll container size
   const nativeGridHeight = useMemo(() => {
-    const totalMinutes = (END_HOUR - START_HOUR) * 60;
     const headerPx = mobileFullView ? compactHeaderPx : 28;
-    return totalMinutes * activeGridPpm + headerPx;
-  }, [mobileFullView, activeGridPpm]);
+    return gridContentHeightPx(gridBounds, activeGridPpm) + headerPx;
+  }, [mobileFullView, activeGridPpm, gridBounds]);
 
 
 
@@ -1950,6 +2005,44 @@ function GrillaViewInner() {
     }
   };
 
+  const openBookingForEdit = useCallback(async (bookingId: string) => {
+    try {
+      const data = await apiFetchWithAuth<any>(`/bookings/${bookingId}`);
+      if (data.ok && data.booking) {
+        const b = data.booking;
+        const court = courts.find((c) => c.id === b.court_id);
+        setReservations((prev) => {
+          const exists = prev.some((r) => r.id === bookingId);
+          if (exists) return prev;
+          return [
+            ...prev,
+            {
+              id: bookingId,
+              courtId: b.court_id,
+              courtName: court?.name ?? 'Pista',
+              startTime: formatLocalTimeHHmm(b.start_at),
+              durationMinutes: Math.round(
+                (new Date(b.end_at).getTime() - new Date(b.start_at).getTime()) / 60000,
+              ),
+              playerName: b.players?.first_name
+                ? `${b.players.first_name} ${b.players.last_name || ''}`
+                : '',
+              status: b.status ?? 'pending_payment',
+              booking_type: b.reservation_type ?? 'standard',
+            },
+          ];
+        });
+        setEditingBookingData({
+          ...b,
+          courtName: court?.name ?? 'Pista',
+        });
+        setSelectedModalReservationId(bookingId);
+      }
+    } catch (err) {
+      console.error('Error fetching booking for edit:', err);
+    }
+  }, [courts]);
+
   const handleLogout = () => {
     authService.logout();
     navigate('/login', { replace: true });
@@ -1957,7 +2050,26 @@ function GrillaViewInner() {
 
   if (loading || !authResolved) return <PageSpinner />;
 
+  const handleFreeSlotClick = useCallback((
+    courtId: string,
+    courtName: string,
+    timeStr: string,
+    isDisabled: boolean,
+  ) => {
+    if (isDisabled || gridBounds.closed) return;
+    const startMin = parseTimeStrInBounds(timeStr, gridBounds);
+    if (startMin < gridBounds.openMin || startMin + 90 > gridBounds.closeMin) return;
+    const newId = `new-${Date.now()}`;
+    setReservations(prev => [...prev, {
+      id: newId, courtId, courtName,
+      startTime: timeStr, durationMinutes: 90,
+      playerName: '', status: 'available', booking_type: 'standard',
+    }]);
+    setSelectedModalReservationId(newId);
+  }, [gridBounds]);
+
   return (
+    <GridBoundsProvider weeklySchedule={weeklySchedule} dateStr={selectedDateKey}>
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
       <div className="grilla-shell h-dvh flex flex-col bg-gray-100 font-sans overflow-hidden">
         {!isMobileDevice && (
@@ -2090,39 +2202,26 @@ function GrillaViewInner() {
               dateStr={toDateStr(selectedDate)}
               onRefreshGrid={refresh}
               onBackToGrid={() => setActiveView('grid')}
-              onEditBooking={async (bookingId: string) => {
-                try {
-                  const data = await apiFetchWithAuth<any>(`/bookings/${bookingId}`);
-                  if (data.ok && data.booking) {
-                    const b = data.booking;
-                    const court = courts.find(c => c.id === b.court_id);
-                    // Ensure the reservation exists in local state so the modal can find it
-                    setReservations(prev => {
-                      const exists = prev.some(r => r.id === bookingId);
-                      if (exists) return prev;
-                      return [...prev, {
-                        id: bookingId,
-                        courtId: b.court_id,
-                        courtName: court?.name ?? 'Pista',
-                        startTime: formatLocalTimeHHmm(b.start_at),
-                        durationMinutes: Math.round((new Date(b.end_at).getTime() - new Date(b.start_at).getTime()) / 60000),
-                        playerName: b.players?.first_name ? `${b.players.first_name} ${b.players.last_name || ''}` : '',
-                        status: b.status ?? 'pending_payment',
-                        booking_type: b.reservation_type ?? 'standard',
-                      }];
-                    });
-                    setEditingBookingData({
-                      ...b,
-                      courtName: court?.name ?? 'Pista',
-                    });
-                    setSelectedModalReservationId(bookingId);
-                    // Switch back to grid view so the modal appears over the grid
-                    setActiveView('grid');
-                  }
-                } catch (err) {
-                  console.error('Error fetching booking for edit:', err);
-                }
+              onEditBooking={(bookingId) => {
+                void openBookingForEdit(bookingId);
+                setActiveView('grid');
               }}
+            />
+          ) : isReservationsListView ? (
+            <ReservationsListPanel
+              reservations={serverReservations}
+              courts={courts}
+              dateStr={formatDateForInput(selectedDate)}
+              clubName={portalClubName}
+              onDateChange={(ds) => {
+                const [y, mo, d] = ds.split('-').map(Number);
+                if (!y || !mo || !d) return;
+                setSelectedDate(new Date(y, mo - 1, d));
+              }}
+              onEditBooking={(bookingId) => void openBookingForEdit(bookingId)}
+              onDeleteBookings={handleDeleteBookings}
+              onOpenGrid={() => navigate('/grilla?menu=reservas')}
+              loading={loading}
             />
           ) : (
           <DndContext
@@ -2172,6 +2271,14 @@ function GrillaViewInner() {
                     )}
                     {/* Controls row */}
                     <div className="flex flex-wrap items-center gap-1 md:gap-2">
+                      <span
+                        className="flex items-center gap-1 px-2 py-0.5 rounded border border-[#006A6A]/30 bg-[#006A6A]/5 text-[10px] font-mono font-semibold text-[#006A6A] shrink-0"
+                        title="Hora actual del club (España)"
+                      >
+                        {clubClock}
+                        <span className="font-sans font-medium text-gray-500">España</span>
+                      </span>
+                      <span className="text-gray-300 select-none">|</span>
                       <span className="text-[10px] font-medium text-gray-500 shrink-0 mr-1">{t('toolbar.dateLabel')}</span>
 
                       {/* date picker group */}
@@ -2220,10 +2327,10 @@ function GrillaViewInner() {
                           <button
                             onClick={() => {
                               switch (dayKey) {
-                                case 'yesterday': setSelectedDate(addDays(today, -1)); break;
-                                case 'today': setSelectedDate(today); break;
-                                case 'tomorrow': setSelectedDate(addDays(today, 1)); break;
-                                case 'dayAfterTomorrow': setSelectedDate(addDays(today, 2)); break;
+                                case 'yesterday': setSelectedDate(addDays(clubToday, -1)); break;
+                                case 'today': setSelectedDate(clubToday); break;
+                                case 'tomorrow': setSelectedDate(addDays(clubToday, 1)); break;
+                                case 'dayAfterTomorrow': setSelectedDate(addDays(clubToday, 2)); break;
                               }
                             }}
                             className={clsx(
@@ -2485,8 +2592,8 @@ function GrillaViewInner() {
                         >
                           <GridBackground compactPxPerMinute={compactPxPerMinute} />
                           {/* Current time red line — only shown when viewing today */}
-                          {activeChip === 'today' && nowMinutes >= START_HOUR * 60 && nowMinutes <= END_HOUR * 60 && (() => {
-                            const topPx = compactHeaderPx + (nowMinutes - START_HOUR * 60) * compactPxPerMinute;
+                          {activeChip === 'today' && nowMinutes >= gridBounds.openMin && nowMinutes <= gridBounds.closeMin && (() => {
+                            const topPx = compactHeaderPx + (nowMinutes - gridBounds.openMin) * compactPxPerMinute;
                             return (
                               <div
                                 className="absolute left-0 right-0 z-30 pointer-events-none"
@@ -2515,16 +2622,7 @@ function GrillaViewInner() {
                               dragGhost={dragState?.courtId === court.id ? dragState : undefined}
                               recentlyDroppedId={recentlyDroppedId}
                               onReservationClick={handleReservationClick}
-                              onFreeSlotClick={(courtId, courtName, timeStr, isDisabled) => {
-                                if (isDisabled) return;
-                                const newId = `new-${Date.now()}`;
-                                setReservations(prev => [...prev, {
-                                  id: newId, courtId, courtName,
-                                  startTime: timeStr, durationMinutes: 90,
-                                  playerName: '', status: 'available', booking_type: 'standard',
-                                }]);
-                                setSelectedModalReservationId(newId);
-                              }}
+                              onFreeSlotClick={handleFreeSlotClick}
                               onHeaderClick={(courtId) => {
                                 setFocusedCourtId(courtId);
                               }}
@@ -2582,16 +2680,7 @@ function GrillaViewInner() {
                           dragGhost={dragState?.courtId === court.id ? dragState : undefined}
                           recentlyDroppedId={recentlyDroppedId}
                           onReservationClick={handleReservationClick}
-                          onFreeSlotClick={(courtId, courtName, timeStr, isDisabled) => {
-                            if (isDisabled) return;
-                            const newId = `new-${Date.now()}`;
-                            setReservations(prev => [...prev, {
-                              id: newId, courtId, courtName,
-                              startTime: timeStr, durationMinutes: 90,
-                              playerName: '', status: 'available', booking_type: 'standard',
-                            }]);
-                            setSelectedModalReservationId(newId);
-                          }}
+                          onFreeSlotClick={handleFreeSlotClick}
                           isCompactView={false}
                           isMaintenanceBlocked={isNonWorkingDay || reservations.some(r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO')}
                           totalCourts={gridCourts.length}
@@ -2632,10 +2721,12 @@ function GrillaViewInner() {
           )}
         </main>
 
-        <GrillaLegend
-          typeConfigs={Object.keys(typeConfigs).length > 0 ? typeConfigs : undefined}
-          typeColorOverrides={Object.keys(typeColorOverrides).length > 0 ? typeColorOverrides : undefined}
-        />
+        {!isReservationsListView && activeView !== 'matches' && (
+          <GrillaLegend
+            typeConfigs={Object.keys(typeConfigs).length > 0 ? typeConfigs : undefined}
+            typeColorOverrides={Object.keys(typeColorOverrides).length > 0 ? typeColorOverrides : undefined}
+          />
+        )}
 
         <ReservationModal
           clubId={clubId}
@@ -2730,6 +2821,7 @@ function GrillaViewInner() {
         loading={permissionsLoading}
       />
     </ZoomContext.Provider>
+    </GridBoundsProvider>
   );
 }
 
