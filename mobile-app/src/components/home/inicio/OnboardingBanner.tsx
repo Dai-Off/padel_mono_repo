@@ -4,8 +4,44 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { ScalePressable } from './ScalePressable';
 
 type Props = {
-  /** Tap en la card → abre el cuestionario de nivelación en perfil. */
+  /** Tap en la card. */
   onPress: () => void;
+  variant?: 'onboarding' | 'matchmaking-searching' | 'matchmaking-matched' | 'matchmaking-timeout';
+};
+
+const BANNER_COPY: Record<
+  NonNullable<Props['variant']>,
+  {
+    title: string;
+    subtitle: string;
+    iconName: keyof typeof Ionicons.glyphMap;
+    colors: [string, string];
+  }
+> = {
+  onboarding: {
+    title: 'Descubre tu nivel',
+    subtitle: 'Desbloquea todo el contenido',
+    iconName: 'compass',
+    colors: ['#F18F34', '#C46A20'],
+  },
+  'matchmaking-searching': {
+    title: 'Búsqueda competitiva activa',
+    subtitle: 'Busqueda en curso en segundo plano',
+    iconName: 'radio-outline',
+    colors: ['#F18F34', '#C46A20'],
+  },
+  'matchmaking-matched': {
+    title: '¡Partido encontrado!',
+    subtitle: 'Entra y confirma tu lugar',
+    iconName: 'checkmark-circle',
+    colors: ['#16A34A', '#15803D'],
+  },
+  'matchmaking-timeout': {
+    title: 'No se encontraron jugadores',
+    subtitle: 'Vuelve a configurar parámetros',
+    iconName: 'time-outline',
+    colors: ['#F59E0B', '#D97706'],
+  },
 };
 
 /**
@@ -13,11 +49,12 @@ type Props = {
  * completado. Visible arriba de todo, naranja para destacar respecto al resto
  * del Home. Tap → abre el perfil con el modal de onboarding.
  */
-export function OnboardingBanner({ onPress }: Props) {
+export function OnboardingBanner({ onPress, variant = 'onboarding' }: Props) {
+  const copy = BANNER_COPY[variant];
   return (
     <ScalePressable onPress={onPress} pressedScale={0.985} style={styles.wrap}>
       <LinearGradient
-        colors={['#F18F34', '#C46A20']}
+        colors={copy.colors}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.gradient}
@@ -25,16 +62,16 @@ export function OnboardingBanner({ onPress }: Props) {
         <View style={styles.iconWrap}>
           <View style={styles.iconGlow} />
           <View style={styles.iconCircle}>
-            <Ionicons name="compass" size={18} color="#FFFFFF" />
+            <Ionicons name={copy.iconName} size={18} color="#FFFFFF" />
           </View>
         </View>
 
         <View style={styles.textWrap}>
           <Text style={styles.title} numberOfLines={1}>
-            Descubre tu nivel
+            {copy.title}
           </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            Desbloquea todo el contenido
+            {copy.subtitle}
           </Text>
         </View>
 

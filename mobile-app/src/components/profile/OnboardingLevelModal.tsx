@@ -106,27 +106,11 @@ type Props = {
   savedEloRating?: number | null;
 };
 
-const POOL_LABELS: Record<string, string> = {
-  beginner: 'Iniciación',
-  intermediate: 'Intermedio',
-  advanced: 'Avanzado',
-  expert: 'Experto',
-};
-
-function poolLabel(pool: string): string {
-  return POOL_LABELS[pool] ?? pool.replace(/_/g, ' ');
-}
-
 type ViewMode =
   | { kind: 'loading' }
   | { kind: 'already_done'; elo: number | null }
   | { kind: 'single'; question: OnboardingQuestionPayload; stepLabel: string }
-  | {
-      kind: 'phase2_intro';
-      questions: OnboardingQuestionPayload[];
-      eloPhase1: number;
-      poolAssigned: string;
-    }
+  | { kind: 'phase2_intro'; questions: OnboardingQuestionPayload[] }
   | { kind: 'phase2'; questions: OnboardingQuestionPayload[]; stepLabel: string }
   | { kind: 'done'; elo: number };
 
@@ -139,6 +123,7 @@ export function OnboardingLevelModal({
 }: Props) {
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const donePulse = useRef(new Animated.Value(1)).current;
   /** No incluir en deps del bootstrap: al guardar el padre refresca perfil y cambiaría `savedEloRating` y reiniciaría el modal. */
   const savedEloRatingRef = useRef(savedEloRating);
   savedEloRatingRef.current = savedEloRating;
@@ -218,11 +203,9 @@ export function OnboardingLevelModal({
         try {
           const { elo_rating } = await submitPlayerOnboarding(accessToken, nextAnswers);
           const eloNum = Number(elo_rating);
-          notifyCompletedOnce(Number.isFinite(eloNum) ? eloNum : 0);
           setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
         } catch (e) {
           if (isAlreadyCompletedError(e)) {
-            notifyCompletedOnce(0);
             setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
             return;
           }
@@ -256,11 +239,9 @@ export function OnboardingLevelModal({
           setSubmitting(true);
           const { elo_rating } = await submitPlayerOnboarding(accessToken, nextAnswers);
           const eloNum = Number(elo_rating);
-          notifyCompletedOnce(Number.isFinite(eloNum) ? eloNum : 0);
           setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
         } catch (e) {
           if (isAlreadyCompletedError(e)) {
-            notifyCompletedOnce(0);
             setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
             return;
           }
@@ -272,12 +253,7 @@ export function OnboardingLevelModal({
         }
         return;
       }
-      setView({
-        kind: 'phase2_intro',
-        questions: state.questions,
-        eloPhase1: state.elo_phase1,
-        poolAssigned: state.pool_assigned,
-      });
+      setView({ kind: 'phase2_intro', questions: state.questions });
     },
     [accessToken],
   );
@@ -314,12 +290,7 @@ export function OnboardingLevelModal({
             setBootError('No hay preguntas de Fase 2 disponibles. Cierra e intenta de nuevo o contacta al club.');
             return;
           }
-          setView({
-            kind: 'phase2_intro',
-            questions: state.questions,
-            eloPhase1: state.elo_phase1,
-            poolAssigned: state.pool_assigned,
-          });
+          setView({ kind: 'phase2_intro', questions: state.questions });
         }
       } catch (e) {
         if (!cancelled) {
@@ -331,6 +302,36 @@ export function OnboardingLevelModal({
       cancelled = true;
     };
   }, [visible, accessToken, resetLocal, animateOpen]);
+
+  useEffect(() => {
+    if (view.kind !== 'done') {
+      donePulse.stopAnimation();
+      donePulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(donePulse, {
+          toValue: 1.08,
+          duration: 700,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(donePulse, {
+          toValue: 1,
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      donePulse.stopAnimation();
+      donePulse.setValue(1);
+    };
+  }, [donePulse, view.kind]);
 
   const handleClose = () => {
     animateClose(() => {
@@ -421,11 +422,9 @@ export function OnboardingLevelModal({
       setSubmitting(true);
       const { elo_rating } = await submitPlayerOnboarding(accessToken, merged);
       const eloNum = Number(elo_rating);
-      notifyCompletedOnce(Number.isFinite(eloNum) ? eloNum : 0);
       setView({ kind: 'done', elo: Number.isFinite(eloNum) ? eloNum : 0 });
     } catch (e) {
       if (isAlreadyCompletedError(e)) {
-        notifyCompletedOnce(0);
         setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
         return;
       }
@@ -571,8 +570,7 @@ export function OnboardingLevelModal({
         <Ionicons name="checkmark-circle" size={48} color="#34D399" style={{ marginBottom: 8 }} />
         <Text style={styles.alreadyDoneTitle}>Nivelación del club completada</Text>
         <Text style={styles.alreadyDoneBody}>
-          El cuestionario oficial del club (el que viene del servidor) ya está registrado. No quedan pasos
-          pendientes.
+          Ya completaste la nivelación inicial del club. No tenés pasos pendientes.
         </Text>
         {view.elo != null && Number.isFinite(view.elo) ? (
           <Text style={styles.alreadyDoneElo}>Tu nivel en perfil: {view.elo.toFixed(2)}</Text>
@@ -638,12 +636,10 @@ export function OnboardingLevelModal({
         >
           <Text style={styles.questionTitle}>Afinamos tu nivel con 5 preguntas técnicas</Text>
           <Text style={styles.phase2IntroBody}>
-            Tras el cuestionario oficial, tu nivel orientativo es{' '}
-            <Text style={styles.phase2IntroElo}>{view.eloPhase1.toFixed(2)}</Text> (escala 0–7). El bloque siguiente
-            está calibrado para el perfil «{poolLabel(view.poolAssigned)}».
+            Ya completaste la fase 1. Ahora necesitamos terminar la fase 2 para calcular y guardar tu nivel final.
           </Text>
           <Text style={styles.phase2IntroHint}>
-            Responde con cuidado: estas respuestas ajustan tu nivel inicial antes de guardarlo en tu perfil.
+            Solo al terminar todas las preguntas se calcula tu resultado.
           </Text>
         </ScrollView>
         <View style={[styles.footer, { paddingBottom: footerPadding }]}>
@@ -719,11 +715,17 @@ export function OnboardingLevelModal({
         <Pressable style={[styles.iconClose, styles.doneClose]} onPress={handleClose}>
           <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
         </Pressable>
-        <Text style={styles.doneTitle}>Tu nivel inicial</Text>
+        <Animated.View style={[styles.doneIconWrap, { transform: [{ scale: donePulse }] }]}>
+          <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.doneIconGrad}>
+            <Ionicons name="sparkles" size={28} color="#fff" />
+          </LinearGradient>
+        </Animated.View>
+        <Text style={styles.doneTitle}>¡Nivelación completada con éxito!</Text>
+        <Text style={styles.doneEloLabel}>Tu nivel ELO inicial</Text>
         <Text style={styles.doneElo}>{eloLabel}</Text>
         <Text style={styles.doneSub}>
-          Escala 0–7 · según tus respuestas (camino corto o completo). Ya puedes usar matchmaking y lecciones según las
-          reglas del club.
+          Tu nivel inicial ya quedo configurado. Desde ahora vas a recibir emparejamientos y experiencias adaptadas a tu
+          perfil dentro del club.
         </Text>
         <Pressable
           style={styles.primaryWrap}
@@ -742,17 +744,22 @@ export function OnboardingLevelModal({
 
   return (
     <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
-      <View style={styles.root}>
-        <Pressable style={styles.backdrop} onPress={handleClose} />
-        <Animated.View style={[styles.sheet, { transform: [{ translateY }], paddingBottom: footerPadding }]}>
-          {inner}
-        </Animated.View>
-      </View>
+      {view.kind === 'done' ? (
+        <View style={styles.fullscreenRoot}>{inner}</View>
+      ) : (
+        <View style={styles.root}>
+          <Pressable style={styles.backdrop} onPress={handleClose} />
+          <Animated.View style={[styles.sheet, { transform: [{ translateY }], paddingBottom: footerPadding }]}>
+            {inner}
+          </Animated.View>
+        </View>
+      )}
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  fullscreenRoot: { flex: 1, backgroundColor: '#0F0F0F', justifyContent: 'center' },
   root: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
   sheet: {
@@ -862,7 +869,28 @@ const styles = StyleSheet.create({
   alreadyDoneElo: { color: '#F18F34', fontSize: 20, fontWeight: '800', marginTop: 8 },
   doneRoot: { padding: 24, alignItems: 'center' },
   doneClose: { alignSelf: 'flex-end', marginBottom: 8 },
-  doneTitle: { color: 'rgba(255,255,255,0.7)', fontSize: 14, marginBottom: 8 },
+  doneIconWrap: { marginBottom: 14 },
+  doneIconGrad: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#F18F34',
+    shadowOpacity: 0.28,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  doneTitle: { color: 'rgba(255,255,255,0.88)', fontSize: 17, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  doneEloLabel: {
+    color: '#F18F34',
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
   doneElo: { color: '#fff', fontSize: 44, fontWeight: '800', marginBottom: 12 },
-  doneSub: { color: '#9CA3AF', fontSize: 13, textAlign: 'center', marginBottom: 24, lineHeight: 20, paddingHorizontal: 8 },
+  doneSub: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', marginBottom: 24, lineHeight: 21, paddingHorizontal: 8 },
 });
