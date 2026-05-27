@@ -63,7 +63,7 @@ export function TuActividadDataProvider({ children }: { children: ReactNode }) {
     setError(null);
     try {
       const [pastMatches, enrollRes, tourRes] = await Promise.all([
-        fetchMyMatches(token, { phase: 'past', limit: 100 }),
+        fetchMyMatches(token, { phase: 'past', limit: 200 }),
         fetchMyEnrollments(token),
         fetchMyTournaments(token, { limit: TOURNAMENTS_PAGE, offset: 0 }),
       ]);

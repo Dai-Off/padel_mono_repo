@@ -9,10 +9,13 @@ export async function finalizePastMatches(): Promise<number> {
   const supabase = getSupabaseServiceRoleClient();
   const nowIso = new Date().toISOString();
 
+  // Incluye todos los estados "activos" — no solo 'pending'/'in_progress'.
+  // En este sistema los partidos se crean con status 'open' o 'full'.
+  const ACTIVE_STATUSES = ['open', 'full', 'pending', 'in_progress'];
   const { data: rows, error } = await supabase
     .from('matches')
     .select('id, bookings!inner(end_at)')
-    .in('status', ['pending', 'in_progress'])
+    .in('status', ACTIVE_STATUSES)
     .lt('bookings.end_at', nowIso);
 
   if (error) {

@@ -1,4 +1,5 @@
 import { API_URL } from '../config';
+import { normalizeMatchList } from './normalizeMatch';
 
 export type Match = {
   id: string;
@@ -32,27 +33,30 @@ type MatchPlayerRef = {
   players: PlayerRef | null;
 };
 
-export type MatchEnriched = Match & {
-  bookings?: {
+export type MatchBookingExpanded = {
+  id: string;
+  organizer_player_id?: string | null;
+  start_at: string;
+  end_at: string;
+  total_price_cents: number;
+  currency: string;
+  status?: string;
+  reservation_type?: string | null;
+  court_id: string;
+  courts?: {
     id: string;
-    organizer_player_id?: string | null;
-    start_at: string;
-    end_at: string;
-    total_price_cents: number;
-    currency: string;
-    status?: string;
-    reservation_type?: string | null;
-    court_id: string;
-    courts?: {
-      id: string;
-      club_id: string;
-      name?: string;
-      indoor?: boolean;
-      glass_type?: string;
-      sport?: string | null;
-      clubs?: { id: string; name: string; address: string; city: string } | null;
-    } | null;
+    club_id: string;
+    name?: string;
+    indoor?: boolean;
+    glass_type?: string;
+    sport?: string | null;
+    clubs?: { id: string; name: string; address: string; city: string } | null;
   } | null;
+};
+
+export type MatchEnriched = Match & {
+  /** Supabase expand: objeto o array de un elemento. */
+  bookings?: MatchBookingExpanded | MatchBookingExpanded[] | null;
   match_players?: MatchPlayerRef[] | null;
 };
 
@@ -92,7 +96,7 @@ export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<M
     const res = await fetch(url.toString(), { headers });
     if (!res.ok) return [];
     const json = (await res.json()) as MatchesResponse;
-    if (Array.isArray(json.matches)) return json.matches as MatchEnriched[];
+    if (Array.isArray(json.matches)) return normalizeMatchList(json.matches as MatchEnriched[]);
     return [];
   } catch {
     return [];
@@ -115,7 +119,7 @@ export async function fetchMyMatches(
     });
     if (!res.ok) return [];
     const json = (await res.json()) as MatchesResponse;
-    if (Array.isArray(json.matches)) return json.matches as MatchEnriched[];
+    if (Array.isArray(json.matches)) return normalizeMatchList(json.matches as MatchEnriched[]);
     return [];
   } catch {
     return [];
@@ -288,7 +292,7 @@ export async function fetchMatchById(
     const res = await fetch(`${API_URL}/matches/${matchId}?expand=1`, { headers });
     if (!res.ok) return null;
     const json = (await res.json()) as MatchResponse;
-    if (json.ok && json.match) return json.match;
+    if (json.ok && json.match) return normalizeMatchList([json.match as MatchEnriched])[0] ?? null;
     return null;
   } catch {
     return null;

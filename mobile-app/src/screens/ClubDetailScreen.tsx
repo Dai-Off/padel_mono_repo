@@ -24,7 +24,7 @@ import { fetchAvailableSlots } from "../api/availability";
 import { fetchClubById } from "../api/clubs";
 import { fetchPublicClubReviews, type PublicClubReview } from "../api/clubReviews";
 import { fetchCourtsByClubId, type Court } from "../api/courts";
-import { fetchMatches } from "../api/matches";
+import { fetchMatches, type MatchEnriched } from "../api/matches";
 import { mapMatchToPartido } from "../api/mapMatchToPartido";
 import { clubLocalDateTimeToUtcIso } from "../lib/clubTimeZone";
 import {
@@ -39,6 +39,7 @@ import { PrivateReservationModal } from "../components/partido/PrivateReservatio
 import type { PartidoItem } from "./PartidosScreen";
 import { theme } from "../theme";
 import { filterSlotsStartingAfterNow } from "../domain/localSlotAvailability";
+import { getMatchBooking } from "../domain/matchLifecycle";
 import { toDateStringLocal as localCalendarYmd } from "../utils/dateLocal";
 import { useSlotPrice } from "../hooks/useSlotPrice";
 
@@ -140,11 +141,8 @@ function getNextDays(count: number) {
   return out;
 }
 
-function matchBelongsToClub(
-  match: { bookings?: { courts?: { club_id?: string } | null } | null },
-  clubId: string,
-): boolean {
-  const clubIdFromMatch = match.bookings?.courts?.club_id;
+function matchBelongsToClub(match: MatchEnriched, clubId: string): boolean {
+  const clubIdFromMatch = getMatchBooking(match)?.courts?.club_id;
   return clubIdFromMatch != null && clubIdFromMatch === clubId;
 }
 

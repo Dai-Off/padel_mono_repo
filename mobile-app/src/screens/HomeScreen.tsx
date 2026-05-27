@@ -316,16 +316,15 @@ export function HomeScreen({
             <OnboardingBanner onPress={() => onOpenProfileForOnboarding?.()} />
           </InicioEnterBlock>
         )}
-        {(matchesLoading || misPartidos.length > 0) && (
+        {session?.access_token ? (
           <InicioEnterBlock enterIndex={homeEnterOffset + 1}>
             <ProximosPartidosSection
               items={misPartidos}
-              /** No acoplar a session aquí: en iOS la sesión hidrata tarde y `loading` quedaba false con items vacíos → la sección se ocultaba por completo (early return). */
               loading={matchesLoading}
               onPartidoPress={onPartidoPress}
             />
           </InicioEnterBlock>
-        )}
+        ) : null}
         <InicioEnterBlock enterIndex={homeEnterOffset + 2}>
           <InicioWidgetsCarousel>
             <DailyLessonCard
