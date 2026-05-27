@@ -108,6 +108,8 @@ export type PartidoItem = {
   matchStatus?: string;
   bookingStatus?: string;
   scoreStatus?: 'pending' | 'confirmed' | 'disputed' | null;
+  /** true si el jugador autenticado ya envió feedback de este partido. */
+  hasMyFeedback?: boolean;
   /** Deporte de la pista (padel, tenis, pickleball…) */
   courtSport?: string;
 };

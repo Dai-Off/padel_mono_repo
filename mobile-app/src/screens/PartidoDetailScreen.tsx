@@ -124,7 +124,7 @@ export function PartidoDetailScreen({
    * todavía no ha llegado, tratamos como "completado" para no mostrar el
    * candado durante el flicker inicial.
    */
-  const { profile: myProfile } = useHomeData();
+  const { profile: myProfile, refreshMatches } = useHomeData();
   /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido (fetch async). */
   const [playerContextResolved, setPlayerContextResolved] = useState(() => !session?.access_token);
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
@@ -453,14 +453,26 @@ export function PartidoDetailScreen({
       );
 
       if (!res.ok) return res;
+      setPartido((prev) => ({ ...prev, hasMyFeedback: true }));
+      await refreshMatches({ force: true });
       return { ok: true as const };
     },
-    [partido.id, partido.playerIds, partido.playerIdsBySlot, currentPlayerId, session?.access_token]
+    [
+      partido.id,
+      partido.playerIds,
+      partido.playerIdsBySlot,
+      currentPlayerId,
+      session?.access_token,
+      refreshMatches,
+    ]
   );
   /** Usuario apuntado y partido aún no cerrado: barra inferior con finalizar + papelera. */
   const playersFilledCount = partido.players.filter((p) => !p.isFree).length;
   const showFinishBar =
-    playerContextResolved && isInMatch && matchPhase !== 'past' && !pendingMmPay;
+    playerContextResolved &&
+    isInMatch &&
+    !pendingMmPay &&
+    partido.hasMyFeedback !== true;
   const bottomBarNeedsStack = pendingMmPay || canDeclineMmProposal;
   const bottomReserve = insets.bottom + (showFinishBar ? 100 : bottomBarNeedsStack ? 148 : 88);
   const canPressCta =

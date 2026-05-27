@@ -148,7 +148,7 @@ export function ProximosPartidosSection({
     <View style={styles.section}>
       <View style={styles.headerRow}>
         <View style={styles.headerTextCol}>
-          <Text style={styles.title}>Próximos partidos</Text>
+          <Text style={styles.title}>Mis partidos</Text>
           <Text style={styles.subtitle}>
             {loading && items.length === 0
               ? 'Cargando…'
