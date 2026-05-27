@@ -12,7 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { changePassword, forgotPassword } from '../api/auth';
-import { BackHeader } from '../components/layout/BackHeader';
+import { MenuScreenHeader } from '../components/menuScreen/MenuScreenHeader';
 import { theme } from '../theme';
 
 const CARD = 'rgba(255,255,255,0.06)';
@@ -21,9 +21,14 @@ const BORDER = 'rgba(255,255,255,0.08)';
 type ChangePasswordScreenProps = {
   onBack: () => void;
   userEmail?: string | null;
+  title?: string;
 };
 
-export function ChangePasswordScreen({ onBack, userEmail }: ChangePasswordScreenProps) {
+export function ChangePasswordScreen({
+  onBack,
+  userEmail,
+  title = 'Cambiar contraseña',
+}: ChangePasswordScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [password, setPassword] = useState('');
@@ -94,7 +99,7 @@ export function ChangePasswordScreen({ onBack, userEmail }: ChangePasswordScreen
 
   return (
     <View style={styles.root}>
-      <BackHeader title="Cambiar contraseña" onBack={onBack} tone="dark" />
+      <MenuScreenHeader title={title} onBack={onBack} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 24 + insets.bottom, paddingHorizontal: 16 }}

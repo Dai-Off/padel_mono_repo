@@ -29,6 +29,8 @@ import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
 import { TusPagosScreen } from './TusPagosScreen';
 import { MonederoScreen } from './MonederoScreen';
+import { TuActividadFlow } from './TuActividadFlow';
+import type { TuActividadDestination } from './TuActividadScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
 import { DailyLessonScreen } from './DailyLessonScreen';
@@ -50,6 +52,10 @@ import { CompetitiveLeagueScreen } from './CompetitiveLeagueScreen';
 import { SeasonPassScreen } from './SeasonPassScreen';
 import { PreferencesScreen } from './PreferencesScreen';
 import { PublicProfileScreen } from './PublicProfileScreen';
+import { AjustesScreen } from './AjustesScreen';
+import { InfoContentScreen } from './InfoContentScreen';
+import type { InfoScreenId } from '../content/infoContent';
+import { consumeOverlayNestedBack, registerOverlayNestedBack } from '../navigation/overlayBackRef';
 import type { EducationalCourse } from '../api/dailyLessons';
 import type { PublicCourse } from '../api/schoolCourses';
 
@@ -77,7 +83,10 @@ export function MainApp() {
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [showTusPagos, setShowTusPagos] = useState(false);
   const [showMonedero, setShowMonedero] = useState(false);
+  const [showTuActividad, setShowTuActividad] = useState(false);
+  const [tuActividadSubView, setTuActividadSubView] = useState<TuActividadDestination | null>(null);
   const [showTransacciones, setShowTransacciones] = useState(false);
+  const [preferencesReturnToTuActividad, setPreferencesReturnToTuActividad] = useState(false);
   const [showDailyLesson, setShowDailyLesson] = useState(false);
   /** Al cerrar la lección, fuerza otro fetch de racha en Inicio (por si el árbol no remonta). */
   const [streakRefreshKey, setStreakRefreshKey] = useState(0);
@@ -101,6 +110,9 @@ export function MainApp() {
   // cuestionario de nivelación automáticamente al montar.
   const [profileAutoOpenOnboarding, setProfileAutoOpenOnboarding] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
+  const [showAjustes, setShowAjustes] = useState(false);
+  const [infoScreen, setInfoScreen] = useState<InfoScreenId | null>(null);
+  const [infoReturnToProfile, setInfoReturnToProfile] = useState(false);
   const [showCommunity, setShowCommunity] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [messagesPeer, setMessagesPeer] = useState<MessagePeerNav | null>(null);
@@ -230,6 +242,59 @@ export function MainApp() {
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
 
+  /** Cierra overlays del menú lateral antes de abrir otro destino (evita flags superpuestos). */
+  const resetSidebarOverlays = useCallback(() => {
+    setShowProfile(false);
+    setShowEditProfile(false);
+    setShowChangePassword(false);
+    setShowPreferences(false);
+    setPreferencesReturnToTuActividad(false);
+    setShowAjustes(false);
+    setInfoScreen(null);
+    setInfoReturnToProfile(false);
+    setShowTuActividad(false);
+    setTuActividadSubView(null);
+    setShowMonedero(false);
+    setShowTusPagos(false);
+    setShowTransacciones(false);
+    registerOverlayNestedBack(null);
+  }, []);
+
+  const fullscreenOverlayOpen =
+    bookingSuccessData != null ||
+    showTusPagos ||
+    showMonedero ||
+    showTuActividad ||
+    showTransacciones ||
+    showProfile ||
+    showEditProfile ||
+    showChangePassword ||
+    showPreferences ||
+    showAjustes ||
+    infoScreen != null ||
+    showPartidoDetail ||
+    showClubDetail ||
+    showCompetitiveLeague ||
+    showSeasonPass ||
+    crearPartidoFlow.open ||
+    showDailyLesson ||
+    showCourses ||
+    selectedEducationalCourse != null ||
+    selectedPublicCourse != null ||
+    showMessages ||
+    showCommunity ||
+    !!affinityDmPeer ||
+    showPublicProfile ||
+    affinityPublicProfileId !== null;
+
+  const closeInfoScreen = useCallback(() => {
+    setInfoScreen(null);
+    if (infoReturnToProfile) {
+      setInfoReturnToProfile(false);
+      setShowProfile(true);
+    }
+  }, [infoReturnToProfile]);
+
   /**
    * Botón hardware atrás (Android). La app no usa React Navigation, así que
    * sin este listener Android cierra la activity por defecto.
@@ -244,6 +309,10 @@ export function MainApp() {
       // Sidebar abierto → cerrar primero (cubre cualquier pantalla).
       if (sidebar.isOpen) {
         sidebar.close();
+        return true;
+      }
+      // Subpantallas internas (Ajustes → Notificaciones, etc.)
+      if (consumeOverlayNestedBack()) {
         return true;
       }
       // Flujos modales por encima de todo
@@ -288,10 +357,26 @@ export function MainApp() {
         setShowProfile(true);
         return true;
       }
-      // Preferences → vuelve a perfil (igual que su onBack)
+      // Preferences → vuelve a perfil o a Tu actividad
       if (showPreferences) {
         setShowPreferences(false);
-        setShowProfile(true);
+        if (preferencesReturnToTuActividad) {
+          setPreferencesReturnToTuActividad(false);
+          setTuActividadSubView(null);
+          setShowTuActividad(true);
+        } else {
+          setShowProfile(true);
+        }
+        return true;
+      }
+      // Ajustes
+      if (showAjustes) {
+        setShowAjustes(false);
+        return true;
+      }
+      // Ayuda / legal
+      if (infoScreen) {
+        closeInfoScreen();
         return true;
       }
       // Perfil
@@ -350,6 +435,20 @@ export function MainApp() {
         setShowTransacciones(false);
         return true;
       }
+      // Detalle de partido (prioridad sobre flujos padre, p. ej. Tu actividad)
+      if (selectedPartido) {
+        setSelectedPartido(null);
+        return true;
+      }
+      // Tu actividad (subpantalla → menú → cerrar)
+      if (showTuActividad) {
+        if (tuActividadSubView != null) {
+          setTuActividadSubView(null);
+          return true;
+        }
+        setShowTuActividad(false);
+        return true;
+      }
       // Monedero
       if (showMonedero) {
         setShowMonedero(false);
@@ -358,11 +457,6 @@ export function MainApp() {
       // Tus Pagos
       if (showTusPagos) {
         setShowTusPagos(false);
-        return true;
-      }
-      // Detalle de partido (público o privado)
-      if (selectedPartido) {
-        setSelectedPartido(null);
         return true;
       }
       // Detalle de club en pestaña Pistas
@@ -394,6 +488,10 @@ export function MainApp() {
     showEditProfile,
     showPreferences,
     showProfile,
+    preferencesReturnToTuActividad,
+    showAjustes,
+    infoScreen,
+    closeInfoScreen,
     showCommunity,
     showMessages,
     messagesPeer,
@@ -403,6 +501,8 @@ export function MainApp() {
     showCompetitiveLeague,
     showSeasonPass,
     showTransacciones,
+    showTuActividad,
+    tuActividadSubView,
     showMonedero,
     showTusPagos,
     selectedPartido,
@@ -520,6 +620,28 @@ export function MainApp() {
         />
       );
     }
+    if (showAjustes) {
+      return <AjustesScreen onBack={() => setShowAjustes(false)} />;
+    }
+    if (infoScreen) {
+      return <InfoContentScreen screenId={infoScreen} onBack={closeInfoScreen} />;
+    }
+    if (showPreferences) {
+      return (
+        <PreferencesScreen
+          onBack={() => {
+            setShowPreferences(false);
+            if (preferencesReturnToTuActividad) {
+              setPreferencesReturnToTuActividad(false);
+              setTuActividadSubView(null);
+              setShowTuActividad(true);
+            } else {
+              setShowProfile(true);
+            }
+          }}
+        />
+      );
+    }
     if (showProfile) {
       return (
         <ProfileScreen
@@ -540,18 +662,14 @@ export function MainApp() {
             setShowProfile(false);
             setShowPreferences(true);
           }}
+          onNavigateToInfo={(screenId) => {
+            setInfoReturnToProfile(true);
+            setInfoScreen(screenId);
+          }}
           autoOpenOnboarding={profileAutoOpenOnboarding}
           onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
           onOnboardingCompleted={handleOnboardingCompleted}
         />
-      );
-    }
-    if (showPreferences) {
-      return (
-        <PreferencesScreen onBack={() => {
-          setShowPreferences(false);
-          setShowProfile(true);
-        }} />
       );
     }
     if (showCommunity) {
@@ -645,18 +763,6 @@ export function MainApp() {
     if (showMonedero) {
       return <MonederoScreen onBack={() => setShowMonedero(false)} />;
     }
-    if (showTusPagos) {
-      return (
-        <TusPagosScreen
-          onBack={() => setShowTusPagos(false)}
-          onTransaccionesPress={() => setShowTransacciones(true)}
-          onMonederoPress={() => {
-            setShowTusPagos(false);
-            setShowMonedero(true);
-          }}
-        />
-      );
-    }
     if (showPartidoDetail && selectedPartido) {
       if (selectedPartido.visibility === 'private') {
         return (
@@ -672,6 +778,8 @@ export function MainApp() {
           onBack={() => setSelectedPartido(null)}
           onGoHome={() => {
             setSelectedPartido(null);
+            setShowTuActividad(false);
+            setTuActividadSubView(null);
             setActiveTab('inicio');
           }}
           onOpenPublicProfile={(pid) => {
@@ -681,6 +789,47 @@ export function MainApp() {
           onOpenProfileForOnboarding={() => {
             setSelectedPartido(null);
             openOnboardingFromSection('partido-detail');
+          }}
+        />
+      );
+    }
+    if (showTuActividad) {
+      return (
+        <TuActividadFlow
+          subView={tuActividadSubView}
+          onCloseFlow={() => {
+            setShowTuActividad(false);
+            setTuActividadSubView(null);
+          }}
+          onBackToMenu={() => setTuActividadSubView(null)}
+          onNavigate={(destination: TuActividadDestination) => {
+            if (destination === 'grupos') {
+              setShowTuActividad(false);
+              setTuActividadSubView(null);
+              setShowCommunity(true);
+              return;
+            }
+            if (destination === 'clubes-favoritos') {
+              setShowTuActividad(false);
+              setTuActividadSubView(null);
+              setPreferencesReturnToTuActividad(true);
+              setShowPreferences(true);
+              return;
+            }
+            setTuActividadSubView(destination);
+          }}
+          onPartidoPress={(p) => setSelectedPartido(p)}
+        />
+      );
+    }
+    if (showTusPagos) {
+      return (
+        <TusPagosScreen
+          onBack={() => setShowTusPagos(false)}
+          onTransaccionesPress={() => setShowTransacciones(true)}
+          onMonederoPress={() => {
+            setShowTusPagos(false);
+            setShowMonedero(true);
           }}
         />
       );
@@ -757,48 +906,10 @@ export function MainApp() {
     }
   };
 
-  const showMainTabs =
-    bookingSuccessData == null &&
-    !showTusPagos &&
-    !showMonedero &&
-    !showTransacciones &&
-    !showProfile &&
-    !showEditProfile &&
-    !showChangePassword &&
-    !showPreferences &&
-    !showPartidoDetail &&
-    !showClubDetail &&
-    !crearPartidoFlow.open &&
-    !showDailyLesson &&
-    !showCourses &&
-    !selectedEducationalCourse &&
-    !selectedPublicCourse &&
-    !showMessages &&
-    !affinityDmPeer &&
-    !showCompetitiveLeague &&
-    !showSeasonPass &&
-    !showPublicProfile;
+  const showMainTabs = !fullscreenOverlayOpen;
 
   const customHeader =
-    bookingSuccessData != null ||
-    showTusPagos ||
-    showMonedero ||
-    showTransacciones ||
-    showProfile ||
-    showEditProfile ||
-    showChangePassword ||
-    showPreferences ||
-    showPartidoDetail ||
-    showCompetitiveLeague ||
-    showSeasonPass ||
-    crearPartidoFlow.open ||
-    showDailyLesson ||
-    showCourses ||
-    showMessages ||
-    !!affinityDmPeer ||
-    selectedEducationalCourse != null ||
-    selectedPublicCourse != null ||
-    showPublicProfile
+    fullscreenOverlayOpen
       ? undefined
       : activeTab === 'tienda'
           ? (
@@ -863,7 +974,7 @@ export function MainApp() {
       ? '#000000'
       : showMessages || !!affinityDmPeer
         ? '#0A0A0A'
-        : showEditProfile || showChangePassword || showPreferences || showMonedero
+        : showEditProfile || showChangePassword || showPreferences || showAjustes || infoScreen || showMonedero || showTuActividad
           ? '#0F0F0F'
         : showDailyLesson
           ? '#0F0F0F'
@@ -889,48 +1000,58 @@ export function MainApp() {
     setShowEditProfile(false);
     setShowChangePassword(false);
     setShowPreferences(false);
+    setShowAjustes(false);
+    setInfoScreen(null);
+    setInfoReturnToProfile(false);
+    registerOverlayNestedBack(null);
     setShowMessages(false);
     setMessagesPeer(null);
     setShowCompetitiveLeague(false);
     setShowSeasonPass(false);
     setShowCommunity(false);
+    setShowTuActividad(false);
+    setTuActividadSubView(null);
   };
 
   return (
     <View style={styles.container}>
       <SidebarProvider
         close={sidebar.close}
-        onNavigateToTusPagos={() => setShowTusPagos(true)}
-        onNavigateToMonedero={() => setShowMonedero(true)}
-        onProfilePress={() => setShowProfile(true)}
+        onNavigateToTusPagos={() => {
+          resetSidebarOverlays();
+          setShowTusPagos(true);
+        }}
+        onNavigateToMonedero={() => {
+          resetSidebarOverlays();
+          setShowMonedero(true);
+        }}
+        onNavigateToTuActividad={() => {
+          resetSidebarOverlays();
+          setShowTuActividad(true);
+        }}
+        onNavigateToAjustes={() => {
+          resetSidebarOverlays();
+          setShowAjustes(true);
+        }}
+        onNavigateToInfo={(screenId) => {
+          resetSidebarOverlays();
+          setInfoScreen(screenId);
+        }}
+        onNavigateToEditProfile={() => {
+          resetSidebarOverlays();
+          setShowEditProfile(true);
+        }}
+        onProfilePress={() => {
+          resetSidebarOverlays();
+          setShowProfile(true);
+        }}
       >
         <View style={styles.mainColumn}>
           <ScreenLayout
             sidebar={sidebar}
             customHeader={customHeader}
             hideHeader={
-              bookingSuccessData != null ||
-                showProfile ||
-              showEditProfile ||
-              showChangePassword ||
-              showPreferences ||
-              showClubDetail ||
-              showPartidoDetail ||
-              showCompetitiveLeague ||
-              showSeasonPass ||
-              showTusPagos ||
-              showMonedero ||
-              showTransacciones ||
-              crearPartidoFlow.open ||
-              showDailyLesson ||
-              showCourses ||
-              selectedEducationalCourse != null ||
-              selectedPublicCourse != null ||
-              showMessages ||
-              showCommunity ||
-              !!affinityDmPeer ||
-              showPublicProfile ||
-              affinityPublicProfileId !== null ||
+              fullscreenOverlayOpen ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos')
             }
@@ -942,24 +1063,7 @@ export function MainApp() {
           >
             {renderContent()}
           </ScreenLayout>
-          {bookingSuccessData == null &&
-            !showClubDetail &&
-            !showPartidoDetail &&
-            !showTusPagos &&
-            !showMonedero &&
-            !showTransacciones &&
-            !showPreferences &&
-            !crearPartidoFlow.open &&
-            !showDailyLesson &&
-            !showCourses &&
-            !selectedEducationalCourse &&
-            !selectedPublicCourse &&
-            !showMessages &&
-            !affinityDmPeer &&
-            !showCompetitiveLeague &&
-            !showSeasonPass &&
-            !showPublicProfile &&
-            affinityPublicProfileId === null && (
+          {showMainTabs && (
             <View style={styles.bottomBar}>
               <BottomNavbar activeTab={(showProfile || showPublicProfile) ? null : activeTab} onTabChange={handleTabChange} />
             </View>
