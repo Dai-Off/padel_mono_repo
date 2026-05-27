@@ -55,15 +55,17 @@
       },
       "softwareKeyboardLayoutMode": "pan",
       "package": "com.anonymous.padelapp",
-      "runtimeVersion": "1.0.0"
+      "runtimeVersion": "1.0.0",
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "extra": {
       "eas": {
-        "projectId": "a3d1a65c-8c6a-40d6-9007-3226cbf37a20"
+        "projectId": "42e3550f-3cc0-46b1-82b6-2306d96ab923"
       }
     },
-    "updates": {
-      "url": "https://u.expo.dev/a3d1a65c-8c6a-40d6-9007-3226cbf37a20"
-    }
+    "owner": "tradebotg"
   }
 }

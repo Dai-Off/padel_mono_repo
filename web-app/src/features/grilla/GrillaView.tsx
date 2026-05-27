@@ -2043,13 +2043,6 @@ function GrillaViewInner() {
     }
   }, [courts]);
 
-  const handleLogout = () => {
-    authService.logout();
-    navigate('/login', { replace: true });
-  };
-
-  if (loading || !authResolved) return <PageSpinner />;
-
   const handleFreeSlotClick = useCallback((
     courtId: string,
     courtName: string,
@@ -2067,6 +2060,13 @@ function GrillaViewInner() {
     }]);
     setSelectedModalReservationId(newId);
   }, [gridBounds]);
+
+  const handleLogout = () => {
+    authService.logout();
+    navigate('/login', { replace: true });
+  };
+
+  if (loading || !authResolved) return <PageSpinner />;
 
   return (
     <GridBoundsProvider weeklySchedule={weeklySchedule} dateStr={selectedDateKey}>

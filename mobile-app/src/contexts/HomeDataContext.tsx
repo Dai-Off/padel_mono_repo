@@ -9,14 +9,16 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import { fetchMatches, type MatchEnriched } from '../api/matches';
+import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId, fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
-import { selectMyUpcomingMatches } from '../domain/selectMyUpcomingMatches';
+import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
+import { selectMyMatchesForHome } from '../domain/selectMyUpcomingMatches';
+import { normalizeMatchEnriched } from '../api/normalizeMatch';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
@@ -50,7 +52,7 @@ type HomeDataValue = {
 
   // Matches (datos derivados ya mapeados a PartidoItem para HomeScreen).
   partidos: PartidoItem[];
-  misProximosPartidos: PartidoItem[];
+  misPartidos: PartidoItem[];
   matchesLoading: boolean;
   refreshMatches: (opts?: { force?: boolean }) => Promise<void>;
 
@@ -117,7 +119,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const profileLoadedAt = useRef(0);
 
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
-  const [misProximosPartidos, setMisProximosPartidos] = useState<PartidoItem[]>([]);
+  const [misPartidos, setMisPartidos] = useState<PartidoItem[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
   const matchesLoadedAt = useRef(0);
 
@@ -181,15 +183,21 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
   const refreshMatches = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
+      if (!token) {
+        setMisPartidos([]);
+        setPartidos([]);
+        return;
+      }
       if (!force && Date.now() - matchesLoadedAt.current < TTL_MS) return;
       const isFirst = matchesLoadedAt.current === 0;
       if (isFirst) setMatchesLoading(true);
 
       try {
         let tk: string | null = token;
-        let [playerId, matches] = await Promise.all([
-          tk ? fetchMyPlayerId(tk) : Promise.resolve(null),
-          fetchMatches({ expand: true, token: tk }),
+        let [playerId, matches, myMatches] = await Promise.all([
+          fetchMyPlayerId(tk),
+          fetchMatches({ expand: true, token: tk, activeOnly: false }),
+          fetchMyMatches(tk, { phase: 'all', limit: 100 }),
         ]);
 
         // Si el token caducó silenciosamente, reintentamos UNA vez con refresh.
@@ -197,18 +205,62 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
           const newToken = await refreshAccessToken();
           if (newToken) {
             tk = newToken;
-            [playerId, matches] = await Promise.all([
+            [playerId, matches, myMatches] = await Promise.all([
               fetchMyPlayerId(newToken),
-              fetchMatches({ expand: true, token: newToken }),
+              fetchMatches({ expand: true, token: newToken, activeOnly: false }),
+              fetchMyMatches(newToken, { phase: 'all', limit: 100 }),
             ]);
           }
         }
 
-        const mineRaw = selectMyUpcomingMatches(matches as MatchEnriched[], playerId);
-        const misProximos = mineRaw
+        let mineSource = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
+        // Fallback: si /matches/mine viene vacío (error silencioso, desfase de API, etc.),
+        // reconstruir desde el listado expandido filtrando por jugador.
+        if (playerId && mineSource.length === 0) {
+          mineSource = selectMyMatchesForHome(
+            (matches as MatchEnriched[]).map(normalizeMatchEnriched),
+            playerId,
+          );
+        }
+
+        const mineRawBase = mineSource.filter((m) => {
+          const b = getMatchBooking(m);
+          return Boolean(b?.start_at && b?.end_at);
+        });
+        const mineVisible = mineRawBase.filter((m) => {
+          const b = getMatchBooking(m)!;
+          const phase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
+          const hasMyFeedback = (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true;
+          // Regla de negocio Home: si el partido ya finalizó y el usuario ya
+          // dejó feedback, se oculta del carrusel "Mis partidos".
+          return !(phase === 'past' && hasMyFeedback);
+        });
+        const mineRaw = [
+          ...mineVisible
+            .filter((m) => {
+              const b = getMatchBooking(m)!;
+              return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) !== 'past';
+            })
+            .sort(
+              (a, b) =>
+                new Date(getMatchBooking(a)!.start_at!).getTime() -
+                new Date(getMatchBooking(b)!.start_at!).getTime(),
+            ),
+          ...mineVisible
+            .filter((m) => {
+              const b = getMatchBooking(m)!;
+              return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) === 'past';
+            })
+            .sort(
+              (a, b) =>
+                new Date(getMatchBooking(b)!.start_at!).getTime() -
+                new Date(getMatchBooking(a)!.start_at!).getTime(),
+            ),
+        ];
+        const mis = mineRaw
           .map(mapMatchToPartido)
           .filter((p): p is PartidoItem => p != null);
-        setMisProximosPartidos(misProximos);
+        setMisPartidos(mis);
 
         const all = (matches as MatchEnriched[])
           .map(mapMatchToPartido)
@@ -366,7 +418,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     if (!token) {
       setProfile(null);
       setPartidos([]);
-      setMisProximosPartidos([]);
+      setMisPartidos([]);
       setPublicTournamentsCount(null);
       setSeasonPassMe(null);
       setStats(null);
@@ -415,7 +467,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       profileLoading,
       refreshProfile,
       partidos,
-      misProximosPartidos,
+      misPartidos,
       matchesLoading,
       refreshMatches,
       publicTournamentsCount,
@@ -438,7 +490,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       profileLoading,
       refreshProfile,
       partidos,
-      misProximosPartidos,
+      misPartidos,
       matchesLoading,
       refreshMatches,
       publicTournamentsCount,

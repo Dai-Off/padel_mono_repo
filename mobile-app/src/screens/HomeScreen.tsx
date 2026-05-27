@@ -76,6 +76,7 @@ type HomeScreenProps = {
   onOpenAffinityPublicProfile?: (playerId: string) => void;
   /** Abre el perfil con el modal del cuestionario auto-abierto (banner + hard blocks). */
   onOpenProfileForOnboarding?: () => void;
+  matchmakingBannerState?: 'hidden' | 'searching' | 'matched' | 'timed_out';
 };
 
 /** Caché a nivel de módulo para que affinityResponse y los IDs enviados sobrevivan al desmonte/remonte de HomeScreen */
@@ -99,6 +100,7 @@ export function HomeScreen({
   onOpenPublicProfile,
   onOpenAffinityPublicProfile,
   onOpenProfileForOnboarding,
+  matchmakingBannerState = 'hidden',
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -108,7 +110,7 @@ export function HomeScreen({
     profile: myPlayerProfile,
     profileLoading,
     partidos,
-    misProximosPartidos,
+    misPartidos,
     matchesLoading,
     publicTournamentsCount,
     tournamentsLoading,
@@ -264,6 +266,7 @@ export function HomeScreen({
    */
   const isFirstLoading =
     profileLoading || matchesLoading || tournamentsLoading || seasonPassLoading;
+  const homeEnterOffset = matchmakingBannerState !== 'hidden' ? 1 : 0;
 
   return (
     <>
@@ -294,22 +297,35 @@ export function HomeScreen({
         {/* Banner proactivo: visible arriba de todo si el jugador no ha
             completado el cuestionario de nivelación. Tap → perfil con modal
             del onboarding auto-abierto. */}
-        {myPlayerProfile && !myPlayerProfile.onboardingCompleted && (
+        {matchmakingBannerState !== 'hidden' && (
           <InicioEnterBlock enterIndex={0}>
+            <OnboardingBanner
+              variant={
+                matchmakingBannerState === 'matched'
+                  ? 'matchmaking-matched'
+                  : matchmakingBannerState === 'timed_out'
+                    ? 'matchmaking-timeout'
+                    : 'matchmaking-searching'
+              }
+              onPress={() => onOpenCompetitiveLeague?.()}
+            />
+          </InicioEnterBlock>
+        )}
+        {myPlayerProfile && !myPlayerProfile.onboardingCompleted && (
+          <InicioEnterBlock enterIndex={homeEnterOffset}>
             <OnboardingBanner onPress={() => onOpenProfileForOnboarding?.()} />
           </InicioEnterBlock>
         )}
-        {(matchesLoading || misProximosPartidos.length > 0) && (
-          <InicioEnterBlock enterIndex={1}>
+        {session?.access_token ? (
+          <InicioEnterBlock enterIndex={homeEnterOffset + 1}>
             <ProximosPartidosSection
-              items={misProximosPartidos}
-              /** No acoplar a session aquí: en iOS la sesión hidrata tarde y `loading` quedaba false con items vacíos → la sección se ocultaba por completo (early return). */
+              items={misPartidos}
               loading={matchesLoading}
               onPartidoPress={onPartidoPress}
             />
           </InicioEnterBlock>
-        )}
-        <InicioEnterBlock enterIndex={2}>
+        ) : null}
+        <InicioEnterBlock enterIndex={homeEnterOffset + 2}>
           <InicioWidgetsCarousel>
             <DailyLessonCard
               variant="carousel"
@@ -350,7 +366,7 @@ export function HomeScreen({
             />
           </InicioWidgetsCarousel>
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={3}>
+        <InicioEnterBlock enterIndex={homeEnterOffset + 3}>
           <InicioQuickActions
             onNavigateToTab={onNavigateToTab}
             onCoursesPress={onCoursesPress}
@@ -360,7 +376,7 @@ export function HomeScreen({
             loading={listLoading}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={4}>
+        <InicioEnterBlock enterIndex={homeEnterOffset + 4}>
           <IAAfinidadCard
             locked={myPlayerProfile != null && !myPlayerProfile.onboardingCompleted}
             onPress={() => {
@@ -378,10 +394,10 @@ export function HomeScreen({
             }}
           />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={5}>
+        <InicioEnterBlock enterIndex={homeEnterOffset + 5}>
           <MissionsHomeSection missions={homeMissionsFromPass} />
         </InicioEnterBlock>
-        <InicioEnterBlock enterIndex={6}>
+        <InicioEnterBlock enterIndex={homeEnterOffset + 6}>
           <EnDirectoSection
             partidos={partidos.filter((p) => p.matchPhase === 'live')}
             loading={matchesLoading}

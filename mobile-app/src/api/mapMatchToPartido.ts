@@ -1,5 +1,5 @@
 import type { MatchEnriched } from './matches';
-import { getMatchListPhase } from '../domain/matchLifecycle';
+import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
 import type { PartidoItem, PartidoMode, PartidoPlayer } from '../screens/PartidosScreen';
 
 function formatDateTime(startAt: string, endAt: string): string {
@@ -24,12 +24,12 @@ function durationMinutes(startAt: string, endAt: string): number {
   return Math.round((end - start) / 60000);
 }
 
-/** Nivel 0–7 (OpenSkill). Por encima de 25 se asume escala legacy (p. ej. 1200 → 1,20). */
+/** Formato de ELO alineado con Perfil (misma escala numérica). */
 function formatSkillNumber(rating: number | null | undefined): string {
   if (rating == null || !Number.isFinite(Number(rating))) return '—';
   const v = Number(rating);
-  if (v <= 25) return v.toFixed(1).replace('.', ',');
-  return (v / 1000).toFixed(2).replace('.', ',');
+  // Mantener misma escala que en Perfil para evitar desalineaciones visuales.
+  return v.toFixed(2).replace('.', ',');
 }
 
 function playerLevelLine(p: { elo_rating: number; liga?: string | null }): string {
@@ -40,8 +40,48 @@ function playerLevelLine(p: { elo_rating: number; liga?: string | null }): strin
 }
 
 export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
-  const b = m.bookings;
-  if (!b?.start_at || !b?.end_at || !b?.total_price_cents) return null;
+  const b = getMatchBooking(m);
+  // Partidos sin booking siguen siendo válidos para el historial (datos mínimos).
+  if (!b) {
+    const matchPhase = getMatchListPhase(Date.now(), m.status);
+    const slots: PartidoPlayer[] = Array.from({ length: 4 }, () => ({ name: '', level: '', isFree: true }));
+    const playerIds: string[] = [];
+    const playerIdsBySlot: Array<string | null> = [null, null, null, null];
+    (m.match_players ?? []).forEach((mp, i) => {
+      const p = mp.players;
+      if (!p || i >= 4) return;
+      if (p.id) { playerIds.push(p.id); playerIdsBySlot[i] = p.id; }
+      const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
+      const parts = fullName.split(/\s+/).filter(Boolean);
+      const initial = parts.length >= 2 ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase() : fullName[0]?.toUpperCase() ?? '?';
+      slots[i] = { id: p.id, name: fullName, initial, level: playerLevelLine(p), isFree: false };
+    });
+    return {
+      id: m.id,
+      playerIds,
+      playerIdsBySlot,
+      organizerPlayerId: null,
+      visibility: m.visibility === 'private' ? 'private' : 'public',
+      matchPhase,
+      dateTime: '—',
+      mode: m.competitive ? 'competitivo' : 'amistoso',
+      typeLabel: m.gender === 'mixed' ? 'Mixto' : 'Todos los jugadores',
+      levelRange: m.elo_min != null && m.elo_max != null ? `${formatSkillNumber(m.elo_min)} - ${formatSkillNumber(m.elo_max)}` : 'Libre',
+      players: slots,
+      venue: 'Club',
+      location: '—',
+      price: '—',
+      pricePerPlayer: '—',
+      duration: '—',
+      matchType: m.type ?? undefined,
+      matchStatus: m.status,
+      scoreStatus: null,
+      bookingStatus: undefined,
+      hasMyFeedback: (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true,
+    };
+  }
+  if (!b.start_at || !b.end_at) return null;
+  const totalPriceCents = b.total_price_cents ?? 0;
 
   const court = b.courts;
   const club = court?.clubs;
@@ -125,8 +165,6 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
 
   const matchPhase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
 
-  const pricePerPlayerCents = Math.ceil(b.total_price_cents / 4);
-
   return {
     id: m.id,
     playerIds,
@@ -141,13 +179,14 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     players,
     venue,
     location: city ? `${city}` : '—',
-    price: formatPrice(b.total_price_cents, b.currency ?? 'EUR'),
-    pricePerPlayer: formatPrice(pricePerPlayerCents, b.currency ?? 'EUR'),
+    price: formatPrice(totalPriceCents, b.currency ?? 'EUR'),
+    pricePerPlayer: formatPrice(Math.ceil(totalPriceCents / 4), b.currency ?? 'EUR'),
     duration: `${durationMin}min`,
     matchType: m.type ?? undefined,
     matchStatus: m.status,
     scoreStatus: (m.score_status === 'pending' ? null : m.score_status) as PartidoItem['scoreStatus'],
     bookingStatus: b.status,
+    hasMyFeedback: (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true,
     venueAddress: address || undefined,
     courtName,
     courtType,
