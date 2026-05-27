@@ -17,7 +17,7 @@ import { INICIO_STACK_GAP } from './constants';
 export function HomeSkeleton() {
   return (
     <View style={styles.stack}>
-      {/* Próximos partidos: header + 2 cards horizontales. */}
+      {/* Mis partidos: header + 2 cards horizontales. */}
       <View>
         <Skeleton width={160} height={18} variant="dark" borderRadius={6} />
         <View style={styles.matchesRow}>

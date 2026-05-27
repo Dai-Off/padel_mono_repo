@@ -24,12 +24,12 @@ function durationMinutes(startAt: string, endAt: string): number {
   return Math.round((end - start) / 60000);
 }
 
-/** Nivel 0–7 (OpenSkill). Por encima de 25 se asume escala legacy (p. ej. 1200 → 1,20). */
+/** Formato de ELO alineado con Perfil (misma escala numérica). */
 function formatSkillNumber(rating: number | null | undefined): string {
   if (rating == null || !Number.isFinite(Number(rating))) return '—';
   const v = Number(rating);
-  if (v <= 25) return v.toFixed(1).replace('.', ',');
-  return (v / 1000).toFixed(2).replace('.', ',');
+  // Mantener misma escala que en Perfil para evitar desalineaciones visuales.
+  return v.toFixed(2).replace('.', ',');
 }
 
 function playerLevelLine(p: { elo_rating: number; liga?: string | null }): string {
@@ -147,6 +147,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     matchStatus: m.status,
     scoreStatus: (m.score_status === 'pending' ? null : m.score_status) as PartidoItem['scoreStatus'],
     bookingStatus: b.status,
+    hasMyFeedback: (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true,
     venueAddress: address || undefined,
     courtName,
     courtType,

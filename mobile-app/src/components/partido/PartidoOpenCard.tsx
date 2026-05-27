@@ -57,6 +57,16 @@ function countFree(players: PartidoPlayer[]): number {
   return players.filter((p) => p.isFree).length;
 }
 
+function matchPhaseLabel(item: PartidoItem): string {
+  const phase = item.matchPhase ?? 'upcoming';
+  if (phase === 'past') {
+    const status = String(item.matchStatus ?? '').toLowerCase();
+    return status === 'cancelled' ? 'Cancelado' : 'Finalizado';
+  }
+  // En el home “mis partidos” normalmente incluye próximos y en curso.
+  return 'Próximo';
+}
+
 type Props = {
   item: PartidoItem;
   onPress: () => void;
@@ -99,6 +109,8 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
   const { datePart, timePart } = splitDateTime(item.dateTime);
   const uri = item.venueImage ?? pickPlaceholderUri(item.id);
   const libres = countFree(item.players);
+  const phaseLabel = matchPhaseLabel(item);
+  const isPast = (item.matchPhase ?? 'upcoming') === 'past';
 
   return (
     <Pressable
@@ -126,6 +138,11 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
               end={{ x: 1, y: 0 }}
               style={styles.thumbOverlay}
             />
+            <View style={[styles.thumbPhasePill, isPast && styles.thumbPhasePillPast]}>
+              <Text style={[styles.thumbPhasePillText, isPast && styles.thumbPhasePillTextPast]}>
+                {phaseLabel}
+              </Text>
+            </View>
             <View style={styles.priceTag}>
               <Text style={styles.priceLine}>
                 <Text style={styles.priceMain}>{item.pricePerPlayer}</Text>
@@ -230,6 +247,31 @@ const styles = StyleSheet.create({
   thumbOverlay: {
     ...StyleSheet.absoluteFillObject,
   },
+  thumbPhasePill: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    backgroundColor: "rgba(8, 24, 18, 0.86)",
+    borderWidth: 1,
+    borderColor: "rgba(74, 222, 128, 0.55)",
+  },
+  thumbPhasePillPast: {
+    backgroundColor: "rgba(36, 20, 8, 0.9)",
+    borderColor: "rgba(251, 146, 60, 0.62)",
+  },
+  thumbPhasePillText: {
+    fontSize: 8,
+    fontWeight: "800",
+    color: "#ecfdf5",
+    textTransform: "uppercase",
+    lineHeight: 10,
+  },
+  thumbPhasePillTextPast: {
+    color: "#ffedd5",
+  },
   priceTag: {
     position: "absolute",
     left: 6,
@@ -290,7 +332,7 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     gap: 6,
     marginBottom: 4,
-    /** Misma altura mínima del bloque (tipo + nivel) entre cards; si el texto ocupa más, crece sin recortar. */
+    /** Dos badges (tipo + nivel). */
     minHeight: 54,
   },
   badge: {

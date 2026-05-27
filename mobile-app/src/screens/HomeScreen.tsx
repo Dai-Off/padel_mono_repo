@@ -110,7 +110,7 @@ export function HomeScreen({
     profile: myPlayerProfile,
     profileLoading,
     partidos,
-    misProximosPartidos,
+    misPartidos,
     matchesLoading,
     publicTournamentsCount,
     tournamentsLoading,
@@ -316,10 +316,10 @@ export function HomeScreen({
             <OnboardingBanner onPress={() => onOpenProfileForOnboarding?.()} />
           </InicioEnterBlock>
         )}
-        {(matchesLoading || misProximosPartidos.length > 0) && (
+        {(matchesLoading || misPartidos.length > 0) && (
           <InicioEnterBlock enterIndex={homeEnterOffset + 1}>
             <ProximosPartidosSection
-              items={misProximosPartidos}
+              items={misPartidos}
               /** No acoplar a session aquí: en iOS la sesión hidrata tarde y `loading` quedaba false con items vacíos → la sección se ocultaba por completo (early return). */
               loading={matchesLoading}
               onPartidoPress={onPartidoPress}
