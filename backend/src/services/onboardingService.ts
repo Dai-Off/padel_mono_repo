@@ -125,7 +125,7 @@ export async function getNextQuestionState(answers: OnboardingAnswer[]): Promise
       if (getAns('p8') === undefined) return { type: 'question', question: await fetchQuestion('p8') };
       if (getAns('p9') === undefined) return { type: 'question', question: await fetchQuestion('p9') };
     }
-    return { type: 'complete' };
+    // Aun para perfiles iniciales, al terminar fase 1 siempre debe continuar fase 2.
   }
 
   // P1 >= 2

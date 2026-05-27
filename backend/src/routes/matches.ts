@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { bookingStartIsTooFarInPast, BOOKING_START_PAST_ERROR } from '../lib/bookingStartNotInPast';
 import { finalizePastMatches, finalizePastMatchesThrottled } from '../lib/finalizePastMatches';
 import { getMatchListPhase } from '../lib/matchLifecycle';
@@ -196,6 +197,92 @@ router.get('/', async (req: Request, res: Response) => {
       return res.json({ ok: true, matches: filtered });
     }
     return res.json({ ok: true, matches: rows });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /matches/mine:
+ *   get:
+ *     tags: [Matches]
+ *     summary: Partidos del jugador autenticado
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: phase
+ *         schema: { type: string, enum: [past, upcoming, all] }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50 }
+ */
+router.get('/mine', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  const phaseRaw = String(req.query.phase ?? 'all').trim().toLowerCase();
+  const phase = phaseRaw === 'past' || phaseRaw === 'upcoming' ? phaseRaw : 'all';
+  const limit = Math.min(100, Math.max(1, Math.trunc(Number(req.query.limit) || 50)));
+
+  try {
+    await finalizePastMatchesThrottled();
+    const supabase = getSupabaseServiceRoleClient();
+    const nowMs = Date.now();
+
+    const { data: mpRows, error: mpErr } = await supabase
+      .from('match_players')
+      .select('match_id')
+      .eq('player_id', playerId);
+    if (mpErr) return res.status(500).json({ ok: false, error: mpErr.message });
+
+    const matchIds = [...new Set((mpRows ?? []).map((r: { match_id: string }) => r.match_id))];
+    if (matchIds.length === 0) return res.json({ ok: true, matches: [] });
+
+    const { data, error } = await supabase
+      .from('matches')
+      .select(expandSelect('bookings'))
+      .in('id', matchIds)
+      .neq('status', 'cancelled')
+      .order('created_at', { ascending: false })
+      .limit(Math.min(matchIds.length, 200));
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    const filtered = (data ?? []).filter((row: any) => {
+      const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
+      if (!b?.start_at || !b?.end_at) return false;
+      const listPhase = getMatchListPhase(nowMs, row.status, b.start_at, b.end_at);
+      if (phase === 'past') return listPhase === 'past';
+      if (phase === 'upcoming') return listPhase !== 'past';
+      return true;
+    });
+
+    filtered.sort((a: any, b: any) => {
+      const ba = Array.isArray(a.bookings) ? a.bookings[0] : a.bookings;
+      const bb = Array.isArray(b.bookings) ? b.bookings[0] : b.bookings;
+      const ta = new Date(ba?.start_at ?? 0).getTime();
+      const tb = new Date(bb?.start_at ?? 0).getTime();
+      return phase === 'upcoming' ? ta - tb : tb - ta;
+    });
+    const sliced = filtered.slice(0, limit);
+    const slicedIds = [...new Set(sliced.map((m: any) => m.id).filter(Boolean))];
+    let feedbackByMatch = new Set<string>();
+    if (slicedIds.length > 0) {
+      const { data: myFeedbackRows, error: fbErr } = await supabase
+        .from('match_feedback')
+        .select('match_id')
+        .eq('reviewer_id', playerId)
+        .in('match_id', slicedIds);
+      if (fbErr) return res.status(500).json({ ok: false, error: fbErr.message });
+      feedbackByMatch = new Set((myFeedbackRows ?? []).map((r: { match_id: string }) => r.match_id));
+    }
+
+    const withFeedbackFlag = sliced.map((m: any) => ({
+      ...m,
+      has_my_feedback: feedbackByMatch.has(m.id),
+    }));
+
+    return res.json({ ok: true, matches: withFeedbackFlag });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
