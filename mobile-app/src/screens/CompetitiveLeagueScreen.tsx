@@ -23,6 +23,7 @@ import {
   type MatchmakingStatusResponse,
 } from '../api/matchmaking';
 import { useHomeData } from '../contexts/HomeDataContext';
+import { getMatchBooking } from '../domain/matchLifecycle';
 
 type Step = 'home' | 'prefs' | 'queue' | 'found';
 type MainTab = 'liga' | 'ranking';
@@ -257,7 +258,7 @@ export function CompetitiveLeagueScreen({
       setRecentMatchRows(toRecentRows(myMatches, myId));
       const clubs = new Map<string, string>();
       for (const m of myMatches) {
-        const c = m.bookings?.courts?.clubs;
+        const c = getMatchBooking(m)?.courts?.clubs;
         if (c?.id && c.name) clubs.set(c.id, c.name);
       }
       setClubOptions([...clubs.entries()].map(([id, name]) => ({ id, name })));
@@ -300,12 +301,13 @@ export function CompetitiveLeagueScreen({
       .filter((m) => m.type === 'matchmaking')
       .filter((m) => (m.match_players ?? []).some((mp) => mp.players?.id === myPlayerId))
       .filter((m) => {
-        const start = m.bookings?.start_at ? new Date(m.bookings.start_at).getTime() : 0;
+        const startAt = getMatchBooking(m)?.start_at;
+        const start = startAt ? new Date(startAt).getTime() : 0;
         return Number.isFinite(start) && start > 0 && start <= Date.now();
       })
       .sort((a, b) => {
-        const sa = a.bookings?.start_at ? new Date(a.bookings.start_at).getTime() : 0;
-        const sb = b.bookings?.start_at ? new Date(b.bookings.start_at).getTime() : 0;
+        const sa = getMatchBooking(a)?.start_at ? new Date(getMatchBooking(a)!.start_at).getTime() : 0;
+        const sb = getMatchBooking(b)?.start_at ? new Date(getMatchBooking(b)!.start_at).getTime() : 0;
         return sb - sa;
       })
       .slice(0, 3)
@@ -326,7 +328,10 @@ export function CompetitiveLeagueScreen({
           id: m.id,
           title: title || 'Rivales pendientes',
           subtitle,
-          when: m.bookings?.start_at ? formatRelativeDate(m.bookings.start_at) : 'Reciente',
+          when: (() => {
+            const startAt = getMatchBooking(m)?.start_at;
+            return startAt ? formatRelativeDate(startAt) : 'Reciente';
+          })(),
         };
       });
   }
@@ -536,8 +541,9 @@ export function CompetitiveLeagueScreen({
       .filter(Boolean)
       .join(' & ');
 
-    const club = proposalMatch?.bookings?.courts?.clubs;
-    const startAt = proposalMatch?.bookings?.start_at;
+    const proposalBooking = proposalMatch ? getMatchBooking(proposalMatch) : null;
+    const club = proposalBooking?.courts?.clubs;
+    const startAt = proposalBooking?.start_at;
     const startDate = startAt ? new Date(startAt) : null;
     const weekday = startDate
       ? startDate.toLocaleDateString('es-ES', { weekday: 'long' })

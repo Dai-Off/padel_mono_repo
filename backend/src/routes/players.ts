@@ -436,8 +436,19 @@ router.get('/me', async (req: Request, res: Response) => {
       return res.status(404).json({ ok: false, error: 'No existe jugador asociado a esta cuenta' });
     }
     const pid = String((player as Row).id);
-    const wl = await fetchPlayerMatchmakingWl(supabase, pid);
-    return res.json({ ok: true, player: withPublicPlayerAndMm(player as Row, wl) });
+    const [wl, matchCountRes] = await Promise.all([
+      fetchPlayerMatchmakingWl(supabase, pid),
+      supabase
+        .from('match_players')
+        .select('match_id', { count: 'exact', head: true })
+        .eq('player_id', pid),
+    ]);
+    const matchesPlayedLive = matchCountRes.count ?? null;
+    const playerWithStats = withPublicPlayerAndMm(player as Row, wl) as Row;
+    if (matchesPlayedLive !== null) {
+      playerWithStats.matches_played_total = matchesPlayedLive;
+    }
+    return res.json({ ok: true, player: playerWithStats });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
