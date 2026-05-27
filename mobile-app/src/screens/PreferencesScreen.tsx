@@ -173,7 +173,7 @@ const FALLBACK_FAVORITE_CLUB_CANDIDATES = [
   { name: 'Pintopadel', subtitle: 'Madrid · 12 km' },
   { name: 'X7 Padel Sabadell Sur', subtitle: 'Fuenlabrada · 3 km' },
   { name: 'Club De Padel Mirasur', subtitle: 'Madrid · 15 km' },
-  { name: 'CourtHub Padel Center', subtitle: 'Madrid · 5 km' },
+  { name: 'WeMatch Padel Center', subtitle: 'Madrid · 5 km' },
   { name: 'Pádel Y Tenis San Martín', subtitle: 'Madrid · 7 km' },
   { name: 'Padel Family Indoor', subtitle: 'Madrid · 8 km' },
 ];

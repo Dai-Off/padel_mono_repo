@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Alert, LayoutChangeEvent, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { MATCHMAKING_DEFAULT_CLUB_ID } from '../config';
+import { Skeleton } from '../components/ui/Skeleton';
 import { fetchMatches, fetchMatchById, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import type { PartidoItem } from './PartidosScreen';
@@ -41,6 +42,7 @@ const DEFAULT_FORM: SearchForm = {
   gender: 'any',
   search_area: 'club',
 };
+const FLOW_TOP_PADDING = 12;
 
 function computeAvailabilityWindow(input: Pick<SearchForm, 'day' | 'time'>): {
   availableFrom: string;
@@ -82,9 +84,29 @@ function computeAvailabilityWindow(input: Pick<SearchForm, 'day' | 'time'>): {
 type Props = {
   onBack: () => void;
   onPartidoPress?: (partido: PartidoItem) => void;
+  entryIntent?: 'default' | 'queue' | 'prefs';
+  queueElapsedSec: number;
+  setQueueElapsedSec: Dispatch<SetStateAction<number>>;
+  queueStartedAtMs: number | null;
+  setQueueStartedAtMs: Dispatch<SetStateAction<number | null>>;
+  matchmakingBannerState?: 'hidden' | 'searching' | 'matched' | 'timed_out';
+  onMatchmakingBannerStateChange?: (
+    state: 'hidden' | 'searching' | 'matched' | 'timed_out',
+    options?: { force?: boolean },
+  ) => void;
 };
 
-export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
+export function CompetitiveLeagueScreen({
+  onBack,
+  onPartidoPress,
+  entryIntent = 'default',
+  queueElapsedSec,
+  setQueueElapsedSec,
+  queueStartedAtMs,
+  setQueueStartedAtMs,
+  matchmakingBannerState = 'hidden',
+  onMatchmakingBannerStateChange,
+}: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [mainTab, setMainTab] = useState<MainTab>('liga');
@@ -93,6 +115,7 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
   const [loading, setLoading] = useState(false);
   const [openingProposal, setOpeningProposal] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [isHomeBootstrapping, setIsHomeBootstrapping] = useState(true);
   // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
   const { profile } = useHomeData();
   const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
@@ -107,8 +130,8 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
   const [distanceKm, setDistanceKm] = useState(10);
   const [distanceTrackWidth, setDistanceTrackWidth] = useState(1);
   const [countdownText, setCountdownText] = useState<string>('--:--:--');
-  const [queueElapsedSec, setQueueElapsedSec] = useState(0);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAppliedEntryIntentRef = useRef<'default' | 'queue' | 'prefs' | null>(null);
 
   const clearPollTimer = useCallback(() => {
     if (pollTimerRef.current) {
@@ -123,6 +146,9 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
     const s = await fetchMatchmakingStatus(token);
     setStatus(s);
     if (s?.status === 'matched') {
+      onMatchmakingBannerStateChange?.('matched');
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
       const p = await fetchMatchmakingProposal(token);
       setProposal(p);
       setLoading(false);
@@ -131,14 +157,18 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
       return;
     }
     if (s?.status !== 'searching') {
+      if (matchmakingBannerState !== 'timed_out') onMatchmakingBannerStateChange?.('hidden');
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
       setLoading(false);
       clearPollTimer();
       return;
     }
+    onMatchmakingBannerStateChange?.('searching');
     pollTimerRef.current = setTimeout(() => {
       void pollStatus();
     }, 5000);
-  }, [clearPollTimer, session?.access_token]);
+  }, [clearPollTimer, onMatchmakingBannerStateChange, session?.access_token, setQueueElapsedSec, setQueueStartedAtMs]);
 
   const refreshStatus = useCallback(async () => {
     const token = session?.access_token ?? null;
@@ -147,27 +177,74 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
     setStatus(s);
     if (s?.status === 'matched') {
       clearPollTimer();
+      onMatchmakingBannerStateChange?.('matched');
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
       const p = await fetchMatchmakingProposal(token);
       setProposal(p);
       setStep('found');
     } else if (s?.status === 'searching') {
-      setStep('queue');
+      onMatchmakingBannerStateChange?.('searching');
+      if (queueStartedAtMs == null) setQueueStartedAtMs(Date.now());
       setProposal(null);
       void pollStatus();
     } else {
+      if (matchmakingBannerState !== 'timed_out') onMatchmakingBannerStateChange?.('hidden');
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
       setProposal(null);
     }
-  }, [clearPollTimer, pollStatus, session?.access_token]);
+  }, [
+    clearPollTimer,
+    matchmakingBannerState,
+    onMatchmakingBannerStateChange,
+    pollStatus,
+    queueStartedAtMs,
+    session?.access_token,
+    setQueueElapsedSec,
+    setQueueStartedAtMs,
+  ]);
 
   useEffect(() => {
     void fetchMatchmakingLeagueConfig().then(setLeagueRows);
   }, []);
 
   useEffect(() => {
-    if (!session?.access_token) return;
-    void refreshStatus();
-    return () => clearPollTimer();
+    const token = session?.access_token ?? null;
+    let cancelled = false;
+    if (!token) {
+      setIsHomeBootstrapping(false);
+      return () => clearPollTimer();
+    }
+    setIsHomeBootstrapping(true);
+    void refreshStatus().finally(() => {
+      if (!cancelled) setIsHomeBootstrapping(false);
+    });
+    return () => {
+      cancelled = true;
+      clearPollTimer();
+    };
   }, [clearPollTimer, refreshStatus, session?.access_token]);
+
+  useEffect(() => {
+    if (lastAppliedEntryIntentRef.current === entryIntent) return;
+    if (entryIntent === 'prefs') {
+      setStep('prefs');
+      if (matchmakingBannerState === 'timed_out') {
+        setErrorText('No se encontraron jugadores. Ajusta los parámetros y vuelve a intentar.');
+      }
+      lastAppliedEntryIntentRef.current = entryIntent;
+      return;
+    }
+    if (entryIntent === 'queue' && status?.status === 'searching') {
+      setStep('queue');
+      lastAppliedEntryIntentRef.current = entryIntent;
+      return;
+    }
+    if (entryIntent === 'default') {
+      lastAppliedEntryIntentRef.current = entryIntent;
+    }
+  }, [entryIntent, matchmakingBannerState, status?.status]);
 
   useEffect(() => {
     const token = session?.access_token ?? null;
@@ -298,10 +375,22 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
       setErrorText(result.error);
       return;
     }
+    setQueueStartedAtMs(Date.now());
     setQueueElapsedSec(0);
+    onMatchmakingBannerStateChange?.('searching', { force: true });
     setStep('queue');
     await pollStatus();
-  }, [clearPollTimer, distanceKm, form, pollStatus, preferredClubIds.length, session?.access_token]);
+  }, [
+    clearPollTimer,
+    distanceKm,
+    form,
+    onMatchmakingBannerStateChange,
+    pollStatus,
+    preferredClubIds.length,
+    session?.access_token,
+    setQueueElapsedSec,
+    setQueueStartedAtMs,
+  ]);
 
   const handleLeaveQueue = useCallback(async () => {
     const token = session?.access_token ?? null;
@@ -315,8 +404,17 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
     }
     setStatus(null);
     setProposal(null);
+    onMatchmakingBannerStateChange?.('hidden');
+    setQueueStartedAtMs(null);
+    setQueueElapsedSec(0);
     setStep('home');
-  }, [clearPollTimer, session?.access_token]);
+  }, [
+    clearPollTimer,
+    onMatchmakingBannerStateChange,
+    session?.access_token,
+    setQueueElapsedSec,
+    setQueueStartedAtMs,
+  ]);
 
   const handleRejectProposal = useCallback(async () => {
     const token = session?.access_token ?? null;
@@ -328,6 +426,7 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
       return;
     }
     setProposal(null);
+    onMatchmakingBannerStateChange?.('searching', { force: true });
     setStep('queue');
     void pollStatus();
   }, [pollStatus, proposal?.match_id, session?.access_token]);
@@ -465,12 +564,21 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
   }, [profile?.id, proposal?.pre_match_win_prob, proposalMatch]);
 
   useEffect(() => {
-    if (step !== 'queue') return;
-    const timer = setInterval(() => {
-      setQueueElapsedSec((v) => v + 1);
-    }, 1000);
+    if (status?.status !== 'searching' || queueStartedAtMs == null) return;
+    const updateElapsed = () => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - queueStartedAtMs) / 1000));
+      setQueueElapsedSec(elapsed);
+    };
+    updateElapsed();
+    const timer = setInterval(updateElapsed, 1000);
     return () => clearInterval(timer);
-  }, [step]);
+  }, [queueStartedAtMs, setQueueElapsedSec, status?.status]);
+
+  useEffect(() => {
+    if (matchmakingBannerState !== 'timed_out') return;
+    setErrorText('No se encontraron jugadores. Ajusta los parámetros y vuelve a intentar.');
+    setStep('prefs');
+  }, [matchmakingBannerState]);
 
   const queueElapsedLabel = useMemo(() => {
     const mm = Math.floor(queueElapsedSec / 60)
@@ -494,16 +602,19 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
   return (
     <View style={styles.container}>
       {step === 'home' ? (
-        <Pressable style={[styles.backFab, { top: Math.max(insets.top + 4, 12) }]} onPress={onBack}>
+        <Pressable style={[styles.backFab, { top: FLOW_TOP_PADDING }]} onPress={onBack}>
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
       ) : null}
 
       {step === 'home' && (
+        isHomeBootstrapping ? (
+          <CompetitiveLeagueHomeSkeleton insetsBottom={insets.bottom} />
+        ) : (
         <ScrollView
           contentContainerStyle={[
             styles.homeContent,
-            { paddingTop: Math.max(insets.top + 36, 44), paddingBottom: insets.bottom + 28 },
+            { paddingTop: FLOW_TOP_PADDING + 32, paddingBottom: insets.bottom + 28 },
           ]}
         >
           {(status?.status === 'searching' || status?.status === 'matched') && (
@@ -650,10 +761,11 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
             </View>
           )}
         </ScrollView>
+        )
       )}
 
       {step === 'prefs' && (
-        <ScrollView contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}>
+        <ScrollView contentContainerStyle={[styles.content, { paddingTop: FLOW_TOP_PADDING, paddingBottom: insets.bottom + 32 }]}>
           <View style={styles.stepHeader}>
             <Pressable style={styles.stepBackBtn} onPress={() => setStep('home')}>
               <Ionicons name="arrow-back" size={16} color="#fff" />
@@ -791,7 +903,7 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
       )}
 
       {step === 'queue' && (
-        <View style={[styles.content, { paddingTop: Math.max(insets.top + 10, 18), paddingBottom: insets.bottom + 20 }]}>
+        <View style={[styles.content, { paddingTop: FLOW_TOP_PADDING, paddingBottom: insets.bottom + 20 }]}>
           <View style={styles.queueTopRow}>
             <Pressable style={styles.stepBackBtn} onPress={() => setStep('home')}>
               <Ionicons name="arrow-back" size={16} color="#fff" />
@@ -854,7 +966,7 @@ export function CompetitiveLeagueScreen({ onBack, onPartidoPress }: Props) {
       )}
 
       {step === 'found' && (
-        <View style={[styles.content, { paddingBottom: insets.bottom + 20 }]}>
+        <View style={[styles.content, { paddingTop: FLOW_TOP_PADDING, paddingBottom: insets.bottom + 20 }]}>
           <View style={styles.foundTop}>
             <View style={styles.foundTopIcon}>
               <Ionicons name="checkmark" size={14} color="#34d399" />
@@ -963,6 +1075,31 @@ function OptionRow({
         ))}
       </View>
     </View>
+  );
+}
+
+function CompetitiveLeagueHomeSkeleton({
+  insetsBottom,
+}: {
+  insetsBottom: number;
+}) {
+  return (
+    <ScrollView
+      contentContainerStyle={[
+        styles.homeContent,
+        { paddingTop: FLOW_TOP_PADDING + 32, paddingBottom: insetsBottom + 28 },
+      ]}
+    >
+      <Skeleton height={38} borderRadius={12} variant="dark" />
+      <Skeleton height={188} borderRadius={18} variant="dark" />
+      <Skeleton height={38} borderRadius={14} variant="dark" />
+      <Skeleton height={50} borderRadius={20} variant="dark" />
+      <Skeleton width="55%" height={16} borderRadius={8} variant="dark" style={{ marginTop: 2 }} />
+      <Skeleton height={56} borderRadius={14} variant="dark" />
+      <Skeleton height={56} borderRadius={14} variant="dark" />
+      <Skeleton height={56} borderRadius={14} variant="dark" />
+      <Skeleton height={140} borderRadius={14} variant="dark" />
+    </ScrollView>
   );
 }
 
