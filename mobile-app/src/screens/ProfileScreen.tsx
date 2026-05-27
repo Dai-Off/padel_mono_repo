@@ -31,11 +31,14 @@ import {
   type PickedImage,
 } from '../api/playerAvatar';
 
+import type { InfoScreenId } from '../content/infoContent';
+
 type ProfileScreenProps = {
   onBack: () => void;
   onMenuPress: () => void;
   onEditProfilePress?: () => void;
   onPreferencesPress?: () => void;
+  onNavigateToInfo?: (screenId: InfoScreenId) => void;
   // Si true, abre automáticamente el modal del cuestionario de nivelación al
   // montar. Usado cuando se llega aquí desde una feature bloqueada (Daily
   // Lesson) para que el usuario complete el onboarding sin un paso extra.
@@ -60,6 +63,7 @@ export function ProfileScreen({
   onMenuPress,
   onEditProfilePress,
   onPreferencesPress,
+  onNavigateToInfo,
   autoOpenOnboarding = false,
   onOnboardingAutoOpened,
   onOnboardingCompleted,
@@ -492,6 +496,14 @@ export function ProfileScreen({
                 onPress={() => {
                   if (item.title === 'Preferencias') {
                     onPreferencesPress?.();
+                    return;
+                  }
+                  if (item.title === 'Ayuda y soporte') {
+                    onNavigateToInfo?.('help');
+                    return;
+                  }
+                  if (item.title === 'Términos y condiciones') {
+                    onNavigateToInfo?.('terms');
                     return;
                   }
                   Alert.alert(item.title, `Navegando a ${item.title}`);

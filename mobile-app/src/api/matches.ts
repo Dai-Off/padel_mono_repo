@@ -97,6 +97,29 @@ export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<M
   }
 }
 
+export type MyMatchesPhase = 'past' | 'upcoming' | 'all';
+
+export async function fetchMyMatches(
+  token: string | null | undefined,
+  opts?: { phase?: MyMatchesPhase; limit?: number },
+): Promise<MatchEnriched[]> {
+  if (!token) return [];
+  const phase = opts?.phase ?? 'all';
+  const limit = Math.max(1, Math.trunc(opts?.limit ?? 50));
+  try {
+    const url = `${API_URL}/matches/mine?phase=${encodeURIComponent(phase)}&limit=${limit}`;
+    const res = await fetch(url, {
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as MatchesResponse;
+    if (Array.isArray(json.matches)) return json.matches as MatchEnriched[];
+    return [];
+  } catch {
+    return [];
+  }
+}
+
 export type CreateMatchWithBookingParams = {
   court_id: string;
   organizer_player_id: string;

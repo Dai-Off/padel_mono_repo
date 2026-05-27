@@ -41,7 +41,8 @@ function playerLevelLine(p: { elo_rating: number; liga?: string | null }): strin
 
 export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
   const b = m.bookings;
-  if (!b?.start_at || !b?.end_at || !b?.total_price_cents) return null;
+  if (!b?.start_at || !b?.end_at) return null;
+  const totalPriceCents = b.total_price_cents ?? 0;
 
   const court = b.courts;
   const club = court?.clubs;
@@ -125,8 +126,6 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
 
   const matchPhase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
 
-  const pricePerPlayerCents = Math.ceil(b.total_price_cents / 4);
-
   return {
     id: m.id,
     playerIds,
@@ -141,8 +140,8 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     players,
     venue,
     location: city ? `${city}` : '—',
-    price: formatPrice(b.total_price_cents, b.currency ?? 'EUR'),
-    pricePerPlayer: formatPrice(pricePerPlayerCents, b.currency ?? 'EUR'),
+    price: formatPrice(totalPriceCents, b.currency ?? 'EUR'),
+    pricePerPlayer: formatPrice(Math.ceil(totalPriceCents / 4), b.currency ?? 'EUR'),
     duration: `${durationMin}min`,
     matchType: m.type ?? undefined,
     matchStatus: m.status,
