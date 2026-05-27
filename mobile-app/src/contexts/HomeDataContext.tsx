@@ -9,14 +9,14 @@ import {
   type ReactNode,
 } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
-import { fetchMatches, type MatchEnriched } from '../api/matches';
+import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId, fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
-import { selectMyUpcomingMatches } from '../domain/selectMyUpcomingMatches';
+import { getMatchListPhase } from '../domain/matchLifecycle';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
@@ -50,7 +50,7 @@ type HomeDataValue = {
 
   // Matches (datos derivados ya mapeados a PartidoItem para HomeScreen).
   partidos: PartidoItem[];
-  misProximosPartidos: PartidoItem[];
+  misPartidos: PartidoItem[];
   matchesLoading: boolean;
   refreshMatches: (opts?: { force?: boolean }) => Promise<void>;
 
@@ -117,7 +117,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const profileLoadedAt = useRef(0);
 
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
-  const [misProximosPartidos, setMisProximosPartidos] = useState<PartidoItem[]>([]);
+  const [misPartidos, setMisPartidos] = useState<PartidoItem[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
   const matchesLoadedAt = useRef(0);
 
@@ -187,9 +187,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
       try {
         let tk: string | null = token;
-        let [playerId, matches] = await Promise.all([
+        let [playerId, matches, myMatches] = await Promise.all([
           tk ? fetchMyPlayerId(tk) : Promise.resolve(null),
           fetchMatches({ expand: true, token: tk }),
+          tk ? fetchMyMatches(tk, { phase: 'all', limit: 100 }) : Promise.resolve([]),
         ]);
 
         // Si el token caducó silenciosamente, reintentamos UNA vez con refresh.
@@ -197,18 +198,50 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
           const newToken = await refreshAccessToken();
           if (newToken) {
             tk = newToken;
-            [playerId, matches] = await Promise.all([
+            [playerId, matches, myMatches] = await Promise.all([
               fetchMyPlayerId(newToken),
               fetchMatches({ expand: true, token: newToken }),
+              fetchMyMatches(newToken, { phase: 'all', limit: 100 }),
             ]);
           }
         }
 
-        const mineRaw = selectMyUpcomingMatches(matches as MatchEnriched[], playerId);
-        const misProximos = mineRaw
+        const mineRawBase = (myMatches as MatchEnriched[]).filter((m) => {
+          const b = m.bookings;
+          return Boolean(b?.start_at && b?.end_at);
+        });
+        const mineVisible = mineRawBase.filter((m) => {
+          const b = m.bookings!;
+          const phase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
+          const hasMyFeedback = (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true;
+          // Regla de negocio Home: si el partido ya finalizó y el usuario ya
+          // dejó feedback, se oculta del carrusel "Mis partidos".
+          return !(phase === 'past' && hasMyFeedback);
+        });
+        const mineRaw = [
+          ...mineVisible
+            .filter((m) => {
+              const b = m.bookings!;
+              return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) !== 'past';
+            })
+            .sort(
+              (a, b) =>
+                new Date(a.bookings!.start_at).getTime() - new Date(b.bookings!.start_at).getTime(),
+            ),
+          ...mineVisible
+            .filter((m) => {
+              const b = m.bookings!;
+              return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) === 'past';
+            })
+            .sort(
+              (a, b) =>
+                new Date(b.bookings!.start_at).getTime() - new Date(a.bookings!.start_at).getTime(),
+            ),
+        ];
+        const mis = mineRaw
           .map(mapMatchToPartido)
           .filter((p): p is PartidoItem => p != null);
-        setMisProximosPartidos(misProximos);
+        setMisPartidos(mis);
 
         const all = (matches as MatchEnriched[])
           .map(mapMatchToPartido)
@@ -366,7 +399,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     if (!token) {
       setProfile(null);
       setPartidos([]);
-      setMisProximosPartidos([]);
+      setMisPartidos([]);
       setPublicTournamentsCount(null);
       setSeasonPassMe(null);
       setStats(null);
@@ -415,7 +448,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       profileLoading,
       refreshProfile,
       partidos,
-      misProximosPartidos,
+      misPartidos,
       matchesLoading,
       refreshMatches,
       publicTournamentsCount,
@@ -438,7 +471,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       profileLoading,
       refreshProfile,
       partidos,
-      misProximosPartidos,
+      misPartidos,
       matchesLoading,
       refreshMatches,
       publicTournamentsCount,

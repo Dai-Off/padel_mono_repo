@@ -12,6 +12,8 @@ export type Match = {
   status: string;
   score_status?: 'pending' | 'confirmed' | 'disputed' | null;
   type?: string | null;
+  /** Solo en /matches/mine: indica si el jugador autenticado ya envió feedback. */
+  has_my_feedback?: boolean;
 };
 
 type PlayerRef = {

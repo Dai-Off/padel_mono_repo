@@ -270,8 +270,8 @@ export function ProfileScreen({
       <View style={styles.header}>
         <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.headerContent}>
-          <Pressable onPress={onMenuPress} style={styles.headerIconBtn}>
-            <Ionicons name="menu" size={24} color="#fff" />
+          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel="Volver">
+            <Ionicons name="arrow-back" size={24} color="#fff" />
           </Pressable>
           <Text style={styles.headerTitle}>Perfil</Text>
           <View style={styles.headerActions}>
