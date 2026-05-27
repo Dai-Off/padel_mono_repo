@@ -33,6 +33,15 @@ export function isMatchActiveForDiscovery(phase: MatchListPhase): boolean {
   return phase === 'upcoming' || phase === 'live';
 }
 
+/** bookings puede venir como objeto o array (Supabase expand). */
+export function getMatchBooking<T extends { start_at?: string | null; end_at?: string | null }>(
+  m: { bookings?: T | T[] | null },
+): T | null {
+  const raw = m.bookings;
+  if (raw == null) return null;
+  return Array.isArray(raw) ? (raw[0] ?? null) : raw;
+}
+
 /** bookings puede venir como objeto o array (Supabase). */
 export function isMatchEnrichedActiveForDiscovery(m: {
   status: string;
@@ -41,8 +50,7 @@ export function isMatchEnrichedActiveForDiscovery(m: {
     | { start_at?: string | null; end_at?: string | null }[]
     | null;
 }): boolean {
-  const raw = m.bookings;
-  const b = Array.isArray(raw) ? raw[0] : raw;
+  const b = getMatchBooking(m);
   const phase = getMatchListPhase(Date.now(), m.status, b?.start_at, b?.end_at);
   return isMatchActiveForDiscovery(phase);
 }

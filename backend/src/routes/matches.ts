@@ -24,6 +24,21 @@ const SELECT_LIST =
 const SELECT_ONE =
   'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_confirmed_at';
 
+/** Supabase expand devuelve relaciones 1:1 a veces como array; aplanamos para clientes. */
+function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?: unknown }>(row: T): T {
+  const rawB = row.bookings;
+  const bookings = Array.isArray(rawB) ? rawB[0] ?? null : rawB;
+  const rawMps = row.match_players;
+  const match_players = Array.isArray(rawMps)
+    ? rawMps.map((mp: { players?: unknown }) => {
+        const rawP = mp?.players;
+        const players = Array.isArray(rawP) ? rawP[0] ?? null : rawP;
+        return players === mp?.players ? mp : { ...mp, players };
+      })
+    : rawMps;
+  return { ...row, bookings, match_players };
+}
+
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team,
           ${bookingRel} (
@@ -223,7 +238,8 @@ router.get('/mine', async (req: Request, res: Response) => {
 
   const phaseRaw = String(req.query.phase ?? 'all').trim().toLowerCase();
   const phase = phaseRaw === 'past' || phaseRaw === 'upcoming' ? phaseRaw : 'all';
-  const limit = Math.min(100, Math.max(1, Math.trunc(Number(req.query.limit) || 50)));
+  // Límite cliente: máx 200 para historial completo (Tu actividad).
+  const limit = Math.min(200, Math.max(1, Math.trunc(Number(req.query.limit) || 50)));
 
   try {
     await finalizePastMatchesThrottled();
@@ -245,13 +261,13 @@ router.get('/mine', async (req: Request, res: Response) => {
       .in('id', matchIds)
       .neq('status', 'cancelled')
       .order('created_at', { ascending: false })
-      .limit(Math.min(matchIds.length, 200));
+      .limit(Math.min(matchIds.length, 500));
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
     const filtered = (data ?? []).filter((row: any) => {
       const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
-      if (!b?.start_at || !b?.end_at) return false;
-      const listPhase = getMatchListPhase(nowMs, row.status, b.start_at, b.end_at);
+      // Si no tiene booking usamos sólo el estado para determinar la fase.
+      const listPhase = getMatchListPhase(nowMs, row.status, b?.start_at, b?.end_at);
       if (phase === 'past') return listPhase === 'past';
       if (phase === 'upcoming') return listPhase !== 'past';
       return true;
@@ -277,10 +293,12 @@ router.get('/mine', async (req: Request, res: Response) => {
       feedbackByMatch = new Set((myFeedbackRows ?? []).map((r: { match_id: string }) => r.match_id));
     }
 
-    const withFeedbackFlag = sliced.map((m: any) => ({
-      ...m,
-      has_my_feedback: feedbackByMatch.has(m.id),
-    }));
+    const withFeedbackFlag = sliced.map((m: any) =>
+      flattenMatchRowForClient({
+        ...m,
+        has_my_feedback: feedbackByMatch.has(m.id),
+      }),
+    );
 
     return res.json({ ok: true, matches: withFeedbackFlag });
   } catch (err) {
