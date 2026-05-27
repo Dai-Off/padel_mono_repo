@@ -119,7 +119,17 @@ router.post('/:id/feedback', async (req: Request, res: Response) => {
     (match.updated_at as string);
   const deadline = new Date(confirmedAt).getTime() + FEEDBACK_WINDOW_HOURS * 3600 * 1000;
   if (Date.now() > deadline) {
-    return res.status(410).json({ ok: false, error: 'Ventana de feedback cerrada' });
+    // UX: permitir el PRIMER feedback aunque la ventana oficial esté cerrada.
+    // Solo bloqueamos cambios tardíos si ya existía feedback de este reviewer.
+    const { data: existingFeedback } = await supabase
+      .from('match_feedback')
+      .select('match_id')
+      .eq('match_id', matchId)
+      .eq('reviewer_id', playerId)
+      .maybeSingle();
+    if (existingFeedback) {
+      return res.status(410).json({ ok: false, error: 'Ventana de feedback cerrada' });
+    }
   }
 
   const { data: others } = await supabase
