@@ -13,10 +13,24 @@
         "buildType": "apk"
       },
       "distribution": "internal",
-      "channel": "preview"
+      "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://padel-be.fly.dev",
+        "EXPO_PUBLIC_AI_MATCH_WEBHOOK_URL": "https://orquestador-clasificador-n8n-v2.fly.dev/webhook/36c6520e-6891-4251-8b7f-cad0f6e02f67/chat",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51T9TJSEph8cht14r9pH3YYnEAPb90Kb6GJlgYGruoLNHNTDB9RNS3ILKhGGyiG8TpyKcigyslquVRLXiBXkKEYpe00Vz1me9hu",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://oxowmfhnorxnabhzkcmi.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im94b3dtZmhub3J4bmFiaHprY21pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5Mzc0MjcsImV4cCI6MjA4NzUxMzQyN30.76N7iUlqqBRQtc_JAIkP_EcvXy4dQ0-ck5_fWfVvva4"
+      }
     },
     "production": {
-      "channel": "production"
+      "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://padel-be.fly.dev",
+        "EXPO_PUBLIC_AI_MATCH_WEBHOOK_URL": "https://orquestador-clasificador-n8n-v2.fly.dev/webhook/36c6520e-6891-4251-8b7f-cad0f6e02f67/chat",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_test_51T9TJSEph8cht14r9pH3YYnEAPb90Kb6GJlgYGruoLNHNTDB9RNS3ILKhGGyiG8TpyKcigyslquVRLXiBXkKEYpe00Vz1me9hu",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://oxowmfhnorxnabhzkcmi.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im94b3dtZmhub3J4bmFiaHprY21pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5Mzc0MjcsImV4cCI6MjA4NzUxMzQyN30.76N7iUlqqBRQtc_JAIkP_EcvXy4dQ0-ck5_fWfVvva4"
+      }
     }
   },
   "submit": {
