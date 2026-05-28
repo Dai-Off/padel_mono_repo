@@ -240,7 +240,8 @@ router.get('/courts', async (req: Request, res: Response) => {
         
         // Base price from reservation_type_prices if available
         const clubRtMin = minRtByClub.get(court.club_id) ?? 0;
-        let minPriceCents = clubRtMin;
+        let minPriceCents = 0;
+        let hasRulePrice = false;
 
         for (const rule of rules) {
           for (let min = rule.startMin; min < rule.endMin; min += 60) {
@@ -252,11 +253,16 @@ router.get('/courts', async (req: Request, res: Response) => {
             if (!overlaps) {
               const h = Math.floor(min / 60);
               timeSlots.push(`${String(h).padStart(2, '0')}:00`);
-              if (minPriceCents === 0 || rule.amountCents < minPriceCents) {
+              if (!hasRulePrice || rule.amountCents < minPriceCents) {
                 minPriceCents = rule.amountCents;
+                hasRulePrice = true;
               }
             }
           }
+        }
+
+        if (!hasRulePrice) {
+          minPriceCents = clubRtMin;
         }
 
         const minPriceFormatted = minPriceCents ? `${(minPriceCents / 100).toFixed(2).replace('.', ',')}€` : '-';

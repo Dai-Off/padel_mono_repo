@@ -18,9 +18,106 @@ import {
 } from '../services/seasonPassService';
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import { insertGuestMatchPlayerAfterPayment } from '../services/matchPlayerSlotService';
+import { sendMatchJoinConfirmationEmail } from '../lib/mailer';
 import { zonedTimeToUtc } from './learningTimezone';
 import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
+
+/**
+ * Helper to fetch player and match/club/court details and send the join confirmation email.
+ * This is designed to be fire-and-forget so that it doesn't block the main join transaction flow.
+ */
+function notifyMatchJoinByEmail(supabase: any, matchId: string, playerId: string): void {
+  (async () => {
+    try {
+      // 1. Fetch player email and name
+      const { data: player, error: playerErr } = await supabase
+        .from('players')
+        .select('email, name')
+        .eq('id', playerId)
+        .maybeSingle();
+
+      if (playerErr || !player || !player.email) {
+        console.error(`[notifyMatchJoinByEmail] Failed to fetch player ${playerId}:`, playerErr);
+        return;
+      }
+
+      // 2. Fetch match details, court details, club details
+      const { data: match, error: matchErr } = await supabase
+        .from('matches')
+        .select(`
+          start_at,
+          courts (
+            name,
+            clubs (
+              name,
+              address
+            )
+          )
+        `)
+        .eq('id', matchId)
+        .maybeSingle();
+
+      if (matchErr || !match) {
+        console.error(`[notifyMatchJoinByEmail] Failed to fetch match ${matchId}:`, matchErr);
+        return;
+      }
+
+      const court = (match as any).courts;
+      if (!court) {
+        console.error(`[notifyMatchJoinByEmail] Match ${matchId} has no court relations.`);
+        return;
+      }
+
+      const club = court.clubs;
+      const clubName = club?.name || 'Club de Pádel';
+      const address = club?.address || 'Dirección no especificada';
+      const courtName = court.name || 'Pista no especificada';
+
+      // 3. Format Date & Time
+      // Format to Spanish date: e.g., "Miércoles, 27 de Mayo de 2026"
+      const dateObj = new Date(match.start_at);
+      
+      const spanishDays = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      const spanishMonths = [
+        'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+        'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+      ];
+      
+      const dayName = spanishDays[dateObj.getDay()];
+      const dayNum = dateObj.getDate();
+      const monthName = spanishMonths[dateObj.getMonth()];
+      const year = dateObj.getFullYear();
+      
+      const matchDateStr = `${dayName}, ${dayNum} de ${monthName} de ${year}`;
+      
+      // Format Time: e.g., "18:45"
+      const hours = String(dateObj.getHours()).padStart(2, '0');
+      const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+      const matchTimeStr = `${hours}:${minutes}`;
+
+      // 4. Send email
+      const emailResult = await sendMatchJoinConfirmationEmail(
+        player.email,
+        player.name || 'Jugador',
+        clubName,
+        matchDateStr,
+        matchTimeStr,
+        courtName,
+        address
+      );
+
+      if (!emailResult.sent) {
+        console.error(`[notifyMatchJoinByEmail] Failed to send email to ${player.email}:`, emailResult.error);
+      } else {
+        console.log(`[notifyMatchJoinByEmail] Confirmation email sent successfully to ${player.email}`);
+      }
+    } catch (err) {
+      console.error('[notifyMatchJoinByEmail] Unexpected error:', err);
+    }
+  })();
+}
+
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
 const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
@@ -897,12 +994,15 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
               match_id: match.id,
               player_id: participant.player_id,
             });
-          } else if (ins.reassigned) {
-            console.warn('[payments/webhook] slot reassigned (race):', {
-              match_id: match.id,
-              player_id: participant.player_id,
-              used: ins.slot_index,
-            });
+          } else {
+            notifyMatchJoinByEmail(supabase, match.id, participant.player_id);
+            if (ins.reassigned) {
+              console.warn('[payments/webhook] slot reassigned (race):', {
+                match_id: match.id,
+                player_id: participant.player_id,
+                used: ins.slot_index,
+              });
+            }
           }
         }
       }
@@ -3422,12 +3522,15 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
               match_id: match.id,
               player_id: participant.player_id,
             });
-          } else if (ins.reassigned) {
-            console.warn('[payments/confirm-client] slot reassigned (race):', {
-              match_id: match.id,
-              player_id: participant.player_id,
-              used: ins.slot_index,
-            });
+          } else {
+            notifyMatchJoinByEmail(supabase, match.id, participant.player_id);
+            if (ins.reassigned) {
+              console.warn('[payments/confirm-client] slot reassigned (race):', {
+                match_id: match.id,
+                player_id: participant.player_id,
+                used: ins.slot_index,
+              });
+            }
           }
         }
       }
@@ -3713,13 +3816,19 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
           .maybeSingle();
 
         if (!existing) {
-          await supabase.from('match_players').insert({
+          const { error: insErr } = await supabase.from('match_players').insert({
             match_id: match.id,
             player_id: chosenParticipant.player_id,
             team: 'A',
             invite_status: 'accepted',
             slot_index: null,
           });
+          if (!insErr) {
+            notifyMatchJoinByEmail(supabase, match.id, chosenParticipant.player_id);
+          }
+        } else {
+          // If already in match, trigger email just in case we need to guarantee it
+          notifyMatchJoinByEmail(supabase, match.id, chosenParticipant.player_id);
         }
       }
     }

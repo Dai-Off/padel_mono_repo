@@ -1180,7 +1180,17 @@ export function TournamentDetailScreen({
                   />
                 ) : null}
                 {row.visibility ? (
-                  <DetailRow icon="eye-outline" cap="Visibilidad" text={row.visibility} />
+                  <DetailRow
+                    icon="eye-outline"
+                    cap="Visibilidad"
+                    text={
+                      row.visibility === 'public'
+                        ? 'Pública'
+                        : row.visibility === 'private'
+                        ? 'Privada'
+                        : row.visibility
+                    }
+                  />
                 ) : null}
                 {row.cancelled_at ? (
                   <DetailRow
@@ -1236,6 +1246,32 @@ export function TournamentDetailScreen({
                 </Text>
                 <Text style={styles.mapPhHint}>Toca para abrir en mapas</Text>
               </Pressable>
+
+              {club ? (
+                <Pressable
+                  style={({ pressed }) => [styles.clubRow, pressed && styles.pressed]}
+                  onPress={openMaps}
+                >
+                  {club.logo_url ? (
+                    <Image source={{ uri: club.logo_url }} style={styles.clubThumb} />
+                  ) : (
+                    <View style={[styles.clubThumb, { alignItems: 'center', justifyContent: 'center' }]}>
+                      <Ionicons name="business" size={24} color="#666" />
+                    </View>
+                  )}
+                  <View style={styles.clubRowBody}>
+                    <Text style={styles.clubRowTitle} numberOfLines={1}>
+                      {club.name}
+                    </Text>
+                    <Text style={styles.clubRowSub} numberOfLines={2}>
+                      {club.address || locationLine || 'Dirección no especificada'}
+                    </Text>
+                  </View>
+                  <View style={styles.clubRowMap}>
+                    <Ionicons name="location" size={18} color="#fff" />
+                  </View>
+                </Pressable>
+              ) : null}
             </View>
 
             <View style={styles.card}>
@@ -2107,6 +2143,43 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 18,
     maxWidth: 280,
+  },
+  clubRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+    marginTop: 16,
+  },
+  clubThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: '#333',
+  },
+  clubRowBody: { flex: 1, minWidth: 0 },
+  clubRowTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  clubRowSub: {
+    fontSize: 12,
+    color: '#9ca3af',
+  },
+  clubRowMap: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: ACCENT,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pressed: { opacity: 0.88 },
 });
