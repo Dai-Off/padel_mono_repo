@@ -77,7 +77,7 @@ type PostOnboardingReturn =
   | 'cursos';
 
 type MatchmakingHomeBannerState = 'hidden' | 'searching' | 'matched' | 'timed_out';
-const MATCHMAKING_TIMEOUT_SECONDS = 5 * 60;
+const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
 
 export function MainApp() {
   const sidebar = useSidebar(false);
@@ -228,15 +228,27 @@ export function MainApp() {
   const handleMatchmakingBannerStateChange = useCallback(
     (state: MatchmakingHomeBannerState, options?: { force?: boolean }) => {
       const force = options?.force === true;
-      if (matchmakingTimeoutNoticePending && state === 'hidden') {
+      if (state === 'timed_out') {
+        setMatchmakingTimeoutNoticePending(true);
+        setMatchmakingHomeBannerState('timed_out');
         return;
       }
-      setMatchmakingHomeBannerState(state);
-      if (state === 'timed_out') setMatchmakingTimeoutNoticePending(true);
-      if (state === 'searching') {
+
+      if (state === 'searching' || state === 'matched') {
         setMatchmakingTimeoutNoticePending(false);
-      } else if (state === 'matched') {
-        setMatchmakingTimeoutNoticePending(false);
+        setMatchmakingHomeBannerState(state);
+        return;
+      }
+
+      if (state === 'hidden') {
+        // El timeout debe quedar visible hasta que el usuario haga una nueva
+        // búsqueda o aparezca un match; no se oculta automáticamente.
+        setMatchmakingHomeBannerState((prev) => {
+          if (!force && (matchmakingTimeoutNoticePending || prev === 'timed_out')) {
+            return prev;
+          }
+          return 'hidden';
+        });
       }
     },
     [matchmakingTimeoutNoticePending],
