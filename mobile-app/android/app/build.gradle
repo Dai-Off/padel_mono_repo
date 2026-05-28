@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.anonymous.padelapp'
+    namespace 'com.wematch.padel'
     defaultConfig {
-        applicationId 'com.anonymous.padelapp'
+        applicationId 'com.wematch.padel'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Padel App",
+    "name": "WeMatch",
     "slug": "padel-app",
-    "scheme": "padelapp",
+    "scheme": "wematch",
     "version": "1.0.0",
     "orientation": "default",
     "icon": "./assets/images/wematch-logo.png",
@@ -54,7 +54,7 @@
         "backgroundColor": "#000000"
       },
       "softwareKeyboardLayoutMode": "pan",
-      "package": "com.anonymous.padelapp",
+      "package": "com.wematch.padel",
       "runtimeVersion": "1.0.0",
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
