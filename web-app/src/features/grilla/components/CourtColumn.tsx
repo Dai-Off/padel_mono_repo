@@ -1,9 +1,14 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useDroppable, useDraggable } from '@dnd-kit/core';
 import clsx from 'clsx';
 import type { Court, Reservation } from '../types';
 import { ReservationCard } from './ReservationCard';
-import { getGridIntervals, parseTimeStr, START_HOUR, END_HOUR, PIXELS_PER_MINUTE } from '../utils/timeGrid';
+import { PIXELS_PER_MINUTE } from '../utils/timeGrid';
+import {
+    gridContentHeightPx,
+    parseTimeStrInBounds,
+    useGridBounds,
+} from '../context/GridBoundsContext';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { useZoom } from '../context/ZoomContext';
 
@@ -23,26 +28,28 @@ interface Props {
     isCurrentlyFocused?: boolean;
     isCompactView?: boolean;
     compactPxPerMinute?: number;
-    /** Fixed column width on mobile when many courts (enables horizontal pan). */
     mobileColumnWidthPx?: number;
     totalCourts?: number;
     typeColorOverrides?: Record<string, string>;
-    /** Día de la grilla respecto a hoy: celdas libres pasadas se muestran en gris. */
     gridDayKind?: 'past' | 'today' | 'future';
-    /** Minutos desde medianoche (hora local); solo aplica con gridDayKind === 'today'. */
     nowMinutes?: number;
 }
 
-// Split "Pista 2 CENTRAL" → { main: "PISTA 2", sub: "CENTRAL" }
 function parseCourtName(name: string): { main: string; sub?: string } {
     const parts = name.trim().split(/\s+/);
-    // e.g. ["Pista", "2"] or ["Pista", "2", "CENTRAL"] or ["Pista", "Virtual"]
     if (parts.length <= 2) {
         return { main: name.toUpperCase() };
     }
     const mainParts = parts.slice(0, 2).join(' ').toUpperCase();
     const sub = parts.slice(2).join(' ').toUpperCase();
     return { main: mainParts, sub };
+}
+
+function formatTimeFromMinutes(blockStartMins: number): string {
+    const h = Math.floor(blockStartMins / 60);
+    const m = blockStartMins % 60;
+    const displayH = h >= 24 ? h - 24 : h;
+    return `${displayH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
 }
 
 export const CourtColumn: React.FC<Props> = ({
@@ -69,54 +76,65 @@ export const CourtColumn: React.FC<Props> = ({
 }) => {
     const { tData } = useGrillaTranslation();
     const { zoomLevel } = useZoom();
+    const bounds = useGridBounds();
     const isSmallZoom = !isCompactView && (zoomLevel === 'XS' || zoomLevel === 'S' || zoomLevel === 'M');
     const { setNodeRef, isOver } = useDroppable({
         id: court.id,
         data: court,
     });
 
-    // Make the court header draggable (to drag between tabs)
     const { attributes: dragAttrs, listeners: dragListeners, setNodeRef: setDragRef, isDragging } = useDraggable({
         id: `court-header-${court.id}`,
         data: { type: 'court', court },
     });
 
-    const intervals = getGridIntervals();
     const ppm = (isCompactView && compactPxPerMinute) ? compactPxPerMinute : PIXELS_PER_MINUTE;
-    const height = (intervals.length - 1) * 30 * ppm;
+    const height = gridContentHeightPx(bounds, ppm);
+    const gridStartMin = bounds.startHour * 60;
+    const gridEndMin = bounds.endHour * 60;
 
     const isVirtual = /virtual/i.test(court.name);
     const { main: courtMain, sub: courtSub } = parseCourtName(tData(court.name));
 
-    // Calculate free slots
-    const getFreeSlots = () => {
-        const slots = [];
-        const startMin = START_HOUR * 60;
-        const endMin = END_HOUR * 60;
-        let currentMin = startMin;
+    const parseTime = (time: string) => parseTimeStrInBounds(time, bounds);
 
-        const sortedRes = [...reservations].sort((a, b) => parseTimeStr(a.startTime) - parseTimeStr(b.startTime));
+    const emptyBlocks = useMemo(() => {
+        const blocks: { startMins: number; bookable: boolean; isPast: boolean }[] = [];
+        for (let blockStart = gridStartMin; blockStart + 30 <= gridEndMin; blockStart += 30) {
+            const blockEnd = blockStart + 30;
+            const covered = reservations.some((r) => {
+                const rs = parseTime(r.startTime);
+                const re = rs + r.durationMinutes;
+                return blockStart < re && blockEnd > rs;
+            });
+            if (covered) continue;
 
-        for (const res of sortedRes) {
-            const resStart = parseTimeStr(res.startTime);
-            const resEnd = resStart + res.durationMinutes;
+            const withinHours = blockStart >= bounds.openMin && blockEnd <= bounds.closeMin;
+            const isPast =
+                gridDayKind === 'past' ||
+                (gridDayKind === 'today' && blockStart < nowMinutes);
+            const bookable =
+                !bounds.closed &&
+                !isMaintenanceBlocked &&
+                withinHours &&
+                !isPast;
 
-            if (resStart > currentMin) {
-                slots.push({ startMins: currentMin, endMins: resStart });
-            }
-            if (resEnd > currentMin) {
-                currentMin = resEnd;
-            }
+            blocks.push({ startMins: blockStart, bookable, isPast: isPast || !withinHours });
         }
+        return blocks;
+    }, [
+        gridStartMin,
+        gridEndMin,
+        reservations,
+        bounds.openMin,
+        bounds.closeMin,
+        bounds.closed,
+        isMaintenanceBlocked,
+        gridDayKind,
+        nowMinutes,
+    ]);
 
-        if (currentMin < endMin) {
-            slots.push({ startMins: currentMin, endMins: endMin });
-        }
-
-        return slots;
-    };
-
-    const freeSlots = getFreeSlots();
+    const manyCourts = totalCourts && totalCourts > 10;
 
     return (
         <div
@@ -135,7 +153,6 @@ export const CourtColumn: React.FC<Props> = ({
                     : undefined
             }
         >
-            {/* Court Header — draggable to move between tabs */}
             <div
                 ref={setDragRef}
                 {...dragListeners}
@@ -187,86 +204,39 @@ export const CourtColumn: React.FC<Props> = ({
                 )}
                 style={{ height }}
             >
-                {/* Render Free Slots — grey when maintenance-blocked or outside operational hours */}
-                {(isMaintenanceBlocked
-                    ? Array.from({ length: Math.floor(((END_HOUR - START_HOUR) * 60) / 30) }).map((_, b) => {
-                        const blockStartMins = START_HOUR * 60 + b * 30;
-                        const h = Math.floor(blockStartMins / 60);
-                        const m = blockStartMins % 60;
-                        const displayH = h >= 24 ? h - 24 : h;
-                        const timeStr = `${displayH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-                        const manyCourts = totalCourts && totalCourts > 10;
-                        return (
-                            <div
-                                key={`maint-${b}`}
-                                className="absolute inset-x-0 border-b z-[5] flex items-center justify-center bg-[#d0d0d0] border-white cursor-not-allowed"
-                                style={{
-                                    top: (blockStartMins - START_HOUR * 60) * ppm,
-                                    height: 30 * ppm,
-                                }}
-                            >
-                                <span className={clsx(
-                                    "font-semibold pointer-events-none text-[#919191]",
-                                    isCompactView
-                                        ? (manyCourts ? "text-[7.5px] -ml-0.5 tracking-tighter" : "text-[7px]")
-                                        : isSmallZoom ? "text-[13px]" : "text-[8px]",
-                                )}>
-                                    {timeStr}
-                                </span>
-                            </div>
-                        );
-                    })
-                    : freeSlots.map((slot, i) => {
-                        const duration = slot.endMins - slot.startMins;
-                        if (duration < 30) return null;
+                {emptyBlocks.map(({ startMins, bookable, isPast }) => {
+                    const timeStr = formatTimeFromMinutes(startMins);
+                    const disabled = !bookable || isPast;
 
-                        const blocksCount = Math.floor(duration / 30);
-
-                        return Array.from({ length: blocksCount }).map((_, b) => {
-                            const blockStartMins = slot.startMins + (b * 30);
-
-                            const h = Math.floor(blockStartMins / 60);
-                            const m = blockStartMins % 60;
-                            const displayH = h >= 24 ? h - 24 : h;
-                            const timeStr = `${displayH.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
-
-                            const isPastFree =
-                                gridDayKind === 'past' ||
-                                (gridDayKind === 'today' && blockStartMins < nowMinutes);
-
-                            const manyCourts = totalCourts && totalCourts > 10;
-
-                            return (
-                                <div
-                                    key={`free-${i}-${b}`}
-                                    onClick={() => onFreeSlotClick?.(court.id, court.name, timeStr, isPastFree)}
-                                    className={clsx(
-                                        "absolute inset-x-0 border-b z-0 flex items-center justify-center transition-colors",
-                                        isPastFree
-                                            ? "bg-[#e0e0e0] border-white cursor-not-allowed opacity-95"
-                                            : "bg-[#ade88f] border-white cursor-pointer hover:bg-[#93db72]"
-                                    )}
-                                    style={{
-                                        top: (blockStartMins - START_HOUR * 60) * ppm,
-                                        height: 30 * ppm,
-                                    }}
-                                >
-                                    <span className={clsx(
-                                        "font-semibold pointer-events-none",
-                                        isCompactView
-                                            ? (mobileColumnWidthPx
-                                                ? "text-[8px]"
-                                                : manyCourts ? "text-[7.5px] -ml-0.5 tracking-tighter" : "text-[7px]")
-                                            : isSmallZoom ? "text-[13px]" : "text-[8px]",
-                                        "text-[#919191]"
-                                    )}>
-                                        {timeStr}
-                                    </span>
-                                </div>
-                            );
-                        });
-                    })
-                )}
+                    return (
+                        <div
+                            key={`slot-${startMins}`}
+                            onClick={() => onFreeSlotClick?.(court.id, court.name, timeStr, disabled)}
+                            className={clsx(
+                                "absolute inset-x-0 border-b z-0 flex items-center justify-center transition-colors",
+                                disabled
+                                    ? "bg-[#e0e0e0] border-white cursor-not-allowed opacity-95"
+                                    : "bg-[#ade88f] border-white cursor-pointer hover:bg-[#93db72]"
+                            )}
+                            style={{
+                                top: (startMins - gridStartMin) * ppm,
+                                height: 30 * ppm,
+                            }}
+                        >
+                            <span className={clsx(
+                                "font-semibold pointer-events-none",
+                                isCompactView
+                                    ? (mobileColumnWidthPx
+                                        ? "text-[8px]"
+                                        : manyCourts ? "text-[7.5px] -ml-0.5 tracking-tighter" : "text-[7px]")
+                                    : isSmallZoom ? "text-[13px]" : "text-[8px]",
+                                "text-[#919191]"
+                            )}>
+                                {timeStr}
+                            </span>
+                        </div>
+                    );
+                })}
 
                 {dragGhost && (
                     <div
@@ -275,8 +245,8 @@ export const CourtColumn: React.FC<Props> = ({
                             top: (() => {
                                 const [h, m] = dragGhost.startTime.split(':').map(Number);
                                 let absoluteH = h;
-                                if (h < START_HOUR && START_HOUR > 0) absoluteH += 24;
-                                return ((absoluteH * 60 + m) - (START_HOUR * 60)) * ppm;
+                                if (h < bounds.startHour && bounds.startHour > 0) absoluteH += 24;
+                                return ((absoluteH * 60 + m) - gridStartMin) * ppm;
                             })() + 1,
                             height: (dragGhost.duration * ppm) - 2,
                         }}

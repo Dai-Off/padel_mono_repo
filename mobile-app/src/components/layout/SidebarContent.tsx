@@ -171,7 +171,7 @@ export function SidebarContent() {
             iconVariant="orange"
             onPress={() => {
               close?.();
-              ctx?.onProfilePress?.();
+              ctx?.onNavigateToEditProfile?.();
             }}
           />
           <SidebarRowItem
@@ -179,7 +179,10 @@ export function SidebarContent() {
             title="Tu actividad"
             subtitle="Partidos, clases, competiciones, grupos"
             iconVariant="purple"
-            onPress={close}
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToTuActividad?.();
+            }}
           />
           <SidebarRowItem
             icon="cash-outline"
@@ -206,18 +209,49 @@ export function SidebarContent() {
             title="Ajustes"
             subtitle="Configura privacidad, notificaciones, segu..."
             iconVariant="sky"
-            onPress={close}
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToAjustes?.();
+            }}
           />
         </SidebarSection>
 
         <SidebarSection title="Soporte">
-          <SidebarRowItem icon="help-circle-outline" title="Ayuda" onPress={close} />
-          <SidebarRowItem icon="phone-portrait-outline" title="Cómo funciona CourtHub" onPress={close} />
+          <SidebarRowItem
+            icon="help-circle-outline"
+            title="Ayuda"
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToInfo?.('help');
+            }}
+          />
+          <SidebarRowItem
+            icon="phone-portrait-outline"
+            title="Cómo funciona WeMatch"
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToInfo?.('how-it-works');
+            }}
+          />
         </SidebarSection>
 
         <SidebarSection title="Información legal">
-          <SidebarRowItem icon="document-text-outline" title="Condiciones de uso" onPress={close} />
-          <SidebarRowItem icon="eye-outline" title="Política de privacidad" onPress={close} />
+          <SidebarRowItem
+            icon="document-text-outline"
+            title="Condiciones de uso"
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToInfo?.('terms');
+            }}
+          />
+          <SidebarRowItem
+            icon="eye-outline"
+            title="Política de privacidad"
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToInfo?.('privacy');
+            }}
+          />
         </SidebarSection>
 
         <View style={styles.logoutSection}>

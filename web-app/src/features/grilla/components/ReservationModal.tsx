@@ -1,5 +1,8 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'sonner';
+import type { CreateBookingBatchResult } from '../types';
 import type { Reservation, PaymentMethod } from '../types';
 import {
     X,
@@ -15,7 +18,11 @@ import {
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
 import { apiFetchWithAuth } from '../../../services/api';
-import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
+import { clubIanaTimeZone, zonedTimeToUtc, formatTimeHHmmInClubTz } from '../../../lib/clubTimeZone';
+
+function clubSlotToUtcIso(dateBase: string, hour: string, minute: string): string {
+    return zonedTimeToUtc(`${dateBase}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`).toISOString();
+}
 import { reservationTypePricesService, type ReservationTypeConfig } from '../../../services/reservationTypePrices';
 import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
@@ -23,6 +30,7 @@ import { calendarLocale } from '../i18n/calendarLocale';
 import { TournamentGridBookingEditor } from './TournamentGridBookingEditor';
 import { WEEKDAY_CHIPS } from '../utils/recurrenceDates';
 import { resolveJoinedPlayer } from '../utils/bookingDisplay';
+import { formatPlayerLabel, formatPlayerSubline } from '../../../lib/playerLabel';
 
 const PLAY_MODE_MARKER = '__PLAY_MODE__';
 
@@ -57,7 +65,7 @@ interface ReservationModalProps {
     isOpen: boolean;
     onClose: () => void;
     reservation: Reservation | null;
-    onSave?: (bookingData: any) => Promise<void>;
+    onSave?: (bookingData: any) => Promise<CreateBookingBatchResult | void>;
     editingBookingData?: any | null;
     onUpdate?: (bookingId: string, data: any) => Promise<void>;
     onDelete?: (bookingId: string, sendEmail: boolean) => Promise<void>;
@@ -90,7 +98,7 @@ export const PlayerSearch: React.FC<{
     const [altaOpen, setAltaOpen] = useState(false);
     const [altaSubmitting, setAltaSubmitting] = useState(false);
     const [altaError, setAltaError] = useState('');
-    const [altaForm, setAltaForm] = useState({ first_name: '', last_name: '', phone: '', email: '' });
+    const [altaForm, setAltaForm] = useState({ first_name: '', last_name: '', phone: '', email: '', username: '' });
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -135,15 +143,17 @@ export const PlayerSearch: React.FC<{
         setAltaError('');
         try {
             const emailTrim = email.trim();
+            const usernameTrim = altaForm.username.trim().toLowerCase();
             const newPlayer = await playerService.createManual({
                 first_name: first_name.trim(),
                 last_name: last_name.trim(),
                 phone: phone.trim(),
                 email: emailTrim || undefined,
+                username: usernameTrim || undefined,
             });
             onSelect(newPlayer);
             setAltaOpen(false);
-            setAltaForm({ first_name: '', last_name: '', phone: '', email: '' });
+            setAltaForm({ first_name: '', last_name: '', phone: '', email: '', username: '' });
         } catch (err: unknown) {
             const msg =
                 err && typeof err === 'object' && 'message' in err
@@ -168,11 +178,9 @@ export const PlayerSearch: React.FC<{
                                 {selectedPlayer.first_name[0]}{selectedPlayer.last_name[0]}
                             </div>
                             <div>
-                                <p className="text-sm font-bold text-gray-900">{selectedPlayer.first_name} {selectedPlayer.last_name}</p>
+                                <p className="text-sm font-bold text-gray-900">{formatPlayerLabel(selectedPlayer)}</p>
                                 <p className="text-[10px] text-gray-500">
-                                    {selectedPlayer.phone?.trim()
-                                        ? `${selectedPlayer.phone} · Elo ${Math.round(Number(selectedPlayer.elo_rating) || 0)}`
-                                        : selectedPlayer.email || t('playerSearch.noContactLine')}
+                                    {formatPlayerSubline(selectedPlayer) || t('playerSearch.noContactLine')}
                                 </p>
                             </div>
                         </div>
@@ -238,11 +246,9 @@ export const PlayerSearch: React.FC<{
                                             {p.first_name[0]}{p.last_name[0]}
                                         </div>
                                         <div className="truncate">
-                                            <p className="text-sm font-bold text-gray-900 truncate">{p.first_name} {p.last_name}</p>
+                                            <p className="text-sm font-bold text-gray-900 truncate">{formatPlayerLabel(p)}</p>
                                             <p className="text-[11px] text-gray-500 truncate">
-                                                {p.phone?.trim()
-                                                    ? `${p.phone} · Elo ${Math.round(Number(p.elo_rating) || 0)}`
-                                                    : p.email || t('playerSearch.noContactLine')}
+                                                {formatPlayerSubline(p) || t('playerSearch.noContactLine')}
                                             </p>
                                         </div>
                                     </button>
@@ -270,10 +276,12 @@ export const PlayerSearch: React.FC<{
                         </div>
                         <form onSubmit={handleAltaSubmit} className="flex flex-col gap-3">
                             <p className="text-[11px] text-gray-500">{t('playerSearch.manualAddHint')}</p>
-                            {(['first_name', 'last_name', 'phone', 'email'] as const).map((field) => (
+                            {(['first_name', 'last_name', 'phone', 'username', 'email'] as const).map((field) => (
                                 <div key={field}>
-                                    {field === 'email' && (
-                                        <span className="text-[10px] text-gray-400 block mb-0.5">{t('playerSearch.emailOptional')}</span>
+                                    {(field === 'email' || field === 'username') && (
+                                        <span className="text-[10px] text-gray-400 block mb-0.5">
+                                            {field === 'email' ? t('playerSearch.emailOptional') : 'Usuario (opcional)'}
+                                        </span>
                                     )}
                                     <input
                                         type={field === 'email' ? 'email' : field === 'phone' ? 'tel' : 'text'}
@@ -282,11 +290,20 @@ export const PlayerSearch: React.FC<{
                                                 first_name: t('playerSearch.namePh'),
                                                 last_name: t('playerSearch.lastNamePh'),
                                                 phone: t('playerSearch.phonePh'),
+                                                username: 'tu_usuario',
                                                 email: t('playerSearch.emailPh'),
                                             }[field]
                                         }
                                         value={altaForm[field]}
-                                        onChange={(e) => setAltaForm(prev => ({ ...prev, [field]: e.target.value }))}
+                                        onChange={(e) =>
+                                            setAltaForm((prev) => ({
+                                                ...prev,
+                                                [field]:
+                                                    field === 'username'
+                                                        ? e.target.value.replace(/\s/g, '').toLowerCase()
+                                                        : e.target.value,
+                                            }))
+                                        }
                                         className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-portal-header focus:border-transparent outline-none"
                                     />
                                 </div>
@@ -496,7 +513,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [multipleWeekdays, setMultipleWeekdays] = useState<number[]>([]);
     const [includeHolidaysInRecurrence, setIncludeHolidaysInRecurrence] = useState(true);
     const [selectedCourtIds, setSelectedCourtIds] = useState<string[]>([]);
+    const [courtPickCount, setCourtPickCount] = useState('2');
+    const [multiCourtPickMode, setMultiCourtPickMode] = useState<'manual' | 'auto'>('manual');
+    const [batchResult, setBatchResult] = useState<CreateBookingBatchResult | null>(null);
     const [availableCourtsForSlot, setAvailableCourtsForSlot] = useState<Array<{ id: string; name: string }>>([]);
+    const navigate = useNavigate();
     const [courtToAdd, setCourtToAdd] = useState('');
 
     // ─── Helpers de pago ─────────────────────────────────────────────────────
@@ -660,7 +681,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     useEffect(() => {
         if (!isOpen || !clubId || !reservation || isEditMode) return;
         const dateBase = bookingDate || new Date().toISOString().split('T')[0];
-        const start = new Date(`${dateBase}T${startHour}:${startMinute}`).toISOString();
+        const start = clubSlotToUtcIso(dateBase, startHour, startMinute);
         const end = new Date(new Date(start).getTime() + duration * 60000).toISOString();
         let cancelled = false;
         (async () => {
@@ -826,11 +847,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         // Validate no overlap with other bookings on the same court
         if (isEditMode && editingBookingData) {
             const dateBase = bookingDate || new Date().toISOString().split('T')[0];
-            const newStart = new Date(`${dateBase}T${startHour}:${startMinute}`);
+            const startAtCheck = clubSlotToUtcIso(dateBase, startHour, startMinute);
+            const newStart = new Date(startAtCheck);
             const newEnd = new Date(newStart.getTime() + duration * 60000);
             try {
                 const courtId = editingBookingData.court_id;
-                const tz = encodeURIComponent(browserIanaTimeZone());
+                const tz = encodeURIComponent(clubIanaTimeZone());
                 const bRes = await apiFetchWithAuth<any>(
                     `/bookings?court_id=${encodeURIComponent(courtId)}&date=${encodeURIComponent(dateBase)}&time_zone=${tz}`,
                 );
@@ -842,7 +864,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 });
                 if (conflicts.length > 0) {
                     const c = conflicts[0];
-                    const cTime = new Date(c.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+                    const cTime = formatTimeHHmmInClubTz(c.start_at);
                     const cName = c.players ? `${c.players.first_name} ${c.players.last_name}` : t('reservation.otherBookingName');
                     setOverlapError(t('reservation.overlapConflict', { name: cName, time: cTime }));
                     return;
@@ -854,24 +876,25 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
 
         if (!isEditMode && isMultipleReservation) {
             if (!multipleStartDate || !multipleEndDate) {
-                alert('Indica fecha de inicio y fecha de fin para la reserva múltiple.');
+                toast.error('Indica fecha de inicio y fecha de fin para la reserva múltiple.');
                 return;
             }
             if (multipleEndDate < multipleStartDate) {
-                alert('La fecha de fin no puede ser anterior a la de inicio.');
+                toast.error('La fecha de fin no puede ser anterior a la de inicio.');
                 return;
             }
             if (!multipleWeekdays.length) {
-                alert('Selecciona al menos un día de la semana.');
+                toast.error('Selecciona al menos un día de la semana.');
                 return;
             }
         }
 
         setIsSaving(true);
+        setBatchResult(null);
         try {
             if (isEditMode && onUpdate && editingBookingData) {
                 const dateBase = bookingDate || new Date().toISOString().split('T')[0];
-                const startAt = new Date(`${dateBase}T${startHour}:${startMinute}`).toISOString();
+                const startAt = clubSlotToUtcIso(dateBase, startHour, startMinute);
                 const endAt = new Date(new Date(startAt).getTime() + duration * 60000).toISOString();
                 await onUpdate(editingBookingData.id, {
                     notes: composeNotesWithPlayMode(notes, playMode),
@@ -883,9 +906,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     participants: buildParticipants(),
                 });
             } else if (onSave) {
+                const courtIdsForSave = isMultipleReservation && selectedCourtIds.length > 0
+                    ? selectedCourtIds
+                    : [reservation.courtId];
                 const data = {
                     court_id: reservation.courtId,
-                    court_ids: selectedCourtIds.length > 0 ? selectedCourtIds : [reservation.courtId],
+                    court_ids: courtIdsForSave,
                     organizer_player_id: organizer.id,
                     start_at: `${startHour}:${startMinute}`,
                     duration_minutes: duration,
@@ -902,16 +928,56 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     recurrence_weekdays: isMultipleReservation ? multipleWeekdays : undefined,
                     include_holidays: includeHolidaysInRecurrence,
                 };
-                await onSave(data);
+                const result = await onSave(data);
+                if (result && (result.failed.length > 0 || result.skippedHolidays.length > 0)) {
+                    setBatchResult(result);
+                    if (result.created > 0) return;
+                }
             }
             onClose();
         } catch (err: any) {
             console.error('Error saving reservation:', err);
             const detail = err?.message || err?.error || String(err);
-            alert(`${t('reservation.saveError')}\n\n${detail}`);
+            toast.error(t('reservation.saveError'), { description: detail, duration: 6000 });
         } finally {
             setIsSaving(false);
         }
+    };
+
+    const assignAvailableCourts = () => {
+        if (!isMultipleReservation) return;
+        const count = Math.max(2, Math.trunc(Number(courtPickCount) || 2));
+        const baseId = reservation?.courtId;
+        const pool = availableCourtsForSlot.map((c) => c.id);
+        const ordered = baseId ? [baseId, ...pool.filter((id) => id !== baseId)] : pool;
+        setSelectedCourtIds(ordered.slice(0, count));
+        if (ordered.length < count) {
+            toast.message(`Solo ${ordered.length} pista(s) libre(s) en este horario`, { description: 'Se asignaron todas las disponibles.' });
+        }
+    };
+
+    const addCourtManually = () => {
+        if (!isMultipleReservation || !courtToAdd) return;
+        if (selectedCourtIds.includes(courtToAdd)) return;
+        setSelectedCourtIds((prev) => [...prev, courtToAdd]);
+        setCourtToAdd('');
+    };
+
+    const handleMultipleReservationToggle = (checked: boolean) => {
+        setIsMultipleReservation(checked);
+        if (!checked && reservation?.courtId) {
+            setSelectedCourtIds([reservation.courtId]);
+            setMultiCourtPickMode('manual');
+        }
+    };
+
+    const goToCart = () => {
+        if (!editingBookingData) return;
+        const q = new URLSearchParams();
+        if (editingBookingData.organizer_player_id) q.set('player', String(editingBookingData.organizer_player_id));
+        q.set('booking', String(editingBookingData.id));
+        navigate(`/carrito?${q}`);
+        onClose();
     };
 
     const handleMarkPaid = async () => {
@@ -922,7 +988,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             onClose();
         } catch (err) {
             console.error('Error marking paid:', err);
-            alert(t('reservation.markPaidError'));
+            toast.error(t('reservation.markPaidError'));
         } finally {
             setIsMarkingPaid(false);
         }
@@ -936,7 +1002,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             onClose();
         } catch (err) {
             console.error('Error deleting booking:', err);
-            alert(t('reservation.deleteError'));
+            toast.error(t('reservation.deleteError'));
         } finally {
             setIsDeleting(false);
         }
@@ -1008,6 +1074,25 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 {moveToHiddenError}
                             </div>
                         )}
+                        {batchResult && batchResult.failed.length > 0 && (
+                            <div className="mt-2 max-h-32 overflow-y-auto rounded-md border border-red-200 bg-red-50 px-3 py-2">
+                                <p className="text-xs font-bold text-red-800">
+                                    {batchResult.created} creada(s) · {batchResult.failed.length} fallida(s)
+                                </p>
+                                <ul className="mt-1 space-y-0.5 text-[11px] text-red-700">
+                                    {batchResult.failed.map((f, i) => {
+                                        const courtLabel =
+                                            availableCourtsForSlot.find((c) => c.id === f.court_id)?.name
+                                            ?? (f.court_id === reservation?.courtId ? courtDisplayName : f.court_id.slice(0, 8));
+                                        return (
+                                            <li key={`${f.date}-${f.court_id}-${i}`}>
+                                                ✕ {f.date} · {courtLabel} — {f.reason}
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </div>
+                        )}
                         <div className="flex gap-2 flex-wrap">
                             <button
                                 onClick={() => handleSave()}
@@ -1022,6 +1107,15 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             >
                                 {t('reservation.cancel')}
                             </button>
+                            {isEditMode && editingBookingData && (
+                                <button
+                                    type="button"
+                                    onClick={goToCart}
+                                    className="px-4 py-1.5 bg-[#E31E24] text-white text-xs font-bold rounded-md hover:opacity-90 transition-colors"
+                                >
+                                    Carrito
+                                </button>
+                            )}
                             {isEditMode && editingBookingData && isOnHiddenCourt && onMoveToVisible && (
                                 <button
                                     onClick={async () => {
@@ -1129,14 +1223,19 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             {!isEditMode && (
                             <div className="space-y-2">
                                 <div className="space-y-2">
-                                    <label className="inline-flex items-center gap-2 text-xs text-gray-700 font-medium">
+                                    <label className="inline-flex items-start gap-2 text-xs text-gray-700 font-medium">
                                         <input
                                             type="checkbox"
                                             checked={isMultipleReservation}
-                                            onChange={(e) => setIsMultipleReservation(e.target.checked)}
-                                            className="w-4 h-4 accent-[#006A6A]"
+                                            onChange={(e) => handleMultipleReservationToggle(e.target.checked)}
+                                            className="w-4 h-4 accent-[#006A6A] mt-0.5"
                                         />
-                                        Reserva múltiple
+                                        <span>
+                                            Reserva múltiple
+                                            <span className="block text-[10px] font-normal text-gray-500 mt-0.5">
+                                                Varias pistas a la vez y/o repetición en varias fechas
+                                            </span>
+                                        </span>
                                     </label>
                                     {isMultipleReservation && (
                                         <>
@@ -1205,7 +1304,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     selectedPlayer={organizer}
                                     onSelect={(p) => {
                                         if (p && additionalPlayers.some(ap => ap?.id === p.id)) {
-                                            alert(t('reservation.duplicatePlayerError'));
+                                            toast.error(t('reservation.duplicatePlayerError'));
                                             return;
                                         }
                                         setOrganizer(p);
@@ -1265,69 +1364,104 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                         {/* Right Column */}
                         <div className="space-y-5">
                             {/* Instalación */}
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm font-bold text-gray-700 w-32 shrink-0">{t('reservation.facility')}</span>
-                                <div className="flex-1 flex items-center gap-2 flex-wrap">
-                                    <span className="text-sm text-gray-900 font-bold uppercase">{courtDisplayName}</span>
-                                    {!isEditMode && (
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                if (!courtToAdd) return;
-                                                if (selectedCourtIds.includes(courtToAdd)) return;
-                                                setSelectedCourtIds((prev) => [...prev, courtToAdd]);
-                                                setCourtToAdd('');
-                                            }}
-                                            className="px-2 py-1 rounded-md bg-[#006A6A] text-white text-[11px] font-bold"
-                                        >
-                                            Añadir pista
-                                        </button>
+                            <div className="flex items-start gap-2">
+                                <span className="text-sm font-bold text-gray-700 w-32 shrink-0 pt-1">{t('reservation.facility')}</span>
+                                <div className="flex-1 space-y-2">
+                                    <span className="text-sm text-gray-900 font-bold uppercase block">{courtDisplayName}</span>
+                                    {!isEditMode && !isMultipleReservation && (
+                                        <p className="text-[10px] text-gray-500">
+                                            Activa «Reserva múltiple» para reservar varias pistas en el mismo horario.
+                                        </p>
+                                    )}
+                                    {!isEditMode && isMultipleReservation && (
+                                        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+                                            <p className="text-[10px] font-semibold text-gray-600">Pistas en este horario</p>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setMultiCourtPickMode('manual')}
+                                                    className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-bold ${multiCourtPickMode === 'manual' ? 'bg-[#006A6A] text-white' : 'bg-white border border-gray-200 text-gray-600'}`}
+                                                >
+                                                    Una a una
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setMultiCourtPickMode('auto')}
+                                                    className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-bold ${multiCourtPickMode === 'auto' ? 'bg-[#006A6A] text-white' : 'bg-white border border-gray-200 text-gray-600'}`}
+                                                >
+                                                    Asignar cantidad
+                                                </button>
+                                            </div>
+                                            {multiCourtPickMode === 'manual' ? (
+                                                <div className="flex items-center gap-2">
+                                                    <select
+                                                        className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
+                                                        value={courtToAdd}
+                                                        onChange={(e) => setCourtToAdd(e.target.value)}
+                                                    >
+                                                        <option value="">Elegir pista disponible…</option>
+                                                        {availableCourtsForSlot
+                                                            .filter((c) => !selectedCourtIds.includes(c.id))
+                                                            .map((c) => (
+                                                                <option key={c.id} value={c.id}>{c.name}</option>
+                                                            ))}
+                                                    </select>
+                                                    <button
+                                                        type="button"
+                                                        onClick={addCourtManually}
+                                                        disabled={!courtToAdd}
+                                                        className="shrink-0 px-3 py-2 rounded-md bg-[#006A6A] text-white text-[11px] font-bold disabled:opacity-40"
+                                                    >
+                                                        Añadir
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center gap-2">
+                                                    <label className="text-[10px] text-gray-600 shrink-0">N.º pistas</label>
+                                                    <input
+                                                        type="number"
+                                                        min={2}
+                                                        max={20}
+                                                        value={courtPickCount}
+                                                        onChange={(e) => setCourtPickCount(e.target.value)}
+                                                        className="w-16 p-2 border border-gray-300 rounded-md text-sm bg-white"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        onClick={assignAvailableCourts}
+                                                        className="px-3 py-2 rounded-md bg-[#1A1A1A] text-white text-[11px] font-bold"
+                                                    >
+                                                        Asignar libres
+                                                    </button>
+                                                </div>
+                                            )}
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                {selectedCourtIds.map((cid) => {
+                                                    const label =
+                                                        availableCourtsForSlot.find((c) => c.id === cid)?.name ||
+                                                        (cid === reservation.courtId ? courtDisplayName : cid);
+                                                    const isBase = cid === reservation.courtId;
+                                                    return (
+                                                        <span key={cid} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-white border border-gray-200 text-[11px] font-bold text-gray-700">
+                                                            {label}
+                                                            {!isBase && (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setSelectedCourtIds((prev) => prev.filter((x) => x !== cid))}
+                                                                    className="text-gray-500 hover:text-red-600"
+                                                                    aria-label="Quitar pista"
+                                                                >
+                                                                    <X size={12} />
+                                                                </button>
+                                                            )}
+                                                        </span>
+                                                    );
+                                                })}
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
                             </div>
-                            {!isEditMode && (
-                                <div className="flex items-center gap-2">
-                                    <span className="text-sm font-bold text-gray-700 w-32 shrink-0">Pistas extra</span>
-                                    <div className="flex-1 space-y-2">
-                                        <div className="flex items-center gap-2">
-                                            <select
-                                                className="flex-1 p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
-                                                value={courtToAdd}
-                                                onChange={(e) => setCourtToAdd(e.target.value)}
-                                            >
-                                                <option value="">Seleccionar pista disponible…</option>
-                                                {availableCourtsForSlot
-                                                    .filter((c) => !selectedCourtIds.includes(c.id))
-                                                    .map((c) => (
-                                                        <option key={c.id} value={c.id}>{c.name}</option>
-                                                    ))}
-                                            </select>
-                                        </div>
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            {selectedCourtIds.map((cid) => {
-                                                const label =
-                                                    availableCourtsForSlot.find((c) => c.id === cid)?.name ||
-                                                    (cid === reservation.courtId ? courtDisplayName : cid);
-                                                const isBase = cid === reservation.courtId;
-                                                return (
-                                                    <span key={cid} className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 text-[11px] font-bold text-gray-700">
-                                                        {label}
-                                                        {!isBase && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => setSelectedCourtIds((prev) => prev.filter((x) => x !== cid))}
-                                                                className="text-gray-500 hover:text-red-600"
-                                                            >
-                                                                <X size={12} />
-                                                            </button>
-                                                        )}
-                                                    </span>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
 
                             {/* Duración */}
                             <div className="flex items-center gap-2">
@@ -1368,9 +1502,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                             { reservation_type: 'blocked', display_name: 'Bloqueado', is_system: true },
                                           ]
                                     ).map((opt) => {
-                                        const label = opt.is_system
-                                            ? t(`reservation.type_${opt.reservation_type}`)
-                                            : opt.display_name;
+                                        const i18nKey = `reservation.type_${opt.reservation_type}`;
+                                        const translated = t(i18nKey);
+                                        const label = translated !== i18nKey
+                                            ? translated
+                                            : opt.display_name || opt.reservation_type;
                                         return (
                                             <option key={opt.reservation_type} value={opt.reservation_type}>
                                                 {label}
@@ -1422,11 +1558,11 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                         onSelect={(player) => {
                                             if (player) {
                                                 if (organizer?.id === player.id) {
-                                                    alert(t('reservation.duplicatePlayerError'));
+                                                    toast.error(t('reservation.duplicatePlayerError'));
                                                     return;
                                                 }
                                                 if (additionalPlayers.some((ap, i) => i !== index && ap?.id === player.id)) {
-                                                    alert(t('reservation.duplicatePlayerError'));
+                                                    toast.error(t('reservation.duplicatePlayerError'));
                                                     return;
                                                 }
                                             }

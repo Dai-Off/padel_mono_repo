@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
@@ -8,6 +9,11 @@ import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonServi
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
 import { syncPlayerVector } from '../lib/mailer';
+import {
+  assertUsernameAvailable,
+  normalizeUsername,
+  normalizeUsernameOptional,
+} from '../lib/playerUsername';
 
 const router = Router();
 
@@ -159,7 +165,7 @@ function withPublicPlayerAndMm(row: Row, wl: MmWl): Row {
 }
 
 const SELECT_PUBLIC_INTERNAL = `
-  id, created_at, updated_at, first_name, last_name, email, phone, status, auth_user_id, avatar_url, gender,
+  id, created_at, updated_at, first_name, last_name, email, phone, username, status, auth_user_id, avatar_url, gender,
   mu, sigma, elo_rating, sp,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents,
@@ -294,6 +300,95 @@ function normalizePreferencesPatch(body: Record<string, unknown>): PreferencesPa
   return { ok: true, hasAny, patch };
 }
 
+const avatarUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Formato no soportado. Usa JPEG, PNG, WEBP o GIF'));
+  },
+});
+
+function extFromMime(mime: string): string {
+  if (mime === 'image/png') return 'png';
+  if (mime === 'image/webp') return 'webp';
+  if (mime === 'image/gif') return 'gif';
+  return 'jpg';
+}
+
+/**
+ * @openapi
+ * /players/me/avatar:
+ *   post:
+ *     tags: [Players]
+ *     summary: Subir o reemplazar foto de perfil
+ *     description: Recibe multipart/form-data con campo `file`. Sube al bucket `player-avatars` y actualiza `avatar_url` del jugador.
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [file]
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Avatar actualizado
+ *         content:
+ *           application/json:
+ *             example: { ok: true, url: "https://..." }
+ *       400:
+ *         description: Archivo ausente o formato inválido
+ *       401:
+ *         description: Token inválido o ausente
+ *       404:
+ *         description: Jugador no encontrado
+ *       500:
+ *         description: Error interno
+ */
+router.post('/me/avatar', avatarUpload.single('file'), async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return res.status(401).json({ ok: false, error: 'Token requerido' });
+
+  if (!req.file) return res.status(400).json({ ok: false, error: 'Envía el archivo en el campo "file"' });
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user?.id) return res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+
+    const ext = extFromMime(req.file.mimetype);
+    const storagePath = `${user.id}/avatar.${ext}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('player-avatars')
+      .upload(storagePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: true,
+      });
+    if (uploadErr) return res.status(500).json({ ok: false, error: uploadErr.message });
+
+    const { data: pub } = supabase.storage.from('player-avatars').getPublicUrl(storagePath);
+    const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+    const { error: dbErr } = await supabase
+      .from('players')
+      .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
+      .eq('auth_user_id', user.id);
+    if (dbErr) return res.status(500).json({ ok: false, error: dbErr.message });
+
+    return res.json({ ok: true, url: publicUrl });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 /**
  * @openapi
  * /players/me:
@@ -341,8 +436,19 @@ router.get('/me', async (req: Request, res: Response) => {
       return res.status(404).json({ ok: false, error: 'No existe jugador asociado a esta cuenta' });
     }
     const pid = String((player as Row).id);
-    const wl = await fetchPlayerMatchmakingWl(supabase, pid);
-    return res.json({ ok: true, player: withPublicPlayerAndMm(player as Row, wl) });
+    const [wl, matchCountRes] = await Promise.all([
+      fetchPlayerMatchmakingWl(supabase, pid),
+      supabase
+        .from('match_players')
+        .select('match_id', { count: 'exact', head: true })
+        .eq('player_id', pid),
+    ]);
+    const matchesPlayedLive = matchCountRes.count ?? null;
+    const playerWithStats = withPublicPlayerAndMm(player as Row, wl) as Row;
+    if (matchesPlayedLive !== null) {
+      playerWithStats.matches_played_total = matchesPlayedLive;
+    }
+    return res.json({ ok: true, player: playerWithStats });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -390,6 +496,13 @@ router.get('/me', async (req: Request, res: Response) => {
  *                 maxLength: 40
  *                 description: Teléfono de contacto (único si ya existe en otro jugador)
  *                 example: "+34600111222"
+ *               username:
+ *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 30
+ *                 pattern: '^[a-z0-9_]+$'
+ *                 description: Identificador público único (minúsculas, números, _)
+ *                 example: ana_padel
  *           examples:
  *             names:
  *               value: { first_name: "Ana", last_name: "García López" }
@@ -409,6 +522,8 @@ router.get('/me', async (req: Request, res: Response) => {
  *         description: Token inválido o ausente
  *       404:
  *         description: No hay jugador asociado a esta cuenta
+ *       409:
+ *         description: Username ya en uso
  *       500:
  *         description: Error interno
  */
@@ -464,10 +579,18 @@ router.patch('/me', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: prefsNorm.error });
   }
 
-  if (!firstFinal && avatarNorm.mode === 'omit' && !hasPhone && !prefsNorm.hasAny) {
+  const hasUsername = Object.prototype.hasOwnProperty.call(body, 'username');
+  let usernameFinal: string | null | undefined = undefined;
+  if (hasUsername) {
+    const un = normalizeUsername(body.username);
+    if (!un.ok) return res.status(400).json({ ok: false, error: un.error });
+    usernameFinal = un.value;
+  }
+
+  if (!firstFinal && avatarNorm.mode === 'omit' && !hasPhone && !prefsNorm.hasAny && !hasUsername) {
     return res.status(400).json({
       ok: false,
-      error: 'Envía first_name y last_name, y/o avatar_url, y/o phone, y/o preferencias',
+      error: 'Envía first_name y last_name, y/o avatar_url, y/o phone, y/o username, y/o preferencias',
     });
   }
 
@@ -507,6 +630,11 @@ router.patch('/me', async (req: Request, res: Response) => {
       return res.status(404).json({ ok: false, error: 'No existe jugador vinculado a esta cuenta' });
     }
 
+    if (usernameFinal !== undefined) {
+      const avail = await assertUsernameAvailable(supabase, usernameFinal, playerId);
+      if (!avail.ok) return res.status(avail.status).json({ ok: false, error: avail.error });
+    }
+
     const { data: curPhoneRow } = await supabase.from('players').select('phone').eq('id', playerId).maybeSingle();
     const curPhoneTrim = String((curPhoneRow as { phone?: string | null } | null)?.phone ?? '').trim();
     if (firstFinal && lastFinal) {
@@ -541,6 +669,9 @@ router.patch('/me', async (req: Request, res: Response) => {
         return res.status(409).json({ ok: false, error: 'Ya existe otro jugador con este teléfono' });
       }
       patch.phone = phoneFinal;
+    }
+    if (usernameFinal !== undefined) {
+      patch.username = usernameFinal;
     }
     Object.assign(patch, prefsNorm.patch);
 
@@ -579,7 +710,7 @@ router.patch('/me', async (req: Request, res: Response) => {
  *     summary: Alta manual en club
  */
 router.post('/manual', async (req: Request, res: Response) => {
-  const { first_name, last_name, phone, email } = req.body ?? {};
+  const { first_name, last_name, phone, email, username } = req.body ?? {};
 
   const firstName = typeof first_name === 'string' ? first_name.trim() : '';
   const lastName = typeof last_name === 'string' ? last_name.trim() : '';
@@ -618,6 +749,15 @@ router.post('/manual', async (req: Request, res: Response) => {
       }
     }
 
+    const usernameNorm = normalizeUsernameOptional(username);
+    if (!usernameNorm.ok) {
+      return res.status(400).json({ ok: false, error: usernameNorm.error });
+    }
+    if (usernameNorm.value) {
+      const avail = await assertUsernameAvailable(supabase, usernameNorm.value);
+      if (!avail.ok) return res.status(avail.status).json({ ok: false, error: avail.error });
+    }
+
     const { data, error } = await supabase
       .from('players')
       .insert([
@@ -626,6 +766,7 @@ router.post('/manual', async (req: Request, res: Response) => {
           last_name: lastName,
           phone: phoneStr,
           email: emailStr,
+          username: usernameNorm.value,
           auth_user_id: null,
           onboarding_completed: true,
           gender: req.body?.gender ?? 'male',
@@ -975,16 +1116,66 @@ router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response
 
 /**
  * @openapi
+ * /players/username/check:
+ *   get:
+ *     tags: [Players]
+ *     summary: Comprobar disponibilidad de username
+ *     description: Normaliza a minúsculas y valida formato (3–30 caracteres, a-z, 0-9, _).
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema: { type: string }
+ *         example: juan_padel
+ *       - in: query
+ *         name: exclude_player_id
+ *         schema: { type: string, format: uuid }
+ *         description: Excluir jugador actual al editar perfil
+ *     responses:
+ *       200:
+ *         description: Resultado de disponibilidad
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok: { type: boolean }
+ *                 available: { type: boolean }
+ *                 username: { type: string }
+ *       400:
+ *         description: Username inválido
+ */
+router.get('/username/check', async (req: Request, res: Response) => {
+  const un = normalizeUsername(req.query.q);
+  if (!un.ok) {
+    return res.status(400).json({ ok: false, error: un.error });
+  }
+  const exclude =
+    typeof req.query.exclude_player_id === 'string' ? req.query.exclude_player_id.trim() : undefined;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const avail = await assertUsernameAvailable(supabase, un.value, exclude || null);
+    if (!avail.ok) {
+      return res.json({ ok: true, available: false, username: un.value });
+    }
+    return res.json({ ok: true, available: true, username: un.value });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
  * /players:
  *   get:
  *     tags: [Players]
  *     summary: Listar jugadores
- *     description: Sin `q` devuelve los últimos jugadores. Con `q`, filtra por nombre (nombre/apellido) o teléfono (no por email).
+ *     description: Sin `q` devuelve los últimos jugadores. Con `q`, filtra por nombre, teléfono o username.
  *     parameters:
  *       - in: query
  *         name: q
  *         schema: { type: string }
- *         description: Texto de búsqueda (nombre, apellido o teléfono)
+ *         description: Texto de búsqueda (nombre, apellido, teléfono o username)
  */
 router.get('/', async (req: Request, res: Response) => {
   const query = req.query.q as string | undefined;
@@ -1000,7 +1191,7 @@ router.get('/', async (req: Request, res: Response) => {
     let q = supabase
       .from('players')
       .select(
-        `id, created_at, first_name, last_name, email, phone, status, auth_user_id,
+        `id, created_at, first_name, last_name, email, phone, username, status, auth_user_id,
          mu, sigma, elo_rating, sp, matches_played_competitive, matches_played_friendly, matches_played_matchmaking`
       )
       .order('created_at', { ascending: false })
@@ -1008,7 +1199,12 @@ router.get('/', async (req: Request, res: Response) => {
 
     if (terms.length) {
       const orExpr = terms
-        .flatMap((t) => [`first_name.ilike.%${t}%`, `last_name.ilike.%${t}%`, `phone.ilike.%${t}%`])
+        .flatMap((t) => [
+          `first_name.ilike.%${t}%`,
+          `last_name.ilike.%${t}%`,
+          `phone.ilike.%${t}%`,
+          `username.ilike.%${t}%`,
+        ])
         .join(',');
       q = q.or(orExpr);
     }
@@ -1024,11 +1220,14 @@ router.get('/', async (req: Request, res: Response) => {
       players = players.filter((p) => {
         const full = `${String(p.first_name ?? '')} ${String(p.last_name ?? '')}`.toLowerCase();
         const phone = String(p.phone ?? '').toLowerCase();
+        const uname = String(p.username ?? '').toLowerCase();
         const phoneDigits = phone.replace(/\D/g, '');
         return terms.every((t) => {
-          if (full.includes(t)) return true;
-          if (phone.includes(t)) return true;
-          const td = t.replace(/\D/g, '');
+          const term = t.startsWith('@') ? t.slice(1) : t;
+          if (full.includes(term)) return true;
+          if (uname.includes(term)) return true;
+          if (phone.includes(term)) return true;
+          const td = term.replace(/\D/g, '');
           if (td.length > 0 && phoneDigits.includes(td)) return true;
           return false;
         });
@@ -1059,7 +1258,7 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: player, error: pErr } = await supabase
       .from('players')
-      .select('id, first_name, last_name, avatar_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga')
+      .select('id, first_name, last_name, username, avatar_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga')
       .eq('id', id)
       .maybeSingle();
 

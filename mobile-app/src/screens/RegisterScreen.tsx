@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { register } from '../api/auth';
+import { validateUsernameLocal } from '../lib/username';
 import {
   AuthLayout,
   AuthBrand,
@@ -21,6 +22,7 @@ type RegisterScreenProps = {
 export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
   const { setSession } = useAuth();
   const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -34,6 +36,12 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
     const e = email.trim();
     const p = password;
     const cp = confirmPassword;
+
+    const usernameErr = validateUsernameLocal(username);
+    if (usernameErr) {
+      setError(usernameErr);
+      return;
+    }
 
     if (!e || !p) {
       setError('Email y contraseña son obligatorios');
@@ -54,7 +62,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
     setLoading(true);
 
     try {
-      const res = await register(e, p, name.trim() || undefined);
+      const res = await register(e, p, username.trim().toLowerCase(), name.trim() || undefined);
 
       if (res.ok && res.user) {
         if (res.session) {
@@ -69,6 +77,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
           setPassword('');
           setConfirmPassword('');
           setName('');
+          setUsername('');
           clearError();
           setShowConfirmMessage(true);
         }
@@ -125,6 +134,20 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
         autoComplete="name"
         value={name}
         onChangeText={(t) => { setName(t); clearError(); }}
+        editable={!loading}
+      />
+
+      <AuthInput
+        label="Usuario"
+        icon="at-outline"
+        placeholder="tu_usuario"
+        autoCapitalize="none"
+        autoCorrect={false}
+        value={username}
+        onChangeText={(t) => {
+          setUsername(t.replace(/\s/g, '').toLowerCase());
+          clearError();
+        }}
         editable={!loading}
       />
 

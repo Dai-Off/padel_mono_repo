@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
+import { formatPlayerLabel } from '../lib/username';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { PlayerAvatarCircle } from '../components/profile/PlayerAvatarCircle';
 import { theme } from '../theme';
@@ -30,11 +31,14 @@ import {
   type PickedImage,
 } from '../api/playerAvatar';
 
+import type { InfoScreenId } from '../content/infoContent';
+
 type ProfileScreenProps = {
   onBack: () => void;
   onMenuPress: () => void;
   onEditProfilePress?: () => void;
   onPreferencesPress?: () => void;
+  onNavigateToInfo?: (screenId: InfoScreenId) => void;
   // Si true, abre automáticamente el modal del cuestionario de nivelación al
   // montar. Usado cuando se llega aquí desde una feature bloqueada (Daily
   // Lesson) para que el usuario complete el onboarding sin un paso extra.
@@ -59,6 +63,7 @@ export function ProfileScreen({
   onMenuPress,
   onEditProfilePress,
   onPreferencesPress,
+  onNavigateToInfo,
   autoOpenOnboarding = false,
   onOnboardingAutoOpened,
   onOnboardingCompleted,
@@ -132,8 +137,12 @@ export function ProfileScreen({
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
   const displayName = profile
-    ? `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim()
-    : profileLoading ? 'Cargando...' : '—';
+    ? `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() ||
+      formatPlayerLabel(profile)
+    : profileLoading
+      ? 'Cargando...'
+      : '—';
+  const usernameLine = profile?.username ? `@${profile.username}` : null;
 
   const needsLevelOnboarding = profile != null && profile.onboardingCompleted === false;
 
@@ -261,8 +270,8 @@ export function ProfileScreen({
       <View style={styles.header}>
         <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.headerContent}>
-          <Pressable onPress={onMenuPress} style={styles.headerIconBtn}>
-            <Ionicons name="menu" size={24} color="#fff" />
+          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel="Volver">
+            <Ionicons name="arrow-back" size={24} color="#fff" />
           </Pressable>
           <Text style={styles.headerTitle}>Perfil</Text>
           <View style={styles.headerActions}>
@@ -336,6 +345,9 @@ export function ProfileScreen({
               </View>
               <View style={styles.profileInfo}>
                 <Text style={styles.profileName}>{displayName}</Text>
+                {usernameLine ? (
+                  <Text style={styles.usernameText}>{usernameLine}</Text>
+                ) : null}
                 {(profile?.email ?? session?.user?.email) ? (
                   <View style={styles.emailRow}>
                     <Ionicons name="mail-outline" size={12} color="#9CA3AF" />
@@ -484,6 +496,14 @@ export function ProfileScreen({
                 onPress={() => {
                   if (item.title === 'Preferencias') {
                     onPreferencesPress?.();
+                    return;
+                  }
+                  if (item.title === 'Ayuda y soporte') {
+                    onNavigateToInfo?.('help');
+                    return;
+                  }
+                  if (item.title === 'Términos y condiciones') {
+                    onNavigateToInfo?.('terms');
                     return;
                   }
                   Alert.alert(item.title, `Navegando a ${item.title}`);
@@ -667,6 +687,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9CA3AF',
     flex: 1,
+  },
+  usernameText: {
+    fontSize: 13,
+    color: '#F18F34',
+    marginTop: 2,
+    marginBottom: 2,
   },
   statsRow: {
     flexDirection: 'row',

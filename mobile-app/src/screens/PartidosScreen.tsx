@@ -43,24 +43,19 @@ function dayLabel(d: Date): string {
 
 type SportFilter = 'all' | 'padel' | 'tenis' | 'pickleball' | 'otro';
 
-function passesPartidoFilters(
-  p: PartidoItem,
-  sportFilter: SportFilter,
-  fillFilter: 'all' | 'free' | 'full',
-  statusFilter: 'all' | 'cancelled' | 'live' | 'past'
-): boolean {
+function passesSportFilter(p: PartidoItem, sportFilter: SportFilter): boolean {
   const sport = (p.courtSport ?? 'padel').toLowerCase();
   if (sportFilter === 'otro') {
     if (sport === 'padel' || sport === 'tenis' || sport === 'pickleball') return false;
   } else if (sportFilter !== 'all' && sport !== sportFilter) return false;
-  const filled = (p.players ?? []).filter((x) => !x.isFree).length;
-  if (fillFilter === 'free' && filled >= 4) return false;
-  if (fillFilter === 'full' && filled < 4) return false;
-  if (statusFilter === 'cancelled' && p.matchStatus !== 'cancelled') return false;
-  if (statusFilter === 'live' && p.matchPhase !== 'live') return false;
-  if (statusFilter === 'past' && p.matchPhase !== 'past') return false;
-  if (statusFilter === 'all' && p.matchStatus === 'cancelled') return false;
   return true;
+}
+
+function isPublicJoinableMatch(p: PartidoItem): boolean {
+  if (p.matchPhase !== 'upcoming') return false;
+  if (p.matchStatus === 'cancelled') return false;
+  const filled = (p.players ?? []).filter((x) => !x.isFree).length;
+  return filled < 4;
 }
 
 export type PartidoMode = 'competitivo' | 'amistoso';
@@ -108,6 +103,8 @@ export type PartidoItem = {
   matchStatus?: string;
   bookingStatus?: string;
   scoreStatus?: 'pending' | 'confirmed' | 'disputed' | null;
+  /** true si el jugador autenticado ya envió feedback de este partido. */
+  hasMyFeedback?: boolean;
   /** Deporte de la pista (padel, tenis, pickleball…) */
   courtSport?: string;
 };
@@ -136,8 +133,7 @@ export function PartidosScreen({
   const [loading, setLoading] = useState(true);
   const [dayOffset, setDayOffset] = useState(0);
   const [sportFilter, setSportFilter] = useState<SportFilter>('all');
-  const [fillFilter, setFillFilter] = useState<'all' | 'free' | 'full'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'cancelled' | 'live' | 'past'>('all');
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   const loadPartidos = useCallback(async () => {
     setLoading(true);
@@ -172,13 +168,16 @@ export function PartidosScreen({
   }, [session?.access_token, dayOffset]);
 
   const openPartidos = useMemo(
-    () => openRaw.filter((p) => passesPartidoFilters(p, sportFilter, fillFilter, statusFilter)),
-    [openRaw, sportFilter, fillFilter, statusFilter]
+    () =>
+      openRaw
+        .filter(isPublicJoinableMatch)
+        .filter((p) => passesSportFilter(p, sportFilter)),
+    [openRaw, sportFilter]
   );
 
   const myPartidos = useMemo(
-    () => myRaw.filter((p) => passesPartidoFilters(p, sportFilter, fillFilter, statusFilter)),
-    [myRaw, sportFilter, fillFilter, statusFilter]
+    () => myRaw.filter((p) => passesSportFilter(p, sportFilter)),
+    [myRaw, sportFilter]
   );
 
   const dayDateDisplay = useMemo(() => addDays(new Date(), dayOffset), [dayOffset]);
@@ -234,60 +233,40 @@ export function PartidosScreen({
           </View>
           <View style={styles.daySide} />
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
-          {(
-            [
-              ['all', 'Todos deportes'],
-              ['padel', 'Pádel'],
-              ['tenis', 'Tenis'],
-              ['pickleball', 'Pickleball'],
-              ['otro', 'Otro'],
-            ] as const
-          ).map(([v, label]) => (
-            <Pressable
-              key={v}
-              onPress={() => setSportFilter(v)}
-              style={[styles.chip, sportFilter === v && styles.chipOn]}
-            >
-              <Text style={[styles.chipText, sportFilter === v && styles.chipTextOn]}>{label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
-          {(
-            [
-              ['all', 'Plazas: todas'],
-              ['free', 'Con hueco'],
-              ['full', 'Completos'],
-            ] as const
-          ).map(([v, label]) => (
-            <Pressable
-              key={v}
-              onPress={() => setFillFilter(v)}
-              style={[styles.chip, fillFilter === v && styles.chipOn]}
-            >
-              <Text style={[styles.chipText, fillFilter === v && styles.chipTextOn]}>{label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
-          {(
-            [
-              ['all', 'Activos'],
-              ['live', 'En curso'],
-              ['past', 'Jugados'],
-              ['cancelled', 'Cancelados'],
-            ] as const
-          ).map(([v, label]) => (
-            <Pressable
-              key={v}
-              onPress={() => setStatusFilter(v)}
-              style={[styles.chip, statusFilter === v && styles.chipOn]}
-            >
-              <Text style={[styles.chipText, statusFilter === v && styles.chipTextOn]}>{label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
+        <Pressable
+          onPress={() => setFiltersExpanded((v) => !v)}
+          style={styles.filtersToggle}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: filtersExpanded }}
+        >
+          <Text style={styles.filtersToggleText}>Filtros</Text>
+          <Ionicons
+            name={filtersExpanded ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color="#d1d5db"
+          />
+        </Pressable>
+        {filtersExpanded ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+            {(
+              [
+                ['all', 'Todos deportes'],
+                ['padel', 'Pádel'],
+                ['tenis', 'Tenis'],
+                ['pickleball', 'Pickleball'],
+                ['otro', 'Otro'],
+              ] as const
+            ).map(([v, label]) => (
+              <Pressable
+                key={v}
+                onPress={() => setSportFilter(v)}
+                style={[styles.chip, sportFilter === v && styles.chipOn]}
+              >
+                <Text style={[styles.chipText, sportFilter === v && styles.chipTextOn]}>{label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : null}
       </View>
       <View style={styles.list}>
         {loading ? (
@@ -457,6 +436,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   hoyPillText: { fontSize: 12, fontWeight: '600', color: '#f9fafb' },
+  filtersToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  filtersToggleText: { fontSize: 13, fontWeight: '600', color: '#e5e7eb' },
   chipsRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 2 },
   chip: {
     paddingHorizontal: 12,

@@ -56,13 +56,17 @@ type CourseFormState = {
   installments: SchoolCourseInstallment[];
 };
 
+type PrivateStudentRow = {
+  name: string;
+  email: string;
+  phone: string;
+  player_id?: string;
+};
+
 type PrivateFormState = {
-  student_name: string;
-  student_email: string;
-  student_phone: string;
+  students: PrivateStudentRow[];
   staff_id: string;
-  court_id: string;
-  student_count: '1' | '2' | '3';
+  court_ids: string[];
   fee_rule_id: string;
   weekday: SchoolWeekday;
   start_time: string;
@@ -70,6 +74,15 @@ type PrivateFormState = {
   starts_on: string;
   ends_on: string;
 };
+
+function privateStudentsFilled(rows: PrivateStudentRow[]): PrivateStudentRow[] {
+  return rows.filter((s) => s.name.trim() || s.email.trim() || s.phone.trim() || s.player_id);
+}
+
+function privateStudentCount(rows: PrivateStudentRow[]): 1 | 2 | 3 | 4 {
+  const n = privateStudentsFilled(rows).length;
+  return Math.min(4, Math.max(1, n || 1)) as 1 | 2 | 3 | 4;
+}
 
 function resolveTimeBand(weekday: SchoolWeekday, startTime: string): 'morning' | 'afternoon' | 'weekend' {
   if (weekday === 'sat' || weekday === 'sun') return 'weekend';
@@ -95,7 +108,7 @@ function feeRuleOptionLabel(rule: SchoolFeeRule, staffById: Map<string, string>)
 function feeRulesForPrivateChoice(
   rules: SchoolFeeRule[],
   staffId: string,
-  studentCount: 1 | 2 | 3,
+  studentCount: 1 | 2 | 3 | 4,
 ): SchoolFeeRule[] {
   if (!staffId) return [];
   const staffRules = rules.filter((r) => r.staff_id === staffId && r.group_size === studentCount);
@@ -104,7 +117,7 @@ function feeRulesForPrivateChoice(
 }
 
 function findFeeRuleIdForLesson(rules: SchoolFeeRule[], lesson: SchoolPrivateLesson): string {
-  const count = (lesson.student_count ?? 1) as 1 | 2 | 3;
+  const count = (lesson.student_count ?? 1) as 1 | 2 | 3 | 4;
   const matches = rules.filter(
     (r) =>
       r.group_size === count &&
@@ -288,12 +301,9 @@ const emptyCourseForm: CourseFormState = {
 };
 
 const emptyPrivateForm: PrivateFormState = {
-  student_name: '',
-  student_email: '',
-  student_phone: '',
+  students: [{ name: '', email: '', phone: '' }],
   staff_id: '',
-  court_id: '',
-  student_count: '1',
+  court_ids: [],
   fee_rule_id: '',
   weekday: 'wed',
   start_time: '18:00',
@@ -580,23 +590,36 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
     }
   };
 
+  const courtById = useMemo(() => new Map(courts.map((c) => [c.id, c.name])), [courts]);
+
   const openPrivateCreate = () => {
     setPrivateForm({
       ...emptyPrivateForm,
       staff_id: coachStaff[0]?.id ?? '',
-      court_id: courts[0]?.id ?? '',
+      court_ids: courts[0]?.id ? [courts[0].id] : [],
     });
     setPrivateModal({ mode: 'create' });
   };
 
   const openPrivateEdit = (lesson: SchoolPrivateLesson) => {
+    const lessonStudents =
+      lesson.students?.length
+        ? lesson.students.map((s) => ({
+            name: s.name ?? '',
+            email: s.email ?? '',
+            phone: s.phone ?? '',
+            player_id: s.player_id ?? undefined,
+          }))
+        : [{
+            name: lesson.student_name ?? '',
+            email: lesson.student_email ?? '',
+            phone: lesson.student_phone ?? '',
+            player_id: lesson.student_player_id ?? undefined,
+          }];
     setPrivateForm({
-      student_name: lesson.student_name ?? '',
-      student_email: lesson.student_email ?? '',
-      student_phone: lesson.student_phone ?? '',
+      students: lessonStudents.length > 0 ? lessonStudents : [{ name: '', email: '', phone: '' }],
       staff_id: lesson.staff_id,
-      court_id: lesson.court_id,
-      student_count: String(lesson.student_count ?? 1) as '1' | '2' | '3',
+      court_ids: lesson.court_ids?.length ? lesson.court_ids : lesson.court_id ? [lesson.court_id] : [],
       fee_rule_id: findFeeRuleIdForLesson(feeRules, lesson),
       weekday: lesson.weekday,
       start_time: lesson.start_time,
@@ -675,20 +698,33 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
   const defaultFeeRules = useMemo(() => feeRules.filter((r) => !r.staff_id), [feeRules]);
   const staffFeeRules = useMemo(() => feeRules.filter((r) => r.staff_id), [feeRules]);
 
+  const privateAlumniCount = useMemo(() => privateStudentCount(privateForm.students), [privateForm.students]);
+
   const privateFeeOptions = useMemo(() => {
-    const count = Number(privateForm.student_count) as 1 | 2 | 3;
-    return feeRulesForPrivateChoice(feeRules, privateForm.staff_id, count);
-  }, [feeRules, privateForm.staff_id, privateForm.student_count]);
+    return feeRulesForPrivateChoice(feeRules, privateForm.staff_id, privateAlumniCount);
+  }, [feeRules, privateForm.staff_id, privateAlumniCount]);
 
   const selectedPrivateFeeRule = useMemo(
     () => feeRules.find((r) => r.id === privateForm.fee_rule_id) ?? null,
     [feeRules, privateForm.fee_rule_id],
   );
 
+  useEffect(() => {
+    if (!privateModal) return;
+    const opts = feeRulesForPrivateChoice(feeRules, privateForm.staff_id, privateAlumniCount);
+    setPrivateForm((f) => ({
+      ...f,
+      fee_rule_id: opts.some((o) => o.id === f.fee_rule_id) ? f.fee_rule_id : '',
+    }));
+  }, [privateAlumniCount, privateForm.staff_id, feeRules, privateModal]);
+
   const savePrivate = async () => {
     if (!clubId) return;
     if (savingPrivate) return;
-    if (!privateForm.staff_id || !privateForm.court_id) return toast.error('Entrenador y pista obligatorios');
+    if (!privateForm.staff_id) return toast.error('Entrenador obligatorio');
+    if (privateForm.court_ids.length === 0) return toast.error('Selecciona al menos una pista');
+    const filledStudents = privateStudentsFilled(privateForm.students);
+    if (filledStudents.length === 0) return toast.error('Añade al menos un alumno');
     if (!isSchoolCoachRole(staff.find((s) => s.id === privateForm.staff_id)?.role)) {
       return toast.error('Solo puedes asignar clases a entrenadores');
     }
@@ -698,14 +734,22 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
 
     setSavingPrivate(true);
     try {
+      const primary = filledStudents[0];
       const payload = {
         club_id: clubId,
-        student_name: privateForm.student_name || null,
-        student_email: privateForm.student_email || null,
-        student_phone: privateForm.student_phone || null,
+        student_name: primary.name.trim() || null,
+        student_email: primary.email.trim() || null,
+        student_phone: primary.phone.trim() || null,
+        student_player_id: primary.player_id ?? null,
+        students: filledStudents.map((s) => ({
+          name: s.name.trim() || null,
+          email: s.email.trim() || null,
+          phone: s.phone.trim() || null,
+          player_id: s.player_id ?? null,
+        })),
         staff_id: privateForm.staff_id,
-        court_id: privateForm.court_id,
-        student_count: Number(privateForm.student_count) as 1 | 2 | 3,
+        court_ids: privateForm.court_ids,
+        student_count: privateAlumniCount,
         price_cents: selectedPrivateFeeRule.price_cents,
         weekday: privateForm.weekday,
         start_time: privateForm.start_time,
@@ -980,9 +1024,17 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
               <div key={lesson.id} className="bg-white rounded-2xl border border-gray-100 p-4">
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-xs font-bold text-[#1A1A1A]">{lesson.student_name || lesson.student_email || 'Alumno'}</p>
+                    <p className="text-xs font-bold text-[#1A1A1A]">
+                      {(lesson.students?.length
+                        ? lesson.students.map((s) => s.name || s.email).filter(Boolean).join(', ')
+                        : null) || lesson.student_name || lesson.student_email || 'Alumno'}
+                    </p>
                     <p className="text-[10px] text-gray-500">
-                      {lesson.student_count ?? 1} alumno(s) · {WEEKDAYS.find((x) => x.key === lesson.weekday)?.label} {lesson.start_time}-{lesson.end_time}
+                      {lesson.student_count ?? 1} alumno(s) ·{' '}
+                      {(lesson.court_ids?.length ? lesson.court_ids : [lesson.court_id])
+                        .map((id) => courtById.get(id) ?? 'Pista')
+                        .join(', ')}{' '}
+                      · {WEEKDAYS.find((x) => x.key === lesson.weekday)?.label} {lesson.start_time}-{lesson.end_time}
                     </p>
                   </div>
                   <div className="flex gap-1.5">
@@ -1310,19 +1362,119 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
           <div className="w-full max-w-lg rounded-2xl bg-white border border-gray-200 p-5 shadow-xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-sm font-bold text-[#1A1A1A] mb-4">{privateModal.mode === 'create' ? 'Crear clase particular' : 'Editar clase particular'}</h3>
             <div className="space-y-3">
-              <input className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Alumno" value={privateForm.student_name} onChange={(e) => setPrivateForm((f) => ({ ...f, student_name: e.target.value }))} />
-              <div className="grid grid-cols-2 gap-2">
-                <input className="rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Email" value={privateForm.student_email} onChange={(e) => setPrivateForm((f) => ({ ...f, student_email: e.target.value }))} />
-                <input className="rounded-xl border border-gray-200 px-3 py-2 text-sm" placeholder="Teléfono" value={privateForm.student_phone} onChange={(e) => setPrivateForm((f) => ({ ...f, student_phone: e.target.value }))} />
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-2">Alumnos ({privateAlumniCount})</p>
+                <div className="space-y-2">
+                  {privateForm.students.map((student, idx) => (
+                    <div key={idx} className="rounded-xl border border-gray-200 p-2 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-bold text-gray-500">Alumno {idx + 1}</span>
+                        {privateForm.students.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPrivateForm((f) => ({
+                                ...f,
+                                students: f.students.filter((_, i) => i !== idx),
+                              }))
+                            }
+                            className="text-[10px] font-bold text-red-600 hover:underline"
+                          >
+                            Quitar
+                          </button>
+                        ) : null}
+                      </div>
+                      <input
+                        className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                        placeholder="Nombre"
+                        value={student.name}
+                        onChange={(e) =>
+                          setPrivateForm((f) => ({
+                            ...f,
+                            students: f.students.map((row, i) => (i === idx ? { ...row, name: e.target.value } : row)),
+                          }))
+                        }
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                          placeholder="Email"
+                          value={student.email}
+                          onChange={(e) =>
+                            setPrivateForm((f) => ({
+                              ...f,
+                              students: f.students.map((row, i) => (i === idx ? { ...row, email: e.target.value } : row)),
+                            }))
+                          }
+                        />
+                        <input
+                          className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                          placeholder="Teléfono"
+                          value={student.phone}
+                          onChange={(e) =>
+                            setPrivateForm((f) => ({
+                              ...f,
+                              students: f.students.map((row, i) => (i === idx ? { ...row, phone: e.target.value } : row)),
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {privateForm.students.length < 4 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPrivateForm((f) => ({
+                        ...f,
+                        students: [...f.students, { name: '', email: '', phone: '' }],
+                      }))
+                    }
+                    className="mt-2 text-xs font-bold text-[#0B5B7A] hover:underline"
+                  >
+                    + Añadir alumno
+                  </button>
+                ) : null}
               </div>
+
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-2">Pistas</p>
+                <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto rounded-xl border border-gray-200 p-2">
+                  {courts.map((c) => {
+                    const selected = privateForm.court_ids.includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() =>
+                          setPrivateForm((f) => ({
+                            ...f,
+                            court_ids: selected
+                              ? f.court_ids.filter((id) => id !== c.id)
+                              : [...f.court_ids, c.id],
+                          }))
+                        }
+                        className={`rounded-lg px-3 py-1.5 text-xs font-bold border transition ${
+                          selected
+                            ? 'bg-[#0B5B7A] text-white border-[#0B5B7A]'
+                            : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        {c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <select
                   className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
                   value={privateForm.staff_id}
                   onChange={(e) => {
                     const staffId = e.target.value;
-                    const count = Number(privateForm.student_count) as 1 | 2 | 3;
-                    const opts = feeRulesForPrivateChoice(feeRules, staffId, count);
+                    const opts = feeRulesForPrivateChoice(feeRules, staffId, privateAlumniCount);
                     setPrivateForm((f) => ({
                       ...f,
                       staff_id: staffId,
@@ -1332,30 +1484,6 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
                 >
                   <option value="">Entrenador</option>
                   {coachStaff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-                <select className="rounded-xl border border-gray-200 px-3 py-2 text-sm" value={privateForm.court_id} onChange={(e) => setPrivateForm((f) => ({ ...f, court_id: e.target.value }))}>
-                  <option value="">Selecciona pista</option>
-                  {courts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
-                  value={privateForm.student_count}
-                  onChange={(e) => {
-                    const studentCount = e.target.value as '1' | '2' | '3';
-                    const count = Number(studentCount) as 1 | 2 | 3;
-                    const opts = feeRulesForPrivateChoice(feeRules, privateForm.staff_id, count);
-                    setPrivateForm((f) => ({
-                      ...f,
-                      student_count: studentCount,
-                      fee_rule_id: opts.some((o) => o.id === f.fee_rule_id) ? f.fee_rule_id : '',
-                    }));
-                  }}
-                >
-                  <option value="1">1 alumno</option>
-                  <option value="2">2 alumnos</option>
-                  <option value="3">3 alumnos</option>
                 </select>
                 <select
                   className="rounded-xl border border-gray-200 px-3 py-2 text-sm"
@@ -1367,8 +1495,8 @@ export function ClubSchoolTab({ clubId, clubResolved = true }: { clubId: string 
                     {!privateForm.staff_id
                       ? 'Elige entrenador'
                       : privateFeeOptions.length === 0
-                        ? 'Sin tarifas'
-                        : 'Tarifa'}
+                        ? `Sin tarifas para ${privateAlumniCount} alumno(s)`
+                        : `Tarifa (${privateAlumniCount} alum.)`}
                   </option>
                   {privateFeeOptions.map((rule) => (
                     <option key={rule.id} value={rule.id}>

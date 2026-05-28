@@ -24,8 +24,9 @@ import { fetchAvailableSlots } from "../api/availability";
 import { fetchClubById } from "../api/clubs";
 import { fetchPublicClubReviews, type PublicClubReview } from "../api/clubReviews";
 import { fetchCourtsByClubId, type Court } from "../api/courts";
-import { fetchMatches } from "../api/matches";
+import { fetchMatches, type MatchEnriched } from "../api/matches";
 import { mapMatchToPartido } from "../api/mapMatchToPartido";
+import { clubLocalDateTimeToUtcIso } from "../lib/clubTimeZone";
 import {
   createIntentForNewMatch,
   confirmPaymentFromClient,
@@ -38,6 +39,7 @@ import { PrivateReservationModal } from "../components/partido/PrivateReservatio
 import type { PartidoItem } from "./PartidosScreen";
 import { theme } from "../theme";
 import { filterSlotsStartingAfterNow } from "../domain/localSlotAvailability";
+import { getMatchBooking } from "../domain/matchLifecycle";
 import { toDateStringLocal as localCalendarYmd } from "../utils/dateLocal";
 import { useSlotPrice } from "../hooks/useSlotPrice";
 
@@ -139,11 +141,8 @@ function getNextDays(count: number) {
   return out;
 }
 
-function matchBelongsToClub(
-  match: { bookings?: { courts?: { club_id?: string } | null } | null },
-  clubId: string,
-): boolean {
-  const clubIdFromMatch = match.bookings?.courts?.club_id;
+function matchBelongsToClub(match: MatchEnriched, clubId: string): boolean {
+  const clubIdFromMatch = getMatchBooking(match)?.courts?.club_id;
   return clubIdFromMatch != null && clubIdFromMatch === clubId;
 }
 
@@ -605,11 +604,8 @@ export function ClubDetailScreen({
         });
 
       const dateStr = localCalendarYmd(selectedDate);
-      // Parse as local time (no Z suffix) so JS converts correctly to UTC when sending to backend
-      const startDate = new Date(`${dateStr}T${selectedTimeSlot}:00`);
-      const start_at = startDate.toISOString();
-      const endDate = new Date(startDate.getTime() + duration * 60 * 1000);
-      const end_at = endDate.toISOString();
+      const start_at = clubLocalDateTimeToUtcIso(dateStr, selectedTimeSlot);
+      const end_at = new Date(new Date(start_at).getTime() + duration * 60 * 1000).toISOString();
       const totalPriceCents = Math.max(finalPriceCents, 100);
       const payChoice = await askPayLaterChoice();
       if (payChoice === "cancel") return;

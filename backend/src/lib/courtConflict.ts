@@ -5,7 +5,9 @@ import { dayKeyInTz, zonedTimeToUtc } from '../routes/learningTimezone';
 export const MATCH_DRAFT_LOCK_MARKER = '__MATCH_DRAFT_LOCK__';
 
 /** IANA zone for escuela/Reservas when `clubs` no trae columna; alineado con `matchmaking` y `bookings`. */
-const DEFAULT_CLUB_TIMEZONE = 'Europe/Madrid';
+import { CLUB_IANA_TIMEZONE } from './clubTimezone';
+
+const DEFAULT_CLUB_TIMEZONE = CLUB_IANA_TIMEZONE;
 
 function shortWeekdayCodeInTimeZone(d: Date, timeZone: string): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
   const s = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(d);
