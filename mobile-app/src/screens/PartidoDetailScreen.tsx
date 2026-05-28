@@ -1047,7 +1047,11 @@ function PlayerSlotDetail({
         style={({ pressed }) => [styles.plFill, pressed && styles.pressed]}
       >
         {player.avatar ? (
-          <Image source={{ uri: player.avatar }} style={styles.plAvatar} />
+          <Image
+            source={{ uri: player.avatar }}
+            style={styles.plAvatar}
+            resizeMode="cover"
+          />
         ) : (
           <Text style={styles.plInitials}>
             {(player.initial ?? player.name?.slice(0, 2) ?? '?').toUpperCase()}

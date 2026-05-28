@@ -51,7 +51,7 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
           ),
           match_players (
             id, team, created_at, slot_index,
-            players (id, first_name, last_name, elo_rating, liga)
+            players (id, first_name, last_name, elo_rating, liga, avatar_url)
           )`;
 }
 
@@ -231,6 +231,9 @@ router.get('/', async (req: Request, res: Response) => {
  *       - in: query
  *         name: limit
  *         schema: { type: integer, default: 50 }
+ *     responses:
+ *       200: { description: OK }
+ *       401: { description: No autenticado }
  */
 router.get('/mine', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
@@ -245,7 +248,6 @@ router.get('/mine', async (req: Request, res: Response) => {
     await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
     const nowMs = Date.now();
-
     const { data: mpRows, error: mpErr } = await supabase
       .from('match_players')
       .select('match_id')
