@@ -367,7 +367,24 @@ router.get('/:id', async (req: Request, res: Response) => {
           }
         }
       }
-      return res.json({ ok: true, match: out });
+      let hasMyFeedback = false;
+      const { playerId: viewerId } = await getPlayerIdFromBearer(req);
+      if (viewerId) {
+        const { data: fbRow } = await supabase
+          .from('match_feedback')
+          .select('match_id')
+          .eq('match_id', id)
+          .eq('reviewer_id', viewerId)
+          .maybeSingle();
+        hasMyFeedback = !!fbRow;
+      }
+      const flattened = flattenMatchRowForClient(
+        out as { bookings?: unknown; match_players?: unknown },
+      );
+      return res.json({
+        ok: true,
+        match: { ...flattened, has_my_feedback: hasMyFeedback },
+      });
     }
     const { data, error } = await supabase
       .from('matches')
