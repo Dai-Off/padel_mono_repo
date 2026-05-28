@@ -95,20 +95,13 @@ function initials(p: PartidoPlayer): string {
 }
 
 function buildTeammateList(partido: PartidoItem, currentPlayerId: string | null): TeammateSlot[] {
-  let mySlot = -1;
-  if (currentPlayerId) {
-    if (partido.playerIdsBySlot && Array.isArray(partido.playerIdsBySlot)) {
-      mySlot = partido.playerIdsBySlot.findIndex((id) => id === currentPlayerId);
-    }
-    if (mySlot === -1 && partido.playerIds && Array.isArray(partido.playerIds)) {
-      mySlot = partido.playerIds.findIndex((id) => id === currentPlayerId);
-    }
-  }
   const list: TeammateSlot[] = [];
   partido.players.forEach((player, playerIndex) => {
-    if (!player.isFree && playerIndex !== mySlot) {
-      list.push({ playerIndex, order: list.length });
-    }
+    if (player.isFree) return;
+    const slotPlayerId =
+      partido.playerIdsBySlot?.[playerIndex] ?? partido.playerIds?.[playerIndex] ?? null;
+    if (currentPlayerId && slotPlayerId === currentPlayerId) return;
+    list.push({ playerIndex, order: list.length });
   });
   return list;
 }

@@ -11,7 +11,8 @@ export type Match = {
   gender: string | null;
   competitive: boolean;
   status: string;
-  score_status?: 'pending' | 'confirmed' | 'disputed' | null;
+  score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | null;
+  sets?: Array<{ a: number; b: number }> | null;
   type?: string | null;
   /** Solo en /matches/mine: indica si el jugador autenticado ya envió feedback. */
   has_my_feedback?: boolean;
