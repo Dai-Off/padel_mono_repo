@@ -1,5 +1,5 @@
 import type { MatchEnriched } from '../api/matches';
-import { getMatchListPhase } from './matchLifecycle';
+import { getMatchBooking, getMatchListPhase } from './matchLifecycle';
 
 /** Partidos donde participa el jugador y aún no terminaron (próximos o en curso). */
 export function selectMyUpcomingMatches(
@@ -34,8 +34,7 @@ function selectMyMatchesForHomeInternal(
       const inMatch = (m.match_players ?? []).some((mp) => mp.players?.id === playerId);
       if (!inMatch) return null;
 
-      const rawBookings = m.bookings;
-      const b = Array.isArray(rawBookings) ? rawBookings[0] : rawBookings;
+      const b = getMatchBooking(m);
       if (!b?.start_at || !b?.end_at) return null;
 
       const phase = getMatchListPhase(now, m.status, b.start_at, b.end_at);

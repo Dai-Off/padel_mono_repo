@@ -16,7 +16,9 @@ import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
-import { getMatchListPhase } from '../domain/matchLifecycle';
+import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
+import { selectMyMatchesForHome } from '../domain/selectMyUpcomingMatches';
+import { normalizeMatchEnriched } from '../api/normalizeMatch';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
@@ -181,6 +183,11 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
   const refreshMatches = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
+      if (!token) {
+        setMisPartidos([]);
+        setPartidos([]);
+        return;
+      }
       if (!force && Date.now() - matchesLoadedAt.current < TTL_MS) return;
       const isFirst = matchesLoadedAt.current === 0;
       if (isFirst) setMatchesLoading(true);
@@ -188,9 +195,9 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       try {
         let tk: string | null = token;
         let [playerId, matches, myMatches] = await Promise.all([
-          tk ? fetchMyPlayerId(tk) : Promise.resolve(null),
-          fetchMatches({ expand: true, token: tk }),
-          tk ? fetchMyMatches(tk, { phase: 'all', limit: 100 }) : Promise.resolve([]),
+          fetchMyPlayerId(tk),
+          fetchMatches({ expand: true, token: tk, activeOnly: false }),
+          fetchMyMatches(tk, { phase: 'all', limit: 100 }),
         ]);
 
         // Si el token caducó silenciosamente, reintentamos UNA vez con refresh.
@@ -200,18 +207,28 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
             tk = newToken;
             [playerId, matches, myMatches] = await Promise.all([
               fetchMyPlayerId(newToken),
-              fetchMatches({ expand: true, token: newToken }),
+              fetchMatches({ expand: true, token: newToken, activeOnly: false }),
               fetchMyMatches(newToken, { phase: 'all', limit: 100 }),
             ]);
           }
         }
 
-        const mineRawBase = (myMatches as MatchEnriched[]).filter((m) => {
-          const b = m.bookings;
+        let mineSource = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
+        // Fallback: si /matches/mine viene vacío (error silencioso, desfase de API, etc.),
+        // reconstruir desde el listado expandido filtrando por jugador.
+        if (playerId && mineSource.length === 0) {
+          mineSource = selectMyMatchesForHome(
+            (matches as MatchEnriched[]).map(normalizeMatchEnriched),
+            playerId,
+          );
+        }
+
+        const mineRawBase = mineSource.filter((m) => {
+          const b = getMatchBooking(m);
           return Boolean(b?.start_at && b?.end_at);
         });
         const mineVisible = mineRawBase.filter((m) => {
-          const b = m.bookings!;
+          const b = getMatchBooking(m)!;
           const phase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
           const hasMyFeedback = (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true;
           // Regla de negocio Home: si el partido ya finalizó y el usuario ya
@@ -221,21 +238,23 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         const mineRaw = [
           ...mineVisible
             .filter((m) => {
-              const b = m.bookings!;
+              const b = getMatchBooking(m)!;
               return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) !== 'past';
             })
             .sort(
               (a, b) =>
-                new Date(a.bookings!.start_at).getTime() - new Date(b.bookings!.start_at).getTime(),
+                new Date(getMatchBooking(a)!.start_at!).getTime() -
+                new Date(getMatchBooking(b)!.start_at!).getTime(),
             ),
           ...mineVisible
             .filter((m) => {
-              const b = m.bookings!;
+              const b = getMatchBooking(m)!;
               return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) === 'past';
             })
             .sort(
               (a, b) =>
-                new Date(b.bookings!.start_at).getTime() - new Date(a.bookings!.start_at).getTime(),
+                new Date(getMatchBooking(b)!.start_at!).getTime() -
+                new Date(getMatchBooking(a)!.start_at!).getTime(),
             ),
         ];
         const mis = mineRaw

@@ -1,6 +1,5 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
 import {
-  Animated,
   Platform,
   Pressable,
   ScrollView,
@@ -14,7 +13,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import type { PartidoItem } from '../../../screens/PartidosScreen';
 import { PartidoOpenCard } from '../../partido/PartidoOpenCard';
 import { INICIO_PAD_H } from './constants';
-import { INICIO_ENTER_EASING } from './inicioMotion';
 import { androidReadableText } from './textStyles';
 import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
@@ -52,48 +50,8 @@ function subtitleLine(count: number): string {
  * Capa absolute inset-0 como en web (hover allí = opacity-100; aquí siempre visible).
  * elevation > card para que en Android no quede debajo del elevation del PartidoOpenCard.
  */
-function CarouselItemEnter({
-  index,
-  width,
-  children,
-}: {
-  index: number;
-  width: number;
-  children: ReactNode;
-}) {
-  const p = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    p.setValue(0);
-    Animated.timing(p, {
-      toValue: 1,
-      delay: index * 56,
-      duration: 400,
-      easing: INICIO_ENTER_EASING,
-      useNativeDriver: true,
-    }).start();
-  }, [index, p]);
-
-  return (
-    <Animated.View
-      style={[
-        styles.carouselItem,
-        {
-          width,
-          opacity: p,
-          transform: [
-            {
-              translateX: p.interpolate({
-                inputRange: [0, 1],
-                outputRange: [16, 0],
-              }),
-            },
-          ],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
+function CarouselItem({ width, children }: { width: number; children: ReactNode }) {
+  return <View style={[styles.carouselItem, { width }]}>{children}</View>;
 }
 
 function ProximoCard({
@@ -140,10 +98,6 @@ export function ProximosPartidosSection({
   const cardWidth =
     !loading && items.length === 1 ? singleCardW : carouselCardW;
 
-  if (!loading && items.length === 0) {
-    return null;
-  }
-
   return (
     <View style={styles.section}>
       <View style={styles.headerRow}>
@@ -152,7 +106,9 @@ export function ProximosPartidosSection({
           <Text style={styles.subtitle}>
             {loading && items.length === 0
               ? 'Cargando…'
-              : subtitleLine(items.length)}
+              : items.length === 0
+                ? 'Sin reservas activas'
+                : subtitleLine(items.length)}
           </Text>
         </View>
       </View>
@@ -170,7 +126,7 @@ export function ProximosPartidosSection({
             { paddingRight: 12 + insets.right },
           ]}
         >
-          <CarouselItemEnter index={0} width={carouselCardW}>
+          <CarouselItem width={carouselCardW}>
             <Pressable style={[styles.skeletonCard, { width: carouselCardW }]} disabled>
               <LinearGradient
                 colors={[`rgba(${theme.orb1Color}, 0.1)`, 'transparent']}
@@ -182,8 +138,14 @@ export function ProximosPartidosSection({
               <View style={styles.skeletonLineLg} />
               <View style={styles.skeletonLineSm} />
             </Pressable>
-          </CarouselItemEnter>
+          </CarouselItem>
         </ScrollView>
+      ) : items.length === 0 ? (
+        <View style={styles.emptyHint}>
+          <Text style={styles.emptyHintText}>
+            Cuando reserves o te unas a un partido, aparecerá aquí.
+          </Text>
+        </View>
       ) : (
         <ScrollView
           horizontal
@@ -200,15 +162,15 @@ export function ProximosPartidosSection({
             },
           ]}
         >
-            {items.map((item, index) => (
-              <CarouselItemEnter key={item.id} index={index} width={cardWidth}>
+            {items.map((item) => (
+              <CarouselItem key={item.id} width={cardWidth}>
                 <ProximoCard
                   item={item}
                   fullWidth={items.length === 1}
                   onPress={() => onPartidoPress?.(item)}
                   theme={theme}
                 />
-              </CarouselItemEnter>
+              </CarouselItem>
             ))}
         </ScrollView>
       )}
@@ -328,5 +290,19 @@ const styles = StyleSheet.create({
     width: '44%',
     borderRadius: 4,
     backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  emptyHint: {
+    minHeight: 72,
+    paddingVertical: 16,
+    paddingHorizontal: 4,
+    justifyContent: 'center',
+  },
+  emptyHintText: {
+    ...androidReadableText({
+      fontSize: 13,
+      color: '#6b7280',
+      fontWeight: '500',
+      lineHeight: 18,
+    }),
   },
 });
