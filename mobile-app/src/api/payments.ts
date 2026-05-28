@@ -139,7 +139,7 @@ export async function fetchCustomerPortalUrl(
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ return_url: 'padelapp://payments' }),
+      body: JSON.stringify({ return_url: 'wematch://payments' }),
     });
     const json = (await res.json()) as CustomerPortalResponse;
     if (!res.ok) return { ok: false, error: json.error ?? 'Error al abrir métodos de pago' };

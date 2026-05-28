@@ -37,9 +37,16 @@ function AuthFlowWrapper() {
   const [screen, setScreen] = useState<AuthScreen>('login');
   const [recovery, setRecovery] = useState<RecoveryPayload | null>(null);
 
-  const consumeRecoveryUrl = useCallback((url: string | null) => {
+  const consumeDeepLink = useCallback((url: string | null) => {
     if (!url) return;
     void stashTournamentInviteFromUrl(url);
+
+    if (url.includes('email-confirmed')) {
+      setRecovery(null);
+      setScreen('login');
+      return;
+    }
+
     if (!isRecoveryDeepLink(url)) return;
     const parsed = parseSupabaseRecoveryFromUrl(url);
     setRecovery({
@@ -54,16 +61,16 @@ function AuthFlowWrapper() {
     let alive = true;
     void (async () => {
       const initial = await Linking.getInitialURL();
-      if (alive && initial) consumeRecoveryUrl(initial);
+      if (alive && initial) consumeDeepLink(initial);
     })();
     const sub = Linking.addEventListener('url', ({ url }) => {
-      consumeRecoveryUrl(url);
+      consumeDeepLink(url);
     });
     return () => {
       alive = false;
       sub.remove();
     };
-  }, [consumeRecoveryUrl]);
+  }, [consumeDeepLink]);
 
   const goLogin = () => {
     setRecovery(null);
