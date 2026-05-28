@@ -29,7 +29,7 @@ const DIFFICULTY_COLORS = {
 const ICON_MAP: Record<string, string> = {
   'target': 'locate-outline',
   'zap': 'flash-outline',
-  'book-open': 'book-open-outline',
+  'book-open': 'book-outline',
   'trophy': 'trophy-outline',
 };
 
