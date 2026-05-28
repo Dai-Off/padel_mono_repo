@@ -15,6 +15,7 @@ import { releaseMatchmakingProposal } from '../services/matchmakingService';
 import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
+import { getPlayerIdFromBearer } from '../lib/authPlayer';
 
 const router = Router();
 
@@ -35,7 +36,7 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
           ),
           match_players (
             id, team, created_at, slot_index,
-            players (id, first_name, last_name, elo_rating, liga)
+            players (id, first_name, last_name, elo_rating, liga, avatar_url)
           )`;
 }
 
@@ -196,6 +197,88 @@ router.get('/', async (req: Request, res: Response) => {
       return res.json({ ok: true, matches: filtered });
     }
     return res.json({ ok: true, matches: rows });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /matches/mine:
+ *   get:
+ *     tags: [Matches]
+ *     summary: Partidos del jugador autenticado
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: phase
+ *         schema: { type: string, enum: [past, upcoming, all] }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 50 }
+ *     responses:
+ *       200: { description: OK }
+ *       401: { description: No autenticado }
+ */
+router.get('/mine', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  const phase = String(req.query.phase ?? 'all').toLowerCase();
+  const limit = Math.min(Math.max(1, parseInt(String(req.query.limit ?? '50'), 10) || 50), 200);
+
+  try {
+    await finalizePastMatchesThrottled();
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: mpRows, error: mpErr } = await supabase
+      .from('match_players')
+      .select('match_id')
+      .eq('player_id', playerId);
+    if (mpErr) return res.status(500).json({ ok: false, error: mpErr.message });
+
+    const matchIds = [...new Set((mpRows ?? []).map((r: { match_id: string }) => r.match_id))];
+    if (matchIds.length === 0) return res.json({ ok: true, matches: [] });
+
+    const { data: rows, error } = await supabase
+      .from('matches')
+      .select(expandSelect('bookings'))
+      .in('id', matchIds)
+      .order('start_at', { ascending: false, foreignTable: 'bookings' })
+      .limit(Math.min(matchIds.length, limit * 4));
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    const now = Date.now();
+    const filtered = (rows ?? [])
+      .filter((row: { status: string; bookings?: { start_at?: string; end_at?: string } | { start_at?: string; end_at?: string }[] }) => {
+        const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
+        if (!b?.start_at || !b?.end_at) return false;
+        const listPhase = getMatchListPhase(now, row.status, b.start_at, b.end_at);
+        if (phase === 'past') return listPhase === 'past';
+        if (phase === 'upcoming') return listPhase === 'upcoming' || listPhase === 'live';
+        return true;
+      })
+      .slice(0, limit);
+
+    const ids = filtered.map((r: { id: string }) => r.id);
+    const feedbackSet = new Set<string>();
+    if (ids.length > 0) {
+      const { data: fbRows } = await supabase
+        .from('match_feedback')
+        .select('match_id')
+        .eq('reviewer_id', playerId)
+        .in('match_id', ids);
+      for (const r of fbRows ?? []) {
+        feedbackSet.add((r as { match_id: string }).match_id);
+      }
+    }
+
+    const out = filtered.map((row: { id: string }) => ({
+      ...row,
+      has_my_feedback: feedbackSet.has(row.id),
+    }));
+
+    return res.json({ ok: true, matches: out });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

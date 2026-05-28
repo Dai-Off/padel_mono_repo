@@ -12,7 +12,8 @@ export type MainTabId =
   | 'pistas'
   | 'tienda'
   | 'torneos'
-  | 'partidos';
+  | 'partidos'
+  | 'perfil';
 
 type TabConfig = {
   id: MainTabId;
@@ -26,6 +27,7 @@ const TABS: TabConfig[] = [
   { id: 'tienda', label: 'Tienda', icon: 'bag-handle-outline' },
   { id: 'torneos', label: 'Torneos', icon: 'trophy' },
   { id: 'partidos', label: 'Partidos', icon: 'flash' },
+  { id: 'perfil', label: 'Perfil', icon: 'person' },
 ];
 
 const GRADIENT = ['#F18F34', '#FFA940'] as const;

@@ -22,6 +22,7 @@ type PlayerRef = {
   last_name: string;
   elo_rating: number;
   liga?: string | null;
+  avatar_url?: string | null;
 };
 
 type MatchPlayerRef = {

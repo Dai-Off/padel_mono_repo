@@ -222,7 +222,7 @@ export function EditProfileScreen({
 }: EditProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const { refreshProfile } = useHomeData();
+  const { refreshProfile, refreshMatches } = useHomeData();
   const token = session?.access_token;
 
   const [loading, setLoading] = useState(true);
@@ -359,6 +359,7 @@ export function EditProfileScreen({
       }
       setAvatarUrl(publicUrl);
       await refreshProfile({ force: true });
+      await refreshMatches({ force: true });
     } catch (err) {
       const p = await fetchMyPlayerProfile(token);
       setAvatarUrl(p?.avatarUrl ?? null);
