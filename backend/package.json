@@ -1,7 +1,7 @@
 {
   "name": "padel-be",
   "version": "1.0.0",
-  "description": "Backend para Padel App",
+  "description": "Backend para WeMatch",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
