@@ -177,6 +177,7 @@ export function PartidoDetailScreen({
           matchType: updated.matchType ?? prev.matchType,
           matchStatus: updated.matchStatus ?? prev.matchStatus,
           bookingStatus: updated.bookingStatus ?? prev.bookingStatus,
+          hasMyFeedback: updated.hasMyFeedback === true || prev.hasMyFeedback === true,
         }));
       }
     });
@@ -401,45 +402,56 @@ export function PartidoDetailScreen({
         });
       }
 
-      if (levelRatings.length !== payload.teammateRatings.length || levelRatings.length === 0) {
+      if (levelRatings.length !== payload.teammateRatings.length) {
         return {
           ok: false as const,
           error: 'No se pudo mapear a todos los jugadores para enviar el feedback.',
         };
       }
 
+      let scoreSaved = false;
       if (payload.sets.length > 0 && currentPlayerId) {
         const fresh = await fetchMatchById(partido.id, token);
-        let team: 'A' | 'B' | null = null;
-        if (fresh?.match_players) {
-          const mine = fresh.match_players.find((mp) => mp.players?.id === currentPlayerId);
-          team = mine?.team ?? null;
-        }
-        if (!team) {
-          return {
-            ok: false as const,
-            error: 'No se pudo determinar tu equipo para guardar el marcador.',
-          };
-        }
-        const apiSets =
-          team === 'A'
-            ? payload.sets.map((s) => ({ a: s.us, b: s.them }))
-            : payload.sets.map((s) => ({ a: s.them, b: s.us }));
-        // Calcular quién ganó cada set
-        const usSets = payload.sets.filter((s) => s.us > s.them).length;
-        const themSets = payload.sets.filter((s) => s.them > s.us).length;
-        const isDraw = usSets === themSets;
+        const scoreStatus = fresh?.score_status ?? 'pending';
+        const scoreAlreadyOnRecord =
+          scoreStatus !== 'pending' &&
+          Array.isArray(fresh?.sets) &&
+          fresh.sets.length > 0;
 
-        const scoreRes = await submitMatchScore(
-          partido.id,
-          {
-            sets: apiSets,
-            match_end_reason: isDraw ? "draw" : "completed",
-          },
-          token
-        );
-        if (!scoreRes.ok && scoreRes.status !== 409) {
-          return { ok: false as const, error: scoreRes.error };
+        if (scoreAlreadyOnRecord) {
+          scoreSaved = true;
+        } else if (scoreStatus === 'pending') {
+          let team: 'A' | 'B' | null = null;
+          if (fresh?.match_players) {
+            const mine = fresh.match_players.find((mp) => mp.players?.id === currentPlayerId);
+            team = mine?.team ?? null;
+          }
+          if (!team) {
+            return {
+              ok: false as const,
+              error: 'No se pudo determinar tu equipo para guardar el marcador.',
+            };
+          }
+          const apiSets =
+            team === 'A'
+              ? payload.sets.map((s) => ({ a: s.us, b: s.them }))
+              : payload.sets.map((s) => ({ a: s.them, b: s.us }));
+          const usSets = payload.sets.filter((s) => s.us > s.them).length;
+          const themSets = payload.sets.filter((s) => s.them > s.us).length;
+          const isDraw = usSets === themSets;
+
+          const scoreRes = await submitMatchScore(
+            partido.id,
+            {
+              sets: apiSets,
+              match_end_reason: isDraw ? 'draw' : 'completed',
+            },
+            token
+          );
+          if (!scoreRes.ok) {
+            return { ok: false as const, error: scoreRes.error };
+          }
+          scoreSaved = true;
         }
       }
 
@@ -452,7 +464,14 @@ export function PartidoDetailScreen({
         token
       );
 
-      if (!res.ok) return res;
+      if (!res.ok) {
+        return {
+          ok: false as const,
+          error: scoreSaved
+            ? `El marcador se guardó, pero no el feedback: ${res.error}`
+            : res.error,
+        };
+      }
       setPartido((prev) => ({ ...prev, hasMyFeedback: true }));
       await refreshMatches({ force: true });
       return { ok: true as const };

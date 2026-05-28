@@ -56,7 +56,27 @@ const LEVEL_OPTIONS: {
 const TEAMMATE_EXTRA_QUESTIONS = [
   '¿Qué aspecto destacarías de su juego hoy?',
   '¿Cómo ha sido la compenetración en pista?',
+  '¿Qué tal anduvo de movilidad y desplazamiento?',
+  '¿Qué golpe o técnica le resultó más efectivo?',
+  '¿Cómo manejó los momentos de mayor presión?',
+  '¿Qué tal estuvo su consistencia en el saque?',
+  '¿Cómo calificarías su actitud y compañerismo?',
+  '¿Qué aspecto técnico crees que podría mejorar?',
+  '¿Cómo se desenvolvió en el juego de volea?',
+  '¿Qué tal estuvo en la lectura táctica del partido?',
 ];
+
+function pickExtraQuestion(matchId: string, playerIndex: number): string {
+  if (!matchId) return TEAMMATE_EXTRA_QUESTIONS[0];
+  let hash = 0;
+  const str = `${matchId}-${playerIndex}`;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0; // Convert to 32bit integer
+  }
+  const idx = Math.abs(hash) % TEAMMATE_EXTRA_QUESTIONS.length;
+  return TEAMMATE_EXTRA_QUESTIONS[idx] ?? TEAMMATE_EXTRA_QUESTIONS[0];
+}
 
 type Props = {
   visible: boolean;
@@ -75,14 +95,13 @@ function initials(p: PartidoPlayer): string {
 }
 
 function buildTeammateList(partido: PartidoItem, currentPlayerId: string | null): TeammateSlot[] {
-  const mySlot = currentPlayerId
-    ? partido.playerIds?.findIndex((id) => id === currentPlayerId) ?? -1
-    : -1;
   const list: TeammateSlot[] = [];
   partido.players.forEach((player, playerIndex) => {
-    if (!player.isFree && playerIndex !== mySlot) {
-      list.push({ playerIndex, order: list.length });
-    }
+    if (player.isFree) return;
+    const slotPlayerId =
+      partido.playerIdsBySlot?.[playerIndex] ?? partido.playerIds?.[playerIndex] ?? null;
+    if (currentPlayerId && slotPlayerId === currentPlayerId) return;
+    list.push({ playerIndex, order: list.length });
   });
   return list;
 }
@@ -429,7 +448,8 @@ export function MatchEvaluationFlow({
                 rating={ratings[currentTeammate.playerIndex] ?? { level: null, note: '' }}
                 onChangeLevel={(lvl) => setRating(currentTeammate.playerIndex, { level: lvl })}
                 onChangeNote={(note) => setRating(currentTeammate.playerIndex, { note })}
-                extraQuestionIndex={currentTeammate.order}
+                matchId={partido.id}
+                playerIndex={currentTeammate.playerIndex}
               />
             )}
             {sectionIndex === 1 && (
@@ -519,7 +539,8 @@ function TeammateStepContent({
   rating,
   onChangeLevel,
   onChangeNote,
-  extraQuestionIndex,
+  matchId,
+  playerIndex,
 }: {
   player: PartidoPlayer;
   teammateOrder: number;
@@ -527,11 +548,11 @@ function TeammateStepContent({
   rating: { level: TeammateLevelRating | null; note: string };
   onChangeLevel: (l: TeammateLevelRating) => void;
   onChangeNote: (n: string) => void;
-  extraQuestionIndex: number;
+  matchId: string;
+  playerIndex: number;
 }) {
   const dots = Array.from({ length: teammatesTotal }, (_, i) => i);
-  const extraQ =
-    TEAMMATE_EXTRA_QUESTIONS[extraQuestionIndex % TEAMMATE_EXTRA_QUESTIONS.length] ?? TEAMMATE_EXTRA_QUESTIONS[0];
+  const extraQ = pickExtraQuestion(matchId, playerIndex);
   const noteEnabled = rating.level != null;
   const placeholder = 'Opcional - Escribe tu respuesta...';
 
