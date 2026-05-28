@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { CheckCircle2, ArrowRight } from 'lucide-react';
 
-const DEEP_LINK = 'padelapp://email-confirmed';
+const DEEP_LINK = 'wematch://email-confirmed';
 
 function openApp() {
     window.location.href = DEEP_LINK;

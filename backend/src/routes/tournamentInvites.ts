@@ -211,7 +211,7 @@ router.post('/:id/invites', requireClubOwnerOrAdminOrPortalStaff, async (req: Re
  *     tags: [Tournaments]
  *     summary: Página de aceptación de invitación (enlace email/WhatsApp)
  *     description: |
- *       Sirve HTML con enlace profundo a la app (`padelapp://`) para aceptar la invitación.
+ *       Sirve HTML con enlace profundo a la app (`wematch://`) para aceptar la invitación.
  *       Query opcional `tournament_id` para abrir el torneo correcto en la app.
  *     parameters:
  *       - in: path
@@ -234,7 +234,7 @@ router.get('/invites/:token/accept', (req: Request, res: Response) => {
   if (!token) {
     return res.status(400).type('text/html').send('<h1>Invitación inválida</h1>');
   }
-  const appUrl = `padelapp://tournament-invite?token=${encodeURIComponent(token)}&tournament_id=${encodeURIComponent(tournamentId)}`;
+  const appUrl = `wematch://tournament-invite?token=${encodeURIComponent(token)}&tournament_id=${encodeURIComponent(tournamentId)}`;
   const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
