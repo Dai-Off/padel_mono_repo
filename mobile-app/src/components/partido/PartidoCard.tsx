@@ -47,7 +47,11 @@ function PlayerSlot({
   return (
     <View style={styles.playerSlot}>
       {player.avatar ? (
-        <Image source={{ uri: player.avatar }} style={styles.playerAvatar} />
+        <Image
+          source={{ uri: player.avatar }}
+          style={styles.playerAvatar}
+          resizeMode="cover"
+        />
       ) : (
         <View style={styles.playerAvatarInitial}>
           <Text style={styles.playerInitialText}>
@@ -150,6 +154,7 @@ export function PartidoCard({
                 <Image
                   source={{ uri: org.avatar }}
                   style={styles.privateReservadoImg}
+                  resizeMode="cover"
                 />
               ) : (
                 <View style={styles.privateReservadoInitialWrap}>

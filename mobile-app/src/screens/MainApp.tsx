@@ -77,7 +77,7 @@ type PostOnboardingReturn =
   | 'cursos';
 
 type MatchmakingHomeBannerState = 'hidden' | 'searching' | 'matched' | 'timed_out';
-const MATCHMAKING_TIMEOUT_SECONDS = 5 * 60;
+const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
 
 export function MainApp() {
   const sidebar = useSidebar(false);
@@ -104,7 +104,6 @@ export function MainApp() {
   }>({ open: false, organizerId: null });
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
-  const [showProfile, setShowProfile] = useState(false);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
@@ -229,15 +228,27 @@ export function MainApp() {
   const handleMatchmakingBannerStateChange = useCallback(
     (state: MatchmakingHomeBannerState, options?: { force?: boolean }) => {
       const force = options?.force === true;
-      if (matchmakingTimeoutNoticePending && state === 'hidden') {
+      if (state === 'timed_out') {
+        setMatchmakingTimeoutNoticePending(true);
+        setMatchmakingHomeBannerState('timed_out');
         return;
       }
-      setMatchmakingHomeBannerState(state);
-      if (state === 'timed_out') setMatchmakingTimeoutNoticePending(true);
-      if (state === 'searching') {
+
+      if (state === 'searching' || state === 'matched') {
         setMatchmakingTimeoutNoticePending(false);
-      } else if (state === 'matched') {
-        setMatchmakingTimeoutNoticePending(false);
+        setMatchmakingHomeBannerState(state);
+        return;
+      }
+
+      if (state === 'hidden') {
+        // El timeout debe quedar visible hasta que el usuario haga una nueva
+        // búsqueda o aparezca un match; no se oculta automáticamente.
+        setMatchmakingHomeBannerState((prev) => {
+          if (!force && (matchmakingTimeoutNoticePending || prev === 'timed_out')) {
+            return prev;
+          }
+          return 'hidden';
+        });
       }
     },
     [matchmakingTimeoutNoticePending],
@@ -303,7 +314,7 @@ export function MainApp() {
   const openOnboardingFromSection = (returnTo: PostOnboardingReturn) => {
     setPendingOnboardingReturn(returnTo);
     setProfileAutoOpenOnboarding(true);
-    setShowProfile(true);
+    setActiveTab('perfil');
   };
 
   /**
@@ -315,11 +326,9 @@ export function MainApp() {
     setPendingOnboardingReturn(null);
     setProfileAutoOpenOnboarding(false);
     if (!target || target === 'home') {
-      setShowProfile(false);
       setActiveTab('inicio');
       return;
     }
-    setShowProfile(false);
     if (target === 'daily-lesson') setShowDailyLesson(true);
     else if (target === 'matchmaking') setShowCompetitiveLeague(true);
     else if (target === 'torneos') setActiveTab('torneos');
@@ -333,7 +342,6 @@ export function MainApp() {
 
   /** Cierra overlays del menú lateral antes de abrir otro destino (evita flags superpuestos). */
   const resetSidebarOverlays = useCallback(() => {
-    setShowProfile(false);
     setShowEditProfile(false);
     setShowChangePassword(false);
     setShowPreferences(false);
@@ -355,7 +363,6 @@ export function MainApp() {
     showMonedero ||
     showTuActividad ||
     showTransacciones ||
-    showProfile ||
     showEditProfile ||
     showChangePassword ||
     showPreferences ||
@@ -380,7 +387,7 @@ export function MainApp() {
     setInfoScreen(null);
     if (infoReturnToProfile) {
       setInfoReturnToProfile(false);
-      setShowProfile(true);
+      setActiveTab('perfil');
     }
   }, [infoReturnToProfile]);
 
@@ -454,7 +461,7 @@ export function MainApp() {
       // Editar perfil
       if (showEditProfile) {
         setShowEditProfile(false);
-        setShowProfile(true);
+        setActiveTab('perfil');
         return true;
       }
       // Preferences → vuelve a perfil o a Tu actividad
@@ -465,7 +472,7 @@ export function MainApp() {
           setTuActividadSubView(null);
           setShowTuActividad(true);
         } else {
-          setShowProfile(true);
+          setActiveTab('perfil');
         }
         return true;
       }
@@ -479,10 +486,8 @@ export function MainApp() {
         closeInfoScreen();
         return true;
       }
-      // Perfil
-      if (showProfile) {
-        setShowProfile(false);
-        setShowPreferences(false);
+      if (activeTab === 'perfil' && !showEditProfile && !showPreferences && !infoScreen) {
+        setActiveTab('inicio');
         setProfileAutoOpenOnboarding(false);
         return true;
       }
@@ -587,7 +592,6 @@ export function MainApp() {
     showChangePassword,
     showEditProfile,
     showPreferences,
-    showProfile,
     preferencesReturnToTuActividad,
     showAjustes,
     infoScreen,
@@ -618,8 +622,7 @@ export function MainApp() {
           onBack={() => setSelectedEducationalCourse(null)}
           onOpenProfileForOnboarding={() => {
             // Cerramos también `showCourses` (listado): en `renderContent` se
-            // evalúa antes que `showProfile`, así que sin esto la navegación
-            // se quedaba en el listado de cursos en vez de ir al perfil.
+            // Cierra el listado de cursos antes de ir al tab Perfil (onboarding).
             setSelectedEducationalCourse(null);
             setShowCourses(false);
             openOnboardingFromSection('cursos');
@@ -686,7 +689,7 @@ export function MainApp() {
           onNavigateToCompleteOnboarding={() => {
             setCrearPartidoFlow({ open: false, organizerId: null });
             bumpPartidos();
-            setShowProfile(true);
+            setActiveTab('perfil');
           }}
           onPartidoCreado={(data) => {
             setCrearPartidoFlow({ open: false, organizerId: null });
@@ -709,9 +712,12 @@ export function MainApp() {
         <EditProfileScreen
           onBack={() => {
             setShowEditProfile(false);
-            setShowProfile(true);
+            setActiveTab('perfil');
           }}
-          onSaved={() => setProfileRefreshKey((k) => k + 1)}
+          onSaved={() => {
+            setProfileRefreshKey((k) => k + 1);
+            setPartidosRefreshNonce((n) => n + 1);
+          }}
           onPreferencesPress={() => {
             setShowEditProfile(false);
             setShowPreferences(true);
@@ -736,39 +742,9 @@ export function MainApp() {
               setTuActividadSubView(null);
               setShowTuActividad(true);
             } else {
-              setShowProfile(true);
+              setActiveTab('perfil');
             }
           }}
-        />
-      );
-    }
-    if (showProfile) {
-      return (
-        <ProfileScreen
-          key={profileRefreshKey}
-          onBack={() => {
-            setShowProfile(false);
-            setShowPreferences(false);
-            setShowEditProfile(false);
-            setShowChangePassword(false);
-            setProfileAutoOpenOnboarding(false);
-          }}
-          onMenuPress={sidebar.toggle}
-          onEditProfilePress={() => {
-            setShowProfile(false);
-            setShowEditProfile(true);
-          }}
-          onPreferencesPress={() => {
-            setShowProfile(false);
-            setShowPreferences(true);
-          }}
-          onNavigateToInfo={(screenId) => {
-            setInfoReturnToProfile(true);
-            setInfoScreen(screenId);
-          }}
-          autoOpenOnboarding={profileAutoOpenOnboarding}
-          onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
-          onOnboardingCompleted={handleOnboardingCompleted}
         />
       );
     }
@@ -1005,8 +981,35 @@ export function MainApp() {
             onOpenWeMatchClubsFlow={(organizerId) =>
               setCrearPartidoFlow({ open: true, organizerId })
             }
-            onNavigateToCompleteOnboarding={() => setShowProfile(true)}
+            onNavigateToCompleteOnboarding={() => setActiveTab('perfil')}
             partidosRefreshNonce={partidosRefreshNonce}
+          />
+        );
+      case 'perfil':
+        return (
+          <ProfileScreen
+            key={profileRefreshKey}
+            onBack={() => {
+              setActiveTab('inicio');
+              setShowPreferences(false);
+              setShowEditProfile(false);
+              setShowChangePassword(false);
+              setProfileAutoOpenOnboarding(false);
+            }}
+            onMenuPress={sidebar.toggle}
+            onEditProfilePress={() => {
+              setShowEditProfile(true);
+            }}
+            onPreferencesPress={() => {
+              setShowPreferences(true);
+            }}
+            onNavigateToInfo={(screenId) => {
+              setInfoReturnToProfile(true);
+              setInfoScreen(screenId);
+            }}
+            autoOpenOnboarding={profileAutoOpenOnboarding}
+            onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
+            onOnboardingCompleted={handleOnboardingCompleted}
           />
         );
       default:
@@ -1098,7 +1101,7 @@ export function MainApp() {
             ? '#0F0F0F'
             : crearPartidoFlow.open
               ? '#0F0F0F'
-              : showProfile
+              : activeTab === 'perfil'
                 ? '#0F0F0F'
                 : showPublicProfile || !!affinityPublicProfileId
                   ? '#0F0F0F'
@@ -1110,7 +1113,6 @@ export function MainApp() {
 
   const handleTabChange = (tab: MainTabId) => {
     setActiveTab(tab);
-    setShowProfile(false);
     setShowEditProfile(false);
     setShowChangePassword(false);
     setShowPreferences(false);
@@ -1157,7 +1159,7 @@ export function MainApp() {
         }}
         onProfilePress={() => {
           resetSidebarOverlays();
-          setShowProfile(true);
+          setActiveTab('perfil');
         }}
       >
         <View style={styles.mainColumn}>
@@ -1167,7 +1169,8 @@ export function MainApp() {
             hideHeader={
               fullscreenOverlayOpen ||
               (showMainTabs && activeTab === 'pistas') ||
-              (showMainTabs && activeTab === 'torneos')
+              (showMainTabs && activeTab === 'torneos') ||
+              (showMainTabs && activeTab === 'perfil')
             }
             layoutBackgroundColor={layoutBackgroundColor}
             navbarActions={{
@@ -1179,7 +1182,7 @@ export function MainApp() {
           </ScreenLayout>
           {showMainTabs && (
             <View style={styles.bottomBar}>
-              <BottomNavbar activeTab={(showProfile || showPublicProfile) ? null : activeTab} onTabChange={handleTabChange} />
+              <BottomNavbar activeTab={showPublicProfile ? null : activeTab} onTabChange={handleTabChange} />
             </View>
           )}
         </View>

@@ -82,6 +82,17 @@ function PlayerFace({ player, colors }: { player: PartidoPlayer; colors: [string
       </View>
     );
   }
+  if (player.avatar) {
+    return (
+      <View style={styles.slotFill}>
+        <Image
+          source={{ uri: player.avatar }}
+          style={styles.slotAvatar}
+          resizeMode="cover"
+        />
+      </View>
+    );
+  }
   return (
     <LinearGradient
       colors={colors}
@@ -89,13 +100,9 @@ function PlayerFace({ player, colors }: { player: PartidoPlayer; colors: [string
       end={{ x: 1, y: 1 }}
       style={styles.slotFill}
     >
-      {player.avatar ? (
-        <Image source={{ uri: player.avatar }} style={styles.slotAvatar} />
-      ) : (
-        <Text style={styles.slotInitials} numberOfLines={1}>
-          {(player.initial ?? player.name?.slice(0, 2) ?? "?").toUpperCase()}
-        </Text>
-      )}
+      <Text style={styles.slotInitials} numberOfLines={1}>
+        {(player.initial ?? player.name?.slice(0, 2) ?? "?").toUpperCase()}
+      </Text>
     </LinearGradient>
   );
 }

@@ -32,11 +32,8 @@ function formatSkillNumber(rating: number | null | undefined): string {
   return v.toFixed(2).replace('.', ',');
 }
 
-function playerLevelLine(p: { elo_rating: number; liga?: string | null }): string {
-  const core = formatSkillNumber(p.elo_rating);
-  const raw = p.liga != null && String(p.liga).trim() !== '' ? String(p.liga).trim() : '';
-  const ligaLabel = raw ? raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase() : '';
-  return ligaLabel ? `${core} · ${ligaLabel}` : core;
+function playerLevelLine(p: { elo_rating: number }): string {
+  return formatSkillNumber(p.elo_rating);
 }
 
 export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
@@ -159,7 +156,8 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
         ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
         : fullName[0]?.toUpperCase() ?? '?';
     const level = playerLevelLine(p);
-    slots[idx] = { id: p.id, name: fullName, initial, level, isFree: false };
+    const avatar = p.avatar_url?.trim() || undefined;
+    slots[idx] = { id: p.id, name: fullName, initial, level, avatar, isFree: false };
   });
   const players = slots;
 
