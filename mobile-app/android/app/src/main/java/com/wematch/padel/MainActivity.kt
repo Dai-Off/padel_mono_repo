@@ -1,4 +1,4 @@
-package com.anonymous.padelapp
+package com.wematch.padel
 
 import android.os.Build
 import android.os.Bundle

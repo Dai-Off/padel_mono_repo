@@ -1,4 +1,4 @@
-package com.anonymous.padelapp
+package com.wematch.padel
 
 import android.app.Application
 import android.content.res.Configuration
