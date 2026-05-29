@@ -119,7 +119,8 @@ const toDateStr = (d: Date | string) =>
 
 const useClubData = (dateOrStr: Date | string) => {
     const [courts, setCourts] = useState<Court[]>([]);
-    const [reservations, setReservations] = useState<Reservation[]>([]);
+    const [gridReservations, setGridReservations] = useState<Reservation[]>([]);
+    const [listReservations, setListReservations] = useState<Reservation[]>([]);
     const [loading, setLoading] = useState(true);
     const [authResolved, setAuthResolved] = useState(false);
     const [isCreatingCourt, setIsCreatingCourt] = useState(false);
@@ -218,10 +219,16 @@ const useClubData = (dateOrStr: Date | string) => {
     }, [clubId]);
 
     // Fetch bookings for a single date — filtered by club to avoid cross-club pollution
-    const fetchBookingsForDate = useCallback(async (date: string, courtsData: Court[]): Promise<Reservation[]> => {
+    const fetchBookingsForDate = useCallback(async (
+        date: string,
+        courtsData: Court[],
+    ): Promise<{ grid: Reservation[]; list: Reservation[] }> => {
         const cached = bookingsCache[date];
         if (cached && Date.now() - cached.ts < CACHE_TTL) {
-            return mapBookings(cached.data, courtsData);
+            return {
+                grid: mapBookings(cached.data, courtsData, 'grid'),
+                list: mapBookings(cached.data, courtsData, 'list'),
+            };
         }
 
         const tz = encodeURIComponent(clubIanaTimeZone());
@@ -258,7 +265,10 @@ const useClubData = (dateOrStr: Date | string) => {
         }));
         const merged = [...raw, ...schoolAsBookings, ...privateAsBookings];
         putBookingsCache(date, merged);
-        return mapBookings(merged, courtsData);
+        return {
+            grid: mapBookings(merged, courtsData, 'grid'),
+            list: mapBookings(merged, courtsData, 'list'),
+        };
     }, [clubId]);
 
     // Prefetch silencioso de los 4 días clave, siempre relativo a HOY.
@@ -317,13 +327,15 @@ const useClubData = (dateOrStr: Date | string) => {
         // Render instantáneo: si hay caché para esta fecha, pintar de inmediato
         const cached = bookingsCache[dateStr];
         if (!isFirstLoad && cached) {
-            setReservations(mapBookings(cached.data, courtsRef.current));
+            setGridReservations(mapBookings(cached.data, courtsRef.current, 'grid'));
+            setListReservations(mapBookings(cached.data, courtsRef.current, 'list'));
         }
 
         try {
             const courtsData = await fetchCourts();
             const mapped = await fetchBookingsForDate(dateStr, courtsData);
-            setReservations(mapped);
+            setGridReservations(mapped.grid);
+            setListReservations(mapped.list);
             // Prefetch de los otros 3 días ahora que las canchas ya están disponibles
             prefetchWindow(courtsData, dateStr);
         } catch (err) {
@@ -379,18 +391,27 @@ const useClubData = (dateOrStr: Date | string) => {
                             }
                         }
                         if (rawDate !== dateStr) return;
-                        const mapped = mapBookings([raw], courtsRef.current)[0];
-                        if (!mapped) return;
-                        setReservations(prev => {
-                            const existing = prev.find(r => r.id === mapped.id);
+                        const mappedGrid = mapBookings([raw], courtsRef.current, 'grid')[0];
+                        const mappedList = mapBookings([raw], courtsRef.current, 'list')[0];
+                        if (!mappedList) return;
+                        setListReservations(prev => {
+                            const existing = prev.find(r => r.id === mappedList.id);
                             if (existing) {
-                                // Already inserted via optimistic update — preserve player data
-                                // since Realtime payloads lack joins.
                                 if (!raw.players && existing.playerName) return prev;
-                                return prev.map(r => r.id === mapped.id ? mapped : r);
+                                return prev.map(r => r.id === mappedList.id ? mappedList : r);
                             }
-                            return [...prev, mapped];
+                            return [...prev, mappedList];
                         });
+                        if (mappedGrid) {
+                            setGridReservations(prev => {
+                                const existing = prev.find(r => r.id === mappedGrid.id);
+                                if (existing) {
+                                    if (!raw.players && existing.playerName) return prev;
+                                    return prev.map(r => r.id === mappedGrid.id ? mappedGrid : r);
+                                }
+                                return [...prev, mappedGrid];
+                            });
+                        }
                     }
 
                     if (payload.eventType === 'UPDATE') {
@@ -404,7 +425,8 @@ const useClubData = (dateOrStr: Date | string) => {
                                     bookingsCache[ds] = { data: entry.data.filter((b: any) => b.id !== removedId), ts: entry.ts };
                                 }
                             }
-                            setReservations(prev => prev.filter(r => r.id !== removedId));
+                            setGridReservations(prev => prev.filter(r => r.id !== removedId));
+                            setListReservations(prev => prev.filter(r => r.id !== removedId));
                             return;
                         }
                         const rawDate = toDateStr(new Date(raw.start_at));
@@ -416,37 +438,43 @@ const useClubData = (dateOrStr: Date | string) => {
                             };
                         }
                         if (rawDate !== dateStr) return;
-                        const mapped = mapBookings([raw], courtsRef.current)[0];
-                        if (!mapped) return;
-                        // When an open_match transitions from pending_payment → confirmed (all 4 paid),
-                        // it won't be in the current list. Force a fresh fetch to get full player data.
-                        if (raw.reservation_type === 'open_match' && raw.status === 'confirmed') {
+                        if (
+                            raw.court_contention_status === 'won' ||
+                            (raw.reservation_type === 'open_match' && raw.status === 'confirmed')
+                        ) {
                             delete bookingsCache[dateStr];
                             fetchData();
                             return;
                         }
-                        setReservations(prev =>
+                        const mappedList = mapBookings([raw], courtsRef.current, 'list')[0];
+                        const mappedGrid = mapBookings([raw], courtsRef.current, 'grid')[0];
+                        if (!mappedList) return;
+                        const mergeMapped = (prev: Reservation[], mapped: Reservation): Reservation[] =>
                             prev.map(r => {
                                 if (r.id !== mapped.id) return r;
                                 const pendingStart = r.tournamentId ? pendingTournamentStartById[r.tournamentId] : undefined;
-                                if (pendingStart && mapped.startTime !== pendingStart) {
-                                    return r;
-                                }
-                                // Realtime payloads lack joined tables (players, participants, transactions).
-                                // Preserve fields from the existing reservation when the payload has no player data.
+                                if (pendingStart && mapped.startTime !== pendingStart) return r;
                                 if (!raw.players) {
                                     return {
-                                      ...mapped,
-                                      playerName: r.playerName,
-                                      matchType: r.matchType,
-                                      detailedPlayers: r.detailedPlayers,
-                                      totalPaidCents: r.totalPaidCents,
-                                      tournamentId: r.tournamentId ?? mapped.tournamentId,
+                                        ...mapped,
+                                        playerName: r.playerName,
+                                        matchType: r.matchType,
+                                        detailedPlayers: r.detailedPlayers,
+                                        totalPaidCents: r.totalPaidCents,
+                                        tournamentId: r.tournamentId ?? mapped.tournamentId,
                                     };
                                 }
                                 return mapped;
-                            })
-                        );
+                            });
+                        setListReservations(prev => mergeMapped(prev, mappedList));
+                        setGridReservations(prev => {
+                            if (!mappedGrid) {
+                                return prev.filter(r => r.id !== mappedList.id);
+                            }
+                            const exists = prev.some(r => r.id === mappedGrid.id);
+                            if (!exists) return [...prev, mappedGrid];
+                            return mergeMapped(prev, mappedGrid);
+                        });
                     }
 
                     if (payload.eventType === 'DELETE') {
@@ -458,7 +486,8 @@ const useClubData = (dateOrStr: Date | string) => {
                                 bookingsCache[ds] = { data: entry.data.filter((b: any) => b.id !== deletedId), ts: entry.ts };
                             }
                         }
-                        setReservations(prev => prev.filter(r => r.id !== deletedId));
+                        setGridReservations(prev => prev.filter(r => r.id !== deletedId));
+                        setListReservations(prev => prev.filter(r => r.id !== deletedId));
                     }
                 }
             )
@@ -543,7 +572,22 @@ const useClubData = (dateOrStr: Date | string) => {
         }
     }, []);
 
-    return { courts, reservations, loading, authResolved, isCreatingCourt, refresh, clubId, weeklySchedule, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs };
+    return {
+        courts,
+        gridReservations,
+        listReservations,
+        loading,
+        authResolved,
+        isCreatingCourt,
+        refresh,
+        clubId,
+        weeklySchedule,
+        toggleCourtHidden,
+        addHiddenCourt,
+        removeCourt,
+        typeColorOverrides,
+        typeConfigs,
+    };
 };
 
 function linkedTournamentDisplayName(b: any): string | null {
@@ -577,19 +621,18 @@ function schedulePendingTournamentStartClear(tournamentId: string, expectedSeq: 
     }, 2500);
 }
 
-// Pure mapping function — no network calls
-function mapBookings(rawBookings: any[], courtsData: Court[]): Reservation[] {
+/** Grid hides bookings still competing for the court; list shows all. */
+function mapBookings(
+    rawBookings: any[],
+    courtsData: Court[],
+    surface: 'grid' | 'list' = 'grid',
+): Reservation[] {
     const courtMap = new Map(courtsData.map(c => [c.id, c.name]));
-    return rawBookings
-        .filter(
-            (b: any) =>
-                !(
-                    b.reservation_type === 'open_match' &&
-                    b.status === 'pending_payment' &&
-                    (b.source_channel === 'web' || b.source_channel === 'mobile')
-                ),
-        )
-        .map((b: any) => {
+    const visible =
+        surface === 'list'
+            ? rawBookings
+            : rawBookings.filter((b: any) => b.court_contention_status !== 'competing');
+    return visible.map((b: any) => {
         const start = new Date(b.start_at);
         const organizer = resolveOrganizerFromBooking(b);
         const bookingType = b.reservation_type ?? b.booking_type ?? 'standard';
@@ -801,7 +844,22 @@ function GrillaViewInner() {
     return 'future';
   }, [clubTodayKey, selectedDateKey]);
 
-  const { courts, reservations: serverReservations, loading, authResolved, isCreatingCourt, refresh, clubId, weeklySchedule, toggleCourtHidden, addHiddenCourt, removeCourt, typeColorOverrides, typeConfigs } = useClubData(selectedDate);
+  const {
+    courts,
+    gridReservations: serverGridReservations,
+    listReservations: serverListReservations,
+    loading,
+    authResolved,
+    isCreatingCourt,
+    refresh,
+    clubId,
+    weeklySchedule,
+    toggleCourtHidden,
+    addHiddenCourt,
+    removeCourt,
+    typeColorOverrides,
+    typeConfigs,
+  } = useClubData(selectedDate);
 
   const gridBounds = useMemo(
     () => gridBoundsForClubDay(weeklySchedule, selectedDateKey),
@@ -850,7 +908,7 @@ function GrillaViewInner() {
 
   useEffect(() => {
     const allowed = new Set(gridCourts.map((c) => c.id));
-    const incoming = serverReservations.filter((r) => allowed.has(r.courtId));
+    const incoming = serverGridReservations.filter((r) => allowed.has(r.courtId));
     setReservations((prev) => {
       const pendingTournamentIds = new Set(
         Object.keys(pendingTournamentStartById).filter(
@@ -866,7 +924,7 @@ function GrillaViewInner() {
       });
     });
     setRecentlyDroppedId(null);
-  }, [serverReservations, gridCourts]);
+  }, [serverGridReservations, gridCourts]);
 
   // Current time indicator — updates every minute
   const [nowMinutes, setNowMinutes] = useState<number>(() => nowMinutesInClubTz());
@@ -2209,7 +2267,7 @@ function GrillaViewInner() {
             />
           ) : isReservationsListView ? (
             <ReservationsListPanel
-              reservations={serverReservations}
+              reservations={serverListReservations}
               courts={courts}
               dateStr={formatDateForInput(selectedDate)}
               clubName={portalClubName}

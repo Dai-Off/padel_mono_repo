@@ -5,8 +5,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
-import { MATCHMAKING_DEFAULT_CLUB_ID } from '../config';
 import { Skeleton } from '../components/ui/Skeleton';
+import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
+import { useClubCatalog } from '../hooks/useClubCatalog';
+import { loadStoredPreferredClubIds, saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import { fetchMatches, fetchMatchById, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import type { PartidoItem } from './PartidosScreen';
@@ -14,6 +16,7 @@ import {
   fetchMatchmakingLeagueConfig,
   fetchMatchmakingProposal,
   fetchMatchmakingStatus,
+  isMatchmakingFlowPending,
   joinMatchmaking,
   leaveMatchmaking,
   rejectMatchmakingProposal,
@@ -126,8 +129,10 @@ export function CompetitiveLeagueScreen({
   const [recentMatchRows, setRecentMatchRows] = useState<
     Array<{ id: string; title: string; subtitle: string; when: string }>
   >([]);
-  const [clubOptions, setClubOptions] = useState<Array<{ id: string; name: string }>>([]);
   const [preferredClubIds, setPreferredClubIds] = useState<string[]>([]);
+  const [clubPickerVisible, setClubPickerVisible] = useState(false);
+  const [preferredClubsHydrated, setPreferredClubsHydrated] = useState(false);
+  const { clubs: clubCatalog } = useClubCatalog();
   const [distanceKm, setDistanceKm] = useState(10);
   const [distanceTrackWidth, setDistanceTrackWidth] = useState(1);
   const [countdownText, setCountdownText] = useState<string>('--:--:--');
@@ -147,13 +152,23 @@ export function CompetitiveLeagueScreen({
     const s = await fetchMatchmakingStatus(token);
     setStatus(s);
     if (s?.status === 'matched') {
-      onMatchmakingBannerStateChange?.('matched');
-      setQueueStartedAtMs(null);
-      setQueueElapsedSec(0);
       const p = await fetchMatchmakingProposal(token);
       setProposal(p);
+      if (isMatchmakingFlowPending(s, p)) {
+        onMatchmakingBannerStateChange?.('matched');
+        setQueueStartedAtMs(null);
+        setQueueElapsedSec(0);
+        setLoading(false);
+        setStep('found');
+        clearPollTimer();
+        return;
+      }
+      onMatchmakingBannerStateChange?.('hidden', { force: true });
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
+      setProposal(null);
       setLoading(false);
-      setStep('found');
+      setStep('home');
       clearPollTimer();
       return;
     }
@@ -178,12 +193,21 @@ export function CompetitiveLeagueScreen({
     setStatus(s);
     if (s?.status === 'matched') {
       clearPollTimer();
-      onMatchmakingBannerStateChange?.('matched');
-      setQueueStartedAtMs(null);
-      setQueueElapsedSec(0);
       const p = await fetchMatchmakingProposal(token);
       setProposal(p);
-      setStep('found');
+      if (isMatchmakingFlowPending(s, p)) {
+        onMatchmakingBannerStateChange?.('matched');
+        setQueueStartedAtMs(null);
+        setQueueElapsedSec(0);
+        setStep('found');
+        return;
+      }
+      onMatchmakingBannerStateChange?.('hidden', { force: true });
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
+      setProposal(null);
+      setStep('home');
+      return;
     } else if (s?.status === 'searching') {
       onMatchmakingBannerStateChange?.('searching');
       if (queueStartedAtMs == null) setQueueStartedAtMs(Date.now());
@@ -256,17 +280,44 @@ export function CompetitiveLeagueScreen({
       if (cancelled) return;
       const myMatches = rows.filter((m) => (m.match_players ?? []).some((mp) => mp.players?.id === myId));
       setRecentMatchRows(toRecentRows(myMatches, myId));
-      const clubs = new Map<string, string>();
-      for (const m of myMatches) {
-        const c = getMatchBooking(m)?.courts?.clubs;
-        if (c?.id && c.name) clubs.set(c.id, c.name);
-      }
-      setClubOptions([...clubs.entries()].map(([id, name]) => ({ id, name })));
     });
     return () => {
       cancelled = true;
     };
   }, [profile?.id, session?.access_token]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadStoredPreferredClubIds().then((stored) => {
+      if (!cancelled && stored.length > 0) setPreferredClubIds(stored);
+      if (!cancelled) setPreferredClubsHydrated(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!preferredClubsHydrated || preferredClubIds.length > 0 || clubCatalog.length === 0) return;
+    const favNames = new Set(
+      (profile?.preferences.favoriteClubs ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean),
+    );
+    if (favNames.size === 0) return;
+    const fromProfile = clubCatalog
+      .filter((c) => favNames.has(c.name.trim().toLowerCase()))
+      .map((c) => c.id);
+    if (fromProfile.length > 0) setPreferredClubIds(fromProfile);
+  }, [clubCatalog, preferredClubIds.length, preferredClubsHydrated, profile?.preferences.favoriteClubs]);
+
+  useEffect(() => {
+    if (!preferredClubsHydrated) return;
+    void saveStoredPreferredClubIds(preferredClubIds);
+  }, [preferredClubIds, preferredClubsHydrated]);
+
+  const preferredClubLabels = useMemo(() => {
+    const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
+    return preferredClubIds.map((id) => byId.get(id) ?? 'Club');
+  }, [clubCatalog, preferredClubIds]);
 
   const division = useMemo(() => {
     if (!profile) return null;
@@ -352,9 +403,8 @@ export function CompetitiveLeagueScreen({
       preferred_side: form.preferred_side,
       gender: form.gender,
     };
-    const wantClub = preferredClubIds.length > 0 || form.search_area === 'club';
-    if (wantClub) {
-      payload.club_id = MATCHMAKING_DEFAULT_CLUB_ID;
+    if (preferredClubIds.length > 0) {
+      payload.preferred_club_ids = preferredClubIds;
     } else {
       const maxKm = Math.max(1, Math.min(50, Math.round(distanceKm)));
       const perm = await Location.requestForegroundPermissionsAsync();
@@ -623,14 +673,14 @@ export function CompetitiveLeagueScreen({
             { paddingTop: FLOW_TOP_PADDING + 32, paddingBottom: insets.bottom + 28 },
           ]}
         >
-          {(status?.status === 'searching' || status?.status === 'matched') && (
+          {(status?.status === 'searching' || isMatchmakingFlowPending(status, proposal)) && (
             <Pressable
               style={styles.resumeBanner}
-              onPress={() => setStep(status.status === 'matched' ? 'found' : 'queue')}
+              onPress={() => setStep(status?.status === 'matched' ? 'found' : 'queue')}
             >
               <Ionicons name="radio-outline" size={16} color="#F59E0B" />
               <Text style={styles.resumeBannerText}>
-                {status.status === 'matched'
+                {status?.status === 'matched'
                   ? 'Tienes partido encontrado'
                   : 'Búsqueda en curso en segundo plano'}
               </Text>
@@ -875,27 +925,24 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="location-outline" size={14} color="#F59E0B" />
               <Text style={styles.optionTitle}>Clubes preferidos (opcional)</Text>
             </View>
-            {clubOptions.length === 0 ? (
-              <Text style={styles.clubEmpty}>No hay clubes disponibles en tus partidos recientes.</Text>
-            ) : (
-              clubOptions.map((club) => {
-                const active = preferredClubIds.includes(club.id);
-                return (
-                  <Pressable
-                    key={club.id}
-                    style={[styles.clubRow, active && styles.clubRowActive]}
-                    onPress={() =>
-                      setPreferredClubIds((prev) =>
-                        prev.includes(club.id) ? prev.filter((id) => id !== club.id) : [...prev, club.id],
-                      )
-                    }
-                  >
-                    <Text style={[styles.clubName, active && styles.clubNameActive]}>{club.name}</Text>
-                    {active ? <Ionicons name="checkmark-circle" size={18} color="#F59E0B" /> : null}
-                  </Pressable>
-                );
-              })
-            )}
+            <Pressable
+              style={styles.clubPickerBtn}
+              onPress={() => setClubPickerVisible(true)}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={styles.clubPickerBtnTitle}>
+                  {preferredClubIds.length === 0
+                    ? 'Elegir clubes'
+                    : `${preferredClubIds.length} club${preferredClubIds.length === 1 ? '' : 'es'} seleccionado${preferredClubIds.length === 1 ? '' : 's'}`}
+                </Text>
+                <Text style={styles.clubPickerBtnSub} numberOfLines={2}>
+                  {preferredClubIds.length === 0
+                    ? 'Si no eliges ninguno, buscamos por distancia máxima'
+                    : preferredClubLabels.join(' · ')}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            </Pressable>
           </View>
 
           <Pressable style={styles.primaryBtn} onPress={() => void handleJoinQueue()} disabled={loading}>
@@ -946,7 +993,14 @@ export function CompetitiveLeagueScreen({
           <View style={styles.queueSummaryBox}>
             <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>Formato</Text><Text style={styles.queueVal}>2v2 (Por parejas)</Text></View>
             <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>Horario</Text><Text style={styles.queueVal}>{form.time === 'manana' ? 'Mañana' : form.time === 'tarde' ? 'Tarde' : 'Noche'}</Text></View>
-            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>Distancia</Text><Text style={styles.queueVal}>Hasta {distanceKm} km</Text></View>
+            <View style={styles.queueSummaryRow}>
+              <Text style={styles.queueKey}>Ubicación</Text>
+              <Text style={styles.queueVal} numberOfLines={2}>
+                {preferredClubIds.length > 0
+                  ? preferredClubLabels.join(', ')
+                  : `Hasta ${distanceKm} km`}
+              </Text>
+            </View>
             <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>Modalidad</Text><Text style={styles.queueVal}>{form.gender === 'male' ? 'Masculino' : form.gender === 'female' ? 'Femenino' : form.gender === 'mixed' ? 'Mixto' : 'Sin pref.'}</Text></View>
             <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>Lado</Text><Text style={styles.queueVal}>{form.preferred_side === 'drive' ? 'Derecha' : form.preferred_side === 'backhand' ? 'Izquierda' : 'Ambos'}</Text></View>
           </View>
@@ -1028,6 +1082,14 @@ export function CompetitiveLeagueScreen({
         </View>
       )}
 
+      <ClubMultiSelectPicker
+        visible={clubPickerVisible}
+        selectedIds={preferredClubIds}
+        onChange={setPreferredClubIds}
+        onClose={() => setClubPickerVisible(false)}
+        title="Clubes para matchmaking"
+        subtitle="Podés elegir varios. Sin selección, usamos la distancia máxima."
+      />
     </View>
   );
 }
@@ -1404,6 +1466,18 @@ const styles = StyleSheet.create({
   },
   sliderLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
   sliderLabel: { color: '#9ca3af', fontSize: 11 },
+  clubPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#141414',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  clubPickerBtnTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  clubPickerBtnSub: { color: '#9ca3af', fontSize: 12, marginTop: 4 },
   clubRow: {
     borderRadius: 12,
     borderWidth: 1,

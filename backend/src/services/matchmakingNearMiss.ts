@@ -9,7 +9,7 @@ import {
   type QuartetPreCourtContext,
   buildUnits,
   iterUnitCombos,
-  resolveClubId,
+  resolveCandidateClubIds,
   quartetPreCourtValid,
 } from './matchmakingShared';
 
@@ -49,7 +49,7 @@ export async function runNearMissTripletScan(): Promise<number> {
   const { data: poolRows, error } = await supabase
     .from('matchmaking_pool')
     .select(
-      'id, player_id, paired_with_id, club_id, max_distance_km, preferred_side, gender, available_from, available_until, expires_at, search_lat, search_lng, created_at, expansion_offer, status',
+      'id, player_id, paired_with_id, club_id, preferred_club_ids, max_distance_km, preferred_side, gender, available_from, available_until, expires_at, search_lat, search_lng, created_at, expansion_offer, status',
     )
     .eq('status', 'searching');
 
@@ -113,10 +113,16 @@ export async function runNearMissTripletScan(): Promise<number> {
     }
   }
 
-  const clubIds = [...new Set(rows.map((r) => r.club_id).filter(Boolean))] as string[];
+  const clubIds = new Set<string>();
+  for (const r of rows) {
+    if (r.club_id) clubIds.add(r.club_id);
+    for (const id of r.preferred_club_ids ?? []) {
+      if (id) clubIds.add(id);
+    }
+  }
   const clubPosById = new Map<string, { lat: number; lng: number }>();
-  if (clubIds.length) {
-    const { data: clubData } = await supabase.from('clubs').select('id, lat, lng').in('id', clubIds);
+  if (clubIds.size > 0) {
+    const { data: clubData } = await supabase.from('clubs').select('id, lat, lng').in('id', [...clubIds]);
     for (const c of clubData ?? []) {
       const row = c as { id: string; lat: number | null; lng: number | null };
       if (row.lat != null && row.lng != null && Number.isFinite(row.lat) && Number.isFinite(row.lng)) {
@@ -165,8 +171,9 @@ export async function runNearMissTripletScan(): Promise<number> {
 
       const flat4 = [...tripletRows, pRow];
       const ids4 = [...tripletIds, pRow.player_id];
-      const clubId = resolveClubId(flat4);
-      if (!clubId) continue;
+      const clubCandidates = resolveCandidateClubIds(flat4, clubPosById);
+      if (clubCandidates.length === 0) continue;
+      const clubId = clubCandidates[0]!;
 
       if (quartetPreCourtValid(flat4, ids4, clubId, ctxBase)) {
         continue;
