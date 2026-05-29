@@ -165,7 +165,7 @@ function withPublicPlayerAndMm(row: Row, wl: MmWl): Row {
 }
 
 const SELECT_PUBLIC_INTERNAL = `
-  id, created_at, updated_at, first_name, last_name, email, phone, username, status, auth_user_id, avatar_url, gender,
+  id, created_at, updated_at, first_name, last_name, email, phone, username, status, auth_user_id, avatar_url, cover_url, gender,
   mu, sigma, elo_rating, sp,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents,
@@ -192,6 +192,18 @@ function normalizeAvatarUrl(body: Record<string, unknown>): AvatarNormalize {
   if (!t) return { ok: true, mode: 'set', value: null };
   if (t.length > AVATAR_URL_MAX) return { ok: false, error: `avatar_url admite como máximo ${AVATAR_URL_MAX} caracteres` };
   if (!/^https?:\/\//i.test(t)) return { ok: false, error: 'avatar_url debe ser una URL http(s) absoluta' };
+  return { ok: true, mode: 'set', value: t };
+}
+
+function normalizeCoverUrl(body: Record<string, unknown>): AvatarNormalize {
+  if (!Object.prototype.hasOwnProperty.call(body, 'cover_url')) return { ok: true, mode: 'omit' };
+  const raw = body.cover_url;
+  if (raw === null) return { ok: true, mode: 'set', value: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'cover_url debe ser texto o null' };
+  const t = raw.trim();
+  if (!t) return { ok: true, mode: 'set', value: null };
+  if (t.length > AVATAR_URL_MAX) return { ok: false, error: `cover_url admite como máximo ${AVATAR_URL_MAX} caracteres` };
+  if (!/^https?:\/\//i.test(t)) return { ok: false, error: 'cover_url debe ser una URL http(s) absoluta' };
   return { ok: true, mode: 'set', value: t };
 }
 
@@ -558,6 +570,11 @@ router.patch('/me', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: avatarNorm.error });
   }
 
+  const coverNorm = normalizeCoverUrl(body as Record<string, unknown>);
+  if (!coverNorm.ok) {
+    return res.status(400).json({ ok: false, error: coverNorm.error });
+  }
+
   const hasPhone = Object.prototype.hasOwnProperty.call(body, 'phone');
   let phoneFinal: string | null = null;
   if (hasPhone) {
@@ -587,10 +604,10 @@ router.patch('/me', async (req: Request, res: Response) => {
     usernameFinal = un.value;
   }
 
-  if (!firstFinal && avatarNorm.mode === 'omit' && !hasPhone && !prefsNorm.hasAny && !hasUsername) {
+  if (!firstFinal && avatarNorm.mode === 'omit' && coverNorm.mode === 'omit' && !hasPhone && !prefsNorm.hasAny && !hasUsername) {
     return res.status(400).json({
       ok: false,
-      error: 'Envía first_name y last_name, y/o avatar_url, y/o phone, y/o username, y/o preferencias',
+      error: 'Envía first_name y last_name, y/o avatar_url, y/o cover_url, y/o phone, y/o username, y/o preferencias',
     });
   }
 
@@ -655,6 +672,9 @@ router.patch('/me', async (req: Request, res: Response) => {
     }
     if (avatarNorm.mode === 'set') {
       patch.avatar_url = avatarNorm.value;
+    }
+    if (coverNorm.mode === 'set') {
+      patch.cover_url = coverNorm.value;
     }
     if (phoneFinal !== null) {
       const { data: dupPhone, error: dupErr } = await supabase
