@@ -3,11 +3,11 @@ export type ParsedTournamentInvite = {
   tournamentId: string;
 };
 
-/** Deep link: padelapp://tournament-invite?token=…&tournament_id=… */
+/** Deep link: wematch://tournament-invite?token=…&tournament_id=… */
 export function parseTournamentInviteUrl(url: string): ParsedTournamentInvite | null {
   if (!url?.trim()) return null;
   try {
-    const normalized = url.replace(/^padelapp:\/\//i, 'https://padelapp/');
+    const normalized = url.replace(/^wematch:\/\//i, 'https://wematch/');
     const parsed = new URL(normalized);
     const path = parsed.pathname.toLowerCase();
     const isInvitePath =

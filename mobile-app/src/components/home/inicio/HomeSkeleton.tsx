@@ -17,13 +17,10 @@ import { INICIO_STACK_GAP } from './constants';
 export function HomeSkeleton() {
   return (
     <View style={styles.stack}>
-      {/* Mis partidos: header + 2 cards horizontales. */}
-      <View>
-        <Skeleton width={160} height={18} variant="dark" borderRadius={6} />
-        <View style={styles.matchesRow}>
-          <Skeleton height={120} variant="dark" borderRadius={16} style={styles.matchCard} />
-          <Skeleton height={120} variant="dark" borderRadius={16} style={styles.matchCard} />
-        </View>
+      {/* Mis partidos: 2 cards horizontales. */}
+      <View style={styles.matchesRow}>
+        <Skeleton height={120} variant="dark" borderRadius={16} style={styles.matchCard} />
+        <Skeleton height={120} variant="dark" borderRadius={16} style={styles.matchCard} />
       </View>
 
       {/* Widget carousel (lección diaria + season pass + liga). Altura 160 px

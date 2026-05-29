@@ -261,7 +261,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
             <TextInput
               value={searchQ}
               onChangeText={setSearchQ}
-              placeholder="Nombre o apellido (mín. 2 caracteres)"
+              placeholder="Nombre, apellido o @usuario"
               placeholderTextColor="rgba(255,255,255,0.35)"
               style={styles.modalInput}
               autoCorrect={false}
@@ -277,6 +277,8 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                 style={styles.modalList}
                 renderItem={({ item }) => {
                   const dn = formatPlayerLabel(item);
+                  const fullName = `${item.first_name ?? ''} ${item.last_name ?? ''}`.trim();
+                  const hasUsername = !!item.username?.trim();
                   return (
                     <Pressable
                       style={({ pressed }) => [styles.searchRow, pressed && styles.rowPressed]}
@@ -289,18 +291,23 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                       }
                     >
                       <View style={styles.avatar}>
-                        <Text style={styles.avatarText}>{initials(dn)}</Text>
+                        <Text style={styles.avatarText}>{initials(fullName || dn)}</Text>
                       </View>
-                      <Text style={styles.peerName}>{dn}</Text>
+                      <View style={styles.searchRowText}>
+                        <Text style={styles.peerName}>
+                          {hasUsername ? `@${item.username}` : fullName || 'Jugador'}
+                        </Text>
+                        {hasUsername && fullName ? (
+                          <Text style={styles.searchRowSub}>{fullName}</Text>
+                        ) : null}
+                      </View>
                     </Pressable>
                   );
                 }}
                 ListEmptyComponent={
                   searchQ.trim().length >= 2 && !searchLoading ? (
                     <Text style={styles.empty}>Sin resultados</Text>
-                  ) : (
-                    <Text style={styles.emptyMuted}>Escribe al menos 2 caracteres</Text>
-                  )
+                  ) : null
                 }
               />
             )}
@@ -415,11 +422,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.md,
     lineHeight: theme.lineHeightFor(theme.fontSize.base),
   },
-  emptyMuted: {
-    color: 'rgba(255,255,255,0.35)',
-    textAlign: 'center',
-    marginTop: theme.spacing.md,
-  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.65)',
@@ -460,4 +462,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.06)',
   },
+  searchRowText: { flex: 1, minWidth: 0 },
+  searchRowSub: { color: 'rgba(255,255,255,0.45)', fontSize: theme.fontSize.sm, marginTop: 2 },
 });

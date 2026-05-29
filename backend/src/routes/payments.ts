@@ -1072,7 +1072,7 @@ export async function customerPortalHandler(req: Request, res: Response): Promis
         .eq('id', player.id);
     }
 
-    const returnUrl = (req.body?.return_url as string) || 'padelapp://payments';
+    const returnUrl = (req.body?.return_url as string) || 'wematch://payments';
     const stripe = getStripe();
     const session = await stripe.billingPortal.sessions.create({
       customer: customerId,

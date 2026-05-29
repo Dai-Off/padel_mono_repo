@@ -1,7 +1,7 @@
 {
 	"info": {
 		"_postman_id": "8430adde-3b04-42c9-8dba-c13893a9f5ed",
-		"name": "Padel App - Onboarding CRUD",
+		"name": "WeMatch - Onboarding CRUD",
 		"description": "Colección para probar el nuevo sistema de cuestionario inicial y la gestión administrativa de preguntas.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
