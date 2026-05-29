@@ -98,6 +98,12 @@ export function ProximosPartidosSection({
   const cardWidth =
     !loading && items.length === 1 ? singleCardW : carouselCardW;
 
+  // Si ya cargó y no hay partidos próximos ni por confirmar, ocultar toda la
+  // sección. El skeleton sigue mostrándose mientras carga.
+  if (!loading && items.length === 0) {
+    return null;
+  }
+
   return (
     <View style={styles.section}>
       <View style={styles.headerRow}>
@@ -140,12 +146,6 @@ export function ProximosPartidosSection({
             </Pressable>
           </CarouselItem>
         </ScrollView>
-      ) : items.length === 0 ? (
-        <View style={styles.emptyHint}>
-          <Text style={styles.emptyHintText}>
-            Cuando reserves o te unas a un partido, aparecerá aquí.
-          </Text>
-        </View>
       ) : (
         <ScrollView
           horizontal
@@ -290,19 +290,5 @@ const styles = StyleSheet.create({
     width: '44%',
     borderRadius: 4,
     backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  emptyHint: {
-    minHeight: 72,
-    paddingVertical: 16,
-    paddingHorizontal: 4,
-    justifyContent: 'center',
-  },
-  emptyHintText: {
-    ...androidReadableText({
-      fontSize: 13,
-      color: '#6b7280',
-      fontWeight: '500',
-      lineHeight: 18,
-    }),
   },
 });
