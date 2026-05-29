@@ -3,6 +3,7 @@ import { TuActividadScreen, type TuActividadDestination } from './TuActividadScr
 import { MisPartidosActividadScreen } from './tuActividad/MisPartidosActividadScreen';
 import { MisClasesActividadScreen } from './tuActividad/MisClasesActividadScreen';
 import { MisCompeticionesActividadScreen } from './tuActividad/MisCompeticionesActividadScreen';
+import { MisClubesFavoritosActividadScreen } from './tuActividad/MisClubesFavoritosActividadScreen';
 import type { PartidoItem } from './PartidosScreen';
 
 type TuActividadFlowProps = {
@@ -30,6 +31,9 @@ function TuActividadFlowInner({
   }
   if (subView === 'competiciones') {
     return <MisCompeticionesActividadScreen onBack={onBackToMenu} />;
+  }
+  if (subView === 'clubes-favoritos') {
+    return <MisClubesFavoritosActividadScreen onBack={onBackToMenu} />;
   }
   return <TuActividadScreen onBack={onCloseFlow} onNavigate={onNavigate} />;
 }

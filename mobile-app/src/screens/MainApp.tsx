@@ -892,13 +892,6 @@ export function MainApp() {
               setShowCommunity(true);
               return;
             }
-            if (destination === 'clubes-favoritos') {
-              setShowTuActividad(false);
-              setTuActividadSubView(null);
-              setPreferencesReturnToTuActividad(true);
-              setShowPreferences(true);
-              return;
-            }
             setTuActividadSubView(destination);
           }}
           onPartidoPress={(p) => setSelectedPartido(p)}

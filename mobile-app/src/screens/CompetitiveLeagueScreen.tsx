@@ -132,6 +132,7 @@ export function CompetitiveLeagueScreen({
   const [preferredClubIds, setPreferredClubIds] = useState<string[]>([]);
   const [clubPickerVisible, setClubPickerVisible] = useState(false);
   const [preferredClubsHydrated, setPreferredClubsHydrated] = useState(false);
+  const preferredClubsSeedDoneRef = useRef(false);
   const { clubs: clubCatalog } = useClubCatalog();
   const [distanceKm, setDistanceKm] = useState(10);
   const [distanceTrackWidth, setDistanceTrackWidth] = useState(1);
@@ -287,27 +288,38 @@ export function CompetitiveLeagueScreen({
   }, [profile?.id, session?.access_token]);
 
   useEffect(() => {
+    if (preferredClubsSeedDoneRef.current || clubCatalog.length === 0) return;
+
     let cancelled = false;
-    void loadStoredPreferredClubIds().then((stored) => {
-      if (!cancelled && stored.length > 0) setPreferredClubIds(stored);
-      if (!cancelled) setPreferredClubsHydrated(true);
-    });
+    void (async () => {
+      const stored = await loadStoredPreferredClubIds();
+      if (cancelled || preferredClubsSeedDoneRef.current) return;
+
+      if (stored.length > 0) {
+        preferredClubsSeedDoneRef.current = true;
+        setPreferredClubIds(stored);
+        setPreferredClubsHydrated(true);
+        return;
+      }
+
+      if (!profile) return;
+
+      preferredClubsSeedDoneRef.current = true;
+      const favNames = new Set(
+        (profile.preferences.favoriteClubs ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean),
+      );
+      if (favNames.size > 0) {
+        setPreferredClubIds(
+          clubCatalog.filter((c) => favNames.has(c.name.trim().toLowerCase())).map((c) => c.id),
+        );
+      }
+      setPreferredClubsHydrated(true);
+    })();
+
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  useEffect(() => {
-    if (!preferredClubsHydrated || preferredClubIds.length > 0 || clubCatalog.length === 0) return;
-    const favNames = new Set(
-      (profile?.preferences.favoriteClubs ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean),
-    );
-    if (favNames.size === 0) return;
-    const fromProfile = clubCatalog
-      .filter((c) => favNames.has(c.name.trim().toLowerCase()))
-      .map((c) => c.id);
-    if (fromProfile.length > 0) setPreferredClubIds(fromProfile);
-  }, [clubCatalog, preferredClubIds.length, preferredClubsHydrated, profile?.preferences.favoriteClubs]);
+  }, [clubCatalog, profile]);
 
   useEffect(() => {
     if (!preferredClubsHydrated) return;
