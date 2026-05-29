@@ -13,6 +13,7 @@ import {
 } from '../services/matchmakingService';
 import { closeActiveMatchmakingSeason } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
+import { clearMatchmakingPoolIfPlayerPaid } from '../services/matchmakingPoolCleanup';
 
 async function countActiveSearching(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
@@ -118,7 +119,11 @@ router.get('/league-config', async (_req: Request, res: Response) => {
  *             type: object
  *             required: [available_from, available_until]
  *             properties:
- *               club_id: { type: string, format: uuid }
+ *               club_id: { type: string, format: uuid, description: 'Un solo club fijo (legacy; preferir preferred_club_ids) }
+ *               preferred_club_ids:
+ *                 type: array
+ *                 items: { type: string, format: uuid }
+ *                 description: Clubes donde el jugador acepta jugar (vacío = sin restricción de sede)
  *               max_distance_km: { type: integer }
  *               preferred_side: { type: string, enum: [drive, backhand, any] }
  *               gender: { type: string, default: any }
@@ -138,6 +143,7 @@ router.post('/join', async (req: Request, res: Response) => {
 
   const {
     club_id,
+    preferred_club_ids: preferredClubIdsRaw,
     max_distance_km,
     preferred_side,
     gender,
@@ -149,6 +155,32 @@ router.post('/join', async (req: Request, res: Response) => {
   } = req.body ?? {};
   if (!available_from || !available_until) {
     return res.status(400).json({ ok: false, error: 'available_from y available_until son obligatorios' });
+  }
+
+  let preferredClubIds: string[] = [];
+  if (preferredClubIdsRaw != null) {
+    if (!Array.isArray(preferredClubIdsRaw)) {
+      return res.status(400).json({ ok: false, error: 'preferred_club_ids debe ser un array de UUID' });
+    }
+    preferredClubIds = [
+      ...new Set(
+        preferredClubIdsRaw
+          .map((id: unknown) => (typeof id === 'string' ? id.trim() : ''))
+          .filter((id) => id.length > 0),
+      ),
+    ].slice(0, 20);
+    if (preferredClubIds.length > 0) {
+      const { data: found, error: clubsErr } = await getSupabaseServiceRoleClient()
+        .from('clubs')
+        .select('id')
+        .in('id', preferredClubIds);
+      if (clubsErr) return res.status(500).json({ ok: false, error: clubsErr.message });
+      const valid = new Set((found ?? []).map((c) => (c as { id: string }).id));
+      const missing = preferredClubIds.filter((id) => !valid.has(id));
+      if (missing.length > 0) {
+        return res.status(400).json({ ok: false, error: 'Uno o más club_id de preferred_club_ids no existen' });
+      }
+    }
   }
 
   const maxKm = max_distance_km != null ? Number(max_distance_km) : null;
@@ -200,10 +232,21 @@ router.post('/join', async (req: Request, res: Response) => {
   if (g === 'mixed' && !(pl as { sex?: string | null }).sex) {
     g = 'any';
   }
+  let resolvedClubId: string | null = null;
+  let poolPreferredClubIds: string[] = [];
+  if (typeof club_id === 'string' && club_id.trim()) {
+    resolvedClubId = club_id.trim();
+  } else if (preferredClubIds.length === 1) {
+    resolvedClubId = preferredClubIds[0]!;
+  } else if (preferredClubIds.length > 1) {
+    poolPreferredClubIds = preferredClubIds;
+  }
+
   const { error: insErr } = await supabase.from('matchmaking_pool').insert({
     player_id: playerId,
     paired_with_id: paired_with_id ?? null,
-    club_id: club_id ?? null,
+    club_id: resolvedClubId,
+    preferred_club_ids: poolPreferredClubIds,
     max_distance_km: maxKm,
     preferred_side: side,
     gender: g,
@@ -298,6 +341,19 @@ router.get('/status', async (req: Request, res: Response) => {
   }
 
   const st = (row as { status: string }).status;
+  if (st === 'matched') {
+    const cleared = await clearMatchmakingPoolIfPlayerPaid(supabase, playerId);
+    if (cleared) {
+      return res.json({
+        ok: true,
+        status: 'not_in_pool',
+        match_id: null,
+        expansion_offer: null,
+        searching_count: counts.total,
+        searching_in_club_count: counts.in_club,
+      });
+    }
+  }
   if (st === 'searching') {
     const t = Date.now();
     if (t - lastStatusTriggeredCycleMs >= STATUS_MATCHMAKING_CYCLE_THROTTLE_MS) {
@@ -477,6 +533,18 @@ router.get('/proposal', async (req: Request, res: Response) => {
     .eq('player_id', playerId)
     .maybeSingle();
 
+  const yourPaymentStatus = (part as { payment_status?: string } | null)?.payment_status ?? null;
+  if (yourPaymentStatus === 'paid') {
+    await clearMatchmakingPoolIfPlayerPaid(supabase, playerId, bookingId);
+    return res.json({
+      ok: true,
+      has_proposal: false,
+      status: 'not_in_pool',
+      match_id: matchId,
+      your_payment_status: 'paid',
+    });
+  }
+
   return res.json({
     ok: true,
     has_proposal: true,
@@ -489,7 +557,7 @@ router.get('/proposal', async (req: Request, res: Response) => {
     booking: booking ?? null,
     your_participant_id: (part as { id?: string } | null)?.id ?? null,
     your_share_cents: (part as { share_amount_cents?: number } | null)?.share_amount_cents ?? null,
-    your_payment_status: (part as { payment_status?: string } | null)?.payment_status ?? null,
+    your_payment_status: yourPaymentStatus,
   });
 });
 
