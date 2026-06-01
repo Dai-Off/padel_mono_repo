@@ -191,9 +191,16 @@ function AuthProviderInner({ children }: { children: ReactNode }) {
     return () => sub.remove();
   }, [refreshAccessToken]);
 
+  const isLoggingOutRef = useRef(false);
   const logout = useCallback(async () => {
-    setSessionState(null);
-    await AsyncStorage.removeItem(SESSION_KEY);
+    if (isLoggingOutRef.current) return;
+    isLoggingOutRef.current = true;
+    try {
+      setSessionState(null);
+      await AsyncStorage.removeItem(SESSION_KEY);
+    } finally {
+      isLoggingOutRef.current = false;
+    }
   }, []);
 
   // Lógica de autorefresh de token (revisión proactiva)
