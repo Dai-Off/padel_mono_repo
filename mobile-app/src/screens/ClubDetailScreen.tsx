@@ -33,7 +33,12 @@ import {
 } from "../api/payments";
 import { fetchMyPlayerId } from "../api/players";
 import { useAuth } from "../contexts/AuthContext";
+import { useHomeData } from "../contexts/HomeDataContext";
 import { PartidoCard } from "../components/partido/PartidoCard";
+import {
+  defaultFriendlyRange,
+  FriendlyLevelRangeSection,
+} from "../components/partido/FriendlyLevelRangeSection";
 import type { BookingConfirmationData } from "./BookingConfirmationScreen";
 import { PrivateReservationModal } from "../components/partido/PrivateReservationModal";
 import type { PartidoItem } from "./PartidosScreen";
@@ -343,6 +348,7 @@ export function ClubDetailScreen({
   onPartidoPress,
 }: ClubDetailScreenProps) {
   const { session } = useAuth();
+  const { profile } = useHomeData();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [activeTab, setActiveTab] = useState<TabId>("Home");
   const [clubPartidos, setClubPartidos] = useState<PartidoItem[]>([]);
@@ -388,7 +394,13 @@ export function ClubDetailScreen({
 
   const loadClubPartidos = useCallback(async () => {
     setPartidosLoading(true);
-    const matches = await fetchMatches({ expand: true, clubId: court.clubId });
+    const matches = await fetchMatches({
+      expand: true,
+      clubId: court.clubId,
+      activeOnly: true,
+      visibility: "public",
+      discovery: true,
+    });
     const filtered = matches
       .filter((m) => matchBelongsToClub(m, court.clubId))
       .map(mapMatchToPartido)
@@ -419,6 +431,10 @@ export function ClubDetailScreen({
   const [expandedCourtId, setExpandedCourtId] = useState<string | null>(null);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
   const [reserving, setReserving] = useState(false);
+  const [partidoPrivado, setPartidoPrivado] = useState(false);
+  const [restrictByLevel, setRestrictByLevel] = useState(false);
+  const [eloMin, setEloMin] = useState(() => defaultFriendlyRange(3.5).eloMin);
+  const [eloMax, setEloMax] = useState(() => defaultFriendlyRange(3.5).eloMax);
   const dateOptions = getNextDays(7);
 
   const selectedDate = useMemo(() => {
@@ -543,12 +559,16 @@ export function ClubDetailScreen({
   }, [activeTab, selectedDate, loadTimeSlotsForDate, duration]);
 
   useEffect(() => {
+    if (profile?.id) {
+      setOrganizerPlayerId(profile.id);
+      return;
+    }
     if (session?.access_token) {
       fetchMyPlayerId(session.access_token).then(setOrganizerPlayerId);
     } else {
       setOrganizerPlayerId(null);
     }
-  }, [session?.access_token]);
+  }, [profile?.id, session?.access_token]);
 
   const handleReservar = useCallback(
     async (
@@ -573,8 +593,20 @@ export function ClubDetailScreen({
         );
         return;
       }
-      if (!organizerPlayerId || !session?.access_token) {
+      if (!session?.access_token) {
         Alert.alert("Inicia sesión", "Debes iniciar sesión para reservar.");
+        return;
+      }
+      let playerId = organizerPlayerId ?? profile?.id ?? null;
+      if (!playerId) {
+        playerId = await fetchMyPlayerId(session.access_token);
+        if (playerId) setOrganizerPlayerId(playerId);
+      }
+      if (!playerId) {
+        Alert.alert(
+          "Perfil de jugador",
+          "No encontramos tu perfil. Espera un momento e inténtalo de nuevo.",
+        );
         return;
       }
       if (finalPriceCents <= 0) {
@@ -585,7 +617,7 @@ export function ClubDetailScreen({
         return;
       }
 
-      const shouldOfferPayLater = c.allow_payment_after_play === true;
+      const shouldOfferPayLater = c.allow_payment_after_play === true && partidoPrivado;
       const askPayLaterChoice = () =>
         new Promise<"pay_now" | "pay_later" | "cancel">((resolve) => {
           if (!shouldOfferPayLater) {
@@ -614,7 +646,7 @@ export function ClubDetailScreen({
       if (payChoice === "pay_later") {
         const created = await createPayLaterBooking({
           courtId: c.id,
-          organizerPlayerId,
+          organizerPlayerId: playerId,
           startAtIso: start_at,
           endAtIso: end_at,
           totalPriceCents,
@@ -633,7 +665,7 @@ export function ClubDetailScreen({
           dateTimeFormatted: formatDateTimeForConfirmation(selectedDate, selectedTimeSlot),
           duration: `${duration} min`,
           priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
-          matchVisibility: "private",
+          matchVisibility: partidoPrivado ? "private" : "public",
           clubId: court.clubId,
           courtId: c.id,
           date: localCalendarYmd(selectedDate),
@@ -646,14 +678,16 @@ export function ClubDetailScreen({
       const intentRes = await createIntentForNewMatch(
         {
           court_id: c.id,
-          organizer_player_id: organizerPlayerId,
+          organizer_player_id: playerId,
           start_at,
           end_at,
           total_price_cents: totalPriceCents,
           pay_full: true,
-          visibility: "private",
+          visibility: partidoPrivado ? "private" : "public",
           competitive: false,
           gender: "any",
+          elo_min: !partidoPrivado && restrictByLevel ? eloMin : null,
+          elo_max: !partidoPrivado && restrictByLevel ? eloMax : null,
         },
         session.access_token,
       );
@@ -730,7 +764,7 @@ export function ClubDetailScreen({
         ),
         duration: `${duration} min`,
         priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
-        matchVisibility: "private",
+        matchVisibility: partidoPrivado ? "private" : "public",
         clubId: court.clubId,
         courtId: c.id,
         date: localCalendarYmd(selectedDate),
@@ -742,8 +776,13 @@ export function ClubDetailScreen({
       selectedTimeSlot,
       selectedDate,
       organizerPlayerId,
+      profile?.id,
       session?.access_token,
       court.clubName,
+      partidoPrivado,
+      restrictByLevel,
+      eloMin,
+      eloMax,
       initPaymentSheet,
       presentPaymentSheet,
       loadTimeSlotsForDate,
@@ -1009,8 +1048,36 @@ export function ClubDetailScreen({
             <View style={styles.section}>
               <Text style={styles.reservaTitle}>Reserva una pista</Text>
               <Text style={styles.reservaSub}>
-                Crea un partido privado e invita a tus amigos
+                {partidoPrivado
+                  ? "Crea un partido privado e invita a tus amigos"
+                  : "Publica un partido abierto para encontrar jugadores"}
               </Text>
+              <View style={styles.reservaToggleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.reservaToggleTitle}>Partido privado</Text>
+                  <Text style={styles.reservaToggleSub}>
+                    Si lo apagas, aparecerá en Buscar partido
+                  </Text>
+                </View>
+                <Switch
+                  value={partidoPrivado}
+                  onValueChange={setPartidoPrivado}
+                  trackColor={{ false: "#e5e7eb", true: theme.auth.accent }}
+                  thumbColor="#fff"
+                />
+              </View>
+              {!partidoPrivado ? (
+                <View style={styles.reservaLevelWrap}>
+                  <FriendlyLevelRangeSection
+                    restrictByLevel={restrictByLevel}
+                    onRestrictByLevelChange={setRestrictByLevel}
+                    eloMin={eloMin}
+                    eloMax={eloMax}
+                    onEloMinChange={setEloMin}
+                    onEloMaxChange={setEloMax}
+                  />
+                </View>
+              ) : null}
               <View style={styles.courtList}>
                 {!selectedTimeSlot ? (
                   <Text style={styles.partidosEmptySubtitle}>
@@ -2118,6 +2185,29 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.md,
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
     ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  reservaToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+  },
+  reservaToggleTitle: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: "700",
+    color: "#ffffff",
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  reservaToggleSub: {
+    marginTop: 2,
+    fontSize: theme.fontSize.xs,
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  reservaLevelWrap: {
+    marginBottom: theme.spacing.md,
   },
   courtList: {
     gap: theme.spacing.md,

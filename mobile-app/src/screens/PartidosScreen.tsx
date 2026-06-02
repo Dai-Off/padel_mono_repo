@@ -9,14 +9,17 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchMatches } from '../api/matches';
+import { useHomeData } from '../contexts/HomeDataContext';
+import { fetchMatches, fetchMyMatches } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId } from '../api/players';
 import { PartidoCard } from '../components/partido/PartidoCard';
 import { PartidoOpenCard } from '../components/partido/PartidoOpenCard';
 import { PartidoOpenCardSkeleton } from '../components/partido/PartidoOpenCardSkeleton';
 import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
+import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
 import type { MatchListPhase } from '../domain/matchLifecycle';
+import { clubCalendarDayBounds, dayKeyInClubTz } from '../lib/clubTimeZone';
 import { lineHeightFor, theme } from '../theme';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -24,16 +27,6 @@ function addDays(d: Date, n: number): Date {
   const x = new Date(d);
   x.setDate(x.getDate() + n);
   return x;
-}
-
-function startOfDayIso(d: Date): string {
-  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-  return x.toISOString();
-}
-
-function endOfDayIso(d: Date): string {
-  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
-  return x.toISOString();
 }
 
 function dayLabel(d: Date): string {
@@ -56,6 +49,20 @@ function isPublicJoinableMatch(p: PartidoItem): boolean {
   if (p.matchStatus === 'cancelled') return false;
   const filled = (p.players ?? []).filter((x) => !x.isFree).length;
   return filled < 4;
+}
+
+function passesLevelForViewer(p: PartidoItem, viewerElo: number | null | undefined): boolean {
+  if (viewerElo == null || !Number.isFinite(viewerElo)) return true;
+  if (p.eloMin != null && p.eloMax != null) {
+    return viewerElo >= p.eloMin && viewerElo <= p.eloMax;
+  }
+  return true;
+}
+
+function sortByStartAsc(a: PartidoItem, b: PartidoItem): number {
+  const ta = a.startAtIso ? new Date(a.startAtIso).getTime() : Number.POSITIVE_INFINITY;
+  const tb = b.startAtIso ? new Date(b.startAtIso).getTime() : Number.POSITIVE_INFINITY;
+  return ta - tb;
 }
 
 export type PartidoMode = 'competitivo' | 'amistoso';
@@ -107,6 +114,9 @@ export type PartidoItem = {
   hasMyFeedback?: boolean;
   /** Deporte de la pista (padel, tenis, pickleball…) */
   courtSport?: string;
+  startAtIso?: string;
+  eloMin?: number | null;
+  eloMax?: number | null;
 };
 
 type PartidosScreenProps = {
@@ -126,7 +136,8 @@ export function PartidosScreen({
   partidosRefreshNonce = 0,
 }: PartidosScreenProps) {
   const { session } = useAuth();
-  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
+  const { profile } = useHomeData();
+  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(profile?.id ?? null);
   const [locationModalVisible, setLocationModalVisible] = useState(false);
   const [openRaw, setOpenRaw] = useState<PartidoItem[]>([]);
   const [myRaw, setMyRaw] = useState<PartidoItem[]>([]);
@@ -135,37 +146,69 @@ export function PartidosScreen({
   const [sportFilter, setSportFilter] = useState<SportFilter>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
 
+  useEffect(() => {
+    if (profile?.id) {
+      setOrganizerPlayerId(profile.id);
+      return;
+    }
+    const token = session?.access_token;
+    if (!token) {
+      setOrganizerPlayerId(null);
+      return;
+    }
+    void fetchMyPlayerId(token).then(setOrganizerPlayerId);
+  }, [profile?.id, session?.access_token]);
+
   const loadPartidos = useCallback(async () => {
     setLoading(true);
     const token = session?.access_token ?? null;
     const useDay = dayOffset !== 0;
-    const dayDate = addDays(new Date(), dayOffset);
-    const [playerId, matches] = await Promise.all([
-      token ? fetchMyPlayerId(token) : Promise.resolve(null),
-      fetchMatches({
-        expand: true,
-        token,
-        activeOnly: !useDay,
-        dateFrom: useDay ? startOfDayIso(dayDate) : undefined,
-        dateTo: useDay ? endOfDayIso(dayDate) : undefined,
-      }),
-    ]);
-    setOrganizerPlayerId(playerId);
-    const allPartidos = matches
+    const dayBounds = useDay ? clubCalendarDayBounds(dayOffset) : null;
+    const viewerElo = profile?.eloRating ?? null;
+
+    const openMatches = await fetchMatches({
+      expand: true,
+      token,
+      activeOnly: true,
+      discovery: true,
+      dateFrom: dayBounds?.dateFrom,
+      dateTo: dayBounds?.dateTo,
+      visibility: 'public',
+    });
+    const openPartidos = openMatches
       .map(mapMatchToPartido)
       .filter((p): p is PartidoItem => p != null)
-      .filter((p) => useDay || p.matchPhase !== 'past');
-    setOpenRaw(allPartidos.filter((p) => p.visibility !== 'private'));
-    setMyRaw(
-      allPartidos.filter(
-        (p) =>
-          p.visibility === 'private' &&
-          playerId != null &&
-          (p.playerIds ?? []).includes(playerId)
-      )
-    );
+      .filter((p) => p.matchPhase !== 'past')
+      .filter((p) => {
+        if (!useDay || !dayBounds || !p.startAtIso) return true;
+        return dayKeyInClubTz(new Date(p.startAtIso)) === dayBounds.dayKey;
+      })
+      .filter((p) => passesLevelForViewer(p, viewerElo))
+      .sort(sortByStartAsc);
+    setOpenRaw(openPartidos);
     setLoading(false);
-  }, [session?.access_token, dayOffset]);
+
+    if (!token) {
+      setMyRaw([]);
+      return;
+    }
+
+    const myMatches = await fetchMyMatches(token, { phase: 'all', limit: 50 });
+    const myPartidos = myMatches
+      .filter((m) => {
+        const booking = getMatchBooking(m);
+        if (!booking?.start_at || !booking?.end_at) return false;
+        if ((m.visibility ?? 'public') !== 'private') return false;
+        if (useDay && dayBounds) {
+          return dayKeyInClubTz(new Date(booking.start_at)) === dayBounds.dayKey;
+        }
+        return getMatchListPhase(Date.now(), m.status, booking.start_at, booking.end_at) !== 'past';
+      })
+      .map(mapMatchToPartido)
+      .filter((p): p is PartidoItem => p != null)
+      .sort(sortByStartAsc);
+    setMyRaw(myPartidos);
+  }, [session?.access_token, dayOffset, profile?.eloRating]);
 
   const openPartidos = useMemo(
     () =>
@@ -180,7 +223,10 @@ export function PartidosScreen({
     [myRaw, sportFilter]
   );
 
-  const dayDateDisplay = useMemo(() => addDays(new Date(), dayOffset), [dayOffset]);
+  const dayDateDisplay = useMemo(() => {
+    const bounds = clubCalendarDayBounds(dayOffset);
+    return new Date(`${bounds.dayKey}T12:00:00`);
+  }, [dayOffset]);
   const maxDayAhead = 21;
   const maxDayBack = -7;
 
@@ -355,7 +401,7 @@ export function PartidosScreen({
         organizerPlayerId={organizerPlayerId}
         onContinueWeMatch={() => {
           setLocationModalVisible(false);
-          onOpenWeMatchClubsFlow?.(organizerPlayerId);
+          onOpenWeMatchClubsFlow?.(organizerPlayerId ?? profile?.id ?? null);
         }}
         onClose={() => setLocationModalVisible(false)}
         onSiguiente={() => {}}

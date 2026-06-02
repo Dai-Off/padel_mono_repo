@@ -78,10 +78,14 @@ type FetchMatchesOptions = {
   dateTo?: string;
   /** Filtra partidos del club (expand + backend). */
   clubId?: string;
+  visibility?: 'public' | 'private';
+  /** Listado optimizado para Buscar partido (públicos activos, orden por hora). */
+  discovery?: boolean;
 };
 
 export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<MatchEnriched[]> {
-  const { bookingId, expand = true, token, activeOnly = true, dateFrom, dateTo, clubId } = options;
+  const { bookingId, expand = true, token, activeOnly = true, dateFrom, dateTo, clubId, visibility, discovery } =
+    options;
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -93,6 +97,8 @@ export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<M
   if (dateFrom) url.searchParams.set('date_from', dateFrom);
   if (dateTo) url.searchParams.set('date_to', dateTo);
   if (clubId) url.searchParams.set('club_id', clubId);
+  if (visibility) url.searchParams.set('visibility', visibility);
+  if (discovery) url.searchParams.set('discovery', '1');
 
   try {
     const res = await fetch(url.toString(), { headers });

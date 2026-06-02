@@ -40,3 +40,20 @@ export function dayKeyInClubTz(date: Date = new Date()): string {
     day: '2-digit',
   }).format(date);
 }
+
+/** Límites UTC de un día calendario del club (offset 0 = hoy en Madrid). */
+export function clubCalendarDayBounds(dayOffsetFromToday: number): {
+  dayKey: string;
+  dateFrom: string;
+  dateTo: string;
+} {
+  const todayKey = dayKeyInClubTz(new Date());
+  const [y, m, d] = todayKey.split('-').map(Number);
+  const target = new Date(Date.UTC(y, m - 1, d + dayOffsetFromToday));
+  const dayKey = target.toISOString().slice(0, 10);
+  return {
+    dayKey,
+    dateFrom: clubLocalDateTimeToUtcIso(dayKey, '00:00'),
+    dateTo: clubLocalDateTimeToUtcIso(dayKey, '23:59'),
+  };
+}

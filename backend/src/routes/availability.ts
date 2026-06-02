@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { bookingBlocksCourtForAvailability } from '../lib/courtContentionService';
+import { CLUB_IANA_TIMEZONE } from '../lib/clubTimezone';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { zonedTimeToUtc } from '../routes/learningTimezone';
 
 const router = Router();
 
@@ -128,7 +130,8 @@ router.get('/slots', async (req: Request, res: Response) => {
         const sMin = h * 60 + m;
         const eMin = sMin + duration_minutes;
         
-        const sMs = new Date(`${date}T${slotTime.slice(0, 5)}:00Z`).getTime();
+        const slotHms = slotTime.slice(0, 5);
+        const sMs = zonedTimeToUtc(`${date}T${slotHms}:00`, CLUB_IANA_TIMEZONE).getTime();
         const eMs = sMs + duration_minutes * 60 * 1000;
 
         if (courtBookings.some(b => overlaps(sMs, eMs, b.s, b.e))) continue;
@@ -142,6 +145,7 @@ router.get('/slots', async (req: Request, res: Response) => {
           end: `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
         });
       }
+      freeSlots.sort((a, b) => a.start.localeCompare(b.start));
       results.push({ court_id: court.id, court_name: court.name, club_id: court.club_id, free_slots: freeSlots });
     }
 

@@ -75,6 +75,8 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
       scoreStatus: null,
       bookingStatus: undefined,
       hasMyFeedback: (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true,
+      eloMin: m.elo_min ?? null,
+      eloMax: m.elo_max ?? null,
     };
   }
   if (!b.start_at || !b.end_at) return null;
@@ -185,6 +187,9 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     scoreStatus: (m.score_status === 'pending' ? null : m.score_status) as PartidoItem['scoreStatus'],
     bookingStatus: b.status,
     hasMyFeedback: (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true,
+    startAtIso: b.start_at,
+    eloMin: m.elo_min ?? null,
+    eloMax: m.elo_max ?? null,
     venueAddress: address || undefined,
     courtName,
     courtType,
