@@ -7,7 +7,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile, updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { fetchClubAvailabilityForCreate } from '../api/partidoClubs';
+import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
+import { useClubCatalog } from '../hooks/useClubCatalog';
+import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import { theme } from '../theme';
 
 type PreferencesScreenProps = {
@@ -169,15 +171,6 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
   notifChatMessages: true,
 };
 
-const FALLBACK_FAVORITE_CLUB_CANDIDATES = [
-  { name: 'Pintopadel', subtitle: 'Madrid · 12 km' },
-  { name: 'X7 Padel Sabadell Sur', subtitle: 'Fuenlabrada · 3 km' },
-  { name: 'Club De Padel Mirasur', subtitle: 'Madrid · 15 km' },
-  { name: 'WeMatch Padel Center', subtitle: 'Madrid · 5 km' },
-  { name: 'Pádel Y Tenis San Martín', subtitle: 'Madrid · 7 km' },
-  { name: 'Padel Family Indoor', subtitle: 'Madrid · 8 km' },
-];
-
 function arraysEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((v, i) => v === b[i]);
@@ -208,7 +201,9 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
   const [saving, setSaving] = useState(false);
   const [base, setBase] = useState<PlayerPreferences>(DEFAULT_PREFERENCES);
   const [prefs, setPrefs] = useState<PlayerPreferences>(DEFAULT_PREFERENCES);
-  const [clubCandidates, setClubCandidates] = useState(FALLBACK_FAVORITE_CLUB_CANDIDATES);
+  const [clubPickerVisible, setClubPickerVisible] = useState(false);
+  const [selectedClubIds, setSelectedClubIds] = useState<string[]>([]);
+  const { clubs: clubCatalog } = useClubCatalog();
   // Invalidamos la cache global del profile tras guardar — el resto de
   // pantallas que leen `useHomeData().profile` verán los cambios.
   const { refreshProfile: refreshGlobalProfile } = useHomeData();
@@ -227,38 +222,23 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
   }, [token]);
 
   useEffect(() => {
-    let mounted = true;
-    fetchClubAvailabilityForCreate(token)
-      .then((clubs) => {
-        if (!mounted || clubs.length === 0) return;
-        const mapped = clubs
-          .map((club) => ({
-            name: club.clubName,
-            subtitle: club.location || 'Club disponible',
-          }))
-          .filter((club) => club.name.trim().length > 0);
-
-        const deduped: { name: string; subtitle: string }[] = [];
-        const seen = new Set<string>();
-        for (const item of mapped) {
-          const key = item.name.trim().toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          deduped.push(item);
-        }
-        if (deduped.length > 0) {
-          setClubCandidates(deduped);
-        }
-      })
-      .catch(() => {
-        // fallback silently to static club list
-      });
-    return () => {
-      mounted = false;
-    };
-  }, [token]);
+    if (clubCatalog.length === 0) return;
+    const favNames = new Set(prefs.favoriteClubs.map((n) => n.trim().toLowerCase()).filter(Boolean));
+    if (favNames.size === 0) {
+      setSelectedClubIds([]);
+      return;
+    }
+    setSelectedClubIds(
+      clubCatalog.filter((c) => favNames.has(c.name.trim().toLowerCase())).map((c) => c.id),
+    );
+  }, [clubCatalog, prefs.favoriteClubs]);
 
   const dirty = useMemo(() => !preferencesEqual(base, prefs), [base, prefs]);
+
+  const selectedClubLabels = useMemo(() => {
+    const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
+    return selectedClubIds.map((id) => byId.get(id) ?? 'Club');
+  }, [clubCatalog, selectedClubIds]);
 
   const toggleScheduleSlot = (slot: PlayerPreferences['preferredScheduleSlots'][number]) => {
     setPrefs((prev) => {
@@ -282,14 +262,11 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
     });
   };
 
-  const toggleFavoriteClub = (club: string) => {
-    setPrefs((prev) => {
-      const exists = prev.favoriteClubs.includes(club);
-      return {
-        ...prev,
-        favoriteClubs: exists ? prev.favoriteClubs.filter((x) => x !== club) : [...prev.favoriteClubs, club],
-      };
-    });
+  const applySelectedClubIds = (ids: string[]) => {
+    setSelectedClubIds(ids);
+    const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
+    const names = ids.map((id) => byId.get(id)).filter((n): n is string => !!n && n.trim().length > 0);
+    setPrefs((prev) => ({ ...prev, favoriteClubs: names }));
   };
 
   const save = async () => {
@@ -306,6 +283,11 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
     }
     setBase(res.player.preferences);
     setPrefs(res.player.preferences);
+    const byName = new Map(clubCatalog.map((c) => [c.name.trim().toLowerCase(), c.id]));
+    const idsForMm = res.player.preferences.favoriteClubs
+      .map((n) => byName.get(n.trim().toLowerCase()))
+      .filter((id): id is string => !!id);
+    void saveStoredPreferredClubIds(idsForMm);
     void refreshGlobalProfile({ force: true });
     Alert.alert('Preferencias', 'Cambios guardados.');
   };
@@ -386,51 +368,24 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <Text style={styles.cardSubtitle}>Marca tus clubes de confianza</Text>
               </View>
             </View>
-            <View style={styles.columnGap}>
-              {clubCandidates.map((club) => {
-                const active = prefs.favoriteClubs.includes(club.name);
-                return (
-                  <Pressable
-                    key={club.name}
-                    onPress={() => toggleFavoriteClub(club.name)}
-                    style={styles.clubRowPressable}
-                  >
-                    {active ? (
-                      <LinearGradient
-                        colors={['rgba(234,179,8,0.2)', 'rgba(249,115,22,0.2)']}
-                        start={{ x: 0, y: 0.5 }}
-                        end={{ x: 1, y: 0.5 }}
-                        style={styles.clubRowActive}
-                      >
-                        <View style={styles.clubBuildingWrap}>
-                          <Ionicons name="business-outline" size={18} color="#9CA3AF" />
-                        </View>
-                        <View style={styles.clubTextCol}>
-                          <Text style={styles.clubName}>{club.name}</Text>
-                          <Text style={styles.clubSubtitle}>{club.subtitle}</Text>
-                        </View>
-                        <View style={styles.clubHeartWrap}>
-                          <HeartIcon color="#FACC15" filled />
-                        </View>
-                      </LinearGradient>
-                    ) : (
-                      <View style={styles.clubRow}>
-                        <View style={styles.clubBuildingWrap}>
-                          <Ionicons name="business-outline" size={18} color="#9CA3AF" />
-                        </View>
-                        <View style={styles.clubTextCol}>
-                          <Text style={styles.clubName}>{club.name}</Text>
-                          <Text style={styles.clubSubtitle}>{club.subtitle}</Text>
-                        </View>
-                        <View style={styles.clubHeartWrap}>
-                          <HeartIcon color="#6B7280" />
-                        </View>
-                      </View>
-                    )}
-                  </Pressable>
-                );
-              })}
-            </View>
+            <Pressable style={styles.clubPickerBtn} onPress={() => setClubPickerVisible(true)}>
+              <View style={styles.clubBuildingWrap}>
+                <Ionicons name="business-outline" size={18} color="#9CA3AF" />
+              </View>
+              <View style={styles.clubTextCol}>
+                <Text style={styles.clubName}>
+                  {selectedClubIds.length === 0
+                    ? 'Elegir clubes favoritos'
+                    : `${selectedClubIds.length} club${selectedClubIds.length === 1 ? '' : 'es'} seleccionado${selectedClubIds.length === 1 ? '' : 's'}`}
+                </Text>
+                <Text style={styles.clubSubtitle} numberOfLines={2}>
+                  {selectedClubIds.length === 0
+                    ? 'Buscar y filtrar como en torneos'
+                    : selectedClubLabels.join(' · ')}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            </Pressable>
           </View>
 
           <View style={styles.card}>
@@ -738,6 +693,15 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
           </View>
         </ScrollView>
       )}
+
+      <ClubMultiSelectPicker
+        visible={clubPickerVisible}
+        selectedIds={selectedClubIds}
+        onChange={applySelectedClubIds}
+        onClose={() => setClubPickerVisible(false)}
+        title="Clubes favoritos"
+        subtitle="Se usan también en matchmaking competitivo"
+      />
     </View>
   );
 }
@@ -881,6 +845,18 @@ const styles = StyleSheet.create({
   },
   listRowText: { color: '#D1D5DB', fontSize: 13, fontWeight: '600' },
   listRowTextActive: { color: '#fff' },
+  clubPickerBtn: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
   clubRowPressable: {
     width: '100%',
     borderRadius: 12,

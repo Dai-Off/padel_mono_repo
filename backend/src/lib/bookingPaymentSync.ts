@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { clearMatchmakingPoolIfPlayerPaid } from '../services/matchmakingPoolCleanup';
 
 /**
  * Tras marcar un participante como pagado: actualiza `bookings.status`.
@@ -35,6 +36,20 @@ export async function refreshBookingStatusAfterParticipantPayment(
         .from('bookings')
         .update({ status: 'confirmed', updated_at: new Date().toISOString() })
         .eq('id', bookingId);
+    }
+    if (matchType === 'matchmaking') {
+      const { data: paidParts } = await supabase
+        .from('booking_participants')
+        .select('player_id')
+        .eq('booking_id', bookingId)
+        .eq('payment_status', 'paid');
+      for (const p of paidParts ?? []) {
+        await clearMatchmakingPoolIfPlayerPaid(
+          supabase,
+          (p as { player_id: string }).player_id,
+          bookingId,
+        );
+      }
     }
     return;
   }

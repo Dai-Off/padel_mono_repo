@@ -725,6 +725,27 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: 'El partido no tiene reserva asociada' });
     }
 
+    const { data: contentionBooking, error: errContBk } = await supabase
+      .from('bookings')
+      .select('status, court_contention_status')
+      .eq('id', match.booking_id)
+      .maybeSingle();
+    if (errContBk) return res.status(500).json({ ok: false, error: errContBk.message });
+    if (contentionBooking?.status === 'cancelled') {
+      return res.status(400).json({
+        ok: false,
+        code: 'contention_lost',
+        error: 'Este partido ya no tiene la pista: otro grupo completó el partido antes.',
+      });
+    }
+    if (contentionBooking?.court_contention_status === 'lost') {
+      return res.status(400).json({
+        ok: false,
+        code: 'contention_lost',
+        error: 'Este partido ya no tiene la pista: otro grupo completó el partido antes.',
+      });
+    }
+
     const { data: joinPlayer, error: errJP } = await supabase
       .from('players')
       .select('elo_rating, onboarding_completed')

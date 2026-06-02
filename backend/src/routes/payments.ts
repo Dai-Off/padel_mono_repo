@@ -22,6 +22,11 @@ import { sendMatchJoinConfirmationEmail } from '../lib/mailer';
 import { zonedTimeToUtc } from './learningTimezone';
 import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
+import {
+  assertCourtSlotAvailableForNewContentionMatch,
+  contentionStatusForNewMatchBooking,
+  resolveCourtContention,
+} from '../lib/courtContentionService';
 
 /**
  * Helper to fetch player and match/club/court details and send the join confirmation email.
@@ -252,27 +257,20 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       }
     }
 
-    const { data: courtBookings } = await supabase
-      .from('bookings')
-      .select('id, start_at, end_at')
-      .eq('court_id', court_id)
-      .in('status', ['confirmed', 'pending_payment']);
-    const courtOverlaps = (courtBookings ?? []).some((b) => {
-      const exStart = new Date(b.start_at).getTime();
-      const exEnd = new Date(b.end_at).getTime();
-      return newStart < exEnd && newEnd > exStart;
-    });
-    if (courtOverlaps) {
-      res.status(400).json({
-        ok: false,
-        error: 'Esa pista ya está reservada para ese horario. Elige otra hora.',
-      });
-      return;
-    }
-
     const totalCents = Number(total_price_cents);
     const isPayFull = pay_full === true || pay_full === 'true' || pay_full === 1;
     const reservation_type = isPayFull ? 'standard' : 'open_match';
+
+    const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+      supabase,
+      court_id,
+      start_at,
+      end_at,
+    );
+    if (slotConflict) {
+      res.status(400).json({ ok: false, error: slotConflict });
+      return;
+    }
     const sch0 = ['mobile', 'web', 'manual', 'system'].includes(source_channel) ? source_channel : 'mobile';
     const { data: courtForClub } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
     const clubIdRule = (courtForClub as { club_id?: string } | null)?.club_id;
@@ -1014,6 +1012,11 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+    try {
+      await resolveCourtContention(supabase, booking_id);
+    } catch (contentionErr) {
+      console.error('[payments/webhook] resolveCourtContention:', contentionErr);
+    }
 
     res.json({ received: true });
   } catch (err) {
@@ -3062,24 +3065,19 @@ async function processNewMatchPayment(
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents <= 0) return;
 
-  const newStart = new Date(start_at).getTime();
-  const newEnd = new Date(end_at).getTime();
-  const { data: courtBookings } = await supabase
-    .from('bookings')
-    .select('id, start_at, end_at')
-    .eq('court_id', court_id)
-    .in('status', ['confirmed', 'pending_payment']);
-  const courtOverlaps = (courtBookings ?? []).some((b) => {
-    const exStart = new Date(b.start_at).getTime();
-    const exEnd = new Date(b.end_at).getTime();
-    return newStart < exEnd && newEnd > exStart;
-  });
-  if (courtOverlaps) {
-    console.error('[payments/webhook] Slot already booked, skipping booking creation. Payment may need refund.', {
+  const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+    supabase,
+    court_id,
+    start_at,
+    end_at,
+  );
+  if (slotConflict) {
+    console.error('[payments/webhook] Slot blocked for contention match, skipping booking creation.', {
       court_id,
       start_at,
       end_at,
       paymentIntentId: pi.id,
+      error: slotConflict,
     });
     return;
   }
@@ -3097,22 +3095,25 @@ async function processNewMatchPayment(
 
   const isPayFull = meta.pay_full === '1';
   const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
+  const contentionStatus = contentionStatusForNewMatchBooking(reservation_type, isPayFull);
+
+  const bookingInsert: Record<string, unknown> = {
+    court_id,
+    organizer_player_id,
+    start_at,
+    end_at,
+    timezone,
+    total_price_cents,
+    currency: 'EUR',
+    reservation_type,
+    status: isPayFull ? 'confirmed' : 'pending_payment',
+    source_channel,
+  };
+  if (contentionStatus) bookingInsert.court_contention_status = contentionStatus;
 
   const { data: booking, error: errBooking } = await supabase
     .from('bookings')
-    .insert([{
-      court_id,
-      organizer_player_id,
-      start_at,
-      end_at,
-      timezone,
-      total_price_cents,
-      currency: 'EUR',
-      reservation_type,
-      // Split-payment: stays pending until all 4 players pay. Full-payment: confirmed immediately.
-      status: isPayFull ? 'confirmed' : 'pending_payment',
-      source_channel,
-    }])
+    .insert([bookingInsert])
     .select('id')
     .maybeSingle();
 
@@ -3256,26 +3257,6 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
 
-      const newStart = new Date(start_at).getTime();
-      const newEnd = new Date(end_at).getTime();
-      const { data: courtBookings } = await supabase
-        .from('bookings')
-        .select('id, start_at, end_at')
-        .eq('court_id', court_id)
-        .in('status', ['confirmed', 'pending_payment']);
-      const courtOverlaps = (courtBookings ?? []).some((b) => {
-        const exStart = new Date(b.start_at).getTime();
-        const exEnd = new Date(b.end_at).getTime();
-        return newStart < exEnd && newEnd > exStart;
-      });
-      if (courtOverlaps) {
-        res.status(400).json({
-          ok: false,
-          error: 'Esa pista ya está reservada para ese horario. Contacta con soporte para el reembolso.',
-        });
-        return;
-      }
-
       const isPayFull = meta.pay_full === '1';
       const reservation_type =
         meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
@@ -3283,6 +3264,20 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
           : isPayFull
             ? 'standard'
             : 'open_match';
+
+      const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+        supabase,
+        court_id,
+        start_at,
+        end_at,
+      );
+      if (slotConflict) {
+        res.status(400).json({
+          ok: false,
+          error: 'Esa pista ya está reservada para ese horario. Contacta con soporte para el reembolso.',
+        });
+        return;
+      }
 
       const { data: courtRowGate2 } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
       const clubGate2 = (courtRowGate2 as { club_id?: string } | null)?.club_id;
@@ -3296,22 +3291,25 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       }
 
       const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
+      const contentionStatus = contentionStatusForNewMatchBooking(reservation_type, isPayFull);
+
+      const confirmBookingInsert: Record<string, unknown> = {
+        court_id,
+        organizer_player_id,
+        start_at,
+        end_at,
+        timezone,
+        total_price_cents,
+        currency: 'EUR',
+        reservation_type,
+        status: isPayFull ? 'confirmed' : 'pending_payment',
+        source_channel,
+      };
+      if (contentionStatus) confirmBookingInsert.court_contention_status = contentionStatus;
 
       const { data: booking, error: errBooking } = await supabase
         .from('bookings')
-        .insert([{
-          court_id,
-          organizer_player_id,
-          start_at,
-          end_at,
-          timezone,
-          total_price_cents,
-          currency: 'EUR',
-          reservation_type,
-          // Split-payment: stays pending until all 4 players pay. Full-payment: confirmed immediately.
-          status: isPayFull ? 'confirmed' : 'pending_payment',
-          source_channel,
-        }])
+        .insert([confirmBookingInsert])
         .select('id')
         .maybeSingle();
 
@@ -3542,6 +3540,11 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+    try {
+      await resolveCourtContention(supabase, booking_id);
+    } catch (contentionErr) {
+      console.error('[payments/confirm-client] resolveCourtContention:', contentionErr);
+    }
 
     res.json({ ok: true });
   } catch (err) {
@@ -3838,6 +3841,11 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking.id);
+    try {
+      await resolveCourtContention(supabase, booking.id);
+    } catch (contentionErr) {
+      console.error('[payments/simulate-turn-payment] resolveCourtContention:', contentionErr);
+    }
 
     res.json({
       ok: true,

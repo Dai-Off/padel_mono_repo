@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { bookingBlocksCourtForAvailability } from '../lib/courtContentionService';
 import { resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { zonedDayRangeUtcIso } from '../lib/zonedDayBounds';
@@ -125,7 +126,7 @@ router.get('/courts', async (req: Request, res: Response) => {
 
     let bookingsQuery = supabase
       .from('bookings')
-      .select('id, court_id, start_at, end_at, total_price_cents, status')
+      .select('id, court_id, start_at, end_at, total_price_cents, status, reservation_type, court_contention_status')
       .in('court_id', courtIds)
       .neq('status', 'cancelled')
       .is('deleted_at', null);
@@ -173,6 +174,7 @@ router.get('/courts', async (req: Request, res: Response) => {
 
     const bookedRangesByCourt = new Map<string, { start: number; end: number }[]>();
     for (const b of bookings ?? []) {
+      if (!bookingBlocksCourtForAvailability(b)) continue;
       const start = new Date(b.start_at).getTime();
       const end = new Date(b.end_at).getTime();
       const list = bookedRangesByCourt.get(b.court_id) ?? [];
