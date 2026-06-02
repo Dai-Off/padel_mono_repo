@@ -165,6 +165,16 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
 
   const matchPhase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
 
+  const rawGender = (m.gender ?? 'any').toLowerCase();
+  const matchGender: PartidoItem['matchGender'] =
+    rawGender === 'male' || rawGender === 'men'
+      ? 'male'
+      : rawGender === 'female' || rawGender === 'women'
+        ? 'female'
+        : rawGender === 'mixed'
+          ? 'mixed'
+          : 'all';
+
   return {
     id: m.id,
     playerIds,
@@ -194,5 +204,9 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     courtName,
     courtType,
     courtSport,
+    clubId: court?.club_id ?? club?.id,
+    startAt: b.start_at,
+    endAt: b.end_at,
+    matchGender,
   };
 }

@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'react';
+import { useState, type ComponentProps } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -149,10 +149,17 @@ export function SidebarContent() {
   const ctx = useSidebarContext();
   const { logout } = useAuth();
   const close = ctx?.close;
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const handleLogout = async () => {
-    close?.();
-    await logout();
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      await logout();
+    } catch (err) {
+      console.error('[SidebarContent] logout error', err);
+      setIsLoggingOut(false);
+    }
   };
 
   return (
@@ -256,13 +263,20 @@ export function SidebarContent() {
 
         <View style={styles.logoutSection}>
           <Pressable
-            style={({ pressed }) => [styles.logoutButton, pressed && styles.logoutButtonPressed]}
+            style={({ pressed }) => [
+              styles.logoutButton,
+              pressed && styles.logoutButtonPressed,
+              isLoggingOut && { opacity: 0.6 }
+            ]}
             onPress={handleLogout}
+            disabled={isLoggingOut}
           >
             <View style={styles.logoutIconBox}>
               <Ionicons name="power" size={20} color="#f87171" />
             </View>
-            <Text style={styles.logoutText}>Cerrar sesión</Text>
+            <Text style={styles.logoutText}>
+              {isLoggingOut ? 'Cerrando sesión...' : 'Cerrar sesión'}
+            </Text>
           </Pressable>
         </View>
       </ScrollView>
