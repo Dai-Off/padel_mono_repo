@@ -38,6 +38,8 @@ type MeResponse = {
     notif_tournament_reminders?: boolean | null;
     notif_class_updates?: boolean | null;
     notif_chat_messages?: boolean | null;
+    /** Visibilidad del jugador en las búsquedas de la IA de afinidad. */
+    affinity_visible?: boolean | null;
     /** Presente solo si el backend lo incluye en `/players/me`. */
     onboarding_completed?: boolean | null;
     avatar_url?: string | null;
@@ -86,6 +88,11 @@ export type MyPlayerProfile = {
   mmLosses: number;
   mmDraws: number;
   preferences: PlayerPreferences;
+  /**
+   * Visibilidad en las búsquedas de la IA de afinidad. Desactivada por defecto;
+   * se activa al primer uso. Si el backend no envía el campo, se asume `false`.
+   */
+  affinityVisible: boolean;
   /**
    * Onboarding de nivelación; si el backend no envía el campo, se asume completado
    * para no bloquear la app.
@@ -244,6 +251,7 @@ export async function fetchMyPlayerProfile(
         notifClassUpdates: json.player.notif_class_updates !== false,
         notifChatMessages: json.player.notif_chat_messages !== false,
       },
+      affinityVisible: json.player.affinity_visible === true,
       onboardingCompleted: json.player.onboarding_completed !== false,
       gender: parseGender(json.player.gender),
       birthDate:
@@ -362,6 +370,43 @@ export async function updateMyPlayerPreferences(
       return {
         ok: false,
         error: json.error ?? "No se pudo actualizar preferencias",
+      };
+    const refreshed = await fetchMyPlayerProfile(token);
+    if (!refreshed)
+      return { ok: false, error: "No se pudo refrescar tu perfil" };
+    return { ok: true, player: refreshed };
+  } catch {
+    return { ok: false, error: "Error de conexión" };
+  }
+}
+
+/**
+ * Activa/desactiva la visibilidad del jugador en las búsquedas de la IA de
+ * afinidad. Cuando está desactivada, el jugador no aparece en los resultados
+ * de otros (el filtrado real lo aplica n8n leyendo este flag).
+ */
+export async function updateAffinityVisible(
+  token: string | null | undefined,
+  visible: boolean,
+): Promise<
+  { ok: true; player: MyPlayerProfile } | { ok: false; error: string }
+> {
+  if (!token)
+    return { ok: false, error: "Inicia sesión para cambiar tu visibilidad" };
+  try {
+    const res = await fetch(`${API_URL}/players/me`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ affinity_visible: visible }),
+    });
+    const json = (await res.json()) as MeResponse;
+    if (!res.ok || !json.ok || !json.player)
+      return {
+        ok: false,
+        error: json.error ?? "No se pudo actualizar la visibilidad",
       };
     const refreshed = await fetchMyPlayerProfile(token);
     if (!refreshed)
