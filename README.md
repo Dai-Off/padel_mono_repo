@@ -51,6 +51,20 @@ npx eas build --platform ios       # IPA (requiere Apple Developer)
 
 Requiere [EAS CLI](https://docs.expo.dev/build/setup/) y cuenta Expo.
 
+### Canales EAS (main vs demo)
+
+```bash
+# Main / producción
+npx eas build --platform android --profile production
+npx eas update --branch main --channel production --environment production
+
+# Demo (rama demo)
+npx eas build --platform android --profile demo
+npx eas update --branch demo --channel demo --environment preview
+```
+
+`main` y `demo` comparten el mismo proyecto Expo, pero no se pisan porque usan canales distintos (`production` y `demo`).
+
 ### Conectar con backend
 
 Para apuntar a la API, crear `.env` en `mobile-app/` con:
