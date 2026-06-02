@@ -172,6 +172,7 @@ const SELECT_PUBLIC_INTERNAL = `
   preferred_side, preferred_schedule_slots, preferred_days, preferred_play_style,
   preferred_match_duration_min, preferred_partner_level, favorite_clubs,
   notif_new_matches, notif_tournament_reminders, notif_class_updates, notif_chat_messages,
+  affinity_visible,
   onboarding_completed,
   liga, lps, mm_peak_liga
 `;
@@ -287,6 +288,7 @@ function normalizePreferencesPatch(body: Record<string, unknown>): PreferencesPa
     'notif_tournament_reminders',
     'notif_class_updates',
     'notif_chat_messages',
+    'affinity_visible',
   ] as const;
 
   for (const bf of boolFields) {
