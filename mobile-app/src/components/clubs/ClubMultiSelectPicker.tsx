@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { ClubCatalogItem } from '../../hooks/useClubCatalog';
 import { useClubCatalog } from '../../hooks/useClubCatalog';
 import { ClubFilterBar } from './ClubFilterBar';
-import { ClubFiltersSheet } from './ClubFiltersSheet';
+import { ClubQuickPickers, type ClubQuickPickerKind } from './ClubQuickPickers';
 import { theme } from '../../theme';
 
 const BG = '#0F0F0F';
@@ -74,8 +74,7 @@ export function ClubMultiSelectBody({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<ClubMultiSelectFilters>(DEFAULT_FILTERS);
-  const [filtersSheetVisible, setFiltersSheetVisible] = useState(false);
-  const [filtersBarVisible, setFiltersBarVisible] = useState(false);
+  const [quickPicker, setQuickPicker] = useState<ClubQuickPickerKind>(null);
 
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -108,7 +107,8 @@ export function ClubMultiSelectBody({
         ? 'Interior'
         : 'Exterior';
 
-  const hasActiveFilters = filters.sport !== 'all' || filters.cerramiento !== 'all';
+  const sportActive = filters.sport !== 'all';
+  const cerramientoActive = filters.cerramiento !== 'all';
 
   const toggleClub = (clubId: string) => {
     if (selectedSet.has(clubId)) {
@@ -117,11 +117,6 @@ export function ClubMultiSelectBody({
     }
     if (selectedIds.length >= maxSelection) return;
     onChange([...selectedIds, clubId]);
-  };
-
-  const toggleFiltersBar = () => {
-    setFiltersBarVisible((v) => !v);
-    if (!filtersBarVisible) setFiltersSheetVisible(false);
   };
 
   const handleDonePress = () => {
@@ -154,31 +149,18 @@ export function ClubMultiSelectBody({
             autoCapitalize="none"
           />
         </View>
-        <Pressable
-          onPress={toggleFiltersBar}
-          style={({ pressed }) => [
-            styles.iconBtn,
-            filtersBarVisible && styles.iconBtnActive,
-            pressed && styles.pressed,
-          ]}
-          accessibilityLabel={filtersBarVisible ? 'Ocultar filtros' : 'Mostrar filtros'}
-        >
-          <Ionicons name="options-outline" size={18} color={filtersBarVisible ? ACCENT : '#fff'} />
-        </Pressable>
       </View>
 
-      {filtersBarVisible ? (
-        <View style={styles.filterBarWrap}>
-          <ClubFilterBar
-            filters={filters}
-            sportLabel={sportChipLabel}
-            cerramientoLabel={cerramientoChipLabel}
-            hasActiveFilters={hasActiveFilters}
-            onSportPress={() => setFiltersSheetVisible(true)}
-            onCerramientoPress={() => setFiltersSheetVisible(true)}
-          />
-        </View>
-      ) : null}
+      <View style={styles.filterBarWrap}>
+        <ClubFilterBar
+          sportLabel={sportChipLabel}
+          cerramientoLabel={cerramientoChipLabel}
+          sportActive={sportActive}
+          cerramientoActive={cerramientoActive}
+          onSportPress={() => setQuickPicker('sport')}
+          onCerramientoPress={() => setQuickPicker('cerramiento')}
+        />
+      </View>
 
       {loading ? (
         <View style={styles.centered}>
@@ -261,12 +243,11 @@ export function ClubMultiSelectBody({
         </Pressable>
       </View>
 
-      <ClubFiltersSheet
-        visible={filtersSheetVisible}
-        onClose={() => setFiltersSheetVisible(false)}
-        initialFilters={filters}
+      <ClubQuickPickers
+        kind={quickPicker}
+        filters={filters}
+        onClose={() => setQuickPicker(null)}
         onApply={setFilters}
-        resultCount={filtered.length}
       />
     </View>
   );

@@ -11,7 +11,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,15 +22,22 @@ import { TournamentDetailScreen } from './TournamentDetailScreen';
 import { OnboardingInlineBanner } from '../components/onboarding/OnboardingInlineBanner';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
-import {
-  formatFormatLabel,
-  matchesFormatFilter,
-  matchesLevelFilter,
-  matchesSearch,
-  type TournamentFormatFilter,
-  type TournamentLevelFilter,
-} from '../domain/tournamentDisplay';
 import { tournamentTitle } from '../domain/tournamentDisplay';
+import {
+  countTournamentActiveFilters,
+  filterTournamentRows,
+  formatFilterChipLabel,
+  getInitialTournamentFilters,
+  joinableChipLabel,
+  levelChipLabel,
+  type TournamentFiltersState,
+} from '../domain/tournamentFilters';
+import { AppFilterBar } from '../components/filters/AppFilterBar';
+import { FilterSearchHeader } from '../components/filters/FilterSearchHeader';
+import {
+  TournamentFilterSheets,
+  type TournamentSheetKind,
+} from '../components/competiciones/TournamentFilterSheets';
 import { theme } from '../theme';
 
 const BG = '#0F0F0F';
@@ -52,28 +58,6 @@ type CompeticionesScreenProps = {
   onOpenProfileForOnboarding?: () => void;
 };
 
-function FilterChipButton({
-  label,
-  onPress,
-}: {
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [styles.filterChip, pressed && styles.pressed]}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-    >
-      <Text style={styles.filterChipText} numberOfLines={1}>
-        {label}
-      </Text>
-      <Ionicons name="chevron-down" size={12} color="rgba(255,255,255,0.75)" />
-    </Pressable>
-  );
-}
-
 export function CompeticionesScreen({
   onBack,
   initialOpenTournamentId,
@@ -85,9 +69,10 @@ export function CompeticionesScreen({
   const { session } = useAuth();
   const [activeTab, setActiveTab] = useState<CompeticionTab>('disponibles');
   const [searchQuery, setSearchQuery] = useState('');
-  const [formatFilter, setFormatFilter] = useState<TournamentFormatFilter>('all');
-  const [levelFilter, setLevelFilter] = useState<TournamentLevelFilter>('all');
-  const [joinableOnly, setJoinableOnly] = useState(true);
+  const [tournamentFilters, setTournamentFilters] = useState<TournamentFiltersState>(
+    getInitialTournamentFilters,
+  );
+  const [filterSheet, setFilterSheet] = useState<TournamentSheetKind>(null);
   // elo y onboarding del profile compartido (HomeDataContext) — evita un GET
   // /players/me al montar esta pantalla.
   const { profile } = useHomeData();
@@ -106,7 +91,6 @@ export function CompeticionesScreen({
   const [hasMore, setHasMore] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filterModalVisible, setFilterModalVisible] = useState(false);
   const [detailOpen, setDetailOpen] = useState<{ id: string } | null>(null);
 
   useEffect(() => {
@@ -241,32 +225,31 @@ export function CompeticionesScreen({
     setLoadingMore(false);
   }, [loading, loadingMore, hasMore, activeTab, items.length, load]);
 
+  const filterContext = useMemo(
+    () => ({
+      searchQuery,
+      activeTab,
+      canJoin: canJoinTournament,
+    }),
+    [searchQuery, activeTab, canJoinTournament],
+  );
+
   const filtered = useMemo((): PublicTournamentRow[] => {
     if (activeTab === 'solicitudes') return [];
-    const now = Date.now();
-    return items
-      .filter((row) => String(row.status ?? '').toLowerCase() !== 'cancelled')
-      .filter((row) => {
-        const endMs = new Date(String(row.end_at ?? '')).getTime();
-        if (!Number.isFinite(endMs)) return true;
-        return endMs >= now;
-      })
-      .filter(
-        (row) =>
-          matchesSearch(row, searchQuery) &&
-          matchesFormatFilter(row, formatFilter) &&
-          matchesLevelFilter(row, levelFilter) &&
-          (activeTab !== 'disponibles' || !joinableOnly || canJoinTournament(row)),
-      )
-      .sort((a, b) => {
-        const da = new Date(String(a.start_at ?? '')).getTime();
-        const db = new Date(String(b.start_at ?? '')).getTime();
-        if (!Number.isFinite(da) && !Number.isFinite(db)) return 0;
-        if (!Number.isFinite(da)) return 1;
-        if (!Number.isFinite(db)) return -1;
-        return da - db;
-      });
-  }, [activeTab, items, searchQuery, formatFilter, levelFilter, joinableOnly, canJoinTournament]);
+    return filterTournamentRows(items, tournamentFilters, filterContext);
+  }, [activeTab, items, tournamentFilters, filterContext]);
+
+  const previewTournamentCount = useCallback(
+    (draft: TournamentFiltersState) =>
+      activeTab === 'solicitudes'
+        ? 0
+        : filterTournamentRows(items, draft, filterContext).length,
+    [activeTab, items, filterContext],
+  );
+
+  const activeFilterCount = countTournamentActiveFilters(tournamentFilters, {
+    includeJoinable: activeTab === 'disponibles',
+  });
 
   const flatListData = useMemo((): CompeticionesListRow[] => {
     if (activeTab === 'solicitudes') {
@@ -274,18 +257,6 @@ export function CompeticionesScreen({
     }
     return filtered.map((row) => ({ kind: 'tournament' as const, row }));
   }, [activeTab, requestItems, filtered]);
-
-  const formatChipLabel =
-    formatFilter === 'all' ? 'Formato' : formatFormatLabel(formatFilter);
-  const levelChipLabel =
-    levelFilter === 'all'
-      ? 'Nivel'
-      : levelFilter === 'principiante'
-        ? 'Principiante'
-        : levelFilter === 'medio'
-          ? 'Medio'
-          : 'Avanzado';
-  const joinableChipLabel = joinableOnly ? 'Solo me puedo unir' : 'Mostrar todas';
 
   const listHeader = (
     <>
@@ -337,59 +308,51 @@ export function CompeticionesScreen({
           },
         ]}
       >
-        <View style={styles.topRow}>
-          {onBack ? (
-            <Pressable
-              onPress={onBack}
-              style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Volver al inicio"
-            >
-              <Ionicons name="arrow-back" size={18} color="#fff" />
-            </Pressable>
-          ) : (
-            <View style={styles.iconBtn} />
-          )}
-          <View style={styles.searchShell}>
-            <Ionicons name="search" size={16} color="#737373" style={styles.searchIcon} />
-            <TextInput
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder="Buscar torneos..."
-              placeholderTextColor="#737373"
-              style={styles.searchInput}
-              returnKeyType="search"
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
-          </View>
-          <Pressable
-            onPress={() => setFilterModalVisible(true)}
-            style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
-            accessibilityRole="button"
-            accessibilityLabel="Filtros avanzados"
-          >
-            <Ionicons name="options-outline" size={18} color="#fff" />
-          </Pressable>
-        </View>
+        <FilterSearchHeader
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          placeholder="Buscar torneos..."
+          onBack={onBack}
+          showFiltersButton={false}
+        />
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filterScroll}
-        >
-          <FilterChipButton
-            label="Pádel"
-            onPress={() =>
-              Alert.alert('Deporte', 'Por ahora todos los torneos son de pádel.')
-            }
-          />
-          <FilterChipButton label={formatChipLabel} onPress={() => setFilterModalVisible(true)} />
-          <FilterChipButton label={levelChipLabel} onPress={() => setFilterModalVisible(true)} />
-          {activeTab === 'disponibles' ? (
-            <FilterChipButton label={joinableChipLabel} onPress={() => setJoinableOnly((v) => !v)} />
-          ) : null}
-        </ScrollView>
+        <AppFilterBar
+          advancedCount={activeFilterCount}
+          onAdvancedPress={() => setFilterSheet('all')}
+          chips={[
+            {
+              id: 'sport',
+              label: 'Pádel',
+              active: true,
+              onPress: () =>
+                Alert.alert('Deporte', 'Por ahora todos los torneos son de pádel.'),
+            },
+            {
+              id: 'format',
+              label: formatFilterChipLabel(tournamentFilters),
+              active: tournamentFilters.format !== 'all',
+              onPress: () => setFilterSheet('format'),
+            },
+            {
+              id: 'level',
+              label: levelChipLabel(tournamentFilters),
+              active: tournamentFilters.level !== 'all',
+              onPress: () => setFilterSheet('level'),
+            },
+            ...(activeTab === 'disponibles'
+              ? [
+                  {
+                    id: 'joinable',
+                    label: joinableChipLabel(tournamentFilters.joinableOnly),
+                    active: tournamentFilters.joinableOnly,
+                    showChevron: false,
+                    onPress: () =>
+                      setTournamentFilters((f) => ({ ...f, joinableOnly: !f.joinableOnly })),
+                  },
+                ]
+              : []),
+          ]}
+        />
 
         <View style={styles.segmented}>
           <Pressable
@@ -596,105 +559,14 @@ export function CompeticionesScreen({
         ) : null}
       </Modal>
 
-      <Modal
-        visible={filterModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFilterModalVisible(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setFilterModalVisible(false)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Filtros</Text>
-            <Text style={styles.modalSectionLabel}>Formato</Text>
-            <ScrollView style={styles.modalScroll} nestedScrollEnabled>
-              {(
-                ['all', 'liga', 'americano', 'eliminatoria', 'torneo'] as TournamentFormatFilter[]
-              ).map((key) => (
-                <Pressable
-                  key={key}
-                  style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-                  onPress={() => setFormatFilter(key)}
-                >
-                  <Text
-                    style={[
-                      styles.modalRowText,
-                      formatFilter === key && styles.modalRowTextActive,
-                    ]}
-                  >
-                    {key === 'all' ? 'Todos' : formatFormatLabel(key)}
-                  </Text>
-                  {formatFilter === key ? (
-                    <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-                  ) : null}
-                </Pressable>
-              ))}
-            </ScrollView>
-            <Text style={styles.modalSectionLabel}>Nivel</Text>
-            <ScrollView style={styles.modalScroll} nestedScrollEnabled>
-              {(['all', 'principiante', 'medio', 'avanzado'] as TournamentLevelFilter[]).map(
-                (key) => (
-                  <Pressable
-                    key={key}
-                    style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-                    onPress={() => setLevelFilter(key)}
-                  >
-                    <Text
-                      style={[
-                        styles.modalRowText,
-                        levelFilter === key && styles.modalRowTextActive,
-                      ]}
-                    >
-                      {key === 'all'
-                        ? 'Todos'
-                        : key === 'principiante'
-                          ? 'Principiante'
-                          : key === 'medio'
-                            ? 'Medio'
-                            : 'Avanzado'}
-                    </Text>
-                    {levelFilter === key ? (
-                      <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-                    ) : null}
-                  </Pressable>
-                ),
-              )}
-            </ScrollView>
-            {activeTab === 'disponibles' ? (
-              <>
-                <Text style={styles.modalSectionLabel}>Disponibilidad</Text>
-                <Pressable
-                  style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-                  onPress={() => setJoinableOnly(true)}
-                >
-                  <Text style={[styles.modalRowText, joinableOnly && styles.modalRowTextActive]}>
-                    Solo torneos a los que me puedo unir
-                  </Text>
-                  {joinableOnly ? (
-                    <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-                  ) : null}
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [styles.modalRow, pressed && styles.pressed]}
-                  onPress={() => setJoinableOnly(false)}
-                >
-                  <Text style={[styles.modalRowText, !joinableOnly && styles.modalRowTextActive]}>
-                    Mostrar todos (incluye no cumplo requisitos)
-                  </Text>
-                  {!joinableOnly ? (
-                    <Ionicons name="checkmark" size={18} color={theme.auth.accent} />
-                  ) : null}
-                </Pressable>
-              </>
-            ) : null}
-            <Pressable
-              style={styles.modalClose}
-              onPress={() => setFilterModalVisible(false)}
-            >
-              <Text style={styles.modalCloseText}>Listo</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <TournamentFilterSheets
+        kind={filterSheet}
+        draft={tournamentFilters}
+        showJoinableSection={activeTab === 'disponibles'}
+        resultCount={previewTournamentCount(tournamentFilters)}
+        onClose={() => setFilterSheet(null)}
+        onApply={setTournamentFilters}
+      />
     </View>
   );
 }
@@ -715,69 +587,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.05)',
     paddingHorizontal: 16,
-  },
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
-  },
-  iconBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchShell: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 12,
-    paddingLeft: 10,
-    paddingRight: 12,
-    minHeight: 40,
-  },
-  searchIcon: { marginRight: 6 },
-  searchInput: {
-    flex: 1,
-    minWidth: 0,
-    paddingVertical: Platform.select({ ios: 8, default: 6 }),
-    fontSize: theme.fontSize.sm,
-    color: '#fff',
-    includeFontPadding: false,
-  },
-  filterScroll: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingBottom: 4,
-    paddingRight: 8,
-  },
-  filterChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    maxWidth: 200,
-  },
-  filterChipText: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-    color: '#fff',
-    flexShrink: 1,
   },
   segmented: {
     flexDirection: 'row',
@@ -907,60 +716,4 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSize.xs,
   },
   pressed: { opacity: 0.85 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
-    padding: 16,
-  },
-  modalCard: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    padding: 16,
-    maxHeight: '70%',
-  },
-  modalTitle: {
-    fontSize: theme.fontSize.lg,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 12,
-  },
-  modalSectionLabel: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: '700',
-    color: '#9ca3af',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  modalScroll: { maxHeight: 200 },
-  modalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
-  },
-  modalRowText: {
-    fontSize: theme.fontSize.sm,
-    color: '#e5e5e5',
-  },
-  modalRowTextActive: {
-    color: theme.auth.accent,
-    fontWeight: '600',
-  },
-  modalClose: {
-    marginTop: 12,
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  modalCloseText: {
-    color: '#9ca3af',
-    fontSize: theme.fontSize.sm,
-    fontWeight: '600',
-  },
 });
