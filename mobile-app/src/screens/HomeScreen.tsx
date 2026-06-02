@@ -25,9 +25,10 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import type { PartidoItem } from './PartidosScreen';
-import { IAAfinidadModal } from '../components/home/IAAfinidadModal';
+import { IAAfinidadModal, type AffinityCriteria } from '../components/home/IAAfinidadModal';
 import { OnboardingHardBlockModal } from '../components/onboarding/OnboardingHardBlockModal';
 import { searchAiMatch } from '../api/aiMatch';
+import { updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
 import { type SeasonPassMissionDto } from '../api/seasonPass';
 import {
   isSeasonPassSpCapped,
@@ -80,10 +81,40 @@ type HomeScreenProps = {
 };
 
 /** Caché a nivel de módulo para que affinityResponse y los IDs enviados sobrevivan al desmonte/remonte de HomeScreen */
-const _affinityCache = { 
+const _affinityCache = {
   response: null as string | null,
   sentIds: new Set<string>()
 };
+
+// Etiquetas legibles para construir el prompt de la IA de afinidad a partir de
+// los criterios (= preferencias del jugador).
+const AFFINITY_DAY_LABELS: Record<string, string> = {
+  mon: 'lunes', tue: 'martes', wed: 'miércoles', thu: 'jueves',
+  fri: 'viernes', sat: 'sábado', sun: 'domingo',
+};
+const AFFINITY_SLOT_LABELS: Record<string, string> = {
+  morning: 'mañana', afternoon: 'tarde', evening: 'noche', night: 'madrugada',
+};
+const AFFINITY_STYLE_LABELS: Record<string, string> = {
+  competitive: 'competitivo', social: 'social', learning: 'aprendizaje', balanced: 'cualquiera',
+};
+
+/**
+ * Construye la frase de solicitud para n8n MANTENIENDO la estructura original
+ * que el flujo ya espera ("Quiero buscar un compañero... Disponibilidad... por
+ * la... Estilo preferido... Dame los mejores jugadores compatibles."). Solo
+ * cambian los valores: la disponibilidad pasa de "hoy/mañana" a los días y
+ * franjas de las preferencias del jugador. No se añaden campos nuevos para no
+ * alterar lo que n8n está entrenado para recibir.
+ */
+function buildAffinityCriteriaPrompt(criteria: AffinityCriteria): string {
+  const dias = criteria.days.map((d) => AFFINITY_DAY_LABELS[d] ?? d);
+  const franjas = criteria.slots.map((s) => AFFINITY_SLOT_LABELS[s] ?? s);
+  const estilo = AFFINITY_STYLE_LABELS[criteria.style] ?? criteria.style;
+  const diasTxt = dias.length ? dias.join(', ') : 'cualquier día';
+  const franjasTxt = franjas.length ? franjas.join(' y ') : 'cualquier franja';
+  return `Quiero buscar un compañero para jugar pádel. Disponibilidad: ${diasTxt} por la ${franjasTxt}. Estilo preferido: ${estilo}. Dame los mejores jugadores compatibles.`;
+}
 
 export function HomeScreen({
   streakRefreshKey = 0,
@@ -109,6 +140,7 @@ export function HomeScreen({
   const {
     profile: myPlayerProfile,
     profileLoading,
+    refreshProfile,
     partidos,
     misPartidos,
     matchesLoading,
@@ -180,8 +212,32 @@ export function HomeScreen({
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 
-  const handleAffinitySearch = useCallback(
-    async (prompt: string) => {
+  const handleAffinityRun = useCallback(
+    async (criteria: AffinityCriteria, persist: boolean) => {
+      // Si el usuario editó criterios en el formulario, los guardamos como
+      // preferencias antes de buscar (los criterios de afinidad SON las
+      // preferencias del jugador).
+      if (persist) {
+        const token = session?.access_token ?? null;
+        if (!token || !myPlayerProfile) {
+          setAffinityError('No se pudieron guardar tus criterios.');
+          return;
+        }
+        const res = await updateMyPlayerPreferences(token, {
+          ...myPlayerProfile.preferences,
+          preferredDays: criteria.days as PlayerPreferences['preferredDays'],
+          preferredScheduleSlots:
+            criteria.slots as PlayerPreferences['preferredScheduleSlots'],
+          preferredPlayStyle:
+            criteria.style as PlayerPreferences['preferredPlayStyle'],
+        });
+        if (!res.ok) {
+          setAffinityError(res.error);
+          return;
+        }
+        void refreshProfile({ force: true });
+      }
+
       setAffinityLoading(true);
       setAffinityError(null);
       setAffinityResponse(null);
@@ -204,7 +260,7 @@ export function HomeScreen({
         `- telefono: ${myPlayerProfile?.phone ?? 'Sin dato'}`,
         '',
         'SOLICITUD DEL USUARIO',
-        prompt,
+        buildAffinityCriteriaPrompt(criteria),
         '',
         'INSTRUCCION IMPORTANTE',
         'Usa el jugador logueado como jugador ancla para el matching.',
@@ -218,7 +274,7 @@ export function HomeScreen({
       }
       setAffinityLoading(false);
     },
-    [myPlayerProfile, session?.user?.email, session?.user?.user_metadata?.full_name]
+    [myPlayerProfile, refreshProfile, session]
   );
 
   const homeMissionsFromPass = useMemo(() => {
@@ -425,7 +481,8 @@ export function HomeScreen({
         }}
         sentIds={affinitySentIds}
         onSentIdsChange={updateAffinitySentIds}
-        onSubmit={handleAffinitySearch}
+        preferences={myPlayerProfile?.preferences ?? null}
+        onRunSearch={handleAffinityRun}
         onDirectMessageSent={(target) => {
           // Usa el hilo directo de afinidad: back vuelve al modal de resultados
           // en vez de pasar por la lista de chats.
