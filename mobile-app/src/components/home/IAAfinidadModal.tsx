@@ -8,6 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { sendDirectMessage } from '../../api/messages';
 import { searchPlayers } from '../../api/players';
 import type { PlayerPreferences } from '../../api/players';
+import { AffinityVisibilityToggle } from '../affinity/AffinityVisibilityToggle';
 
 type Option = { id: string; label: string };
 
@@ -209,6 +210,12 @@ type IAAfinidadModalProps = {
    * antes como preferencias del jugador.
    */
   onRunSearch: (criteria: AffinityCriteria, persist: boolean) => void;
+  /** Visibilidad actual del jugador en las búsquedas de afinidad. */
+  affinityVisible: boolean;
+  /** Activa/desactiva la visibilidad; devuelve true si se guardó correctamente. */
+  onSetVisible: (visible: boolean) => Promise<boolean>;
+  /** Cancela la búsqueda en curso (descarta su resultado y libera el loading). */
+  onCancelSearch: () => void;
   onDirectMessageSent?: (target: { id: string; displayName: string; avatarUrl: string | null }) => void;
   sentIds?: Set<string>;
   onSentIdsChange?: (newSet: Set<string>) => void;
@@ -365,6 +372,9 @@ export function IAAfinidadModal({
   onClose,
   preferences,
   onRunSearch,
+  affinityVisible,
+  onSetVisible,
+  onCancelSearch,
   onDirectMessageSent,
   sentIds = new Set(),
   onSentIdsChange,
@@ -405,15 +415,64 @@ export function IAAfinidadModal({
     setSentCandidateIds(sentIds);
   }, [sentIds]);
 
+  /** Guardando el cambio de visibilidad (gate de consentimiento). */
+  const [settingVisible, setSettingVisible] = useState(false);
+  /** Fuerza el gate aunque haya resultados: el usuario intentó buscar sin visibilidad. */
+  const [forceConsent, setForceConsent] = useState(false);
+  /** Búsqueda que quedó pendiente por falta de visibilidad; se lanza al activarla. */
+  const [pendingCriteria, setPendingCriteria] = useState<AffinityCriteria | null>(null);
+
   // Vistas mutuamente excluyentes del cuerpo del modal:
+  //  - gate de visibilidad: sin visibilidad activa no se puede buscar
   //  - formulario: editando, o primera vez sin preferencias completas
   //  - auto-búsqueda en curso: prefs completas, sin resultados aún
   //  - resultados: hay respuesta de la IA
-  // Mostramos el formulario si: el usuario edita, faltan preferencias, o una
-  // búsqueda falló (errorText) sin resultados — así no se queda el loader colgado.
-  const showFormView = showForm || (!responseText && (!prefsComplete || !!errorText));
-  const autoSearchPending = !loading && !showFormView && !responseText;
+  const hasResults = !!responseText;
+  // El gate se muestra mientras no haya visibilidad y: no haya resultados en
+  // pantalla (no bloqueamos ver lo ya buscado), o el usuario haya intentado
+  // buscar de nuevo estando invisible (forceConsent).
+  const needsConsent = !affinityVisible && (!hasResults || forceConsent);
+  // Formulario si: el usuario edita, faltan preferencias, o una búsqueda falló
+  // (errorText) sin resultados — así no se queda el loader colgado.
+  const showFormView =
+    !needsConsent && (showForm || (!hasResults && (!prefsComplete || !!errorText)));
+  const autoSearchPending = !loading && !needsConsent && !showFormView && !hasResults;
   const isFormView = !loading && showFormView;
+
+  const handleActivateVisibility = async () => {
+    if (settingVisible) return;
+    setSettingVisible(true);
+    const ok = await onSetVisible(true);
+    setSettingVisible(false);
+    if (!ok) return;
+    setForceConsent(false);
+    if (pendingCriteria) {
+      // Veníamos de un intento de búsqueda con el formulario estando invisible:
+      // lanzamos esa misma búsqueda ahora que ya somos visibles.
+      autoSearchedRef.current = true;
+      onRunSearch(pendingCriteria, true);
+      setPendingCriteria(null);
+    }
+    // Si no había pendiente, al volverse affinityVisible=true el efecto de
+    // auto-búsqueda lanza con las prefs (o se muestra el formulario si faltan).
+  };
+
+  /** Cambia la visibilidad desde el toggle del modal (vista de resultados). */
+  const handleVisibilityChange = async (next: boolean) => {
+    if (settingVisible) return;
+    setSettingVisible(true);
+    await onSetVisible(next);
+    setSettingVisible(false);
+  };
+
+  // Desde el loader: pasar a editar criterios sin esperar a que termine la
+  // búsqueda. Cancela la búsqueda en curso (su resultado se descarta) y abre el
+  // formulario; autoSearchedRef evita que el efecto la relance.
+  const handleEditDuringLoad = () => {
+    autoSearchedRef.current = true;
+    onCancelSearch();
+    setShowForm(true);
+  };
 
   const toggleDay = (id: string) =>
     setCriteria((p) => ({
@@ -430,10 +489,17 @@ export function IAAfinidadModal({
   const handleSubmitForm = () => {
     if (!isFormComplete) return;
     setShowForm(false);
-    autoSearchedRef.current = true; // ya hemos lanzado búsqueda en esta apertura
     const empty = new Set<string>();
     setSentCandidateIds(empty);
     onSentIdsChange?.(empty);
+    if (!affinityVisible) {
+      // No se puede buscar sin visibilidad: guardamos la intención y mostramos
+      // el gate; al activar la visibilidad se lanza esta misma búsqueda.
+      setPendingCriteria(criteria);
+      setForceConsent(true);
+      return;
+    }
+    autoSearchedRef.current = true; // ya hemos lanzado búsqueda en esta apertura
     onRunSearch(criteria, true); // persistir criterios editados como preferencias
   };
 
@@ -613,6 +679,8 @@ export function IAAfinidadModal({
     if (!visible) {
       autoSearchedRef.current = false;
       setShowForm(false);
+      setForceConsent(false);
+      setPendingCriteria(null);
       return;
     }
     setCriteria({ days: prefDays, slots: prefSlots, style: prefStyle });
@@ -624,6 +692,7 @@ export function IAAfinidadModal({
   // resultados previos. Si faltan datos, se muestra el formulario (mini-form).
   useEffect(() => {
     if (!visible || loading) return;
+    if (!affinityVisible) return; // sin visibilidad → se muestra el gate, no se busca
     if (responseText) return; // ya hay resultados (p. ej. al volver del chat)
     if (showForm) return; // el usuario está editando criterios
     if (!prefsComplete) return; // faltan datos → formulario
@@ -631,7 +700,7 @@ export function IAAfinidadModal({
     autoSearchedRef.current = true;
     onRunSearch({ days: prefDays, slots: prefSlots, style: prefStyle }, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, loading, responseText, showForm, prefsComplete]);
+  }, [visible, loading, affinityVisible, responseText, showForm, prefsComplete]);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -665,9 +734,11 @@ export function IAAfinidadModal({
                   <Text style={styles.headerSubtitle}>
                     {loading || autoSearchPending
                       ? 'Buscando...'
-                      : isFormView
-                        ? 'Define tus criterios'
-                        : 'Resultados IA'}
+                      : needsConsent
+                        ? 'Activa tu visibilidad'
+                        : isFormView
+                          ? 'Define tus preferencias'
+                          : 'Resultados IA'}
                   </Text>
                 </View>
               </View>
@@ -786,6 +857,37 @@ export function IAAfinidadModal({
                     />
                   ))}
                 </View>
+                <Pressable style={styles.loaderEditBtn} onPress={handleEditDuringLoad}>
+                  <Ionicons name="options-outline" size={16} color="#9ca3af" />
+                  <Text style={styles.loaderEditText}>Cambiar preferencias</Text>
+                </Pressable>
+              </View>
+            ) : needsConsent ? (
+              <View style={styles.gateWrap}>
+                <View style={styles.gateIcon}>
+                  <Ionicons name="people" size={36} color="#F18F34" />
+                </View>
+                <Text style={styles.gateTitle}>Activa tu visibilidad</Text>
+                <Text style={styles.gateText}>
+                  Para encontrar compañeros con la IA de afinidad, también serás
+                  visible para otros jugadores que busquen compañero. Puedes
+                  desactivarlo cuando quieras desde tus preferencias.
+                </Text>
+                <Pressable
+                  style={[styles.gateBtn, settingVisible && styles.gateBtnDisabled]}
+                  onPress={() => void handleActivateVisibility()}
+                  disabled={settingVisible}
+                >
+                  <Ionicons name="sparkles" size={18} color="#fff" />
+                  <Text style={styles.gateBtnText}>
+                    {settingVisible ? 'Activando…' : 'Activar y buscar'}
+                  </Text>
+                </Pressable>
+                {!!errorText && (
+                  <View style={styles.errorCard}>
+                    <Text style={styles.errorText}>{errorText}</Text>
+                  </View>
+                )}
               </View>
             ) : showFormView ? (
               <>
@@ -812,7 +914,7 @@ export function IAAfinidadModal({
                 />
 
                 <Text style={styles.formHint}>
-                  Estos criterios se guardan en tus preferencias y se usan para
+                  Estas preferencias se guardan en tu perfil y se usan para
                   encontrar jugadores compatibles.
                 </Text>
 
@@ -855,7 +957,7 @@ export function IAAfinidadModal({
                     {parsedCandidates.length > 0 ? `${parsedCandidates.length} compañeros encontrados!` : 'No se encontraron compañeros'}
                   </Text>
                   <Text style={styles.resultSubtitle}>
-                    {parsedCandidates.length > 0 ? 'Compañeros perfectos para ti' : 'Prueba ajustando criterios para ampliar opciones.'}
+                    {parsedCandidates.length > 0 ? 'Compañeros perfectos para ti' : 'Prueba ajustando tus preferencias para ampliar opciones.'}
                   </Text>
                 </View>
 
@@ -880,12 +982,20 @@ export function IAAfinidadModal({
                   )}
                 </View>
 
+                <View style={styles.resultsVisibility}>
+                  <AffinityVisibilityToggle
+                    value={affinityVisible}
+                    onChange={(v) => void handleVisibilityChange(v)}
+                    disabled={settingVisible}
+                  />
+                </View>
+
                 <Pressable
                   style={styles.searchAgainBtn}
                   onPress={() => setShowForm(true)}
                 >
                   <Ionicons name="options-outline" size={18} color="#d1d5db" />
-                  <Text style={styles.searchAgainText}>Editar criterios</Text>
+                  <Text style={styles.searchAgainText}>Editar preferencias</Text>
                 </Pressable>
               </>
             )}
@@ -1066,6 +1176,58 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontWeight: '500',
     paddingHorizontal: 2,
+  },
+  gateWrap: {
+    minHeight: 420,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 8,
+    gap: 14,
+  },
+  gateIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(241,143,52,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.2)',
+  },
+  gateTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  gateText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#9ca3af',
+    textAlign: 'center',
+    maxWidth: 320,
+  },
+  gateBtn: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(241,143,52,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.32)',
+  },
+  gateBtnDisabled: {
+    opacity: 0.6,
+  },
+  gateBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   submitBtn: {
     marginTop: 4,
@@ -1347,8 +1509,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
-  searchAgainBtn: {
+  resultsVisibility: {
     marginTop: 14,
+  },
+  searchAgainBtn: {
+    marginTop: 12,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
@@ -1423,6 +1588,24 @@ const styles = StyleSheet.create({
     marginTop: 16,
     flexDirection: 'row',
     gap: 8,
+  },
+  loaderEditBtn: {
+    marginTop: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  loaderEditText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#9ca3af',
   },
   loaderDot: {
     width: 7,

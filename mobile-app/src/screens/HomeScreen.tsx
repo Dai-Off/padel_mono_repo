@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -28,7 +28,7 @@ import type { PartidoItem } from './PartidosScreen';
 import { IAAfinidadModal, type AffinityCriteria } from '../components/home/IAAfinidadModal';
 import { OnboardingHardBlockModal } from '../components/onboarding/OnboardingHardBlockModal';
 import { searchAiMatch } from '../api/aiMatch';
-import { updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
+import { updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreferences } from '../api/players';
 import { type SeasonPassMissionDto } from '../api/seasonPass';
 import {
   isSeasonPassSpCapped,
@@ -212,8 +212,13 @@ export function HomeScreen({
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 
+  // Id de la búsqueda en curso: permite descartar el resultado de una búsqueda
+  // que el usuario canceló (p. ej. al pulsar "Cambiar criterios" en el loader).
+  const affinityRunIdRef = useRef(0);
+
   const handleAffinityRun = useCallback(
     async (criteria: AffinityCriteria, persist: boolean) => {
+      const runId = ++affinityRunIdRef.current;
       // Si el usuario editó criterios en el formulario, los guardamos como
       // preferencias antes de buscar (los criterios de afinidad SON las
       // preferencias del jugador).
@@ -235,6 +240,7 @@ export function HomeScreen({
           setAffinityError(res.error);
           return;
         }
+        if (affinityRunIdRef.current !== runId) return; // cancelada durante el guardado
         void refreshProfile({ force: true });
       }
 
@@ -267,6 +273,7 @@ export function HomeScreen({
       ].join('\n');
 
       const result = await searchAiMatch(enrichedPrompt);
+      if (affinityRunIdRef.current !== runId) return; // el usuario canceló: descartar
       if (result.ok && result.text) {
         setAffinityResponse(result.text);
       } else {
@@ -275,6 +282,36 @@ export function HomeScreen({
       setAffinityLoading(false);
     },
     [myPlayerProfile, refreshProfile, session]
+  );
+
+  // Cancela la búsqueda en curso: invalida su id (su resultado se ignorará) y
+  // libera el loading para que el formulario quede operativo de inmediato.
+  const handleCancelAffinitySearch = useCallback(() => {
+    affinityRunIdRef.current++;
+    setAffinityLoading(false);
+    setAffinityResponse(null);
+    setAffinityError(null);
+  }, []);
+
+  // Activa/desactiva la visibilidad en afinidad (gate del modal + auto-activación
+  // al primer uso). Devuelve true si se guardó correctamente.
+  const handleSetAffinityVisible = useCallback(
+    async (visible: boolean): Promise<boolean> => {
+      const token = session?.access_token ?? null;
+      if (!token) {
+        setAffinityError('Inicia sesión para cambiar tu visibilidad.');
+        return false;
+      }
+      setAffinityError(null);
+      const res = await updateAffinityVisible(token, visible);
+      if (!res.ok) {
+        setAffinityError(res.error);
+        return false;
+      }
+      await refreshProfile({ force: true });
+      return true;
+    },
+    [session, refreshProfile]
   );
 
   const homeMissionsFromPass = useMemo(() => {
@@ -483,6 +520,9 @@ export function HomeScreen({
         onSentIdsChange={updateAffinitySentIds}
         preferences={myPlayerProfile?.preferences ?? null}
         onRunSearch={handleAffinityRun}
+        affinityVisible={myPlayerProfile?.affinityVisible ?? false}
+        onSetVisible={handleSetAffinityVisible}
+        onCancelSearch={handleCancelAffinitySearch}
         onDirectMessageSent={(target) => {
           // Usa el hilo directo de afinidad: back vuelve al modal de resultados
           // en vez de pasar por la lista de chats.

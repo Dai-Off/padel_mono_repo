@@ -5,7 +5,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Path, Polyline } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchMyPlayerProfile, updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
+import { fetchMyPlayerProfile, updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreferences } from '../api/players';
+import { AffinityVisibilityToggle } from '../components/affinity/AffinityVisibilityToggle';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
 import { useClubCatalog } from '../hooks/useClubCatalog';
@@ -201,6 +202,10 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
   const [saving, setSaving] = useState(false);
   const [base, setBase] = useState<PlayerPreferences>(DEFAULT_PREFERENCES);
   const [prefs, setPrefs] = useState<PlayerPreferences>(DEFAULT_PREFERENCES);
+  // Visibilidad en IA de afinidad: vive aparte de PlayerPreferences (es un flag
+  // de privacidad del perfil) y se guarda al instante, sin pasar por "Guardar".
+  const [affinityVisible, setAffinityVisible] = useState(false);
+  const [affinitySaving, setAffinitySaving] = useState(false);
   const [clubPickerVisible, setClubPickerVisible] = useState(false);
   const [selectedClubIds, setSelectedClubIds] = useState<string[]>([]);
   const { clubs: clubCatalog } = useClubCatalog();
@@ -217,6 +222,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
       const next = profile?.preferences ?? DEFAULT_PREFERENCES;
       setBase(next);
       setPrefs(next);
+      setAffinityVisible(profile?.affinityVisible ?? false);
       setLoading(false);
     });
   }, [token]);
@@ -267,6 +273,24 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
     const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
     const names = ids.map((id) => byId.get(id)).filter((n): n is string => !!n && n.trim().length > 0);
     setPrefs((prev) => ({ ...prev, favoriteClubs: names }));
+  };
+
+  const handleAffinityVisibleChange = async (next: boolean) => {
+    if (!token) {
+      Alert.alert('Visibilidad', 'Inicia sesión para cambiar tu visibilidad.');
+      return;
+    }
+    if (affinitySaving) return;
+    setAffinityVisible(next); // optimista
+    setAffinitySaving(true);
+    const res = await updateAffinityVisible(token, next);
+    setAffinitySaving(false);
+    if (!res.ok) {
+      setAffinityVisible(!next); // revertir si falla
+      Alert.alert('Visibilidad', res.error);
+      return;
+    }
+    void refreshGlobalProfile({ force: true });
   };
 
   const save = async () => {
@@ -660,6 +684,23 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 );
               })}
             </View>
+          </View>
+
+          <View style={styles.card}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={[styles.sectionIconWrap, { backgroundColor: 'rgba(241,143,52,0.2)' }]}>
+                <Ionicons name="sparkles" size={16} color={ACCENT} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>IA de afinidad</Text>
+                <Text style={styles.cardSubtitle}>Quién puede encontrarte</Text>
+              </View>
+            </View>
+            <AffinityVisibilityToggle
+              value={affinityVisible}
+              onChange={(v) => void handleAffinityVisibleChange(v)}
+              disabled={affinitySaving}
+            />
           </View>
 
           <View style={styles.footerActions}>
