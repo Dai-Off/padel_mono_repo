@@ -433,8 +433,8 @@ export function CrearPartidoLocationSheet({
     }
   };
 
-  /** Paso ubicación o listado de clubes: cromado oscuro (auth) unificado */
-  const matchFlowDark = step === 'location' || step === 'clubs';
+  /** Paso ubicación o listado de clubes o configurar: cromado oscuro (auth) unificado */
+  const matchFlowDark = step === 'location' || step === 'clubs' || step === 'configurar';
 
   const isModal = presentation === 'modal';
   const tallStep = step === 'clubs' || step === 'configurar' || step === 'pista_externa';
@@ -481,7 +481,7 @@ export function CrearPartidoLocationSheet({
                   accessibilityRole="button"
                   accessibilityLabel="Cerrar"
                 >
-                  <Ionicons name="close" size={20} color="#1A1A1A" />
+                  <Ionicons name="close" size={20} color={theme.auth.text} />
                 </Pressable>
                 <Text style={styles.headerConfigTitle} numberOfLines={1}>
                   Configura tu partido
@@ -773,7 +773,7 @@ export function CrearPartidoLocationSheet({
                   <Text style={styles.configSectionTitle}>Privacidad</Text>
                   <View style={styles.privacyRow}>
                     <View style={styles.privacyLeft}>
-                      <Ionicons name="lock-closed-outline" size={18} color="#6b7280" />
+                      <Ionicons name="lock-closed-outline" size={18} color={theme.auth.textMuted} />
                       <View style={styles.privacyTextWrap}>
                         <Text style={styles.privacyLabel}>Partido privado</Text>
                         <Text style={styles.privacySub}>No aparecerá en “Partidos abiertos”</Text>
@@ -782,7 +782,7 @@ export function CrearPartidoLocationSheet({
                     <Switch
                       value={partidoPrivado}
                       onValueChange={setPartidoPrivado}
-                      trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
+                      trackColor={{ false: 'rgba(255,255,255,0.2)', true: theme.auth.accent }}
                       thumbColor="#fff"
                     />
                   </View>
@@ -801,7 +801,7 @@ export function CrearPartidoLocationSheet({
                       {selectedSlot.courtIndoor ? 'Interior' : 'Exterior'}
                     </Text>
                     <View style={styles.configClubMeta}>
-                      <Ionicons name="time-outline" size={12} color="#6b7280" />
+                      <Ionicons name="time-outline" size={12} color={theme.auth.textMuted} />
                       <Text style={styles.configClubMetaText}>
                         {selectedSlot.dateLabel} • {selectedSlot.time}
                       </Text>
@@ -811,7 +811,7 @@ export function CrearPartidoLocationSheet({
                 </View>
 
                 {createError && (
-                  <View style={styles.createErrorBanner}>
+                  <View style={[styles.createErrorBanner, styles.createErrorBannerDark]}>
                     <Ionicons name="alert-circle" size={18} color="#E31E24" />
                     <Text style={styles.createErrorText}>{createError}</Text>
                   </View>
@@ -1385,11 +1385,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
     marginBottom: 0,
   },
-  /** Header light del paso `configurar` (como StartMatchFlow) */
+  /** Header light del paso `configurar` ahora oscuro */
   headerConfig: {
-    backgroundColor: 'rgba(250,250,250,0.95)',
+    backgroundColor: theme.auth.bg,
     borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    borderBottomColor: 'rgba(255,255,255,0.1)',
     paddingVertical: 16,
     marginBottom: 0,
   },
@@ -1397,9 +1397,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 12,
-    backgroundColor: 'rgba(250,250,250,0.6)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: 'rgba(229,231,235,0.9)',
+    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1407,7 +1407,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
     textAlign: 'center',
   },
   headerConfigRightSpacer: {
@@ -1505,28 +1505,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: 'rgba(255,255,255,0.1)',
     borderRadius: 12,
-    backgroundColor: '#f3f4f6',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   slotPressedGlass: {
     borderColor: theme.auth.accent,
-    backgroundColor: 'rgba(241, 143, 52, 0.08)',
+    backgroundColor: 'rgba(241, 143, 52, 0.15)',
   },
   slotTimeGlass: {
     fontSize: theme.fontSize.xs,
     fontWeight: '700',
-    color: '#000000',
+    color: theme.auth.text,
   },
   slotDurationGlass: {
     fontSize: 10,
-    color: '#9ca3af',
+    color: theme.auth.textMuted,
     marginTop: 2,
   },
   slotMetaGlass: {
     fontSize: 9,
     fontWeight: '600',
-    color: '#6b7280',
+    color: theme.auth.textMuted,
     marginTop: 4,
     maxWidth: 72,
     textAlign: 'center',
@@ -1808,12 +1808,12 @@ const styles = StyleSheet.create({
   configSectionTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
     marginBottom: 12,
   },
   configFriendlyNote: {
     fontSize: 12,
-    color: '#6b7280',
+    color: theme.auth.textMuted,
     marginBottom: 12,
     lineHeight: 18,
   },
@@ -1824,8 +1824,8 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 16,
     borderWidth: 2,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     marginBottom: 12,
     alignSelf: 'stretch',
   },
@@ -1838,7 +1838,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#d1d5db',
+    borderColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -1860,12 +1860,12 @@ const styles = StyleSheet.create({
   configOptionTitle: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
     marginBottom: 2,
   },
   configOptionSub: {
     fontSize: 12,
-    color: '#6b7280',
+    color: theme.auth.textMuted,
   },
   configGenderRow: {
     flexDirection: 'row',
@@ -1882,11 +1882,11 @@ const styles = StyleSheet.create({
   configGenderLabel: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1A1A1A',
+    color: theme.auth.text,
   },
   configGenderSub: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: theme.auth.textMuted,
     marginTop: 2,
   },
   privacyRow: {
@@ -1897,8 +1897,8 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   privacyLeft: {
     flexDirection: 'row',
@@ -1914,11 +1914,11 @@ const styles = StyleSheet.create({
   privacyLabel: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
   },
   privacySub: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: theme.auth.textMuted,
     marginTop: 2,
   },
   configClubCard: {
@@ -1926,17 +1926,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   configClubImage: {
     width: 48,
     height: 48,
     borderRadius: 12,
   },
-  configClubImagePlaceholder: { backgroundColor: '#e5e7eb' },
+  configClubImagePlaceholder: { backgroundColor: 'rgba(255,255,255,0.1)' },
   configClubInfo: {
     flex: 1,
     minWidth: 0,
@@ -1944,12 +1944,12 @@ const styles = StyleSheet.create({
   configClubName: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: theme.auth.text,
   },
   configCourtLine: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#4b5563',
+    color: theme.auth.textMuted,
     marginTop: 4,
     lineHeight: 15,
   },
@@ -1961,7 +1961,7 @@ const styles = StyleSheet.create({
   },
   configClubMetaText: {
     fontSize: 10,
-    color: '#6b7280',
+    color: theme.auth.textMuted,
   },
   configClubPrice: {
     fontSize: 12,
@@ -1971,9 +1971,9 @@ const styles = StyleSheet.create({
   },
   configurarFooter: {
     width: '100%',
-    backgroundColor: 'rgba(250,250,250,0.95)',
+    backgroundColor: theme.auth.bg,
     borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+    borderTopColor: 'rgba(255,255,255,0.1)',
     paddingTop: 12,
     paddingBottom: 16,
   },
