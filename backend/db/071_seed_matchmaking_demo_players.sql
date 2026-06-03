@@ -52,7 +52,7 @@ prepared AS (
     d.last_name,
     d.elo_rating,
     d.sex,
-    (25.0 + (d.elo_rating - 3.5) * 1.8) AS mu,
+    ((d.elo_rating / 7.0 * 50) + 2 * 8.333) AS mu,
     8.333::double precision AS sigma,
     4.167::double precision AS beta,
     CASE
