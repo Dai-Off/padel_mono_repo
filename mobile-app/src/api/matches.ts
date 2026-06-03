@@ -297,7 +297,14 @@ export async function fetchMatchById(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
-    const res = await fetch(`${API_URL}/matches/${matchId}?expand=1`, { headers });
+    const res = await fetch(`${API_URL}/matches/${matchId}?expand=1`, {
+      headers: {
+        ...headers,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
+    });
     if (!res.ok) return null;
     const json = (await res.json()) as MatchResponse;
     if (json.ok && json.match) return normalizeMatchList([json.match as MatchEnriched])[0] ?? null;

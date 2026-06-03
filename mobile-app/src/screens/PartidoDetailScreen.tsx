@@ -31,7 +31,8 @@ import {
 import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
 import { fetchMyPlayerId } from '../api/players';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import { enrichPartidoWithProfileAvatar } from '../lib/partidoPlayerUtils';
+import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { rejectMatchmakingProposal } from '../api/matchmaking';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import {
@@ -92,6 +93,8 @@ type PartidoDetailScreenProps = {
    * onboarding (soft block sticky).
    */
   onOpenProfileForOnboarding?: () => void;
+  /** Tras unirse, pagar o salir: refresca listas globales (Home, pestaña Partidos). */
+  onMatchDataChanged?: () => void;
 };
 
 function PulseDot() {
@@ -109,6 +112,7 @@ export function PartidoDetailScreen({
   onGoHome,
   onOpenPublicProfile,
   onOpenProfileForOnboarding,
+  onMatchDataChanged,
 }: PartidoDetailScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -124,9 +128,12 @@ export function PartidoDetailScreen({
    * todavía no ha llegado, tratamos como "completado" para no mostrar el
    * candado durante el flicker inicial.
    */
-  const { profile: myProfile, refreshMatches } = useHomeData();
-  /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido (fetch async). */
-  const [playerContextResolved, setPlayerContextResolved] = useState(() => !session?.access_token);
+  const { profile: myProfile, refreshMatches, upsertMisPartido } = useHomeData();
+  const matchFetchGen = useRef(0);
+  /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido. */
+  const [playerContextResolved, setPlayerContextResolved] = useState(
+    () => !session?.access_token || Boolean(myProfile?.id),
+  );
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
   const [joiningSlotIndex, setJoiningSlotIndex] = useState<number | null>(null);
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
@@ -146,12 +153,48 @@ export function PartidoDetailScreen({
       setPlayerContextResolved(true);
       return;
     }
+    if (myProfile?.id) {
+      setCurrentPlayerId(myProfile.id);
+      setPlayerContextResolved(true);
+      return;
+    }
     setPlayerContextResolved(false);
     fetchMyPlayerId(session.access_token)
       .then(setCurrentPlayerId)
       .catch(() => setCurrentPlayerId(null))
       .finally(() => setPlayerContextResolved(true));
-  }, [session?.access_token]);
+  }, [session?.access_token, myProfile?.id]);
+
+  const mergePartidoFromServer = useCallback(
+    (raw: PartidoItem | null, mergeWith?: PartidoItem) => {
+      if (!raw) return;
+      let next = enrichPartidoWithProfileAvatar(raw, currentPlayerId, myProfile?.avatarUrl);
+      if (mergeWith) {
+        next = {
+          ...next,
+          organizerPlayerId: next.organizerPlayerId ?? mergeWith.organizerPlayerId,
+          matchType: next.matchType ?? mergeWith.matchType,
+          matchStatus: next.matchStatus ?? mergeWith.matchStatus,
+          bookingStatus: next.bookingStatus ?? mergeWith.bookingStatus,
+          hasMyFeedback: next.hasMyFeedback === true || mergeWith.hasMyFeedback === true,
+        };
+      }
+      setPartido(next);
+      return next;
+    },
+    [currentPlayerId, myProfile?.avatarUrl],
+  );
+
+  const syncPartidoAfterMutation = useCallback(
+    (raw: PartidoItem | null, mergeWith?: PartidoItem) => {
+      const next = mergePartidoFromServer(raw, mergeWith);
+      if (!next) return;
+      upsertMisPartido(next);
+      onMatchDataChanged?.();
+      void refreshMatches({ force: true, scope: 'mine' });
+    },
+    [mergePartidoFromServer, upsertMisPartido, onMatchDataChanged, refreshMatches],
+  );
 
   /**
    * Soft block: el backend rechaza /matches/:id/join con 403 cuando el match
@@ -166,21 +209,13 @@ export function PartidoDetailScreen({
   useEffect(() => {
     const token = session?.access_token;
     if (!token) return;
-    fetchMatchById(partido.id, token).then((m) => {
-      if (!m) return;
-      const updated = mapMatchToPartido(m);
-      if (updated) {
-        setPartido((prev) => ({
-          ...updated,
-          organizerPlayerId: updated.organizerPlayerId ?? prev.organizerPlayerId,
-          matchmakingPayment: prev.matchmakingPayment,
-          matchType: updated.matchType ?? prev.matchType,
-          matchStatus: updated.matchStatus ?? prev.matchStatus,
-          bookingStatus: updated.bookingStatus ?? prev.bookingStatus,
-          hasMyFeedback: updated.hasMyFeedback === true || prev.hasMyFeedback === true,
-        }));
-      }
+    const gen = ++matchFetchGen.current;
+    void reloadMatchPartido(partido.id, token).then((updated) => {
+      if (gen !== matchFetchGen.current || !updated) return;
+      mergePartidoFromServer(updated, partido);
     });
+    // Solo al abrir el detalle o cambiar sesión — no en cada setPartido local.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partido.id, session?.access_token]);
 
   const isInMatch = currentPlayerId != null && (partido.playerIds ?? []).includes(currentPlayerId);
@@ -241,19 +276,30 @@ export function PartidoDetailScreen({
         return;
       }
       const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, token);
-      setJoiningSlotIndex(null);
       if (!confirmRes.ok) {
+        setJoiningSlotIndex(null);
         Alert.alert('Error', 'No se pudo confirmar. Inténtalo de nuevo.');
         return;
       }
-      const match = await fetchMatchById(partido.id, token);
-      if (match) {
-        const updated = mapMatchToPartido(match);
-        if (updated) setPartido(updated);
+      matchFetchGen.current += 1;
+      const updated = await reloadMatchPartido(partido.id, token, {
+        retryIfMissingPlayerId: currentPlayerId ?? myProfile?.id ?? undefined,
+      });
+      setJoiningSlotIndex(null);
+      if (updated) {
+        syncPartidoAfterMutation(updated, { ...partido, matchmakingPayment: undefined });
       }
       setSelectedSlotIndex(null);
     },
-    [partido.id, session?.access_token, initPaymentSheet, presentPaymentSheet]
+    [
+      partido,
+      currentPlayerId,
+      myProfile?.id,
+      session?.access_token,
+      initPaymentSheet,
+      presentPaymentSheet,
+      syncPartidoAfterMutation,
+    ]
   );
 
   const handleMatchmakingPay = useCallback(async () => {
@@ -292,22 +338,27 @@ export function PartidoDetailScreen({
       return;
     }
     const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, token);
-    setMatchmakingPayBusy(false);
     if (!confirmRes.ok) {
+      setMatchmakingPayBusy(false);
       Alert.alert('Error', 'No se pudo confirmar. Inténtalo de nuevo.');
       return;
     }
-    const match = await fetchMatchById(partido.id, token);
-    if (match) {
-      const updated = mapMatchToPartido(match);
-      if (updated) setPartido({ ...updated, matchmakingPayment: undefined });
+    matchFetchGen.current += 1;
+    const updated = await reloadMatchPartido(partido.id, token, {
+      retryIfMissingPlayerId: currentPlayerId ?? myProfile?.id ?? undefined,
+    });
+    setMatchmakingPayBusy(false);
+    if (updated) {
+      syncPartidoAfterMutation({ ...updated, matchmakingPayment: undefined }, partido);
     }
   }, [
-    partido.id,
-    partido.matchmakingPayment,
+    partido,
+    currentPlayerId,
+    myProfile?.id,
     session?.access_token,
     initPaymentSheet,
     presentPaymentSheet,
+    syncPartidoAfterMutation,
   ]);
 
   const handleDeclineMatchmaking = useCallback(() => {
@@ -538,9 +589,10 @@ export function PartidoDetailScreen({
               } else {
                 setCancelOverlay((o) => ({ ...o, message: 'Actualizando partido…' }));
                 Alert.alert('Listo', 'Saliste del partido. Si pagaste con tarjeta, el reembolso se procesará en breve.');
-                const m = await fetchMatchById(partido.id, token);
-                const updated = m ? mapMatchToPartido(m) : null;
-                if (updated) setPartido(updated);
+                matchFetchGen.current += 1;
+                const updated = await reloadMatchPartido(partido.id, token);
+                if (updated) syncPartidoAfterMutation(updated, partido);
+                else void refreshMatches({ force: true, scope: 'mine' });
               }
               return;
             }
@@ -553,7 +605,14 @@ export function PartidoDetailScreen({
         },
       },
     ]);
-  }, [session?.access_token, partido.id, onBack, playersFilledCount]);
+  }, [
+    session?.access_token,
+    partido,
+    onBack,
+    playersFilledCount,
+    syncPartidoAfterMutation,
+    refreshMatches,
+  ]);
 
   return (
     <View style={styles.root}>
@@ -1067,6 +1126,7 @@ function PlayerSlotDetail({
       >
         {player.avatar ? (
           <Image
+            key={player.avatar}
             source={{ uri: player.avatar }}
             style={styles.plAvatar}
             resizeMode="cover"
