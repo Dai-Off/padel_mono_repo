@@ -703,14 +703,21 @@ export function MainApp() {
             if (data.matchId && token) {
               void reloadMatchPartido(data.matchId, token, {
                 retryIfMissingPlayerId: profile?.id,
-              }).then((p) => {
-                if (!p) return;
-                upsertMisPartido(
-                  enrichPartidoWithProfileAvatar(p, profile?.id, profile?.avatarUrl),
-                );
+              }).then(async (p) => {
+                if (!p || !profile?.id) return;
+                const enriched = enrichPartidoWithProfileAvatar(p, {
+                  id: profile.id,
+                  firstName: profile.firstName,
+                  lastName: profile.lastName,
+                  avatarUrl: profile.avatarUrl,
+                });
+                upsertMisPartido(enriched);
+                await refreshMatches({ force: true, scope: 'mine' });
+                upsertMisPartido(enriched);
               });
+            } else {
+              void refreshMatches({ force: true, scope: 'mine' });
             }
-            void refreshMatches({ force: true, scope: 'mine' });
           }}
         />
       );
@@ -875,8 +882,12 @@ export function MainApp() {
         <PartidoDetailScreen
           partido={selectedPartido}
           onMatchDataChanged={() => setPartidosRefreshNonce((n) => n + 1)}
-          onBack={() => setSelectedPartido(null)}
+          onBack={() => {
+            void refreshMatches({ force: true, scope: 'mine' });
+            setSelectedPartido(null);
+          }}
           onGoHome={() => {
+            void refreshMatches({ force: true, scope: 'mine' });
             setSelectedPartido(null);
             setShowTuActividad(false);
             setTuActividadSubView(null);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
 import {
   ActivityIndicator,
@@ -165,10 +165,25 @@ export function PartidoDetailScreen({
       .finally(() => setPlayerContextResolved(true));
   }, [session?.access_token, myProfile?.id]);
 
+  const profileForEnrich = useMemo(
+    () =>
+      myProfile?.id
+        ? {
+            id: myProfile.id,
+            firstName: myProfile.firstName,
+            lastName: myProfile.lastName,
+            avatarUrl: myProfile.avatarUrl,
+          }
+        : currentPlayerId
+          ? { id: currentPlayerId, avatarUrl: myProfile?.avatarUrl ?? null }
+          : null,
+    [myProfile, currentPlayerId],
+  );
+
   const mergePartidoFromServer = useCallback(
     (raw: PartidoItem | null, mergeWith?: PartidoItem) => {
       if (!raw) return;
-      let next = enrichPartidoWithProfileAvatar(raw, currentPlayerId, myProfile?.avatarUrl);
+      let next = enrichPartidoWithProfileAvatar(raw, profileForEnrich);
       if (mergeWith) {
         next = {
           ...next,
@@ -182,16 +197,17 @@ export function PartidoDetailScreen({
       setPartido(next);
       return next;
     },
-    [currentPlayerId, myProfile?.avatarUrl],
+    [profileForEnrich],
   );
 
   const syncPartidoAfterMutation = useCallback(
-    (raw: PartidoItem | null, mergeWith?: PartidoItem) => {
+    async (raw: PartidoItem | null, mergeWith?: PartidoItem) => {
       const next = mergePartidoFromServer(raw, mergeWith);
       if (!next) return;
       upsertMisPartido(next);
       onMatchDataChanged?.();
-      void refreshMatches({ force: true, scope: 'mine' });
+      await refreshMatches({ force: true, scope: 'mine' });
+      upsertMisPartido(next);
     },
     [mergePartidoFromServer, upsertMisPartido, onMatchDataChanged, refreshMatches],
   );
@@ -287,7 +303,7 @@ export function PartidoDetailScreen({
       });
       setJoiningSlotIndex(null);
       if (updated) {
-        syncPartidoAfterMutation(updated, { ...partido, matchmakingPayment: undefined });
+        await syncPartidoAfterMutation(updated, { ...partido, matchmakingPayment: undefined });
       }
       setSelectedSlotIndex(null);
     },
@@ -349,7 +365,7 @@ export function PartidoDetailScreen({
     });
     setMatchmakingPayBusy(false);
     if (updated) {
-      syncPartidoAfterMutation({ ...updated, matchmakingPayment: undefined }, partido);
+      await syncPartidoAfterMutation({ ...updated, matchmakingPayment: undefined }, partido);
     }
   }, [
     partido,
@@ -591,7 +607,7 @@ export function PartidoDetailScreen({
                 Alert.alert('Listo', 'Saliste del partido. Si pagaste con tarjeta, el reembolso se procesará en breve.');
                 matchFetchGen.current += 1;
                 const updated = await reloadMatchPartido(partido.id, token);
-                if (updated) syncPartidoAfterMutation(updated, partido);
+                if (updated) await syncPartidoAfterMutation(updated, partido);
                 else void refreshMatches({ force: true, scope: 'mine' });
               }
               return;
