@@ -27,60 +27,110 @@ function slotBelongsToPlayer(
   return slotId === playerId;
 }
 
+function playerParticipatesInPartido(partido: PartidoItem, playerId: string): boolean {
+  if (partido.organizerPlayerId === playerId) return true;
+  if ((partido.playerIds ?? []).includes(playerId)) return true;
+  if ((partido.playerIdsBySlot ?? []).some((id) => id === playerId)) return true;
+  return partido.players.some(
+    (p, index) => p.id === playerId || partido.playerIdsBySlot?.[index] === playerId,
+  );
+}
+
+function shouldEnrichSlot(
+  partido: PartidoItem,
+  index: number,
+  player: PartidoItem['players'][number],
+  playerId: string,
+  forceSlotIndex?: number,
+): boolean {
+  if (forceSlotIndex === index) return true;
+  return slotBelongsToPlayer(partido, index, player, playerId);
+}
+
+export type EnrichPartidoOptions = {
+  /** Tras unirse: rellena la plaza aunque la API aún no devolvió al jugador. */
+  forceSlotIndex?: number;
+};
+
 /** Rellena nombre, iniciales y avatar del jugador actual desde el perfil cacheado. */
 export function enrichPartidoWithProfileAvatar(
   partido: PartidoItem,
   profile: ProfileForPartidoEnrich | null | undefined,
+  opts?: EnrichPartidoOptions,
 ): PartidoItem {
   const pid = profile?.id?.trim();
   if (!pid || !profile) return partido;
 
-  const inMatch =
-    (partido.playerIds ?? []).includes(pid) ||
-    (partido.playerIdsBySlot ?? []).some((id) => id === pid);
-  if (!inMatch) return partido;
+  const forceSlotIndex = opts?.forceSlotIndex;
+  const participates =
+    forceSlotIndex != null ||
+    playerParticipatesInPartido(partido, pid);
+  if (!participates) return partido;
 
   const first = profile.firstName?.trim() ?? '';
   const last = profile.lastName?.trim() ?? '';
   const fullName = `${first} ${last}`.trim();
-  const initial = fullName ? buildInitial(first, last) : '';
+  const initial = fullName ? buildInitial(first, last) : '?';
   const uri = profile.avatarUrl?.trim();
 
   let changed = false;
   const players = partido.players.map((p, index) => {
-    if (p.isFree && !slotBelongsToPlayer(partido, index, p, pid)) return p;
-    if (!p.isFree && !slotBelongsToPlayer(partido, index, p, pid)) return p;
+    if (!shouldEnrichSlot(partido, index, p, pid, forceSlotIndex)) return p;
 
     const next = { ...p, id: p.id ?? pid };
     if (next.isFree) {
       next.isFree = false;
       changed = true;
     }
-    if (uri && next.avatar !== uri) {
+    if (uri && !next.avatar?.trim()) {
+      next.avatar = uri;
+      changed = true;
+    } else if (uri && next.id === pid && next.avatar !== uri) {
       next.avatar = uri;
       changed = true;
     }
-    if (fullName && (!next.name || next.name === 'Jugador')) {
+    if (fullName && (!next.name?.trim() || next.name === 'Jugador')) {
       next.name = fullName;
       changed = true;
     }
-    if (initial && (!next.initial || next.initial === '?')) {
+    if (!next.initial?.trim() || next.initial === '?') {
       next.initial = initial;
       changed = true;
     }
-    if (!next.isFree && next.id !== pid) {
+    if (next.id !== pid) {
       next.id = pid;
       changed = true;
     }
     return next;
   });
 
+  const playerIdsBySlot = [...(partido.playerIdsBySlot ?? [null, null, null, null])];
+  while (playerIdsBySlot.length < 4) playerIdsBySlot.push(null);
+  if (forceSlotIndex != null && forceSlotIndex >= 0 && forceSlotIndex <= 3) {
+    if (playerIdsBySlot[forceSlotIndex] !== pid) {
+      playerIdsBySlot[forceSlotIndex] = pid;
+      changed = true;
+    }
+  }
+
   const playerIds = [...new Set([...(partido.playerIds ?? []), pid])];
   const idsChanged = playerIds.length !== (partido.playerIds ?? []).length;
+  const slotsChanged =
+    forceSlotIndex != null &&
+    playerIdsBySlot.some((id, i) => id !== (partido.playerIdsBySlot ?? [])[i]);
 
-  return changed || idsChanged
-    ? { ...partido, players, playerIds }
+  return changed || idsChanged || slotsChanged
+    ? { ...partido, players, playerIds, playerIdsBySlot }
     : partido;
+}
+
+/** Enriquece una lista de partidos con el perfil del jugador actual. */
+export function enrichPartidosWithProfileAvatar(
+  items: PartidoItem[],
+  profile: ProfileForPartidoEnrich | null | undefined,
+): PartidoItem[] {
+  if (!profile?.id?.trim()) return items;
+  return items.map((p) => enrichPartidoWithProfileAvatar(p, profile));
 }
 
 /** Inserta o actualiza un partido en la lista "Mis partidos" (orden por startAt). */
@@ -129,19 +179,17 @@ export function isPartidoMine(
 }
 
 /**
- * Tras /matches/mine, conserva solo partidos locales del jugador que la API
- * aún no devolvió (desfase tras join/pago). Nunca mezcla partidos abiertos ajenos.
+ * Tras /matches/mine, conserva partidos locales que la API aún no devolvió
+ * (desfase tras crear/unirse/pago). `previous` solo contiene partidos del usuario.
  */
 export function mergeMisPartidosFromServer(
   previous: PartidoItem[],
   fromServer: PartidoItem[],
-  playerId: string | null | undefined,
 ): PartidoItem[] {
   const serverIds = new Set(fromServer.map((p) => p.id));
   let merged = fromServer;
   for (const p of previous) {
     if (serverIds.has(p.id) || p.matchPhase === 'past') continue;
-    if (!isPartidoMine(p, playerId)) continue;
     merged = upsertMisPartidosList(merged, p);
   }
   return merged;

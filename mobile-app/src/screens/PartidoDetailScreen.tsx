@@ -29,9 +29,13 @@ import {
   type SubmitMatchFeedbackBody,
 } from '../api/matches';
 import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
-import { fetchMyPlayerId } from '../api/players';
+import { fetchMyPlayerId, fetchMyPlayerProfile } from '../api/players';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { enrichPartidoWithProfileAvatar } from '../lib/partidoPlayerUtils';
+import {
+  enrichPartidoWithProfileAvatar,
+  type ProfileForPartidoEnrich,
+} from '../lib/partidoPlayerUtils';
+import { PartidoSlotAvatar } from '../components/partido/PartidoSlotAvatar';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { rejectMatchmakingProposal } from '../api/matchmaking';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
@@ -128,7 +132,7 @@ export function PartidoDetailScreen({
    * todavía no ha llegado, tratamos como "completado" para no mostrar el
    * candado durante el flicker inicial.
    */
-  const { profile: myProfile, refreshMatches, upsertMisPartido } = useHomeData();
+  const { profile: myProfile, refreshMatches, upsertMisPartido, refreshProfile } = useHomeData();
   const matchFetchGen = useRef(0);
   /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido. */
   const [playerContextResolved, setPlayerContextResolved] = useState(
@@ -181,9 +185,16 @@ export function PartidoDetailScreen({
   );
 
   const mergePartidoFromServer = useCallback(
-    (raw: PartidoItem | null, mergeWith?: PartidoItem) => {
+    (
+      raw: PartidoItem | null,
+      mergeWith?: PartidoItem,
+      enrichOpts?: { profile?: ProfileForPartidoEnrich | null; forceSlotIndex?: number },
+    ) => {
       if (!raw) return;
-      let next = enrichPartidoWithProfileAvatar(raw, profileForEnrich);
+      const profile = enrichOpts?.profile ?? profileForEnrich;
+      let next = enrichPartidoWithProfileAvatar(raw, profile, {
+        forceSlotIndex: enrichOpts?.forceSlotIndex,
+      });
       if (mergeWith) {
         next = {
           ...next,
@@ -201,15 +212,20 @@ export function PartidoDetailScreen({
   );
 
   const syncPartidoAfterMutation = useCallback(
-    async (raw: PartidoItem | null, mergeWith?: PartidoItem) => {
-      const next = mergePartidoFromServer(raw, mergeWith);
+    async (
+      raw: PartidoItem | null,
+      mergeWith?: PartidoItem,
+      enrichOpts?: { profile?: ProfileForPartidoEnrich | null; forceSlotIndex?: number },
+    ) => {
+      const next = mergePartidoFromServer(raw, mergeWith, enrichOpts);
       if (!next) return;
       upsertMisPartido(next);
       onMatchDataChanged?.();
       await refreshMatches({ force: true, scope: 'mine' });
       upsertMisPartido(next);
+      void refreshProfile({ force: true });
     },
-    [mergePartidoFromServer, upsertMisPartido, onMatchDataChanged, refreshMatches],
+    [mergePartidoFromServer, upsertMisPartido, onMatchDataChanged, refreshMatches, refreshProfile],
   );
 
   /**
@@ -298,12 +314,24 @@ export function PartidoDetailScreen({
         return;
       }
       matchFetchGen.current += 1;
+      const freshProfile = await fetchMyPlayerProfile(token);
+      const profileEnrich: ProfileForPartidoEnrich | null = freshProfile?.id
+        ? {
+            id: freshProfile.id,
+            firstName: freshProfile.firstName,
+            lastName: freshProfile.lastName,
+            avatarUrl: freshProfile.avatarUrl,
+          }
+        : profileForEnrich;
       const updated = await reloadMatchPartido(partido.id, token, {
-        retryIfMissingPlayerId: currentPlayerId ?? myProfile?.id ?? undefined,
+        retryIfMissingPlayerId: currentPlayerId ?? myProfile?.id ?? freshProfile?.id ?? undefined,
       });
       setJoiningSlotIndex(null);
       if (updated) {
-        await syncPartidoAfterMutation(updated, { ...partido, matchmakingPayment: undefined });
+        await syncPartidoAfterMutation(updated, { ...partido, matchmakingPayment: undefined }, {
+          profile: profileEnrich,
+          forceSlotIndex: slotIndex,
+        });
       }
       setSelectedSlotIndex(null);
     },
@@ -311,6 +339,7 @@ export function PartidoDetailScreen({
       partido,
       currentPlayerId,
       myProfile?.id,
+      profileForEnrich,
       session?.access_token,
       initPaymentSheet,
       presentPaymentSheet,
@@ -360,17 +389,29 @@ export function PartidoDetailScreen({
       return;
     }
     matchFetchGen.current += 1;
+    const freshProfile = await fetchMyPlayerProfile(token);
+    const profileEnrich: ProfileForPartidoEnrich | null = freshProfile?.id
+      ? {
+          id: freshProfile.id,
+          firstName: freshProfile.firstName,
+          lastName: freshProfile.lastName,
+          avatarUrl: freshProfile.avatarUrl,
+        }
+      : profileForEnrich;
     const updated = await reloadMatchPartido(partido.id, token, {
-      retryIfMissingPlayerId: currentPlayerId ?? myProfile?.id ?? undefined,
+      retryIfMissingPlayerId: currentPlayerId ?? myProfile?.id ?? freshProfile?.id ?? undefined,
     });
     setMatchmakingPayBusy(false);
     if (updated) {
-      await syncPartidoAfterMutation({ ...updated, matchmakingPayment: undefined }, partido);
+      await syncPartidoAfterMutation({ ...updated, matchmakingPayment: undefined }, partido, {
+        profile: profileEnrich,
+      });
     }
   }, [
     partido,
     currentPlayerId,
     myProfile?.id,
+    profileForEnrich,
     session?.access_token,
     initPaymentSheet,
     presentPaymentSheet,
@@ -1140,18 +1181,13 @@ function PlayerSlotDetail({
         onPress={() => player.id && onOpenPublicProfile?.(player.id)}
         style={({ pressed }) => [styles.plFill, pressed && styles.pressed]}
       >
-        {player.avatar ? (
-          <Image
-            key={player.avatar}
-            source={{ uri: player.avatar }}
-            style={styles.plAvatar}
-            resizeMode="cover"
-          />
-        ) : (
-          <Text style={styles.plInitials}>
-            {(player.initial ?? player.name?.slice(0, 2) ?? '?').toUpperCase()}
-          </Text>
-        )}
+        <PartidoSlotAvatar
+          avatarUrl={player.avatar}
+          initials={player.initial ?? player.name?.slice(0, 2) ?? '?'}
+          size={56}
+          borderRadius={12}
+          backgroundColor={ACCENT}
+        />
       </Pressable>
       <Pressable onPress={() => player.id && onOpenPublicProfile?.(player.id)}>
         <Text style={styles.plName} numberOfLines={1}>

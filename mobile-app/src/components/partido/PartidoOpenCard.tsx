@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import { PartidoSlotAvatar } from "./PartidoSlotAvatar";
 import type { PartidoItem, PartidoPlayer } from "../../screens/PartidosScreen";
 
 import { useAmbientTheme } from "../../hooks/useAmbientTheme";
@@ -82,28 +83,16 @@ function PlayerFace({ player, colors }: { player: PartidoPlayer; colors: [string
       </View>
     );
   }
-  if (player.avatar) {
-    return (
-      <View style={styles.slotFill}>
-        <Image
-          source={{ uri: player.avatar }}
-          style={styles.slotAvatar}
-          resizeMode="cover"
-        />
-      </View>
-    );
-  }
   return (
-    <LinearGradient
-      colors={colors}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.slotFill}
-    >
-      <Text style={styles.slotInitials} numberOfLines={1}>
-        {(player.initial ?? player.name?.slice(0, 2) ?? "?").toUpperCase()}
-      </Text>
-    </LinearGradient>
+    <View style={styles.slotFill}>
+      <PartidoSlotAvatar
+        avatarUrl={player.avatar}
+        initials={player.initial ?? player.name?.slice(0, 2) ?? '?'}
+        size={40}
+        borderRadius={8}
+        backgroundColor={colors[0]}
+      />
+    </View>
   );
 }
 
