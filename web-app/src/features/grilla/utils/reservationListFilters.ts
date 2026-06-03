@@ -91,7 +91,7 @@ function rawPlayerCount(b: {
     return b.organizer_player_id || b.players ? 1 : 0;
 }
 
-function rawTotalPaidCents(b: {
+type RawBookingPaymentInput = {
     payment_transactions?: Array<{
         status?: string;
         payer_player_id?: string | null;
@@ -103,7 +103,9 @@ function rawTotalPaidCents(b: {
         payment_status?: string | null;
         share_amount_cents?: number | null;
     }>;
-}): number {
+};
+
+function rawTotalPaidCents(b: RawBookingPaymentInput): number {
     const txByPlayer = new Map<string, number>();
     for (const t of b.payment_transactions ?? []) {
         if (t.status !== 'succeeded' || !t.payer_player_id) continue;
@@ -127,12 +129,12 @@ function rawTotalPaidCents(b: {
         .reduce((sum, p) => sum + (p.share_amount_cents ?? 0), 0);
 }
 
-function rawBookingFullyPaid(b: {
-    total_price_cents?: number | null;
-    status?: string | null;
-    payment_transactions?: unknown[];
-    booking_participants?: unknown[];
-}): boolean {
+function rawBookingFullyPaid(
+    b: RawBookingPaymentInput & {
+        total_price_cents?: number | null;
+        status?: string | null;
+    },
+): boolean {
     const total = b.total_price_cents ?? 0;
     const paid = rawTotalPaidCents(b);
     if (total <= 0) return paid > 0 || b.status === 'confirmed' || b.status === 'flat_rate';
@@ -140,17 +142,17 @@ function rawBookingFullyPaid(b: {
 }
 
 /** Grid: match bookings need 4 players or 100% payment; list shows all (except court contention). */
-export function shouldShowRawBookingInGrid(b: {
-    court_contention_status?: string | null;
-    reservation_type?: string;
-    booking_type?: string;
-    booking_participants?: unknown[];
-    organizer_player_id?: string | null;
-    players?: unknown;
-    total_price_cents?: number | null;
-    status?: string | null;
-    payment_transactions?: unknown[];
-}): boolean {
+export function shouldShowRawBookingInGrid(
+    b: RawBookingPaymentInput & {
+        court_contention_status?: string | null;
+        reservation_type?: string;
+        booking_type?: string;
+        organizer_player_id?: string | null;
+        players?: unknown;
+        total_price_cents?: number | null;
+        status?: string | null;
+    },
+): boolean {
     if (b.court_contention_status === 'competing') return false;
 
     const type = rawBookingType(b);
