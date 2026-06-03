@@ -40,3 +40,41 @@ export function dayKeyInClubTz(date: Date = new Date()): string {
     day: '2-digit',
   }).format(date);
 }
+
+/** Límites UTC de un día calendario del club (offset 0 = hoy en Madrid). */
+export function clubCalendarDayBounds(dayOffsetFromToday: number): {
+  dayKey: string;
+  dateFrom: string;
+  dateTo: string;
+} {
+  const todayKey = dayKeyInClubTz(new Date());
+  const [y, m, d] = todayKey.split('-').map(Number);
+  const target = new Date(Date.UTC(y, m - 1, d + dayOffsetFromToday));
+  const dayKey = target.toISOString().slice(0, 10);
+  return {
+    dayKey,
+    dateFrom: clubLocalDateTimeToUtcIso(dayKey, '00:00'),
+    dateTo: clubLocalDateTimeToUtcIso(dayKey, '23:59'),
+  };
+}
+
+export function addDaysToClubKey(baseKey: string, days: number): string {
+  const [y, m, d] = baseKey.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + days));
+  return t.toISOString().slice(0, 10);
+}
+
+/** Hora civil del club (HH:mm) como minutos desde medianoche. */
+export function clubLocalMinutesFromIso(iso: string): number | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: CLUB_IANA_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const h = parseInt(parts.find((x) => x.type === 'hour')?.value ?? '0', 10);
+  const m = parseInt(parts.find((x) => x.type === 'minute')?.value ?? '0', 10);
+  return h * 60 + m;
+}

@@ -81,9 +81,7 @@ const BANDS: Band[] = [
 
 
 function muFromElo(elo: number): number {
-
-  return 25.0 + (elo - 3.5) * 1.8;
-
+  return (elo / 7) * 50 + 2 * 8.333;
 }
 
 

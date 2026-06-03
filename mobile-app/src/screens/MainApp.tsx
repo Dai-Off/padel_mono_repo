@@ -12,6 +12,7 @@ import { MobileSidebar } from '../components/layout/MobileSidebar';
 import { ScreenLayout } from '../components/layout/ScreenLayout';
 import { SidebarContent } from '../components/layout/SidebarContent';
 import { SidebarProvider } from '../contexts/SidebarContext';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { useSidebar } from '../hooks/useSidebar';
 import {
   BookingConfirmationScreen,
@@ -82,6 +83,7 @@ const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
 export function MainApp() {
   const sidebar = useSidebar(false);
   const { session } = useAuth();
+  const { profile } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
@@ -972,7 +974,10 @@ export function MainApp() {
           <PartidosScreen
             onPartidoPress={(p) => setSelectedPartido(p)}
             onOpenWeMatchClubsFlow={(organizerId) =>
-              setCrearPartidoFlow({ open: true, organizerId })
+              setCrearPartidoFlow({
+                open: true,
+                organizerId: organizerId ?? profile?.id ?? null,
+              })
             }
             onNavigateToCompleteOnboarding={() => setActiveTab('perfil')}
             partidosRefreshNonce={partidosRefreshNonce}

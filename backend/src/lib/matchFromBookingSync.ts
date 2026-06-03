@@ -74,25 +74,16 @@ export async function ensureOpenMatchRecordForBooking(supabase: SupabaseClient, 
   let matchId = (existing as { id?: string } | null)?.id;
 
   if (!matchId) {
-    const { data: orgPl } = await supabase
-      .from('players')
-      .select('elo_rating')
-      .eq('id', row.organizer_player_id)
-      .maybeSingle();
-    const elo = Number((orgPl as { elo_rating?: number } | null)?.elo_rating ?? 3.5);
-    const eloMinIns = Math.round((elo - 0.5) * 10) / 10;
-    const eloMaxIns = Math.round((elo + 0.5) * 10) / 10;
-
     const { data: inserted, error: mErr } = await supabase
       .from('matches')
       .insert([
         {
           booking_id: bookingId,
           visibility: 'public',
-          elo_min: eloMinIns,
-          elo_max: eloMaxIns,
+          elo_min: null,
+          elo_max: null,
           gender: 'any',
-          competitive: true,
+          competitive: false,
           type: 'open',
         },
       ])

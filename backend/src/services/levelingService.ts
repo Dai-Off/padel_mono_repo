@@ -163,7 +163,7 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
 
   if (errM) throw new Error(errM.message);
   if (!match) throw new Error('Partido no encontrado');
-  if (!match.competitive || match.score_status !== 'confirmed') return;
+  if (!match.competitive || match.type !== 'matchmaking' || match.score_status !== 'confirmed') return;
   if (match.leveling_applied_at) return;
 
   const { data: rows, error: errMp } = await supabase

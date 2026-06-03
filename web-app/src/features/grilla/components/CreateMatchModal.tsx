@@ -167,7 +167,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
     const [duration, setDuration] = useState(90);
     const [matchGender, setMatchGender] = useState<'male' | 'female' | 'mixed' | 'any'>('any');
     const [matchVisibility, setMatchVisibility] = useState<'public' | 'private'>('public');
-    const [isCompetitive, setIsCompetitive] = useState(true);
+    const [eloMinFilter, setEloMinFilter] = useState<string>('');
+    const [eloMaxFilter, setEloMaxFilter] = useState<string>('');
     const [startHour, setStartHour] = useState('18');
     const [startMinute, setStartMinute] = useState('00');
     const [bookingDate, setBookingDate] = useState(() => {
@@ -424,8 +425,10 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
                 booking_id: bookingId,
                 visibility: matchVisibility,
                 gender: matchGender,
-                competitive: isCompetitive,
-                type: 'open'
+                competitive: false,
+                type: 'open',
+                elo_min: eloMinFilter === '' ? null : Number(eloMinFilter),
+                elo_max: eloMaxFilter === '' ? null : Number(eloMaxFilter),
             };
 
             const mtRes = await apiFetchWithAuth<any>('/matches', {
@@ -454,6 +457,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
 
     const hours = Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0'));
     const minutes = ['00', '15', '30', '45'];
+    const levelOptions = Array.from({ length: 15 }, (_, i) => (i * 0.5).toFixed(1));
 
     return (
         <div style={vvStyle} className="fixed inset-0 z-250 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 hover:opacity-100 transition-opacity duration-300">
@@ -584,37 +588,64 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
                                             </p>
                                         </div>
 
-                                        {/* Competitivo / Amistoso */}
                                         <div>
                                             <label className="block text-sm font-bold text-gray-700 mb-1">Modalidad</label>
-                                            <div className="flex rounded-lg overflow-hidden border border-gray-300">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setIsCompetitive(true)}
-                                                    className={`flex-1 py-2.5 text-sm font-bold text-center transition-colors ${
-                                                        isCompetitive
-                                                            ? 'bg-[#006A6A] text-white'
-                                                            : 'bg-white text-gray-600 hover:bg-gray-50'
-                                                    }`}
-                                                >
-                                                    🏆 Competitivo
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setIsCompetitive(false)}
-                                                    className={`flex-1 py-2.5 text-sm font-bold text-center transition-colors border-l border-gray-300 ${
-                                                        !isCompetitive
-                                                            ? 'bg-[#006A6A] text-white'
-                                                            : 'bg-white text-gray-600 hover:bg-gray-50'
-                                                    }`}
-                                                >
-                                                    🤝 Amistoso
-                                                </button>
+                                            <div className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2.5 text-sm font-semibold text-gray-700">
+                                                🤝 Amistoso
                                             </div>
                                             <p className="text-xs text-gray-500 mt-1">
-                                                {isCompetitive
-                                                    ? 'Afecta el ranking Elo. Se aplican rangos de nivel.'
-                                                    : 'Sin efecto en ranking. No requiere nivelación.'}
+                                                Desde grilla los partidos abiertos se crean como amistosos y no afectan el Elo.
+                                            </p>
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-bold text-gray-700 mb-1">Rango de nivel (opcional)</label>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div>
+                                                    <span className="block text-xs text-gray-500 mb-1">Mínimo</span>
+                                                    <select
+                                                        value={eloMinFilter}
+                                                        onChange={(e) => {
+                                                            const next = e.target.value;
+                                                            setEloMinFilter(next);
+                                                            if (eloMaxFilter !== '' && next !== '' && Number(next) > Number(eloMaxFilter)) {
+                                                                setEloMaxFilter(next);
+                                                            }
+                                                        }}
+                                                        className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm"
+                                                    >
+                                                        <option value="">Sin mínimo</option>
+                                                        {levelOptions.map((lvl) => (
+                                                            <option key={`elo-min-${lvl}`} value={lvl}>
+                                                                {lvl}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <span className="block text-xs text-gray-500 mb-1">Máximo</span>
+                                                    <select
+                                                        value={eloMaxFilter}
+                                                        onChange={(e) => {
+                                                            const next = e.target.value;
+                                                            setEloMaxFilter(next);
+                                                            if (eloMinFilter !== '' && next !== '' && Number(next) < Number(eloMinFilter)) {
+                                                                setEloMinFilter(next);
+                                                            }
+                                                        }}
+                                                        className="w-full p-2.5 bg-white border border-gray-300 rounded-md text-sm"
+                                                    >
+                                                        <option value="">Sin máximo</option>
+                                                        {levelOptions.map((lvl) => (
+                                                            <option key={`elo-max-${lvl}`} value={lvl}>
+                                                                {lvl}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            </div>
+                                            <p className="text-xs text-gray-500 mt-1">
+                                                Solo podrán unirse jugadores cuyo nivel esté dentro de este rango.
                                             </p>
                                         </div>
                                     </div>

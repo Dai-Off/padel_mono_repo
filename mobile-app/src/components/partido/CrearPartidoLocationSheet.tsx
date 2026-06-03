@@ -19,12 +19,17 @@ import { useStripe } from '../../stripe';
 import { useAuth } from '../../contexts/AuthContext';
 import { useHomeData } from '../../contexts/HomeDataContext';
 import { createIntentForNewMatch, confirmPaymentFromClient } from '../../api/payments';
+import {
+  defaultFriendlyRange,
+  FriendlyLevelRangeSection,
+} from './FriendlyLevelRangeSection';
 import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
 import { clubLocalDateTimeToUtcIso } from '../../lib/clubTimeZone';
 import { useSlotPrice } from '../../hooks/useSlotPrice';
+import { fetchMyPlayerId } from '../../api/players';
 
 export type LocationType = 'club_wematch' | 'pista_externa';
 
@@ -147,7 +152,34 @@ export function CrearPartidoLocationSheet({
     }
   }, [visible, presentation]);
 
-  const orgId = organizerProp ?? null;
+  const [resolvedOrganizerId, setResolvedOrganizerId] = useState<string | null>(
+    organizerProp ?? cachedProfile?.id ?? null,
+  );
+
+  useEffect(() => {
+    if (organizerProp) {
+      setResolvedOrganizerId(organizerProp);
+      return;
+    }
+    if (cachedProfile?.id) {
+      setResolvedOrganizerId(cachedProfile.id);
+      return;
+    }
+    const token = session?.access_token;
+    if (!token) {
+      setResolvedOrganizerId(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchMyPlayerId(token).then((id) => {
+      if (!cancelled) setResolvedOrganizerId(id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [organizerProp, cachedProfile?.id, session?.access_token]);
+
+  const orgId = resolvedOrganizerId;
 
   const loadClubs = useCallback(async () => {
     setClubsLoading(true);
@@ -170,10 +202,12 @@ export function CrearPartidoLocationSheet({
 
   useEffect(() => {
     const active = presentation === 'fullscreen' || visible;
-    if (active && step === 'clubs') {
+    const onClubsStep = step === 'clubs';
+    const prefetchFromModal = presentation === 'modal' && visible && modalOnlyWeMatch;
+    if (active && (onClubsStep || prefetchFromModal)) {
       loadClubs();
     }
-  }, [visible, presentation, step, loadClubs]);
+  }, [visible, presentation, step, modalOnlyWeMatch, loadClubs]);
 
   const [pistaReservada, setPistaReservada] = useState(false);
   const [partidoPrivado, setPartidoPrivado] = useState(false);
@@ -198,18 +232,29 @@ export function CrearPartidoLocationSheet({
     return selectedSlot ? slotPriceForDuration(selectedSlot) : '—';
   };
 
-  const [competitive, setCompetitive] = useState(true);
+  const organizerElo = cachedProfile?.eloRating ?? null;
+  const [restrictByLevel, setRestrictByLevel] = useState(false);
+  const [eloMin, setEloMin] = useState(() => defaultFriendlyRange(organizerElo).eloMin);
+  const [eloMax, setEloMax] = useState(() => defaultFriendlyRange(organizerElo).eloMax);
   const [gender, setGender] = useState<GenderOption>('any');
   const [onboardingCheckPending, setOnboardingCheckPending] = useState(false);
 
   const handleSlotPress = useCallback(
     async (slot: SlotForCreate, club: ClubDisplay) => {
-      if (!orgId) {
+      const token = session?.access_token;
+      if (!token) {
         setCreateError('Necesitas iniciar sesión para crear un partido');
         return;
       }
-      const token = session?.access_token;
-      if (!token) return;
+      let playerId = orgId;
+      if (!playerId) {
+        playerId = cachedProfile?.id ?? (await fetchMyPlayerId(token));
+        if (playerId) setResolvedOrganizerId(playerId);
+      }
+      if (!playerId) {
+        setCreateError('No encontramos tu perfil de jugador. Espera un momento e inténtalo de nuevo.');
+        return;
+      }
 
       if (cachedProfile && cachedProfile.onboardingCompleted === false) {
         Alert.alert(
@@ -231,16 +276,32 @@ export function CrearPartidoLocationSheet({
       setCreateError(null);
       setSelectedSlot(slot);
       setSelectedClub(club);
-      setCompetitive(true);
+      const range = defaultFriendlyRange(cachedProfile?.eloRating ?? null);
+      setRestrictByLevel(false);
+      setEloMin(range.eloMin);
+      setEloMax(range.eloMax);
       setGender('any');
       setStep('configurar');
     },
-    [orgId, session?.access_token, onNavigateToCompleteOnboarding],
+    [orgId, session?.access_token, cachedProfile?.id, onNavigateToCompleteOnboarding],
   );
 
   const handleCheckout = useCallback(async () => {
     if (!selectedSlot || !selectedClub) return;
-    if (!orgId || !session?.access_token) return;
+    const token = session?.access_token;
+    if (!token) {
+      Alert.alert('Iniciar sesión', 'Necesitas iniciar sesión para crear un partido.');
+      return;
+    }
+    let playerId = orgId;
+    if (!playerId) {
+      playerId = cachedProfile?.id ?? (await fetchMyPlayerId(token));
+      if (playerId) setResolvedOrganizerId(playerId);
+    }
+    if (!playerId) {
+      Alert.alert('Perfil de jugador', 'No encontramos tu perfil. Espera un momento e inténtalo de nuevo.');
+      return;
+    }
     if (priceLoading) {
       Alert.alert('Calculando precio', 'Espera un momento a que terminemos de calcular el precio exacto.');
       return;
@@ -259,15 +320,17 @@ export function CrearPartidoLocationSheet({
     const intentRes = await createIntentForNewMatch(
       {
         court_id: selectedSlot.courtId,
-        organizer_player_id: orgId,
+        organizer_player_id: playerId,
         start_at,
         end_at,
         total_price_cents: priceData.total_price_cents,
         visibility: partidoPrivado ? 'private' : 'public',
-        competitive,
+        competitive: false,
         gender,
+        elo_min: restrictByLevel ? eloMin : null,
+        elo_max: restrictByLevel ? eloMax : null,
       },
-      session.access_token
+      token
     );
     if (!intentRes.ok || !intentRes.clientSecret) {
       setCreating(false);
@@ -309,7 +372,7 @@ export function CrearPartidoLocationSheet({
 
     const confirmRes = await confirmPaymentFromClient(
       intentRes.paymentIntentId!,
-      session.access_token
+      token
     );
     setCreating(false);
     if (!confirmRes.ok) {
@@ -338,7 +401,23 @@ export function CrearPartidoLocationSheet({
     } else {
       onClose();
     }
-  }, [selectedSlot, selectedClub, competitive, gender, orgId, session?.access_token, initPaymentSheet, presentPaymentSheet, onPartidoCreado, onClose, partidoPrivado, priceData, priceLoading]);
+  }, [
+    selectedSlot,
+    selectedClub,
+    restrictByLevel,
+    eloMin,
+    eloMax,
+    gender,
+    orgId,
+    session?.access_token,
+    initPaymentSheet,
+    presentPaymentSheet,
+    onPartidoCreado,
+    onClose,
+    partidoPrivado,
+    priceData,
+    priceLoading,
+  ]);
 
   const handleSiguiente = () => {
     if (selected === 'club_wematch') {
@@ -652,39 +731,18 @@ export function CrearPartidoLocationSheet({
                 showsVerticalScrollIndicator={false}
               >
                 <View style={styles.configSection}>
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.configOption,
-                      competitive && styles.configOptionSelected,
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => setCompetitive(true)}
-                  >
-                    <View style={[styles.configRadio, competitive && styles.configRadioSelected]}>
-                      {competitive && <View style={styles.configRadioDot} />}
-                    </View>
-                    <View style={styles.configOptionBody}>
-                      <Text style={styles.configOptionTitle}>Partido Competitivo</Text>
-                      <Text style={styles.configOptionSub}>El resultado afectará a tu nivel y rankings.</Text>
-                    </View>
-                  </Pressable>
-                  <Pressable
-                    style={({ pressed }) => [
-                      styles.configOption,
-                      !competitive && styles.configOptionSelected,
-                      pressed && styles.pressed,
-                    ]}
-                    accessibilityState={{ selected: !competitive }}
-                    onPress={() => setCompetitive(false)}
-                  >
-                    <View style={[styles.configRadio, !competitive && styles.configRadioSelected]}>
-                      {!competitive && <View style={styles.configRadioDot} />}
-                    </View>
-                    <View style={styles.configOptionBody}>
-                      <Text style={styles.configOptionTitle}>Partido Amistoso</Text>
-                      <Text style={styles.configOptionSub}>El resultado no afectará a tu nivel ni rankings.</Text>
-                    </View>
-                  </Pressable>
+                  <Text style={styles.configSectionTitle}>Partido amistoso</Text>
+                  <Text style={styles.configFriendlyNote}>
+                    Los partidos públicos no afectan tu ELO. Para ranked 2v2 usá Liga / matchmaking.
+                  </Text>
+                  <FriendlyLevelRangeSection
+                    restrictByLevel={restrictByLevel}
+                    onRestrictByLevelChange={setRestrictByLevel}
+                    eloMin={eloMin}
+                    eloMax={eloMax}
+                    onEloMinChange={setEloMin}
+                    onEloMaxChange={setEloMax}
+                  />
                 </View>
 
                 <View style={styles.configSection}>
@@ -1752,6 +1810,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1A1A1A',
     marginBottom: 12,
+  },
+  configFriendlyNote: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 12,
+    lineHeight: 18,
   },
   configOption: {
     flexDirection: 'row',

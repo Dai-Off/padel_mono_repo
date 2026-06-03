@@ -27,6 +27,7 @@ import {
   contentionStatusForNewMatchBooking,
   resolveCourtContention,
 } from '../lib/courtContentionService';
+import { parseEloLevel, parseEloRange } from '../lib/openMatchRules';
 
 /**
  * Helper to fetch player and match/club/court details and send the join confirmation email.
@@ -303,13 +304,18 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       payer_player_id: player.id,
       timezone: timezone ?? 'Europe/Madrid',
       visibility: visibility === 'public' ? 'public' : 'private',
-      competitive: competitive !== false ? '1' : '0',
+      competitive: '0',
       gender: gender ?? 'any',
       source_channel: sch0,
       reservation_type,
     };
-    if (elo_min != null) metadata.elo_min = String(elo_min);
-    if (elo_max != null) metadata.elo_max = String(elo_max);
+    const eloMeta = parseEloRange(elo_min, elo_max);
+    if (!eloMeta.ok) {
+      res.status(400).json({ ok: false, error: eloMeta.error });
+      return;
+    }
+    if (eloMeta.elo_min != null) metadata.elo_min = String(eloMeta.elo_min);
+    if (eloMeta.elo_max != null) metadata.elo_max = String(eloMeta.elo_max);
     if (isPayFull) metadata.pay_full = '1';
 
     const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
@@ -3049,10 +3055,10 @@ async function processNewMatchPayment(
   const total_price_cents = parseInt(meta.total_price_cents ?? '0', 10);
   const timezone = meta.timezone ?? 'Europe/Madrid';
   const visibility = meta.visibility === 'public' ? 'public' : 'private';
-  const competitive = meta.competitive !== '0';
+  const competitive = false;
   const gender = meta.gender ?? 'any';
-  const elo_min = meta.elo_min ? parseInt(meta.elo_min, 10) : null;
-  const elo_max = meta.elo_max ? parseInt(meta.elo_max, 10) : null;
+  const elo_min = meta.elo_min != null && meta.elo_min !== '' ? parseEloLevel(meta.elo_min) : null;
+  const elo_max = meta.elo_max != null && meta.elo_max !== '' ? parseEloLevel(meta.elo_max) : null;
   const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
     ? meta.source_channel
     : 'mobile';
@@ -3131,6 +3137,7 @@ async function processNewMatchPayment(
       elo_max,
       gender,
       competitive,
+      type: 'open',
     }])
     .select('id')
     .maybeSingle();
@@ -3239,10 +3246,10 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       const total_price_cents = parseInt(meta.total_price_cents ?? '0', 10);
       const timezone = meta.timezone ?? 'Europe/Madrid';
       const visibility = meta.visibility === 'public' ? 'public' : 'private';
-      const competitive = meta.competitive !== '0';
+      const competitive = false;
       const gender = meta.gender ?? 'any';
-      const elo_min = meta.elo_min ? parseInt(meta.elo_min, 10) : null;
-      const elo_max = meta.elo_max ? parseInt(meta.elo_max, 10) : null;
+      const elo_min = meta.elo_min != null && meta.elo_min !== '' ? parseEloLevel(meta.elo_min) : null;
+      const elo_max = meta.elo_max != null && meta.elo_max !== '' ? parseEloLevel(meta.elo_max) : null;
       const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
         ? meta.source_channel
         : 'mobile';
@@ -3328,6 +3335,7 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
           elo_max,
           gender,
           competitive,
+          type: 'open',
         }])
         .select('id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status')
         .maybeSingle();

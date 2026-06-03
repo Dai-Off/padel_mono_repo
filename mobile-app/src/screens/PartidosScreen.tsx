@@ -63,6 +63,9 @@ export type PartidoItem = {
   scoreStatus?: 'pending' | 'confirmed' | 'disputed' | null;
   hasMyFeedback?: boolean;
   courtSport?: string;
+  startAtIso?: string;
+  eloMin?: number | null;
+  eloMax?: number | null;
   clubId?: string;
   startAt?: string;
   endAt?: string;
@@ -159,7 +162,7 @@ export function PartidosScreen({
 
         <View style={[styles.section, { marginTop: theme.spacing.xl }]}>
           <Text style={styles.sectionTitle}>Mis partidos</Text>
-          <Text style={styles.sectionSubtitle}>Tus reservas privadas</Text>
+          <Text style={styles.sectionSubtitle}>Tus reservas y partidos que organizas</Text>
         </View>
         <View style={styles.list}>
           {loading ? (
@@ -178,7 +181,7 @@ export function PartidosScreen({
             ))
           ) : (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No tienes partidos privados</Text>
+              <Text style={styles.emptyText}>No tienes partidos próximos</Text>
             </View>
           )}
         </View>
@@ -251,7 +254,7 @@ export function PartidosScreen({
         organizerPlayerId={organizerPlayerId}
         onContinueWeMatch={() => {
           setLocationModalVisible(false);
-          onOpenWeMatchClubsFlow?.(organizerPlayerId);
+          onOpenWeMatchClubsFlow?.(organizerPlayerId ?? null);
         }}
         onClose={() => setLocationModalVisible(false)}
         onSiguiente={() => {}}
