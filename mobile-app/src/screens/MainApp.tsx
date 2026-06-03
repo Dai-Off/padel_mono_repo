@@ -14,8 +14,6 @@ import { SidebarContent } from '../components/layout/SidebarContent';
 import { SidebarProvider } from '../contexts/SidebarContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { useSidebar } from '../hooks/useSidebar';
-import { enrichPartidoWithProfileAvatar } from '../lib/partidoPlayerUtils';
-import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import {
   BookingConfirmationScreen,
   type BookingConfirmationData,
@@ -85,7 +83,7 @@ const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
 export function MainApp() {
   const sidebar = useSidebar(false);
   const { session } = useAuth();
-  const { profile, refreshMatches, upsertMisPartido } = useHomeData();
+  const { profile, refreshMatches, syncMisPartidoFromMatchId } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
@@ -696,27 +694,14 @@ export function MainApp() {
             setActiveTab('perfil');
           }}
           onPartidoCreado={(data) => {
+            const organizerId = crearPartidoFlow.organizerId ?? profile?.id ?? null;
             setCrearPartidoFlow({ open: false, organizerId: null });
             bumpPartidos();
             setBookingSuccessData(data);
-            const token = session?.access_token;
-            if (data.matchId && token) {
-              void reloadMatchPartido(data.matchId, token, {
-                retryIfMissingPlayerId: profile?.id,
-              }).then(async (p) => {
-                if (!p || !profile?.id) return;
-                const enriched = enrichPartidoWithProfileAvatar(p, {
-                  id: profile.id,
-                  firstName: profile.firstName,
-                  lastName: profile.lastName,
-                  avatarUrl: profile.avatarUrl,
-                });
-                upsertMisPartido(enriched);
-                await refreshMatches({ force: true, scope: 'mine' });
-                upsertMisPartido(enriched);
-              });
+            if (data.matchId) {
+              void syncMisPartidoFromMatchId(data.matchId, { organizerPlayerId: organizerId });
             } else {
-              void refreshMatches({ force: true, scope: 'mine' });
+              void refreshMatches({ scope: 'mine' });
             }
           }}
         />
@@ -883,11 +868,11 @@ export function MainApp() {
           partido={selectedPartido}
           onMatchDataChanged={() => setPartidosRefreshNonce((n) => n + 1)}
           onBack={() => {
-            void refreshMatches({ force: true, scope: 'mine' });
+            void refreshMatches({ scope: 'mine' });
             setSelectedPartido(null);
           }}
           onGoHome={() => {
-            void refreshMatches({ force: true, scope: 'mine' });
+            void refreshMatches({ scope: 'mine' });
             setSelectedPartido(null);
             setShowTuActividad(false);
             setTuActividadSubView(null);
