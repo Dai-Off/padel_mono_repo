@@ -402,7 +402,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const expand = req.query.expand === '1' || req.query.expand === 'true';
   try {
-    await finalizePastMatches();
+    await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
     if (expand) {
       const { data, error } = await supabase

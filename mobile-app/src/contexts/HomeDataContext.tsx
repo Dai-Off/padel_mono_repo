@@ -19,6 +19,7 @@ import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
 import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
 import { selectMyMatchesForHome } from '../domain/selectMyUpcomingMatches';
 import { normalizeMatchEnriched } from '../api/normalizeMatch';
+import { upsertMisPartidosList } from '../lib/partidoPlayerUtils';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
@@ -54,7 +55,9 @@ type HomeDataValue = {
   partidos: PartidoItem[];
   misPartidos: PartidoItem[];
   matchesLoading: boolean;
-  refreshMatches: (opts?: { force?: boolean }) => Promise<void>;
+  refreshMatches: (opts?: { force?: boolean; scope?: 'full' | 'mine' }) => Promise<void>;
+  /** Actualiza el carrusel "Mis partidos" al instante (p. ej. tras unirse a un partido). */
+  upsertMisPartido: (item: PartidoItem) => void;
 
   // Tournaments (solo el count, que es lo que usa el home).
   publicTournamentsCount: number | null;
@@ -181,8 +184,55 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
+  const buildMisPartidosFromMatches = useCallback(
+    (mineSource: MatchEnriched[], matchesFallback: MatchEnriched[], playerId: string | null) => {
+      let source = mineSource;
+      if (playerId && source.length === 0 && matchesFallback.length > 0) {
+        source = selectMyMatchesForHome(matchesFallback, playerId);
+      }
+      const mineRawBase = source.filter((m) => {
+        const b = getMatchBooking(m);
+        return Boolean(b?.start_at && b?.end_at);
+      });
+      const mineVisible = mineRawBase.filter((m) => {
+        const b = getMatchBooking(m)!;
+        const phase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
+        const hasMyFeedback = (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true;
+        return !(phase === 'past' && hasMyFeedback);
+      });
+      const mineRaw = [
+        ...mineVisible
+          .filter((m) => {
+            const b = getMatchBooking(m)!;
+            return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) !== 'past';
+          })
+          .sort(
+            (a, b) =>
+              new Date(getMatchBooking(a)!.start_at!).getTime() -
+              new Date(getMatchBooking(b)!.start_at!).getTime(),
+          ),
+        ...mineVisible
+          .filter((m) => {
+            const b = getMatchBooking(m)!;
+            return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) === 'past';
+          })
+          .sort(
+            (a, b) =>
+              new Date(getMatchBooking(b)!.start_at!).getTime() -
+              new Date(getMatchBooking(a)!.start_at!).getTime(),
+          ),
+      ];
+      return mineRaw.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
+    },
+    [],
+  );
+
+  const upsertMisPartido = useCallback((item: PartidoItem) => {
+    setMisPartidos((prev) => upsertMisPartidosList(prev, item));
+  }, []);
+
   const refreshMatches = useCallback(
-    async ({ force = false }: { force?: boolean } = {}) => {
+    async ({ force = false, scope = 'full' }: { force?: boolean; scope?: 'full' | 'mine' } = {}) => {
       if (!token) {
         setMisPartidos([]);
         setPartidos([]);
@@ -194,79 +244,50 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
       try {
         let tk: string | null = token;
-        let [playerId, matches, myMatches] = await Promise.all([
-          fetchMyPlayerId(tk),
-          fetchMatches({ expand: true, token: tk, activeOnly: false }),
-          fetchMyMatches(tk, { phase: 'all', limit: 100 }),
-        ]);
+        const mineOnly = scope === 'mine';
 
-        // Si el token caducó silenciosamente, reintentamos UNA vez con refresh.
+        let playerId: string | null = null;
+        let matches: MatchEnriched[] = [];
+        let myMatches: MatchEnriched[] = [];
+
+        if (mineOnly) {
+          myMatches = await fetchMyMatches(tk, { phase: 'all', limit: 100 });
+        } else {
+          [playerId, matches, myMatches] = await Promise.all([
+            fetchMyPlayerId(tk),
+            fetchMatches({ expand: true, token: tk, activeOnly: false }),
+            fetchMyMatches(tk, { phase: 'all', limit: 100 }),
+          ]);
+        }
+
         if (!playerId && session?.refresh_token) {
           const newToken = await refreshAccessToken();
           if (newToken) {
             tk = newToken;
-            [playerId, matches, myMatches] = await Promise.all([
-              fetchMyPlayerId(newToken),
-              fetchMatches({ expand: true, token: newToken, activeOnly: false }),
-              fetchMyMatches(newToken, { phase: 'all', limit: 100 }),
-            ]);
+            if (mineOnly) {
+              myMatches = await fetchMyMatches(newToken, { phase: 'all', limit: 100 });
+            } else {
+              [playerId, matches, myMatches] = await Promise.all([
+                fetchMyPlayerId(newToken),
+                fetchMatches({ expand: true, token: newToken, activeOnly: false }),
+                fetchMyMatches(newToken, { phase: 'all', limit: 100 }),
+              ]);
+            }
           }
         }
 
-        let mineSource = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
-        // Fallback: si /matches/mine viene vacío (error silencioso, desfase de API, etc.),
-        // reconstruir desde el listado expandido filtrando por jugador.
-        if (playerId && mineSource.length === 0) {
-          mineSource = selectMyMatchesForHome(
-            (matches as MatchEnriched[]).map(normalizeMatchEnriched),
-            playerId,
-          );
-        }
-
-        const mineRawBase = mineSource.filter((m) => {
-          const b = getMatchBooking(m);
-          return Boolean(b?.start_at && b?.end_at);
-        });
-        const mineVisible = mineRawBase.filter((m) => {
-          const b = getMatchBooking(m)!;
-          const phase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
-          const hasMyFeedback = (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true;
-          // Regla de negocio Home: si el partido ya finalizó y el usuario ya
-          // dejó feedback, se oculta del carrusel "Mis partidos".
-          return !(phase === 'past' && hasMyFeedback);
-        });
-        const mineRaw = [
-          ...mineVisible
-            .filter((m) => {
-              const b = getMatchBooking(m)!;
-              return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) !== 'past';
-            })
-            .sort(
-              (a, b) =>
-                new Date(getMatchBooking(a)!.start_at!).getTime() -
-                new Date(getMatchBooking(b)!.start_at!).getTime(),
-            ),
-          ...mineVisible
-            .filter((m) => {
-              const b = getMatchBooking(m)!;
-              return getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at) === 'past';
-            })
-            .sort(
-              (a, b) =>
-                new Date(getMatchBooking(b)!.start_at!).getTime() -
-                new Date(getMatchBooking(a)!.start_at!).getTime(),
-            ),
-        ];
-        const mis = mineRaw
-          .map(mapMatchToPartido)
-          .filter((p): p is PartidoItem => p != null);
+        const mineNormalized = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
+        const allNormalized = (matches as MatchEnriched[]).map(normalizeMatchEnriched);
+        const mis = buildMisPartidosFromMatches(mineNormalized, allNormalized, playerId);
         setMisPartidos(mis);
 
-        const all = (matches as MatchEnriched[])
-          .map(mapMatchToPartido)
-          .filter((p): p is PartidoItem => p != null)
-          .filter((p) => p.matchPhase !== 'past');
-        setPartidos(all);
+        if (!mineOnly) {
+          const all = allNormalized
+            .map(mapMatchToPartido)
+            .filter((p): p is PartidoItem => p != null)
+            .filter((p) => p.matchPhase !== 'past');
+          setPartidos(all);
+        }
 
         matchesLoadedAt.current = Date.now();
       } catch {
@@ -275,7 +296,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         if (isFirst) setMatchesLoading(false);
       }
     },
-    [token, session?.refresh_token, refreshAccessToken],
+    [token, session?.refresh_token, refreshAccessToken, buildMisPartidosFromMatches],
   );
 
   const refreshTournaments = useCallback(
@@ -470,6 +491,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       misPartidos,
       matchesLoading,
       refreshMatches,
+      upsertMisPartido,
       publicTournamentsCount,
       tournamentsLoading,
       refreshTournaments,
@@ -493,6 +515,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       misPartidos,
       matchesLoading,
       refreshMatches,
+      upsertMisPartido,
       publicTournamentsCount,
       tournamentsLoading,
       refreshTournaments,
