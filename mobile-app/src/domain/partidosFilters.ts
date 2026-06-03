@@ -1,3 +1,4 @@
+import { clubLocalMinutesFromIso, clubLocalDateTimeToUtcIso, dayKeyInClubTz } from '../lib/clubTimeZone';
 import { dateKeyLocal, startOfLocalDay, TIME_RANGE_PRESETS } from '../utils/formatSearch';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
@@ -60,10 +61,9 @@ function slotToMinutes(slot: string): number {
 }
 
 function partidoStartMinutes(p: PartidoItem): number | null {
-  if (!p.startAt) return null;
-  const d = new Date(p.startAt);
-  if (Number.isNaN(d.getTime())) return null;
-  return d.getHours() * 60 + d.getMinutes();
+  const iso = p.startAt ?? p.startAtIso;
+  if (!iso) return null;
+  return clubLocalMinutesFromIso(iso);
 }
 
 function passesTimeRange(p: PartidoItem, range: { start: string; end: string } | null): boolean {
@@ -135,8 +135,9 @@ export function filterPartidosList(
     if (!passesTimeRange(p, filters.timeRange)) return false;
 
     if (filters.selectedDateKeys.length > 0) {
-      if (!p.startAt) return false;
-      const key = dateKeyLocal(new Date(p.startAt));
+      const iso = p.startAt ?? p.startAtIso;
+      if (!iso) return false;
+      const key = dayKeyInClubTz(new Date(iso));
       if (!filters.selectedDateKeys.includes(key)) return false;
     }
 
@@ -163,6 +164,13 @@ export function filterPartidosList(
   return out;
 }
 
+function partidoStartMs(p: PartidoItem): number {
+  const iso = p.startAt ?? p.startAtIso;
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
 function comparePartidos(
   a: PartidoItem,
   b: PartidoItem,
@@ -170,9 +178,7 @@ function comparePartidos(
   ctx: PartidosFilterContext,
 ): number {
   if (sortBy === 'recent') {
-    const ta = a.startAt ? new Date(a.startAt).getTime() : 0;
-    const tb = b.startAt ? new Date(b.startAt).getTime() : 0;
-    return ta - tb;
+    return partidoStartMs(a) - partidoStartMs(b);
   }
   if (sortBy === 'players') {
     const fa = (a.players ?? []).filter((x) => !x.isFree).length;
@@ -184,8 +190,8 @@ function comparePartidos(
     const db = b.clubId ? ctx.clubDistanceById.get(b.clubId) ?? Infinity : Infinity;
     if (da !== db) return da - db;
   }
-  const ta = a.startAt ? new Date(a.startAt).getTime() : 0;
-  const tb = b.startAt ? new Date(b.startAt).getTime() : 0;
+  const ta = partidoStartMs(a);
+  const tb = partidoStartMs(b);
   return ta - tb;
 }
 
@@ -249,12 +255,10 @@ export function partidosFetchDateRange(filters: PartidosFiltersState): {
   const sorted = [...filters.selectedDateKeys].sort();
   const minKey = sorted[0]!;
   const maxKey = sorted[sorted.length - 1]!;
-  const minDate = new Date(minKey + 'T00:00:00');
-  const maxDate = new Date(maxKey + 'T23:59:59');
   return {
-    activeOnly: false,
-    dateFrom: minDate.toISOString(),
-    dateTo: maxDate.toISOString(),
+    activeOnly: true,
+    dateFrom: clubLocalDateTimeToUtcIso(minKey, '00:00'),
+    dateTo: clubLocalDateTimeToUtcIso(maxKey, '23:59'),
   };
 }
 
@@ -277,5 +281,5 @@ export function nearestDistanceStep(km: number): number {
 }
 
 export function todayKey(): string {
-  return dateKeyLocal(startOfLocalDay(new Date()));
+  return dayKeyInClubTz(new Date());
 }

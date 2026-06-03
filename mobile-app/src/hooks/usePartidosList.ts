@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { fetchMatches } from '../api/matches';
+import { fetchMatches, fetchMyMatches } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId } from '../api/players';
+import { useHomeData } from '../contexts/HomeDataContext';
 import {
   clubsChipLabel,
   countPartidosAdvancedFilters,
@@ -24,13 +25,24 @@ function isPublicJoinableMatch(p: PartidoItem): boolean {
 }
 
 export function usePartidosList(token: string | null | undefined, refreshNonce: number) {
+  const { profile } = useHomeData();
   const [filters, setFilters] = useState<PartidosFiltersState>(getInitialPartidosFilters);
   const [openRaw, setOpenRaw] = useState<PartidoItem[]>([]);
   const [myRaw, setMyRaw] = useState<PartidoItem[]>([]);
-  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
+  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(profile?.id ?? null);
   const [loading, setLoading] = useState(true);
   const [favoriteClubIds, setFavoriteClubIds] = useState<string[]>([]);
   const { clubs, loading: clubsLoading, reload: reloadClubs } = useClubCatalog();
+
+  useEffect(() => {
+    if (profile?.id) {
+      setOrganizerPlayerId(profile.id);
+    } else if (token) {
+      void fetchMyPlayerId(token).then(setOrganizerPlayerId);
+    } else {
+      setOrganizerPlayerId(null);
+    }
+  }, [profile?.id, token]);
 
   useEffect(() => {
     void loadStoredPreferredClubIds().then(setFavoriteClubIds);
@@ -54,30 +66,34 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
   const loadPartidos = useCallback(async () => {
     setLoading(true);
     const { activeOnly, dateFrom, dateTo } = fetchRange;
-    const [playerId, matches] = await Promise.all([
-      token ? fetchMyPlayerId(token) : Promise.resolve(null),
-      fetchMatches({
-        expand: true,
-        token,
-        activeOnly,
-        dateFrom,
-        dateTo,
-      }),
-    ]);
-    setOrganizerPlayerId(playerId);
-    const allPartidos = matches
+
+    const openMatches = await fetchMatches({
+      expand: true,
+      token,
+      activeOnly,
+      discovery: true,
+      visibility: 'public',
+      dateFrom,
+      dateTo,
+    });
+    const openPartidos = openMatches
       .map(mapMatchToPartido)
       .filter((p): p is PartidoItem => p != null)
-      .filter((p) => activeOnly === false || p.matchPhase !== 'past');
-    setOpenRaw(allPartidos.filter((p) => p.visibility !== 'private'));
-    setMyRaw(
-      allPartidos.filter(
-        (p) =>
-          p.visibility === 'private' &&
-          playerId != null &&
-          (p.playerIds ?? []).includes(playerId),
-      ),
-    );
+      .filter((p) => p.matchPhase !== 'past');
+    setOpenRaw(openPartidos);
+
+    if (!token) {
+      setMyRaw([]);
+      setLoading(false);
+      return;
+    }
+
+    const myMatches = await fetchMyMatches(token, { phase: 'upcoming', limit: 100 });
+    const myPartidos = myMatches
+      .map(mapMatchToPartido)
+      .filter((p): p is PartidoItem => p != null)
+      .filter((p) => p.matchPhase !== 'past');
+    setMyRaw(myPartidos);
     setLoading(false);
   }, [token, fetchRange.activeOnly, fetchRange.dateFrom, fetchRange.dateTo]);
 

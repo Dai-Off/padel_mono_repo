@@ -253,26 +253,41 @@ function CourtCardDynamic({
   duration,
   onToggleDuration,
 }: CourtCardDynamicProps) {
-  const { priceData, loading } = useSlotPrice({
+  const quoteSlot =
+    isExpanded && selectedTimeSlot ? selectedTimeSlot : undefined;
+
+  const { priceData, loading, error: priceError } = useSlotPrice({
     clubId,
     courtId: court.id,
     date: selectedDateStr,
-    slot: isExpanded && selectedTimeSlot ? selectedTimeSlot : undefined,
+    slot: quoteSlot,
     durationMinutes: duration,
     reservationType: "standard",
     token,
   });
 
+  const hasSlotQuote = Boolean(quoteSlot);
+
   const getPriceDisplay = () => {
-    if (isExpanded && selectedTimeSlot) {
-      if (loading) return "Calculando...";
-      if (priceData) return `${(priceData.total_price_cents / 100).toFixed(2)}€`;
+    if (!hasSlotQuote) return priceInfo?.minPriceFormatted ?? "-";
+    if (loading) return "Calculando...";
+    if (priceError) return "—";
+    if (priceData && priceData.total_price_cents > 0) {
+      return `${(priceData.total_price_cents / 100).toFixed(2)} €`;
     }
     return priceInfo?.minPriceFormatted ?? "-";
   };
 
   const finalPriceCents =
-    priceData?.total_price_cents ?? priceInfo?.minPriceCents ?? 0;
+    hasSlotQuote && priceData && priceData.total_price_cents > 0
+      ? priceData.total_price_cents
+      : 0;
+
+  const canReserve =
+    Boolean(selectedTimeSlot) &&
+    !reserving &&
+    !loading &&
+    finalPriceCents > 0;
 
   return (
     <View style={styles.courtCard}>
@@ -298,33 +313,35 @@ function CourtCardDynamic({
       </Pressable>
       {isExpanded && (
         <View style={styles.courtCardActions}>
+          <View style={styles.courtPriceBox}>
+            <Text style={styles.courtPriceAmount}>{getPriceDisplay()}</Text>
+            {hasSlotQuote ? (
+              <Text style={styles.courtPriceHint}>
+                Total · {duration} min
+              </Text>
+            ) : null}
+          </View>
           <Pressable
             onPress={onToggleDuration}
+            accessibilityLabel={`Duración ${duration} minutos. Toca para cambiar entre 60 y 90 minutos`}
             style={({ pressed }) => [
-              styles.courtPriceBtn,
+              styles.courtDurationBtn,
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.courtPriceAmount}>{getPriceDisplay()}</Text>
-            <Text style={styles.courtPriceDuration}>{duration} min</Text>
+            <Text style={styles.courtDurationValue}>{duration}</Text>
+            <Text style={styles.courtDurationLabel}>min</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [
               styles.courtReservarBtn,
-              (!selectedTimeSlot || reserving || (loading && isExpanded)) &&
-                styles.courtReservarBtnDisabled,
-              pressed &&
-                !reserving &&
-                !loading &&
-                selectedTimeSlot &&
-                styles.pressed,
+              !canReserve && styles.courtReservarBtnDisabled,
+              pressed && canReserve && styles.pressed,
             ]}
             onPress={() =>
-              selectedTimeSlot && !loading
-                ? onReservar(court, finalPriceCents)
-                : undefined
+              canReserve ? onReservar(court, finalPriceCents) : undefined
             }
-            disabled={reserving || !selectedTimeSlot || loading}
+            disabled={!canReserve}
           >
             {reserving ? (
               <ActivityIndicator size="small" color="#1A1A1A" />
@@ -611,8 +628,8 @@ export function ClubDetailScreen({
       }
       if (finalPriceCents <= 0) {
         Alert.alert(
-          "No disponible",
-          "No hay precio disponible para esta pista en la fecha seleccionada.",
+          "Precio no disponible",
+          "No pudimos calcular el precio para este horario. Elige otra hora o inténtalo de nuevo.",
         );
         return;
       }
@@ -2249,13 +2266,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.md,
     paddingBottom: theme.spacing.md,
   },
-  courtPriceBtn: {
+  courtPriceBox: {
     flex: 1,
     backgroundColor: theme.auth.accent,
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: theme.spacing.sm,
     alignItems: "center",
+    justifyContent: "center",
   },
   courtPriceAmount: {
     fontSize: 14,
@@ -2266,13 +2284,37 @@ const styles = StyleSheet.create({
     textAlign: "center",
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  courtPriceDuration: {
+  courtPriceHint: {
     fontSize: 10,
     color: "rgba(255,255,255,0.9)",
     marginTop: 1,
     lineHeight: 14,
     alignSelf: "stretch",
     textAlign: "center",
+    ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  courtDurationBtn: {
+    minWidth: 56,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    paddingVertical: 8,
+    paddingHorizontal: theme.spacing.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  courtDurationValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#fff",
+    lineHeight: 18,
+    ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  courtDurationLabel: {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.75)",
+    lineHeight: 12,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtReservarBtn: {

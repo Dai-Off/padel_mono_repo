@@ -57,3 +57,24 @@ export function clubCalendarDayBounds(dayOffsetFromToday: number): {
     dateTo: clubLocalDateTimeToUtcIso(dayKey, '23:59'),
   };
 }
+
+export function addDaysToClubKey(baseKey: string, days: number): string {
+  const [y, m, d] = baseKey.split('-').map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + days));
+  return t.toISOString().slice(0, 10);
+}
+
+/** Hora civil del club (HH:mm) como minutos desde medianoche. */
+export function clubLocalMinutesFromIso(iso: string): number | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: CLUB_IANA_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(d);
+  const h = parseInt(parts.find((x) => x.type === 'hour')?.value ?? '0', 10);
+  const m = parseInt(parts.find((x) => x.type === 'minute')?.value ?? '0', 10);
+  return h * 60 + m;
+}
