@@ -93,7 +93,7 @@ export function FriendlyLevelRangeSection({
         <Switch
           value={restrictByLevel}
           onValueChange={onRestrictByLevelChange}
-          trackColor={{ false: '#e5e7eb', true: theme.auth.accent }}
+          trackColor={{ false: 'rgba(255,255,255,0.2)', true: theme.auth.accent }}
           thumbColor="#fff"
         />
       </View>
@@ -127,28 +127,28 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 14,
     borderRadius: 14,
-    backgroundColor: '#f9fafb',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
-  sectionTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  sectionSub: { fontSize: 12, color: '#6b7280', marginTop: 4 },
+  sectionTitle: { fontSize: 15, fontWeight: '700', color: theme.auth.text },
+  sectionSub: { fontSize: 12, color: theme.auth.textMuted, marginTop: 4 },
   steppers: { flexDirection: 'row', gap: 12 },
   stepperBlock: { flex: 1, gap: 8 },
-  stepperLabel: { fontSize: 12, fontWeight: '600', color: '#6b7280' },
+  stepperLabel: { fontSize: 12, fontWeight: '600', color: theme.auth.textMuted },
   stepperRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: 'rgba(255,255,255,0.1)',
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
@@ -160,6 +160,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepBtnDisabled: { backgroundColor: '#e5e7eb' },
-  stepValue: { fontSize: 18, fontWeight: '700', color: '#111827', minWidth: 48, textAlign: 'center' },
+  stepBtnDisabled: { backgroundColor: 'rgba(255,255,255,0.1)' },
+  stepValue: { fontSize: 18, fontWeight: '700', color: theme.auth.text, minWidth: 48, textAlign: 'center' },
 });
