@@ -83,7 +83,7 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
     });
 
     const minePromise = token
-      ? refreshMatches({ force: true, scope: 'mine' })
+      ? refreshMatches({ scope: 'mine' })
       : Promise.resolve();
 
     try {

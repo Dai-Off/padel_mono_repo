@@ -20,6 +20,7 @@ import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
 import { normalizeMatchEnriched } from '../api/normalizeMatch';
 import { defaultPartidosDiscoveryDateRange } from '../domain/partidosFilters';
 import {
+  cachePlayerAvatar,
   enrichPartidoWithProfileAvatar,
   enrichPartidosWithProfileAvatar,
   isPartidoOpenForDiscovery,
@@ -34,6 +35,12 @@ import type { PartidoItem } from '../screens/PartidosScreen';
 import { CLUB_IANA_TIMEZONE } from '../lib/clubTimeZone';
 
 const TIMEZONE = CLUB_IANA_TIMEZONE;
+
+/** Evita re-bootstrap si el provider se remonta por un parpadeo de sesión. */
+const bootstrappedUserIds = new Set<string>();
+/** Cooldown entre refrescos completos al volver del background. */
+const lastBackgroundRefreshAtByUser = new Map<string, number>();
+const BACKGROUND_REFRESH_COOLDOWN_MS = 30_000;
 
 type StreakState = {
   currentStreak: number;
@@ -99,15 +106,15 @@ type HomeDataValue = {
 const HomeDataContext = createContext<HomeDataValue | null>(null);
 
 /**
- * Provider de datos del Home. Sin TTL ni skip de refetch: cada llamada a
- * `refresh*` vuelve a pedir al servidor. El estado en memoria solo evita
- * parpadeos al navegar entre pantallas dentro de la misma sesión.
+ * Provider de datos del Home. Revalidaciones tras la primera carga son
+ * silenciosas (sin skeleton). `force: true` o `scope: 'mine'` tras mutaciones.
  */
 export function HomeDataProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
-  const lastSessionTokenRef = useRef<string | null>(null);
+  const lastSessionUserIdRef = useRef<string | null>(null);
   const refreshMatchesGen = useRef(0);
   const token = session?.access_token ?? null;
+  const userId = session?.user?.id ?? null;
 
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -116,6 +123,9 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
   const [misPartidos, setMisPartidos] = useState<PartidoItem[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
+  const matchesLoadedAt = useRef(0);
+  const refreshMatchesMineAt = useRef(0);
+  const profileForEnrichRef = useRef<ProfileForPartidoEnrich | null>(null);
 
   const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
   const [tournamentsLoading, setTournamentsLoading] = useState(false);
@@ -161,6 +171,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       if (isFirst) setProfileLoading(true);
       try {
         const p = await fetchMyPlayerProfile(token);
+        if (p?.id) cachePlayerAvatar(p.id, p.avatarUrl);
         setProfile(p);
         profileLoadedAt.current = Date.now();
         if (p == null && isFirst) setHasInitialError(true);
@@ -224,34 +235,73 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       id: profile.id,
       firstName: profile.firstName,
       lastName: profile.lastName,
+      username: profile.username,
       avatarUrl: profile.avatarUrl,
+      eloRating: profile.eloRating,
     };
-  }, [profile]);
+  }, [
+    profile?.id,
+    profile?.firstName,
+    profile?.lastName,
+    profile?.username,
+    profile?.avatarUrl,
+    profile?.eloRating,
+  ]);
+
+  useEffect(() => {
+    profileForEnrichRef.current = profileForEnrich;
+  }, [profileForEnrich]);
+
+  /** Si el perfil llega después de /matches/mine, rellena avatares sin esperar otro refetch. */
+  useEffect(() => {
+    if (!profileForEnrich?.id?.trim()) return;
+    cachePlayerAvatar(profileForEnrich.id, profileForEnrich.avatarUrl);
+    setMisPartidos((prev) => {
+      if (prev.length === 0) return prev;
+      const next = enrichPartidosWithProfileAvatar(prev, profileForEnrich);
+      const same = next.every((p, i) => p === prev[i]);
+      return same ? prev : next;
+    });
+  }, [
+    profileForEnrich?.id,
+    profileForEnrich?.avatarUrl,
+    profileForEnrich?.firstName,
+    profileForEnrich?.lastName,
+    profileForEnrich?.username,
+  ]);
 
   const refreshMatches = useCallback(
-    async ({ scope = 'full' }: { force?: boolean; scope?: 'full' | 'mine' } = {}) => {
+    async ({ force = false, scope = 'full' }: { force?: boolean; scope?: 'full' | 'mine' } = {}) => {
       if (!token) {
         setMisPartidos([]);
         setPartidos([]);
+        matchesLoadedAt.current = 0;
         return;
       }
+    const mineOnly = scope === 'mine';
+    if (!force && !mineOnly && matchesLoadedAt.current > 0) return;
+    if (mineOnly && matchesLoadedAt.current > 0) {
+      const lastMineRefresh = refreshMatchesMineAt.current;
+      if (Date.now() - lastMineRefresh < 3000) return;
+    }
+
       const gen = ++refreshMatchesGen.current;
-      setMatchesLoading(true);
+      const isFirst = matchesLoadedAt.current === 0;
+      if (isFirst) setMatchesLoading(true);
 
       try {
-        const mineOnly = scope === 'mine';
-        const playerId = profile?.id ?? null;
+        const playerId = profileForEnrichRef.current?.id ?? profile?.id ?? null;
+        const enrichProfile = profileForEnrichRef.current;
 
         const myMatches = await fetchMyMatches(token, { phase: 'all', limit: 100 });
         if (gen !== refreshMatchesGen.current) return;
 
         const mineNormalized = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
-        const misFromServer = buildMisPartidosFromMatches(mineNormalized, profileForEnrich);
+        const misFromServer = buildMisPartidosFromMatches(mineNormalized, enrichProfile);
 
-        if (mineOnly) {
-          setMisPartidos((prev) => mergeMisPartidosFromServer(prev, misFromServer));
-        } else {
-          setMisPartidos(misFromServer);
+        setMisPartidos((prev) => mergeMisPartidosFromServer(prev, misFromServer));
+
+        if (!mineOnly) {
           const { dateFrom, dateTo } = defaultPartidosDiscoveryDateRange();
           const discoveryRows = await fetchMatches({
             expand: true,
@@ -272,13 +322,16 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
             .filter((p) => isPartidoOpenForDiscovery(p, playerId));
           setPartidos(open);
         }
+
+        matchesLoadedAt.current = Date.now();
+        if (mineOnly) refreshMatchesMineAt.current = Date.now();
       } catch {
-        setHasInitialError(true);
+        if (isFirst) setHasInitialError(true);
       } finally {
-        if (gen === refreshMatchesGen.current) setMatchesLoading(false);
+        if (isFirst && gen === refreshMatchesGen.current) setMatchesLoading(false);
       }
     },
-    [token, profile?.id, profileForEnrich, buildMisPartidosFromMatches],
+    [token, buildMisPartidosFromMatches],
   );
 
   const syncMisPartidoFromMatchId = useCallback(
@@ -318,23 +371,22 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
       await refreshMatches({ scope: 'mine' });
 
-      if (loaded) {
-        let enriched = enrichPartidoWithProfileAvatar(loaded, profileEnrich, {
-          forceSlotIndex: opts?.forceSlotIndex,
-        });
-        enriched = {
-          ...enriched,
-          organizerPlayerId: enriched.organizerPlayerId ?? opts?.organizerPlayerId ?? playerId,
-        };
-        upsertMisPartido(enriched);
-      }
-
       if (freshProfile) {
-        setProfile(freshProfile);
+        setProfile((prev) => {
+          if (
+            prev?.id === freshProfile.id &&
+            prev.avatarUrl === freshProfile.avatarUrl &&
+            prev.firstName === freshProfile.firstName &&
+            prev.lastName === freshProfile.lastName
+          ) {
+            return prev;
+          }
+          return freshProfile;
+        });
         profileLoadedAt.current = Date.now();
       }
     },
-    [token, profile, upsertMisPartido, refreshMatches],
+    [token, profile?.id, profile?.firstName, profile?.lastName, profile?.avatarUrl, upsertMisPartido, refreshMatches],
   );
 
   const refreshTournaments = useCallback(
@@ -446,7 +498,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     setHasInitialError(false);
     await Promise.all([
       refreshProfile({ force: true }),
-      refreshMatches(),
+      refreshMatches({ force: true }),
       refreshTournaments({ force: true }),
       refreshSeasonPass({ force: true }),
       refreshStats({ force: true }),
@@ -462,74 +514,112 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   ]);
 
   // -----------------------------------------------------------------
-  // Carga inicial solo al iniciar sesión (no en cada refresh de JWT).
+  // Logout: solo cuando userId desaparece (no en refresh de JWT).
   // -----------------------------------------------------------------
   useEffect(() => {
-    if (!token) {
-      lastSessionTokenRef.current = null;
-      refreshMatchesGen.current = 0;
+    if (userId) return;
+    const prevUser = lastSessionUserIdRef.current;
+    if (prevUser) {
+      bootstrappedUserIds.delete(prevUser);
+      lastBackgroundRefreshAtByUser.delete(prevUser);
+    }
+    lastSessionUserIdRef.current = null;
+    refreshMatchesGen.current = 0;
+    profileLoadedAt.current = 0;
+    matchesLoadedAt.current = 0;
+    tournamentsLoadedAt.current = 0;
+    seasonPassLoadedAt.current = 0;
+    statsLoadedAt.current = 0;
+    streakLoadedAt.current = 0;
+    setHasInitialError(false);
+    setProfile(null);
+    setPartidos([]);
+    setMisPartidos([]);
+    setPublicTournamentsCount(null);
+    setSeasonPassMe(null);
+    setStats(null);
+    setStreak({ currentStreak: 0, longestStreak: 0, multiplier: 0, lastCompleted: null });
+  }, [userId]);
+
+  // -----------------------------------------------------------------
+  // Bootstrap: una sola vez por userId cuando hay token.
+  // -----------------------------------------------------------------
+  useEffect(() => {
+    if (!token || !userId) return;
+
+    const switchedUser =
+      lastSessionUserIdRef.current != null && lastSessionUserIdRef.current !== userId;
+    if (switchedUser) {
+      bootstrappedUserIds.delete(lastSessionUserIdRef.current!);
       profileLoadedAt.current = 0;
+      matchesLoadedAt.current = 0;
       tournamentsLoadedAt.current = 0;
       seasonPassLoadedAt.current = 0;
       statsLoadedAt.current = 0;
       streakLoadedAt.current = 0;
-      setHasInitialError(false);
-      setProfile(null);
-      setPartidos([]);
-      setMisPartidos([]);
-      setPublicTournamentsCount(null);
-      setSeasonPassMe(null);
-      setStats(null);
-      setStreak({ currentStreak: 0, longestStreak: 0, multiplier: 0, lastCompleted: null });
-      return;
     }
 
-    const isNewLogin = lastSessionTokenRef.current === null;
-    lastSessionTokenRef.current = token;
-    if (!isNewLogin) return;
+    lastSessionUserIdRef.current = userId;
+    if (bootstrappedUserIds.has(userId)) return;
 
+    bootstrappedUserIds.add(userId);
     profileLoadedAt.current = 0;
+    matchesLoadedAt.current = 0;
     tournamentsLoadedAt.current = 0;
     seasonPassLoadedAt.current = 0;
     statsLoadedAt.current = 0;
     streakLoadedAt.current = 0;
     setHasInitialError(false);
     void refreshProfile({ force: true });
-    void refreshMatches();
+    void refreshMatches({ force: true });
     void refreshTournaments({ force: true });
     void refreshSeasonPass({ force: true });
     void refreshStats({ force: true });
     void refreshStreak({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [userId]);
 
-  // -----------------------------------------------------------------
-  // Al volver del background, refrescar todo.
-  // -----------------------------------------------------------------
-  useEffect(() => {
-    let last: AppStateStatus = AppState.currentState;
-    const sub = AppState.addEventListener('change', (next) => {
-      const prev = last;
-      last = next;
-      if (prev.match(/inactive|background/) && next === 'active' && token) {
-        void refreshProfile({ force: true });
-        void refreshMatches();
-        void refreshTournaments({ force: true });
-        void refreshSeasonPass({ force: true });
-        void refreshStats({ force: true });
-        void refreshStreak({ force: true });
-      }
-    });
-    return () => sub.remove();
-  }, [
-    token,
+  const refreshFnsRef = useRef({
     refreshProfile,
     refreshMatches,
     refreshTournaments,
     refreshSeasonPass,
     refreshStats,
     refreshStreak,
-  ]);
+  });
+  refreshFnsRef.current = {
+    refreshProfile,
+    refreshMatches,
+    refreshTournaments,
+    refreshSeasonPass,
+    refreshStats,
+    refreshStreak,
+  };
+
+  // -----------------------------------------------------------------
+  // Al volver del background: refresh con cooldown (30s por usuario).
+  // -----------------------------------------------------------------
+  useEffect(() => {
+    let last: AppStateStatus = AppState.currentState;
+    const sub = AppState.addEventListener('change', (next) => {
+      const prev = last;
+      last = next;
+      const uid = lastSessionUserIdRef.current;
+      if (prev.match(/inactive|background/) && next === 'active' && token && uid) {
+        const lastAt = lastBackgroundRefreshAtByUser.get(uid) ?? 0;
+        if (Date.now() - lastAt < BACKGROUND_REFRESH_COOLDOWN_MS) return;
+        lastBackgroundRefreshAtByUser.set(uid, Date.now());
+        const fns = refreshFnsRef.current;
+        void fns.refreshProfile({ force: true });
+        void fns.refreshMatches({ force: true });
+        void fns.refreshTournaments({ force: true });
+        void fns.refreshSeasonPass({ force: true });
+        void fns.refreshStats({ force: true });
+        void fns.refreshStreak({ force: true });
+      }
+    });
+    return () => sub.remove();
+  }, [token]);
 
   const value = useMemo<HomeDataValue>(
     () => ({

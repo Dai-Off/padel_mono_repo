@@ -1,75 +1,79 @@
 import { useEffect, useState } from 'react';
-import { Image, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { normalizePlayerAvatarUrl } from '../../api/playerAvatar';
+import { theme } from '../../theme';
 
 type PartidoSlotAvatarProps = {
   avatarUrl?: string | null;
   initials: string;
   size?: number;
   borderRadius?: number;
-  backgroundColor?: string;
-  style?: ViewStyle;
 };
 
-/** Avatar de slot en partidos: fallback a iniciales si la URL falla (común en prod/Android). */
+/**
+ * Avatar en detalle de partido: gradiente naranja SIEMPRE visible;
+ * la foto se superpone encima cuando carga (nunca reemplaza el gradiente).
+ */
 export function PartidoSlotAvatar({
   avatarUrl,
   initials,
   size = 56,
   borderRadius = 12,
-  backgroundColor = '#FF6B35',
-  style,
 }: PartidoSlotAvatarProps) {
-  const uri = avatarUrl?.trim() || null;
-  const [loadFailed, setLoadFailed] = useState(false);
-
-  useEffect(() => {
-    setLoadFailed(false);
-  }, [uri]);
-
+  const uri = normalizePlayerAvatarUrl(avatarUrl);
+  const [photoFailed, setPhotoFailed] = useState(false);
   const label = (initials || '?').toUpperCase().slice(0, 2);
 
-  if (!uri || loadFailed) {
-    return (
-      <View
-        style={[
-          styles.fill,
-          { width: size, height: size, borderRadius, backgroundColor },
-          style,
-        ]}
-      >
-        <Text style={styles.initials}>{label}</Text>
-      </View>
-    );
-  }
+  useEffect(() => {
+    setPhotoFailed(false);
+  }, [uri]);
 
   return (
     <View
       style={[
-        styles.fill,
-        { width: size, height: size, borderRadius, backgroundColor },
-        style,
+        styles.root,
+        { width: size, height: size, borderRadius, backgroundColor: theme.sidebar.avatarGradientFrom },
       ]}
     >
-      <Image
-        source={{ uri }}
-        style={{ width: size, height: size, borderRadius }}
-        resizeMode="cover"
-        onError={() => setLoadFailed(true)}
-        accessibilityLabel="Foto del jugador"
-      />
+      <LinearGradient
+        colors={[theme.sidebar.avatarGradientFrom, theme.sidebar.avatarGradientTo]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.gradient, { width: size, height: size, borderRadius }]}
+      >
+        <Text style={styles.initials}>{label}</Text>
+      </LinearGradient>
+      {uri && !photoFailed ? (
+        <Image
+          key={uri}
+          source={{ uri }}
+          style={[styles.photo, { width: size, height: size, borderRadius }]}
+          resizeMode="cover"
+          onError={() => setPhotoFailed(true)}
+          accessibilityLabel="Foto de perfil"
+        />
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  fill: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  root: {
     overflow: 'hidden',
   },
+  gradient: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   initials: {
-    fontSize: 14,
+    color: theme.auth.text,
     fontWeight: '800',
-    color: '#fff',
+    fontSize: 14,
+  },
+  photo: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
   },
 });

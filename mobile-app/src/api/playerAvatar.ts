@@ -1,12 +1,39 @@
 import { API_URL } from '../config';
-import { readImageBytesFromUri } from '../lib/readImageBytes';
-import { getSupabaseClient } from '../lib/supabase';
 
 export type PickedImage = {
   uri: string;
   mimeType?: string | null;
   fileName?: string | null;
 };
+
+/** URL usable en `<Image />`: https o URI local del dispositivo. */
+export function normalizePlayerAvatarUrl(url: string | null | undefined): string | null {
+  const t = url?.trim();
+  if (!t) return null;
+  if (
+    t.startsWith('file://') ||
+    t.startsWith('content://') ||
+    t.startsWith('ph://') ||
+    t.startsWith('data:')
+  ) {
+    return t;
+  }
+  if (!/^https?:\/\//i.test(t)) return null;
+  return t;
+}
+
+/** URIs que ya cargaron en `<Image />` — evita pantalla vacía al remontar. */
+const loadedAvatarUris = new Set<string>();
+
+export function markPlayerAvatarUriLoaded(url: string | null | undefined): void {
+  const uri = normalizePlayerAvatarUrl(url);
+  if (uri) loadedAvatarUris.add(uri);
+}
+
+export function isPlayerAvatarUriLoaded(url: string | null | undefined): boolean {
+  const uri = normalizePlayerAvatarUrl(url);
+  return uri != null && loadedAvatarUris.has(uri);
+}
 
 function extFromImage(image: PickedImage): string {
   const fromName = image.fileName?.split('.').pop()?.toLowerCase();
@@ -20,42 +47,47 @@ function extFromImage(image: PickedImage): string {
   return 'jpg';
 }
 
-async function getAuthedSupabase(accessToken: string, refreshToken: string) {
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    throw new Error('Supabase no configurado (EXPO_PUBLIC_SUPABASE_URL / ANON_KEY)');
-  }
-  const { error } = await supabase.auth.setSession({
-    access_token: accessToken,
-    refresh_token: refreshToken,
-  });
-  if (error) throw new Error(error.message);
-  return supabase;
-}
+type PlayerMediaKind = 'avatar' | 'cover';
 
-/** Sube a `player-avatars/{authUserId}/avatar.ext` (misma ruta que web). */
-export async function uploadPlayerAvatarToStorage(
-  authUserId: string,
-  accessToken: string,
-  refreshToken: string,
+async function uploadPlayerMediaViaApi(
+  token: string,
   image: PickedImage,
+  kind: PlayerMediaKind,
 ): Promise<string> {
-  const supabase = await getAuthedSupabase(accessToken, refreshToken);
   const ext = extFromImage(image);
-  const path = `${authUserId}/avatar.${ext}`;
-  const bytes = await readImageBytesFromUri(image.uri);
   const contentType =
     image.mimeType?.trim() || (ext === 'jpg' ? 'image/jpeg' : `image/${ext}`);
 
-  const { error: upErr } = await supabase.storage.from('player-avatars').upload(path, bytes, {
-    upsert: true,
-    contentType,
-  });
-  if (upErr) throw new Error(upErr.message);
+  const formData = new FormData();
+  formData.append('file', {
+    uri: image.uri,
+    name: `${kind}.${ext}`,
+    type: contentType,
+  } as unknown as Blob);
 
-  const { data: pub } = supabase.storage.from('player-avatars').getPublicUrl(path);
-  const base = pub.publicUrl;
-  return `${base}${base.includes('?') ? '&' : '?'}v=${Date.now()}`;
+  const res = await fetch(`${API_URL}/players/me/${kind}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: formData,
+  });
+  const json = (await res.json()) as { ok?: boolean; url?: string; error?: string };
+  if (!res.ok || !json.ok || !json.url?.trim()) {
+    throw new Error(
+      json.error ??
+        (kind === 'avatar' ? 'No se pudo subir la foto de perfil' : 'No se pudo subir la portada'),
+    );
+  }
+  return json.url.trim();
+}
+
+/** Sube avatar vía backend (Storage + DB). No requiere Supabase en el cliente. */
+export async function uploadPlayerAvatarToStorage(
+  _authUserId: string,
+  accessToken: string,
+  _refreshToken: string,
+  image: PickedImage,
+): Promise<string> {
+  return uploadPlayerMediaViaApi(accessToken, image, 'avatar');
 }
 
 async function patchPlayerMedia(
@@ -89,29 +121,14 @@ export async function patchMyAvatarUrl(
   return patchPlayerMedia(token, { avatar_url }, 'No se pudo guardar la foto');
 }
 
-/** Sube a `player-avatars/{authUserId}/cover.ext`. */
+/** Sube portada vía backend (Storage + DB). No requiere Supabase en el cliente. */
 export async function uploadPlayerCoverToStorage(
-  authUserId: string,
+  _authUserId: string,
   accessToken: string,
-  refreshToken: string,
+  _refreshToken: string,
   image: PickedImage,
 ): Promise<string> {
-  const supabase = await getAuthedSupabase(accessToken, refreshToken);
-  const ext = extFromImage(image);
-  const path = `${authUserId}/cover.${ext}`;
-  const bytes = await readImageBytesFromUri(image.uri);
-  const contentType =
-    image.mimeType?.trim() || (ext === 'jpg' ? 'image/jpeg' : `image/${ext}`);
-
-  const { error: upErr } = await supabase.storage.from('player-avatars').upload(path, bytes, {
-    upsert: true,
-    contentType,
-  });
-  if (upErr) throw new Error(upErr.message);
-
-  const { data: pub } = supabase.storage.from('player-avatars').getPublicUrl(path);
-  const base = pub.publicUrl;
-  return `${base}${base.includes('?') ? '&' : '?'}v=${Date.now()}`;
+  return uploadPlayerMediaViaApi(accessToken, image, 'cover');
 }
 
 export async function patchMyCoverUrl(

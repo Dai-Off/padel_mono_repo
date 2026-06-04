@@ -1,18 +1,31 @@
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "../../theme";
-import { PartidoSlotAvatar } from "./PartidoSlotAvatar";
+import { PlayerAvatarCircle } from "../profile/PlayerAvatarCircle";
+import { useHomeData } from "../../contexts/HomeDataContext";
+import {
+  resolvePlayerDisplayAvatar,
+  resolvePlayerDisplayInitials,
+  type ProfileForPartidoEnrich,
+} from "../../lib/partidoPlayerUtils";
 import type { PartidoItem, PartidoPlayer } from "../../screens/PartidosScreen";
 
 function PlayerSlot({
   player,
   isPrivate,
   surface = "light",
+  slotIndex,
+  playerIdsBySlot,
+  currentProfile,
 }: {
   player: PartidoPlayer;
   isPrivate?: boolean;
   surface?: "light" | "dark";
+  slotIndex: number;
+  playerIdsBySlot?: Array<string | null>;
+  currentProfile: ProfileForPartidoEnrich | null;
 }) {
+  const displayOpts = { slotIndex, playerIdsBySlot };
   const d = surface === "dark";
   if (player.isFree) {
     return (
@@ -47,12 +60,11 @@ function PlayerSlot({
   }
   return (
     <View style={styles.playerSlot}>
-      <PartidoSlotAvatar
-        avatarUrl={player.avatar}
-        initials={player.initial ?? player.name?.slice(0, 2) ?? '?'}
+      <PlayerAvatarCircle
+        avatarUrl={resolvePlayerDisplayAvatar(player, currentProfile, displayOpts)}
+        initials={resolvePlayerDisplayInitials(player, currentProfile, displayOpts)}
         size={48}
         borderRadius={10}
-        backgroundColor={theme.auth.accent}
       />
       <Text
         style={[styles.playerName, d && styles.playerNameDark]}
@@ -80,6 +92,16 @@ export function PartidoCard({
   surface = "light",
 }: PartidoCardProps) {
   const d = surface === "dark";
+  const { profile } = useHomeData();
+  const currentProfile: ProfileForPartidoEnrich | null = profile?.id
+    ? {
+        id: profile.id,
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        username: profile.username,
+        avatarUrl: profile.avatarUrl,
+      }
+    : null;
   return (
     <Pressable
       style={({ pressed }) => [
@@ -177,6 +199,9 @@ export function PartidoCard({
               player={p}
               isPrivate={false}
               surface={surface}
+              slotIndex={i}
+              playerIdsBySlot={item.playerIdsBySlot}
+              currentProfile={currentProfile}
             />
           ))}
         </View>
