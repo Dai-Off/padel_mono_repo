@@ -20,6 +20,9 @@ import {
   getCashCurrentOperatorHandler,
   customerPortalHandler,
   simulateTurnPaymentHandler,
+  simulateBookingPaymentHandler,
+  simulateTournamentPaymentHandler,
+  simulateJoinPaymentHandler,
 } from './payments';
 
 const router = Router();
@@ -43,5 +46,8 @@ router.post('/create-intent-for-tournament', createIntentForTournamentHandler);
 router.post('/create-intent-for-season-pass-elite', createIntentForSeasonPassEliteHandler);
 router.post('/confirm-client', confirmClientHandler);
 router.post('/simulate-turn-payment', simulateTurnPaymentHandler);
+router.post('/simulate-booking-payment', simulateBookingPaymentHandler);
+router.post('/simulate-tournament-payment', simulateTournamentPaymentHandler);
+router.post('/simulate-join-payment', simulateJoinPaymentHandler);
 
 export default router;

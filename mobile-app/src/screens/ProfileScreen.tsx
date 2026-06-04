@@ -26,7 +26,6 @@ import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal
 import { fetchMyCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
 import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
 import {
-  patchMyCoverUrl,
   uploadPlayerCoverToStorage,
   type PickedImage,
 } from '../api/playerAvatar';
@@ -170,12 +169,6 @@ export function ProfileScreen({
         session.refresh_token,
         image,
       );
-      const patch = await patchMyCoverUrl(session.access_token, publicUrl);
-      if (!patch.ok) {
-        setCoverUrl(profile?.coverUrl ?? null);
-        Alert.alert('Error', patch.error);
-        return;
-      }
       setCoverUrl(publicUrl);
       setProfile((prev) => (prev ? { ...prev, coverUrl: publicUrl } : prev));
       void refreshGlobalProfile({ force: true });

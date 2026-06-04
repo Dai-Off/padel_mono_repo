@@ -102,6 +102,7 @@ export function PartidosScreen({
     openPartidos,
     myPartidos,
     loading,
+    misPartidosLoading,
     organizerPlayerId,
     clubs,
     clubsLoading,
@@ -169,7 +170,7 @@ export function PartidosScreen({
           <Text style={styles.sectionSubtitle}>Tus reservas y partidos que organizas</Text>
         </View>
         <View style={styles.list}>
-          {loading ? (
+          {misPartidosLoading && myPartidos.length === 0 ? (
             <>
               <PartidoOpenCardSkeleton />
               <PartidoOpenCardSkeleton />
