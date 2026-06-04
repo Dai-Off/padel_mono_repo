@@ -61,6 +61,34 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
           )`;
 }
 
+/** Listado Buscar partido: sin payment_transactions (menos payload). */
+function expandSelectDiscovery(): string {
+  return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type,
+          bookings!inner (
+            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
+            courts (
+              id, club_id, name, indoor, glass_type, sport,
+              clubs (id, name, address, city)
+            )
+          ),
+          match_players (
+            id, team, slot_index,
+            players (id, first_name, last_name, elo_rating, avatar_url)
+          )`;
+}
+
+const DISCOVERY_DEFAULT_DAYS = 14;
+const DISCOVERY_DEFAULT_LIMIT = 100;
+const DISCOVERY_MAX_LIMIT = 150;
+
+function countFilledSlots(row: { match_players?: Array<{ players?: { id?: string } | null }> | null }): number {
+  return (row.match_players ?? []).filter((mp) => Boolean(mp?.players?.id)).length;
+}
+
+function isJoinableDiscoveryRow(row: { match_players?: Array<{ players?: { id?: string } | null }> | null }): boolean {
+  return countFilledSlots(row) < 4;
+}
+
 /**
  * @openapi
  * /matches:
@@ -175,25 +203,40 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     if (expand && discovery) {
+      const joinable_only = req.query.joinable_only !== '0' && req.query.joinable_only !== 'false';
+      const limitRaw = Math.trunc(Number(req.query.limit) || DISCOVERY_DEFAULT_LIMIT);
+      const limit = Math.min(DISCOVERY_MAX_LIMIT, Math.max(1, limitRaw));
+
+      const rangeStart = new Date();
+      rangeStart.setUTCHours(0, 0, 0, 0);
+      const rangeEnd = new Date(rangeStart);
+      rangeEnd.setUTCDate(rangeEnd.getUTCDate() + DISCOVERY_DEFAULT_DAYS);
+      const defaultFrom = rangeStart.toISOString();
+      const defaultTo = rangeEnd.toISOString();
+      const effectiveFrom = date_from ?? defaultFrom;
+      const effectiveTo = date_to ?? defaultTo;
+
       let q = supabase
         .from('matches')
-        .select(expandSelect('bookings!inner'))
+        .select(expandSelectDiscovery())
         .eq('visibility', 'public')
         .eq('type', 'open')
         .not('status', 'eq', 'cancelled')
         .not('status', 'eq', 'finished')
         .gt('bookings.end_at', nowIso)
         .is('bookings.deleted_at', null)
+        .gte('bookings.start_at', effectiveFrom)
+        .lte('bookings.start_at', effectiveTo)
         .order('start_at', { ascending: true, foreignTable: 'bookings' })
-        .limit(400);
-      if (date_from) q = q.gte('bookings.start_at', date_from);
-      if (date_to) q = q.lte('bookings.start_at', date_to);
+        .limit(limit);
       if (booking_id) q = q.eq('booking_id', booking_id);
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
       const rows = (data ?? []).filter((row: any) => {
         const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
-        return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
+        if (getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) === 'past') return false;
+        if (joinable_only && !isJoinableDiscoveryRow(row)) return false;
+        return true;
       });
       return res.json({ ok: true, matches: rows });
     }
@@ -402,7 +445,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const expand = req.query.expand === '1' || req.query.expand === 'true';
   try {
-    await finalizePastMatches();
+    await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
     if (expand) {
       const { data, error } = await supabase

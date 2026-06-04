@@ -382,6 +382,15 @@ export function CrearPartidoLocationSheet({
 
     const currentPriceFormatted = getSlotDisplayPrice();
 
+    const createdMatchId =
+      confirmRes.ok &&
+      confirmRes.match &&
+      typeof confirmRes.match === 'object' &&
+      'id' in confirmRes.match &&
+      typeof (confirmRes.match as { id: unknown }).id === 'string'
+        ? (confirmRes.match as { id: string }).id
+        : undefined;
+
     const confirmation: BookingConfirmationData = {
       courtName: selectedSlot.courtName,
       clubName: selectedClub.clubName,
@@ -394,6 +403,7 @@ export function CrearPartidoLocationSheet({
       date: selectedSlot.dateStr,
       slot: selectedSlot.time,
       durationMinutes: DURATION_MIN,
+      matchId: createdMatchId,
     };
     /** El padre (p. ej. MainApp) cierra el flujo dentro de `onPartidoCreado`; no llamar `onClose` después para evitar carrera con la pantalla de éxito. */
     if (onPartidoCreado) {

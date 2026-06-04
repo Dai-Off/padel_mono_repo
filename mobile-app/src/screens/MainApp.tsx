@@ -83,7 +83,7 @@ const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
 export function MainApp() {
   const sidebar = useSidebar(false);
   const { session } = useAuth();
-  const { profile } = useHomeData();
+  const { profile, refreshMatches, syncMisPartidoFromMatchId } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
@@ -694,9 +694,15 @@ export function MainApp() {
             setActiveTab('perfil');
           }}
           onPartidoCreado={(data) => {
+            const organizerId = crearPartidoFlow.organizerId ?? profile?.id ?? null;
             setCrearPartidoFlow({ open: false, organizerId: null });
             bumpPartidos();
             setBookingSuccessData(data);
+            if (data.matchId) {
+              void syncMisPartidoFromMatchId(data.matchId, { organizerPlayerId: organizerId });
+            } else {
+              void refreshMatches({ scope: 'mine' });
+            }
           }}
         />
       );
@@ -860,8 +866,13 @@ export function MainApp() {
       return (
         <PartidoDetailScreen
           partido={selectedPartido}
-          onBack={() => setSelectedPartido(null)}
+          onMatchDataChanged={() => setPartidosRefreshNonce((n) => n + 1)}
+          onBack={() => {
+            void refreshMatches({ scope: 'mine' });
+            setSelectedPartido(null);
+          }}
           onGoHome={() => {
+            void refreshMatches({ scope: 'mine' });
             setSelectedPartido(null);
             setShowTuActividad(false);
             setTuActividadSubView(null);

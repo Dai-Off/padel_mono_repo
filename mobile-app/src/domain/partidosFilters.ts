@@ -243,14 +243,29 @@ export function whenChipLabel(
   return `${weekday}, ${d.getDate()} ${month}`;
 }
 
-/** Rango API según días seleccionados; vacío = solo activos sin rango. */
+/** Ventana por defecto al buscar partidos abiertos (evita descargar todo el histórico). */
+export const PARTIDOS_DISCOVERY_DEFAULT_DAYS = 14;
+
+export function defaultPartidosDiscoveryDateRange(): { dateFrom: string; dateTo: string } {
+  const today = dayKeyInClubTz(new Date());
+  const end = new Date();
+  end.setUTCDate(end.getUTCDate() + PARTIDOS_DISCOVERY_DEFAULT_DAYS);
+  const endKey = dayKeyInClubTz(end);
+  return {
+    dateFrom: clubLocalDateTimeToUtcIso(today, '00:00'),
+    dateTo: clubLocalDateTimeToUtcIso(endKey, '23:59'),
+  };
+}
+
+/** Rango API según días seleccionados; sin días = próximos 14 días. */
 export function partidosFetchDateRange(filters: PartidosFiltersState): {
   activeOnly: boolean;
   dateFrom?: string;
   dateTo?: string;
 } {
   if (filters.selectedDateKeys.length === 0) {
-    return { activeOnly: true };
+    const { dateFrom, dateTo } = defaultPartidosDiscoveryDateRange();
+    return { activeOnly: true, dateFrom, dateTo };
   }
   const sorted = [...filters.selectedDateKeys].sort();
   const minKey = sorted[0]!;
