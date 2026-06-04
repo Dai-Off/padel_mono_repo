@@ -60,8 +60,12 @@ export type PartidoItem = {
   matchType?: string | null;
   matchStatus?: string;
   bookingStatus?: string;
-  scoreStatus?: 'pending' | 'confirmed' | 'disputed' | null;
+  scoreStatus?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | null;
   hasMyFeedback?: boolean;
+  sets?: Array<{ a: number; b: number }> | null;
+  myTeam?: 'A' | 'B' | null;
+  myResult?: 'win' | 'loss' | 'draw' | 'pending' | null;
+  matchEndReason?: string | null;
   courtSport?: string;
   startAtIso?: string;
   eloMin?: number | null;

@@ -172,7 +172,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   );
 
   /** Solo datos de GET /matches/mine — nunca el listado público de /matches. */
-  const buildMisPartidosFromMatches = useCallback((mineSource: MatchEnriched[]) => {
+  const buildMisPartidosFromMatches = useCallback((mineSource: MatchEnriched[], playerId: string | null) => {
       const mineRawBase = mineSource.filter((m) => {
         const b = getMatchBooking(m);
         return Boolean(b?.start_at && b?.end_at);
@@ -205,7 +205,9 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
               new Date(getMatchBooking(a)!.start_at!).getTime(),
           ),
       ];
-      return mineRaw.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
+      return mineRaw
+        .map((m) => mapMatchToPartido(m, { viewerPlayerId: playerId }))
+        .filter((p): p is PartidoItem => p != null);
   }, []);
 
   const upsertMisPartido = useCallback(
@@ -233,7 +235,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
         const myMatches = await fetchMyMatches(token, { phase: 'all', limit: 100 });
         const mineNormalized = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
-        const misFromServer = buildMisPartidosFromMatches(mineNormalized);
+        const misFromServer = buildMisPartidosFromMatches(mineNormalized, playerId);
 
         if (mineOnly) {
           setMisPartidos((prev) => mergeMisPartidosFromServer(prev, misFromServer, playerId));
@@ -252,7 +254,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
             limit: 80,
           });
           const open = discoveryRows
-            .map(mapMatchToPartido)
+            .map((m) => mapMatchToPartido(m))
             .filter((p): p is PartidoItem => p != null)
             .filter((p) => p.matchPhase !== 'past')
             .filter((p) => isPartidoOpenForDiscovery(p, playerId));

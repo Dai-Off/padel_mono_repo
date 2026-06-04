@@ -11,6 +11,8 @@ import { fetchMyMatches } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyEnrollments, type CourseEnrollment } from '../api/schoolCourses';
 import { fetchMyTournaments, type PublicTournamentRow } from '../api/tournaments';
+import { countFavoriteClubsFromIds, resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
+import { useClubCatalog } from '../hooks/useClubCatalog';
 import { useAuth } from './AuthContext';
 import { useHomeData } from './HomeDataContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
@@ -41,7 +43,9 @@ const TuActividadDataContext = createContext<TuActividadDataValue | null>(null);
 export function TuActividadDataProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
   const { profile, profileLoading } = useHomeData();
+  const { clubs: clubCatalog } = useClubCatalog();
   const [loading, setLoading] = useState(true);
+  const [favoriteClubCount, setFavoriteClubCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMoreTournaments, setLoadingMoreTournaments] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,8 +72,13 @@ export function TuActividadDataProvider({ children }: { children: ReactNode }) {
         fetchMyTournaments(token, { limit: TOURNAMENTS_PAGE, offset: 0 }),
       ]);
 
+      const favoriteIds = await resolveSavedFavoriteClubIds(profile, clubCatalog);
+      setFavoriteClubCount(countFavoriteClubsFromIds(favoriteIds));
+
       setPastPartidos(
-        pastMatches.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null),
+        pastMatches
+          .map((m) => mapMatchToPartido(m, { viewerPlayerId: profile?.id ?? null }))
+          .filter((p): p is PartidoItem => p != null),
       );
       setEnrollments(enrollRes.ok && Array.isArray(enrollRes.enrollments) ? enrollRes.enrollments : []);
       if (tourRes.ok) {
@@ -87,7 +96,7 @@ export function TuActividadDataProvider({ children }: { children: ReactNode }) {
       setTournaments([]);
       setTournamentsHasMore(false);
     }
-  }, [session?.access_token]);
+  }, [session?.access_token, profile?.id, profile, clubCatalog]);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,9 +136,9 @@ export function TuActividadDataProvider({ children }: { children: ReactNode }) {
       pastPartidos: pastPartidos.length,
       enrollments: enrollments.length,
       tournaments: tournaments.length,
-      favoriteClubs: profile?.preferences.favoriteClubs.length ?? 0,
+      favoriteClubs: favoriteClubCount,
     }),
-    [profile, pastPartidos.length, enrollments.length, tournaments.length],
+    [favoriteClubCount, pastPartidos.length, enrollments.length, tournaments.length],
   );
 
   const value = useMemo(

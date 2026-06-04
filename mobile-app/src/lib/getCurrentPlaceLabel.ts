@@ -38,6 +38,10 @@ export async function placeLabelFromCoords(
   }
 }
 
+function coordsFromPosition(pos: Location.LocationObject): MapCoords {
+  return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+}
+
 export async function getCurrentMapCoords(): Promise<
   { ok: true; coords: MapCoords } | { ok: false; error: string }
 > {
@@ -45,20 +49,42 @@ export async function getCurrentMapCoords(): Promise<
   if (perm.status !== 'granted') {
     return { ok: false, error: 'Activa el permiso de ubicación.' };
   }
-  try {
-    const pos = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    });
-    return {
-      ok: true,
-      coords: {
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
-      },
-    };
-  } catch {
-    return { ok: false, error: 'No se pudo obtener tu ubicación.' };
+
+  const servicesOn = await Location.hasServicesEnabledAsync();
+  if (!servicesOn) {
+    return { ok: false, error: 'Activa la ubicación (GPS) en los ajustes del dispositivo.' };
   }
+
+  try {
+    const last = await Location.getLastKnownPositionAsync({ maxAge: 300_000 });
+    if (last?.coords && Number.isFinite(last.coords.latitude) && Number.isFinite(last.coords.longitude)) {
+      return { ok: true, coords: coordsFromPosition(last) };
+    }
+  } catch {
+    /* seguir con fix actual */
+  }
+
+  const attempts: Location.LocationOptions[] = [
+    { accuracy: Location.Accuracy.Balanced },
+    { accuracy: Location.Accuracy.Low },
+  ];
+
+  for (const options of attempts) {
+    try {
+      const pos = await Location.getCurrentPositionAsync(options);
+      if (Number.isFinite(pos.coords.latitude) && Number.isFinite(pos.coords.longitude)) {
+        return { ok: true, coords: coordsFromPosition(pos) };
+      }
+    } catch {
+      /* siguiente intento */
+    }
+  }
+
+  return {
+    ok: false,
+    error:
+      'No se pudo obtener tu ubicación. Probá de nuevo en unos segundos o elegí clubes preferidos.',
+  };
 }
 
 /** Ciudad/región a partir de GPS (atajo sin mapa). */

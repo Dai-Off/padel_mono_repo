@@ -56,7 +56,7 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
             )
           ),
           match_players (
-            id, team, created_at, slot_index,
+            id, team, created_at, slot_index, result,
             players (id, first_name, last_name, elo_rating, liga, avatar_url)
           )`;
 }
@@ -351,7 +351,6 @@ router.get('/mine', async (req: Request, res: Response) => {
       .select('id')
       .eq('organizer_player_id', playerId)
       .is('deleted_at', null)
-      .neq('status', 'cancelled')
       .limit(500);
     if (orgBkErr) return res.status(500).json({ ok: false, error: orgBkErr.message });
 
@@ -361,7 +360,6 @@ router.get('/mine', async (req: Request, res: Response) => {
         .from('matches')
         .select('id')
         .in('booking_id', bookingIds)
-        .neq('status', 'cancelled')
         .limit(500);
       if (orgMErr) return res.status(500).json({ ok: false, error: orgMErr.message });
       for (const row of orgMatches ?? []) {
@@ -376,7 +374,6 @@ router.get('/mine', async (req: Request, res: Response) => {
       .from('matches')
       .select(expandSelect('bookings'))
       .in('id', [...matchIds])
-      .neq('status', 'cancelled')
       .order('created_at', { ascending: false })
       .limit(Math.min(matchIds.size, 500));
     if (error) return res.status(500).json({ ok: false, error: error.message });

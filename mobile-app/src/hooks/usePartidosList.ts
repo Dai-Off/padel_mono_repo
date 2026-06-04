@@ -90,7 +90,7 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
       const [openMatches] = await Promise.all([openPromise, minePromise]);
       const myId = profile?.id ?? null;
       const openPartidos = openMatches
-        .map(mapMatchToPartido)
+        .map((m) => mapMatchToPartido(m))
         .filter((p): p is PartidoItem => p != null)
         .filter((p) => p.matchPhase !== 'past')
         .filter((p) => isPartidoOpenForDiscovery(p, myId));
