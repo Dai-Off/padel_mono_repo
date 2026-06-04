@@ -75,6 +75,8 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
       scoreStatus: null,
       bookingStatus: undefined,
       hasMyFeedback: (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true,
+      eloMin: m.elo_min ?? null,
+      eloMax: m.elo_max ?? null,
     };
   }
   if (!b.start_at || !b.end_at) return null;
@@ -163,6 +165,16 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
 
   const matchPhase = getMatchListPhase(Date.now(), m.status, b.start_at, b.end_at);
 
+  const rawGender = (m.gender ?? 'any').toLowerCase();
+  const matchGender: PartidoItem['matchGender'] =
+    rawGender === 'male' || rawGender === 'men'
+      ? 'male'
+      : rawGender === 'female' || rawGender === 'women'
+        ? 'female'
+        : rawGender === 'mixed'
+          ? 'mixed'
+          : 'all';
+
   return {
     id: m.id,
     playerIds,
@@ -185,9 +197,16 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     scoreStatus: (m.score_status === 'pending' ? null : m.score_status) as PartidoItem['scoreStatus'],
     bookingStatus: b.status,
     hasMyFeedback: (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true,
+    startAtIso: b.start_at,
+    eloMin: m.elo_min ?? null,
+    eloMax: m.elo_max ?? null,
     venueAddress: address || undefined,
     courtName,
     courtType,
     courtSport,
+    clubId: court?.club_id ?? club?.id,
+    startAt: b.start_at,
+    endAt: b.end_at,
+    matchGender,
   };
 }

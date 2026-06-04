@@ -28,6 +28,7 @@ export type MatchmakingJoinPayload = {
   available_from: string;
   available_until: string;
   club_id?: string;
+  preferred_club_ids?: string[];
   max_distance_km?: number;
   search_lat?: number;
   search_lng?: number;
@@ -70,6 +71,18 @@ export type MatchmakingProposalResponse = {
   your_share_cents?: number | null;
   your_payment_status?: string | null;
 };
+
+/** Búsqueda activa o propuesta matchmaking sin pagar todavía. */
+export function isMatchmakingFlowPending(
+  status: MatchmakingStatusResponse | null | undefined,
+  proposal?: MatchmakingProposalResponse | null,
+): boolean {
+  if (status?.status === 'searching') return true;
+  if (status?.status === 'matched') {
+    return proposal?.your_payment_status !== 'paid';
+  }
+  return false;
+}
 
 async function parseErrorMessage(res: Response): Promise<string> {
   try {

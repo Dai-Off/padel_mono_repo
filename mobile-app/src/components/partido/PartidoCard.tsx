@@ -1,6 +1,7 @@
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { theme } from "../../theme";
+import { PartidoSlotAvatar } from "./PartidoSlotAvatar";
 import type { PartidoItem, PartidoPlayer } from "../../screens/PartidosScreen";
 
 function PlayerSlot({
@@ -46,19 +47,13 @@ function PlayerSlot({
   }
   return (
     <View style={styles.playerSlot}>
-      {player.avatar ? (
-        <Image
-          source={{ uri: player.avatar }}
-          style={styles.playerAvatar}
-          resizeMode="cover"
-        />
-      ) : (
-        <View style={styles.playerAvatarInitial}>
-          <Text style={styles.playerInitialText}>
-            {player.initial ?? player.name[0]}
-          </Text>
-        </View>
-      )}
+      <PartidoSlotAvatar
+        avatarUrl={player.avatar}
+        initials={player.initial ?? player.name?.slice(0, 2) ?? '?'}
+        size={48}
+        borderRadius={10}
+        backgroundColor={theme.auth.accent}
+      />
       <Text
         style={[styles.playerName, d && styles.playerNameDark]}
         numberOfLines={1}

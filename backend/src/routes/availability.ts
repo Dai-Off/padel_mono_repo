@@ -1,5 +1,8 @@
 import { Router, Request, Response } from 'express';
+import { bookingBlocksCourtForAvailability } from '../lib/courtContentionService';
+import { CLUB_IANA_TIMEZONE } from '../lib/clubTimezone';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { zonedTimeToUtc } from '../routes/learningTimezone';
 
 const router = Router();
 
@@ -61,7 +64,7 @@ router.get('/slots', async (req: Request, res: Response) => {
     // 2. Fetch everything in parallel to minimize latency
     const [scheduleRes, bookingsRes, coursesRes, tournamentsRes] = await Promise.all([
       supabase.from('club_day_schedule').select('court_id, slot').in('court_id', courtIds).eq('date', date),
-      supabase.from('bookings').select('court_id, start_at, end_at').in('court_id', courtIds).neq('status', 'cancelled').is('deleted_at', null).gte('start_at', `${date}T00:00:00Z`).lte('start_at', `${date}T23:59:59Z`),
+      supabase.from('bookings').select('court_id, start_at, end_at, status, reservation_type, court_contention_status').in('court_id', courtIds).neq('status', 'cancelled').is('deleted_at', null).gte('start_at', `${date}T00:00:00Z`).lte('start_at', `${date}T23:59:59Z`),
       supabase.from('club_school_courses').select('id, court_id, club_id, starts_on, ends_on').in('club_id', clubIds).eq('is_active', true),
       supabase.from('tournaments').select('id, club_id, start_at, end_at, status, tournament_courts(court_id)').in('club_id', clubIds).neq('status', 'cancelled')
     ]);
@@ -112,10 +115,12 @@ router.get('/slots', async (req: Request, res: Response) => {
       const candidates = scheduleRes.data?.filter(s => s.court_id === court.id).map(s => s.slot) ?? [];
       const slots = candidates.length > 0 ? candidates : fallbackSlots;
       
-      const courtBookings = (bookingsRes.data ?? []).filter(b => b.court_id === court.id).map(b => ({
-        s: new Date(b.start_at).getTime(),
-        e: new Date(b.end_at).getTime()
-      }));
+      const courtBookings = (bookingsRes.data ?? [])
+        .filter((b) => b.court_id === court.id && bookingBlocksCourtForAvailability(b))
+        .map((b) => ({
+          s: new Date(b.start_at).getTime(),
+          e: new Date(b.end_at).getTime(),
+        }));
       const courtSchool = schoolBlocks.filter(b => b.court_id === court.id);
       const courtTournaments = tournamentList.filter(t => t.club_id === court.club_id && t.courts.has(court.id));
 
@@ -125,7 +130,8 @@ router.get('/slots', async (req: Request, res: Response) => {
         const sMin = h * 60 + m;
         const eMin = sMin + duration_minutes;
         
-        const sMs = new Date(`${date}T${slotTime.slice(0, 5)}:00Z`).getTime();
+        const slotHms = slotTime.slice(0, 5);
+        const sMs = zonedTimeToUtc(`${date}T${slotHms}:00`, CLUB_IANA_TIMEZONE).getTime();
         const eMs = sMs + duration_minutes * 60 * 1000;
 
         if (courtBookings.some(b => overlaps(sMs, eMs, b.s, b.e))) continue;
@@ -139,6 +145,7 @@ router.get('/slots', async (req: Request, res: Response) => {
           end: `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
         });
       }
+      freeSlots.sort((a, b) => a.start.localeCompare(b.start));
       results.push({ court_id: court.id, court_name: court.name, club_id: court.club_id, free_slots: freeSlots });
     }
 

@@ -67,12 +67,108 @@ function playerCount(res: Reservation): number {
     return res.playerName?.trim() ? 1 : 0;
 }
 
+const MATCH_GRID_FILL_TYPES = new Set(['open_match', 'pozo', 'standard']);
+
 function expectedPlayerSlots(res: Reservation): number {
     const t = res.booking_type;
     if (t === 'blocked' || t === 'tournament' || t === 'flat_rate') return 0;
     if (t === 'school_group' || t === 'school_individual' || t === 'school_course') return 1;
     if (t === 'open_match' || t === 'pozo' || t === 'standard') return 4;
     return 4;
+}
+
+function rawBookingType(b: { reservation_type?: string; booking_type?: string }): string {
+    return b.reservation_type ?? b.booking_type ?? 'standard';
+}
+
+function rawPlayerCount(b: {
+    booking_participants?: unknown[];
+    organizer_player_id?: string | null;
+    players?: unknown;
+}): number {
+    const participants = Array.isArray(b.booking_participants) ? b.booking_participants : [];
+    if (participants.length > 0) return participants.length;
+    return b.organizer_player_id || b.players ? 1 : 0;
+}
+
+type RawBookingPaymentInput = {
+    payment_transactions?: Array<{
+        status?: string;
+        payer_player_id?: string | null;
+        amount_cents?: number | null;
+    }>;
+    booking_participants?: Array<{
+        paid_amount_cents?: number | null;
+        wallet_amount_cents?: number | null;
+        payment_status?: string | null;
+        share_amount_cents?: number | null;
+    }>;
+};
+
+function rawTotalPaidCents(b: RawBookingPaymentInput): number {
+    const txByPlayer = new Map<string, number>();
+    for (const t of b.payment_transactions ?? []) {
+        if (t.status !== 'succeeded' || !t.payer_player_id) continue;
+        txByPlayer.set(
+            t.payer_player_id,
+            (txByPlayer.get(t.payer_player_id) ?? 0) + (t.amount_cents ?? 0),
+        );
+    }
+    const txTotal = Array.from(txByPlayer.values()).reduce((sum, n) => sum + n, 0);
+    if (txTotal > 0) return txTotal;
+
+    const participants = b.booking_participants ?? [];
+    const bpTotal = participants.reduce(
+        (sum, p) => sum + (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0),
+        0,
+    );
+    if (bpTotal > 0) return bpTotal;
+
+    return participants
+        .filter((p) => p.payment_status === 'paid')
+        .reduce((sum, p) => sum + (p.share_amount_cents ?? 0), 0);
+}
+
+function rawBookingFullyPaid(
+    b: RawBookingPaymentInput & {
+        total_price_cents?: number | null;
+        status?: string | null;
+    },
+): boolean {
+    const total = b.total_price_cents ?? 0;
+    const paid = rawTotalPaidCents(b);
+    if (total <= 0) return paid > 0 || b.status === 'confirmed' || b.status === 'flat_rate';
+    return paid >= total;
+}
+
+/** Grid: match bookings need 4 players or 100% payment; list shows all (except court contention). */
+export function shouldShowRawBookingInGrid(
+    b: RawBookingPaymentInput & {
+        court_contention_status?: string | null;
+        reservation_type?: string;
+        booking_type?: string;
+        organizer_player_id?: string | null;
+        players?: unknown;
+        total_price_cents?: number | null;
+        status?: string | null;
+    },
+): boolean {
+    if (b.court_contention_status === 'competing') return false;
+
+    const type = rawBookingType(b);
+    if (!MATCH_GRID_FILL_TYPES.has(type)) return true;
+
+    const expected = 4;
+    if (rawPlayerCount(b) >= expected) return true;
+    return rawBookingFullyPaid(b);
+}
+
+/** Same rule on mapped reservations (e.g. optimistic grid updates). */
+export function shouldShowReservationInGrid(res: Reservation): boolean {
+    const type = res.booking_type ?? res.reservation_type ?? 'standard';
+    if (!MATCH_GRID_FILL_TYPES.has(type)) return true;
+    if (isReservationPlayersComplete(res)) return true;
+    return isReservationPaid(res);
 }
 
 export function isReservationPlayersComplete(res: Reservation): boolean {

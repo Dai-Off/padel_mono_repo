@@ -22,6 +22,12 @@ import { sendMatchJoinConfirmationEmail } from '../lib/mailer';
 import { zonedTimeToUtc } from './learningTimezone';
 import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
+import {
+  assertCourtSlotAvailableForNewContentionMatch,
+  contentionStatusForNewMatchBooking,
+  resolveCourtContention,
+} from '../lib/courtContentionService';
+import { parseEloLevel, parseEloRange } from '../lib/openMatchRules';
 
 /**
  * Helper to fetch player and match/club/court details and send the join confirmation email.
@@ -252,27 +258,20 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       }
     }
 
-    const { data: courtBookings } = await supabase
-      .from('bookings')
-      .select('id, start_at, end_at')
-      .eq('court_id', court_id)
-      .in('status', ['confirmed', 'pending_payment']);
-    const courtOverlaps = (courtBookings ?? []).some((b) => {
-      const exStart = new Date(b.start_at).getTime();
-      const exEnd = new Date(b.end_at).getTime();
-      return newStart < exEnd && newEnd > exStart;
-    });
-    if (courtOverlaps) {
-      res.status(400).json({
-        ok: false,
-        error: 'Esa pista ya está reservada para ese horario. Elige otra hora.',
-      });
-      return;
-    }
-
     const totalCents = Number(total_price_cents);
     const isPayFull = pay_full === true || pay_full === 'true' || pay_full === 1;
     const reservation_type = isPayFull ? 'standard' : 'open_match';
+
+    const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+      supabase,
+      court_id,
+      start_at,
+      end_at,
+    );
+    if (slotConflict) {
+      res.status(400).json({ ok: false, error: slotConflict });
+      return;
+    }
     const sch0 = ['mobile', 'web', 'manual', 'system'].includes(source_channel) ? source_channel : 'mobile';
     const { data: courtForClub } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
     const clubIdRule = (courtForClub as { club_id?: string } | null)?.club_id;
@@ -305,13 +304,18 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       payer_player_id: player.id,
       timezone: timezone ?? 'Europe/Madrid',
       visibility: visibility === 'public' ? 'public' : 'private',
-      competitive: competitive !== false ? '1' : '0',
+      competitive: '0',
       gender: gender ?? 'any',
       source_channel: sch0,
       reservation_type,
     };
-    if (elo_min != null) metadata.elo_min = String(elo_min);
-    if (elo_max != null) metadata.elo_max = String(elo_max);
+    const eloMeta = parseEloRange(elo_min, elo_max);
+    if (!eloMeta.ok) {
+      res.status(400).json({ ok: false, error: eloMeta.error });
+      return;
+    }
+    if (eloMeta.elo_min != null) metadata.elo_min = String(eloMeta.elo_min);
+    if (eloMeta.elo_max != null) metadata.elo_max = String(eloMeta.elo_max);
     if (isPayFull) metadata.pay_full = '1';
 
     const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
@@ -1014,6 +1018,11 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+    try {
+      await resolveCourtContention(supabase, booking_id);
+    } catch (contentionErr) {
+      console.error('[payments/webhook] resolveCourtContention:', contentionErr);
+    }
 
     res.json({ received: true });
   } catch (err) {
@@ -3046,10 +3055,10 @@ async function processNewMatchPayment(
   const total_price_cents = parseInt(meta.total_price_cents ?? '0', 10);
   const timezone = meta.timezone ?? 'Europe/Madrid';
   const visibility = meta.visibility === 'public' ? 'public' : 'private';
-  const competitive = meta.competitive !== '0';
+  const competitive = false;
   const gender = meta.gender ?? 'any';
-  const elo_min = meta.elo_min ? parseInt(meta.elo_min, 10) : null;
-  const elo_max = meta.elo_max ? parseInt(meta.elo_max, 10) : null;
+  const elo_min = meta.elo_min != null && meta.elo_min !== '' ? parseEloLevel(meta.elo_min) : null;
+  const elo_max = meta.elo_max != null && meta.elo_max !== '' ? parseEloLevel(meta.elo_max) : null;
   const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
     ? meta.source_channel
     : 'mobile';
@@ -3062,24 +3071,19 @@ async function processNewMatchPayment(
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents <= 0) return;
 
-  const newStart = new Date(start_at).getTime();
-  const newEnd = new Date(end_at).getTime();
-  const { data: courtBookings } = await supabase
-    .from('bookings')
-    .select('id, start_at, end_at')
-    .eq('court_id', court_id)
-    .in('status', ['confirmed', 'pending_payment']);
-  const courtOverlaps = (courtBookings ?? []).some((b) => {
-    const exStart = new Date(b.start_at).getTime();
-    const exEnd = new Date(b.end_at).getTime();
-    return newStart < exEnd && newEnd > exStart;
-  });
-  if (courtOverlaps) {
-    console.error('[payments/webhook] Slot already booked, skipping booking creation. Payment may need refund.', {
+  const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+    supabase,
+    court_id,
+    start_at,
+    end_at,
+  );
+  if (slotConflict) {
+    console.error('[payments/webhook] Slot blocked for contention match, skipping booking creation.', {
       court_id,
       start_at,
       end_at,
       paymentIntentId: pi.id,
+      error: slotConflict,
     });
     return;
   }
@@ -3097,22 +3101,25 @@ async function processNewMatchPayment(
 
   const isPayFull = meta.pay_full === '1';
   const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
+  const contentionStatus = contentionStatusForNewMatchBooking(reservation_type, isPayFull);
+
+  const bookingInsert: Record<string, unknown> = {
+    court_id,
+    organizer_player_id,
+    start_at,
+    end_at,
+    timezone,
+    total_price_cents,
+    currency: 'EUR',
+    reservation_type,
+    status: isPayFull ? 'confirmed' : 'pending_payment',
+    source_channel,
+  };
+  if (contentionStatus) bookingInsert.court_contention_status = contentionStatus;
 
   const { data: booking, error: errBooking } = await supabase
     .from('bookings')
-    .insert([{
-      court_id,
-      organizer_player_id,
-      start_at,
-      end_at,
-      timezone,
-      total_price_cents,
-      currency: 'EUR',
-      reservation_type,
-      // Split-payment: stays pending until all 4 players pay. Full-payment: confirmed immediately.
-      status: isPayFull ? 'confirmed' : 'pending_payment',
-      source_channel,
-    }])
+    .insert([bookingInsert])
     .select('id')
     .maybeSingle();
 
@@ -3130,6 +3137,7 @@ async function processNewMatchPayment(
       elo_max,
       gender,
       competitive,
+      type: 'open',
     }])
     .select('id')
     .maybeSingle();
@@ -3238,10 +3246,10 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       const total_price_cents = parseInt(meta.total_price_cents ?? '0', 10);
       const timezone = meta.timezone ?? 'Europe/Madrid';
       const visibility = meta.visibility === 'public' ? 'public' : 'private';
-      const competitive = meta.competitive !== '0';
+      const competitive = false;
       const gender = meta.gender ?? 'any';
-      const elo_min = meta.elo_min ? parseInt(meta.elo_min, 10) : null;
-      const elo_max = meta.elo_max ? parseInt(meta.elo_max, 10) : null;
+      const elo_min = meta.elo_min != null && meta.elo_min !== '' ? parseEloLevel(meta.elo_min) : null;
+      const elo_max = meta.elo_max != null && meta.elo_max !== '' ? parseEloLevel(meta.elo_max) : null;
       const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
         ? meta.source_channel
         : 'mobile';
@@ -3256,26 +3264,6 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
 
-      const newStart = new Date(start_at).getTime();
-      const newEnd = new Date(end_at).getTime();
-      const { data: courtBookings } = await supabase
-        .from('bookings')
-        .select('id, start_at, end_at')
-        .eq('court_id', court_id)
-        .in('status', ['confirmed', 'pending_payment']);
-      const courtOverlaps = (courtBookings ?? []).some((b) => {
-        const exStart = new Date(b.start_at).getTime();
-        const exEnd = new Date(b.end_at).getTime();
-        return newStart < exEnd && newEnd > exStart;
-      });
-      if (courtOverlaps) {
-        res.status(400).json({
-          ok: false,
-          error: 'Esa pista ya está reservada para ese horario. Contacta con soporte para el reembolso.',
-        });
-        return;
-      }
-
       const isPayFull = meta.pay_full === '1';
       const reservation_type =
         meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
@@ -3283,6 +3271,20 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
           : isPayFull
             ? 'standard'
             : 'open_match';
+
+      const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+        supabase,
+        court_id,
+        start_at,
+        end_at,
+      );
+      if (slotConflict) {
+        res.status(400).json({
+          ok: false,
+          error: 'Esa pista ya está reservada para ese horario. Contacta con soporte para el reembolso.',
+        });
+        return;
+      }
 
       const { data: courtRowGate2 } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
       const clubGate2 = (courtRowGate2 as { club_id?: string } | null)?.club_id;
@@ -3296,22 +3298,25 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       }
 
       const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
+      const contentionStatus = contentionStatusForNewMatchBooking(reservation_type, isPayFull);
+
+      const confirmBookingInsert: Record<string, unknown> = {
+        court_id,
+        organizer_player_id,
+        start_at,
+        end_at,
+        timezone,
+        total_price_cents,
+        currency: 'EUR',
+        reservation_type,
+        status: isPayFull ? 'confirmed' : 'pending_payment',
+        source_channel,
+      };
+      if (contentionStatus) confirmBookingInsert.court_contention_status = contentionStatus;
 
       const { data: booking, error: errBooking } = await supabase
         .from('bookings')
-        .insert([{
-          court_id,
-          organizer_player_id,
-          start_at,
-          end_at,
-          timezone,
-          total_price_cents,
-          currency: 'EUR',
-          reservation_type,
-          // Split-payment: stays pending until all 4 players pay. Full-payment: confirmed immediately.
-          status: isPayFull ? 'confirmed' : 'pending_payment',
-          source_channel,
-        }])
+        .insert([confirmBookingInsert])
         .select('id')
         .maybeSingle();
 
@@ -3330,6 +3335,7 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
           elo_max,
           gender,
           competitive,
+          type: 'open',
         }])
         .select('id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status')
         .maybeSingle();
@@ -3542,6 +3548,11 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+    try {
+      await resolveCourtContention(supabase, booking_id);
+    } catch (contentionErr) {
+      console.error('[payments/confirm-client] resolveCourtContention:', contentionErr);
+    }
 
     res.json({ ok: true });
   } catch (err) {
@@ -3838,6 +3849,11 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking.id);
+    try {
+      await resolveCourtContention(supabase, booking.id);
+    } catch (contentionErr) {
+      console.error('[payments/simulate-turn-payment] resolveCourtContention:', contentionErr);
+    }
 
     res.json({
       ok: true,
@@ -3855,6 +3871,433 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
     });
   } catch (err) {
     console.error('[payments/simulate-turn-payment]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/simulate-booking-payment
+ * Body: { payment_intent_id }
+ * Headers: Authorization: Bearer <token>
+ *
+ * Identical resource-creation logic to confirm-client for the "nuevo partido" flow,
+ * but skips the Stripe status check so it works without real WeChat Pay credentials.
+ * Reads PaymentIntent metadata from Stripe (read-only) then creates booking + match
+ * treating the payment as approved.
+ */
+export async function simulateBookingPaymentHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const { payment_intent_id } = req.body ?? {};
+  if (!payment_intent_id || typeof payment_intent_id !== 'string') {
+    res.status(400).json({ ok: false, error: 'payment_intent_id es obligatorio' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const stripe = getStripe();
+    // Retrieve metadata only — do NOT check pi.status (payment is mocked as succeeded)
+    const pi = await stripe.paymentIntents.retrieve(payment_intent_id);
+    const meta = pi.metadata ?? {};
+    const payer_player_id = meta.payer_player_id;
+
+    const { data: player } = await supabase
+      .from('players')
+      .select('id')
+      .eq('email', user.email.trim().toLowerCase())
+      .maybeSingle();
+    if (!player || (payer_player_id && player.id !== payer_player_id)) {
+      res.status(403).json({ ok: false, error: 'No eres el pagador de este pago' });
+      return;
+    }
+
+    if (!meta.court_id || !meta.organizer_player_id) {
+      res.status(400).json({ ok: false, error: 'Este PaymentIntent no corresponde a un nuevo partido' });
+      return;
+    }
+
+    // Idempotency: if resources already exist for this PI, return them
+    const { data: existingTx } = await supabase
+      .from('payment_transactions')
+      .select('booking_id')
+      .eq('stripe_payment_intent_id', payment_intent_id)
+      .maybeSingle();
+    if (existingTx) {
+      const { data: m } = await supabase
+        .from('matches')
+        .select('id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status')
+        .eq('booking_id', existingTx.booking_id)
+        .maybeSingle();
+      res.json({ ok: true, match: m ?? {}, booking: { id: existingTx.booking_id } });
+      return;
+    }
+
+    const court_id = meta.court_id;
+    const organizer_player_id = meta.organizer_player_id;
+    const start_at = meta.start_at;
+    const end_at = meta.end_at;
+    const total_price_cents = parseInt(meta.total_price_cents ?? '0', 10);
+    const timezone = meta.timezone ?? 'Europe/Madrid';
+    const visibility = meta.visibility === 'public' ? 'public' : 'private';
+    const competitive = false;
+    const gender = meta.gender ?? 'any';
+    const elo_min = meta.elo_min != null && meta.elo_min !== '' ? parseEloLevel(meta.elo_min) : null;
+    const elo_max = meta.elo_max != null && meta.elo_max !== '' ? parseEloLevel(meta.elo_max) : null;
+    const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
+      ? meta.source_channel
+      : 'mobile';
+
+    if (!court_id || !start_at || !end_at || total_price_cents <= 0) {
+      res.status(400).json({ ok: false, error: 'Metadata de pago incompleta' });
+      return;
+    }
+
+    if (organizer_player_id !== player.id) {
+      res.status(403).json({ ok: false, error: 'No eres el organizador' });
+      return;
+    }
+
+    const isPayFull = meta.pay_full === '1';
+    const reservation_type =
+      meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
+        ? meta.reservation_type
+        : isPayFull
+          ? 'standard'
+          : 'open_match';
+
+    const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
+      supabase,
+      court_id,
+      start_at,
+      end_at,
+    );
+    if (slotConflict) {
+      res.status(400).json({
+        ok: false,
+        error: 'Esa pista ya está reservada para ese horario. Elige otro turno.',
+      });
+      return;
+    }
+
+    const { data: courtRowGate } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
+    const clubGate = (courtRowGate as { club_id?: string } | null)?.club_id;
+    if (clubGate) {
+      const allowMap = await fetchAllowOnlineByType(supabase, clubGate);
+      const gate = assertReservationTypeAllowedOnline(allowMap, reservation_type, source_channel);
+      if (!gate.ok) {
+        res.status(403).json({ ok: false, error: gate.error });
+        return;
+      }
+    }
+
+    const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
+    const contentionStatus = contentionStatusForNewMatchBooking(reservation_type, isPayFull);
+
+    const bookingInsert: Record<string, unknown> = {
+      court_id,
+      organizer_player_id,
+      start_at,
+      end_at,
+      timezone,
+      total_price_cents,
+      currency: 'EUR',
+      reservation_type,
+      status: isPayFull ? 'confirmed' : 'pending_payment',
+      source_channel,
+    };
+    if (contentionStatus) bookingInsert.court_contention_status = contentionStatus;
+
+    const { data: booking, error: errBooking } = await supabase
+      .from('bookings')
+      .insert([bookingInsert])
+      .select('id')
+      .maybeSingle();
+
+    if (errBooking || !booking) {
+      console.error('[payments/simulate-booking-payment] Error creando booking:', errBooking);
+      res.status(500).json({ ok: false, error: 'No se pudo crear la reserva' });
+      return;
+    }
+
+    const { data: match, error: errMatch } = await supabase
+      .from('matches')
+      .insert([{
+        booking_id: booking.id,
+        visibility,
+        elo_min,
+        elo_max,
+        gender,
+        competitive,
+        type: 'open',
+      }])
+      .select('id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status')
+      .maybeSingle();
+
+    if (errMatch || !match) {
+      console.error('[payments/simulate-booking-payment] Error creando match:', errMatch);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el partido' });
+      return;
+    }
+
+    await supabase.from('booking_participants').insert([{
+      booking_id: booking.id,
+      player_id: organizer_player_id,
+      role: 'organizer',
+      share_amount_cents: shareCents,
+      payment_status: 'paid',
+    }]);
+
+    await supabase.from('match_players').insert([{
+      match_id: match.id,
+      player_id: organizer_player_id,
+      team: 'A',
+      invite_status: 'accepted',
+      slot_index: 0,
+    }]);
+
+    await supabase.from('payment_transactions').insert({
+      booking_id: booking.id,
+      payer_player_id: player.id,
+      amount_cents: shareCents,
+      currency: 'EUR',
+      stripe_payment_intent_id: pi.id,
+      status: 'succeeded',
+    });
+
+    res.json({ ok: true, match, booking: { id: booking.id } });
+  } catch (err) {
+    console.error('[payments/simulate-booking-payment]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/simulate-tournament-payment
+ * Body: { payment_intent_id }
+ * Headers: Authorization: Bearer <token>
+ *
+ * Identical to the tournament-inscription path of confirm-client, but skips the
+ * Stripe status check so it works without real WeChat Pay credentials.
+ * Uses pi.amount (the intended amount) instead of pi.amount_received (which is 0
+ * for unconfirmed PaymentIntents).
+ */
+export async function simulateTournamentPaymentHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const { payment_intent_id } = req.body ?? {};
+  if (!payment_intent_id || typeof payment_intent_id !== 'string') {
+    res.status(400).json({ ok: false, error: 'payment_intent_id es obligatorio' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const stripe = getStripe();
+    // Retrieve metadata only — do NOT check pi.status (payment is mocked as succeeded)
+    const pi = await stripe.paymentIntents.retrieve(payment_intent_id);
+    const meta = pi.metadata ?? {};
+
+    if (meta.purpose !== STRIPE_META_TOURNAMENT_PURPOSE || !meta.tournament_id) {
+      res.status(400).json({ ok: false, error: 'Este PaymentIntent no corresponde a una inscripción de torneo' });
+      return;
+    }
+
+    const { data: player } = await supabase
+      .from('players')
+      .select('id')
+      .eq('email', user.email.trim().toLowerCase())
+      .maybeSingle();
+    const payer_player_id = meta.payer_player_id;
+    if (!player || (payer_player_id && player.id !== payer_player_id)) {
+      res.status(403).json({ ok: false, error: 'No eres el pagador de este pago' });
+      return;
+    }
+
+    // Use pi.amount (intended amount) — pi.amount_received is 0 for unconfirmed PIs
+    const amountCents = Number(pi.amount ?? 0);
+    const done = await finalizeTournamentPaidJoin({
+      tournamentId: String(meta.tournament_id),
+      playerId: player.id,
+      stripePaymentIntentId: payment_intent_id,
+      amountCents,
+    });
+
+    if (!done.ok) {
+      res.status(400).json({ ok: false, error: done.error });
+      return;
+    }
+
+    res.json({ ok: true, tournament_id: String(meta.tournament_id) });
+  } catch (err) {
+    console.error('[payments/simulate-tournament-payment]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/simulate-join-payment
+ * Body: { payment_intent_id }
+ * Headers: Authorization: Bearer <token>
+ *
+ * Identical to the "pago de participante existente" path of confirm-client, but skips
+ * the Stripe status check so it works without real WeChat Pay credentials.
+ * Handles guest join: creates booking_participant if absent, inserts match_player,
+ * and refreshes booking status.
+ */
+export async function simulateJoinPaymentHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const { payment_intent_id } = req.body ?? {};
+  if (!payment_intent_id || typeof payment_intent_id !== 'string') {
+    res.status(400).json({ ok: false, error: 'payment_intent_id es obligatorio' });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const stripe = getStripe();
+    // Retrieve metadata only — do NOT check pi.status (payment is mocked as succeeded)
+    const pi = await stripe.paymentIntents.retrieve(payment_intent_id);
+    const meta = pi.metadata ?? {};
+    const payer_player_id = meta.payer_player_id;
+    const { booking_id, participant_id } = meta;
+
+    if (!booking_id || !payer_player_id) {
+      res.status(400).json({ ok: false, error: 'Este PaymentIntent no corresponde a un pago de participante' });
+      return;
+    }
+
+    const { data: player } = await supabase
+      .from('players')
+      .select('id')
+      .eq('email', user.email.trim().toLowerCase())
+      .maybeSingle();
+    if (!player || player.id !== payer_player_id) {
+      res.status(403).json({ ok: false, error: 'No eres el pagador de este pago' });
+      return;
+    }
+
+    // Update the payment_transaction row created by create-intent to succeeded
+    await supabase
+      .from('payment_transactions')
+      .update({ status: 'succeeded', updated_at: new Date().toISOString() })
+      .eq('stripe_payment_intent_id', payment_intent_id);
+
+    let participant: { role: string; player_id: string } | null = null;
+    if (participant_id) {
+      await supabase.from('booking_participants').update({ payment_status: 'paid' }).eq('id', participant_id);
+      const { data: bp } = await supabase
+        .from('booking_participants')
+        .select('role, player_id')
+        .eq('id', participant_id)
+        .maybeSingle();
+      participant = bp;
+    } else {
+      const { data: existingBp } = await supabase
+        .from('booking_participants')
+        .select('id, role, player_id')
+        .eq('booking_id', booking_id)
+        .eq('player_id', payer_player_id)
+        .maybeSingle();
+      if (existingBp) {
+        await supabase.from('booking_participants').update({ payment_status: 'paid' }).eq('id', existingBp.id);
+        participant = { role: String(existingBp.role), player_id: String(existingBp.player_id) };
+      } else {
+        const { data: bookingShare } = await supabase
+          .from('bookings')
+          .select('total_price_cents')
+          .eq('id', booking_id)
+          .maybeSingle();
+        const shareAmount = Math.ceil(Number(bookingShare?.total_price_cents ?? 0) / 4);
+        const { data: insertedBp } = await supabase
+          .from('booking_participants')
+          .insert({ booking_id, player_id: payer_player_id, role: 'guest', share_amount_cents: shareAmount, payment_status: 'paid' })
+          .select('role, player_id')
+          .maybeSingle();
+        if (insertedBp) {
+          participant = insertedBp;
+        } else {
+          const { data: afterInsert } = await supabase
+            .from('booking_participants')
+            .select('role, player_id')
+            .eq('booking_id', booking_id)
+            .eq('player_id', payer_player_id)
+            .maybeSingle();
+          participant = afterInsert ?? null;
+        }
+      }
+    }
+
+    if (participant?.role === 'guest') {
+      const { data: match } = await supabase
+        .from('matches')
+        .select('id')
+        .eq('booking_id', booking_id)
+        .maybeSingle();
+      if (match) {
+        const { data: existing } = await supabase
+          .from('match_players')
+          .select('id')
+          .eq('match_id', match.id)
+          .eq('player_id', participant.player_id)
+          .maybeSingle();
+        if (!existing) {
+          const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
+          const preferred = Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
+          const ins = await insertGuestMatchPlayerAfterPayment(supabase, match.id, participant.player_id, preferred);
+          if (!ins.ok) {
+            console.error('[payments/simulate-join-payment] match_players insert failed:', ins.error, ins.code);
+          } else {
+            notifyMatchJoinByEmail(supabase, match.id, participant.player_id);
+          }
+        }
+      }
+    }
+
+    await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+    try {
+      await resolveCourtContention(supabase, booking_id);
+    } catch (contentionErr) {
+      console.error('[payments/simulate-join-payment] resolveCourtContention:', contentionErr);
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[payments/simulate-join-payment]', err);
     res.status(500).json({ ok: false, error: (err as Error).message });
   }
 }

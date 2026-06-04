@@ -1,7 +1,7 @@
 # APK Android con EAS en cada push a main (solo si cambia mobile-app o este workflow)
 # Requiere el secret EXPO_TOKEN: https://expo.dev/accounts/[tu-cuenta]/settings/access-tokens
 
-name: EAS Android (preview APK)
+name: EAS Android (production APK)
 
 on:
   push:
@@ -45,7 +45,7 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
-      - name: EAS Build (Android preview)
-        run: eas build --platform android --profile preview --non-interactive
+      - name: EAS Build (Android production)
+        run: eas build --platform android --profile production --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}

@@ -12,6 +12,7 @@ export type PoolRow = {
   player_id: string;
   paired_with_id: string | null;
   club_id: string | null;
+  preferred_club_ids?: string[] | null;
   max_distance_km: number | null;
   preferred_side: string | null;
   gender: string;
@@ -226,6 +227,62 @@ export function resolveClubId(allRows: PoolRow[]): string | null {
   return [...clubs][0];
 }
 
+function rowPreferredClubIds(r: PoolRow): string[] {
+  if (r.club_id) return [r.club_id];
+  const prefs = r.preferred_club_ids;
+  if (Array.isArray(prefs) && prefs.length > 0) return prefs;
+  return [];
+}
+
+/** Jugadores sin restricción aceptan cualquier sede compatible; los restringidos deben incluir el club. */
+export function clubPreferenceCompatible(allRows: PoolRow[], clubId: string): boolean {
+  for (const r of allRows) {
+    if (r.club_id != null && r.club_id !== clubId) return false;
+    const prefs = r.preferred_club_ids;
+    if (Array.isArray(prefs) && prefs.length > 0 && !prefs.includes(clubId)) return false;
+  }
+  return true;
+}
+
+/** Sedes candidatas: intersección de listas preferidas o, si nadie restringe, las que cumplen distancia. */
+export function resolveCandidateClubIds(
+  allRows: PoolRow[],
+  clubPosById: Map<string, { lat: number; lng: number }>,
+): string[] {
+  const fixed = resolveClubId(allRows);
+  if (fixed) {
+    if (!clubPreferenceCompatible(allRows, fixed)) return [];
+    return [fixed];
+  }
+
+  let intersection: Set<string> | null = null;
+  for (const r of allRows) {
+    const allowed = rowPreferredClubIds(r);
+    if (allowed.length === 0) continue;
+    const set = new Set(allowed);
+    if (intersection === null) {
+      intersection = set;
+    } else {
+      const next = new Set<string>();
+      for (const id of intersection) {
+        if (set.has(id)) next.add(id);
+      }
+      intersection = next;
+    }
+    if (intersection.size === 0) return [];
+  }
+
+  const candidateIds =
+    intersection === null ? [...clubPosById.keys()] : [...intersection];
+
+  const out: string[] = [];
+  for (const clubId of candidateIds) {
+    if (!clubPreferenceCompatible(allRows, clubId)) continue;
+    if (allPlayersWithinMaxDistance(allRows, clubId, clubPosById)) out.push(clubId);
+  }
+  return out;
+}
+
 export function buildUnits(rows: PoolRow[]): { players: string[]; rows: PoolRow[] }[] {
   const ids = new Set(rows.map((r) => r.player_id));
   const byId = new Map(rows.map((r) => [r.player_id, r]));
@@ -309,7 +366,7 @@ export function quartetPreCourtValid(
   if (!genderPrefsPairwiseOk(prefs)) return null;
   if (!flatRows.every((r) => flatRows.every((o) => overlap(r.available_from, r.available_until, o.available_from, o.available_until))))
     return null;
-  if (resolveClubId(flatRows) !== clubId) return null;
+  if (!clubPreferenceCompatible(flatRows, clubId)) return null;
   if (!leaguesMatchmakingCompatible(ids, ctx.ligaById)) return null;
   if (!allPlayersWithinMaxDistance(flatRows, clubId, ctx.clubPosById)) return null;
   const slot = intersectRange(flatRows);

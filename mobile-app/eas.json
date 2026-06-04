@@ -8,12 +8,18 @@
       "developmentClient": true,
       "distribution": "internal"
     },
+    "demo": {
+      "extends": "preview",
+      "channel": "demo",
+      "environment": "preview"
+    },
     "preview": {
       "android": {
         "buildType": "apk"
       },
       "distribution": "internal",
       "channel": "preview",
+      "environment": "preview",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://padel-be.fly.dev",
         "EXPO_PUBLIC_AI_MATCH_WEBHOOK_URL": "https://orquestador-clasificador-n8n-v2.fly.dev/webhook/36c6520e-6891-4251-8b7f-cad0f6e02f67/chat",
@@ -24,6 +30,7 @@
     },
     "production": {
       "channel": "production",
+      "environment": "production",
       "env": {
         "EXPO_PUBLIC_API_URL": "https://padel-be.fly.dev",
         "EXPO_PUBLIC_AI_MATCH_WEBHOOK_URL": "https://orquestador-clasificador-n8n-v2.fly.dev/webhook/36c6520e-6891-4251-8b7f-cad0f6e02f67/chat",

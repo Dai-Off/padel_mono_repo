@@ -12,6 +12,7 @@ import { MobileSidebar } from '../components/layout/MobileSidebar';
 import { ScreenLayout } from '../components/layout/ScreenLayout';
 import { SidebarContent } from '../components/layout/SidebarContent';
 import { SidebarProvider } from '../contexts/SidebarContext';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { useSidebar } from '../hooks/useSidebar';
 import {
   BookingConfirmationScreen,
@@ -82,6 +83,7 @@ const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
 export function MainApp() {
   const sidebar = useSidebar(false);
   const { session } = useAuth();
+  const { profile, refreshMatches, syncMisPartidoFromMatchId } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
@@ -692,9 +694,15 @@ export function MainApp() {
             setActiveTab('perfil');
           }}
           onPartidoCreado={(data) => {
+            const organizerId = crearPartidoFlow.organizerId ?? profile?.id ?? null;
             setCrearPartidoFlow({ open: false, organizerId: null });
             bumpPartidos();
             setBookingSuccessData(data);
+            if (data.matchId) {
+              void syncMisPartidoFromMatchId(data.matchId, { organizerPlayerId: organizerId });
+            } else {
+              void refreshMatches({ scope: 'mine' });
+            }
           }}
         />
       );
@@ -858,8 +866,13 @@ export function MainApp() {
       return (
         <PartidoDetailScreen
           partido={selectedPartido}
-          onBack={() => setSelectedPartido(null)}
+          onMatchDataChanged={() => setPartidosRefreshNonce((n) => n + 1)}
+          onBack={() => {
+            void refreshMatches({ scope: 'mine' });
+            setSelectedPartido(null);
+          }}
           onGoHome={() => {
+            void refreshMatches({ scope: 'mine' });
             setSelectedPartido(null);
             setShowTuActividad(false);
             setTuActividadSubView(null);
@@ -890,13 +903,6 @@ export function MainApp() {
               setShowTuActividad(false);
               setTuActividadSubView(null);
               setShowCommunity(true);
-              return;
-            }
-            if (destination === 'clubes-favoritos') {
-              setShowTuActividad(false);
-              setTuActividadSubView(null);
-              setPreferencesReturnToTuActividad(true);
-              setShowPreferences(true);
               return;
             }
             setTuActividadSubView(destination);
@@ -979,7 +985,10 @@ export function MainApp() {
           <PartidosScreen
             onPartidoPress={(p) => setSelectedPartido(p)}
             onOpenWeMatchClubsFlow={(organizerId) =>
-              setCrearPartidoFlow({ open: true, organizerId })
+              setCrearPartidoFlow({
+                open: true,
+                organizerId: organizerId ?? profile?.id ?? null,
+              })
             }
             onNavigateToCompleteOnboarding={() => setActiveTab('perfil')}
             partidosRefreshNonce={partidosRefreshNonce}

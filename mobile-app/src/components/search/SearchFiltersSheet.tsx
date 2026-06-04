@@ -1,18 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  addDaysLocal,
-  CERRAMIENTO_OPTIONS,
-  dateKeyLocal,
-  DURATION_OPTIONS,
-  PAREDES_OPTIONS,
-  SPORT_OPTIONS,
-  startOfLocalDay,
-  TIME_RANGE_PRESETS,
-  timeRangePresetMatches,
-} from '../../utils/formatSearch';
-import {
   Dimensions,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,14 +9,27 @@ import {
   View,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { FilterBottomSheet } from '../filters/FilterBottomSheet';
+import { FilterApplyFooter } from '../filters/FilterApplyFooter';
+import { FilterPill } from '../filters/FilterPill';
+import { DateStripPicker } from '../filters/DateStripPicker';
+import { filterTheme } from '../filters/filterTheme';
+import {
+  CERRAMIENTO_OPTIONS,
+  countAdvancedSearchFilters,
+  DURATION_OPTIONS,
+  getInitialSearchFilters,
+  PAREDES_OPTIONS,
+  SEARCH_DISTANCE_MAX_KM,
+  SPORT_OPTIONS,
+  TIME_RANGE_PRESETS,
+  type SearchFiltersState,
+} from '../../domain/searchFilters';
+import { timeRangePresetMatches } from '../../utils/formatSearch';
 import { theme } from '../../theme';
 
-type SortOption = 'distancia' | 'precio';
-type DurationOption = 60 | 90 | 120;
-type CerramientoOption = 'indoor' | 'exterior' | 'cubierta';
-type ParedesOption = 'muro' | 'cristal' | 'panoramico';
+export type { SearchFiltersState };
+export { getInitialSearchFilters as getInitialFilters };
 
 type SearchFiltersSheetProps = {
   visible: boolean;
@@ -37,72 +38,9 @@ type SearchFiltersSheetProps = {
   onClear?: () => void;
   initialFilters?: SearchFiltersState;
   resultCount: number;
-  /** Texto del CTA: lista de clubes (Pistas) vs genérico. */
   resultCountKind?: 'clubs' | 'results';
 };
 
-export type SearchFiltersState = {
-  sport: string | null;
-  date: Date | null;
-  timeRange: { start: string; end: string } | null;
-  showUnavailable: boolean;
-  sortBy: SortOption;
-  maxDistanceKm: number;
-  duration: DurationOption;
-  cerramiento: CerramientoOption | null;
-  paredes: ParedesOption | null;
-};
-
-export function getInitialFilters(): SearchFiltersState {
-  return {
-    sport: null,
-    date: null,
-    timeRange: null,
-    showUnavailable: true,
-    sortBy: 'distancia',
-    maxDistanceKm: 50,
-    duration: 90,
-    cerramiento: null,
-    paredes: null,
-  };
-}
-
-function FilterChip({
-  label,
-  selected,
-  onPress,
-  unselectedVariant = 'gray',
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-  /** 'gray' = bg gray-100 (Ordenar). 'outline' = white + border (Duración, Cerramiento, Paredes) */
-  unselectedVariant?: 'gray' | 'outline';
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.chip,
-        selected ? styles.chipSelected : unselectedVariant === 'gray' ? styles.chipUnselectedGray : styles.chipUnselectedOutline,
-        pressed && styles.pressed,
-      ]}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-    >
-      <Text
-        style={[
-          styles.chipText,
-          selected ? styles.chipTextSelected : styles.chipTextUnselected,
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-/** Hoja de filtros que se abre al tocar el botón de filtros en el buscador. */
 function formatResultCtaLabel(n: number, kind: 'clubs' | 'results') {
   if (kind === 'clubs') {
     return n === 1 ? 'Ver 1 club' : `Ver ${n} clubes`;
@@ -110,6 +48,11 @@ function formatResultCtaLabel(n: number, kind: 'clubs' | 'results') {
   return `Ver ${n} resultados`;
 }
 
+function SectionTitle({ children }: { children: string }) {
+  return <Text style={styles.sectionTitle}>{children}</Text>;
+}
+
+/** Hoja completa de filtros avanzados (icono de opciones en buscador de pistas). */
 export function SearchFiltersSheet({
   visible,
   onClose,
@@ -119,9 +62,8 @@ export function SearchFiltersSheet({
   resultCount,
   resultCountKind = 'results',
 }: SearchFiltersSheetProps) {
-  const insets = useSafeAreaInsets();
   const [filters, setFilters] = useState<SearchFiltersState>(() =>
-    initialFilters ?? getInitialFilters()
+    initialFilters ?? getInitialSearchFilters(),
   );
 
   useEffect(() => {
@@ -130,10 +72,9 @@ export function SearchFiltersSheet({
     }
   }, [visible, initialFilters]);
 
-  const todayBase = startOfLocalDay(new Date());
-
   const handleClear = () => {
-    setFilters(getInitialFilters());
+    const cleared = getInitialSearchFilters();
+    setFilters(cleared);
     onClear?.();
   };
 
@@ -142,325 +83,218 @@ export function SearchFiltersSheet({
     onClose();
   };
 
+  const advancedCount = countAdvancedSearchFilters(filters);
+
+  const footer = (
+    <FilterApplyFooter
+      resultCount={resultCount}
+      singularLabel={
+        resultCountKind === 'clubs' ? 'Ver 1 club' : 'Ver 1 resultado'
+      }
+      pluralLabel={formatResultCtaLabel(resultCount, resultCountKind)}
+      onPress={handleApply}
+    />
+  );
+
   return (
-    <Modal
+    <FilterBottomSheet
       visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      statusBarTranslucent
+      title={advancedCount > 0 ? `Filtros (${advancedCount})` : 'Filtros'}
+      onClose={onClose}
+      onClear={handleClear}
+      footer={footer}
+      contentStyle={styles.sheetBody}
     >
-      <Pressable style={styles.overlay} onPress={onClose} accessibilityLabel="Cerrar filtros">
-        <Pressable
-          style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, theme.spacing.lg) }]}
-          onPress={(e) => e.stopPropagation()}
-        >
-          <View style={styles.handle} />
-          <View style={styles.header}>
-            <Pressable
-              onPress={onClose}
-              style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Cerrar"
-            >
-              <Ionicons name="close" size={20} color="#9ca3af" />
-            </Pressable>
-            <Text style={styles.headerTitle}>Filtrar</Text>
-            <Pressable
-              onPress={handleClear}
-              style={({ pressed }) => [styles.headerButton, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel="Borrar filtros"
-            >
-              <Text style={styles.clearButtonText}>Borrar</Text>
-            </Pressable>
-          </View>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <SectionTitle>Deporte</SectionTitle>
+        <View style={styles.chipRow}>
+          <FilterPill
+            label="Todos"
+            selected={filters.sport == null}
+            onPress={() => setFilters((s) => ({ ...s, sport: null }))}
+          />
+          {SPORT_OPTIONS.map((opt) => (
+            <FilterPill
+              key={opt.id}
+              label={opt.label}
+              selected={filters.sport === opt.id}
+              onPress={() =>
+                setFilters((s) => ({
+                  ...s,
+                  sport: s.sport === opt.id ? null : opt.id,
+                }))
+              }
+            />
+          ))}
+        </View>
 
-          <View style={styles.scrollWrapper}>
-          <ScrollView
-            style={styles.scrollContent}
-            contentContainerStyle={[styles.content, { paddingBottom: theme.spacing.xl }]}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Deporte</Text>
-              <View style={styles.chipRow}>
-                <FilterChip
-                  label="Todos"
-                  selected={filters.sport == null}
-                  onPress={() => setFilters((s) => ({ ...s, sport: null }))}
-                  unselectedVariant="outline"
-                />
-                {SPORT_OPTIONS.map((opt) => (
-                  <FilterChip
-                    key={opt.id}
-                    label={opt.label}
-                    selected={filters.sport === opt.id}
-                    onPress={() =>
-                      setFilters((s) => ({
-                        ...s,
-                        sport: s.sport === opt.id ? null : opt.id,
-                      }))
-                    }
-                    unselectedVariant="outline"
-                  />
-                ))}
-              </View>
-            </View>
+        <View style={styles.sectionDivider}>
+          <SectionTitle>Fecha</SectionTitle>
+          <DateStripPicker
+            selectedDate={filters.date}
+            onSelect={(date) => setFilters((s) => ({ ...s, date }))}
+          />
+        </View>
 
-            <View style={[styles.section, styles.sectionBorder]}>
-              <Text style={styles.sectionTitle}>Fecha</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.dateStrip}
-                contentContainerStyle={styles.dateStripContent}
-              >
-                {Array.from({ length: 7 }, (_, i) => {
-                  const d = addDaysLocal(todayBase, i);
-                  const label =
-                    i === 0
-                      ? 'Hoy'
-                      : i === 1
-                        ? 'Mañana'
-                        : `${d.toLocaleDateString('es', { weekday: 'short' })} ${d.getDate()}`;
-                  const selected =
-                    i === 0
-                      ? filters.date == null ||
-                        dateKeyLocal(filters.date) === dateKeyLocal(todayBase)
-                      : filters.date != null && dateKeyLocal(filters.date) === dateKeyLocal(d);
-                  return (
-                    <FilterChip
-                      key={dateKeyLocal(d)}
-                      label={label}
-                      selected={selected}
-                      onPress={() =>
-                        setFilters((s) => ({
-                          ...s,
-                          date: i === 0 ? null : d,
-                        }))
-                      }
-                      unselectedVariant="outline"
-                    />
-                  );
-                })}
-              </ScrollView>
-            </View>
-
-            <View style={[styles.section, styles.sectionBorder]}>
-              <Text style={styles.sectionTitle}>Franja horaria</Text>
-              <View style={styles.chipRow}>
-                {TIME_RANGE_PRESETS.map((preset) => (
-                  <FilterChip
-                    key={preset.id}
-                    label={preset.label}
-                    selected={timeRangePresetMatches(preset.id, filters.timeRange)}
-                    onPress={() =>
-                      setFilters((s) => ({
-                        ...s,
-                        timeRange: preset.range,
-                      }))
-                    }
-                    unselectedVariant="outline"
-                  />
-                ))}
-              </View>
-            </View>
-
-            <View style={[styles.section, styles.sectionBorder]}>
-              <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Solo horarios reservables (duración)</Text>
-                <Switch
-                  value={!filters.showUnavailable}
-                  onValueChange={(v) => setFilters((s) => ({ ...s, showUnavailable: !v }))}
-                  trackColor={{ false: '#e5e7eb', true: '#E31E24' }}
-                  thumbColor="#fff"
-                  accessibilityLabel="Solo horarios reservables para la duración seleccionada"
-                />
-              </View>
-            </View>
-
-            <View style={[styles.section, styles.sectionBorder]}>
-              <Text style={styles.sectionTitle}>Ordenar por</Text>
-              <View style={styles.chipRow}>
-                <FilterChip
-                  label="Distancia"
-                  selected={filters.sortBy === 'distancia'}
-                  onPress={() => setFilters((s) => ({ ...s, sortBy: 'distancia' }))}
-                  unselectedVariant="gray"
-                />
-                <FilterChip
-                  label="Precio"
-                  selected={filters.sortBy === 'precio'}
-                  onPress={() => setFilters((s) => ({ ...s, sortBy: 'precio' }))}
-                  unselectedVariant="gray"
-                />
-              </View>
-            </View>
-
-            <View style={[styles.section, styles.sectionBorder]}>
-              <View style={styles.distanceHeader}>
-                <Text style={styles.sectionTitle}>Distancia máxima</Text>
-                <Text style={styles.distanceValue}>{filters.maxDistanceKm}km</Text>
-              </View>
-              <Slider
-                style={styles.slider}
-                minimumValue={0}
-                maximumValue={50}
-                step={1}
-                value={filters.maxDistanceKm}
-                onValueChange={(v) => setFilters((s) => ({ ...s, maxDistanceKm: v }))}
-                minimumTrackTintColor="#E31E24"
-                maximumTrackTintColor="#e5e7eb"
-                thumbTintColor="#E31E24"
-                accessibilityLabel="Distancia máxima en kilómetros"
+        <View style={styles.sectionDivider}>
+          <SectionTitle>Franja horaria</SectionTitle>
+          <View style={styles.chipRow}>
+            {TIME_RANGE_PRESETS.map((preset) => (
+              <FilterPill
+                key={preset.id}
+                label={preset.label}
+                selected={timeRangePresetMatches(preset.id, filters.timeRange)}
+                onPress={() =>
+                  setFilters((s) => ({
+                    ...s,
+                    timeRange: preset.range,
+                  }))
+                }
               />
-            </View>
-
-            <View style={[styles.section, styles.sectionBorder]}>
-              <Text style={styles.sectionTitle}>Duración</Text>
-              <View style={styles.chipRow}>
-                {DURATION_OPTIONS.map((m) => (
-                  <FilterChip
-                    key={m}
-                    label={`${m} min`}
-                    selected={filters.duration === m}
-                    onPress={() => setFilters((s) => ({ ...s, duration: m }))}
-                    unselectedVariant="outline"
-                  />
-                ))}
-              </View>
-            </View>
-
-            <View style={[styles.section, styles.sectionBorder]}>
-              <Text style={styles.sectionTitle}>Cerramiento</Text>
-              <View style={styles.chipRow}>
-                {CERRAMIENTO_OPTIONS.map((opt) => (
-                  <FilterChip
-                    key={opt.id}
-                    label={opt.label}
-                    selected={filters.cerramiento === opt.id}
-                    onPress={() =>
-                      setFilters((s) => ({
-                        ...s,
-                        cerramiento: s.cerramiento === opt.id ? null : opt.id,
-                      }))
-                    }
-                    unselectedVariant="outline"
-                  />
-                ))}
-              </View>
-            </View>
-
-            <View style={[styles.section, styles.sectionBorder]}>
-              <Text style={styles.sectionTitle}>Paredes</Text>
-              <View style={styles.chipRow}>
-                {PAREDES_OPTIONS.map((opt) => (
-                  <FilterChip
-                    key={opt.id}
-                    label={opt.label}
-                    selected={filters.paredes === opt.id}
-                    onPress={() =>
-                      setFilters((s) => ({
-                        ...s,
-                        paredes: s.paredes === opt.id ? null : opt.id,
-                      }))
-                    }
-                    unselectedVariant="outline"
-                  />
-                ))}
-              </View>
-            </View>
-
-            <Pressable
-              onPress={handleApply}
-              style={({ pressed }) => [styles.ctaButton, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel={formatResultCtaLabel(resultCount, resultCountKind)}
-            >
-              <Text style={styles.ctaButtonText}>
-                {formatResultCtaLabel(resultCount, resultCountKind)}
-              </Text>
-            </Pressable>
-          </ScrollView>
+            ))}
           </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
+        </View>
+
+        <View style={[styles.sectionDivider, styles.toggleRow]}>
+          <Text style={styles.toggleLabel}>Solo horarios reservables</Text>
+          <Switch
+            value={!filters.showUnavailable}
+            onValueChange={(v) => setFilters((s) => ({ ...s, showUnavailable: !v }))}
+            trackColor={{ false: 'rgba(255,255,255,0.15)', true: filterTheme.accent }}
+            thumbColor="#fff"
+            accessibilityLabel="Solo horarios reservables para la duración seleccionada"
+          />
+        </View>
+
+        <View style={styles.sectionDivider}>
+          <SectionTitle>Ordenar por</SectionTitle>
+          <View style={styles.chipRow}>
+            <FilterPill
+              label="Distancia"
+              selected={filters.sortBy === 'distancia'}
+              onPress={() => setFilters((s) => ({ ...s, sortBy: 'distancia' }))}
+            />
+            <FilterPill
+              label="Precio"
+              selected={filters.sortBy === 'precio'}
+              onPress={() => setFilters((s) => ({ ...s, sortBy: 'precio' }))}
+            />
+          </View>
+        </View>
+
+        <View style={styles.sectionDivider}>
+          <View style={styles.distanceHeader}>
+            <SectionTitle>Distancia máxima</SectionTitle>
+            <Text style={styles.distanceValue}>
+              {filters.maxDistanceKm >= SEARCH_DISTANCE_MAX_KM
+                ? 'Sin límite'
+                : `${filters.maxDistanceKm} km`}
+            </Text>
+          </View>
+          <Slider
+            style={styles.slider}
+            minimumValue={5}
+            maximumValue={SEARCH_DISTANCE_MAX_KM}
+            step={1}
+            value={filters.maxDistanceKm}
+            onValueChange={(v) => setFilters((s) => ({ ...s, maxDistanceKm: v }))}
+            minimumTrackTintColor={filterTheme.accent}
+            maximumTrackTintColor="rgba(255,255,255,0.12)"
+            thumbTintColor={filterTheme.accent}
+            accessibilityLabel="Distancia máxima en kilómetros"
+          />
+        </View>
+
+        <View style={styles.sectionDivider}>
+          <SectionTitle>Duración</SectionTitle>
+          <View style={styles.chipRow}>
+            {DURATION_OPTIONS.map((m) => (
+              <FilterPill
+                key={m}
+                label={`${m} min`}
+                selected={filters.duration === m}
+                onPress={() => setFilters((s) => ({ ...s, duration: m }))}
+              />
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.sectionDivider}>
+          <SectionTitle>Cerramiento</SectionTitle>
+          <View style={styles.chipRow}>
+            {CERRAMIENTO_OPTIONS.map((opt) => (
+              <FilterPill
+                key={opt.id}
+                label={opt.label}
+                selected={filters.cerramiento === opt.id}
+                onPress={() =>
+                  setFilters((s) => ({
+                    ...s,
+                    cerramiento: s.cerramiento === opt.id ? null : opt.id,
+                  }))
+                }
+              />
+            ))}
+          </View>
+        </View>
+
+        <View style={styles.sectionDivider}>
+          <SectionTitle>Paredes</SectionTitle>
+          <View style={styles.chipRow}>
+            {PAREDES_OPTIONS.map((opt) => (
+              <FilterPill
+                key={opt.id}
+                label={opt.label}
+                selected={filters.paredes === opt.id}
+                onPress={() =>
+                  setFilters((s) => ({
+                    ...s,
+                    paredes: s.paredes === opt.id ? null : opt.id,
+                  }))
+                }
+              />
+            ))}
+          </View>
+        </View>
+      </ScrollView>
+    </FilterBottomSheet>
   );
 }
 
+const scrollMaxHeight = Dimensions.get('window').height * 0.52;
+
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: theme.spacing.lg,
-    maxHeight: '90%',
-  },
-  handle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#e5e7eb',
-    alignSelf: 'center',
-    marginTop: 6,
-    marginBottom: 8,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
-  },
-  headerButton: {
-    minWidth: 40,
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: theme.fontSize.base,
-    fontWeight: '700',
-    color: '#1A1A1A',
-  },
-  clearButtonText: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-    color: '#E31E24',
-  },
-  scrollWrapper: {
-    maxHeight: Dimensions.get('window').height * 0.6,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  content: {
-    paddingVertical: theme.spacing.lg,
-    gap: 0,
-  },
-  section: {
+  sheetBody: {
+    paddingHorizontal: 0,
     paddingTop: 0,
   },
-  sectionBorder: {
-    paddingTop: theme.spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
-    marginTop: theme.spacing.lg,
+  scroll: {
+    maxHeight: scrollMaxHeight,
+  },
+  scrollContent: {
+    paddingBottom: theme.spacing.md,
   },
   sectionTitle: {
     fontSize: theme.fontSize.sm,
     fontWeight: '700',
-    color: '#1A1A1A',
+    color: filterTheme.text,
     marginBottom: theme.spacing.sm,
+  },
+  sectionDivider: {
+    marginTop: theme.spacing.lg,
+    paddingTop: theme.spacing.md,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: filterTheme.sectionBorder,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.xs,
   },
   toggleRow: {
     flexDirection: 'row',
@@ -468,77 +302,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   toggleLabel: {
+    flex: 1,
     fontSize: theme.fontSize.sm,
-    color: '#374151',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.spacing.xs,
-  },
-  dateStrip: {
-    marginHorizontal: -theme.spacing.lg,
-  },
-  dateStripContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.lg,
-  },
-  chip: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  chipSelected: {
-    backgroundColor: '#1A1A1A',
-  },
-  chipUnselectedGray: {
-    backgroundColor: '#f3f4f6',
-  },
-  chipUnselectedOutline: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-  },
-  chipText: {
-    fontSize: theme.fontSize.xs,
-    fontWeight: '600',
-  },
-  chipTextSelected: {
-    color: '#fff',
-  },
-  chipTextUnselected: {
-    color: '#6b7280',
+    color: filterTheme.textMuted,
+    marginRight: theme.spacing.sm,
   },
   distanceHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: theme.spacing.sm,
+    marginBottom: theme.spacing.xs,
   },
   distanceValue: {
     fontSize: theme.fontSize.xs,
     fontWeight: '600',
-    color: '#E31E24',
+    color: filterTheme.accent,
   },
   slider: {
     width: '100%',
     height: 40,
   },
-  ctaButton: {
-    backgroundColor: '#E31E24',
-    borderRadius: 16,
-    paddingVertical: theme.spacing.md,
-    alignItems: 'center',
-    marginTop: theme.spacing.xl,
-  },
-  ctaButtonText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  pressed: {
-    opacity: 0.8,
-  },
+  pressed: { opacity: 0.88 },
 });

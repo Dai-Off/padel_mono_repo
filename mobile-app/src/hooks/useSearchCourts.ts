@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchSearchCourts, type SearchCourtResult } from '../api/search';
-import type { SearchFiltersState } from '../components/search/SearchFiltersSheet';
+import type { SearchFiltersState } from '../domain/searchFilters';
+import { SEARCH_DISTANCE_MAX_KM } from '../domain/searchFilters';
 import { decorateSearchCourtSlots } from '../domain/searchCourtFilters';
 import { toDateStringLocal } from '../utils/dateLocal';
+
+function filterByMaxDistance(
+  courts: SearchCourtResult[],
+  maxDistanceKm: number,
+): SearchCourtResult[] {
+  if (maxDistanceKm >= SEARCH_DISTANCE_MAX_KM) return courts;
+  return courts.filter((c) => {
+    const d = c.distanceKm;
+    if (d == null) return true;
+    return d <= maxDistanceKm;
+  });
+}
 
 export function useSearchCourts(filters: SearchFiltersState) {
   const [rawResults, setRawResults] = useState<SearchCourtResult[]>([]);
@@ -53,7 +66,6 @@ export function useSearchCourts(filters: SearchFiltersState) {
     } catch (err) {
       if (seq !== requestSeq.current) return;
       setFetchError(err instanceof Error ? err.message : 'Error al cargar clubes');
-      // Mantener rawResults anteriores para que la lista no desaparezca
     } finally {
       if (seq === requestSeq.current) {
         setLoading(false);
@@ -65,10 +77,11 @@ export function useSearchCourts(filters: SearchFiltersState) {
     search();
   }, [search]);
 
-  /** Listado estable: todos los clubes/pistas de la última respuesta OK de la API. */
-  const listResults = rawResults;
+  const listResults = useMemo(
+    () => filterByMaxDistance(rawResults, filters.maxDistanceKm),
+    [rawResults, filters.maxDistanceKm],
+  );
 
-  /** Misma lista con franjas horarias decoradas para las tarjetas (no reduce filas). */
   const results = useMemo(
     () => decorateSearchCourtSlots(listResults, filters, { now: slotNow }),
     [

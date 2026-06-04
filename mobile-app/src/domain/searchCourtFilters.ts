@@ -1,5 +1,5 @@
 import type { SearchCourtResult } from '../api/search';
-import type { SearchFiltersState } from '../components/search/SearchFiltersSheet';
+import type { SearchFiltersState } from './searchFilters';
 import { filterSlotsStartingAfterNow } from './localSlotAvailability';
 import { toDateStringLocal } from '../utils/dateLocal';
 

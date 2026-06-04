@@ -13,7 +13,7 @@ import {
   STREAK_THRESHOLD,
   buildUnits,
   iterUnitCombos,
-  resolveClubId,
+  resolveCandidateClubIds,
   quartetPreCourtValid,
   intersectRange,
   exceedsLevelSpread,
@@ -156,7 +156,7 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
   const { data: pool } = await supabase
     .from('matchmaking_pool')
     .select(
-      'id, player_id, paired_with_id, club_id, max_distance_km, preferred_side, gender, available_from, available_until, expires_at, search_lat, search_lng',
+      'id, player_id, paired_with_id, club_id, preferred_club_ids, max_distance_km, preferred_side, gender, available_from, available_until, expires_at, search_lat, search_lng',
     )
     .eq('status', 'searching');
 
@@ -183,10 +183,32 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
   const units = buildUnits(rows);
   const poolIds = [...new Set(rows.map((r) => r.player_id))];
 
-  const clubIdsForGeo = [...new Set(rows.map((r) => r.club_id).filter(Boolean))] as string[];
+  const clubIdsForGeo = new Set<string>();
+  for (const r of rows) {
+    if (r.club_id) clubIdsForGeo.add(r.club_id);
+    for (const id of r.preferred_club_ids ?? []) {
+      if (id) clubIdsForGeo.add(id);
+    }
+  }
+  const needsAllClubs = rows.some((r) => {
+    const hasClubRestriction =
+      !!r.club_id || (Array.isArray(r.preferred_club_ids) && r.preferred_club_ids.length > 0);
+    return r.max_distance_km != null && !hasClubRestriction;
+  });
   const clubPosById = new Map<string, { lat: number; lng: number }>();
-  if (clubIdsForGeo.length) {
-    const { data: clubRows } = await supabase.from('clubs').select('id, lat, lng').in('id', clubIdsForGeo);
+  if (needsAllClubs) {
+    const { data: clubRows } = await supabase.from('clubs').select('id, lat, lng');
+    for (const c of clubRows ?? []) {
+      const row = c as { id: string; lat: number | null; lng: number | null };
+      if (row.lat != null && row.lng != null && Number.isFinite(row.lat) && Number.isFinite(row.lng)) {
+        clubPosById.set(row.id, { lat: row.lat, lng: row.lng });
+      }
+    }
+  } else if (clubIdsForGeo.size > 0) {
+    const { data: clubRows } = await supabase
+      .from('clubs')
+      .select('id, lat, lng')
+      .in('id', [...clubIdsForGeo]);
     for (const c of clubRows ?? []) {
       const row = c as { id: string; lat: number | null; lng: number | null };
       if (row.lat != null && row.lng != null && Number.isFinite(row.lat) && Number.isFinite(row.lng)) {
@@ -241,7 +263,7 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
     ligaById,
   };
 
-  let best: {
+  type QuartetPick = {
     flatRows: PoolRow[];
     ids: string[];
     split: { teamA: string[]; teamB: string[]; winProb: number; score: number };
@@ -249,7 +271,9 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
     slot: { start: string; end: string };
     courtId: string;
     leagueSpread: number;
-  } | null = null;
+  };
+
+  let best: QuartetPick | null = null;
 
   let comboCount = 0;
   let dNoClub = 0;
@@ -266,73 +290,87 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
     const ids = combo.flatMap((u) => u.players);
     if (ids.length !== 4) continue;
 
-    const clubId = resolveClubId(flatRows);
-    if (!clubId) {
+    const clubCandidates = resolveCandidateClubIds(flatRows, ctx.clubPosById);
+    if (clubCandidates.length === 0) {
       if (wantDiag) dNoClub++;
       continue;
     }
 
-    const q = quartetPreCourtValid(flatRows, ids, clubId, ctx);
-    if (!q) {
-      if (wantDiag) dPreCourt++;
-      continue;
-    }
+    let comboBest: QuartetPick | null = null;
+    let passedPreCourt = false;
+    let passedCourt = false;
+    for (const clubId of clubCandidates) {
+      const q = quartetPreCourtValid(flatRows, ids, clubId, ctx);
+      if (!q) continue;
+      passedPreCourt = true;
 
-    const rawSlot = intersectRange(flatRows);
-    if (!rawSlot) {
-      if (wantDiag) dNoSlot++;
-      continue;
-    }
-    const MM_SLOT_MS = 90 * 60 * 1000;
-    const rangeStartMs = new Date(rawSlot.start).getTime();
-    const rangeEndMs = new Date(rawSlot.end).getTime();
-    if (!Number.isFinite(rangeStartMs) || !Number.isFinite(rangeEndMs) || rangeStartMs + MM_SLOT_MS > rangeEndMs) {
-      if (wantDiag) dNoSlot++;
-      continue;
-    }
+      const rawSlot = intersectRange(flatRows);
+      if (!rawSlot) continue;
+      const MM_SLOT_MS = 90 * 60 * 1000;
+      const rangeStartMs = new Date(rawSlot.start).getTime();
+      const rangeEndMs = new Date(rawSlot.end).getTime();
+      if (!Number.isFinite(rangeStartMs) || !Number.isFinite(rangeEndMs) || rangeStartMs + MM_SLOT_MS > rangeEndMs) {
+        continue;
+      }
 
-    const { data: courtList } = await supabase
-      .from('courts')
-      .select('id')
-      .eq('club_id', clubId)
-      .eq('is_hidden', false)
-      .order('id');
+      const { data: courtList } = await supabase
+        .from('courts')
+        .select('id')
+        .eq('club_id', clubId)
+        .eq('is_hidden', false)
+        .order('id');
 
-    const stepMs = 15 * 60 * 1000;
-    let courtId: string | null = null;
-    let slot: { start: string; end: string } | null = null;
+      const stepMs = 15 * 60 * 1000;
+      let courtId: string | null = null;
+      let slot: { start: string; end: string } | null = null;
 
-    outer: for (let t = rangeStartMs; t + MM_SLOT_MS <= rangeEndMs; t += stepMs) {
-      const startIso = new Date(t).toISOString();
-      const endIso = new Date(t + MM_SLOT_MS).toISOString();
-      for (const c of courtList ?? []) {
-        const cid = (c as { id: string }).id;
-        const conflict = await hasCourtConflict(cid, startIso, endIso);
-        if (!conflict) {
-          courtId = cid;
-          slot = { start: startIso, end: endIso };
-          if (wantDiag) firstCourtConflict = null;
-          break outer;
-        }
-        if (wantDiag && firstCourtConflict == null && typeof conflict === 'string') {
-          firstCourtConflict = conflict.length > 200 ? `${conflict.slice(0, 200)}…` : conflict;
+      outer: for (let t = rangeStartMs; t + MM_SLOT_MS <= rangeEndMs; t += stepMs) {
+        const startIso = new Date(t).toISOString();
+        const endIso = new Date(t + MM_SLOT_MS).toISOString();
+        for (const c of courtList ?? []) {
+          const cid = (c as { id: string }).id;
+          const conflict = await hasCourtConflict(cid, startIso, endIso);
+          if (!conflict) {
+            courtId = cid;
+            slot = { start: startIso, end: endIso };
+            if (wantDiag) firstCourtConflict = null;
+            break outer;
+          }
+          if (wantDiag && firstCourtConflict == null && typeof conflict === 'string') {
+            firstCourtConflict = conflict.length > 200 ? `${conflict.slice(0, 200)}…` : conflict;
+          }
         }
       }
+      if (!courtId || !slot) continue;
+      passedCourt = true;
+
+      const ls = maxLeagueSpread(ids, ligaById);
+      const split = q.split;
+      const betterCombo =
+        !comboBest ||
+        split.score > comboBest.split.score + 1e-9 ||
+        (Math.abs(split.score - comboBest.split.score) < 1e-9 && ls < comboBest.leagueSpread);
+      if (betterCombo) {
+        comboBest = { flatRows, ids, split, clubId, slot, courtId, leagueSpread: ls };
+      }
     }
-    if (!courtId || !slot) {
-      if (wantDiag) dNoCourt++;
+
+    if (!comboBest) {
+      if (wantDiag) {
+        if (!passedPreCourt) dPreCourt++;
+        else if (!passedCourt) dNoCourt++;
+        else dNoSlot++;
+      }
       continue;
     }
 
-    const ls = maxLeagueSpread(ids, ligaById);
-    const split = q.split;
     const better =
       !best ||
-      split.score > best.split.score + 1e-9 ||
-      (Math.abs(split.score - best.split.score) < 1e-9 && ls < best.leagueSpread);
+      comboBest.split.score > best.split.score + 1e-9 ||
+      (Math.abs(comboBest.split.score - best.split.score) < 1e-9 && comboBest.leagueSpread < best.leagueSpread);
 
     if (better) {
-      best = { flatRows, ids, split, clubId, slot, courtId, leagueSpread: ls };
+      best = comboBest;
     }
   }
 
