@@ -994,9 +994,11 @@ export function CrearPartidoLocationSheet({
               step === 'location' && styles.optionCardLocation,
               step === 'location' && styles.optionCardLocationSecond,
               selected === 'pista_externa' && step === 'location' && styles.optionCardLocationSelected,
+              styles.optionCardDisabled,
               pressed && styles.pressed,
             ]}
             onPress={() => setSelected('pista_externa')}
+            disabled={true}
             accessibilityRole="button"
             accessibilityState={{ selected: selected === 'pista_externa' }}
           >
@@ -1018,7 +1020,7 @@ export function CrearPartidoLocationSheet({
             </View>
             <View style={styles.optionBody}>
               <Text style={[styles.optionTitle, step === 'location' && styles.optionTitleLocation]}>
-                Ya se en que pista voy a jugar
+                Ya se en que pista voy a jugar (Próximamente)
               </Text>
               <Text style={[styles.optionDesc, step === 'location' && styles.optionDescLocation]}>
                 Juega en un club o instalacion que esta fuera de las opciones que ofrece WeMatch.
@@ -1270,6 +1272,9 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
     borderRadius: 16,
     marginBottom: 12,
+  },
+  optionCardDisabled: {
+    opacity: 0.4,
   },
   optionCardLocation: {
     borderWidth: 1,
