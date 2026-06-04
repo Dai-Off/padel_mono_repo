@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { CheckCircle2, ArrowRight } from 'lucide-react';
 
 const DEEP_LINK = 'wematch://email-confirmed';
@@ -8,10 +7,6 @@ function openApp() {
 }
 
 export const EmailConfirmed = () => {
-    useEffect(() => {
-        openApp();
-    }, []);
-
     return (
         <div className="min-h-screen flex flex-col items-center justify-center bg-[#000000] px-4 selection:bg-[#F18F34]/30">
             <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
