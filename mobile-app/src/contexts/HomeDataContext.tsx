@@ -113,6 +113,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
   const lastSessionUserIdRef = useRef<string | null>(null);
   const refreshMatchesGen = useRef(0);
+  const refreshMatchesInFlight = useRef<Promise<void> | null>(null);
   const token = session?.access_token ?? null;
   const userId = session?.user?.id ?? null;
 
@@ -278,60 +279,73 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         matchesLoadedAt.current = 0;
         return;
       }
-    const mineOnly = scope === 'mine';
-    if (!force && !mineOnly && matchesLoadedAt.current > 0) return;
-    if (mineOnly && matchesLoadedAt.current > 0) {
-      const lastMineRefresh = refreshMatchesMineAt.current;
-      if (Date.now() - lastMineRefresh < 3000) return;
-    }
-
-      const gen = ++refreshMatchesGen.current;
-      const isFirst = matchesLoadedAt.current === 0;
-      if (isFirst) setMatchesLoading(true);
-
-      try {
-        const playerId = profileForEnrichRef.current?.id ?? profile?.id ?? null;
-        const enrichProfile = profileForEnrichRef.current;
-
-        const myMatches = await fetchMyMatches(token, { phase: 'all', limit: 100 });
-        if (gen !== refreshMatchesGen.current) return;
-
-        const mineNormalized = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
-        const misFromServer = buildMisPartidosFromMatches(mineNormalized, enrichProfile);
-
-        setMisPartidos((prev) => mergeMisPartidosFromServer(prev, misFromServer));
-
-        if (!mineOnly) {
-          const { dateFrom, dateTo } = defaultPartidosDiscoveryDateRange();
-          const discoveryRows = await fetchMatches({
-            expand: true,
-            token,
-            activeOnly: true,
-            discovery: true,
-            visibility: 'public',
-            dateFrom,
-            dateTo,
-            joinableOnly: true,
-            limit: 80,
-          });
-          if (gen !== refreshMatchesGen.current) return;
-          const open = discoveryRows
-            .map(mapMatchToPartido)
-            .filter((p): p is PartidoItem => p != null)
-            .filter((p) => p.matchPhase !== 'past')
-            .filter((p) => isPartidoOpenForDiscovery(p, playerId));
-          setPartidos(open);
-        }
-
-        matchesLoadedAt.current = Date.now();
-        if (mineOnly) refreshMatchesMineAt.current = Date.now();
-      } catch {
-        if (isFirst) setHasInitialError(true);
-      } finally {
-        if (isFirst && gen === refreshMatchesGen.current) setMatchesLoading(false);
+      const mineOnly = scope === 'mine';
+      if (!force && !mineOnly && matchesLoadedAt.current > 0) return;
+      if (mineOnly && matchesLoadedAt.current > 0) {
+        const lastMineRefresh = refreshMatchesMineAt.current;
+        if (Date.now() - lastMineRefresh < 3000) return;
       }
+
+      const execute = async () => {
+        const gen = ++refreshMatchesGen.current;
+        const isFirst = matchesLoadedAt.current === 0;
+        if (isFirst) setMatchesLoading(true);
+
+        try {
+          const playerId = profileForEnrichRef.current?.id ?? profile?.id ?? null;
+          const enrichProfile = profileForEnrichRef.current;
+
+          const myMatches = await fetchMyMatches(token, { phase: 'all', limit: 100 });
+          if (gen !== refreshMatchesGen.current) return;
+
+          const mineNormalized = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
+          const misFromServer = buildMisPartidosFromMatches(mineNormalized, enrichProfile);
+
+          setMisPartidos((prev) => mergeMisPartidosFromServer(prev, misFromServer));
+
+          if (!mineOnly) {
+            const { dateFrom, dateTo } = defaultPartidosDiscoveryDateRange();
+            const discoveryRows = await fetchMatches({
+              expand: true,
+              token,
+              activeOnly: true,
+              discovery: true,
+              visibility: 'public',
+              dateFrom,
+              dateTo,
+              joinableOnly: true,
+              limit: 80,
+            });
+            if (gen !== refreshMatchesGen.current) return;
+            const open = discoveryRows
+              .map(mapMatchToPartido)
+              .filter((p): p is PartidoItem => p != null)
+              .filter((p) => p.matchPhase !== 'past')
+              .filter((p) => isPartidoOpenForDiscovery(p, playerId));
+            setPartidos(open);
+          }
+
+          matchesLoadedAt.current = Date.now();
+          if (mineOnly) refreshMatchesMineAt.current = Date.now();
+        } catch {
+          if (isFirst) setHasInitialError(true);
+        } finally {
+          if (isFirst && gen === refreshMatchesGen.current) setMatchesLoading(false);
+        }
+      };
+
+      if (!refreshMatchesInFlight.current) {
+        const p = execute();
+        refreshMatchesInFlight.current = p;
+        void p.finally(() => {
+          if (refreshMatchesInFlight.current === p) {
+            refreshMatchesInFlight.current = null;
+          }
+        });
+      }
+      await refreshMatchesInFlight.current;
     },
-    [token, buildMisPartidosFromMatches],
+    [token, buildMisPartidosFromMatches, profile?.id],
   );
 
   const syncMisPartidoFromMatchId = useCallback(
