@@ -420,7 +420,7 @@ export function ClubDetailScreen({
     });
     const filtered = matches
       .filter((m) => matchBelongsToClub(m, court.clubId))
-      .map(mapMatchToPartido)
+      .map((m) => mapMatchToPartido(m))
       .filter((p): p is PartidoItem => p != null)
       .filter((p) => p.matchPhase !== "past")
       .filter((p) => p.visibility !== "private");

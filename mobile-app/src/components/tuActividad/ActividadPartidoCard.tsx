@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { PartidoItem } from '../../screens/PartidosScreen';
+import { MatchResultBlock } from '../partido/MatchResultBlock';
 import { theme } from '../../theme';
 
 type ActividadPartidoCardProps = {
@@ -47,6 +48,7 @@ export function ActividadPartidoCard({ partido, onPress }: ActividadPartidoCardP
         ) : null}
         <Text style={styles.metaText}>{partido.duration}</Text>
       </View>
+      <MatchResultBlock partido={partido} compact />
     </Pressable>
   );
 }

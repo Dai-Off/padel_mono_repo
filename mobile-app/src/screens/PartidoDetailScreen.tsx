@@ -53,6 +53,7 @@ import {
   MatchEvaluationFlow,
   type MatchEvaluationPayload,
 } from '../components/partido/MatchEvaluationFlow';
+import { MatchResultBlock } from '../components/partido/MatchResultBlock';
 import type { PartidoItem, PartidoPlayer } from './PartidosScreen';
 
 const BG = '#0F0F0F';
@@ -260,14 +261,14 @@ export function PartidoDetailScreen({
   useEffect(() => {
     const token = session?.access_token;
     if (!token) return;
+    const viewerId = currentPlayerId ?? myProfile?.id ?? null;
     const gen = ++matchFetchGen.current;
-    void reloadMatchPartido(partido.id, token).then((updated) => {
+    void reloadMatchPartido(partido.id, token, { viewerPlayerId: viewerId }).then((updated) => {
       if (gen !== matchFetchGen.current || !updated) return;
       mergePartidoFromServer(updated);
     });
-    // Solo al abrir el detalle o cambiar sesión — no en cada setPartido local.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [partido.id, session?.access_token]);
+  }, [partido.id, session?.access_token, currentPlayerId, myProfile?.id]);
 
   const isInMatch = currentPlayerId != null && (partido.playerIds ?? []).includes(currentPlayerId);
   const firstFreeIndex = partido.players.findIndex((p) => p.isFree);
@@ -369,6 +370,7 @@ export function PartidoDetailScreen({
         void (async () => {
           const updated = await reloadMatchPartido(matchId, token, {
             retryIfMissingPlayerId: playerIdForRetry,
+            viewerPlayerId: playerIdForRetry ?? null,
             maxRetries: 3,
           });
           if (syncGen !== postJoinSyncGen.current || !updated || !profileEnrich) return;
@@ -473,9 +475,11 @@ export function PartidoDetailScreen({
     }
     setMatchmakingPayBusy(false);
     const matchId = partido.id;
+    const viewerId = currentPlayerId ?? myProfile?.id ?? freshProfile?.id ?? null;
     void (async () => {
       const updated = await reloadMatchPartido(matchId, token, {
         retryIfMissingPlayerId: currentPlayerId ?? myProfile?.id ?? freshProfile?.id ?? undefined,
+        viewerPlayerId: viewerId,
         maxRetries: 3,
       });
       if (!updated) return;
@@ -735,7 +739,9 @@ export function PartidoDetailScreen({
                 setCancelOverlay((o) => ({ ...o, message: 'Actualizando partido…' }));
                 Alert.alert('Listo', 'Saliste del partido. Si pagaste con tarjeta, el reembolso se procesará en breve.');
                 matchFetchGen.current += 1;
-                const updated = await reloadMatchPartido(partido.id, token);
+                const updated = await reloadMatchPartido(partido.id, token, {
+                  viewerPlayerId: currentPlayerId ?? myProfile?.id ?? null,
+                });
                 if (updated) await syncPartidoAfterMutation(updated);
                 else void refreshMatches({ scope: 'mine' });
               }
@@ -895,6 +901,12 @@ export function PartidoDetailScreen({
                   label="Fin inscripción"
                   value="Hasta el inicio del partido"
                 />
+                {matchPhase === 'past' ? (
+                  <View style={styles.resultSection}>
+                    <Text style={styles.cardTitle}>Resultado</Text>
+                    <MatchResultBlock partido={partido} />
+                  </View>
+                ) : null}
                 <View style={styles.actionsRow}>
                   <Pressable
                     style={({ pressed }) => [styles.actionCol, pressed && styles.pressed]}
@@ -1440,6 +1452,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     marginBottom: 16,
+  },
+  resultSection: {
+    marginTop: 4,
+    marginBottom: 8,
   },
   grid3: {
     flexDirection: 'row',

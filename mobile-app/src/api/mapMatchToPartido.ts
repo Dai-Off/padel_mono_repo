@@ -37,9 +37,29 @@ function playerLevelLine(p: { elo_rating: number }): string {
   return formatSkillNumber(p.elo_rating);
 }
 
-export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
+export function mapMatchToPartido(
+  m: MatchEnriched,
+  opts?: { viewerPlayerId?: string | null },
+): PartidoItem | null {
   const b = getMatchBooking(m);
   // Partidos sin booking siguen siendo válidos para el historial (datos mínimos).
+  const viewerPlayerId = opts?.viewerPlayerId?.trim() || null;
+  let myTeam: 'A' | 'B' | null = null;
+  let myResult: PartidoItem['myResult'] = null;
+  if (viewerPlayerId) {
+    const mine = (m.match_players ?? []).find((mp) => mp.players?.id === viewerPlayerId);
+    myTeam = mine?.team ?? null;
+    const rawResult = mine?.result;
+    if (rawResult === 'win' || rawResult === 'loss' || rawResult === 'draw' || rawResult === 'pending') {
+      myResult = rawResult;
+    }
+  }
+
+  const sets =
+    Array.isArray(m.sets) && m.sets.length > 0
+      ? m.sets.map((s) => ({ a: Number(s.a), b: Number(s.b) }))
+      : null;
+
   if (!b) {
     const matchPhase = getMatchListPhase(Date.now(), m.status);
     const slots: PartidoPlayer[] = Array.from({ length: 4 }, () => ({ name: '', level: '', isFree: true }));
@@ -78,6 +98,10 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
       hasMyFeedback: (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true,
       eloMin: m.elo_min ?? null,
       eloMax: m.elo_max ?? null,
+      sets,
+      myTeam,
+      myResult,
+      matchEndReason: m.match_end_reason ?? null,
     };
   }
   if (!b.start_at || !b.end_at) return null;
@@ -209,5 +233,9 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     startAt: b.start_at,
     endAt: b.end_at,
     matchGender,
+    sets,
+    myTeam,
+    myResult,
+    matchEndReason: m.match_end_reason ?? null,
   };
 }

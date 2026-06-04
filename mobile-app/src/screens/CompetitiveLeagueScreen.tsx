@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { Alert, LayoutChangeEvent, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import * as Location from 'expo-location';
+import Slider from '@react-native-community/slider';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MATCHMAKING_DEMO } from '../config';
+import { haversineKm } from '../lib/geoDistance';
+import { resolveDeviceSearchCoordinates, type SearchCoordinates } from '../lib/matchSearchLocation';
 import { useAuth } from '../contexts/AuthContext';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
 import { useClubCatalog } from '../hooks/useClubCatalog';
-import { loadStoredPreferredClubIds, saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
+import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
+import { computeMatchAvailabilityWindow } from '../lib/matchAvailabilityWindow';
+import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import { fetchMatches, fetchMatchById, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import type { PartidoItem } from './PartidosScreen';
@@ -47,43 +52,6 @@ const DEFAULT_FORM: SearchForm = {
   search_area: 'club',
 };
 const FLOW_TOP_PADDING = 12;
-
-function computeAvailabilityWindow(input: Pick<SearchForm, 'day' | 'time'>): {
-  availableFrom: string;
-  availableUntil: string;
-} {
-  const now = new Date();
-  const targetDay = new Date(now);
-  if (input.day === 'manana') targetDay.setDate(targetDay.getDate() + 1);
-  else if (input.day === 'esta-semana') targetDay.setDate(targetDay.getDate() + 2);
-  else if (input.day === 'fin-semana') {
-    const day = targetDay.getDay();
-    const daysUntilSaturday = (6 - day + 7) % 7 || 7;
-    targetDay.setDate(targetDay.getDate() + daysUntilSaturday);
-  }
-
-  let startHour = now.getHours();
-  let endHour = Math.min(startHour + 2, 23);
-  if (input.time === 'manana') {
-    startHour = 9;
-    endHour = 12;
-  } else if (input.time === 'tarde') {
-    startHour = 15;
-    endHour = 18;
-  } else if (input.time === 'noche') {
-    startHour = 19;
-    endHour = 22;
-  }
-
-  const availableFromDate = new Date(targetDay);
-  availableFromDate.setHours(startHour, 0, 0, 0);
-  const availableUntilDate = new Date(targetDay);
-  availableUntilDate.setHours(endHour, 0, 0, 0);
-  if (availableUntilDate <= availableFromDate) {
-    availableUntilDate.setTime(availableFromDate.getTime() + 90 * 60 * 1000);
-  }
-  return { availableFrom: availableFromDate.toISOString(), availableUntil: availableUntilDate.toISOString() };
-}
 
 type Props = {
   onBack: () => void;
@@ -135,7 +103,8 @@ export function CompetitiveLeagueScreen({
   const preferredClubsSeedDoneRef = useRef(false);
   const { clubs: clubCatalog } = useClubCatalog();
   const [distanceKm, setDistanceKm] = useState(10);
-  const [distanceTrackWidth, setDistanceTrackWidth] = useState(1);
+  const [searchCoords, setSearchCoords] = useState<SearchCoordinates | null>(null);
+  const [searchCoordsLoading, setSearchCoordsLoading] = useState(false);
   const [countdownText, setCountdownText] = useState<string>('--:--:--');
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAppliedEntryIntentRef = useRef<'default' | 'queue' | 'prefs' | null>(null);
@@ -292,27 +261,10 @@ export function CompetitiveLeagueScreen({
 
     let cancelled = false;
     void (async () => {
-      const stored = await loadStoredPreferredClubIds();
+      const ids = await resolveSavedFavoriteClubIds(profile, clubCatalog);
       if (cancelled || preferredClubsSeedDoneRef.current) return;
-
-      if (stored.length > 0) {
-        preferredClubsSeedDoneRef.current = true;
-        setPreferredClubIds(stored);
-        setPreferredClubsHydrated(true);
-        return;
-      }
-
-      if (!profile) return;
-
       preferredClubsSeedDoneRef.current = true;
-      const favNames = new Set(
-        (profile.preferences.favoriteClubs ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean),
-      );
-      if (favNames.size > 0) {
-        setPreferredClubIds(
-          clubCatalog.filter((c) => favNames.has(c.name.trim().toLowerCase())).map((c) => c.id),
-        );
-      }
+      if (ids.length > 0) setPreferredClubIds(ids);
       setPreferredClubsHydrated(true);
     })();
 
@@ -330,6 +282,40 @@ export function CompetitiveLeagueScreen({
     const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
     return preferredClubIds.map((id) => byId.get(id) ?? 'Club');
   }, [clubCatalog, preferredClubIds]);
+
+  useEffect(() => {
+    if (MATCHMAKING_DEMO || step !== 'prefs' || preferredClubIds.length > 0) {
+      if (MATCHMAKING_DEMO) setSearchCoords(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      setSearchCoordsLoading(true);
+      const res = await resolveDeviceSearchCoordinates();
+      if (cancelled) return;
+      setSearchCoordsLoading(false);
+      setSearchCoords(res.ok ? res.coords : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, preferredClubIds.length]);
+
+  const clubsInRange = useMemo(() => {
+    if (preferredClubIds.length > 0) return [];
+    if (MATCHMAKING_DEMO) {
+      return clubCatalog.map((c) => ({ ...c, distance: null as number | null }));
+    }
+    if (!searchCoords) return [];
+    return clubCatalog
+      .filter((c) => c.lat != null && c.lng != null)
+      .map((c) => ({
+        ...c,
+        distance: haversineKm(searchCoords, { lat: c.lat!, lng: c.lng! }),
+      }))
+      .filter((c) => c.distance <= distanceKm)
+      .sort((a, b) => a.distance - b.distance);
+  }, [clubCatalog, distanceKm, preferredClubIds.length, searchCoords]);
 
   const division = useMemo(() => {
     if (!profile) return null;
@@ -408,32 +394,41 @@ export function CompetitiveLeagueScreen({
     setLoading(true);
     setErrorText(null);
     clearPollTimer();
-    const { availableFrom, availableUntil } = computeAvailabilityWindow(form);
+    const { availableFrom, availableUntil } = computeMatchAvailabilityWindow(form);
     const payload: MatchmakingJoinPayload = {
       available_from: availableFrom,
       available_until: availableUntil,
       preferred_side: form.preferred_side,
       gender: form.gender,
     };
-    if (preferredClubIds.length > 0) {
-      payload.preferred_club_ids = preferredClubIds;
-    } else {
-      const maxKm = Math.max(1, Math.min(50, Math.round(distanceKm)));
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (perm.status !== 'granted') {
+    if (MATCHMAKING_DEMO) {
+      const allClubIds = clubCatalog.map((c) => c.id).slice(0, 20);
+      if (allClubIds.length === 0) {
         setLoading(false);
-        setErrorText('Activa ubicación para buscar por distancia.');
+        setErrorText('No hay clubes cargados para buscar partido.');
         return;
       }
-      try {
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      payload.preferred_club_ids = allClubIds;
+    } else if (preferredClubIds.length > 0) {
+      payload.preferred_club_ids = preferredClubIds.slice(0, 20);
+    } else {
+      const maxKm = Math.max(1, Math.min(50, Math.round(distanceKm)));
+      const loc = searchCoords
+        ? { ok: true as const, coords: searchCoords }
+        : await resolveDeviceSearchCoordinates();
+      if (!loc.ok) {
+        const fallbackIds = await resolveSavedFavoriteClubIds(profile, clubCatalog);
+        if (fallbackIds.length > 0) {
+          payload.preferred_club_ids = fallbackIds.slice(0, 20);
+        } else {
+          setLoading(false);
+          setErrorText(loc.error);
+          return;
+        }
+      } else {
         payload.max_distance_km = maxKm;
-        payload.search_lat = pos.coords.latitude;
-        payload.search_lng = pos.coords.longitude;
-      } catch {
-        setLoading(false);
-        setErrorText('No se pudo obtener tu ubicación.');
-        return;
+        payload.search_lat = loc.coords.lat;
+        payload.search_lng = loc.coords.lng;
       }
     }
     const result = await joinMatchmaking(payload, token);
@@ -453,7 +448,10 @@ export function CompetitiveLeagueScreen({
     form,
     onMatchmakingBannerStateChange,
     pollStatus,
-    preferredClubIds.length,
+    preferredClubIds,
+    searchCoords,
+    clubCatalog,
+    profile,
     session?.access_token,
     setQueueElapsedSec,
     setQueueStartedAtMs,
@@ -507,7 +505,7 @@ export function CompetitiveLeagueScreen({
         Alert.alert('Error', 'No se pudo cargar el partido.');
         return;
       }
-      const mapped = mapMatchToPartido(match);
+      const mapped = mapMatchToPartido(match, { viewerPlayerId: profile?.id ?? null });
       if (!mapped) {
         Alert.alert('Error', 'No se pudo mostrar el partido.');
         return;
@@ -874,38 +872,77 @@ export function CompetitiveLeagueScreen({
           />
 
           <View style={styles.optionSection}>
-            <View style={styles.distanceTitleRow}>
-              <View style={styles.optionTitleRow}>
-                <Ionicons name="location-outline" size={14} color="#F59E0B" />
-                <Text style={styles.optionTitleStrong}>Distancia máxima</Text>
+            {MATCHMAKING_DEMO ? (
+              <View style={styles.demoModeBanner}>
+                <Ionicons name="flash" size={16} color="#F59E0B" />
+                <Text style={styles.demoModeText}>
+                  Modo demo: buscás en todos los clubes sin ubicación ni distancia.
+                </Text>
               </View>
-              <Text style={styles.distanceValue}>{distanceKm} km</Text>
-            </View>
-            <View
-              style={styles.sliderTrack}
-              onLayout={(e: LayoutChangeEvent) =>
-                setDistanceTrackWidth(Math.max(1, e.nativeEvent.layout.width))
-              }
-            >
-              <Pressable
-                style={StyleSheet.absoluteFill}
-                onPress={(e) => {
-                  const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / distanceTrackWidth));
-                  setDistanceKm(Math.max(1, Math.round(1 + ratio * 49)));
-                }}
-              />
-              <View style={[styles.sliderFill, { width: `${((distanceKm - 1) / 49) * 100}%` }]} />
-              <View
-                style={[
-                  styles.sliderThumb,
-                  { left: `${((distanceKm - 1) / 49) * 100}%`, transform: [{ translateX: -8 }] },
-                ]}
-              />
-            </View>
-            <View style={styles.sliderLabels}>
-              <Text style={styles.sliderLabel}>1 km</Text>
-              <Text style={styles.sliderLabel}>50 km</Text>
-            </View>
+            ) : preferredClubIds.length > 0 ? (
+              <Text style={styles.distanceByClubsHint}>
+                Buscás en {preferredClubIds.length} club{preferredClubIds.length === 1 ? '' : 'es'} elegido
+                {preferredClubIds.length === 1 ? '' : 's'}. Quitá la selección de clubes para buscar por distancia.
+              </Text>
+            ) : (
+              <>
+                <View style={styles.distanceTitleRow}>
+                  <View style={styles.optionTitleRow}>
+                    <Ionicons name="location-outline" size={14} color="#F59E0B" />
+                    <Text style={styles.optionTitleStrong}>Distancia máxima</Text>
+                  </View>
+                  <Text style={styles.distanceValue}>{distanceKm} km</Text>
+                </View>
+                <Slider
+                  style={styles.distanceSlider}
+                  minimumValue={1}
+                  maximumValue={50}
+                  step={1}
+                  value={distanceKm}
+                  onValueChange={(v) => setDistanceKm(Math.round(v))}
+                  minimumTrackTintColor="#F59E0B"
+                  maximumTrackTintColor="rgba(12,31,66,0.7)"
+                  thumbTintColor="#1f8dff"
+                />
+                <View style={styles.sliderLabels}>
+                  <Text style={styles.sliderLabel}>1 km</Text>
+                  <Text style={styles.sliderLabel}>50 km</Text>
+                </View>
+              </>
+            )}
+            {preferredClubIds.length === 0 ? (
+              <View style={styles.clubsInRangeBox}>
+                <Text style={styles.clubsInRangeTitle}>
+                  {MATCHMAKING_DEMO ? 'Clubes disponibles (demo)' : 'Clubes en tu rango'}
+                </Text>
+                {!MATCHMAKING_DEMO && searchCoordsLoading ? (
+                  <Text style={styles.clubsInRangeSub}>Calculando distancias…</Text>
+                ) : clubsInRange.length === 0 ? (
+                  <Text style={styles.clubsInRangeEmpty}>
+                    {MATCHMAKING_DEMO
+                      ? 'Cargando clubes…'
+                      : searchCoords
+                        ? `Ningún club dentro de ${distanceKm} km. Ampliá la distancia o elegí clubes preferidos.`
+                        : 'Activa ubicación para ver clubes disponibles.'}
+                  </Text>
+                ) : (
+                  clubsInRange.slice(0, 8).map((club) => (
+                    <View key={club.id} style={styles.clubsInRangeRow}>
+                      <Ionicons name="business-outline" size={14} color="#F59E0B" />
+                      <Text style={styles.clubsInRangeName} numberOfLines={1}>
+                        {club.name}
+                      </Text>
+                      {club.distance != null ? (
+                        <Text style={styles.clubsInRangeKm}>{Math.round(club.distance)} km</Text>
+                      ) : null}
+                    </View>
+                  ))
+                )}
+                {clubsInRange.length > 8 ? (
+                  <Text style={styles.clubsInRangeMore}>+{clubsInRange.length - 8} más</Text>
+                ) : null}
+              </View>
+            ) : null}
           </View>
 
           <OptionRow
@@ -1460,24 +1497,43 @@ const styles = StyleSheet.create({
   optionChipTextActive: { color: '#fff' },
   distanceTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   distanceValue: { color: '#F59E0B', fontWeight: '800', fontSize: 12 },
-  sliderTrack: {
-    height: 7,
-    borderRadius: 99,
-    backgroundColor: 'rgba(12,31,66,0.7)',
-    overflow: 'visible',
-    marginTop: 6,
-  },
-  sliderFill: { height: '100%', borderRadius: 99, backgroundColor: 'rgba(245,158,11,0.55)' },
-  sliderThumb: {
-    position: 'absolute',
-    top: -5,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#1f8dff',
+  distanceSlider: { width: '100%', height: 40, marginTop: 4 },
+  distanceByClubsHint: {
+    color: '#9ca3af',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
   },
   sliderLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
   sliderLabel: { color: '#9ca3af', fontSize: 11 },
+  clubsInRangeBox: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    gap: 8,
+  },
+  clubsInRangeTitle: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  clubsInRangeSub: { color: '#9ca3af', fontSize: 12 },
+  clubsInRangeEmpty: { color: '#9ca3af', fontSize: 12, lineHeight: 18 },
+  clubsInRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  clubsInRangeName: { flex: 1, color: '#d1d5db', fontSize: 13, fontWeight: '600' },
+  clubsInRangeKm: { color: '#F59E0B', fontSize: 12, fontWeight: '700' },
+  clubsInRangeMore: { color: '#6b7280', fontSize: 11, marginTop: 2 },
+  demoModeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(245,158,11,0.35)',
+    marginBottom: 4,
+  },
+  demoModeText: { flex: 1, color: '#FCD34D', fontSize: 12, lineHeight: 17, fontWeight: '600' },
   clubPickerBtn: {
     flexDirection: 'row',
     alignItems: 'center',

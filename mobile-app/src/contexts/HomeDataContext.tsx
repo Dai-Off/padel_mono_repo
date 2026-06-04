@@ -220,7 +220,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
               new Date(getMatchBooking(a)!.start_at!).getTime(),
           ),
       ];
-      const mapped = mineRaw.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
+      const viewerPlayerId = playerProfile?.id ?? null;
+      const mapped = mineRaw
+        .map((m) => mapMatchToPartido(m, { viewerPlayerId }))
+        .filter((p): p is PartidoItem => p != null);
       return enrichPartidosWithProfileAvatar(mapped, playerProfile);
     },
     [],
@@ -318,7 +321,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
             });
             if (gen !== refreshMatchesGen.current) return;
             const open = discoveryRows
-              .map(mapMatchToPartido)
+              .map((m) => mapMatchToPartido(m, { viewerPlayerId: playerId }))
               .filter((p): p is PartidoItem => p != null)
               .filter((p) => p.matchPhase !== 'past')
               .filter((p) => isPartidoOpenForDiscovery(p, playerId));

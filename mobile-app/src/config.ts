@@ -35,3 +35,13 @@ export const OPENWEATHER_API_KEY =
 
 export const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ?? '';
 export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ?? '';
+
+function envFlag(v: string | undefined): boolean {
+  return v === '1' || v?.toLowerCase() === 'true';
+}
+
+/**
+ * Modo demo matchmaking: sin GPS ni distancia; busca partido en todos los clubes del catálogo.
+ * EXPO_PUBLIC_MATCHMAKING_DEMO=true
+ */
+export const MATCHMAKING_DEMO = envFlag(process.env.EXPO_PUBLIC_MATCHMAKING_DEMO);

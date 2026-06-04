@@ -13,6 +13,7 @@ export type Match = {
   status: string;
   score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | null;
   sets?: Array<{ a: number; b: number }> | null;
+  match_end_reason?: string | null;
   type?: string | null;
   /** Solo en /matches/mine: indica si el jugador autenticado ya envió feedback. */
   has_my_feedback?: boolean;
@@ -32,6 +33,7 @@ type MatchPlayerRef = {
   team: 'A' | 'B';
   created_at: string;
   slot_index?: number | null;
+  result?: 'win' | 'loss' | 'draw' | 'pending' | string | null;
   players: PlayerRef | null;
 };
 
