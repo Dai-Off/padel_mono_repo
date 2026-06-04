@@ -118,12 +118,7 @@ function AppContent() {
       <>
         <StatusBar style="dark" />
         <RequireAuth>
-          {/* HomeDataProvider vive aquí — montado una sola vez tras login —
-              para que los datos del Home sobrevivan a remounts cuando el
-              usuario navega a otras pantallas y vuelve. */}
-          <HomeDataProvider>
-            <MainApp />
-          </HomeDataProvider>
+          <MainApp />
         </RequireAuth>
       </>
     );
@@ -149,7 +144,11 @@ export default function App() {
     <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} urlScheme={urlScheme}>
       <SafeAreaProvider>
         <AuthProvider>
-          <AppContent />
+          {/* Montado siempre (no dentro del branch authed) para que un
+              parpadeo de sesión no destruya el cache y dispare reload infinito. */}
+          <HomeDataProvider>
+            <AppContent />
+          </HomeDataProvider>
         </AuthProvider>
       </SafeAreaProvider>
     </StripeProvider>

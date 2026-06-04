@@ -9,7 +9,7 @@ const MAX_PLAYER_RETRIES = 6;
 export async function reloadMatchPartido(
   matchId: string,
   token: string,
-  opts?: { retryIfMissingPlayerId?: string },
+  opts?: { retryIfMissingPlayerId?: string; maxRetries?: number },
 ): Promise<PartidoItem | null> {
   const load = async () => {
     const m = await fetchMatchById(matchId, token);
@@ -20,7 +20,8 @@ export async function reloadMatchPartido(
   const pid = opts?.retryIfMissingPlayerId?.trim();
   if (!pid) return partido;
 
-  for (let attempt = 0; attempt < MAX_PLAYER_RETRIES; attempt++) {
+  const maxRetries = opts?.maxRetries ?? MAX_PLAYER_RETRIES;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     if (!partido) break;
     const inIds = (partido.playerIds ?? []).includes(pid);
     const inSlots = (partido.playerIdsBySlot ?? []).some((id) => id === pid);

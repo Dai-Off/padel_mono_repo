@@ -1,4 +1,5 @@
 import type { MatchEnriched } from './matches';
+import { normalizePlayerAvatarUrl } from '../api/playerAvatar';
 import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
 import type { PartidoItem, PartidoMode, PartidoPlayer } from '../screens/PartidosScreen';
 
@@ -158,7 +159,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
         ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
         : fullName[0]?.toUpperCase() ?? '?';
     const level = playerLevelLine(p);
-    const avatar = p.avatar_url?.trim() || undefined;
+    const avatar = normalizePlayerAvatarUrl(p.avatar_url) ?? undefined;
     slots[idx] = { id: p.id, name: fullName, initial, level, avatar, isFree: false };
   });
   const players = slots;

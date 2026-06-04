@@ -401,6 +401,44 @@ router.post('/me/avatar', avatarUpload.single('file'), async (req: Request, res:
   }
 });
 
+router.post('/me/cover', avatarUpload.single('file'), async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return res.status(401).json({ ok: false, error: 'Token requerido' });
+
+  if (!req.file) return res.status(400).json({ ok: false, error: 'Envía el archivo en el campo "file"' });
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user?.id) return res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+
+    const ext = extFromMime(req.file.mimetype);
+    const storagePath = `${user.id}/cover.${ext}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('player-avatars')
+      .upload(storagePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: true,
+      });
+    if (uploadErr) return res.status(500).json({ ok: false, error: uploadErr.message });
+
+    const { data: pub } = supabase.storage.from('player-avatars').getPublicUrl(storagePath);
+    const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+    const { error: dbErr } = await supabase
+      .from('players')
+      .update({ cover_url: publicUrl, updated_at: new Date().toISOString() })
+      .eq('auth_user_id', user.id);
+    if (dbErr) return res.status(500).json({ ok: false, error: dbErr.message });
+
+    return res.json({ ok: true, url: publicUrl });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 /**
  * @openapi
  * /players/me:

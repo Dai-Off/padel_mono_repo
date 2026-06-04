@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchMatches } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { useHomeData } from '../contexts/HomeDataContext';
@@ -33,7 +33,8 @@ function myUpcomingFromHome(misPartidos: PartidoItem[]): PartidoItem[] {
 }
 
 export function usePartidosList(token: string | null | undefined, refreshNonce: number) {
-  const { profile, misPartidos, refreshMatches } = useHomeData();
+  const { profile, misPartidos, refreshMatches, matchesLoading } = useHomeData();
+  const openLoadGenRef = useRef(0);
   const [filters, setFilters] = useState<PartidosFiltersState>(getInitialPartidosFilters);
   const [openRaw, setOpenRaw] = useState<PartidoItem[]>([]);
   const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(profile?.id ?? null);
@@ -62,32 +63,35 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
     [clubDistanceById, favoriteClubIds],
   );
 
-  const fetchRange = partidosFetchDateRange(filters);
+  const fetchRange = useMemo(() => partidosFetchDateRange(filters), [filters]);
 
   const myRaw = useMemo(() => myUpcomingFromHome(misPartidos), [misPartidos]);
 
-  const loadPartidos = useCallback(async () => {
+  /** Tras mutaciones (unirse, crear…): solo revalida "mis partidos" vía HomeDataContext. */
+  useEffect(() => {
+    if (refreshNonce > 0 && token) {
+      void refreshMatches({ scope: 'mine' });
+    }
+  }, [refreshNonce, token, refreshMatches]);
+
+  const loadOpenPartidos = useCallback(async () => {
+    const gen = ++openLoadGenRef.current;
     setLoading(true);
     const { activeOnly, dateFrom, dateTo } = fetchRange;
 
-    const openPromise = fetchMatches({
-      expand: true,
-      token,
-      activeOnly,
-      discovery: true,
-      visibility: 'public',
-      dateFrom,
-      dateTo,
-      joinableOnly: true,
-      limit: 100,
-    });
-
-    const minePromise = token
-      ? refreshMatches({ force: true, scope: 'mine' })
-      : Promise.resolve();
-
     try {
-      const [openMatches] = await Promise.all([openPromise, minePromise]);
+      const openMatches = await fetchMatches({
+        expand: true,
+        token,
+        activeOnly,
+        discovery: true,
+        visibility: 'public',
+        dateFrom,
+        dateTo,
+        joinableOnly: true,
+        limit: 100,
+      });
+      if (gen !== openLoadGenRef.current) return;
       const myId = profile?.id ?? null;
       const openPartidos = openMatches
         .map(mapMatchToPartido)
@@ -96,22 +100,21 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
         .filter((p) => isPartidoOpenForDiscovery(p, myId));
       setOpenRaw(openPartidos);
     } catch {
-      setOpenRaw([]);
+      if (gen === openLoadGenRef.current) setOpenRaw([]);
     } finally {
-      setLoading(false);
+      if (gen === openLoadGenRef.current) setLoading(false);
     }
   }, [
     token,
     fetchRange.activeOnly,
     fetchRange.dateFrom,
     fetchRange.dateTo,
-    refreshMatches,
     profile?.id,
   ]);
 
   useEffect(() => {
-    loadPartidos();
-  }, [loadPartidos, refreshNonce]);
+    void loadOpenPartidos();
+  }, [loadOpenPartidos, refreshNonce]);
 
   const applyFilters = useCallback((next: PartidosFiltersState) => {
     setFilters(next);
@@ -163,6 +166,8 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
     openPartidos,
     myPartidos,
     loading,
+    /** Skeleton de "Mis partidos" mientras HomeDataContext termina el bootstrap. */
+    misPartidosLoading: matchesLoading,
     organizerPlayerId,
     clubs,
     clubsLoading,
