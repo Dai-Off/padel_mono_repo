@@ -11,15 +11,23 @@ import {
 import { AppState, type AppStateStatus } from 'react-native';
 import { fetchMatches, fetchMyMatches, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
-import { fetchMyPlayerId, fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
+import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { fetchPublicTournaments } from '../api/tournaments';
 import { fetchSeasonPassMe, type SeasonPassMeOk } from '../api/seasonPass';
 import { fetchHomeStats, type HomeStats } from '../api/home';
 import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
 import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
-import { selectMyMatchesForHome } from '../domain/selectMyUpcomingMatches';
 import { normalizeMatchEnriched } from '../api/normalizeMatch';
-import { upsertMisPartidosList } from '../lib/partidoPlayerUtils';
+import { defaultPartidosDiscoveryDateRange } from '../domain/partidosFilters';
+import {
+  enrichPartidoWithProfileAvatar,
+  enrichPartidosWithProfileAvatar,
+  isPartidoOpenForDiscovery,
+  mergeMisPartidosFromServer,
+  upsertMisPartidosList,
+  type ProfileForPartidoEnrich,
+} from '../lib/partidoPlayerUtils';
+import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
@@ -34,17 +42,6 @@ type StreakState = {
   lastCompleted: string | null;
 };
 
-/**
- * TTL global de cache (60 s). Si pides datos antes de que pasen, devolvemos
- * cache sin re-fetch. Pasado el TTL, el siguiente acceso revalida.
- *
- * 60 s es un buen punto medio para esta app: el perfil cambia rara vez, los
- * partidos y torneos cambian cada minutos, no segundos. Si necesitas datos
- * frescos tras una acción del usuario (crear partido, completar lección),
- * llama al `refresh*` correspondiente para forzar.
- */
-const TTL_MS = 60 * 1000;
-
 type HomeDataValue = {
   // Profile
   profile: MyPlayerProfile | null;
@@ -58,6 +55,11 @@ type HomeDataValue = {
   refreshMatches: (opts?: { force?: boolean; scope?: 'full' | 'mine' }) => Promise<void>;
   /** Actualiza el carrusel "Mis partidos" al instante (p. ej. tras unirse a un partido). */
   upsertMisPartido: (item: PartidoItem) => void;
+  /** Tras crear/unirse: carga el partido, lo inserta en Home y revalida con el servidor. */
+  syncMisPartidoFromMatchId: (
+    matchId: string,
+    opts?: { organizerPlayerId?: string | null; forceSlotIndex?: number },
+  ) => Promise<void>;
 
   // Tournaments (solo el count, que es lo que usa el home).
   publicTournamentsCount: number | null;
@@ -97,24 +99,14 @@ type HomeDataValue = {
 const HomeDataContext = createContext<HomeDataValue | null>(null);
 
 /**
- * Provider que mantiene cache en memoria de los datos del Home (profile,
- * partidos, torneos, season pass). Vive a nivel de `MainApp`, así que los
- * datos sobreviven a remounts de `HomeScreen` cuando el usuario navega a
- * Profile / DailyLesson / etc. y vuelve.
- *
- * Patrón típico: stale-while-revalidate manual.
- *   - Primera vez: fetch (loading true).
- *   - Mientras dentro de TTL: devuelve cache (no re-fetch, loading false).
- *   - Pasado TTL: siguiente refresh re-fetch en background sin loading
- *     visible si ya hay datos.
- *   - `force: true` ignora el TTL — usar tras mutaciones (crear partido,
- *     completar lección, completar onboarding).
- *
- * Al volver del background (AppState 'active'), refrescamos todo respetando
- * TTL. Cubre el caso de "abrir la app tras estar fuera 5 min".
+ * Provider de datos del Home. Sin TTL ni skip de refetch: cada llamada a
+ * `refresh*` vuelve a pedir al servidor. El estado en memoria solo evita
+ * parpadeos al navegar entre pantallas dentro de la misma sesión.
  */
 export function HomeDataProvider({ children }: { children: ReactNode }) {
-  const { session, refreshAccessToken } = useAuth();
+  const { session } = useAuth();
+  const lastSessionTokenRef = useRef<string | null>(null);
+  const refreshMatchesGen = useRef(0);
   const token = session?.access_token ?? null;
 
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
@@ -124,7 +116,6 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
   const [misPartidos, setMisPartidos] = useState<PartidoItem[]>([]);
   const [matchesLoading, setMatchesLoading] = useState(false);
-  const matchesLoadedAt = useRef(0);
 
   const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
   const [tournamentsLoading, setTournamentsLoading] = useState(false);
@@ -155,9 +146,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const [hasInitialError, setHasInitialError] = useState(false);
 
   // -----------------------------------------------------------------
-  // Refrescos (uno por entidad). Todos respetan TTL salvo `force: true`.
-  // Política: si la primera carga (sin datos previos) falla, marcamos el
-  // flag global. Si la revalidación con datos previos falla, silencio.
+  // Refrescos (uno por entidad). `force: true` siempre re-fetch.
   // -----------------------------------------------------------------
 
   const refreshProfile = useCallback(
@@ -166,7 +155,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         setProfile(null);
         return;
       }
-      if (!force && Date.now() - profileLoadedAt.current < TTL_MS) return;
+      if (!force && profileLoadedAt.current > 0) return;
       // Solo mostramos loading si no había nada cacheado.
       const isFirst = profileLoadedAt.current === 0;
       if (isFirst) setProfileLoading(true);
@@ -184,13 +173,10 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
+  /** Solo datos de GET /matches/mine — nunca el listado público de /matches. */
   const buildMisPartidosFromMatches = useCallback(
-    (mineSource: MatchEnriched[], matchesFallback: MatchEnriched[], playerId: string | null) => {
-      let source = mineSource;
-      if (playerId && source.length === 0 && matchesFallback.length > 0) {
-        source = selectMyMatchesForHome(matchesFallback, playerId);
-      }
-      const mineRawBase = source.filter((m) => {
+    (mineSource: MatchEnriched[], playerProfile: ProfileForPartidoEnrich | null) => {
+      const mineRawBase = mineSource.filter((m) => {
         const b = getMatchBooking(m);
         return Boolean(b?.start_at && b?.end_at);
       });
@@ -222,7 +208,8 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
               new Date(getMatchBooking(a)!.start_at!).getTime(),
           ),
       ];
-      return mineRaw.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
+      const mapped = mineRaw.map(mapMatchToPartido).filter((p): p is PartidoItem => p != null);
+      return enrichPartidosWithProfileAvatar(mapped, playerProfile);
     },
     [],
   );
@@ -231,77 +218,128 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     setMisPartidos((prev) => upsertMisPartidosList(prev, item));
   }, []);
 
+  const profileForEnrich = useMemo((): ProfileForPartidoEnrich | null => {
+    if (!profile?.id) return null;
+    return {
+      id: profile.id,
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      avatarUrl: profile.avatarUrl,
+    };
+  }, [profile]);
+
   const refreshMatches = useCallback(
-    async ({ force = false, scope = 'full' }: { force?: boolean; scope?: 'full' | 'mine' } = {}) => {
+    async ({ scope = 'full' }: { force?: boolean; scope?: 'full' | 'mine' } = {}) => {
       if (!token) {
         setMisPartidos([]);
         setPartidos([]);
         return;
       }
-      if (!force && Date.now() - matchesLoadedAt.current < TTL_MS) return;
-      const isFirst = matchesLoadedAt.current === 0;
-      if (isFirst) setMatchesLoading(true);
+      const gen = ++refreshMatchesGen.current;
+      setMatchesLoading(true);
 
       try {
-        let tk: string | null = token;
         const mineOnly = scope === 'mine';
+        const playerId = profile?.id ?? null;
 
-        let playerId: string | null = null;
-        let matches: MatchEnriched[] = [];
-        let myMatches: MatchEnriched[] = [];
-
-        if (mineOnly) {
-          myMatches = await fetchMyMatches(tk, { phase: 'all', limit: 100 });
-        } else {
-          [playerId, matches, myMatches] = await Promise.all([
-            fetchMyPlayerId(tk),
-            fetchMatches({ expand: true, token: tk, activeOnly: false }),
-            fetchMyMatches(tk, { phase: 'all', limit: 100 }),
-          ]);
-        }
-
-        if (!playerId && session?.refresh_token) {
-          const newToken = await refreshAccessToken();
-          if (newToken) {
-            tk = newToken;
-            if (mineOnly) {
-              myMatches = await fetchMyMatches(newToken, { phase: 'all', limit: 100 });
-            } else {
-              [playerId, matches, myMatches] = await Promise.all([
-                fetchMyPlayerId(newToken),
-                fetchMatches({ expand: true, token: newToken, activeOnly: false }),
-                fetchMyMatches(newToken, { phase: 'all', limit: 100 }),
-              ]);
-            }
-          }
-        }
+        const myMatches = await fetchMyMatches(token, { phase: 'all', limit: 100 });
+        if (gen !== refreshMatchesGen.current) return;
 
         const mineNormalized = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
-        const allNormalized = (matches as MatchEnriched[]).map(normalizeMatchEnriched);
-        const mis = buildMisPartidosFromMatches(mineNormalized, allNormalized, playerId);
-        setMisPartidos(mis);
+        const misFromServer = buildMisPartidosFromMatches(mineNormalized, profileForEnrich);
 
-        if (!mineOnly) {
-          const all = allNormalized
+        if (mineOnly) {
+          setMisPartidos((prev) => mergeMisPartidosFromServer(prev, misFromServer));
+        } else {
+          setMisPartidos(misFromServer);
+          const { dateFrom, dateTo } = defaultPartidosDiscoveryDateRange();
+          const discoveryRows = await fetchMatches({
+            expand: true,
+            token,
+            activeOnly: true,
+            discovery: true,
+            visibility: 'public',
+            dateFrom,
+            dateTo,
+            joinableOnly: true,
+            limit: 80,
+          });
+          if (gen !== refreshMatchesGen.current) return;
+          const open = discoveryRows
             .map(mapMatchToPartido)
             .filter((p): p is PartidoItem => p != null)
-            .filter((p) => p.matchPhase !== 'past');
-          setPartidos(all);
+            .filter((p) => p.matchPhase !== 'past')
+            .filter((p) => isPartidoOpenForDiscovery(p, playerId));
+          setPartidos(open);
         }
-
-        matchesLoadedAt.current = Date.now();
       } catch {
-        if (isFirst) setHasInitialError(true);
+        setHasInitialError(true);
       } finally {
-        if (isFirst) setMatchesLoading(false);
+        if (gen === refreshMatchesGen.current) setMatchesLoading(false);
       }
     },
-    [token, session?.refresh_token, refreshAccessToken, buildMisPartidosFromMatches],
+    [token, profile?.id, profileForEnrich, buildMisPartidosFromMatches],
+  );
+
+  const syncMisPartidoFromMatchId = useCallback(
+    async (
+      matchId: string,
+      opts?: { organizerPlayerId?: string | null; forceSlotIndex?: number },
+    ) => {
+      if (!token || !matchId.trim()) return;
+
+      const freshProfile = await fetchMyPlayerProfile(token);
+      const playerId = freshProfile?.id ?? opts?.organizerPlayerId?.trim() ?? profile?.id ?? null;
+      if (!playerId) {
+        await refreshMatches({ scope: 'mine' });
+        return;
+      }
+
+      const profileEnrich: ProfileForPartidoEnrich = {
+        id: playerId,
+        firstName: freshProfile?.firstName ?? profile?.firstName,
+        lastName: freshProfile?.lastName ?? profile?.lastName,
+        avatarUrl: freshProfile?.avatarUrl ?? profile?.avatarUrl ?? null,
+      };
+
+      const loaded = await reloadMatchPartido(matchId, token, {
+        retryIfMissingPlayerId: playerId,
+      });
+      if (loaded) {
+        let enriched = enrichPartidoWithProfileAvatar(loaded, profileEnrich, {
+          forceSlotIndex: opts?.forceSlotIndex,
+        });
+        enriched = {
+          ...enriched,
+          organizerPlayerId: enriched.organizerPlayerId ?? opts?.organizerPlayerId ?? playerId,
+        };
+        upsertMisPartido(enriched);
+      }
+
+      await refreshMatches({ scope: 'mine' });
+
+      if (loaded) {
+        let enriched = enrichPartidoWithProfileAvatar(loaded, profileEnrich, {
+          forceSlotIndex: opts?.forceSlotIndex,
+        });
+        enriched = {
+          ...enriched,
+          organizerPlayerId: enriched.organizerPlayerId ?? opts?.organizerPlayerId ?? playerId,
+        };
+        upsertMisPartido(enriched);
+      }
+
+      if (freshProfile) {
+        setProfile(freshProfile);
+        profileLoadedAt.current = Date.now();
+      }
+    },
+    [token, profile, upsertMisPartido, refreshMatches],
   );
 
   const refreshTournaments = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      if (!force && Date.now() - tournamentsLoadedAt.current < TTL_MS) return;
+      if (!force && tournamentsLoadedAt.current > 0) return;
       const isFirst = tournamentsLoadedAt.current === 0;
       if (isFirst) setTournamentsLoading(true);
       try {
@@ -327,7 +365,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         setSeasonPassMe(null);
         return;
       }
-      if (!force && Date.now() - seasonPassLoadedAt.current < TTL_MS) return;
+      if (!force && seasonPassLoadedAt.current > 0) return;
       const isFirst = seasonPassLoadedAt.current === 0;
       if (isFirst) setSeasonPassLoading(true);
       try {
@@ -353,7 +391,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
   const refreshStats = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
-      if (!force && Date.now() - statsLoadedAt.current < TTL_MS) return;
+      if (!force && statsLoadedAt.current > 0) return;
       const isFirst = statsLoadedAt.current === 0;
       if (isFirst) setStatsLoading(true);
       try {
@@ -372,7 +410,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const refreshStreak = useCallback(
     async ({ force = false }: { force?: boolean } = {}) => {
       if (!token) return;
-      if (!force && Date.now() - streakLoadedAt.current < TTL_MS) return;
+      if (!force && streakLoadedAt.current > 0) return;
       const isFirst = streakLoadedAt.current === 0;
       if (isFirst) setStreakLoading(true);
       try {
@@ -408,7 +446,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
     setHasInitialError(false);
     await Promise.all([
       refreshProfile({ force: true }),
-      refreshMatches({ force: true }),
+      refreshMatches(),
       refreshTournaments({ force: true }),
       refreshSeasonPass({ force: true }),
       refreshStats({ force: true }),
@@ -424,19 +462,18 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   ]);
 
   // -----------------------------------------------------------------
-  // Auto-fetch inicial al montar / al cambiar de token.
-  // Resetea timestamps para forzar primera carga "loading visible".
+  // Carga inicial solo al iniciar sesión (no en cada refresh de JWT).
   // -----------------------------------------------------------------
   useEffect(() => {
-    // Reset al cambiar de sesión.
-    profileLoadedAt.current = 0;
-    matchesLoadedAt.current = 0;
-    tournamentsLoadedAt.current = 0;
-    seasonPassLoadedAt.current = 0;
-    statsLoadedAt.current = 0;
-    streakLoadedAt.current = 0;
-    setHasInitialError(false);
     if (!token) {
+      lastSessionTokenRef.current = null;
+      refreshMatchesGen.current = 0;
+      profileLoadedAt.current = 0;
+      tournamentsLoadedAt.current = 0;
+      seasonPassLoadedAt.current = 0;
+      statsLoadedAt.current = 0;
+      streakLoadedAt.current = 0;
+      setHasInitialError(false);
       setProfile(null);
       setPartidos([]);
       setMisPartidos([]);
@@ -446,8 +483,19 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       setStreak({ currentStreak: 0, longestStreak: 0, multiplier: 0, lastCompleted: null });
       return;
     }
+
+    const isNewLogin = lastSessionTokenRef.current === null;
+    lastSessionTokenRef.current = token;
+    if (!isNewLogin) return;
+
+    profileLoadedAt.current = 0;
+    tournamentsLoadedAt.current = 0;
+    seasonPassLoadedAt.current = 0;
+    statsLoadedAt.current = 0;
+    streakLoadedAt.current = 0;
+    setHasInitialError(false);
     void refreshProfile({ force: true });
-    void refreshMatches({ force: true });
+    void refreshMatches();
     void refreshTournaments({ force: true });
     void refreshSeasonPass({ force: true });
     void refreshStats({ force: true });
@@ -456,24 +504,25 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   }, [token]);
 
   // -----------------------------------------------------------------
-  // Al volver del background, refrescar todo (respetando TTL).
+  // Al volver del background, refrescar todo.
   // -----------------------------------------------------------------
   useEffect(() => {
     let last: AppStateStatus = AppState.currentState;
     const sub = AppState.addEventListener('change', (next) => {
       const prev = last;
       last = next;
-      if (prev.match(/inactive|background/) && next === 'active') {
-        void refreshProfile();
+      if (prev.match(/inactive|background/) && next === 'active' && token) {
+        void refreshProfile({ force: true });
         void refreshMatches();
-        void refreshTournaments();
-        void refreshSeasonPass();
-        void refreshStats();
-        void refreshStreak();
+        void refreshTournaments({ force: true });
+        void refreshSeasonPass({ force: true });
+        void refreshStats({ force: true });
+        void refreshStreak({ force: true });
       }
     });
     return () => sub.remove();
   }, [
+    token,
     refreshProfile,
     refreshMatches,
     refreshTournaments,
@@ -492,6 +541,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       matchesLoading,
       refreshMatches,
       upsertMisPartido,
+      syncMisPartidoFromMatchId,
       publicTournamentsCount,
       tournamentsLoading,
       refreshTournaments,
@@ -516,6 +566,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       matchesLoading,
       refreshMatches,
       upsertMisPartido,
+      syncMisPartidoFromMatchId,
       publicTournamentsCount,
       tournamentsLoading,
       refreshTournaments,
