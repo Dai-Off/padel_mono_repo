@@ -458,11 +458,12 @@ export function IAAfinidadModal({
   };
 
   /** Cambia la visibilidad desde el toggle del modal (vista de resultados). */
-  const handleVisibilityChange = async (next: boolean) => {
-    if (settingVisible) return;
+  const handleVisibilityChange = async (next: boolean): Promise<boolean> => {
+    if (settingVisible) return affinityVisible;
     setSettingVisible(true);
-    await onSetVisible(next);
+    const ok = await onSetVisible(next);
     setSettingVisible(false);
+    return ok;
   };
 
   // Desde el loader: pasar a editar criterios sin esperar a que termine la
@@ -985,7 +986,7 @@ export function IAAfinidadModal({
                 <View style={styles.resultsVisibility}>
                   <AffinityVisibilityToggle
                     value={affinityVisible}
-                    onChange={(v) => void handleVisibilityChange(v)}
+                    onChange={handleVisibilityChange}
                     disabled={settingVisible}
                   />
                 </View>

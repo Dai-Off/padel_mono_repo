@@ -1,10 +1,12 @@
+import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 const ACCENT = '#F18F34';
 
 type Props = {
   value: boolean;
-  onChange: (next: boolean) => void;
+  /** Devolver `false` revierte el cambio optimista (p. ej. si el guardado falla). */
+  onChange: (next: boolean) => void | boolean | Promise<void | boolean>;
   disabled?: boolean;
 };
 
@@ -12,13 +14,28 @@ type Props = {
  * Interruptor de visibilidad en las búsquedas de la IA de afinidad. Diseño
  * compartido para que se vea igual en todas las pantallas donde aparece
  * (Preferencias y el modal de afinidad).
+ *
+ * Usa estado optimista: el switch se mueve al instante aunque el guardado tarde
+ * (en el modal, `value` depende de un PATCH + refetch). Se re-sincroniza con
+ * `value`; si `onChange` devuelve `false`, revierte.
  */
 export function AffinityVisibilityToggle({ value, onChange, disabled }: Props) {
+  const [optimistic, setOptimistic] = useState(value);
+  useEffect(() => {
+    setOptimistic(value);
+  }, [value]);
+
+  const handlePress = async () => {
+    if (disabled) return;
+    const next = !optimistic;
+    setOptimistic(next);
+    const res = await onChange(next);
+    if (res === false) setOptimistic(!next);
+  };
+
   return (
     <Pressable
-      onPress={() => {
-        if (!disabled) onChange(!value);
-      }}
+      onPress={() => void handlePress()}
       style={styles.row}
       disabled={disabled}
     >
@@ -29,8 +46,8 @@ export function AffinityVisibilityToggle({ value, onChange, disabled }: Props) {
           necesario para poder buscar tú también.
         </Text>
       </View>
-      <View style={[styles.track, value && styles.trackOn]}>
-        <View style={[styles.thumb, value && styles.thumbOn]} />
+      <View style={[styles.track, optimistic && styles.trackOn]}>
+        <View style={[styles.thumb, optimistic && styles.thumbOn]} />
       </View>
     </Pressable>
   );
