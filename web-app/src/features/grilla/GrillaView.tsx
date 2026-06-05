@@ -48,6 +48,7 @@ import {
   resolveBookingGridLabel,
   resolveOrganizerFromBooking,
 } from './utils/bookingDisplay';
+import { shouldShowRawBookingInGrid } from './utils/reservationListFilters';
 import {
   pixelsToTime,
   timeToPixels,
@@ -621,7 +622,7 @@ function schedulePendingTournamentStartClear(tournamentId: string, expectedSeq: 
     }, 2500);
 }
 
-/** Grid hides bookings still competing for the court; list shows all. */
+/** Grid: no competing courts; incomplete matches only if 4 players or 100% paid. List shows all. */
 function mapBookings(
     rawBookings: any[],
     courtsData: Court[],
@@ -631,7 +632,7 @@ function mapBookings(
     const visible =
         surface === 'list'
             ? rawBookings
-            : rawBookings.filter((b: any) => b.court_contention_status !== 'competing');
+            : rawBookings.filter((b: any) => shouldShowRawBookingInGrid(b));
     return visible.map((b: any) => {
         const start = new Date(b.start_at);
         const organizer = resolveOrganizerFromBooking(b);

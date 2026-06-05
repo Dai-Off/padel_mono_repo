@@ -60,9 +60,16 @@ export type PartidoItem = {
   matchType?: string | null;
   matchStatus?: string;
   bookingStatus?: string;
-  scoreStatus?: 'pending' | 'confirmed' | 'disputed' | null;
+  scoreStatus?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | null;
   hasMyFeedback?: boolean;
+  sets?: Array<{ a: number; b: number }> | null;
+  myTeam?: 'A' | 'B' | null;
+  myResult?: 'win' | 'loss' | 'draw' | 'pending' | null;
+  matchEndReason?: string | null;
   courtSport?: string;
+  startAtIso?: string;
+  eloMin?: number | null;
+  eloMax?: number | null;
   clubId?: string;
   startAt?: string;
   endAt?: string;
@@ -95,6 +102,7 @@ export function PartidosScreen({
     openPartidos,
     myPartidos,
     loading,
+    misPartidosLoading,
     organizerPlayerId,
     clubs,
     clubsLoading,
@@ -159,10 +167,10 @@ export function PartidosScreen({
 
         <View style={[styles.section, { marginTop: theme.spacing.xl }]}>
           <Text style={styles.sectionTitle}>Mis partidos</Text>
-          <Text style={styles.sectionSubtitle}>Tus reservas privadas</Text>
+          <Text style={styles.sectionSubtitle}>Tus reservas y partidos que organizas</Text>
         </View>
         <View style={styles.list}>
-          {loading ? (
+          {misPartidosLoading && myPartidos.length === 0 ? (
             <>
               <PartidoOpenCardSkeleton />
               <PartidoOpenCardSkeleton />
@@ -178,7 +186,7 @@ export function PartidosScreen({
             ))
           ) : (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No tienes partidos privados</Text>
+              <Text style={styles.emptyText}>No tienes partidos próximos</Text>
             </View>
           )}
         </View>
@@ -251,7 +259,7 @@ export function PartidosScreen({
         organizerPlayerId={organizerPlayerId}
         onContinueWeMatch={() => {
           setLocationModalVisible(false);
-          onOpenWeMatchClubsFlow?.(organizerPlayerId);
+          onOpenWeMatchClubsFlow?.(organizerPlayerId ?? null);
         }}
         onClose={() => setLocationModalVisible(false)}
         onSiguiente={() => {}}

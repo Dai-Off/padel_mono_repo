@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
+import { matchAffectsElo } from '../lib/openMatchRules';
 import { applyFriendlyPlayCounts, runLevelingPipeline, type ScoreSet } from '../services/levelingService';
 import { runFraudCheck } from '../services/fraudService';
 import { FEEDBACK_WINDOW_HOURS, MAX_DISPUTE_ROUNDS } from '../lib/levelingConstants';
@@ -284,16 +285,17 @@ router.post('/:id/score/confirm', async (req: Request, res: Response) => {
     .update({ score_status: 'confirmed', score_confirmed_at: now, updated_at: now })
     .eq('id', matchId)
     .eq('score_status', 'pending_confirmation')
-    .select('id, competitive')
+    .select('id, competitive, type')
     .maybeSingle();
 
   if (e2) return res.status(500).json({ ok: false, error: e2.message });
   if (!upd) return res.status(409).json({ ok: false, error: 'No se puede confirmar en este estado' });
 
-  const competitive = !!(upd as { competitive?: boolean }).competitive;
+  const row = upd as { competitive?: boolean; type?: string };
+  const affectsElo = matchAffectsElo(!!row.competitive, row.type);
 
   try {
-    if (competitive) {
+    if (affectsElo) {
       await runLevelingPipeline(matchId);
       runFraudCheck(matchId).catch((e) => console.error('[fraud]', e));
     } else {
@@ -460,14 +462,15 @@ router.post('/:id/score/resolve', async (req: Request, res: Response) => {
       .update({ score_status: 'confirmed', score_confirmed_at: now, updated_at: now })
       .eq('id', matchId)
       .eq('score_status', 'disputed_pending')
-      .select('id, competitive')
+      .select('id, competitive, type')
       .maybeSingle();
     if (e2) return res.status(500).json({ ok: false, error: e2.message });
     if (!upd) return res.status(409).json({ ok: false, error: 'No se pudo confirmar' });
 
-    const competitive = !!(upd as { competitive?: boolean }).competitive;
+    const row = upd as { competitive?: boolean; type?: string };
+    const affectsElo = matchAffectsElo(!!row.competitive, row.type);
     try {
-      if (competitive) {
+      if (affectsElo) {
         await runLevelingPipeline(matchId);
         runFraudCheck(matchId).catch((e) => console.error('[fraud]', e));
       } else {

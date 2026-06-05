@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
-import { loadStoredPreferredClubIds, saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
+import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
+import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import { useClubCatalog } from './useClubCatalog';
 
 export function useFavoriteClubsSelection() {
@@ -20,27 +21,10 @@ export function useFavoriteClubsSelection() {
 
     let cancelled = false;
     void (async () => {
-      const stored = await loadStoredPreferredClubIds();
+      const ids = await resolveSavedFavoriteClubIds(profile, clubCatalog);
       if (cancelled || initialSeedDoneRef.current) return;
-
-      if (stored.length > 0) {
-        initialSeedDoneRef.current = true;
-        setSelectedIds(stored);
-        setHydrated(true);
-        return;
-      }
-
-      if (!profile) return;
-
       initialSeedDoneRef.current = true;
-      const favNames = new Set(
-        (profile.preferences.favoriteClubs ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean),
-      );
-      if (favNames.size > 0) {
-        setSelectedIds(
-          clubCatalog.filter((c) => favNames.has(c.name.trim().toLowerCase())).map((c) => c.id),
-        );
-      }
+      setSelectedIds(ids);
       setHydrated(true);
     })();
 

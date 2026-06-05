@@ -1,0 +1,37 @@
+import { fetchMatchById } from '../api/matches';
+import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import type { PartidoItem } from '../screens/PartidosScreen';
+
+const RETRY_MS = 600;
+const MAX_PLAYER_RETRIES = 6;
+
+/** Carga el partido expandido; reintentos cubren desfase justo tras confirmar pago. */
+export async function reloadMatchPartido(
+  matchId: string,
+  token: string,
+  opts?: {
+    retryIfMissingPlayerId?: string;
+    viewerPlayerId?: string | null;
+    maxRetries?: number;
+  },
+): Promise<PartidoItem | null> {
+  const load = async () => {
+    const m = await fetchMatchById(matchId, token);
+    return m ? mapMatchToPartido(m, { viewerPlayerId: opts?.viewerPlayerId ?? null }) : null;
+  };
+
+  let partido = await load();
+  const pid = opts?.retryIfMissingPlayerId?.trim();
+  if (!pid) return partido;
+
+  const maxRetries = opts?.maxRetries ?? MAX_PLAYER_RETRIES;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    if (!partido) break;
+    const inIds = (partido.playerIds ?? []).includes(pid);
+    const inSlots = (partido.playerIdsBySlot ?? []).some((id) => id === pid);
+    if (inIds || inSlots) break;
+    await new Promise((r) => setTimeout(r, RETRY_MS));
+    partido = await load();
+  }
+  return partido;
+}

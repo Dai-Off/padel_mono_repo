@@ -9,6 +9,13 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import { PlayerAvatarCircle } from "../profile/PlayerAvatarCircle";
+import { useHomeData } from "../../contexts/HomeDataContext";
+import {
+  resolvePlayerDisplayAvatar,
+  resolvePlayerDisplayInitials,
+  type ProfileForPartidoEnrich,
+} from "../../lib/partidoPlayerUtils";
 import type { PartidoItem, PartidoPlayer } from "../../screens/PartidosScreen";
 
 import { useAmbientTheme } from "../../hooks/useAmbientTheme";
@@ -74,7 +81,18 @@ type Props = {
   fullWidth?: boolean;
 };
 
-function PlayerFace({ player, colors }: { player: PartidoPlayer; colors: [string, string] }) {
+function PlayerFace({
+  player,
+  slotIndex,
+  playerIdsBySlot,
+  currentProfile,
+}: {
+  player: PartidoPlayer;
+  slotIndex: number;
+  playerIdsBySlot?: Array<string | null>;
+  currentProfile: ProfileForPartidoEnrich | null;
+}) {
+  const displayOpts = { slotIndex, playerIdsBySlot };
   if (player.isFree) {
     return (
       <View style={styles.slotFree}>
@@ -82,34 +100,31 @@ function PlayerFace({ player, colors }: { player: PartidoPlayer; colors: [string
       </View>
     );
   }
-  if (player.avatar) {
-    return (
-      <View style={styles.slotFill}>
-        <Image
-          source={{ uri: player.avatar }}
-          style={styles.slotAvatar}
-          resizeMode="cover"
-        />
-      </View>
-    );
-  }
   return (
-    <LinearGradient
-      colors={colors}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.slotFill}
-    >
-      <Text style={styles.slotInitials} numberOfLines={1}>
-        {(player.initial ?? player.name?.slice(0, 2) ?? "?").toUpperCase()}
-      </Text>
-    </LinearGradient>
+    <View style={styles.slotFill}>
+      <PlayerAvatarCircle
+        avatarUrl={resolvePlayerDisplayAvatar(player, currentProfile, displayOpts)}
+        initials={resolvePlayerDisplayInitials(player, currentProfile, displayOpts)}
+        size={40}
+        borderRadius={8}
+      />
+    </View>
   );
 }
 
 /** Tarjeta alineada al listado web (imagen + meta + slots horizontales). */
 export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
   const theme = useAmbientTheme(OPENWEATHER_API_KEY);
+  const { profile } = useHomeData();
+  const currentProfile: ProfileForPartidoEnrich | null = profile?.id
+    ? {
+        id: profile.id,
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        username: profile.username,
+        avatarUrl: profile.avatarUrl,
+      }
+    : null;
   const color1 = `rgb(${theme.orb1Color})`;
   const color2 = `rgb(${theme.orb2Color})`;
 
@@ -193,7 +208,13 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
               contentContainerStyle={styles.slotsRow}
             >
               {item.players.map((p, i) => (
-                <PlayerFace key={i} player={p} colors={[color1, color2]} />
+                <PlayerFace
+                  key={i}
+                  player={p}
+                  slotIndex={i}
+                  playerIdsBySlot={item.playerIdsBySlot}
+                  currentProfile={currentProfile}
+                />
               ))}
               {libres > 0 ? (
                 <Text style={[styles.libresTxt, { color: color1 }]}>{libres} libres</Text>

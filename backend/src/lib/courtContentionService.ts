@@ -43,13 +43,8 @@ export function bookingBlocksCourtForAvailability(booking: {
   if (booking.court_contention_status === 'competing') return false;
   if (booking.court_contention_status === 'lost') return false;
   if (booking.court_contention_status === 'won') return true;
-  if (
-    !booking.court_contention_status &&
-    booking.status === 'pending_payment' &&
-    (rt === 'open_match' || rt === 'standard')
-  ) {
-    return false;
-  }
+  if (booking.status === 'confirmed') return true;
+  if (rt === 'open_match' || rt === 'standard') return true;
   return true;
 }
 

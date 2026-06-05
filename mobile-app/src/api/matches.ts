@@ -13,6 +13,7 @@ export type Match = {
   status: string;
   score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | null;
   sets?: Array<{ a: number; b: number }> | null;
+  match_end_reason?: string | null;
   type?: string | null;
   /** Solo en /matches/mine: indica si el jugador autenticado ya envió feedback. */
   has_my_feedback?: boolean;
@@ -32,6 +33,7 @@ type MatchPlayerRef = {
   team: 'A' | 'B';
   created_at: string;
   slot_index?: number | null;
+  result?: 'win' | 'loss' | 'draw' | 'pending' | string | null;
   players: PlayerRef | null;
 };
 
@@ -78,10 +80,29 @@ type FetchMatchesOptions = {
   dateTo?: string;
   /** Filtra partidos del club (expand + backend). */
   clubId?: string;
+  visibility?: 'public' | 'private';
+  /** Listado optimizado para Buscar partido (públicos activos, orden por hora). */
+  discovery?: boolean;
+  /** Con discovery: solo partidos con plaza libre (por defecto en backend). */
+  joinableOnly?: boolean;
+  /** Con discovery: máximo de filas (backend cap 150). */
+  limit?: number;
 };
 
 export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<MatchEnriched[]> {
-  const { bookingId, expand = true, token, activeOnly = true, dateFrom, dateTo, clubId } = options;
+  const {
+    bookingId,
+    expand = true,
+    token,
+    activeOnly = true,
+    dateFrom,
+    dateTo,
+    clubId,
+    visibility,
+    discovery,
+    joinableOnly,
+    limit,
+  } = options;
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -93,6 +114,10 @@ export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<M
   if (dateFrom) url.searchParams.set('date_from', dateFrom);
   if (dateTo) url.searchParams.set('date_to', dateTo);
   if (clubId) url.searchParams.set('club_id', clubId);
+  if (visibility) url.searchParams.set('visibility', visibility);
+  if (discovery) url.searchParams.set('discovery', '1');
+  if (discovery && joinableOnly !== false) url.searchParams.set('joinable_only', '1');
+  if (discovery && limit != null && limit > 0) url.searchParams.set('limit', String(Math.trunc(limit)));
 
   try {
     const res = await fetch(url.toString(), { headers });
@@ -291,7 +316,14 @@ export async function fetchMatchById(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
-    const res = await fetch(`${API_URL}/matches/${matchId}?expand=1`, { headers });
+    const res = await fetch(`${API_URL}/matches/${matchId}?expand=1`, {
+      headers: {
+        ...headers,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
+    });
     if (!res.ok) return null;
     const json = (await res.json()) as MatchResponse;
     if (json.ok && json.match) return normalizeMatchList([json.match as MatchEnriched])[0] ?? null;
