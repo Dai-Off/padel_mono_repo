@@ -173,6 +173,7 @@ const SELECT_PUBLIC_INTERNAL = `
   preferred_match_duration_min, preferred_partner_level, favorite_clubs,
   notif_new_matches, notif_tournament_reminders, notif_class_updates, notif_chat_messages,
   affinity_visible,
+  play_location, birth_date, profile_description,
   onboarding_completed,
   liga, lps, mm_peak_liga
 `;
@@ -644,10 +645,86 @@ router.patch('/me', async (req: Request, res: Response) => {
     usernameFinal = un.value;
   }
 
-  if (!firstFinal && avatarNorm.mode === 'omit' && coverNorm.mode === 'omit' && !hasPhone && !prefsNorm.hasAny && !hasUsername) {
+  const hasPlayLocation = Object.prototype.hasOwnProperty.call(body, 'play_location');
+  let playLocationFinal: string | null | undefined = undefined;
+  if (hasPlayLocation) {
+    const raw = body.play_location;
+    if (raw === null) {
+      playLocationFinal = null;
+    } else if (typeof raw !== 'string') {
+      return res.status(400).json({ ok: false, error: 'play_location debe ser texto o null' });
+    } else {
+      const t = raw.trim();
+      if (t.length > 200) {
+        return res.status(400).json({ ok: false, error: 'play_location admite como máximo 200 caracteres' });
+      }
+      playLocationFinal = t || null;
+    }
+  }
+
+  const hasGender = Object.prototype.hasOwnProperty.call(body, 'gender');
+  let genderFinal: string | undefined = undefined;
+  if (hasGender) {
+    if (typeof body.gender !== 'string' || !['male', 'female', 'other'].includes(body.gender)) {
+      return res.status(400).json({ ok: false, error: "gender debe ser 'male', 'female' u 'other'" });
+    }
+    genderFinal = body.gender;
+  }
+
+  const hasBirthDate = Object.prototype.hasOwnProperty.call(body, 'birth_date');
+  let birthDateFinal: string | null | undefined = undefined;
+  if (hasBirthDate) {
+    const raw = body.birth_date;
+    if (raw === null) {
+      birthDateFinal = null;
+    } else if (typeof raw !== 'string') {
+      return res.status(400).json({ ok: false, error: 'birth_date debe ser texto (YYYY-MM-DD) o null' });
+    } else {
+      const t = raw.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+        return res.status(400).json({ ok: false, error: 'birth_date debe tener formato YYYY-MM-DD' });
+      }
+      const d = new Date(`${t}T00:00:00Z`);
+      const year = Number(t.slice(0, 4));
+      if (Number.isNaN(d.getTime()) || year < 1900 || d.getTime() > Date.now()) {
+        return res.status(400).json({ ok: false, error: 'birth_date no es una fecha válida' });
+      }
+      birthDateFinal = t;
+    }
+  }
+
+  const hasProfileDescription = Object.prototype.hasOwnProperty.call(body, 'profile_description');
+  let profileDescriptionFinal: string | null | undefined = undefined;
+  if (hasProfileDescription) {
+    const raw = body.profile_description;
+    if (raw === null) {
+      profileDescriptionFinal = null;
+    } else if (typeof raw !== 'string') {
+      return res.status(400).json({ ok: false, error: 'profile_description debe ser texto o null' });
+    } else {
+      const t = raw.trim();
+      if (t.length > 100) {
+        return res.status(400).json({ ok: false, error: 'profile_description admite como máximo 100 caracteres' });
+      }
+      profileDescriptionFinal = t || null;
+    }
+  }
+
+  if (
+    !firstFinal &&
+    avatarNorm.mode === 'omit' &&
+    coverNorm.mode === 'omit' &&
+    !hasPhone &&
+    !prefsNorm.hasAny &&
+    !hasUsername &&
+    !hasPlayLocation &&
+    !hasGender &&
+    !hasBirthDate &&
+    !hasProfileDescription
+  ) {
     return res.status(400).json({
       ok: false,
-      error: 'Envía first_name y last_name, y/o avatar_url, y/o cover_url, y/o phone, y/o username, y/o preferencias',
+      error: 'Envía first_name y last_name, y/o avatar_url, y/o cover_url, y/o phone, y/o username, y/o preferencias, y/o datos de perfil (play_location, gender, birth_date, profile_description)',
     });
   }
 
@@ -732,6 +809,18 @@ router.patch('/me', async (req: Request, res: Response) => {
     }
     if (usernameFinal !== undefined) {
       patch.username = usernameFinal;
+    }
+    if (playLocationFinal !== undefined) {
+      patch.play_location = playLocationFinal;
+    }
+    if (genderFinal !== undefined) {
+      patch.gender = genderFinal;
+    }
+    if (birthDateFinal !== undefined) {
+      patch.birth_date = birthDateFinal;
+    }
+    if (profileDescriptionFinal !== undefined) {
+      patch.profile_description = profileDescriptionFinal;
     }
     Object.assign(patch, prefsNorm.patch);
 
