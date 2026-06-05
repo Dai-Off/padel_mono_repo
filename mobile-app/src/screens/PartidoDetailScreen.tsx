@@ -258,6 +258,28 @@ export function PartidoDetailScreen({
   const needsOnboardingForJoin =
     isCompetitiveMatch && myProfile != null && myProfile.onboardingCompleted === false;
 
+  const matchKindBadge = useMemo(() => {
+    if (partido.matchType === 'matchmaking') {
+      return {
+        label: 'Partido Competitivo',
+        style: styles.badgeCompetitive,
+        icon: 'flash' as const,
+      };
+    }
+    if (partido.visibility === 'private') {
+      return {
+        label: 'Partido Privado',
+        style: styles.badgePrivate,
+        icon: 'lock-closed' as const,
+      };
+    }
+    return {
+      label: 'Partido Abierto',
+      style: styles.badgeOpen,
+      icon: null,
+    };
+  }, [partido.matchType, partido.visibility]);
+
   useEffect(() => {
     const token = session?.access_token;
     if (!token) return;
@@ -813,8 +835,13 @@ export function PartidoDetailScreen({
             </View>
             <View style={styles.heroBottom}>
               <View style={styles.heroBadgesRow}>
-                <View style={styles.badgeAuto}>
-                  <Text style={styles.badgeAutoText}>Automático</Text>
+                <View style={[styles.matchKindBadge, matchKindBadge.style]}>
+                  {matchKindBadge.icon ? (
+                    <Ionicons name={matchKindBadge.icon} size={10} color="#fff" />
+                  ) : (
+                    <PulseDot />
+                  )}
+                  <Text style={styles.matchKindBadgeText}>{matchKindBadge.label}</Text>
                 </View>
                 <View style={styles.badgePadel}>
                   <Text style={styles.badgePadelText}>Pádel</Text>
@@ -948,13 +975,6 @@ export function PartidoDetailScreen({
                     </Text>
                   </Pressable>
                 </View>
-              </View>
-
-              <View style={styles.statusPill}>
-                <PulseDot />
-                <Text style={styles.statusPillText}>
-                  Partido{'\n'}Abierto
-                </Text>
               </View>
             </View>
           </View>
@@ -1368,18 +1388,29 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   heroBadgesRow: { flexDirection: 'row', gap: 8, marginBottom: 6 },
-  badgeAuto: {
+  matchKindBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: 'rgba(241,143,52,0.9)',
   },
-  badgeAutoText: {
+  matchKindBadgeText: {
     fontSize: 10,
     fontWeight: '800',
     color: '#fff',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  badgeOpen: {
+    backgroundColor: 'rgba(241,143,52,0.9)',
+  },
+  badgePrivate: {
+    backgroundColor: 'rgba(107,114,128,0.85)',
+  },
+  badgeCompetitive: {
+    backgroundColor: 'rgba(217,119,6,0.95)',
   },
   badgePadel: {
     paddingHorizontal: 10,
@@ -1546,32 +1577,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 14,
     alignSelf: 'stretch',
-    ...Platform.select({
-      android: {
-        includeFontPadding: false,
-      },
-    }),
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    overflow: 'visible',
-  },
-  statusPillText: {
-    marginLeft: 10,
-    flexShrink: 0,
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-    lineHeight: 17,
-    textAlign: 'left',
     ...Platform.select({
       android: {
         includeFontPadding: false,

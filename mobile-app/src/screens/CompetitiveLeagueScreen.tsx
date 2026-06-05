@@ -1,12 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import Slider from '@react-native-community/slider';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MATCHMAKING_DEMO } from '../config';
 import { haversineKm } from '../lib/geoDistance';
-import { resolveDeviceSearchCoordinates, type SearchCoordinates } from '../lib/matchSearchLocation';
+import {
+  probeDeviceLocationIssue,
+  resolveDeviceSearchCoordinatesFast,
+  type LocationIssue,
+  type SearchCoordinates,
+} from '../lib/matchSearchLocation';
 import { useAuth } from '../contexts/AuthContext';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
@@ -105,6 +111,7 @@ export function CompetitiveLeagueScreen({
   const [distanceKm, setDistanceKm] = useState(10);
   const [searchCoords, setSearchCoords] = useState<SearchCoordinates | null>(null);
   const [searchCoordsLoading, setSearchCoordsLoading] = useState(false);
+  const [locationIssue, setLocationIssue] = useState<LocationIssue | null>(null);
   const [countdownText, setCountdownText] = useState<string>('--:--:--');
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAppliedEntryIntentRef = useRef<'default' | 'queue' | 'prefs' | null>(null);
@@ -283,23 +290,94 @@ export function CompetitiveLeagueScreen({
     return preferredClubIds.map((id) => byId.get(id) ?? 'Club');
   }, [clubCatalog, preferredClubIds]);
 
+  const refreshSearchCoords = useCallback(async () => {
+    if (MATCHMAKING_DEMO || preferredClubIds.length > 0) {
+      setSearchCoords(null);
+      setLocationIssue(null);
+      setSearchCoordsLoading(false);
+      return;
+    }
+    const issue = await probeDeviceLocationIssue();
+    if (issue) {
+      setLocationIssue(issue);
+      setSearchCoords(null);
+      setSearchCoordsLoading(false);
+      return;
+    }
+    setLocationIssue(null);
+    setSearchCoordsLoading(true);
+    const res = await resolveDeviceSearchCoordinatesFast(5000);
+    setSearchCoordsLoading(false);
+    if (res.ok) {
+      setSearchCoords(res.coords);
+      setLocationIssue(null);
+    } else {
+      setSearchCoords(null);
+      setLocationIssue({ message: res.error, action: 'retry' });
+    }
+  }, [preferredClubIds.length]);
+
   useEffect(() => {
     if (MATCHMAKING_DEMO || step !== 'prefs' || preferredClubIds.length > 0) {
       if (MATCHMAKING_DEMO) setSearchCoords(null);
+      if (preferredClubIds.length > 0) {
+        setLocationIssue(null);
+        setSearchCoordsLoading(false);
+      }
       return;
     }
     let cancelled = false;
     void (async () => {
+      const issue = await probeDeviceLocationIssue();
+      if (cancelled) return;
+      if (issue) {
+        setLocationIssue(issue);
+        setSearchCoords(null);
+        setSearchCoordsLoading(false);
+        return;
+      }
+      setLocationIssue(null);
       setSearchCoordsLoading(true);
-      const res = await resolveDeviceSearchCoordinates();
+      const res = await resolveDeviceSearchCoordinatesFast(5000);
       if (cancelled) return;
       setSearchCoordsLoading(false);
-      setSearchCoords(res.ok ? res.coords : null);
+      if (res.ok) {
+        setSearchCoords(res.coords);
+        setLocationIssue(null);
+      } else {
+        setSearchCoords(null);
+        setLocationIssue({ message: res.error, action: 'retry' });
+      }
     })();
     return () => {
       cancelled = true;
     };
   }, [step, preferredClubIds.length]);
+
+  const handleActivateLocation = useCallback(async () => {
+    const perm = await Location.getForegroundPermissionsAsync();
+    if (perm.status === 'undetermined') {
+      const req = await Location.requestForegroundPermissionsAsync();
+      if (req.status !== 'granted') {
+        setLocationIssue({
+          message:
+            'Activa el permiso de ubicación para buscar por distancia, o elegí uno o más clubes preferidos.',
+          action: 'open_settings',
+        });
+        return;
+      }
+    } else if (perm.status !== 'granted') {
+      await Linking.openSettings();
+      return;
+    } else {
+      const servicesOn = await Location.hasServicesEnabledAsync();
+      if (!servicesOn) {
+        await Linking.openSettings();
+        return;
+      }
+    }
+    await refreshSearchCoords();
+  }, [refreshSearchCoords]);
 
   const clubsInRange = useMemo(() => {
     if (preferredClubIds.length > 0) return [];
@@ -391,7 +469,6 @@ export function CompetitiveLeagueScreen({
       setErrorText('Necesitas iniciar sesión para buscar partido.');
       return;
     }
-    setLoading(true);
     setErrorText(null);
     clearPollTimer();
     const { availableFrom, availableUntil } = computeMatchAvailabilityWindow(form);
@@ -404,7 +481,6 @@ export function CompetitiveLeagueScreen({
     if (MATCHMAKING_DEMO) {
       const allClubIds = clubCatalog.map((c) => c.id).slice(0, 20);
       if (allClubIds.length === 0) {
-        setLoading(false);
         setErrorText('No hay clubes cargados para buscar partido.');
         return;
       }
@@ -412,25 +488,26 @@ export function CompetitiveLeagueScreen({
     } else if (preferredClubIds.length > 0) {
       payload.preferred_club_ids = preferredClubIds.slice(0, 20);
     } else {
+      const issue = await probeDeviceLocationIssue();
+      if (issue) {
+        setLocationIssue(issue);
+        return;
+      }
       const maxKm = Math.max(1, Math.min(50, Math.round(distanceKm)));
       const loc = searchCoords
         ? { ok: true as const, coords: searchCoords }
-        : await resolveDeviceSearchCoordinates();
+        : await resolveDeviceSearchCoordinatesFast(4000);
       if (!loc.ok) {
-        const fallbackIds = await resolveSavedFavoriteClubIds(profile, clubCatalog);
-        if (fallbackIds.length > 0) {
-          payload.preferred_club_ids = fallbackIds.slice(0, 20);
-        } else {
-          setLoading(false);
-          setErrorText(loc.error);
-          return;
-        }
-      } else {
-        payload.max_distance_km = maxKm;
-        payload.search_lat = loc.coords.lat;
-        payload.search_lng = loc.coords.lng;
+        setLocationIssue({ message: loc.error, action: 'retry' });
+        return;
       }
+      setSearchCoords(loc.coords);
+      setLocationIssue(null);
+      payload.max_distance_km = maxKm;
+      payload.search_lat = loc.coords.lat;
+      payload.search_lng = loc.coords.lng;
     }
+    setLoading(true);
     const result = await joinMatchmaking(payload, token);
     if (!result.ok && !result.alreadyInQueue) {
       setLoading(false);
@@ -451,7 +528,6 @@ export function CompetitiveLeagueScreen({
     preferredClubIds,
     searchCoords,
     clubCatalog,
-    profile,
     session?.access_token,
     setQueueElapsedSec,
     setQueueStartedAtMs,
@@ -844,6 +920,30 @@ export function CompetitiveLeagueScreen({
             </View>
           </View>
 
+          {!MATCHMAKING_DEMO && preferredClubIds.length === 0 && locationIssue ? (
+            <View style={styles.locationBanner}>
+              <View style={styles.locationBannerHead}>
+                <Ionicons name="location-outline" size={18} color="#fca5a5" />
+                <Text style={styles.locationBannerText}>{locationIssue.message}</Text>
+              </View>
+              <View style={styles.locationBannerActions}>
+                <Pressable
+                  style={styles.locationBannerBtn}
+                  onPress={() => void handleActivateLocation()}
+                >
+                  <Ionicons name="navigate-outline" size={14} color="#fff" />
+                  <Text style={styles.locationBannerBtnText}>Activar ubicación</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.locationBannerBtnSecondary}
+                  onPress={() => setClubPickerVisible(true)}
+                >
+                  <Text style={styles.locationBannerBtnSecondaryText}>Elegir clubes</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.prefsCard}>
             <Text style={styles.prefsSectionTitle}>Formato de partido</Text>
             <View style={styles.fixedModeRow}>
@@ -923,7 +1023,9 @@ export function CompetitiveLeagueScreen({
                       ? 'Cargando clubes…'
                       : searchCoords
                         ? `Ningún club dentro de ${distanceKm} km. Ampliá la distancia o elegí clubes preferidos.`
-                        : 'Activa ubicación para ver clubes disponibles.'}
+                        : locationIssue
+                          ? 'Sin ubicación activa. Activá el GPS o elegí clubes preferidos arriba.'
+                          : 'Activa ubicación para ver clubes disponibles.'}
                   </Text>
                 ) : (
                   clubsInRange.slice(0, 8).map((club) => (
@@ -1709,4 +1811,35 @@ const styles = StyleSheet.create({
   },
   foundWarningText: { color: '#fca5a5', fontSize: 12, fontWeight: '600' },
   errorText: { color: '#fca5a5', fontSize: 12, marginTop: 4 },
+  locationBanner: {
+    marginBottom: 14,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.45)',
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    gap: 10,
+  },
+  locationBannerHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  locationBannerText: { flex: 1, color: '#fca5a5', fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  locationBannerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  locationBannerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F18F34',
+  },
+  locationBannerBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  locationBannerBtnSecondary: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  locationBannerBtnSecondaryText: { color: '#e5e7eb', fontSize: 12, fontWeight: '600' },
 });
