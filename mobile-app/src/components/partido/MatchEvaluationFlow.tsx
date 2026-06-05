@@ -308,12 +308,18 @@ export function MatchEvaluationFlow({
         const themSets = parsed.filter((s) => s.them > s.us).length;
         const isDraw = usSets === themSets;
 
+        // Move to step 3 (feedback) immediately to prevent voting screens/banners from flashing
+        setSectionIndex(2);
+
         const propRes = await onProposeScore(apiSets, isDraw ? 'draw' : 'completed');
         setSubmitting(false);
         if (!propRes.ok) {
+          // Revert back to step 2 if proposal failed
+          setSectionIndex(1);
           Alert.alert('No se pudo guardar el marcador', propRes.error ?? 'Error de conexión');
           return;
         }
+        return;
       }
       setSectionIndex(2);
     }
@@ -1323,10 +1329,17 @@ function ScoreVoteStep({
             styles.voteBtn,
             styles.voteBtnReject,
             pressed && styles.pressed,
+            submitting && { opacity: 0.5 },
           ]}
         >
-          <Ionicons name="close-circle" size={24} color="#f87171" />
-          <Text style={styles.voteBtnTextReject}>Rechazar</Text>
+          {submitting ? (
+            <ActivityIndicator color="#f87171" size="small" />
+          ) : (
+            <>
+              <Ionicons name="close-circle" size={24} color="#f87171" />
+              <Text style={styles.voteBtnTextReject}>Rechazar</Text>
+            </>
+          )}
         </Pressable>
         <Pressable
           onPress={() => onVote('confirm')}
@@ -1335,10 +1348,17 @@ function ScoreVoteStep({
             styles.voteBtn,
             styles.voteBtnConfirm,
             pressed && styles.pressed,
+            submitting && { opacity: 0.5 },
           ]}
         >
-          <Ionicons name="checkmark-circle" size={24} color="#34d399" />
-          <Text style={styles.voteBtnTextConfirm}>Confirmar</Text>
+          {submitting ? (
+            <ActivityIndicator color="#34d399" size="small" />
+          ) : (
+            <>
+              <Ionicons name="checkmark-circle" size={24} color="#34d399" />
+              <Text style={styles.voteBtnTextConfirm}>Confirmar</Text>
+            </>
+          )}
         </Pressable>
       </View>
     </View>
