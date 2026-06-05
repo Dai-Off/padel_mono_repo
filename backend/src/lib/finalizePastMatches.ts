@@ -1,5 +1,65 @@
 import { getSupabaseServiceRoleClient } from './supabase';
 
+async function autoConfirmExpiredVotes(): Promise<void> {
+  const supabase = getSupabaseServiceRoleClient();
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+
+  const { data: matchesToConfirm, error: selectErr } = await supabase
+    .from('matches')
+    .select('id, competitive, type')
+    .eq('score_status', 'pending_votes')
+    .lt('score_proposed_at', twentyFourHoursAgo);
+
+  if (selectErr) {
+    console.error('[autoConfirmExpiredVotes] select failed:', selectErr.message);
+    return;
+  }
+
+  if (matchesToConfirm && matchesToConfirm.length > 0) {
+    const { runLevelingPipeline, applyFriendlyPlayCounts } = require('../services/levelingService');
+    const { matchAffectsElo } = require('./openMatchRules');
+    const { runFraudCheck } = require('../services/fraudService');
+
+    for (const match of matchesToConfirm) {
+      const now = new Date().toISOString();
+      const { data: upd, error: updErr } = await supabase
+        .from('matches')
+        .update({ score_status: 'confirmed', score_confirmed_at: now, updated_at: now })
+        .eq('id', match.id)
+        .eq('score_status', 'pending_votes')
+        .select('id')
+        .maybeSingle();
+
+      if (updErr) {
+        console.error('[autoConfirmExpiredVotes] update failed for match:', match.id, updErr.message);
+        continue;
+      }
+
+      if (upd) {
+        const affectsElo = matchAffectsElo(!!match.competitive, match.type);
+        try {
+          if (affectsElo) {
+            await runLevelingPipeline(match.id);
+            runFraudCheck(match.id).catch((e: any) => console.error('[autoConfirm fraud]', e));
+          } else {
+            await applyFriendlyPlayCounts(match.id);
+          }
+        } catch (pipelineErr) {
+          console.error('[autoConfirmExpiredVotes] pipeline failed for match:', match.id, pipelineErr);
+          await supabase
+            .from('matches')
+            .update({
+              score_status: 'pending_votes',
+              score_confirmed_at: null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', match.id);
+        }
+      }
+    }
+  }
+}
+
 /**
  * Marca como finished los partidos cuya reserva ya terminó (bookings.end_at < now).
  * No requiere acción humana: alinea `matches.status` con la realidad horaria.
@@ -8,6 +68,13 @@ import { getSupabaseServiceRoleClient } from './supabase';
 export async function finalizePastMatches(): Promise<number> {
   const supabase = getSupabaseServiceRoleClient();
   const nowIso = new Date().toISOString();
+
+  // Ejecuta la auto-confirmación de partidos con votos pendientes expirados (> 24h)
+  try {
+    await autoConfirmExpiredVotes();
+  } catch (err) {
+    console.error('[finalizePastMatches] autoConfirmExpiredVotes failed:', err);
+  }
 
   // Incluye todos los estados "activos" — no solo 'pending'/'in_progress'.
   // En este sistema los partidos se crean con status 'open' o 'full'.

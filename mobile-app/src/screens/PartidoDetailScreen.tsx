@@ -26,6 +26,7 @@ import {
   prepareJoin,
   submitMatchFeedback,
   submitMatchScore,
+  voteMatchScore,
   type SubmitMatchFeedbackBody,
 } from '../api/matches';
 import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
@@ -583,10 +584,82 @@ export function PartidoDetailScreen({
     partido.matchStatus === 'pending' &&
     partido.bookingStatus === 'pending_payment' &&
     matchPhase !== 'past';
-  const handleSubmitEvaluation = useCallback(
-    async (payload: MatchEvaluationPayload) => {
+  const handleProposeScore = useCallback(
+    async (apiSets: Array<{ a: number; b: number }>, matchEndReason?: string) => {
       const token = session?.access_token;
-      if (!token) return { ok: false as const, error: 'Necesitas iniciar sesión para guardar el feedback.' };
+      if (!token) return { ok: false, error: 'Necesitas iniciar sesión para guardar el marcador.' };
+      const res = await submitMatchScore(
+        partido.id,
+        { sets: apiSets, match_end_reason: matchEndReason as any },
+        token
+      );
+      if (res.ok) {
+        const fresh = await fetchMatchById(partido.id, token);
+        if (fresh) {
+          setPartido(prev => ({
+            ...prev,
+            score_status: fresh.score_status,
+            sets: fresh.sets,
+            score_proposer_id: fresh.score_proposer_id,
+            my_score_vote: fresh.my_score_vote,
+            score_vote_counts: fresh.score_vote_counts,
+          }));
+        }
+        await refreshMatches({ scope: 'mine' });
+        return { ok: true };
+      } else {
+        if (res.status === 409) {
+          const fresh = await fetchMatchById(partido.id, token);
+          if (fresh) {
+            setPartido(prev => ({
+              ...prev,
+              score_status: fresh.score_status,
+              sets: fresh.sets,
+              score_proposer_id: fresh.score_proposer_id,
+              my_score_vote: fresh.my_score_vote,
+              score_vote_counts: fresh.score_vote_counts,
+            }));
+          }
+          return {
+            ok: false,
+            error: 'Otro jugador ya ha propuesto un marcador. La pantalla se actualizará para que puedas votar.',
+          };
+        }
+        return { ok: false, error: res.error };
+      }
+    },
+    [partido.id, session?.access_token, refreshMatches]
+  );
+
+  const handleVoteScore = useCallback(
+    async (vote: 'confirm' | 'reject') => {
+      const token = session?.access_token;
+      if (!token) return { ok: false, error: 'Necesitas iniciar sesión para votar.' };
+      const res = await voteMatchScore(partido.id, vote, token);
+      if (res.ok) {
+        const fresh = await fetchMatchById(partido.id, token);
+        if (fresh) {
+          setPartido(prev => ({
+            ...prev,
+            score_status: fresh.score_status,
+            sets: fresh.sets,
+            score_proposer_id: fresh.score_proposer_id,
+            my_score_vote: fresh.my_score_vote,
+            score_vote_counts: fresh.score_vote_counts,
+          }));
+        }
+        await refreshMatches({ scope: 'mine' });
+        return { ok: true };
+      }
+      return { ok: false, error: res.error };
+    },
+    [partido.id, session?.access_token, refreshMatches]
+  );
+
+  const handleCompleteFeedback = useCallback(
+    async (payload: { teammateRatings: any[]; feedbackText: string }) => {
+      const token = session?.access_token;
+      if (!token) return { ok: false, error: 'Necesitas iniciar sesión para enviar feedback.' };
 
       const levelRatings: SubmitMatchFeedbackBody['level_ratings'] = [];
       for (const rating of payload.teammateRatings) {
@@ -604,55 +677,9 @@ export function PartidoDetailScreen({
 
       if (levelRatings.length !== payload.teammateRatings.length) {
         return {
-          ok: false as const,
+          ok: false,
           error: 'No se pudo mapear a todos los jugadores para enviar el feedback.',
         };
-      }
-
-      let scoreSaved = false;
-      if (payload.sets.length > 0 && currentPlayerId) {
-        const fresh = await fetchMatchById(partido.id, token);
-        const scoreStatus = fresh?.score_status ?? 'pending';
-        const scoreAlreadyOnRecord =
-          scoreStatus !== 'pending' &&
-          Array.isArray(fresh?.sets) &&
-          fresh.sets.length > 0;
-
-        if (scoreAlreadyOnRecord) {
-          scoreSaved = true;
-        } else if (scoreStatus === 'pending') {
-          let team: 'A' | 'B' | null = null;
-          if (fresh?.match_players) {
-            const mine = fresh.match_players.find((mp) => mp.players?.id === currentPlayerId);
-            team = mine?.team ?? null;
-          }
-          if (!team) {
-            return {
-              ok: false as const,
-              error: 'No se pudo determinar tu equipo para guardar el marcador.',
-            };
-          }
-          const apiSets =
-            team === 'A'
-              ? payload.sets.map((s) => ({ a: s.us, b: s.them }))
-              : payload.sets.map((s) => ({ a: s.them, b: s.us }));
-          const usSets = payload.sets.filter((s) => s.us > s.them).length;
-          const themSets = payload.sets.filter((s) => s.them > s.us).length;
-          const isDraw = usSets === themSets;
-
-          const scoreRes = await submitMatchScore(
-            partido.id,
-            {
-              sets: apiSets,
-              match_end_reason: isDraw ? 'draw' : 'completed',
-            },
-            token
-          );
-          if (!scoreRes.ok) {
-            return { ok: false as const, error: scoreRes.error };
-          }
-          scoreSaved = true;
-        }
       }
 
       const res = await submitMatchFeedback(
@@ -665,26 +692,33 @@ export function PartidoDetailScreen({
       );
 
       if (!res.ok) {
-        return {
-          ok: false as const,
-          error: scoreSaved
-            ? `El marcador se guardó, pero no el feedback: ${res.error}`
-            : res.error,
-        };
+        return { ok: false, error: res.error };
       }
+
       setPartido((prev) => ({ ...prev, hasMyFeedback: true }));
       await refreshMatches({ scope: 'mine' });
-      return { ok: true as const };
+      return { ok: true };
     },
-    [
-      partido.id,
-      partido.playerIds,
-      partido.playerIdsBySlot,
-      currentPlayerId,
-      session?.access_token,
-      refreshMatches,
-    ]
+    [partido.id, partido.playerIds, partido.playerIdsBySlot, session?.access_token, refreshMatches]
   );
+
+  const handleOpenEvaluation = useCallback(async () => {
+    const token = session?.access_token;
+    if (token) {
+      const fresh = await fetchMatchById(partido.id, token);
+      if (fresh) {
+        setPartido(prev => ({
+          ...prev,
+          score_status: fresh.score_status,
+          sets: fresh.sets,
+          score_proposer_id: fresh.score_proposer_id,
+          my_score_vote: fresh.my_score_vote,
+          score_vote_counts: fresh.score_vote_counts,
+        }));
+      }
+    }
+    setEvaluationVisible(true);
+  }, [partido.id, session?.access_token]);
   /** Usuario apuntado y partido aún no cerrado: barra inferior con finalizar + papelera. */
   const playersFilledCount = partido.players.filter((p) => !p.isFree).length;
   const showFinishBar =
@@ -1075,7 +1109,7 @@ export function PartidoDetailScreen({
               <Ionicons name="exit-outline" size={22} color="#f87171" />
             </Pressable>
             <Pressable
-              onPress={() => setEvaluationVisible(true)}
+              onPress={handleOpenEvaluation}
               disabled={cancelOverlay.open}
               style={({ pressed }) => [
                 styles.finishBarCta,
@@ -1194,8 +1228,15 @@ export function PartidoDetailScreen({
         partido={partido}
         currentPlayerId={currentPlayerId}
         onClose={() => setEvaluationVisible(false)}
-        onComplete={handleSubmitEvaluation}
         onGoHome={onGoHome}
+        scoreStatus={partido.score_status ?? 'pending'}
+        currentSets={partido.sets ?? null}
+        isScoreProposer={partido.score_proposer_id === currentPlayerId}
+        hasVoted={partido.my_score_vote != null}
+        voteCounts={partido.score_vote_counts ?? null}
+        onProposeScore={handleProposeScore}
+        onVoteScore={handleVoteScore}
+        onCompleteFeedback={handleCompleteFeedback}
       />
 
       <ClubInfoSheet
