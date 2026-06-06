@@ -1,329 +1,359 @@
-# IA de afinidad — diseño de la búsqueda (estado, cambios y bases)
+# IA de afinidad — diseño y plan de implementación
 
-Fecha: 2026-06-03
+Fecha: 2026-06-06
 
-Propósito del documento: documentar **cómo funciona** la búsqueda de afinidad,
-**qué se ha cambiado** en la iteración actual, y **sentar las bases** de cómo debe
-realizarse el matching (parámetros, condiciones y arquitectura), incluyendo el
-análisis de si conviene resolverlo con un LLM (n8n) o con un algoritmo
-determinista.
+Propósito: documentar **cómo funciona** la búsqueda de afinidad, **qué se ha
+cambiado**, y **el plan de implementación** separando claramente el trabajo en
+tres frentes: **el repo**, **el workflow de n8n de DEMO** y **el workflow de n8n
+de develop (versión final)**.
 
-Decisión de producto que enmarca todo el diseño: **el objetivo de la búsqueda es
-encontrar COMPAÑERO DE PAREJA** (jugar juntos como dueto), no rival ni completar
-un grupo de cuatro. Esto condiciona el scoring (prima la complementariedad, no la
-mera similitud).
+Decisión de producto que enmarca todo: **el objetivo de la búsqueda es encontrar
+COMPAÑERO DE PAREJA** (jugar juntos como dueto), no rival ni completar un grupo de
+cuatro. Esto condiciona el scoring (prima la complementariedad, no la mera
+similitud).
+
+Estrategia de ramas acordada:
+- **DEMO** usa el **workflow de n8n actual** (se mantiene estable).
+- **develop** usará un **workflow de n8n mejorado** (muchos mejores matches).
+- **El código del flujo final vive solo en develop.** demo no lo necesita, así que
+  no lo lleva. demo y develop son ramas distintas y es normal que diverjan
+  (develop va por delante); no se fuerza un código idéntico.
+- Lo que **sí** conviene mantener sin divergencias gratuitas es la **base común**
+  (A1–A4: modal, visibilidad, preferencias), para que los fixes se propaguen.
+- El **env** solo lleva la **URL del webhook** (config); no hace falta flag de
+  formato.
 
 ---
 
 ## 1. Estado actual del flujo en producción
 
-### 1.1 Flujo
-1. El usuario abre el modal de IA de afinidad y, originalmente, rellenaba un
-   cuestionario efímero de 4 campos no ligado a su perfil: deporte, cuándo
-   (hoy/mañana/semana/finde), hora y estilo.
-2. La app construye una frase y la envuelve con un bloque de contexto del jugador
-   y la envía al webhook de n8n (`EXPO_PUBLIC_AI_MATCH_WEBHOOK_URL`):
-   ```
-   CONTEXTO JUGADOR LOGUEADO (ANCLA)
-   - player_id / nombre / email / elo_rating / telefono
-   SOLICITUD DEL USUARIO
-   Quiero buscar un compañero para jugar Pádel. Disponibilidad: ... Estilo
-   preferido: ... Dame los mejores jugadores compatibles.
-   INSTRUCCION IMPORTANTE
-   Usa el jugador logueado como jugador ancla para el matching.
-   ```
-3. n8n (workflow `agente-tinder-rag.json`, ver `docs/FLUJO-IA-AFINIDAD.md`)
-   procesa con un agente GPT-4o + Supabase Vector Store (RAG): genera el embedding
-   de la consulta (`text-embedding-3-small`) y llama a la RPC `match_documents`
-   (similitud coseno sobre `players_vector`, `topK: 40`, con `filter` opcional por
-   `metadata @> filter`); GPT-4o rankea los perfiles recuperados y devuelve el JSON.
-4. La app parsea la respuesta a tarjetas: `name`, `matchPercent`, `level`, `stats`
-   (partidos, victorias, distancia), `tags`, `reason`. El agente devuelve 2–3
-   candidatos. Permite enviar un mensaje directo al candidato.
+1. La app abre el modal de IA de afinidad. Hoy los criterios son las
+   **preferencias del jugador** (días, franjas, estilo); ver §2.
+2. La app envía un `chatInput` (texto) al webhook de n8n
+   (`EXPO_PUBLIC_AI_MATCH_WEBHOOK_URL`): un bloque de contexto del jugador (ANCLA:
+   player_id, nombre, email, elo, teléfono) + la solicitud en prosa.
+3. n8n (`agente-tinder-rag.json`, ver `docs/FLUJO-IA-AFINIDAD.md`): agente GPT-4o +
+   Supabase Vector Store (RAG). Embede la consulta (`text-embedding-3-small`) y
+   llama a la RPC `match_documents` (similitud coseno sobre `players_vector`,
+   `topK 40`, `filter` por `metadata @> filter`); GPT-4o rankea y devuelve JSON.
+4. La app parsea a tarjetas (`name`, `matchPercent`, `level`, `stats`, `tags`,
+   `reason`), resuelve el nombre a un jugador real (`searchPlayers`) y permite DM.
 
-### 1.2 Limitaciones del estado original
-- **No usa los datos reales del jugador**: el cuestionario era efímero e
-  independiente de las preferencias ya guardadas en `players`.
-- **Datos inventados**: cuando la IA no devuelve cifras, el parser rellena
-  `matchPercent`, `distancia` y `stats` con valores por defecto. La "distancia" no
-  procede de ninguna geo real: es decorativa.
-- **No determinista**: la misma entrada puede producir distinto resultado; el LLM
-  propone nombres que después hay que resolver por texto (`searchPlayers`) con
-  coincidencia aproximada.
-- **Coste y latencia**: cada búsqueda es una llamada a un servicio LLM externo.
-- **Sin persistencia ni visibilidad**: el formulario se rellenaba cada vez y no
-  existía control de quién entra en las búsquedas de otros.
-- **Infrautiliza la información disponible**: ELO/`mu`/`sigma`, preferencias, geo
-  de clubes, `match_feedback`, coach IA. Solo enviaba 4 campos + 5 de contexto.
+### Limitaciones del enfoque RAG actual
+- **Datos inventados:** `matchPercent` y `distancia` los rellena el modelo a ojo;
+  no hay geo real → la "distancia" es decorativa.
+- **No determinista:** misma entrada, distinto resultado; resolución frágil por
+  nombre.
+- **Coste/latencia:** una llamada LLM externa por búsqueda.
+- **Redundancia y mal encaje (importante):** la búsqueda manda los criterios del
+  jugador en el prompt **y** esos mismos datos ya están en el vector (el jugador
+  también es una fila de `players_vector`). Además, el RAG **embede criterios
+  estructurados** (disponibilidad, nivel, distancia) y los compara por similitud
+  coseno — un mal encaje para **umbrales exactos** ("martes por la tarde", "ELO
+  ±100", "mismo club"), que son aritmética, no semántica.
 
 ---
 
-## 2. Cambios realizados en esta iteración
+## 2. Cambios ya realizados (rama `feature/ia-afinidad-mejora`)
 
-Trabajo implementado en la rama `feature/ia-afinidad-mejora` (fases A1–A4):
+- **A1–A4 (afinidad):**
+  - Criterios = preferencias del jugador (`preferred_days`,
+    `preferred_schedule_slots`, `preferred_play_style`; deporte fijo pádel).
+  - Rellenar una vez → al entrar, **pantalla previa con botón "Buscar jugadores"**
+    (no busca sola: evita gastar tokens por entradas accidentales y permite
+    ajustar antes); mini-formulario si faltan preferencias.
+  - **Visibilidad opt-in** (`players.affinity_visible`, default `false`): gate de
+    activación al primer uso, bloqueo de búsqueda sin visibilidad, y toggle en dos
+    sitios — en el modal de resultados (guardado instantáneo) y en Preferencias
+    (se guarda con "Guardar", cuenta para el estado *dirty*). Componente de toggle
+    compartido con estado optimista (responde al instante visualmente).
+  - Prompt manteniendo la estructura original (solo cambian los valores:
+    días/franjas en vez de "hoy/mañana").
+- **Cableado de perfil:** `play_location`, `gender`, `birth_date`,
+  `profile_description` ahora se guardan y devuelven en `PATCH/GET /players/me`
+  (antes mobile los enviaba pero el backend los descartaba).
+- **Pulido de UX:** padding del botón "Editar preferencias"; el loader aparece de
+  inmediato al buscar (sin parpadeo de la pantalla previa); eliminado el botón
+  "Cambiar preferencias" del loader (la búsqueda ya es explícita y cancelar no
+  recupera los tokens).
 
-1. **Los criterios pasan a ser las preferencias del jugador.** Se elimina el
-   cuestionario efímero. La búsqueda usa `preferred_days`,
-   `preferred_schedule_slots` y `preferred_play_style` (deporte fijo: pádel). Esto
-   aporta datos reales y reutilizables y evita repreguntar lo mismo.
-2. **Rellenar una vez, luego resultados directos.** Si las preferencias están
-   completas, al entrar se autobusca y se muestran resultados; si faltan, un
-   mini-formulario las captura y las persiste como preferencias. Reduce fricción y
-   queda coherente con el resto de la app.
-3. **Visibilidad opt-in.** Nueva columna `players.affinity_visible` (default
-   `false`, se activa al primer uso mediante consentimiento de un toque). Un
-   jugador solo aparece en las búsquedas de otros si la tiene activa; y no puede
-   buscar mientras esté desactivada. Aporta control de privacidad y reciprocidad.
-4. **Prompt con la estructura original.** Se mantiene la frase que n8n ya espera;
-   solo cambian los valores (días de la semana + franjas en lugar de "hoy/mañana").
-   Evita romper n8n mientras se decide la arquitectura definitiva.
+Estos cambios son la **base correcta**: la arquitectura final consume exactamente
+esos mismos campos, así que no es trabajo desechado.
 
-Estos cambios **no eliminan** la dependencia del LLM externo para una tarea que,
-con datos estructurados, un algoritmo resolvería mejor, más barato y de forma
-reproducible. Esa decisión se analiza a continuación.
+> Nota de seguridad relacionada (fuera de alcance de afinidad): ver
+> `docs/seguridad-pii-endpoints-jugadores.md`.
 
 ---
 
 ## 3. Análisis: LLM (n8n) frente a algoritmo determinista
 
-### 3.1 Comparativa por criterio
-
+### 3.1 Comparativa
 | Criterio | Algoritmo determinista | LLM (n8n) |
 |---|---|---|
-| Calidad con datos estructurados (nivel, días, franjas, geo, estilo) | Alta y controlable (fórmula explícita) | Variable; no garantiza optimalidad |
-| Determinismo / reproducibilidad | Total (mismos criterios → mismos resultados) | Bajo (puede variar; puede inventar) |
+| Calidad con datos estructurados (nivel, días, franjas, geo, estilo) | Alta y controlable | Variable; no garantiza optimalidad |
+| Determinismo / reproducibilidad | Total | Bajo (puede variar; puede inventar) |
 | Coste / latencia | Casi nulo (consulta SQL) | Llamada externa por búsqueda |
-| Explicación del match | Derivable de los factores (plantilla) | Texto natural rico |
-| Datos cualitativos (notas, sensaciones, estilo descrito) | No los interpreta | Sí los interpreta |
+| Explicación del match | Derivable de los factores | Texto natural rico |
+| Datos cualitativos (notas, estilo descrito) | No los interpreta | Sí los interpreta |
 | Texto libre del usuario | No | Sí |
-| Mantenibilidad / auditoría | Alta (lógica en el repo, testeable) | Lógica fuera del repo, opaca |
-| Riesgo de alucinación | Ninguno | Sí (nombres, cifras, distancias) |
+| Mantenibilidad / auditoría | Alta (en el repo, testeable) | Opaca (fuera del repo) |
+| Riesgo de alucinación | Ninguno | Sí |
 
-### 3.2 Idoneidad del RAG actual para este problema
+### 3.2 Conclusión del análisis
+Con **datos estructurados**, un algoritmo determinista es superior: el nivel, el
+solape de disponibilidad y la cercanía son cálculo puro. El LLM solo aporta valor
+cuando hay **(a) datos cualitativos** (notas de `match_feedback`, radar del coach
+IA — pipeline que **ya existe y está conectado**; lo que está aislado es la
+**búsqueda de afinidad**, que no los consume) o **(b) texto libre** (decisión de
+producto: "quizás más adelante").
 
-El workflow actual representa el perfil como texto y rankea por similitud coseno.
-Ese enfoque es adecuado para "parecido en general", pero difumina justo lo que
-debe ser preciso: "disponible martes por la tarde", "a menos de 5 km" o "ELO
-±100" son **umbrales exactos**, no nociones semánticas que un embedding represente
-con fiabilidad. Es la causa de que el modelo termine rellenando `distance` y
-`matchPercent` de forma aproximada. Un filtro/score determinista trata esas
-condiciones como lo que son: aritmética.
-
-### 3.3 Condiciones que justificarían el LLM
-
-Con **solo datos estructurados**, el LLM no aporta nada que un algoritmo no haga
-mejor, e introduce coste, variabilidad y datos inventados. El nivel, el solape de
-disponibilidad y la cercanía son cálculo puro: un score ponderado los ordena de
-forma óptima y explicable.
-
-El LLM solo se justifica si se cumple al menos una de estas condiciones:
-
-- **(a) Datos cualitativos del perfil completo.** Que el matching tenga en cuenta
-  lo no numérico: notas de `match_feedback` ("buena compenetración en pista",
-  "juega mejor con gente agresiva"), el radar del coach IA (`coach_assessments`:
-  técnico/físico/mental/táctico, fortalezas, mejoras) y los comentarios libres
-  post-partido. En ese caso, un LLM puede razonar afinidad de estilo y "química"
-  más allá del ELO.
-- **(b) Búsqueda en lenguaje natural.** Que el usuario pueda escribir libremente
-  ("busco a alguien paciente para aprender la volea cerca de casa").
-
-**Estado de esos datos cualitativos:** el pipeline ya existe y está conectado — el
-feedback post-partido (`match_feedback`) alimenta al coach IA
-(`coach_assessments` / `last-peer-feedback-insight`). Lo que está **aislado es la
-propia búsqueda de afinidad**: hoy es un silo independiente (incluso dentro de n8n)
-que **no consume** ninguno de esos datos. Por tanto, el trabajo de la Fase 2 no es
-construir el pipeline cualitativo (ya está), sino **conectar la afinidad a él**.
-
-La decisión de producto sobre el texto libre es "quizás más adelante"; hoy la
-entrada es estructurada.
-
-**Conclusión:** con entrada estructurada y una búsqueda de afinidad que no
-aprovecha los datos cualitativos existentes, el algoritmo determinista es la opción
-adecuada para el objetivo actual (compañero de pareja). El LLM se reserva para una
-segunda fase, cuando la búsqueda de afinidad se conecte a esos datos cualitativos
-(feedback post-partido → coach IA), hoy en un silo aparte, y/o se habilite el texto
-libre.
+Por eso la versión final mueve el matching a un **scoring determinista** y reserva
+el LLM como **capa de enriquecimiento opcional** (Fase 2).
 
 ---
 
-## 4. Arquitectura recomendada: híbrida por fases
+## 4. Arquitectura objetivo (dos workflows + scoring en backend)
 
-### Fase 1 — Núcleo determinista
-El backend calcula el matching con una consulta + scoring. Cubre el objetivo
-(compañero de pareja por nivel, disponibilidad, cercanía y estilo) de forma
-rápida, barata, reproducible y explicable. n8n deja de ser necesario para esto.
+```
+            DEMO (rama demo)                         develop (versión final)
+mobile ──► webhook n8n DEMO                 mobile ──► webhook n8n DEVELOP
+            (agente-tinder-rag, RAG)                   │
+            └─ match_documents (vector)                ├─► endpoint backend de scoring
+            └─ GPT-4o rankea                           │     (determinista; lee players/
+            └─ devuelve candidatos                     │      bookings/clubs directamente)
+                                                       └─► [Fase 2 opcional] re-rank LLM
+                                                            (coach IA / feedback)
+```
 
-### Fase 2 — Capa IA opcional sobre el shortlist (futuro)
-El algoritmo produce un top-N (p. ej. 20). Solo sobre esos N, una capa LLM:
-- reordena usando datos cualitativos (notas de feedback, radar del coach,
-  compenetración histórica), y/o
-- genera la explicación legible de cada match.
-
-Ventajas: coste acotado (LLM solo sobre N), núcleo determinista intacto, y el LLM
-se usa solo donde es diferencial. Si la capa IA falla o se desactiva, el algoritmo
-sigue dando resultados válidos. En esta arquitectura, n8n/LLM pasa de ser el
-"motor de búsqueda" a una "capa de enriquecimiento opcional".
+Claves de la versión final:
+- **El scoring determinista vive en un endpoint de backend** (en el repo), no
+  dentro de n8n. n8n se mantiene como **orquestador**: llama al endpoint y, en el
+  futuro, añade la capa LLM cualitativa **sin que mobile cambie**.
+- **Se resuelve la redundancia:** la petición de v2 es **mínima** (basta el
+  `player_id`); el backend **lee las preferencias del jugador de la BD** en vez de
+  reenviarlas en el prompt. No se vuelven a mandar datos que ya están guardados.
+- **Se abandona el embedding para lo estructurado:** el endpoint consulta
+  `players`/`bookings`/`clubs` y aplica filtros/score exactos. El vector y los
+  embeddings quedan **solo para la Fase 2** (texto libre / similitud cualitativa).
+- **Mobile habla con n8n** en ambas ramas; cambia la URL del webhook (env). El
+  **código del flujo final** (petición mínima + parseo estructurado) vive **solo en
+  develop**; demo conserva su llamada y su parseo actuales.
 
 ---
 
-## 5. Bases del algoritmo de búsqueda (objetivo: compañero de pareja)
+## 5. Reparto del trabajo
 
-### 5.1 Filtros duros (condiciones absolutas que excluyen candidatos)
+### 5.1 Repo
+
+**Base común (ambas ramas; ya en `feature/ia-afinidad-mejora`):**
+
+| Estado | Trabajo | Dónde |
+|---|---|---|
+| ✅ Hecho | Criterios = preferencias, autobúsqueda, visibilidad opt-in, toggle, cableado de perfil | mobile + backend |
+
+> En la **DEMO**, "Editar preferencias" usa el **mini-formulario de 3 campos**
+> (días/franjas/estilo) — coherente con lo único que el flujo de demo consume.
+> **No es pendiente para demo.** La edición de *todas* las preferencias desde el
+> modal es una mejora de la versión final (ver tabla siguiente), porque solo allí
+> el scoring usa el resto de campos.
+
+**Solo develop (código del flujo final; demo no lo lleva):**
+
+| Estado | Trabajo | Dónde | Notas |
+|---|---|---|---|
+| ⏳ Pendiente | **Endpoint de scoring determinista** (filtros duros + pesos por estilo + cercanía + complementariedad + anti-repetición + visibilidad). Ver §6 | backend | El núcleo de la versión final; lo invoca el workflow develop |
+| ⏳ Pendiente | **Petición mínima** (`player_id` [+ texto libre futuro]) + **parseo de respuesta estructurada** (`player_id` + stats reales). Elimina la resolución frágil por nombre | mobile | Resuelve la redundancia |
+| ⏳ Pendiente | **Edición de preferencias = fuente única:** "Editar preferencias" abre la **pantalla de Preferencias completa** (todos los campos: lado, nivel de compañero, duración, clubes…); el modal solo **busca**. Sustituye al mini-form de 3 campos de la demo | mobile | El scoring final usa todas las preferencias |
+| ⏳ Pendiente | **Anti-repetición:** tabla `affinity_dismissals` + endpoints "ocultar"/listar; "ya contactado" derivado de DMs | backend | Ver §6.6 |
+| ⏳ Pendiente | **UI "ocultar"** + lista de ocultos en ajustes | mobile | Acción neutra, reversible |
+
+**Config (ambas ramas):** la URL del webhook por entorno (`EXPO_PUBLIC_AI_MATCH_WEBHOOK_URL`).
+
+**No se toca `sync-player-vector` para la Fase 1.** El scoring determinista lee la
+BD directamente, así que **no hace falta enriquecer el vector** con clubes
+recientes/zona. Esto, además, mantiene **intacto el embedding que usa el DEMO**
+(ver §5.2). El vector queda como está, para la Fase 2.
+
+### 5.2 Workflow de n8n — DEMO (se mantiene estable)
+
+**Objetivo: dejarlo igual.** El repo es retrocompatible: la build de demo apunta a
+este webhook (env) y envía el prompt actual; la respuesta se sigue parseando igual.
+El mecanismo del workflow está en `docs/FLUJO-IA-AFINIDAD.md`.
+
+**Único cambio recomendado (pequeño, y conviene hacerlo):**
+- **Filtro de visibilidad** en el nodo Supabase Vector Store: fijar el *metadata
+  filter* a `{"affinity_visible": true}` (se traduce en
+  `metadata @> '{"affinity_visible": true}'`, que excluye los `false` y los que no
+  tengan el campo) **+ backfill** de `players_vector` (re-sincronizar a todos los
+  jugadores una vez para que el flag exista en su `metadata`; con el filtro activo,
+  sin backfill **no aparecería nadie**).
+- *Por qué:* sin él, el opt-in de visibilidad que ya desplegamos **no oculta a
+  nadie** en las búsquedas de demo.
+- *Requisito:* que `affinity_visible` esté en `metadata` como booleano. La edge
+  function del mono-repo copia toda la fila del jugador a `metadata`, así que lo
+  incluye; **verificar qué versión de `sync-player-vector` está desplegada** (hay
+  otra copia en `N8N/agente-tinder/...` con `buildContent` selectivo).
+- *Si se prefiere congelar el demo al 100% (cero cambios):* es posible, pero la
+  visibilidad **no se aplica** en demo (todos visibles). Aceptable para una demo;
+  decisión del equipo.
+
+**Supervisar (sin cambiar nada salvo que falle):** el prompt ahora trae días de la
+semana + franjas en vez de "hoy/mañana". Al ser un agente LLM, debería entenderlo;
+revisar que ningún nodo haga parsing rígido de las palabras antiguas.
+
+**Prueba end-to-end:** jugador A con `affinity_visible = true` y B con `false` →
+buscar como un tercero: **A aparece, B no**; activar la visibilidad de B (+ re-sync
+de su vector) → **B pasa a aparecer**.
+
+**Importante para no alterar el demo:** **no** enriquecer el `content` (el texto
+que se embede) del vector. El flag `affinity_visible` ya viaja en `metadata` (vía
+`select('*')`), así que el filtro funciona **sin tocar el embedding** → los
+resultados del demo no se desplazan.
+
+### 5.3 Workflow de n8n — develop (versión final)
+
+Flujo objetivo:
+1. La build de develop apunta al **webhook develop** (env) y envía una petición
+   **mínima** (`player_id` [+ texto libre futuro]).
+2. n8n llama al **endpoint de scoring de backend** (§6), que:
+   - lee las preferencias del jugador y de los candidatos de la BD,
+   - aplica filtros duros (visibilidad, activo, pádel, no-uno-mismo,
+     anti-repetición),
+   - puntúa por estilo (nivel con banda variable, disponibilidad, cercanía,
+     complementariedad),
+   - devuelve **candidatos estructurados** (`player_id` real, stats reales, score
+     real, `reason` derivada).
+3. **(Fase 2, opcional)** n8n re-rankea/explica el top-N con una capa LLM que
+   consume los **datos cualitativos** (coach IA / `match_feedback`) — conectando
+   por fin la afinidad con ese pipeline.
+4. Devuelve a mobile la respuesta estructurada (la parsea el parser tolerante).
+
+Esto elimina la redundancia y el mal encaje del RAG: no se reenvían criterios, no
+se usan embeddings para umbrales exactos, y no hay cifras inventadas.
+
+> Decisión abierta: el endpoint de scoring podría llamarlo n8n (recomendado, para
+> dejar hueco a la capa LLM de Fase 2) o llamarlo mobile directamente (más simple,
+> pero saca a n8n del flujo). Por defecto: lo llama n8n.
+
+---
+
+## 6. Bases del algoritmo de scoring (endpoint de backend, objetivo: pareja)
+
+### 6.1 Filtros duros (excluyen candidatos)
 - `affinity_visible = true` (opt-in del candidato).
-- El candidato no es el propio jugador que busca.
+- No es el propio jugador.
 - `status = 'active'`.
-- Deporte pádel (cuando exista segmentación de deporte por jugador; hoy implícito).
+- Deporte pádel (cuando exista segmentación por jugador; hoy implícito).
+- Exclusiones de anti-repetición (ver §6.6).
 
-La disponibilidad **no** es filtro duro: se trata como factor con peso (un solape
-nulo penaliza, pero no excluye), para no dejar sin resultados a jugadores con
-agendas poco solapadas.
+La disponibilidad **no** es filtro duro: es un factor con peso (solape nulo
+penaliza, no excluye).
 
-### 5.2 Score ponderado, dependiente del estilo
-
-Cada factor produce un sub-score 0–1; el score final es la suma ponderada. **Los
-pesos y la anchura de la banda de nivel dependen del estilo de juego elegido**
-(`preferred_play_style`). Siempre se aplica una banda de nivelación; lo que cambia
-es cuánto se abre.
+### 6.2 Score ponderado, dependiente del estilo
+Cada factor da un sub-score 0–1; el total es la suma ponderada. **Los pesos y la
+anchura de la banda de nivel dependen de `preferred_play_style`.** Siempre hay
+banda de nivelación; cambia cuánto se abre.
 
 | Estilo | Nivel | Disponib. | Cercanía | Estilo/complement. | Banda de nivel |
 |---|---|---|---|---|---|
-| **competitive** | 45% | 20% | 20% | 15% | **estrecha** (±banda pequeña de ELO; fuera de banda la puntuación cae rápido) |
-| **social** | 15% | 30% | 35% | 20% | amplia (el nivel pesa poco) |
-| **learning** | 30% | 25% | 25% | 20% | media, con sesgo a igual o superior |
+| **competitive** | 45% | 20% | 20% | 15% | **estrecha** (fuera de banda cae rápido) |
+| **social** | 15% | 30% | 35% | 20% | amplia |
+| **learning** | 30% | 25% | 25% | 20% | media, sesgo a igual o superior |
 | **balanced** | 35% | 30% | 20% | 15% | media |
 
 (Porcentajes de partida, ajustables tras pruebas.)
 
-Reglas de cada factor:
+- **Nivel:** cercanía de ELO/`mu` dentro de una banda cuya anchura fija el estilo;
+  dirección modulada por `preferred_partner_level`. La **fiabilidad** (`sigma`/pocos
+  partidos) **ensancha la banda** (no exigir cercanía estricta con nivel incierto).
+- **Disponibilidad:** solape de día × franja (`preferred_days` ×
+  `preferred_schedule_slots`).
+- **Cercanía:** ver §6.3.
+- **Estilo y complementariedad:** estilo afín suma / opuesto resta (no excluye);
+  **complementariedad de lado** (`preferred_side`: drive + revés = bonus); coherencia
+  de `preferred_match_duration_min`.
 
-- **Nivel.** Cercanía de ELO/`mu` evaluada dentro de una banda cuya anchura la fija
-  el estilo (estrecha en competitivo, amplia en social). La dirección la modula
-  `preferred_partner_level` (`similar` → diferencia ~0; `higher` → premia compañero
-  por encima; `lower` → por debajo). La **fiabilidad del nivel** (`sigma`/pocos
-  partidos) **ensancha la banda efectiva**: con nivel incierto no se puede exigir
-  cercanía estricta, ni siquiera en competitivo.
-- **Disponibilidad.** Solape de combinaciones día × franja entre ambos (p. ej.
-  Jaccard de `preferred_days` × `preferred_schedule_slots`). Más solape, mejor.
-- **Cercanía.** Ver §5.3 (totalmente automática, sin geolocalización del jugador).
-- **Estilo y complementariedad.** El estilo del candidato se trata como
-  **compatibilidad blanda**, no como filtro: estilos afines suman, estilos opuestos
-  restan, pero no excluyen. Para pareja, la **complementariedad de lado**
-  (`preferred_side`: drive + revés = bonus; mismo lado = leve penalización; `both`
-  neutro) es relevante. También cuenta la coherencia de
-  `preferred_match_duration_min`.
+Desempate: actividad reciente, fiabilidad, cercanía.
 
-Desempate: actividad reciente, fiabilidad del nivel y cercanía.
+### 6.3 Cercanía sin geolocalización (automática)
+Combinando señales de más a menos fuerte:
+1. **Clubes en común** (`favorite_clubs` / `preferred_club_ids`).
+2. **Clubes recientes** derivados del **historial de reservas** (`bookings`),
+   automático.
+3. **Misma zona/ciudad** derivada de `clubs.lat/lng`/ciudad de esos clubes.
 
-### 5.3 Cercanía sin geolocalización (automática)
+Sin datos → no puntúa, no bloquea. No se añade campo manual de ubicación (el
+`play_location` ya cableado puede servir de semilla futura, no ahora).
 
-No se añade ningún campo manual de ubicación. La cercanía se deriva por completo de
-datos ya existentes o derivables, combinando señales de más a menos fuerte:
+### 6.4 Salida
+Top-N ordenado, cada uno con jugador real (id, nombre, avatar), score real (no
+inventado) y explicación derivada de los factores dominantes.
 
-1. **Clubes en común** — señal más fuerte: si comparten club, juegan en el mismo
-   sitio. Fuente: `favorite_clubs` (y `preferred_club_ids`).
-2. **Clubes recientes** — derivados automáticamente del **historial de reservas**
-   del jugador (sin intervención del usuario). Reflejan dónde juega realmente y son
-   el equivalente a "clubes recientes" de referencias del sector.
-3. **Misma zona/ciudad** — derivada de la ciudad/geo (`clubs.lat/lng`) de los
-   clubes favoritos y recientes. Permite puntuar proximidad aunque no compartan un
-   club exacto.
-
-La cercanía resultante prioriza: club en común > misma zona/ciudad (derivada de
-clubes) > sin datos (no puntúa, no bloquea). Un campo estructurado de "dónde juega"
-(selección de zona/ciudad o club) queda como **posible semilla futura** para
-usuarios sin clubes ni reservas, pero **no se añade ahora**.
-
-### 5.4 Salida
-Lista ordenada por score (top-N), cada elemento con: jugador real (id, nombre,
-avatar), score normalizado a porcentaje (real, no inventado) y una explicación
-derivada de los factores dominantes ("Mismo club y disponibilidad alta los martes y
-jueves; nivel muy parecido"). Sin nombres ni cifras alucinadas.
-
-### 5.5 Parámetros y condiciones (resumen)
-
+### 6.5 Parámetros y fuentes
 | Parámetro | Fuente | Uso |
 |---|---|---|
-| `affinity_visible` | players | Filtro duro |
-| `status` | players | Filtro duro |
-| `elo_rating` / `mu` / `sigma` | players | Factor nivel + anchura de banda (confianza) |
-| `preferred_play_style` | players | Selecciona el perfil de pesos y la banda de nivel |
-| `preferred_partner_level` | players | Dirección del factor nivel |
-| `preferred_days` / `preferred_schedule_slots` | players | Factor disponibilidad |
-| `favorite_clubs` / `preferred_club_ids` | players | Cercanía (clubes en común) |
-| Historial de reservas | bookings | Cercanía (clubes recientes, automático) |
-| `clubs.lat/lng` / ciudad | clubs | Cercanía (zona derivada) |
-| `preferred_side` | players | Complementariedad de pareja |
-| `preferred_match_duration_min` | players | Factor estilo (coherencia) |
-| `match_feedback` (notas, compenetración) | match_feedback | Fase 2 (LLM) |
-| coach IA (radar, fortalezas) | coach_assessments | Fase 2 (LLM) |
-| texto libre del usuario | input futuro | Fase 2 (LLM) |
+| `affinity_visible`, `status` | players | Filtros duros |
+| `elo_rating`/`mu`/`sigma` | players | Nivel + anchura de banda |
+| `preferred_play_style` | players | Perfil de pesos + banda |
+| `preferred_partner_level` | players | Dirección del nivel |
+| `preferred_days`/`preferred_schedule_slots` | players | Disponibilidad |
+| `favorite_clubs`/`preferred_club_ids` | players | Cercanía (clubes comunes) |
+| historial de reservas | bookings | Cercanía (clubes recientes) |
+| `clubs.lat/lng`/ciudad | clubs | Cercanía (zona) |
+| `preferred_side`, `preferred_match_duration_min` | players | Complementariedad |
+| `match_feedback`, coach IA, texto libre | match_feedback / coach_assessments / input | **Fase 2 (LLM)** |
 
-### 5.6 Anti-repetición: ocultar, ya contactado y variedad (PENDIENTE DE DECIDIR)
-
-Con un top-N determinista, las mismas coincidencias aparecerían repetidamente y el
-usuario vería siempre a las mismas personas. Para evitarlo se contemplan tres
-señales. **No se replica el modelo "ocultar para siempre" de las apps de citas**:
-el pool de jugadores es pequeño y los compañeros recurrentes son deseables, por lo
-que la exclusión total no encaja.
-
-1. **Ocultar explícito (descarte).** Acción del usuario tipo "Ocultar de mis
-   búsquedas" (texto neutro, no "rechazar"). Exclusión fuerte y duradera, pero
-   **reversible** desde una lista de "jugadores ocultos" en ajustes.
-2. **Ya contactado.** Derivado del historial de mensajes directos. **No excluye**:
-   baja la posición en el ranking y muestra una etiqueta ("Ya le escribiste"). Así
-   no reaparece siempre arriba, pero sigue disponible para repetir si hubo buena
-   compenetración.
-3. **Variedad / rotación.** Variar los resultados dentro de una banda de score
-   similar (p. ej. no repetir los mostrados en la última sesión) para que la lista
-   no sea idéntica en cada apertura, aunque no haya descartes.
-
-Encaje técnico: forma parte del algoritmo (Fase 1). Requiere una tabla nueva
-(`affinity_dismissals`: jugador → jugador oculto + fecha) y reutilizar el historial
-de mensajes directos. Con el flujo n8n actual habría que pasarle la lista de
-exclusión en el prompt, lo que es otra razón para resolverlo en la Fase 1.
+### 6.6 Anti-repetición (ocultar, ya contactado, variedad) — PENDIENTE DE DECIDIR
+No se replica el "ocultar para siempre" de las apps de citas (pool pequeño;
+compañeros recurrentes deseables).
+1. **Ocultar explícito:** acción del usuario, exclusión duradera pero **reversible**
+   (lista de ocultos en ajustes). Tabla `affinity_dismissals`.
+2. **Ya contactado:** derivado de DMs; **no excluye**, baja en ranking + etiqueta.
+3. **Variedad:** rotar dentro de una banda de score para que la lista no sea
+   idéntica cada vez.
 
 ---
 
-## 6. Decisiones tomadas y abiertas
+## 7. Decisiones tomadas y abiertas
 
 Tomadas:
-- **Objetivo:** compañero de pareja (prima complementariedad).
-- **LLM vs algoritmo:** Fase 1 determinista; el LLM se mantiene conectado por ahora
-  y se reserva como capa de enriquecimiento para la Fase 2.
-- **Pesos por estilo:** perfiles distintos por `preferred_play_style`, con banda de
-  nivel siempre presente y de anchura variable (estrecha en competitivo).
-- **Cercanía:** automática (clubes favoritos + recientes de reservas + zona derivada
-  de la geo del club). Sin campo manual de ubicación.
+- Objetivo: compañero de pareja.
+- Dos workflows n8n (demo actual / develop mejorado). El **código del flujo final
+  vive solo en develop**; demo conserva el actual. El env solo lleva la URL del
+  webhook. La base común (A1–A4) se mantiene sin divergencias gratuitas.
+- **Edición de preferencias = pantalla de Preferencias** (fuente única) en la
+  versión final; el modal solo busca. El mini-form de 3 campos es de la etapa demo.
+- **Búsqueda explícita:** la IA de afinidad **no busca al entrar**; muestra una
+  pantalla previa con botón "Buscar jugadores" (evita gasto accidental de tokens y
+  permite ajustar antes). Aplica a ambas ramas.
+- Scoring determinista en **endpoint de backend**; n8n como orquestador; LLM
+  reservado para Fase 2 (capa cualitativa sobre el top-N).
+- Pesos por estilo con banda de nivel variable; cercanía automática.
+- DEMO se mantiene; único cambio recomendado: filtro de visibilidad.
 
-Abiertas (a cerrar antes de implementar Fase 1):
-1. **Validación de pesos.** Confirmar/ajustar los porcentajes por estilo de la
-   tabla §5.2 tras pruebas con datos reales.
-2. **Anchura concreta de la banda de nivel** por estilo (valores de ELO) y cómo la
-   ensancha `sigma`.
-3. **Endpoint.** Confirmar `GET /players/affinity-search` (o `routes/affinity.ts`)
-   como ubicación del algoritmo.
-4. **Retirada de n8n en Fase 1.** Decidir si se retira del flujo o se deja
-   desactivado a la espera de la Fase 2.
-5. **Profundidad de la cercanía por reservas.** Ventana temporal de "clubes
-   recientes" (p. ej. últimos 90 días) y número de clubes a considerar.
-6. **Anti-repetición — "ocultar".** ¿El descarte es indefinido (reversible desde la
-   lista de ocultos) o caduca pasado un tiempo?
-7. **Anti-repetición — "ya contactado".** Cuánto baja en el ranking y durante cuánto
-   tiempo (cooldown), y si la etiqueta "Ya le escribiste" se muestra siempre.
-8. **Anti-repetición — variedad.** Estrategia concreta: excluir los mostrados en la
-   última sesión, rotar dentro de una banda de score, o una mezcla.
+Abiertas:
+1. Validación de pesos (§6.2) y anchura concreta de la banda por estilo.
+2. ¿El endpoint de scoring lo llama n8n (por defecto) o mobile directo?
+3. ¿Se aplica el filtro de visibilidad en el DEMO o se congela al 100%?
+4. Ventana temporal de "clubes recientes" (p. ej. 90 días) y nº de clubes.
+5. Anti-repetición: caducidad del "ocultar", cooldown del "ya contactado",
+   estrategia de variedad.
+6. Formato exacto de la petición/respuesta del flujo final (develop).
 
 ---
 
-## 7. Recomendación
+## 8. Próximos pasos sugeridos (orden)
 
-- Implementar el matching de afinidad como **algoritmo determinista en el backend**
-  (Fase 1), en su propio módulo. Cubre el objetivo con los factores descritos, es
-  barato, rápido, reproducible y explicable, y elimina las alucinaciones.
-- **Reservar el LLM para la Fase 2**, cuando la búsqueda de afinidad se conecte a
-  los datos cualitativos que **ya existen** (feedback post-partido → coach IA), hoy
-  en un silo aparte —incluso en n8n—, y/o se habilite el texto libre. En esa fase el
-  LLM actúa como re-ranker/explicador sobre el top-N, no como motor principal.
-- Los cambios ya implementados (criterios = preferencias, visibilidad opt-in) son
-  la base correcta: el algoritmo de Fase 1 consume exactamente esos mismos campos,
-  por lo que no es trabajo desechado.
+demo (cerrar la demo):
+1. **n8n demo:** añadir filtro de visibilidad (o decidir congelarlo al 100%).
+2. **Merge** `feature/ia-afinidad-mejora` → `demo` (limpio) + desplegar backend.
+
+develop (flujo final):
+3. **backend:** endpoint de scoring determinista (§6) + anti-repetición
+   (`affinity_dismissals`).
+4. **mobile:** petición mínima (`player_id`) + parseo de respuesta estructurada;
+   "Editar preferencias" → pantalla de Preferencias completa; UI "ocultar".
+5. **n8n develop:** workflow que llama al endpoint (+ hueco para la Fase 2).
+
+Futuro:
+6. **Fase 2:** capa LLM cualitativa (coach IA / feedback) y/o texto libre.
