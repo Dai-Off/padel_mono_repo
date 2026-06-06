@@ -214,8 +214,6 @@ type IAAfinidadModalProps = {
   affinityVisible: boolean;
   /** Activa/desactiva la visibilidad; devuelve true si se guardó correctamente. */
   onSetVisible: (visible: boolean) => Promise<boolean>;
-  /** Cancela la búsqueda en curso (descarta su resultado y libera el loading). */
-  onCancelSearch: () => void;
   onDirectMessageSent?: (target: { id: string; displayName: string; avatarUrl: string | null }) => void;
   sentIds?: Set<string>;
   onSentIdsChange?: (newSet: Set<string>) => void;
@@ -374,7 +372,6 @@ export function IAAfinidadModal({
   onRunSearch,
   affinityVisible,
   onSetVisible,
-  onCancelSearch,
   onDirectMessageSent,
   sentIds = new Set(),
   onSentIdsChange,
@@ -436,8 +433,27 @@ export function IAAfinidadModal({
   // (errorText) sin resultados — así no se queda el loader colgado.
   const showFormView =
     !needsConsent && (showForm || (!hasResults && (!prefsComplete || !!errorText)));
-  const autoSearchPending = !loading && !needsConsent && !showFormView && !hasResults;
+  // Pantalla previa "Buscar jugadores": visibilidad activa y preferencias
+  // completas, pero aún no se ha buscado. NO se busca solo al entrar (evita
+  // gastar tokens por entradas accidentales y permite ajustar antes de buscar).
+  const showPreSearch = !loading && !needsConsent && !showFormView && !hasResults;
   const isFormView = !loading && showFormView;
+
+  /** Resumen legible de las preferencias con las que se buscará. */
+  const labelList = (opts: Option[], ids: string[]) =>
+    ids.map((id) => opts.find((o) => o.id === id)?.label ?? id);
+  const preSearchSummary = [
+    labelList(DAY_OPTIONS, prefDays).join(', '),
+    labelList(SLOT_OPTIONS, prefSlots).join(', '),
+    STYLE_OPTIONS.find((o) => o.id === prefStyle)?.label,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  /** Lanza la búsqueda con las preferencias actuales (acción explícita del botón). */
+  const handleSearch = () => {
+    onRunSearch({ days: prefDays, slots: prefSlots, style: prefStyle }, false);
+  };
 
   const handleActivateVisibility = async () => {
     if (settingVisible) return;
@@ -453,8 +469,8 @@ export function IAAfinidadModal({
       onRunSearch(pendingCriteria, true);
       setPendingCriteria(null);
     }
-    // Si no había pendiente, al volverse affinityVisible=true el efecto de
-    // auto-búsqueda lanza con las prefs (o se muestra el formulario si faltan).
+    // Si no había pendiente, al volverse affinityVisible=true se muestra la
+    // pantalla previa "Buscar jugadores" (o el formulario si faltan preferencias).
   };
 
   /** Cambia la visibilidad desde el toggle del modal (vista de resultados). */
@@ -464,15 +480,6 @@ export function IAAfinidadModal({
     const ok = await onSetVisible(next);
     setSettingVisible(false);
     return ok;
-  };
-
-  // Desde el loader: pasar a editar criterios sin esperar a que termine la
-  // búsqueda. Cancela la búsqueda en curso (su resultado se descarta) y abre el
-  // formulario; autoSearchedRef evita que el efecto la relance.
-  const handleEditDuringLoad = () => {
-    autoSearchedRef.current = true;
-    onCancelSearch();
-    setShowForm(true);
   };
 
   const toggleDay = (id: string) =>
@@ -689,19 +696,9 @@ export function IAAfinidadModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  // Auto-búsqueda al entrar cuando las preferencias están completas y no hay
-  // resultados previos. Si faltan datos, se muestra el formulario (mini-form).
-  useEffect(() => {
-    if (!visible || loading) return;
-    if (!affinityVisible) return; // sin visibilidad → se muestra el gate, no se busca
-    if (responseText) return; // ya hay resultados (p. ej. al volver del chat)
-    if (showForm) return; // el usuario está editando criterios
-    if (!prefsComplete) return; // faltan datos → formulario
-    if (autoSearchedRef.current) return;
-    autoSearchedRef.current = true;
-    onRunSearch({ days: prefDays, slots: prefSlots, style: prefStyle }, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, loading, affinityVisible, responseText, showForm, prefsComplete]);
+  // No se busca automáticamente al entrar: con preferencias completas se muestra
+  // la pantalla previa con el botón "Buscar jugadores" (ver showPreSearch). Así
+  // no se gastan tokens por entradas accidentales y se puede ajustar antes.
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
@@ -733,13 +730,15 @@ export function IAAfinidadModal({
                 <View>
                   <Text style={styles.headerTitle}>Buscar Compañero con IA</Text>
                   <Text style={styles.headerSubtitle}>
-                    {loading || autoSearchPending
+                    {loading
                       ? 'Buscando...'
                       : needsConsent
                         ? 'Activa tu visibilidad'
                         : isFormView
                           ? 'Define tus preferencias'
-                          : 'Resultados IA'}
+                          : showPreSearch
+                            ? 'Listo para buscar'
+                            : 'Resultados IA'}
                   </Text>
                 </View>
               </View>
@@ -755,7 +754,7 @@ export function IAAfinidadModal({
           </View>
 
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} showsVerticalScrollIndicator={false}>
-            {loading || autoSearchPending ? (
+            {loading ? (
               <View style={styles.loaderWrap}>
                 <View style={styles.loaderOrb}>
                   <Animated.View
@@ -858,10 +857,6 @@ export function IAAfinidadModal({
                     />
                   ))}
                 </View>
-                <Pressable style={styles.loaderEditBtn} onPress={handleEditDuringLoad}>
-                  <Ionicons name="options-outline" size={16} color="#9ca3af" />
-                  <Text style={styles.loaderEditText}>Cambiar preferencias</Text>
-                </Pressable>
               </View>
             ) : needsConsent ? (
               <View style={styles.gateWrap}>
@@ -881,7 +876,7 @@ export function IAAfinidadModal({
                 >
                   <Ionicons name="sparkles" size={18} color="#fff" />
                   <Text style={styles.gateBtnText}>
-                    {settingVisible ? 'Activando…' : 'Activar y buscar'}
+                    {settingVisible ? 'Activando…' : 'Activar'}
                   </Text>
                 </Pressable>
                 {!!errorText && (
@@ -948,6 +943,24 @@ export function IAAfinidadModal({
                   </View>
                 )}
               </>
+            ) : showPreSearch ? (
+              <View style={styles.gateWrap}>
+                <View style={styles.gateIcon}>
+                  <Ionicons name="sparkles" size={36} color="#F18F34" />
+                </View>
+                <Text style={styles.gateTitle}>Buscar compañeros</Text>
+                <Text style={styles.gateText}>
+                  Buscaremos según tus preferencias{preSearchSummary ? `: ${preSearchSummary}` : ''}.
+                </Text>
+                <Pressable style={styles.gateBtn} onPress={handleSearch}>
+                  <Ionicons name="flash" size={18} color="#fff" />
+                  <Text style={styles.gateBtnText}>Buscar jugadores</Text>
+                </Pressable>
+                <Pressable style={styles.searchAgainBtn} onPress={() => setShowForm(true)}>
+                  <Ionicons name="options-outline" size={18} color="#d1d5db" />
+                  <Text style={styles.searchAgainText}>Editar preferencias</Text>
+                </Pressable>
+              </View>
             ) : (
               <>
                 <View style={styles.resultHead}>
@@ -1520,6 +1533,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.08)',
     backgroundColor: 'rgba(255,255,255,0.06)',
     paddingVertical: 12,
+    paddingHorizontal: 24,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1589,24 +1603,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
     flexDirection: 'row',
     gap: 8,
-  },
-  loaderEditBtn: {
-    marginTop: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  loaderEditText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#9ca3af',
   },
   loaderDot: {
     width: 7,

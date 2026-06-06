@@ -219,6 +219,13 @@ export function HomeScreen({
   const handleAffinityRun = useCallback(
     async (criteria: AffinityCriteria, persist: boolean) => {
       const runId = ++affinityRunIdRef.current;
+      // Mostrar el loader de inmediato: si esperásemos al PATCH de preferencias
+      // para activarlo, el modal pintaría un instante la pantalla previa entre
+      // medias (parpadeo "vuelve a Buscar compañeros y luego busca").
+      setAffinityError(null);
+      setAffinityResponse(null);
+      setAffinityLoading(true);
+
       // Si el usuario editó criterios en el formulario, los guardamos como
       // preferencias antes de buscar (los criterios de afinidad SON las
       // preferencias del jugador).
@@ -226,6 +233,7 @@ export function HomeScreen({
         const token = session?.access_token ?? null;
         if (!token || !myPlayerProfile) {
           setAffinityError('No se pudieron guardar tus criterios.');
+          setAffinityLoading(false);
           return;
         }
         const res = await updateMyPlayerPreferences(token, {
@@ -236,17 +244,14 @@ export function HomeScreen({
           preferredPlayStyle:
             criteria.style as PlayerPreferences['preferredPlayStyle'],
         });
+        if (affinityRunIdRef.current !== runId) return; // descarta si otra búsqueda la reemplazó
         if (!res.ok) {
           setAffinityError(res.error);
+          setAffinityLoading(false);
           return;
         }
-        if (affinityRunIdRef.current !== runId) return; // cancelada durante el guardado
         void refreshProfile({ force: true });
       }
-
-      setAffinityLoading(true);
-      setAffinityError(null);
-      setAffinityResponse(null);
 
       const userName =
         [myPlayerProfile?.firstName, myPlayerProfile?.lastName]
@@ -273,7 +278,7 @@ export function HomeScreen({
       ].join('\n');
 
       const result = await searchAiMatch(enrichedPrompt);
-      if (affinityRunIdRef.current !== runId) return; // el usuario canceló: descartar
+      if (affinityRunIdRef.current !== runId) return; // descarta si otra búsqueda la reemplazó
       if (result.ok && result.text) {
         setAffinityResponse(result.text);
       } else {
@@ -283,15 +288,6 @@ export function HomeScreen({
     },
     [myPlayerProfile, refreshProfile, session]
   );
-
-  // Cancela la búsqueda en curso: invalida su id (su resultado se ignorará) y
-  // libera el loading para que el formulario quede operativo de inmediato.
-  const handleCancelAffinitySearch = useCallback(() => {
-    affinityRunIdRef.current++;
-    setAffinityLoading(false);
-    setAffinityResponse(null);
-    setAffinityError(null);
-  }, []);
 
   // Activa/desactiva la visibilidad en afinidad (gate del modal + auto-activación
   // al primer uso). Devuelve true si se guardó correctamente.
@@ -522,7 +518,6 @@ export function HomeScreen({
         onRunSearch={handleAffinityRun}
         affinityVisible={myPlayerProfile?.affinityVisible ?? false}
         onSetVisible={handleSetAffinityVisible}
-        onCancelSearch={handleCancelAffinitySearch}
         onDirectMessageSent={(target) => {
           // Usa el hilo directo de afinidad: back vuelve al modal de resultados
           // en vez de pasar por la lista de chats.
