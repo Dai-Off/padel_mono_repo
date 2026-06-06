@@ -336,6 +336,7 @@ export async function updateMyPlayerProfile(
 export async function updateMyPlayerPreferences(
   token: string | null | undefined,
   preferences: PlayerPreferences,
+  options?: { affinityVisible?: boolean },
 ): Promise<
   { ok: true; player: MyPlayerProfile } | { ok: false; error: string }
 > {
@@ -363,6 +364,9 @@ export async function updateMyPlayerPreferences(
         notif_tournament_reminders: preferences.notifTournamentReminders,
         notif_class_updates: preferences.notifClassUpdates,
         notif_chat_messages: preferences.notifChatMessages,
+        ...(options?.affinityVisible !== undefined
+          ? { affinity_visible: options.affinityVisible }
+          : {}),
       }),
     });
     const json = (await res.json()) as MeResponse;

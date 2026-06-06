@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Path, Polyline } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchMyPlayerProfile, updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreferences } from '../api/players';
+import { fetchMyPlayerProfile, updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
 import { AffinityVisibilityToggle } from '../components/affinity/AffinityVisibilityToggle';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
@@ -203,9 +203,10 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
   const [base, setBase] = useState<PlayerPreferences>(DEFAULT_PREFERENCES);
   const [prefs, setPrefs] = useState<PlayerPreferences>(DEFAULT_PREFERENCES);
   // Visibilidad en IA de afinidad: vive aparte de PlayerPreferences (es un flag
-  // de privacidad del perfil) y se guarda al instante, sin pasar por "Guardar".
+  // de privacidad del perfil), pero se guarda con el botón "Guardar" igual que el
+  // resto. `affinityVisibleBase` es el valor guardado, para calcular `dirty`.
   const [affinityVisible, setAffinityVisible] = useState(false);
-  const [affinitySaving, setAffinitySaving] = useState(false);
+  const [affinityVisibleBase, setAffinityVisibleBase] = useState(false);
   const [clubPickerVisible, setClubPickerVisible] = useState(false);
   const [selectedClubIds, setSelectedClubIds] = useState<string[]>([]);
   const { clubs: clubCatalog } = useClubCatalog();
@@ -223,6 +224,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
       setBase(next);
       setPrefs(next);
       setAffinityVisible(profile?.affinityVisible ?? false);
+      setAffinityVisibleBase(profile?.affinityVisible ?? false);
       setLoading(false);
     });
   }, [token]);
@@ -239,7 +241,10 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
     );
   }, [clubCatalog, prefs.favoriteClubs]);
 
-  const dirty = useMemo(() => !preferencesEqual(base, prefs), [base, prefs]);
+  const dirty = useMemo(
+    () => !preferencesEqual(base, prefs) || affinityVisible !== affinityVisibleBase,
+    [base, prefs, affinityVisible, affinityVisibleBase],
+  );
 
   const selectedClubLabels = useMemo(() => {
     const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
@@ -275,31 +280,13 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
     setPrefs((prev) => ({ ...prev, favoriteClubs: names }));
   };
 
-  const handleAffinityVisibleChange = async (next: boolean) => {
-    if (!token) {
-      Alert.alert('Visibilidad', 'Inicia sesión para cambiar tu visibilidad.');
-      return;
-    }
-    if (affinitySaving) return;
-    setAffinityVisible(next); // optimista
-    setAffinitySaving(true);
-    const res = await updateAffinityVisible(token, next);
-    setAffinitySaving(false);
-    if (!res.ok) {
-      setAffinityVisible(!next); // revertir si falla
-      Alert.alert('Visibilidad', res.error);
-      return;
-    }
-    void refreshGlobalProfile({ force: true });
-  };
-
   const save = async () => {
     if (!token) {
       Alert.alert('Preferencias', 'Inicia sesión para guardar cambios.');
       return;
     }
     setSaving(true);
-    const res = await updateMyPlayerPreferences(token, prefs);
+    const res = await updateMyPlayerPreferences(token, prefs, { affinityVisible });
     setSaving(false);
     if (!res.ok) {
       Alert.alert('Preferencias', res.error);
@@ -307,6 +294,8 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
     }
     setBase(res.player.preferences);
     setPrefs(res.player.preferences);
+    setAffinityVisible(res.player.affinityVisible);
+    setAffinityVisibleBase(res.player.affinityVisible);
     const byName = new Map(clubCatalog.map((c) => [c.name.trim().toLowerCase(), c.id]));
     const idsForMm = res.player.preferences.favoriteClubs
       .map((n) => byName.get(n.trim().toLowerCase()))
@@ -698,14 +687,17 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
             </View>
             <AffinityVisibilityToggle
               value={affinityVisible}
-              onChange={(v) => void handleAffinityVisibleChange(v)}
-              disabled={affinitySaving}
+              onChange={setAffinityVisible}
+              disabled={saving}
             />
           </View>
 
           <View style={styles.footerActions}>
             <Pressable
-              onPress={() => setPrefs(base)}
+              onPress={() => {
+                setPrefs(base);
+                setAffinityVisible(affinityVisibleBase);
+              }}
               style={styles.restoreBtn}
               disabled={!dirty || saving}
             >
