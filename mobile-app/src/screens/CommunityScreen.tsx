@@ -16,7 +16,7 @@ import { CommunityTabs, CommunityTab } from '../components/community/CommunityTa
 import { StoriesRow } from '../components/community/StoriesRow';
 import { PostCard } from '../components/community/PostCard';
 import { CommentSheet } from '../components/community/CommentSheet';
-import { CreatePostModal } from '../components/community/CreatePostModal';
+import { CreatePostModal, PostType } from '../components/community/CreatePostModal';
 import { 
   fetchFeed, 
   fetchStories, 
@@ -46,6 +46,10 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
   const [selectedPostForComments, setSelectedPostForComments] = useState<CommunityPost | null>(null);
   const [isCommentsVisible, setIsCommentsVisible] = useState(false);
   const [isCreateModalVisible, setIsCreateModalVisible] = useState(false);
+  // Tipos que ofrece el modal según el botón pulsado:
+  //  - "+" de historias  -> solo historia
+  //  - FAB inferior       -> publicación (foto) o reel (vídeo)
+  const [createTypes, setCreateTypes] = useState<PostType[]>(['post', 'reel']);
   const [selectedStoryGroup, setSelectedStoryGroup] = useState<StoryGroup | null>(null);
   const [isStoryViewerVisible, setIsStoryViewerVisible] = useState(false);
 
@@ -99,12 +103,24 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
     setIsStoryViewerVisible(true);
   };
 
+  // "+" de historias: abre el modal limitado a crear historias.
+  const openCreateStory = () => {
+    setCreateTypes(['story']);
+    setIsCreateModalVisible(true);
+  };
+
+  // FAB inferior: abre el modal para crear publicación (foto) o reel (vídeo).
+  const openCreatePostOrReel = () => {
+    setCreateTypes(['post', 'reel']);
+    setIsCreateModalVisible(true);
+  };
+
   const renderHeader = () => (
     <View>
       <StoriesRow 
         groups={storyGroups} 
         onPressStory={handleStoryPress}
-        onPressAdd={() => setIsCreateModalVisible(true)}
+        onPressAdd={openCreateStory}
       />
       <CommunityTabs 
         activeTab={activeTab} 
@@ -183,6 +199,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
         isVisible={isCreateModalVisible}
         onClose={() => setIsCreateModalVisible(false)}
         onSuccess={() => loadData(true)}
+        allowedTypes={createTypes}
       />
 
       <StoryViewer 
@@ -192,9 +209,9 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
       />
 
       {/* Floating Action Button */}
-      <TouchableOpacity 
-        style={styles.fab} 
-        onPress={() => setIsCreateModalVisible(true)}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={openCreatePostOrReel}
         activeOpacity={0.8}
       >
         <Ionicons name="add" size={30} color="#FFF" />
