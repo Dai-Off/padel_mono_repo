@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import Slider from '@react-native-community/slider';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -25,6 +36,7 @@ import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import type { PartidoItem } from './PartidosScreen';
 import {
   fetchMatchmakingLeagueConfig,
+  fetchMatchmakingLeaderboard,
   fetchMatchmakingProposal,
   fetchMatchmakingStatus,
   isMatchmakingFlowPending,
@@ -33,6 +45,7 @@ import {
   rejectMatchmakingProposal,
   type MatchmakingJoinPayload,
   type MatchmakingLeagueConfigRow,
+  type MatchmakingLeaderboardRow,
   type MatchmakingProposalResponse,
   type MatchmakingStatusResponse,
 } from '../api/matchmaking';
@@ -58,6 +71,7 @@ const DEFAULT_FORM: SearchForm = {
   search_area: 'club',
 };
 const FLOW_TOP_PADDING = 12;
+const RANKING_PAGE_SIZE = 15;
 
 type Props = {
   onBack: () => void;
@@ -97,6 +111,13 @@ export function CompetitiveLeagueScreen({
   // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
   const { profile } = useHomeData();
   const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
+  const [rankingRows, setRankingRows] = useState<MatchmakingLeaderboardRow[]>([]);
+  const [rankingTotal, setRankingTotal] = useState(0);
+  const [rankingHasMore, setRankingHasMore] = useState(false);
+  const [rankingLoading, setRankingLoading] = useState(false);
+  const [rankingLoadingMore, setRankingLoadingMore] = useState(false);
+  const [rankingError, setRankingError] = useState<string | null>(null);
+  const rankingLoadGenRef = useRef(0);
   const [status, setStatus] = useState<MatchmakingStatusResponse | null>(null);
   const [proposal, setProposal] = useState<MatchmakingProposalResponse | null>(null);
   const [proposalMatch, setProposalMatch] = useState<MatchEnriched | null>(null);
@@ -210,6 +231,72 @@ export function CompetitiveLeagueScreen({
   useEffect(() => {
     void fetchMatchmakingLeagueConfig().then(setLeagueRows);
   }, []);
+
+  const loadRankingPage = useCallback(
+    async (offset: number, append: boolean) => {
+      const token = session?.access_token ?? null;
+      const liga = profile?.liga?.trim() || null;
+      if (!token || !liga) return;
+
+      const gen = ++rankingLoadGenRef.current;
+      if (append) {
+        setRankingLoadingMore(true);
+      } else {
+        setRankingLoading(true);
+        setRankingError(null);
+      }
+
+      const res = await fetchMatchmakingLeaderboard(token, {
+        liga,
+        limit: RANKING_PAGE_SIZE,
+        offset,
+      });
+      if (gen !== rankingLoadGenRef.current) return;
+
+      if (!res) {
+        if (!append) {
+          setRankingRows([]);
+          setRankingTotal(0);
+          setRankingHasMore(false);
+          setRankingError('No se pudo cargar el ranking.');
+        }
+        setRankingLoading(false);
+        setRankingLoadingMore(false);
+        return;
+      }
+
+      setRankingTotal(res.total);
+      setRankingHasMore(res.has_more === true);
+      setRankingRows((prev) => (append ? [...prev, ...res.rows] : res.rows));
+      setRankingLoading(false);
+      setRankingLoadingMore(false);
+    },
+    [profile?.liga, session?.access_token],
+  );
+
+  useEffect(() => {
+    if (mainTab !== 'ranking') return;
+    setRankingRows([]);
+    setRankingTotal(0);
+    setRankingHasMore(false);
+    void loadRankingPage(0, false);
+  }, [mainTab, profile?.liga, session?.access_token, loadRankingPage]);
+
+  const loadMoreRanking = useCallback(() => {
+    if (rankingLoading || rankingLoadingMore || !rankingHasMore) return;
+    void loadRankingPage(rankingRows.length, true);
+  }, [loadRankingPage, rankingHasMore, rankingLoading, rankingLoadingMore, rankingRows.length]);
+
+  const handleHomeScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (mainTab !== 'ranking' || rankingLoading || rankingLoadingMore || !rankingHasMore) return;
+      const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+      if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 140) {
+        loadMoreRanking();
+      }
+    },
+    [loadMoreRanking, mainTab, rankingHasMore, rankingLoading, rankingLoadingMore],
+  );
 
   useEffect(() => {
     const token = session?.access_token ?? null;
@@ -485,6 +572,11 @@ export function CompetitiveLeagueScreen({
         return;
       }
       payload.preferred_club_ids = allClubIds;
+    } else if (preferredClubIds.length === 0 && clubsInRange.length === 0) {
+      setErrorText(
+        `No hay clubes dentro de ${distanceKm} km. Ampliá la distancia o elegí clubes preferidos.`,
+      );
+      return;
     } else if (preferredClubIds.length > 0) {
       payload.preferred_club_ids = preferredClubIds.slice(0, 20);
     } else {
@@ -521,6 +613,7 @@ export function CompetitiveLeagueScreen({
     await pollStatus();
   }, [
     clearPollTimer,
+    clubsInRange.length,
     distanceKm,
     form,
     onMatchmakingBannerStateChange,
@@ -545,7 +638,7 @@ export function CompetitiveLeagueScreen({
     }
     setStatus(null);
     setProposal(null);
-    onMatchmakingBannerStateChange?.('hidden');
+    onMatchmakingBannerStateChange?.('hidden', { force: true });
     setQueueStartedAtMs(null);
     setQueueElapsedSec(0);
     setStep('home');
@@ -561,16 +654,29 @@ export function CompetitiveLeagueScreen({
     const token = session?.access_token ?? null;
     const matchId = proposal?.match_id;
     if (!token || !matchId) return;
+    clearPollTimer();
     const result = await rejectMatchmakingProposal(matchId, token);
     if (!result.ok) {
       setErrorText(result.error);
       return;
     }
+    await leaveMatchmaking(token);
+    setStatus(null);
     setProposal(null);
-    onMatchmakingBannerStateChange?.('searching', { force: true });
-    setStep('queue');
-    void pollStatus();
-  }, [pollStatus, proposal?.match_id, session?.access_token]);
+    setProposalMatch(null);
+    onMatchmakingBannerStateChange?.('hidden', { force: true });
+    setQueueStartedAtMs(null);
+    setQueueElapsedSec(0);
+    setLoading(false);
+    setStep('home');
+  }, [
+    clearPollTimer,
+    onMatchmakingBannerStateChange,
+    proposal?.match_id,
+    session?.access_token,
+    setQueueElapsedSec,
+    setQueueStartedAtMs,
+  ]);
 
   const openMatchDetail = useCallback(
     async (matchId: string, matchmakingPayment?: PartidoItem['matchmakingPayment']) => {
@@ -732,14 +838,19 @@ export function CompetitiveLeagueScreen({
 
   const myRankingRow = useMemo(() => {
     if (!profile) return null;
+    const fromList = rankingRows?.find((r) => r.player_id === profile.id);
     const meName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || 'Tú';
     return {
+      rank: fromList?.rank ?? null,
       name: meName,
       level: profile.eloRating ? `Nivel ${Number(profile.eloRating).toFixed(2)}` : 'Nivel —',
       wl: `${profile.mmWins ?? 0}V / ${profile.mmLosses ?? 0}D`,
       lp: profile.lps ?? 0,
     };
-  }, [profile]);
+  }, [profile, rankingRows]);
+
+  const rankingLoadedCount = rankingRows.length;
+  const rankingPlayerCount = rankingTotal > 0 ? rankingTotal : rankingLoadedCount;
 
   return (
     <View style={styles.container}>
@@ -758,6 +869,8 @@ export function CompetitiveLeagueScreen({
             styles.homeContent,
             { paddingTop: FLOW_TOP_PADDING + 32, paddingBottom: insets.bottom + 28 },
           ]}
+          scrollEventThrottle={16}
+          onScroll={handleHomeScroll}
         >
           {(status?.status === 'searching' || isMatchmakingFlowPending(status, proposal)) && (
             <Pressable
@@ -873,20 +986,76 @@ export function CompetitiveLeagueScreen({
             <View style={{ gap: 8 }}>
               <View style={styles.rankingHeader}>
                 <View>
-                  <Text style={styles.rankingDivision}>{division ?? 'Oro II'}</Text>
-                  <Text style={styles.rankingSub}>20 jugadores en tu división</Text>
+                  <Text style={styles.rankingDivision}>{division ?? '—'}</Text>
+                  <Text style={styles.rankingSub}>
+                    {rankingLoading
+                      ? 'Cargando ranking…'
+                      : rankingPlayerCount > 0
+                        ? rankingHasMore
+                          ? `Mostrando ${rankingLoadedCount} de ${rankingPlayerCount} jugadores`
+                          : `${rankingPlayerCount} jugador${rankingPlayerCount === 1 ? '' : 'es'} en tu división`
+                        : 'Sin jugadores en tu división'}
+                  </Text>
                 </View>
-                <View style={styles.topPill}>
-                  <Text style={styles.topPillText}>Top 20</Text>
+                {rankingPlayerCount > 0 ? (
+                  <View style={styles.topPill}>
+                    <Text style={styles.topPillText}>Top {rankingPlayerCount}</Text>
+                  </View>
+                ) : null}
+              </View>
+              {rankingLoading ? (
+                <>
+                  <Skeleton height={52} borderRadius={12} variant="dark" />
+                  <Skeleton height={52} borderRadius={12} variant="dark" />
+                  <Skeleton height={52} borderRadius={12} variant="dark" />
+                </>
+              ) : rankingError ? (
+                <View style={styles.rankingNoticeCard}>
+                  <Text style={styles.rankingNoticeTitle}>Ranking no disponible</Text>
+                  <Text style={styles.rankingNoticeSub}>{rankingError}</Text>
                 </View>
-              </View>
-              <View style={styles.rankingNoticeCard}>
-                <Text style={styles.rankingNoticeTitle}>Ranking global no disponible</Text>
-                <Text style={styles.rankingNoticeSub}>
-                  Cuando esté disponible el endpoint del leaderboard, acá se mostrará el Top 20 real.
-                </Text>
-              </View>
-              {myRankingRow ? (
+              ) : rankingPlayerCount === 0 ? (
+                <View style={styles.rankingNoticeCard}>
+                  <Text style={styles.rankingNoticeSub}>Aún no hay jugadores clasificados en esta división.</Text>
+                </View>
+              ) : (
+                rankingRows.map((row) => {
+                  const isMe = row.player_id === profile?.id;
+                  const name =
+                    `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim() ||
+                    row.username?.trim() ||
+                    'Jugador';
+                  const level =
+                    row.elo_rating != null ? `Nivel ${Number(row.elo_rating).toFixed(2)}` : 'Nivel —';
+                  const wl = `${row.mm_wins}V / ${row.mm_losses}D`;
+                  return (
+                    <View
+                      key={row.player_id}
+                      style={[styles.rankRow, isMe && styles.rankRowMe]}
+                    >
+                      <View style={[styles.rankBadge, row.rank <= 3 && styles.rankBadgeTop]}>
+                        <Text style={[styles.rankBadgeText, row.rank <= 3 && styles.rankBadgeTextTop]}>
+                          {row.rank}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rankName}>{isMe ? `${name} (Tú)` : name}</Text>
+                        <Text style={styles.rankMeta}>
+                          {level} · {wl}
+                        </Text>
+                      </View>
+                      <Text style={styles.rankLp}>{row.lps} LP</Text>
+                    </View>
+                  );
+                })
+              )}
+              {rankingLoadingMore ? (
+                <View style={styles.rankingLoadMore}>
+                  <ActivityIndicator size="small" color="#F59E0B" />
+                  <Text style={styles.rankingLoadMoreText}>Cargando más jugadores…</Text>
+                </View>
+              ) : null}
+              {!rankingLoading && rankingPlayerCount > 0 && myRankingRow && myRankingRow.rank == null ? (
                 <View style={[styles.rankRow, styles.rankRowMe]}>
                   <View style={styles.rankBadge}>
                     <Text style={styles.rankBadgeText}>—</Text>
@@ -1503,6 +1672,14 @@ const styles = StyleSheet.create({
   },
   rankingNoticeTitle: { color: '#fff', fontSize: 12, fontWeight: '800' },
   rankingNoticeSub: { color: '#9ca3af', fontSize: 11, marginTop: 2, lineHeight: 15 },
+  rankingLoadMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+  },
+  rankingLoadMoreText: { color: '#9ca3af', fontSize: 12 },
   rankRow: {
     borderRadius: 12,
     borderWidth: 1,

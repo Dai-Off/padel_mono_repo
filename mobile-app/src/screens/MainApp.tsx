@@ -835,7 +835,12 @@ export function MainApp() {
           queueStartedAtMs={competitiveQueueStartedAtMs}
           setQueueStartedAtMs={setCompetitiveQueueStartedAtMs}
           matchmakingBannerState={matchmakingHomeBannerState}
-          onMatchmakingBannerStateChange={handleMatchmakingBannerStateChange}
+          onMatchmakingBannerStateChange={(state, options) => {
+            handleMatchmakingBannerStateChange(state, options);
+            if (state === 'hidden' && options?.force) {
+              setCompetitiveLeagueEntryIntent('default');
+            }
+          }}
           onPartidoPress={(p) => {
             setShowCompetitiveLeague(false);
             setSelectedPartido(p);
