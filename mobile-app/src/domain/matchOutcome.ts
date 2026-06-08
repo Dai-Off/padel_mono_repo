@@ -67,7 +67,7 @@ export function classifyPartidoOutcome(partido: PartidoItem): PartidoOutcome {
   if (fromSets) return fromSets;
 
   const scoreSt = (partido.scoreStatus ?? '').toLowerCase();
-  if (scoreSt === 'confirmed' || scoreSt === 'pending_confirmation' || scoreSt === 'disputed') {
+  if (scoreSt === 'confirmed' || scoreSt === 'pending_confirmation' || scoreSt === 'disputed' || scoreSt === 'pending_votes') {
     if (hasRecordedScore(partido)) return 'incomplete';
   }
 

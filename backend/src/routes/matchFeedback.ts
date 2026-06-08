@@ -95,14 +95,14 @@ router.post('/:id/feedback', async (req: Request, res: Response) => {
 
   const st = String(match.score_status ?? '');
   const hasSets = Array.isArray(match.sets) && (match.sets as unknown[]).length > 0;
-  if (['disputed', 'disputed_pending', 'no_result'].includes(st)) {
+  if (['disputed', 'disputed_pending'].includes(st)) {
     return res.status(403).json({
       ok: false,
-      error: 'El marcador está en disputa o sin resultado; no se puede enviar feedback todavía.',
+      error: 'El marcador está en disputa; no se puede enviar feedback todavía.',
     });
   }
   const feedbackAllowed =
-    st === 'confirmed' || st === 'pending_confirmation' || (st === 'pending' && hasSets);
+    st === 'confirmed' || st === 'pending_confirmation' || st === 'pending_votes' || st === 'no_result' || (st === 'pending' && hasSets);
   if (!feedbackAllowed) {
     return res.status(403).json({
       ok: false,

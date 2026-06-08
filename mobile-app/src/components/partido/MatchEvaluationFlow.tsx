@@ -83,11 +83,25 @@ type Props = {
   partido: PartidoItem;
   currentPlayerId: string | null;
   onClose: () => void;
-  onComplete?: (
-    payload: MatchEvaluationPayload
-  ) => Promise<{ ok: true } | { ok: false; error?: string }> | { ok: true } | { ok: false; error?: string } | void;
-  /** Tras la pantalla de agradecimiento, p. ej. tab inicio + cerrar detalle. */
   onGoHome?: () => void;
+
+  // Voting and Score status props
+  scoreStatus: string;
+  currentSets: Array<{ a: number; b: number }> | null;
+  isScoreProposer: boolean;
+  hasVoted: boolean;
+  voteCounts?: { confirm: number; reject: number } | null;
+  onProposeScore: (sets: Array<{ a: number; b: number }>, matchEndReason?: string) => Promise<{ ok: boolean; error?: string }>;
+  onVoteScore: (vote: 'confirm' | 'reject') => Promise<{ ok: boolean; error?: string }>;
+  onCompleteFeedback: (payload: {
+    teammateRatings: Array<{
+      playerIndex: number;
+      playerName: string;
+      level: TeammateLevelRating;
+      note: string;
+    }>;
+    feedbackText: string;
+  }) => Promise<{ ok: boolean; error?: string }>;
 };
 
 function initials(p: PartidoPlayer): string {
@@ -169,8 +183,15 @@ export function MatchEvaluationFlow({
   partido,
   currentPlayerId,
   onClose,
-  onComplete,
   onGoHome,
+  scoreStatus,
+  currentSets,
+  isScoreProposer,
+  hasVoted,
+  voteCounts,
+  onProposeScore,
+  onVoteScore,
+  onCompleteFeedback,
 }: Props) {
   const insets = useSafeAreaInsets();
   const teammates = useMemo(() => buildTeammateList(partido, currentPlayerId), [partido, currentPlayerId]);
@@ -257,7 +278,7 @@ export function MatchEvaluationFlow({
     });
   };
 
-  const goNext = () => {
+  const goNext = async () => {
     if (sectionIndex === 0) {
       if (teammates.length === 0) {
         setSectionIndex(1);
@@ -271,7 +292,45 @@ export function MatchEvaluationFlow({
       return;
     }
     if (sectionIndex === 1) {
+      if (scoreStatus === 'pending') {
+        setSubmitting(true);
+        const parsed = visibleSets
+          .map((row) => ({
+            us: parseInt(row.us, 10),
+            them: parseInt(row.them, 10),
+          }));
+        const team = partido.myTeam ?? 'A';
+        const apiSets =
+          team === 'A'
+            ? parsed.map((s) => ({ a: s.us, b: s.them }))
+            : parsed.map((s) => ({ a: s.them, b: s.us }));
+        const usSets = parsed.filter((s) => s.us > s.them).length;
+        const themSets = parsed.filter((s) => s.them > s.us).length;
+        const isDraw = usSets === themSets;
+
+        // Move to step 3 (feedback) immediately to prevent voting screens/banners from flashing
+        setSectionIndex(2);
+
+        const propRes = await onProposeScore(apiSets, isDraw ? 'draw' : 'completed');
+        setSubmitting(false);
+        if (!propRes.ok) {
+          // Revert back to step 2 if proposal failed
+          setSectionIndex(1);
+          Alert.alert('No se pudo guardar el marcador', propRes.error ?? 'Error de conexión');
+          return;
+        }
+        return;
+      }
       setSectionIndex(2);
+    }
+  };
+
+  const handleVote = async (vote: 'confirm' | 'reject') => {
+    setSubmitting(true);
+    const voteRes = await onVoteScore(vote);
+    setSubmitting(false);
+    if (!voteRes.ok) {
+      Alert.alert('No se pudo registrar el voto', voteRes.error ?? 'Error de conexión');
     }
   };
 
@@ -288,23 +347,13 @@ export function MatchEvaluationFlow({
       };
     });
 
-    const setsParsed = visibleSets
-      .filter((row) => row.us.trim() !== '' && row.them.trim() !== '')
-      .map((row) => ({
-        us: parseInt(row.us, 10),
-        them: parseInt(row.them, 10),
-      }))
-      .filter((s) => !Number.isNaN(s.us) && !Number.isNaN(s.them));
-
-    const payload: MatchEvaluationPayload = {
-      teammateRatings,
-      sets: setsParsed,
-      feedbackText: feedbackText.trim(),
-    };
     setSubmitting(true);
-    const submitResult = await onComplete?.(payload);
+    const submitResult = await onCompleteFeedback({
+      teammateRatings,
+      feedbackText: feedbackText.trim(),
+    });
     setSubmitting(false);
-    if (submitResult && typeof submitResult === 'object' && submitResult.ok === false) {
+    if (!submitResult.ok) {
       Alert.alert('No se pudo guardar', submitResult.error ?? 'Intenta de nuevo en unos segundos.');
       return;
     }
@@ -317,13 +366,19 @@ export function MatchEvaluationFlow({
       if (teammatePageIndex < teammates.length - 1) return 'Siguiente jugador';
       return 'Siguiente paso';
     }
-    if (sectionIndex === 1) return 'Siguiente pregunta';
+    if (sectionIndex === 1) return 'Siguiente paso';
     return 'Finalizar';
   };
 
   const canAdvanceTeammate = (playerIndex: number) => ratings[playerIndex]?.level != null;
 
   const canAdvanceScore = (): { ok: boolean; reason: string | null } => {
+    if (scoreStatus !== 'pending') {
+      if (scoreStatus === 'pending_votes' && !isScoreProposer && !hasVoted) {
+        return { ok: false, reason: 'Debes confirmar o rechazar el marcador para continuar.' };
+      }
+      return { ok: true, reason: null };
+    }
     const withAnyValue = visibleSets.filter((row) => row.us.trim() !== '' || row.them.trim() !== '');
     if (withAnyValue.length === 0) return { ok: false, reason: 'Debes cargar el resultado del partido.' };
     if (withAnyValue.some((row) => row.us.trim() === '' || row.them.trim() === '')) {
@@ -352,7 +407,7 @@ export function MatchEvaluationFlow({
           ? !canAdvanceTeammate(currentTeammate.playerIndex)
           : true
       : sectionIndex === 1
-        ? !canAdvanceScore().ok
+        ? !canAdvanceScore().ok || submitting
         : true;
 
   return (
@@ -453,11 +508,19 @@ export function MatchEvaluationFlow({
               />
             )}
             {sectionIndex === 1 && (
-              <ScoreStepContent
+              <ScoreStepContainer
+                scoreStatus={scoreStatus}
+                isScoreProposer={isScoreProposer}
+                hasVoted={hasVoted}
+                currentSets={currentSets}
+                partido={partido}
+                voteCounts={voteCounts}
                 sets={sets}
-                showThirdSet={shouldShowThirdSet}
-                onChangeSets={setSets}
-                validationReason={canAdvanceScore().reason}
+                shouldShowThirdSet={shouldShowThirdSet}
+                setSets={setSets}
+                canAdvanceScore={canAdvanceScore}
+                handleVote={handleVote}
+                submitting={submitting}
               />
             )}
             {sectionIndex === 2 && (
@@ -1070,4 +1133,315 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#fff',
   },
+  scoreBoardCard: {
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    gap: 12,
+    alignSelf: 'stretch',
+    marginVertical: 8,
+  },
+  scoreBoardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+  },
+  scoreBoardSetLabel: {
+    fontSize: 14,
+    color: '#9ca3af',
+    fontWeight: '600',
+  },
+  scoreBoardValues: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  scoreBoardValueUs: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: ACCENT,
+  },
+  scoreBoardValueThem: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#fff',
+  },
+  scoreBoardDash: {
+    fontSize: 18,
+    color: 'rgba(255,255,255,0.3)',
+    fontWeight: '700',
+  },
+  voteButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+    width: '100%',
+  },
+  voteBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  voteBtnReject: {
+    borderColor: 'rgba(248,113,113,0.3)',
+    backgroundColor: 'rgba(248,113,113,0.06)',
+  },
+  voteBtnConfirm: {
+    borderColor: 'rgba(52,211,153,0.3)',
+    backgroundColor: 'rgba(52,211,153,0.06)',
+  },
+  voteBtnTextReject: {
+    color: '#f87171',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  voteBtnTextConfirm: {
+    color: '#34d399',
+    fontWeight: '800',
+    fontSize: 16,
+  },
+  heroIconSuccess: {
+    backgroundColor: 'rgba(16,185,129,0.15)',
+  },
+  heroIconDanger: {
+    backgroundColor: 'rgba(239,68,68,0.15)',
+  },
 });
+
+function ScoreStepContainer({
+  scoreStatus,
+  isScoreProposer,
+  hasVoted,
+  currentSets,
+  partido,
+  voteCounts,
+  sets,
+  shouldShowThirdSet,
+  setSets,
+  canAdvanceScore,
+  handleVote,
+  submitting,
+}: {
+  scoreStatus: string;
+  isScoreProposer: boolean;
+  hasVoted: boolean;
+  currentSets: Array<{ a: number; b: number }> | null;
+  partido: PartidoItem;
+  voteCounts?: { confirm: number; reject: number } | null;
+  sets: { us: string; them: string }[];
+  shouldShowThirdSet: boolean;
+  setSets: Dispatch<SetStateAction<{ us: string; them: string }[]>>;
+  canAdvanceScore: () => { ok: boolean; reason: string | null };
+  handleVote: (vote: 'confirm' | 'reject') => void;
+  submitting: boolean;
+}) {
+  const parsedCurrentSets = useMemo(() => {
+    if (!currentSets) return [];
+    return currentSets.map((s) => {
+      if (partido.myTeam === 'B') {
+        return { us: s.b, them: s.a };
+      }
+      return { us: s.a, them: s.b };
+    });
+  }, [currentSets, partido.myTeam]);
+
+  if (scoreStatus === 'pending') {
+    return (
+      <ScoreStepContent
+        sets={sets}
+        showThirdSet={shouldShowThirdSet}
+        onChangeSets={setSets}
+        validationReason={canAdvanceScore().reason}
+      />
+    );
+  }
+
+  if (scoreStatus === 'pending_votes') {
+    if (isScoreProposer || hasVoted) {
+      return (
+        <ScoreWaitingBanner
+          sets={parsedCurrentSets}
+          hasVoted={hasVoted}
+          voteCounts={voteCounts}
+        />
+      );
+    }
+    return (
+      <ScoreVoteStep
+        sets={parsedCurrentSets}
+        onVote={handleVote}
+        submitting={submitting}
+      />
+    );
+  }
+
+  return (
+    <ScoreResultBanner
+      sets={parsedCurrentSets}
+      status={scoreStatus}
+    />
+  );
+}
+
+function ScoreVoteStep({
+  sets,
+  onVote,
+  submitting,
+}: {
+  sets: Array<{ us: number; them: number }>;
+  onVote: (vote: 'confirm' | 'reject') => void;
+  submitting: boolean;
+}) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.heroIcon}>
+        <Ionicons name="checkbox-outline" size={28} color={ACCENT} />
+      </View>
+      <Text style={styles.title}>¿Estás de acuerdo con el resultado?</Text>
+      <Text style={styles.subtitle}>Un jugador ha propuesto este marcador:</Text>
+
+      <View style={styles.scoreBoardCard}>
+        {sets.map((s, idx) => (
+          <View key={idx} style={styles.scoreBoardRow}>
+            <Text style={styles.scoreBoardSetLabel}>Set {idx + 1}</Text>
+            <View style={styles.scoreBoardValues}>
+              <Text style={styles.scoreBoardValueUs}>{s.us}</Text>
+              <Text style={styles.scoreBoardDash}>-</Text>
+              <Text style={styles.scoreBoardValueThem}>{s.them}</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.voteButtonsRow}>
+        <Pressable
+          onPress={() => onVote('reject')}
+          disabled={submitting}
+          style={({ pressed }) => [
+            styles.voteBtn,
+            styles.voteBtnReject,
+            pressed && styles.pressed,
+            submitting && { opacity: 0.5 },
+          ]}
+        >
+          {submitting ? (
+            <ActivityIndicator color="#f87171" size="small" />
+          ) : (
+            <>
+              <Ionicons name="close-circle" size={24} color="#f87171" />
+              <Text style={styles.voteBtnTextReject}>Rechazar</Text>
+            </>
+          )}
+        </Pressable>
+        <Pressable
+          onPress={() => onVote('confirm')}
+          disabled={submitting}
+          style={({ pressed }) => [
+            styles.voteBtn,
+            styles.voteBtnConfirm,
+            pressed && styles.pressed,
+            submitting && { opacity: 0.5 },
+          ]}
+        >
+          {submitting ? (
+            <ActivityIndicator color="#34d399" size="small" />
+          ) : (
+            <>
+              <Ionicons name="checkmark-circle" size={24} color="#34d399" />
+              <Text style={styles.voteBtnTextConfirm}>Confirmar</Text>
+            </>
+          )}
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function ScoreWaitingBanner({
+  sets,
+  hasVoted,
+  voteCounts,
+}: {
+  sets: Array<{ us: number; them: number }>;
+  hasVoted: boolean;
+  voteCounts?: { confirm: number; reject: number } | null;
+}) {
+  const confirms = voteCounts?.confirm ?? 0;
+  const totalVotes = confirms + (voteCounts?.reject ?? 0);
+  return (
+    <View style={styles.section}>
+      <View style={styles.heroIcon}>
+        <Ionicons name="time-outline" size={28} color={ACCENT} />
+      </View>
+      <Text style={styles.title}>Esperando confirmación</Text>
+      <Text style={styles.subtitle}>
+        {hasVoted
+          ? `Ya registramos tu voto. Esperando que los demás confirmen (han votado ${totalVotes}/3).`
+          : `Esperando que tus rivales confirmen el marcador (han votado ${totalVotes}/3).`}
+      </Text>
+
+      <View style={styles.scoreBoardCard}>
+        {sets.map((s, idx) => (
+          <View key={idx} style={styles.scoreBoardRow}>
+            <Text style={styles.scoreBoardSetLabel}>Set {idx + 1}</Text>
+            <View style={styles.scoreBoardValues}>
+              <Text style={styles.scoreBoardValueUs}>{s.us}</Text>
+              <Text style={styles.scoreBoardDash}>-</Text>
+              <Text style={styles.scoreBoardValueThem}>{s.them}</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function ScoreResultBanner({
+  sets,
+  status,
+}: {
+  sets: Array<{ us: number; them: number }>;
+  status: string;
+}) {
+  const isConfirmed = status === 'confirmed';
+  return (
+    <View style={styles.section}>
+      <View style={[styles.heroIcon, isConfirmed ? styles.heroIconSuccess : styles.heroIconDanger]}>
+        <Ionicons
+          name={isConfirmed ? 'checkmark-circle-outline' : 'alert-circle-outline'}
+          size={28}
+          color={isConfirmed ? '#10b981' : '#ef4444'}
+        />
+      </View>
+      <Text style={styles.title}>{isConfirmed ? '¡Marcador confirmado!' : 'Sin acuerdo en el marcador'}</Text>
+      <Text style={styles.subtitle}>
+        {isConfirmed
+          ? 'El resultado del partido ha sido validado.'
+          : 'No se logró un consenso sobre el resultado de este partido.'}
+      </Text>
+
+      {sets.length > 0 && (
+        <View style={styles.scoreBoardCard}>
+          {sets.map((s, idx) => (
+            <View key={idx} style={styles.scoreBoardRow}>
+              <Text style={styles.scoreBoardSetLabel}>Set {idx + 1}</Text>
+              <View style={styles.scoreBoardValues}>
+                <Text style={styles.scoreBoardValueUs}>{s.us}</Text>
+                <Text style={styles.scoreBoardDash}>-</Text>
+                <Text style={styles.scoreBoardValueThem}>{s.them}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
