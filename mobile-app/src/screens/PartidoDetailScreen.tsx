@@ -29,7 +29,12 @@ import {
   voteMatchScore,
   type SubmitMatchFeedbackBody,
 } from '../api/matches';
-import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
+import {
+  createPaymentIntent,
+  confirmPaymentFromClient,
+  paymentIntentAlreadyPaid,
+  paymentIntentReadyForSheet,
+} from '../api/payments';
 import { fetchMyPlayerId, fetchMyPlayerProfile } from '../api/players';
 import { normalizePlayerAvatarUrl } from '../api/playerAvatar';
 import { useHomeData } from '../contexts/HomeDataContext';
@@ -40,6 +45,7 @@ import {
   cachePlayerAvatar,
   cachePlayerLevel,
   formatPlayerLevelFromElo,
+  getCachedPlayerAvatar,
   pickProfileEloRating,
   resolvePlayerDisplayAvatar,
   resolvePlayerDisplayInitials,
@@ -324,30 +330,48 @@ export function PartidoDetailScreen({
           return;
         }
         const intentRes = await createPaymentIntent(prep.bookingId, token, slotIndex);
-        if (!intentRes.ok || !intentRes.clientSecret) {
-          Alert.alert('Error', 'No se pudo iniciar el pago. Inténtalo de nuevo.');
-          return;
-        }
-        const returnURL = Linking.createURL('stripe-redirect');
-        const { error: initErr } = await initPaymentSheet({
-          paymentIntentClientSecret: intentRes.clientSecret,
-          merchantDisplayName: 'WeMatch Padel',
-          returnURL,
-        });
-        if (initErr) {
-          Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
-          return;
-        }
-        const { error: presentErr } = await presentPaymentSheet();
-        if (presentErr) {
-          if (presentErr.code === 'Canceled') {
-            Alert.alert('Cancelado', 'Pago cancelado.');
+        let paymentIntentId: string | undefined;
+        if (paymentIntentAlreadyPaid(intentRes)) {
+          paymentIntentId = intentRes.paymentIntentId;
+        } else if (paymentIntentReadyForSheet(intentRes)) {
+          paymentIntentId = intentRes.paymentIntentId;
+          const returnURL = Linking.createURL('stripe-redirect');
+          const { error: initErr } = await initPaymentSheet({
+            paymentIntentClientSecret: intentRes.clientSecret,
+            merchantDisplayName: 'WeMatch Padel',
+            returnURL,
+          });
+          if (initErr) {
+            Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+            return;
+          }
+          const { error: presentErr } = await presentPaymentSheet();
+          if (presentErr) {
+            if (presentErr.code === 'Canceled') {
+              Alert.alert('Cancelado', 'Pago cancelado.');
+            } else {
+              if (__DEV__) {
+                console.warn('[Stripe presentPaymentSheet]', presentErr.code, presentErr.message);
+              }
+              Alert.alert(
+                'Error',
+                presentErr.message ?? 'Error al procesar el pago. Inténtalo de nuevo.'
+              );
+            }
+            return;
+          }
+        } else {
+          const errMsg = intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.';
+          if (intentRes.code === 'slot_taken' || errMsg.includes('plaza')) {
+            Alert.alert('Plaza ocupada', 'Esa plaza ya no está disponible. Elige otra.');
+          } else if (intentRes.code === 'already_in_match' || errMsg.includes('en este partido')) {
+            Alert.alert('Ya estás dentro', 'Ya formas parte de este partido.');
           } else {
-            Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
+            Alert.alert('Error', errMsg);
           }
           return;
         }
-        const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, token);
+        const confirmRes = await confirmPaymentFromClient(paymentIntentId!, token);
         if (!confirmRes.ok) {
           Alert.alert('Error', 'No se pudo confirmar. Inténtalo de nuevo.');
           return;
@@ -355,18 +379,23 @@ export function PartidoDetailScreen({
         matchFetchGen.current += 1;
         const freshProfile = await fetchMyPlayerProfile(token);
         const joinedElo = pickProfileEloRating(freshProfile, myProfile, profileForEnrich);
-        const profileEnrich: ProfileForPartidoEnrich | null = freshProfile?.id
+        const playerId =
+          freshProfile?.id ?? profileForEnrich?.id ?? myProfile?.id ?? currentPlayerId ?? null;
+        const resolvedAvatarUrl =
+          freshProfile?.avatarUrl ??
+          myProfile?.avatarUrl ??
+          profileForEnrich?.avatarUrl ??
+          (playerId ? getCachedPlayerAvatar(playerId) : null);
+        const profileEnrich: ProfileForPartidoEnrich | null = playerId
           ? {
-              id: freshProfile.id,
-              firstName: freshProfile.firstName,
-              lastName: freshProfile.lastName,
-              username: freshProfile.username,
-              avatarUrl: freshProfile.avatarUrl,
+              id: playerId,
+              firstName: freshProfile?.firstName ?? profileForEnrich?.firstName ?? myProfile?.firstName,
+              lastName: freshProfile?.lastName ?? profileForEnrich?.lastName ?? myProfile?.lastName,
+              username: freshProfile?.username ?? profileForEnrich?.username ?? myProfile?.username,
+              avatarUrl: resolvedAvatarUrl,
               eloRating: joinedElo,
             }
-          : profileForEnrich
-            ? { ...profileForEnrich, eloRating: joinedElo ?? profileForEnrich.eloRating }
-            : null;
+          : null;
 
         if (profileEnrich) {
           cachePlayerAvatar(profileEnrich.id, profileEnrich.avatarUrl);
@@ -438,33 +467,44 @@ export function PartidoDetailScreen({
     }
     setMatchmakingPayBusy(true);
     const intentRes = await createPaymentIntent(mp.bookingId, token, undefined, mp.participantId);
-    if (!intentRes.ok || !intentRes.clientSecret) {
+    let paymentIntentId: string | undefined;
+    if (paymentIntentAlreadyPaid(intentRes)) {
+      paymentIntentId = intentRes.paymentIntentId;
+    } else if (paymentIntentReadyForSheet(intentRes)) {
+      paymentIntentId = intentRes.paymentIntentId;
+      const returnURL = Linking.createURL('stripe-redirect');
+      const { error: initErr } = await initPaymentSheet({
+        paymentIntentClientSecret: intentRes.clientSecret,
+        merchantDisplayName: 'WeMatch Padel',
+        returnURL,
+      });
+      if (initErr) {
+        setMatchmakingPayBusy(false);
+        Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+        return;
+      }
+      const { error: presentErr } = await presentPaymentSheet();
+      if (presentErr) {
+        setMatchmakingPayBusy(false);
+        if (presentErr.code === 'Canceled') {
+          Alert.alert('Cancelado', 'Pago cancelado.');
+        } else {
+          if (__DEV__) {
+            console.warn('[Stripe presentPaymentSheet]', presentErr.code, presentErr.message);
+          }
+          Alert.alert(
+            'Error',
+            presentErr.message ?? 'Error al procesar el pago. Inténtalo de nuevo.'
+          );
+        }
+        return;
+      }
+    } else {
       setMatchmakingPayBusy(false);
       Alert.alert('Error', intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.');
       return;
     }
-    const returnURL = Linking.createURL('stripe-redirect');
-    const { error: initErr } = await initPaymentSheet({
-      paymentIntentClientSecret: intentRes.clientSecret,
-      merchantDisplayName: 'WeMatch Padel',
-      returnURL,
-    });
-    if (initErr) {
-      setMatchmakingPayBusy(false);
-      Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
-      return;
-    }
-    const { error: presentErr } = await presentPaymentSheet();
-    if (presentErr) {
-      setMatchmakingPayBusy(false);
-      if (presentErr.code === 'Canceled') {
-        Alert.alert('Cancelado', 'Pago cancelado.');
-      } else {
-        Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
-      }
-      return;
-    }
-    const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, token);
+    const confirmRes = await confirmPaymentFromClient(paymentIntentId!, token);
     if (!confirmRes.ok) {
       setMatchmakingPayBusy(false);
       Alert.alert('Error', 'No se pudo confirmar. Inténtalo de nuevo.');
@@ -588,7 +628,14 @@ export function PartidoDetailScreen({
 
   const teamA = partido.players.slice(0, 2);
   const teamB = partido.players.slice(2, 4);
-  const heroUri = partido.venueImage ?? pickPlaceholderUri(partido.id);
+  const heroPrimaryUri = partido.venueImage?.trim() || pickPlaceholderUri(partido.id);
+  const heroFallbackUri = pickPlaceholderUri(partido.id);
+  const [heroUri, setHeroUri] = useState(heroPrimaryUri);
+
+  useEffect(() => {
+    setHeroUri(partido.venueImage?.trim() || pickPlaceholderUri(partido.id));
+  }, [partido.id, partido.venueImage]);
+
   const venueAddress = partido.venueAddress ?? partido.location;
   const locationLine =
     partido.location && partido.location !== '—'
@@ -848,7 +895,14 @@ export function PartidoDetailScreen({
       >
         <View>
           <View style={styles.heroWrap}>
-            <Image source={{ uri: heroUri }} style={styles.heroImg} resizeMode="cover" />
+            <Image
+              source={{ uri: heroUri }}
+              style={styles.heroImg}
+              resizeMode="cover"
+              onError={() => {
+                if (heroUri !== heroFallbackUri) setHeroUri(heroFallbackUri);
+              }}
+            />
             <LinearGradient
               colors={['transparent', 'rgba(15,15,15,0.55)', BG]}
               locations={[0, 0.45, 1]}

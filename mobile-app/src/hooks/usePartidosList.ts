@@ -12,7 +12,7 @@ import {
   whenChipLabel,
   type PartidosFiltersState,
 } from '../domain/partidosFilters';
-import { isPartidoOpenForDiscovery } from '../lib/partidoPlayerUtils';
+import { enrichPartidosWithClubImages, isPartidoOpenForDiscovery } from '../lib/partidoPlayerUtils';
 import { loadStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import type { PartidoItem } from '../screens/PartidosScreen';
 import { useClubCatalog } from './useClubCatalog';
@@ -93,11 +93,14 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
       });
       if (gen !== openLoadGenRef.current) return;
       const myId = profile?.id ?? null;
-      const openPartidos = openMatches
-        .map((m) => mapMatchToPartido(m))
-        .filter((p): p is PartidoItem => p != null)
-        .filter((p) => p.matchPhase !== 'past')
-        .filter((p) => isPartidoOpenForDiscovery(p, myId));
+      const openPartidos = enrichPartidosWithClubImages(
+        openMatches
+          .map((m) => mapMatchToPartido(m))
+          .filter((p): p is PartidoItem => p != null)
+          .filter((p) => p.matchPhase !== 'past')
+          .filter((p) => isPartidoOpenForDiscovery(p, myId)),
+        clubs.map((c) => ({ id: c.id, imageUrl: c.imageUrl })),
+      );
       setOpenRaw(openPartidos);
     } catch {
       if (gen === openLoadGenRef.current) setOpenRaw([]);
@@ -110,6 +113,7 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
     fetchRange.dateFrom,
     fetchRange.dateTo,
     profile?.id,
+    clubs,
   ]);
 
   useEffect(() => {

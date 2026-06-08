@@ -57,7 +57,15 @@ export type MatchBookingExpanded = {
     indoor?: boolean;
     glass_type?: string;
     sport?: string | null;
-    clubs?: { id: string; name: string; address: string; city: string } | null;
+    clubs?: {
+      id: string;
+      name: string;
+      address: string;
+      city: string;
+      logo_url?: string | null;
+      photo_urls?: unknown;
+      display_image_url?: string | null;
+    } | null;
   } | null;
 };
 

@@ -422,7 +422,23 @@ export function mergePartidoWithServer(
     matchStatus: next.matchStatus ?? previous.matchStatus,
     bookingStatus: next.bookingStatus ?? previous.bookingStatus,
     hasMyFeedback: next.hasMyFeedback === true || previous.hasMyFeedback === true,
+    venueImage: next.venueImage ?? previous.venueImage,
+    venueAddress: next.venueAddress ?? previous.venueAddress,
   };
+}
+
+/** Fallback: catálogo de clubes (`/search/courts`) cuando la API de matches aún no trae imagen. */
+export function enrichPartidosWithClubImages(
+  items: PartidoItem[],
+  clubs: Array<{ id: string; imageUrl: string | null }>,
+): PartidoItem[] {
+  if (clubs.length === 0) return items;
+  const byId = new Map(clubs.map((c) => [c.id, c.imageUrl]));
+  return items.map((p) => {
+    if (p.venueImage?.trim() || !p.clubId) return p;
+    const img = byId.get(p.clubId);
+    return img?.trim() ? { ...p, venueImage: img.trim() } : p;
+  });
 }
 
 /** Enriquece una lista de partidos con el perfil del jugador actual. */

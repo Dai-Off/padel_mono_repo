@@ -73,3 +73,62 @@ export async function resolveClubLogoUrlForClient(
 
   return raw;
 }
+
+type ClubImageRow = {
+  id?: string;
+  logo_url?: string | null;
+  photo_urls?: unknown;
+  display_image_url?: string | null;
+};
+
+/** Prioridad: primera foto del club, luego logo_url. */
+export function pickClubImageSource(club: ClubImageRow | null | undefined): string | null {
+  const firstPhoto =
+    Array.isArray(club?.photo_urls) && club.photo_urls.length > 0
+      ? String(club.photo_urls[0]).trim()
+      : null;
+  const logo = typeof club?.logo_url === 'string' ? club.logo_url.trim() : '';
+  return firstPhoto || logo || null;
+}
+
+/**
+ * Resuelve URLs de imagen de club en filas de matches expandidas (in-place).
+ * Deduplica por club_id para no firmar la misma imagen N veces por request.
+ */
+export async function enrichMatchRowsWithClubImages(
+  supabase: SupabaseClient,
+  rows: unknown[],
+): Promise<void> {
+  const rawByClub = new Map<string, string>();
+  for (const row of rows) {
+    const r = row as { bookings?: unknown };
+    const b = Array.isArray(r.bookings) ? r.bookings[0] : r.bookings;
+    const club = (b as { courts?: { clubs?: ClubImageRow } } | null)?.courts?.clubs;
+    const id = club?.id;
+    if (!id || rawByClub.has(id)) continue;
+    const raw = pickClubImageSource(club);
+    if (raw) rawByClub.set(id, raw);
+  }
+  if (rawByClub.size === 0) return;
+
+  const resolved = new Map<string, string>();
+  await Promise.all(
+    [...rawByClub.entries()].map(async ([id, raw]) => {
+      try {
+        const url = await resolveClubLogoUrlForClient(supabase, raw);
+        if (url) resolved.set(id, url);
+      } catch (err) {
+        console.warn('[enrichMatchRowsWithClubImages] skip club', id, err);
+      }
+    }),
+  );
+
+  for (const row of rows) {
+    const r = row as { bookings?: unknown };
+    const b = Array.isArray(r.bookings) ? r.bookings[0] : r.bookings;
+    const club = (b as { courts?: { clubs?: ClubImageRow } } | null)?.courts?.clubs;
+    if (!club?.id) continue;
+    const url = resolved.get(club.id);
+    if (url) club.display_image_url = url;
+  }
+}

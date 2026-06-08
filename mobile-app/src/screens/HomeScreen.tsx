@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -69,9 +69,7 @@ type HomeScreenProps = {
   onOpenCompetitiveLeague?: () => void;
   onOpenSeasonPass?: () => void;
   onOpenMessageThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
-  /** Abre un DM sin pasar por la lista de chats (usado por IA Afinidad) */
-  onOpenAffinityThread?: (peer: { id: string; displayName: string; avatarUrl: string | null }) => void;
-  /** Incrementar desde MainApp para que el modal de IA Afinidad se reabra al volver del chat */
+  /** Incrementar desde MainApp para reabrir el modal al volver del perfil público */
   affinityReopenSignal?: number;
   /** Llamar tras consumir la señal para que no vuelva a dispararse en cambios de tab */
   onAffinityReopened?: () => void;
@@ -87,8 +85,21 @@ type HomeScreenProps = {
 /** Caché a nivel de módulo para que affinityResponse y los IDs enviados sobrevivan al desmonte/remonte de HomeScreen */
 const _affinityCache = {
   response: null as string | null,
-  sentIds: new Set<string>()
+  sentIds: new Set<string>(),
+  /** Al volver del chat/perfil de afinidad, reabrir el modal en el primer render (sin flash del home). */
+  pendingReopen: false,
 };
+
+/** Marca que el modal de IA Afinidad debe reabrirse al remontar HomeScreen. */
+export function markAffinityModalPendingReopen() {
+  _affinityCache.pendingReopen = true;
+}
+
+function consumeAffinityModalPendingReopen(): boolean {
+  if (!_affinityCache.pendingReopen || !_affinityCache.response) return false;
+  _affinityCache.pendingReopen = false;
+  return true;
+}
 
 // Etiquetas legibles para construir el prompt de la IA de afinidad a partir de
 // los criterios (= preferencias del jugador).
@@ -129,7 +140,6 @@ export function HomeScreen({
   onOpenCompetitiveLeague,
   onOpenSeasonPass,
   onOpenMessageThread,
-  onOpenAffinityThread,
   affinityReopenSignal = 0,
   onAffinityReopened,
   onOpenPublicProfile,
@@ -169,7 +179,9 @@ export function HomeScreen({
       setRetrying(false);
     }
   };
-  const [affinityModalVisible, setAffinityModalVisible] = useState(false);
+  const [affinityModalVisible, setAffinityModalVisible] = useState(() => consumeAffinityModalPendingReopen());
+  /** Sin animación fade al reabrir tras volver del chat (evita flash del home). */
+  const [affinityInstantShow, setAffinityInstantShow] = useState(false);
   const [affinityLoading, setAffinityLoading] = useState(false);
   // Inicializar desde caché para sobrevivir remounts (ej. al volver del chat de IA Afinidad)
   const [affinityResponse, _setAffinityResponse] = useState<string | null>(() => _affinityCache.response);
@@ -238,16 +250,20 @@ export function HomeScreen({
     };
   }, [myPlayerProfile, leagueRows]);
 
-  // Cuando el usuario vuelve del chat de IA Afinidad, reabrir el modal con los resultados del caché
-  useEffect(() => {
+  // useLayoutEffect: reabre el modal antes del paint al volver del chat (sin flash del home).
+  useLayoutEffect(() => {
     if (affinityReopenSignal > 0 && _affinityCache.response) {
       _setAffinityResponse(_affinityCache.response);
+      setAffinityInstantShow(true);
       setAffinityModalVisible(true);
-      // Consumir la señal para que cambios de tab no vuelvan a abrir el modal
       onAffinityReopened?.();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [affinityReopenSignal]);
+
+  useEffect(() => {
+    if (!affinityModalVisible) setAffinityInstantShow(false);
+  }, [affinityModalVisible]);
 
   // Refrescamos season pass y racha cuando volvemos de la lección diaria
   // (ambos pueden haber cambiado). El resto de datos del home se refrescan
@@ -554,6 +570,7 @@ export function HomeScreen({
 
       <IAAfinidadModal
         visible={affinityModalVisible}
+        instantShow={affinityInstantShow}
         loading={affinityLoading}
         responseText={affinityResponse}
         errorText={affinityError}
@@ -563,6 +580,7 @@ export function HomeScreen({
           // para que no reaparezca al cambiar de tab
           _affinityCache.response = null;
           _affinityCache.sentIds = new Set();
+          _affinityCache.pendingReopen = false;
           _setAffinityResponse(null);
           setAffinitySentIds(new Set());
         }}
@@ -572,12 +590,8 @@ export function HomeScreen({
         onRunSearch={handleAffinityRun}
         affinityVisible={myPlayerProfile?.affinityVisible ?? false}
         onSetVisible={handleSetAffinityVisible}
-        onDirectMessageSent={(target) => {
-          // Usa el hilo directo de afinidad: back vuelve al modal de resultados
-          // en vez de pasar por la lista de chats.
-          onOpenAffinityThread?.(target);
-        }}
         onPlayerPress={(pid) => {
+          markAffinityModalPendingReopen();
           setAffinityModalVisible(false);
           onOpenAffinityPublicProfile?.(pid);
         }}
