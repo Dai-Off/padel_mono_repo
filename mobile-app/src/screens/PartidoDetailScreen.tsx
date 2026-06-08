@@ -48,7 +48,7 @@ import {
 } from '../lib/partidoPlayerUtils';
 import { PartidoSlotAvatar } from '../components/partido/PartidoSlotAvatar';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
-import { rejectMatchmakingProposal } from '../api/matchmaking';
+import { rejectMatchmakingProposal, leaveMatchmaking } from '../api/matchmaking';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import {
   MatchEvaluationFlow,
@@ -473,6 +473,7 @@ export function PartidoDetailScreen({
     matchFetchGen.current += 1;
     const freshProfile = await fetchMyPlayerProfile(token);
     const payElo = pickProfileEloRating(freshProfile, myProfile, profileForEnrich);
+    const viewerId = currentPlayerId ?? myProfile?.id ?? freshProfile?.id ?? null;
     const profileEnrich: ProfileForPartidoEnrich | null = freshProfile?.id
       ? {
           id: freshProfile.id,
@@ -485,25 +486,36 @@ export function PartidoDetailScreen({
       : profileForEnrich
         ? { ...profileForEnrich, eloRating: payElo ?? profileForEnrich.eloRating }
         : null;
-    if (profileEnrich) {
+    if (profileEnrich && viewerId) {
+      if (freshProfile?.id) setCurrentPlayerId(freshProfile.id);
       cachePlayerAvatar(profileEnrich.id, profileEnrich.avatarUrl);
       const levelLine = formatPlayerLevelFromElo(profileEnrich.eloRating);
       if (levelLine !== '—') cachePlayerLevel(profileEnrich.id, levelLine);
+      const reservedSlot =
+        partido.playerIdsBySlot?.findIndex((id) => id === viewerId) ??
+        partido.players.findIndex((p) => p.id === viewerId);
+      const forceSlotIndex =
+        reservedSlot >= 0 ? reservedSlot : partido.players.findIndex((p) => p.isFree);
       setPartido((prev) => {
-        const next = enrichPartidoWithProfileAvatar(prev, profileEnrich);
+        const cleared = {
+          ...prev,
+          matchmakingPayment: undefined,
+          bookingStatus: 'confirmed',
+        };
+        const next = enrichPartidoWithProfileAvatar(cleared, profileEnrich, {
+          forceSlotIndex: forceSlotIndex >= 0 ? forceSlotIndex : undefined,
+        });
         upsertMisPartido(next);
         return next;
       });
       void refreshProfile({ force: true });
     }
-    setMatchmakingPayBusy(false);
     const matchId = partido.id;
-    const viewerId = currentPlayerId ?? myProfile?.id ?? freshProfile?.id ?? null;
-    void (async () => {
+    try {
       const updated = await reloadMatchPartido(matchId, token, {
-        retryIfMissingPlayerId: currentPlayerId ?? myProfile?.id ?? freshProfile?.id ?? undefined,
+        retryIfMissingPlayerId: viewerId ?? undefined,
         viewerPlayerId: viewerId,
-        maxRetries: 3,
+        maxRetries: 5,
       });
       if (!updated) return;
       setPartido((prev) => {
@@ -518,7 +530,9 @@ export function PartidoDetailScreen({
       });
       onMatchDataChanged?.();
       void refreshMatches({ scope: 'mine' });
-    })();
+    } finally {
+      setMatchmakingPayBusy(false);
+    }
   }, [
     partido,
     currentPlayerId,
@@ -555,6 +569,7 @@ export function PartidoDetailScreen({
                 Alert.alert('Error', r.error);
                 return;
               }
+              await leaveMatchmaking(token);
               Alert.alert('Listo', 'Has declinado el partido.', [{ text: 'OK', onPress: () => onBack() }]);
             } finally {
               setDecliningMatchmaking(false);

@@ -86,69 +86,73 @@ export function generateFigmaWeeklyPlan(assessment: CoachAssessment): FigmaWeekl
     }
   });
 
-  // 2. Traer estadísticas reales del jugador
-  const matchesPlayed = assessment.stats?.matchCount ?? 0;
-  const completedObjectives = assessment.stats?.completedObjectives ?? 0;
+  // 2. Estadísticas reales del jugador (desde /coach-assessment/me)
+  const stats = assessment.stats;
+  const matchesThisWeek = stats?.matchesThisWeek ?? 0;
+  const matchesThisMonth = stats?.matchesThisMonth ?? stats?.matchCount ?? 0;
+  const dailyLessonsThisWeek = stats?.dailyLessonsThisWeek ?? 0;
+  const tournamentEnrolledCount = stats?.tournamentEnrolledCount ?? 0;
+  const tournamentPlayedCount = stats?.tournamentPlayedCount ?? 0;
+  const classesAttendedCount = stats?.classesAttendedCount ?? 0;
+  const coursesCompletedCount = stats?.coursesCompletedCount ?? 0;
 
-  // Metas semanales según estadísticas reales y metas dinámicas
   const weeklyProgress: ProgressItem[] = [
     {
       key: 'matches',
       label: 'Partidos jugados',
-      actual: Math.min(matchesPlayed, 2), // Límite ilustrativo semanal
+      actual: matchesThisWeek,
       target: 2,
       icon: 'target',
     },
     {
       key: 'classes',
       label: 'Clases asistidas',
-      actual: completedObjectives >= 1 ? 1 : 0, // Si tiene al menos una lección completada, cuenta como 1 clase esta semana
+      actual: classesAttendedCount,
       target: 1,
       icon: 'zap',
     },
     {
       key: 'lessons',
       label: 'Lección diaria',
-      actual: Math.min(completedObjectives, 5), // Basado en los objetivos completados
+      actual: dailyLessonsThisWeek,
       target: 5,
       icon: 'book-open',
     },
     {
       key: 'tournaments',
       label: 'Torneos inscritos',
-      actual: matchesPlayed > 5 ? 1 : 0, // Lógica simple para simular inscripciones
+      actual: tournamentEnrolledCount,
       target: 1,
       icon: 'trophy',
     },
   ];
 
-  // Metas mensuales basadas en estadísticas
   const monthlyProgress: ProgressItem[] = [
     {
       key: 'm_matches',
       label: 'Partidos completados',
-      actual: matchesPlayed, // Total histórico real
-      target: Math.max(8, matchesPlayed + 3), // Meta escalable
+      actual: matchesThisMonth,
+      target: Math.max(8, matchesThisMonth + 3),
       icon: 'target',
     },
     {
       key: 'm_classes',
       label: 'Clases asistidas',
-      actual: Math.floor(completedObjectives / 2),
+      actual: classesAttendedCount,
       target: 4,
       icon: 'zap',
     },
     {
       key: 'm_tournaments',
       label: 'Torneos disputados',
-      actual: Math.floor(matchesPlayed / 6),
+      actual: tournamentPlayedCount,
       target: 1,
       icon: 'trophy',
     },
     {
       key: 'm_courses',
       label: 'Cursos finalizados',
-      actual: completedObjectives > 5 ? 2 : 1,
+      actual: coursesCompletedCount,
       target: 2,
       icon: 'book-open',
     },

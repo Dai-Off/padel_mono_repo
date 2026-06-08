@@ -59,6 +59,57 @@ export type MatchmakingStatusResponse = {
   searching_in_club_count?: number | null;
 };
 
+export type MatchmakingLeaderboardRow = {
+  rank: number;
+  player_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  username: string | null;
+  elo_rating: number | null;
+  lps: number;
+  mm_wins: number;
+  mm_losses: number;
+};
+
+export type MatchmakingLeaderboardResponse = {
+  ok: boolean;
+  liga: string;
+  total: number;
+  offset?: number;
+  limit?: number;
+  has_more?: boolean;
+  rows: MatchmakingLeaderboardRow[];
+};
+
+/** Ranking paginado de la división MM. */
+export async function fetchMatchmakingLeaderboard(
+  token: string | null | undefined,
+  opts?: { liga?: string | null; limit?: number; offset?: number },
+): Promise<MatchmakingLeaderboardResponse | null> {
+  if (!token) return null;
+  const params = new URLSearchParams();
+  if (opts?.liga?.trim()) params.set('liga', opts.liga.trim());
+  if (opts?.limit != null) params.set('limit', String(opts.limit));
+  if (opts?.offset != null) params.set('offset', String(opts.offset));
+  const qs = params.toString();
+  try {
+    const res = await fetch(`${API_URL}/matchmaking/leaderboard${qs ? `?${qs}` : ''}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as MatchmakingLeaderboardResponse;
+    if (!json.ok || !Array.isArray(json.rows)) return null;
+    return json;
+  } catch {
+    return null;
+  }
+}
+
 export type MatchmakingProposalResponse = {
   ok: boolean;
   has_proposal: boolean;

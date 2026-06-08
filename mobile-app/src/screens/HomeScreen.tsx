@@ -28,6 +28,10 @@ import type { PartidoItem } from './PartidosScreen';
 import { IAAfinidadModal, type AffinityCriteria } from '../components/home/IAAfinidadModal';
 import { OnboardingHardBlockModal } from '../components/onboarding/OnboardingHardBlockModal';
 import { searchAiMatch } from '../api/aiMatch';
+import {
+  fetchMatchmakingLeagueConfig,
+  type MatchmakingLeagueConfigRow,
+} from '../api/matchmaking';
 import { updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreferences } from '../api/players';
 import { type SeasonPassMissionDto } from '../api/seasonPass';
 import {
@@ -188,6 +192,51 @@ export function HomeScreen({
   const [hardBlockOpen, setHardBlockOpen] = useState<
     null | 'daily-lesson' | 'ia-afinidad' | 'matchmaking'
   >(null);
+  const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
+
+  const competitiveLeagueNeedsOnboarding =
+    myPlayerProfile != null && myPlayerProfile.onboardingCompleted === false;
+
+  useEffect(() => {
+    if (competitiveLeagueNeedsOnboarding) return;
+    void fetchMatchmakingLeagueConfig().then((rows) => {
+      if (rows) setLeagueRows(rows);
+    });
+  }, [competitiveLeagueNeedsOnboarding]);
+
+  const competitiveLeagueCardProps = useMemo(() => {
+    const p = myPlayerProfile;
+    // Sin perfil o nivelación pendiente: la card queda bloqueada y muestra guiones.
+    if (!p || p.onboardingCompleted === false) return null;
+
+    const ligaCode = typeof p.liga === 'string' ? p.liga.trim() : '';
+    const row = ligaCode ? leagueRows?.find((r) => r.code === ligaCode) : undefined;
+    const divisionName = row?.label ?? (ligaCode || null);
+
+    const lpTargetRaw = row?.lps_to_promote;
+    const lpTarget =
+      lpTargetRaw != null && Number.isFinite(lpTargetRaw) && lpTargetRaw > 0
+        ? Math.round(lpTargetRaw)
+        : 100;
+    const lpsRaw = p.lps;
+    const lps =
+      lpsRaw != null && Number.isFinite(Number(lpsRaw))
+        ? Math.max(0, Math.round(Number(lpsRaw)))
+        : 0;
+    const ladderProgressPercent =
+      lpTarget > 0 ? Math.max(0, Math.min(100, Math.round((lps / lpTarget) * 100))) : 0;
+
+    const wins = Math.max(0, Math.round(Number(p.mmWins ?? 0)));
+    const losses = Math.max(0, Math.round(Number(p.mmLosses ?? 0)));
+
+    return {
+      divisionName,
+      leaguePoints: `${lps} / ${lpTarget} LP`,
+      ladderProgressPercent,
+      winsLabel: `${wins}V`,
+      lossesLabel: `${losses}D`,
+    };
+  }, [myPlayerProfile, leagueRows]);
 
   // Cuando el usuario vuelve del chat de IA Afinidad, reabrir el modal con los resultados del caché
   useEffect(() => {
@@ -444,9 +493,14 @@ export function HomeScreen({
             />
             <CompetitiveLeagueHomeCard
               compact
-              locked={myPlayerProfile != null && !myPlayerProfile.onboardingCompleted}
+              divisionName={competitiveLeagueCardProps?.divisionName}
+              leaguePoints={competitiveLeagueCardProps?.leaguePoints}
+              ladderProgressPercent={competitiveLeagueCardProps?.ladderProgressPercent}
+              winsLabel={competitiveLeagueCardProps?.winsLabel}
+              lossesLabel={competitiveLeagueCardProps?.lossesLabel}
+              locked={competitiveLeagueNeedsOnboarding}
               onPress={() => {
-                if (myPlayerProfile && !myPlayerProfile.onboardingCompleted) {
+                if (competitiveLeagueNeedsOnboarding) {
                   setHardBlockOpen('matchmaking');
                   return;
                 }
