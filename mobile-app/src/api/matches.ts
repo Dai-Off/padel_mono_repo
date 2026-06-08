@@ -11,11 +11,15 @@ export type Match = {
   gender: string | null;
   competitive: boolean;
   status: string;
-  score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | null;
+  score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | 'pending_votes' | 'no_result' | null;
   sets?: Array<{ a: number; b: number }> | null;
+  match_end_reason?: string | null;
   type?: string | null;
   /** Solo en /matches/mine: indica si el jugador autenticado ya envió feedback. */
   has_my_feedback?: boolean;
+  score_proposer_id?: string | null;
+  my_score_vote?: 'confirm' | 'reject' | null;
+  score_vote_counts?: { confirm: number; reject: number } | null;
 };
 
 type PlayerRef = {
@@ -32,6 +36,7 @@ type MatchPlayerRef = {
   team: 'A' | 'B';
   created_at: string;
   slot_index?: number | null;
+  result?: 'win' | 'loss' | 'draw' | 'pending' | string | null;
   players: PlayerRef | null;
 };
 
@@ -52,7 +57,15 @@ export type MatchBookingExpanded = {
     indoor?: boolean;
     glass_type?: string;
     sport?: string | null;
-    clubs?: { id: string; name: string; address: string; city: string } | null;
+    clubs?: {
+      id: string;
+      name: string;
+      address: string;
+      city: string;
+      logo_url?: string | null;
+      photo_urls?: unknown;
+      display_image_url?: string | null;
+    } | null;
   } | null;
 };
 
@@ -81,11 +94,26 @@ type FetchMatchesOptions = {
   visibility?: 'public' | 'private';
   /** Listado optimizado para Buscar partido (públicos activos, orden por hora). */
   discovery?: boolean;
+  /** Con discovery: solo partidos con plaza libre (por defecto en backend). */
+  joinableOnly?: boolean;
+  /** Con discovery: máximo de filas (backend cap 150). */
+  limit?: number;
 };
 
 export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<MatchEnriched[]> {
-  const { bookingId, expand = true, token, activeOnly = true, dateFrom, dateTo, clubId, visibility, discovery } =
-    options;
+  const {
+    bookingId,
+    expand = true,
+    token,
+    activeOnly = true,
+    dateFrom,
+    dateTo,
+    clubId,
+    visibility,
+    discovery,
+    joinableOnly,
+    limit,
+  } = options;
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -99,6 +127,8 @@ export async function fetchMatches(options: FetchMatchesOptions = {}): Promise<M
   if (clubId) url.searchParams.set('club_id', clubId);
   if (visibility) url.searchParams.set('visibility', visibility);
   if (discovery) url.searchParams.set('discovery', '1');
+  if (discovery && joinableOnly !== false) url.searchParams.set('joinable_only', '1');
+  if (discovery && limit != null && limit > 0) url.searchParams.set('limit', String(Math.trunc(limit)));
 
   try {
     const res = await fetch(url.toString(), { headers });
@@ -297,7 +327,14 @@ export async function fetchMatchById(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   try {
-    const res = await fetch(`${API_URL}/matches/${matchId}?expand=1`, { headers });
+    const res = await fetch(`${API_URL}/matches/${matchId}?expand=1`, {
+      headers: {
+        ...headers,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
+    });
     if (!res.ok) return null;
     const json = (await res.json()) as MatchResponse;
     if (json.ok && json.match) return normalizeMatchList([json.match as MatchEnriched])[0] ?? null;
@@ -339,6 +376,31 @@ export async function submitMatchScore(
     return { ok: false, error: json.error ?? 'No se pudo guardar el marcador', status: res.status };
   } catch {
     return { ok: false, error: 'Error de conexión', status: 0 };
+  }
+}
+
+export async function voteMatchScore(
+  matchId: string,
+  vote: 'confirm' | 'reject',
+  token: string | null | undefined
+): Promise<{ ok: true; score_status: string; votes: { confirm: number; reject: number } } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/matches/${matchId}/score/vote`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ vote }),
+    });
+    const json = await res.json();
+    if (res.ok && json.ok) {
+      return { ok: true, score_status: json.score_status, votes: json.votes };
+    }
+    return { ok: false, error: json.error ?? 'No se pudo registrar el voto' };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
   }
 }
 

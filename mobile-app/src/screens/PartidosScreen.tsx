@@ -60,8 +60,16 @@ export type PartidoItem = {
   matchType?: string | null;
   matchStatus?: string;
   bookingStatus?: string;
-  scoreStatus?: 'pending' | 'confirmed' | 'disputed' | null;
+  scoreStatus?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | 'pending_votes' | 'no_result' | null;
+  score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | 'pending_votes' | 'no_result' | null;
   hasMyFeedback?: boolean;
+  sets?: Array<{ a: number; b: number }> | null;
+  myTeam?: 'A' | 'B' | null;
+  myResult?: 'win' | 'loss' | 'draw' | 'pending' | null;
+  matchEndReason?: string | null;
+  score_proposer_id?: string | null;
+  my_score_vote?: 'confirm' | 'reject' | null;
+  score_vote_counts?: { confirm: number; reject: number } | null;
   courtSport?: string;
   startAtIso?: string;
   eloMin?: number | null;
@@ -98,6 +106,7 @@ export function PartidosScreen({
     openPartidos,
     myPartidos,
     loading,
+    misPartidosLoading,
     organizerPlayerId,
     clubs,
     clubsLoading,
@@ -165,7 +174,7 @@ export function PartidosScreen({
           <Text style={styles.sectionSubtitle}>Tus reservas y partidos que organizas</Text>
         </View>
         <View style={styles.list}>
-          {loading ? (
+          {misPartidosLoading && myPartidos.length === 0 ? (
             <>
               <PartidoOpenCardSkeleton />
               <PartidoOpenCardSkeleton />

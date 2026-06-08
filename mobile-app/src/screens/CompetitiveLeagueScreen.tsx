@@ -1,19 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { Alert, LayoutChangeEvent, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Slider from '@react-native-community/slider';
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { MATCHMAKING_DEMO } from '../config';
+import { haversineKm } from '../lib/geoDistance';
+import {
+  probeDeviceLocationIssue,
+  resolveDeviceSearchCoordinatesFast,
+  type LocationIssue,
+  type SearchCoordinates,
+} from '../lib/matchSearchLocation';
 import { useAuth } from '../contexts/AuthContext';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
 import { useClubCatalog } from '../hooks/useClubCatalog';
-import { loadStoredPreferredClubIds, saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
+import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
+import { computeMatchAvailabilityWindow } from '../lib/matchAvailabilityWindow';
+import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import { fetchMatches, fetchMatchById, type MatchEnriched } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import type { PartidoItem } from './PartidosScreen';
 import {
   fetchMatchmakingLeagueConfig,
+  fetchMatchmakingLeaderboard,
   fetchMatchmakingProposal,
   fetchMatchmakingStatus,
   isMatchmakingFlowPending,
@@ -22,6 +45,7 @@ import {
   rejectMatchmakingProposal,
   type MatchmakingJoinPayload,
   type MatchmakingLeagueConfigRow,
+  type MatchmakingLeaderboardRow,
   type MatchmakingProposalResponse,
   type MatchmakingStatusResponse,
 } from '../api/matchmaking';
@@ -47,43 +71,7 @@ const DEFAULT_FORM: SearchForm = {
   search_area: 'club',
 };
 const FLOW_TOP_PADDING = 12;
-
-function computeAvailabilityWindow(input: Pick<SearchForm, 'day' | 'time'>): {
-  availableFrom: string;
-  availableUntil: string;
-} {
-  const now = new Date();
-  const targetDay = new Date(now);
-  if (input.day === 'manana') targetDay.setDate(targetDay.getDate() + 1);
-  else if (input.day === 'esta-semana') targetDay.setDate(targetDay.getDate() + 2);
-  else if (input.day === 'fin-semana') {
-    const day = targetDay.getDay();
-    const daysUntilSaturday = (6 - day + 7) % 7 || 7;
-    targetDay.setDate(targetDay.getDate() + daysUntilSaturday);
-  }
-
-  let startHour = now.getHours();
-  let endHour = Math.min(startHour + 2, 23);
-  if (input.time === 'manana') {
-    startHour = 9;
-    endHour = 12;
-  } else if (input.time === 'tarde') {
-    startHour = 15;
-    endHour = 18;
-  } else if (input.time === 'noche') {
-    startHour = 19;
-    endHour = 22;
-  }
-
-  const availableFromDate = new Date(targetDay);
-  availableFromDate.setHours(startHour, 0, 0, 0);
-  const availableUntilDate = new Date(targetDay);
-  availableUntilDate.setHours(endHour, 0, 0, 0);
-  if (availableUntilDate <= availableFromDate) {
-    availableUntilDate.setTime(availableFromDate.getTime() + 90 * 60 * 1000);
-  }
-  return { availableFrom: availableFromDate.toISOString(), availableUntil: availableUntilDate.toISOString() };
-}
+const RANKING_PAGE_SIZE = 15;
 
 type Props = {
   onBack: () => void;
@@ -123,6 +111,13 @@ export function CompetitiveLeagueScreen({
   // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
   const { profile } = useHomeData();
   const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
+  const [rankingRows, setRankingRows] = useState<MatchmakingLeaderboardRow[]>([]);
+  const [rankingTotal, setRankingTotal] = useState(0);
+  const [rankingHasMore, setRankingHasMore] = useState(false);
+  const [rankingLoading, setRankingLoading] = useState(false);
+  const [rankingLoadingMore, setRankingLoadingMore] = useState(false);
+  const [rankingError, setRankingError] = useState<string | null>(null);
+  const rankingLoadGenRef = useRef(0);
   const [status, setStatus] = useState<MatchmakingStatusResponse | null>(null);
   const [proposal, setProposal] = useState<MatchmakingProposalResponse | null>(null);
   const [proposalMatch, setProposalMatch] = useState<MatchEnriched | null>(null);
@@ -135,7 +130,9 @@ export function CompetitiveLeagueScreen({
   const preferredClubsSeedDoneRef = useRef(false);
   const { clubs: clubCatalog } = useClubCatalog();
   const [distanceKm, setDistanceKm] = useState(10);
-  const [distanceTrackWidth, setDistanceTrackWidth] = useState(1);
+  const [searchCoords, setSearchCoords] = useState<SearchCoordinates | null>(null);
+  const [searchCoordsLoading, setSearchCoordsLoading] = useState(false);
+  const [locationIssue, setLocationIssue] = useState<LocationIssue | null>(null);
   const [countdownText, setCountdownText] = useState<string>('--:--:--');
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAppliedEntryIntentRef = useRef<'default' | 'queue' | 'prefs' | null>(null);
@@ -235,6 +232,72 @@ export function CompetitiveLeagueScreen({
     void fetchMatchmakingLeagueConfig().then(setLeagueRows);
   }, []);
 
+  const loadRankingPage = useCallback(
+    async (offset: number, append: boolean) => {
+      const token = session?.access_token ?? null;
+      const liga = profile?.liga?.trim() || null;
+      if (!token || !liga) return;
+
+      const gen = ++rankingLoadGenRef.current;
+      if (append) {
+        setRankingLoadingMore(true);
+      } else {
+        setRankingLoading(true);
+        setRankingError(null);
+      }
+
+      const res = await fetchMatchmakingLeaderboard(token, {
+        liga,
+        limit: RANKING_PAGE_SIZE,
+        offset,
+      });
+      if (gen !== rankingLoadGenRef.current) return;
+
+      if (!res) {
+        if (!append) {
+          setRankingRows([]);
+          setRankingTotal(0);
+          setRankingHasMore(false);
+          setRankingError('No se pudo cargar el ranking.');
+        }
+        setRankingLoading(false);
+        setRankingLoadingMore(false);
+        return;
+      }
+
+      setRankingTotal(res.total);
+      setRankingHasMore(res.has_more === true);
+      setRankingRows((prev) => (append ? [...prev, ...res.rows] : res.rows));
+      setRankingLoading(false);
+      setRankingLoadingMore(false);
+    },
+    [profile?.liga, session?.access_token],
+  );
+
+  useEffect(() => {
+    if (mainTab !== 'ranking') return;
+    setRankingRows([]);
+    setRankingTotal(0);
+    setRankingHasMore(false);
+    void loadRankingPage(0, false);
+  }, [mainTab, profile?.liga, session?.access_token, loadRankingPage]);
+
+  const loadMoreRanking = useCallback(() => {
+    if (rankingLoading || rankingLoadingMore || !rankingHasMore) return;
+    void loadRankingPage(rankingRows.length, true);
+  }, [loadRankingPage, rankingHasMore, rankingLoading, rankingLoadingMore, rankingRows.length]);
+
+  const handleHomeScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (mainTab !== 'ranking' || rankingLoading || rankingLoadingMore || !rankingHasMore) return;
+      const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+      if (layoutMeasurement.height + contentOffset.y >= contentSize.height - 140) {
+        loadMoreRanking();
+      }
+    },
+    [loadMoreRanking, mainTab, rankingHasMore, rankingLoading, rankingLoadingMore],
+  );
+
   useEffect(() => {
     const token = session?.access_token ?? null;
     let cancelled = false;
@@ -292,27 +355,10 @@ export function CompetitiveLeagueScreen({
 
     let cancelled = false;
     void (async () => {
-      const stored = await loadStoredPreferredClubIds();
+      const ids = await resolveSavedFavoriteClubIds(profile, clubCatalog);
       if (cancelled || preferredClubsSeedDoneRef.current) return;
-
-      if (stored.length > 0) {
-        preferredClubsSeedDoneRef.current = true;
-        setPreferredClubIds(stored);
-        setPreferredClubsHydrated(true);
-        return;
-      }
-
-      if (!profile) return;
-
       preferredClubsSeedDoneRef.current = true;
-      const favNames = new Set(
-        (profile.preferences.favoriteClubs ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean),
-      );
-      if (favNames.size > 0) {
-        setPreferredClubIds(
-          clubCatalog.filter((c) => favNames.has(c.name.trim().toLowerCase())).map((c) => c.id),
-        );
-      }
+      if (ids.length > 0) setPreferredClubIds(ids);
       setPreferredClubsHydrated(true);
     })();
 
@@ -330,6 +376,111 @@ export function CompetitiveLeagueScreen({
     const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
     return preferredClubIds.map((id) => byId.get(id) ?? 'Club');
   }, [clubCatalog, preferredClubIds]);
+
+  const refreshSearchCoords = useCallback(async () => {
+    if (MATCHMAKING_DEMO || preferredClubIds.length > 0) {
+      setSearchCoords(null);
+      setLocationIssue(null);
+      setSearchCoordsLoading(false);
+      return;
+    }
+    const issue = await probeDeviceLocationIssue();
+    if (issue) {
+      setLocationIssue(issue);
+      setSearchCoords(null);
+      setSearchCoordsLoading(false);
+      return;
+    }
+    setLocationIssue(null);
+    setSearchCoordsLoading(true);
+    const res = await resolveDeviceSearchCoordinatesFast(5000);
+    setSearchCoordsLoading(false);
+    if (res.ok) {
+      setSearchCoords(res.coords);
+      setLocationIssue(null);
+    } else {
+      setSearchCoords(null);
+      setLocationIssue({ message: res.error, action: 'retry' });
+    }
+  }, [preferredClubIds.length]);
+
+  useEffect(() => {
+    if (MATCHMAKING_DEMO || step !== 'prefs' || preferredClubIds.length > 0) {
+      if (MATCHMAKING_DEMO) setSearchCoords(null);
+      if (preferredClubIds.length > 0) {
+        setLocationIssue(null);
+        setSearchCoordsLoading(false);
+      }
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const issue = await probeDeviceLocationIssue();
+      if (cancelled) return;
+      if (issue) {
+        setLocationIssue(issue);
+        setSearchCoords(null);
+        setSearchCoordsLoading(false);
+        return;
+      }
+      setLocationIssue(null);
+      setSearchCoordsLoading(true);
+      const res = await resolveDeviceSearchCoordinatesFast(5000);
+      if (cancelled) return;
+      setSearchCoordsLoading(false);
+      if (res.ok) {
+        setSearchCoords(res.coords);
+        setLocationIssue(null);
+      } else {
+        setSearchCoords(null);
+        setLocationIssue({ message: res.error, action: 'retry' });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, preferredClubIds.length]);
+
+  const handleActivateLocation = useCallback(async () => {
+    const perm = await Location.getForegroundPermissionsAsync();
+    if (perm.status === 'undetermined') {
+      const req = await Location.requestForegroundPermissionsAsync();
+      if (req.status !== 'granted') {
+        setLocationIssue({
+          message:
+            'Activa el permiso de ubicación para buscar por distancia, o elegí uno o más clubes preferidos.',
+          action: 'open_settings',
+        });
+        return;
+      }
+    } else if (perm.status !== 'granted') {
+      await Linking.openSettings();
+      return;
+    } else {
+      const servicesOn = await Location.hasServicesEnabledAsync();
+      if (!servicesOn) {
+        await Linking.openSettings();
+        return;
+      }
+    }
+    await refreshSearchCoords();
+  }, [refreshSearchCoords]);
+
+  const clubsInRange = useMemo(() => {
+    if (preferredClubIds.length > 0) return [];
+    if (MATCHMAKING_DEMO) {
+      return clubCatalog.map((c) => ({ ...c, distance: null as number | null }));
+    }
+    if (!searchCoords) return [];
+    return clubCatalog
+      .filter((c) => c.lat != null && c.lng != null)
+      .map((c) => ({
+        ...c,
+        distance: haversineKm(searchCoords, { lat: c.lat!, lng: c.lng! }),
+      }))
+      .filter((c) => c.distance <= distanceKm)
+      .sort((a, b) => a.distance - b.distance);
+  }, [clubCatalog, distanceKm, preferredClubIds.length, searchCoords]);
 
   const division = useMemo(() => {
     if (!profile) return null;
@@ -405,37 +556,50 @@ export function CompetitiveLeagueScreen({
       setErrorText('Necesitas iniciar sesión para buscar partido.');
       return;
     }
-    setLoading(true);
     setErrorText(null);
     clearPollTimer();
-    const { availableFrom, availableUntil } = computeAvailabilityWindow(form);
+    const { availableFrom, availableUntil } = computeMatchAvailabilityWindow(form);
     const payload: MatchmakingJoinPayload = {
       available_from: availableFrom,
       available_until: availableUntil,
       preferred_side: form.preferred_side,
       gender: form.gender,
     };
-    if (preferredClubIds.length > 0) {
-      payload.preferred_club_ids = preferredClubIds;
+    if (MATCHMAKING_DEMO) {
+      const allClubIds = clubCatalog.map((c) => c.id).slice(0, 20);
+      if (allClubIds.length === 0) {
+        setErrorText('No hay clubes cargados para buscar partido.');
+        return;
+      }
+      payload.preferred_club_ids = allClubIds;
+    } else if (preferredClubIds.length === 0 && clubsInRange.length === 0) {
+      setErrorText(
+        `No hay clubes dentro de ${distanceKm} km. Ampliá la distancia o elegí clubes preferidos.`,
+      );
+      return;
+    } else if (preferredClubIds.length > 0) {
+      payload.preferred_club_ids = preferredClubIds.slice(0, 20);
     } else {
+      const issue = await probeDeviceLocationIssue();
+      if (issue) {
+        setLocationIssue(issue);
+        return;
+      }
       const maxKm = Math.max(1, Math.min(50, Math.round(distanceKm)));
-      const perm = await Location.requestForegroundPermissionsAsync();
-      if (perm.status !== 'granted') {
-        setLoading(false);
-        setErrorText('Activa ubicación para buscar por distancia.');
+      const loc = searchCoords
+        ? { ok: true as const, coords: searchCoords }
+        : await resolveDeviceSearchCoordinatesFast(4000);
+      if (!loc.ok) {
+        setLocationIssue({ message: loc.error, action: 'retry' });
         return;
       }
-      try {
-        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        payload.max_distance_km = maxKm;
-        payload.search_lat = pos.coords.latitude;
-        payload.search_lng = pos.coords.longitude;
-      } catch {
-        setLoading(false);
-        setErrorText('No se pudo obtener tu ubicación.');
-        return;
-      }
+      setSearchCoords(loc.coords);
+      setLocationIssue(null);
+      payload.max_distance_km = maxKm;
+      payload.search_lat = loc.coords.lat;
+      payload.search_lng = loc.coords.lng;
     }
+    setLoading(true);
     const result = await joinMatchmaking(payload, token);
     if (!result.ok && !result.alreadyInQueue) {
       setLoading(false);
@@ -449,11 +613,14 @@ export function CompetitiveLeagueScreen({
     await pollStatus();
   }, [
     clearPollTimer,
+    clubsInRange.length,
     distanceKm,
     form,
     onMatchmakingBannerStateChange,
     pollStatus,
-    preferredClubIds.length,
+    preferredClubIds,
+    searchCoords,
+    clubCatalog,
     session?.access_token,
     setQueueElapsedSec,
     setQueueStartedAtMs,
@@ -471,7 +638,7 @@ export function CompetitiveLeagueScreen({
     }
     setStatus(null);
     setProposal(null);
-    onMatchmakingBannerStateChange?.('hidden');
+    onMatchmakingBannerStateChange?.('hidden', { force: true });
     setQueueStartedAtMs(null);
     setQueueElapsedSec(0);
     setStep('home');
@@ -487,16 +654,29 @@ export function CompetitiveLeagueScreen({
     const token = session?.access_token ?? null;
     const matchId = proposal?.match_id;
     if (!token || !matchId) return;
+    clearPollTimer();
     const result = await rejectMatchmakingProposal(matchId, token);
     if (!result.ok) {
       setErrorText(result.error);
       return;
     }
+    await leaveMatchmaking(token);
+    setStatus(null);
     setProposal(null);
-    onMatchmakingBannerStateChange?.('searching', { force: true });
-    setStep('queue');
-    void pollStatus();
-  }, [pollStatus, proposal?.match_id, session?.access_token]);
+    setProposalMatch(null);
+    onMatchmakingBannerStateChange?.('hidden', { force: true });
+    setQueueStartedAtMs(null);
+    setQueueElapsedSec(0);
+    setLoading(false);
+    setStep('home');
+  }, [
+    clearPollTimer,
+    onMatchmakingBannerStateChange,
+    proposal?.match_id,
+    session?.access_token,
+    setQueueElapsedSec,
+    setQueueStartedAtMs,
+  ]);
 
   const openMatchDetail = useCallback(
     async (matchId: string, matchmakingPayment?: PartidoItem['matchmakingPayment']) => {
@@ -507,7 +687,7 @@ export function CompetitiveLeagueScreen({
         Alert.alert('Error', 'No se pudo cargar el partido.');
         return;
       }
-      const mapped = mapMatchToPartido(match);
+      const mapped = mapMatchToPartido(match, { viewerPlayerId: profile?.id ?? null });
       if (!mapped) {
         Alert.alert('Error', 'No se pudo mostrar el partido.');
         return;
@@ -658,14 +838,19 @@ export function CompetitiveLeagueScreen({
 
   const myRankingRow = useMemo(() => {
     if (!profile) return null;
+    const fromList = rankingRows?.find((r) => r.player_id === profile.id);
     const meName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || 'Tú';
     return {
+      rank: fromList?.rank ?? null,
       name: meName,
       level: profile.eloRating ? `Nivel ${Number(profile.eloRating).toFixed(2)}` : 'Nivel —',
       wl: `${profile.mmWins ?? 0}V / ${profile.mmLosses ?? 0}D`,
       lp: profile.lps ?? 0,
     };
-  }, [profile]);
+  }, [profile, rankingRows]);
+
+  const rankingLoadedCount = rankingRows.length;
+  const rankingPlayerCount = rankingTotal > 0 ? rankingTotal : rankingLoadedCount;
 
   return (
     <View style={styles.container}>
@@ -684,6 +869,8 @@ export function CompetitiveLeagueScreen({
             styles.homeContent,
             { paddingTop: FLOW_TOP_PADDING + 32, paddingBottom: insets.bottom + 28 },
           ]}
+          scrollEventThrottle={16}
+          onScroll={handleHomeScroll}
         >
           {(status?.status === 'searching' || isMatchmakingFlowPending(status, proposal)) && (
             <Pressable
@@ -799,20 +986,76 @@ export function CompetitiveLeagueScreen({
             <View style={{ gap: 8 }}>
               <View style={styles.rankingHeader}>
                 <View>
-                  <Text style={styles.rankingDivision}>{division ?? 'Oro II'}</Text>
-                  <Text style={styles.rankingSub}>20 jugadores en tu división</Text>
+                  <Text style={styles.rankingDivision}>{division ?? '—'}</Text>
+                  <Text style={styles.rankingSub}>
+                    {rankingLoading
+                      ? 'Cargando ranking…'
+                      : rankingPlayerCount > 0
+                        ? rankingHasMore
+                          ? `Mostrando ${rankingLoadedCount} de ${rankingPlayerCount} jugadores`
+                          : `${rankingPlayerCount} jugador${rankingPlayerCount === 1 ? '' : 'es'} en tu división`
+                        : 'Sin jugadores en tu división'}
+                  </Text>
                 </View>
-                <View style={styles.topPill}>
-                  <Text style={styles.topPillText}>Top 20</Text>
+                {rankingPlayerCount > 0 ? (
+                  <View style={styles.topPill}>
+                    <Text style={styles.topPillText}>Top {rankingPlayerCount}</Text>
+                  </View>
+                ) : null}
+              </View>
+              {rankingLoading ? (
+                <>
+                  <Skeleton height={52} borderRadius={12} variant="dark" />
+                  <Skeleton height={52} borderRadius={12} variant="dark" />
+                  <Skeleton height={52} borderRadius={12} variant="dark" />
+                </>
+              ) : rankingError ? (
+                <View style={styles.rankingNoticeCard}>
+                  <Text style={styles.rankingNoticeTitle}>Ranking no disponible</Text>
+                  <Text style={styles.rankingNoticeSub}>{rankingError}</Text>
                 </View>
-              </View>
-              <View style={styles.rankingNoticeCard}>
-                <Text style={styles.rankingNoticeTitle}>Ranking global no disponible</Text>
-                <Text style={styles.rankingNoticeSub}>
-                  Cuando esté disponible el endpoint del leaderboard, acá se mostrará el Top 20 real.
-                </Text>
-              </View>
-              {myRankingRow ? (
+              ) : rankingPlayerCount === 0 ? (
+                <View style={styles.rankingNoticeCard}>
+                  <Text style={styles.rankingNoticeSub}>Aún no hay jugadores clasificados en esta división.</Text>
+                </View>
+              ) : (
+                rankingRows.map((row) => {
+                  const isMe = row.player_id === profile?.id;
+                  const name =
+                    `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim() ||
+                    row.username?.trim() ||
+                    'Jugador';
+                  const level =
+                    row.elo_rating != null ? `Nivel ${Number(row.elo_rating).toFixed(2)}` : 'Nivel —';
+                  const wl = `${row.mm_wins}V / ${row.mm_losses}D`;
+                  return (
+                    <View
+                      key={row.player_id}
+                      style={[styles.rankRow, isMe && styles.rankRowMe]}
+                    >
+                      <View style={[styles.rankBadge, row.rank <= 3 && styles.rankBadgeTop]}>
+                        <Text style={[styles.rankBadgeText, row.rank <= 3 && styles.rankBadgeTextTop]}>
+                          {row.rank}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.rankName}>{isMe ? `${name} (Tú)` : name}</Text>
+                        <Text style={styles.rankMeta}>
+                          {level} · {wl}
+                        </Text>
+                      </View>
+                      <Text style={styles.rankLp}>{row.lps} LP</Text>
+                    </View>
+                  );
+                })
+              )}
+              {rankingLoadingMore ? (
+                <View style={styles.rankingLoadMore}>
+                  <ActivityIndicator size="small" color="#F59E0B" />
+                  <Text style={styles.rankingLoadMoreText}>Cargando más jugadores…</Text>
+                </View>
+              ) : null}
+              {!rankingLoading && rankingPlayerCount > 0 && myRankingRow && myRankingRow.rank == null ? (
                 <View style={[styles.rankRow, styles.rankRowMe]}>
                   <View style={styles.rankBadge}>
                     <Text style={styles.rankBadgeText}>—</Text>
@@ -846,6 +1089,30 @@ export function CompetitiveLeagueScreen({
             </View>
           </View>
 
+          {!MATCHMAKING_DEMO && preferredClubIds.length === 0 && locationIssue ? (
+            <View style={styles.locationBanner}>
+              <View style={styles.locationBannerHead}>
+                <Ionicons name="location-outline" size={18} color="#fca5a5" />
+                <Text style={styles.locationBannerText}>{locationIssue.message}</Text>
+              </View>
+              <View style={styles.locationBannerActions}>
+                <Pressable
+                  style={styles.locationBannerBtn}
+                  onPress={() => void handleActivateLocation()}
+                >
+                  <Ionicons name="navigate-outline" size={14} color="#fff" />
+                  <Text style={styles.locationBannerBtnText}>Activar ubicación</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.locationBannerBtnSecondary}
+                  onPress={() => setClubPickerVisible(true)}
+                >
+                  <Text style={styles.locationBannerBtnSecondaryText}>Elegir clubes</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.prefsCard}>
             <Text style={styles.prefsSectionTitle}>Formato de partido</Text>
             <View style={styles.fixedModeRow}>
@@ -874,38 +1141,79 @@ export function CompetitiveLeagueScreen({
           />
 
           <View style={styles.optionSection}>
-            <View style={styles.distanceTitleRow}>
-              <View style={styles.optionTitleRow}>
-                <Ionicons name="location-outline" size={14} color="#F59E0B" />
-                <Text style={styles.optionTitleStrong}>Distancia máxima</Text>
+            {MATCHMAKING_DEMO ? (
+              <View style={styles.demoModeBanner}>
+                <Ionicons name="flash" size={16} color="#F59E0B" />
+                <Text style={styles.demoModeText}>
+                  Modo demo: buscás en todos los clubes sin ubicación ni distancia.
+                </Text>
               </View>
-              <Text style={styles.distanceValue}>{distanceKm} km</Text>
-            </View>
-            <View
-              style={styles.sliderTrack}
-              onLayout={(e: LayoutChangeEvent) =>
-                setDistanceTrackWidth(Math.max(1, e.nativeEvent.layout.width))
-              }
-            >
-              <Pressable
-                style={StyleSheet.absoluteFill}
-                onPress={(e) => {
-                  const ratio = Math.max(0, Math.min(1, e.nativeEvent.locationX / distanceTrackWidth));
-                  setDistanceKm(Math.max(1, Math.round(1 + ratio * 49)));
-                }}
-              />
-              <View style={[styles.sliderFill, { width: `${((distanceKm - 1) / 49) * 100}%` }]} />
-              <View
-                style={[
-                  styles.sliderThumb,
-                  { left: `${((distanceKm - 1) / 49) * 100}%`, transform: [{ translateX: -8 }] },
-                ]}
-              />
-            </View>
-            <View style={styles.sliderLabels}>
-              <Text style={styles.sliderLabel}>1 km</Text>
-              <Text style={styles.sliderLabel}>50 km</Text>
-            </View>
+            ) : preferredClubIds.length > 0 ? (
+              <Text style={styles.distanceByClubsHint}>
+                Buscás en {preferredClubIds.length} club{preferredClubIds.length === 1 ? '' : 'es'} elegido
+                {preferredClubIds.length === 1 ? '' : 's'}. Quitá la selección de clubes para buscar por distancia.
+              </Text>
+            ) : (
+              <>
+                <View style={styles.distanceTitleRow}>
+                  <View style={styles.optionTitleRow}>
+                    <Ionicons name="location-outline" size={14} color="#F59E0B" />
+                    <Text style={styles.optionTitleStrong}>Distancia máxima</Text>
+                  </View>
+                  <Text style={styles.distanceValue}>{distanceKm} km</Text>
+                </View>
+                <Slider
+                  style={styles.distanceSlider}
+                  minimumValue={1}
+                  maximumValue={50}
+                  step={1}
+                  value={distanceKm}
+                  onValueChange={(v) => setDistanceKm(Math.round(v))}
+                  minimumTrackTintColor="#F59E0B"
+                  maximumTrackTintColor="rgba(12,31,66,0.7)"
+                  thumbTintColor="#1f8dff"
+                />
+                <View style={styles.sliderLabels}>
+                  <Text style={styles.sliderLabel}>1 km</Text>
+                  <Text style={styles.sliderLabel}>50 km</Text>
+                </View>
+              </>
+            )}
+            {preferredClubIds.length === 0 ? (
+              <View style={styles.clubsInRangeBox}>
+                <Text style={styles.clubsInRangeTitle}>
+                  {MATCHMAKING_DEMO ? 'Clubes disponibles (demo)' : 'Clubes en tu rango'}
+                </Text>
+                {!MATCHMAKING_DEMO && searchCoordsLoading ? (
+                  <Text style={styles.clubsInRangeSub}>Calculando distancias…</Text>
+                ) : clubsInRange.length === 0 ? (
+                  <Text style={styles.clubsInRangeEmpty}>
+                    {MATCHMAKING_DEMO
+                      ? 'Cargando clubes…'
+                      : searchCoords
+                        ? `Ningún club dentro de ${distanceKm} km. Ampliá la distancia o elegí clubes preferidos.`
+                        : locationIssue
+                          ? 'Sin ubicación activa. Activá el GPS o elegí clubes preferidos arriba.'
+                          : 'Activa ubicación para ver clubes disponibles.'}
+                  </Text>
+                ) : (
+                  clubsInRange.slice(0, 8).map((club) => (
+                    <View key={club.id} style={styles.clubsInRangeRow}>
+                      <Ionicons name="business-outline" size={14} color="#F59E0B" />
+                      <Text style={styles.clubsInRangeName} numberOfLines={1}>
+                        {club.name}
+                      </Text>
+                      {club.distance != null ? (
+                        <Text style={styles.clubsInRangeKm}>{Math.round(club.distance)} km</Text>
+                      ) : null}
+                    </View>
+                  ))
+                )}
+                {clubsInRange.length > 8 ? (
+                  <Text style={styles.clubsInRangeMore}>+{clubsInRange.length - 8} más</Text>
+                ) : null}
+              </View>
+            ) : null}
           </View>
 
           <OptionRow
@@ -1364,6 +1672,14 @@ const styles = StyleSheet.create({
   },
   rankingNoticeTitle: { color: '#fff', fontSize: 12, fontWeight: '800' },
   rankingNoticeSub: { color: '#9ca3af', fontSize: 11, marginTop: 2, lineHeight: 15 },
+  rankingLoadMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+  },
+  rankingLoadMoreText: { color: '#9ca3af', fontSize: 12 },
   rankRow: {
     borderRadius: 12,
     borderWidth: 1,
@@ -1460,24 +1776,43 @@ const styles = StyleSheet.create({
   optionChipTextActive: { color: '#fff' },
   distanceTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   distanceValue: { color: '#F59E0B', fontWeight: '800', fontSize: 12 },
-  sliderTrack: {
-    height: 7,
-    borderRadius: 99,
-    backgroundColor: 'rgba(12,31,66,0.7)',
-    overflow: 'visible',
-    marginTop: 6,
-  },
-  sliderFill: { height: '100%', borderRadius: 99, backgroundColor: 'rgba(245,158,11,0.55)' },
-  sliderThumb: {
-    position: 'absolute',
-    top: -5,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#1f8dff',
+  distanceSlider: { width: '100%', height: 40, marginTop: 4 },
+  distanceByClubsHint: {
+    color: '#9ca3af',
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
   },
   sliderLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 },
   sliderLabel: { color: '#9ca3af', fontSize: 11 },
+  clubsInRangeBox: {
+    marginTop: 14,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    gap: 8,
+  },
+  clubsInRangeTitle: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  clubsInRangeSub: { color: '#9ca3af', fontSize: 12 },
+  clubsInRangeEmpty: { color: '#9ca3af', fontSize: 12, lineHeight: 18 },
+  clubsInRangeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  clubsInRangeName: { flex: 1, color: '#d1d5db', fontSize: 13, fontWeight: '600' },
+  clubsInRangeKm: { color: '#F59E0B', fontSize: 12, fontWeight: '700' },
+  clubsInRangeMore: { color: '#6b7280', fontSize: 11, marginTop: 2 },
+  demoModeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(245,158,11,0.35)',
+    marginBottom: 4,
+  },
+  demoModeText: { flex: 1, color: '#FCD34D', fontSize: 12, lineHeight: 17, fontWeight: '600' },
   clubPickerBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1653,4 +1988,35 @@ const styles = StyleSheet.create({
   },
   foundWarningText: { color: '#fca5a5', fontSize: 12, fontWeight: '600' },
   errorText: { color: '#fca5a5', fontSize: 12, marginTop: 4 },
+  locationBanner: {
+    marginBottom: 14,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.45)',
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    gap: 10,
+  },
+  locationBannerHead: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  locationBannerText: { flex: 1, color: '#fca5a5', fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  locationBannerActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  locationBannerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#F18F34',
+  },
+  locationBannerBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  locationBannerBtnSecondary: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  locationBannerBtnSecondaryText: { color: '#e5e7eb', fontSize: 12, fontWeight: '600' },
 });

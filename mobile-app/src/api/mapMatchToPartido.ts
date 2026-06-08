@@ -1,4 +1,5 @@
 import type { MatchEnriched } from './matches';
+import { normalizePlayerAvatarUrl } from '../api/playerAvatar';
 import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
 import type { PartidoItem, PartidoMode, PartidoPlayer } from '../screens/PartidosScreen';
 
@@ -36,9 +37,40 @@ function playerLevelLine(p: { elo_rating: number }): string {
   return formatSkillNumber(p.elo_rating);
 }
 
-export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
+function resolveVenueImage(
+  club: { display_image_url?: string | null; logo_url?: string | null } | null | undefined,
+): string | undefined {
+  const resolved =
+    typeof club?.display_image_url === 'string' ? club.display_image_url.trim() : '';
+  if (resolved && /^https?:\/\//i.test(resolved)) return resolved;
+  const logo = typeof club?.logo_url === 'string' ? club.logo_url.trim() : '';
+  if (logo && /^https?:\/\//i.test(logo)) return logo;
+  return undefined;
+}
+
+export function mapMatchToPartido(
+  m: MatchEnriched,
+  opts?: { viewerPlayerId?: string | null },
+): PartidoItem | null {
   const b = getMatchBooking(m);
   // Partidos sin booking siguen siendo válidos para el historial (datos mínimos).
+  const viewerPlayerId = opts?.viewerPlayerId?.trim() || null;
+  let myTeam: 'A' | 'B' | null = null;
+  let myResult: PartidoItem['myResult'] = null;
+  if (viewerPlayerId) {
+    const mine = (m.match_players ?? []).find((mp) => mp.players?.id === viewerPlayerId);
+    myTeam = mine?.team ?? null;
+    const rawResult = mine?.result;
+    if (rawResult === 'win' || rawResult === 'loss' || rawResult === 'draw' || rawResult === 'pending') {
+      myResult = rawResult;
+    }
+  }
+
+  const sets =
+    Array.isArray(m.sets) && m.sets.length > 0
+      ? m.sets.map((s) => ({ a: Number(s.a), b: Number(s.b) }))
+      : null;
+
   if (!b) {
     const matchPhase = getMatchListPhase(Date.now(), m.status);
     const slots: PartidoPlayer[] = Array.from({ length: 4 }, () => ({ name: '', level: '', isFree: true }));
@@ -77,6 +109,10 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
       hasMyFeedback: (m as MatchEnriched & { has_my_feedback?: boolean }).has_my_feedback === true,
       eloMin: m.elo_min ?? null,
       eloMax: m.elo_max ?? null,
+      sets,
+      myTeam,
+      myResult,
+      matchEndReason: m.match_end_reason ?? null,
     };
   }
   if (!b.start_at || !b.end_at) return null;
@@ -158,7 +194,7 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
         ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
         : fullName[0]?.toUpperCase() ?? '?';
     const level = playerLevelLine(p);
-    const avatar = p.avatar_url?.trim() || undefined;
+    const avatar = normalizePlayerAvatarUrl(p.avatar_url) ?? undefined;
     slots[idx] = { id: p.id, name: fullName, initial, level, avatar, isFree: false };
   });
   const players = slots;
@@ -205,8 +241,13 @@ export function mapMatchToPartido(m: MatchEnriched): PartidoItem | null {
     courtType,
     courtSport,
     clubId: court?.club_id ?? club?.id,
+    venueImage: resolveVenueImage(club),
     startAt: b.start_at,
     endAt: b.end_at,
     matchGender,
+    sets,
+    myTeam,
+    myResult,
+    matchEndReason: m.match_end_reason ?? null,
   };
 }

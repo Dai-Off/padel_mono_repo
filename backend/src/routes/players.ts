@@ -165,13 +165,15 @@ function withPublicPlayerAndMm(row: Row, wl: MmWl): Row {
 }
 
 const SELECT_PUBLIC_INTERNAL = `
-  id, created_at, updated_at, first_name, last_name, email, phone, username, status, auth_user_id, avatar_url, gender,
+  id, created_at, updated_at, first_name, last_name, email, phone, username, status, auth_user_id, avatar_url, cover_url, gender,
   mu, sigma, elo_rating, sp,
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents,
   preferred_side, preferred_schedule_slots, preferred_days, preferred_play_style,
   preferred_match_duration_min, preferred_partner_level, favorite_clubs,
   notif_new_matches, notif_tournament_reminders, notif_class_updates, notif_chat_messages,
+  affinity_visible,
+  play_location, birth_date, profile_description,
   onboarding_completed,
   liga, lps, mm_peak_liga
 `;
@@ -192,6 +194,18 @@ function normalizeAvatarUrl(body: Record<string, unknown>): AvatarNormalize {
   if (!t) return { ok: true, mode: 'set', value: null };
   if (t.length > AVATAR_URL_MAX) return { ok: false, error: `avatar_url admite como máximo ${AVATAR_URL_MAX} caracteres` };
   if (!/^https?:\/\//i.test(t)) return { ok: false, error: 'avatar_url debe ser una URL http(s) absoluta' };
+  return { ok: true, mode: 'set', value: t };
+}
+
+function normalizeCoverUrl(body: Record<string, unknown>): AvatarNormalize {
+  if (!Object.prototype.hasOwnProperty.call(body, 'cover_url')) return { ok: true, mode: 'omit' };
+  const raw = body.cover_url;
+  if (raw === null) return { ok: true, mode: 'set', value: null };
+  if (typeof raw !== 'string') return { ok: false, error: 'cover_url debe ser texto o null' };
+  const t = raw.trim();
+  if (!t) return { ok: true, mode: 'set', value: null };
+  if (t.length > AVATAR_URL_MAX) return { ok: false, error: `cover_url admite como máximo ${AVATAR_URL_MAX} caracteres` };
+  if (!/^https?:\/\//i.test(t)) return { ok: false, error: 'cover_url debe ser una URL http(s) absoluta' };
   return { ok: true, mode: 'set', value: t };
 }
 
@@ -287,6 +301,7 @@ function normalizePreferencesPatch(body: Record<string, unknown>): PreferencesPa
     'notif_tournament_reminders',
     'notif_class_updates',
     'notif_chat_messages',
+    'affinity_visible',
   ] as const;
 
   for (const bf of boolFields) {
@@ -380,6 +395,44 @@ router.post('/me/avatar', avatarUpload.single('file'), async (req: Request, res:
     const { error: dbErr } = await supabase
       .from('players')
       .update({ avatar_url: publicUrl, updated_at: new Date().toISOString() })
+      .eq('auth_user_id', user.id);
+    if (dbErr) return res.status(500).json({ ok: false, error: dbErr.message });
+
+    return res.json({ ok: true, url: publicUrl });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+router.post('/me/cover', avatarUpload.single('file'), async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) return res.status(401).json({ ok: false, error: 'Token requerido' });
+
+  if (!req.file) return res.status(400).json({ ok: false, error: 'Envía el archivo en el campo "file"' });
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user?.id) return res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+
+    const ext = extFromMime(req.file.mimetype);
+    const storagePath = `${user.id}/cover.${ext}`;
+
+    const { error: uploadErr } = await supabase.storage
+      .from('player-avatars')
+      .upload(storagePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: true,
+      });
+    if (uploadErr) return res.status(500).json({ ok: false, error: uploadErr.message });
+
+    const { data: pub } = supabase.storage.from('player-avatars').getPublicUrl(storagePath);
+    const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+    const { error: dbErr } = await supabase
+      .from('players')
+      .update({ cover_url: publicUrl, updated_at: new Date().toISOString() })
       .eq('auth_user_id', user.id);
     if (dbErr) return res.status(500).json({ ok: false, error: dbErr.message });
 
@@ -558,6 +611,11 @@ router.patch('/me', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: avatarNorm.error });
   }
 
+  const coverNorm = normalizeCoverUrl(body as Record<string, unknown>);
+  if (!coverNorm.ok) {
+    return res.status(400).json({ ok: false, error: coverNorm.error });
+  }
+
   const hasPhone = Object.prototype.hasOwnProperty.call(body, 'phone');
   let phoneFinal: string | null = null;
   if (hasPhone) {
@@ -587,10 +645,86 @@ router.patch('/me', async (req: Request, res: Response) => {
     usernameFinal = un.value;
   }
 
-  if (!firstFinal && avatarNorm.mode === 'omit' && !hasPhone && !prefsNorm.hasAny && !hasUsername) {
+  const hasPlayLocation = Object.prototype.hasOwnProperty.call(body, 'play_location');
+  let playLocationFinal: string | null | undefined = undefined;
+  if (hasPlayLocation) {
+    const raw = body.play_location;
+    if (raw === null) {
+      playLocationFinal = null;
+    } else if (typeof raw !== 'string') {
+      return res.status(400).json({ ok: false, error: 'play_location debe ser texto o null' });
+    } else {
+      const t = raw.trim();
+      if (t.length > 200) {
+        return res.status(400).json({ ok: false, error: 'play_location admite como máximo 200 caracteres' });
+      }
+      playLocationFinal = t || null;
+    }
+  }
+
+  const hasGender = Object.prototype.hasOwnProperty.call(body, 'gender');
+  let genderFinal: string | undefined = undefined;
+  if (hasGender) {
+    if (typeof body.gender !== 'string' || !['male', 'female', 'other'].includes(body.gender)) {
+      return res.status(400).json({ ok: false, error: "gender debe ser 'male', 'female' u 'other'" });
+    }
+    genderFinal = body.gender;
+  }
+
+  const hasBirthDate = Object.prototype.hasOwnProperty.call(body, 'birth_date');
+  let birthDateFinal: string | null | undefined = undefined;
+  if (hasBirthDate) {
+    const raw = body.birth_date;
+    if (raw === null) {
+      birthDateFinal = null;
+    } else if (typeof raw !== 'string') {
+      return res.status(400).json({ ok: false, error: 'birth_date debe ser texto (YYYY-MM-DD) o null' });
+    } else {
+      const t = raw.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) {
+        return res.status(400).json({ ok: false, error: 'birth_date debe tener formato YYYY-MM-DD' });
+      }
+      const d = new Date(`${t}T00:00:00Z`);
+      const year = Number(t.slice(0, 4));
+      if (Number.isNaN(d.getTime()) || year < 1900 || d.getTime() > Date.now()) {
+        return res.status(400).json({ ok: false, error: 'birth_date no es una fecha válida' });
+      }
+      birthDateFinal = t;
+    }
+  }
+
+  const hasProfileDescription = Object.prototype.hasOwnProperty.call(body, 'profile_description');
+  let profileDescriptionFinal: string | null | undefined = undefined;
+  if (hasProfileDescription) {
+    const raw = body.profile_description;
+    if (raw === null) {
+      profileDescriptionFinal = null;
+    } else if (typeof raw !== 'string') {
+      return res.status(400).json({ ok: false, error: 'profile_description debe ser texto o null' });
+    } else {
+      const t = raw.trim();
+      if (t.length > 100) {
+        return res.status(400).json({ ok: false, error: 'profile_description admite como máximo 100 caracteres' });
+      }
+      profileDescriptionFinal = t || null;
+    }
+  }
+
+  if (
+    !firstFinal &&
+    avatarNorm.mode === 'omit' &&
+    coverNorm.mode === 'omit' &&
+    !hasPhone &&
+    !prefsNorm.hasAny &&
+    !hasUsername &&
+    !hasPlayLocation &&
+    !hasGender &&
+    !hasBirthDate &&
+    !hasProfileDescription
+  ) {
     return res.status(400).json({
       ok: false,
-      error: 'Envía first_name y last_name, y/o avatar_url, y/o phone, y/o username, y/o preferencias',
+      error: 'Envía first_name y last_name, y/o avatar_url, y/o cover_url, y/o phone, y/o username, y/o preferencias, y/o datos de perfil (play_location, gender, birth_date, profile_description)',
     });
   }
 
@@ -656,6 +790,9 @@ router.patch('/me', async (req: Request, res: Response) => {
     if (avatarNorm.mode === 'set') {
       patch.avatar_url = avatarNorm.value;
     }
+    if (coverNorm.mode === 'set') {
+      patch.cover_url = coverNorm.value;
+    }
     if (phoneFinal !== null) {
       const { data: dupPhone, error: dupErr } = await supabase
         .from('players')
@@ -672,6 +809,18 @@ router.patch('/me', async (req: Request, res: Response) => {
     }
     if (usernameFinal !== undefined) {
       patch.username = usernameFinal;
+    }
+    if (playLocationFinal !== undefined) {
+      patch.play_location = playLocationFinal;
+    }
+    if (genderFinal !== undefined) {
+      patch.gender = genderFinal;
+    }
+    if (birthDateFinal !== undefined) {
+      patch.birth_date = birthDateFinal;
+    }
+    if (profileDescriptionFinal !== undefined) {
+      patch.profile_description = profileDescriptionFinal;
     }
     Object.assign(patch, prefsNorm.patch);
 

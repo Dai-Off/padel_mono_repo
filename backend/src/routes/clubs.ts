@@ -307,6 +307,29 @@ router.get('/:id/chat-summary', requireClubOwnerOrAdminOrPortalStaff, async (req
   }
 });
 
+/**
+ * GET /clubs/:id/public
+ * Public endpoint for the MiniApp — returns non-sensitive club info without auth.
+ */
+router.get('/:id/public', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('clubs')
+      .select('id, name, address, city, postal_code, lat, lng, weekly_schedule, logo_url, photo_urls')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!data) return res.status(404).json({ ok: false, error: 'Club no encontrado' });
+    const firstPhoto = Array.isArray(data.photo_urls) && data.photo_urls.length > 0 ? data.photo_urls[0] : null;
+    const resolvedImage = await resolveClubLogoUrlForClient(supabase, firstPhoto || data.logo_url);
+    return res.json({ ok: true, club: { ...data, logo_url: resolvedImage } });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 router.get('/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const { id } = req.params;
   try {

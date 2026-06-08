@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
 import {
   ActivityIndicator,
@@ -26,18 +26,41 @@ import {
   prepareJoin,
   submitMatchFeedback,
   submitMatchScore,
+  voteMatchScore,
   type SubmitMatchFeedbackBody,
 } from '../api/matches';
-import { createPaymentIntent, confirmPaymentFromClient } from '../api/payments';
-import { fetchMyPlayerId } from '../api/players';
+import {
+  createPaymentIntent,
+  confirmPaymentFromClient,
+  paymentIntentAlreadyPaid,
+  paymentIntentReadyForSheet,
+} from '../api/payments';
+import { fetchMyPlayerId, fetchMyPlayerProfile } from '../api/players';
+import { normalizePlayerAvatarUrl } from '../api/playerAvatar';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { mapMatchToPartido } from '../api/mapMatchToPartido';
-import { rejectMatchmakingProposal } from '../api/matchmaking';
+import {
+  enrichPartidoWithProfileAvatar,
+  mergePartidoWithServer,
+  partidoPlayersDisplayEqual,
+  cachePlayerAvatar,
+  cachePlayerLevel,
+  formatPlayerLevelFromElo,
+  getCachedPlayerAvatar,
+  pickProfileEloRating,
+  resolvePlayerDisplayAvatar,
+  resolvePlayerDisplayInitials,
+  resolvePlayerDisplayLevel,
+  type ProfileForPartidoEnrich,
+} from '../lib/partidoPlayerUtils';
+import { PartidoSlotAvatar } from '../components/partido/PartidoSlotAvatar';
+import { reloadMatchPartido } from '../lib/reloadMatchPartido';
+import { rejectMatchmakingProposal, leaveMatchmaking } from '../api/matchmaking';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import {
   MatchEvaluationFlow,
   type MatchEvaluationPayload,
 } from '../components/partido/MatchEvaluationFlow';
+import { MatchResultBlock } from '../components/partido/MatchResultBlock';
 import type { PartidoItem, PartidoPlayer } from './PartidosScreen';
 
 const BG = '#0F0F0F';
@@ -92,6 +115,8 @@ type PartidoDetailScreenProps = {
    * onboarding (soft block sticky).
    */
   onOpenProfileForOnboarding?: () => void;
+  /** Tras unirse, pagar o salir: refresca listas globales (Home, pestaña Partidos). */
+  onMatchDataChanged?: () => void;
 };
 
 function PulseDot() {
@@ -109,6 +134,7 @@ export function PartidoDetailScreen({
   onGoHome,
   onOpenPublicProfile,
   onOpenProfileForOnboarding,
+  onMatchDataChanged,
 }: PartidoDetailScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -124,10 +150,14 @@ export function PartidoDetailScreen({
    * todavía no ha llegado, tratamos como "completado" para no mostrar el
    * candado durante el flicker inicial.
    */
-  const { profile: myProfile, refreshMatches } = useHomeData();
-  /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido (fetch async). */
-  const [playerContextResolved, setPlayerContextResolved] = useState(() => !session?.access_token);
+  const { profile: myProfile, refreshMatches, refreshProfile, upsertMisPartido } = useHomeData();
+  const matchFetchGen = useRef(0);
+  /** Evita mostrar «Reservar plaza» antes de saber si el usuario ya está en el partido. */
+  const [playerContextResolved, setPlayerContextResolved] = useState(
+    () => !session?.access_token || Boolean(myProfile?.id),
+  );
   const [partido, setPartido] = useState<PartidoItem>(initialPartido);
+  const postJoinSyncGen = useRef(0);
   const [joiningSlotIndex, setJoiningSlotIndex] = useState<number | null>(null);
   const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
   const [matchmakingPayBusy, setMatchmakingPayBusy] = useState(false);
@@ -146,12 +176,84 @@ export function PartidoDetailScreen({
       setPlayerContextResolved(true);
       return;
     }
+    if (myProfile?.id) {
+      setCurrentPlayerId(myProfile.id);
+      setPlayerContextResolved(true);
+      return;
+    }
     setPlayerContextResolved(false);
     fetchMyPlayerId(session.access_token)
       .then(setCurrentPlayerId)
       .catch(() => setCurrentPlayerId(null))
       .finally(() => setPlayerContextResolved(true));
-  }, [session?.access_token]);
+  }, [session?.access_token, myProfile?.id]);
+
+  const profileForEnrich = useMemo(
+    (): ProfileForPartidoEnrich | null =>
+      myProfile?.id
+        ? {
+            id: myProfile.id,
+            firstName: myProfile.firstName,
+            lastName: myProfile.lastName,
+            username: myProfile.username,
+            avatarUrl: myProfile.avatarUrl,
+            eloRating: myProfile.eloRating,
+          }
+        : currentPlayerId
+          ? {
+              id: currentPlayerId,
+              username: myProfile?.username ?? null,
+              avatarUrl: myProfile?.avatarUrl ?? null,
+              eloRating: myProfile?.eloRating ?? null,
+            }
+          : null,
+    [myProfile, currentPlayerId],
+  );
+
+  const mergePartidoFromServer = useCallback(
+    (
+      raw: PartidoItem | null,
+      enrichOpts?: { profile?: ProfileForPartidoEnrich | null; forceSlotIndex?: number },
+    ): PartidoItem | undefined => {
+      if (!raw) return undefined;
+      const profile = enrichOpts?.profile ?? profileForEnrich;
+      let merged: PartidoItem | undefined;
+      setPartido((prev) => {
+        merged = mergePartidoWithServer(prev, raw, profile, {
+          forceSlotIndex: enrichOpts?.forceSlotIndex,
+        });
+        return partidoPlayersDisplayEqual(prev, merged) ? prev : merged;
+      });
+      return merged;
+    },
+    [profileForEnrich],
+  );
+
+  const syncPartidoAfterMutation = useCallback(
+    async (
+      raw: PartidoItem | null,
+      enrichOpts?: { profile?: ProfileForPartidoEnrich | null; forceSlotIndex?: number },
+    ) => {
+      if (!raw) return;
+      const next = mergePartidoFromServer(raw, enrichOpts);
+      if (next) {
+        upsertMisPartido(next);
+      }
+      onMatchDataChanged?.();
+      void refreshMatches({ scope: 'mine' });
+    },
+    [mergePartidoFromServer, upsertMisPartido, onMatchDataChanged, refreshMatches],
+  );
+
+  useEffect(() => {
+    if (!profileForEnrich?.id) return;
+    if (profileForEnrich.avatarUrl?.trim()) {
+      cachePlayerAvatar(profileForEnrich.id, profileForEnrich.avatarUrl);
+    }
+    const levelLine = formatPlayerLevelFromElo(profileForEnrich.eloRating);
+    if (levelLine !== '—') cachePlayerLevel(profileForEnrich.id, levelLine);
+    setPartido((prev) => enrichPartidoWithProfileAvatar(prev, profileForEnrich));
+  }, [profileForEnrich?.id, profileForEnrich?.avatarUrl, profileForEnrich?.eloRating]);
 
   /**
    * Soft block: el backend rechaza /matches/:id/join con 403 cuando el match
@@ -163,25 +265,39 @@ export function PartidoDetailScreen({
   const needsOnboardingForJoin =
     isCompetitiveMatch && myProfile != null && myProfile.onboardingCompleted === false;
 
+  const matchKindBadge = useMemo(() => {
+    if (partido.matchType === 'matchmaking') {
+      return {
+        label: 'Partido Competitivo',
+        style: styles.badgeCompetitive,
+        icon: 'flash' as const,
+      };
+    }
+    if (partido.visibility === 'private') {
+      return {
+        label: 'Partido Privado',
+        style: styles.badgePrivate,
+        icon: 'lock-closed' as const,
+      };
+    }
+    return {
+      label: 'Partido Abierto',
+      style: styles.badgeOpen,
+      icon: null,
+    };
+  }, [partido.matchType, partido.visibility]);
+
   useEffect(() => {
     const token = session?.access_token;
     if (!token) return;
-    fetchMatchById(partido.id, token).then((m) => {
-      if (!m) return;
-      const updated = mapMatchToPartido(m);
-      if (updated) {
-        setPartido((prev) => ({
-          ...updated,
-          organizerPlayerId: updated.organizerPlayerId ?? prev.organizerPlayerId,
-          matchmakingPayment: prev.matchmakingPayment,
-          matchType: updated.matchType ?? prev.matchType,
-          matchStatus: updated.matchStatus ?? prev.matchStatus,
-          bookingStatus: updated.bookingStatus ?? prev.bookingStatus,
-          hasMyFeedback: updated.hasMyFeedback === true || prev.hasMyFeedback === true,
-        }));
-      }
+    const viewerId = currentPlayerId ?? myProfile?.id ?? null;
+    const gen = ++matchFetchGen.current;
+    void reloadMatchPartido(partido.id, token, { viewerPlayerId: viewerId }).then((updated) => {
+      if (gen !== matchFetchGen.current || !updated) return;
+      mergePartidoFromServer(updated);
     });
-  }, [partido.id, session?.access_token]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partido.id, session?.access_token, currentPlayerId, myProfile?.id]);
 
   const isInMatch = currentPlayerId != null && (partido.playerIds ?? []).includes(currentPlayerId);
   const firstFreeIndex = partido.players.findIndex((p) => p.isFree);
@@ -202,58 +318,144 @@ export function PartidoDetailScreen({
         return;
       }
       setJoiningSlotIndex(slotIndex);
-      const prep = await prepareJoin(partido.id, slotIndex, token);
-      if (!('bookingId' in prep)) {
-        setJoiningSlotIndex(null);
-        const err = prep.error ?? 'No se pudo preparar.';
-        if (prep.code === 'schedule_conflict' || err.includes('esa hora') || err.includes('otro horario')) {
-          Alert.alert('Horario no disponible', 'Ya tienes un partido a esa hora. Elige otro partido.');
-        } else {
-          Alert.alert('Error', err);
+      try {
+        const prep = await prepareJoin(partido.id, slotIndex, token);
+        if (!('bookingId' in prep)) {
+          const err = prep.error ?? 'No se pudo preparar.';
+          if (prep.code === 'schedule_conflict' || err.includes('esa hora') || err.includes('otro horario')) {
+            Alert.alert('Horario no disponible', 'Ya tienes un partido a esa hora. Elige otro partido.');
+          } else {
+            Alert.alert('Error', err);
+          }
+          return;
         }
-        return;
-      }
-      const intentRes = await createPaymentIntent(prep.bookingId, token, slotIndex);
-      if (!intentRes.ok || !intentRes.clientSecret) {
-        setJoiningSlotIndex(null);
-        Alert.alert('Error', 'No se pudo iniciar el pago. Inténtalo de nuevo.');
-        return;
-      }
-      const returnURL = Linking.createURL('stripe-redirect');
-      const { error: initErr } = await initPaymentSheet({
-        paymentIntentClientSecret: intentRes.clientSecret,
-        merchantDisplayName: 'WeMatch Padel',
-        returnURL,
-      });
-      if (initErr) {
-        setJoiningSlotIndex(null);
-        Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
-        return;
-      }
-      const { error: presentErr } = await presentPaymentSheet();
-      if (presentErr) {
-        setJoiningSlotIndex(null);
-        if (presentErr.code === 'Canceled') {
-          Alert.alert('Cancelado', 'Pago cancelado.');
+        const intentRes = await createPaymentIntent(prep.bookingId, token, slotIndex);
+        let paymentIntentId: string | undefined;
+        if (paymentIntentAlreadyPaid(intentRes)) {
+          paymentIntentId = intentRes.paymentIntentId;
+        } else if (paymentIntentReadyForSheet(intentRes)) {
+          paymentIntentId = intentRes.paymentIntentId;
+          const returnURL = Linking.createURL('stripe-redirect');
+          const { error: initErr } = await initPaymentSheet({
+            paymentIntentClientSecret: intentRes.clientSecret,
+            merchantDisplayName: 'WeMatch Padel',
+            returnURL,
+          });
+          if (initErr) {
+            Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+            return;
+          }
+          const { error: presentErr } = await presentPaymentSheet();
+          if (presentErr) {
+            if (presentErr.code === 'Canceled') {
+              Alert.alert('Cancelado', 'Pago cancelado.');
+            } else {
+              if (__DEV__) {
+                console.warn('[Stripe presentPaymentSheet]', presentErr.code, presentErr.message);
+              }
+              Alert.alert(
+                'Error',
+                presentErr.message ?? 'Error al procesar el pago. Inténtalo de nuevo.'
+              );
+            }
+            return;
+          }
         } else {
-          Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
+          const errMsg = intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.';
+          if (intentRes.code === 'slot_taken' || errMsg.includes('plaza')) {
+            Alert.alert('Plaza ocupada', 'Esa plaza ya no está disponible. Elige otra.');
+          } else if (intentRes.code === 'already_in_match' || errMsg.includes('en este partido')) {
+            Alert.alert('Ya estás dentro', 'Ya formas parte de este partido.');
+          } else {
+            Alert.alert('Error', errMsg);
+          }
+          return;
         }
-        return;
+        const confirmRes = await confirmPaymentFromClient(paymentIntentId!, token);
+        if (!confirmRes.ok) {
+          Alert.alert('Error', 'No se pudo confirmar. Inténtalo de nuevo.');
+          return;
+        }
+        matchFetchGen.current += 1;
+        const freshProfile = await fetchMyPlayerProfile(token);
+        const joinedElo = pickProfileEloRating(freshProfile, myProfile, profileForEnrich);
+        const playerId =
+          freshProfile?.id ?? profileForEnrich?.id ?? myProfile?.id ?? currentPlayerId ?? null;
+        const resolvedAvatarUrl =
+          freshProfile?.avatarUrl ??
+          myProfile?.avatarUrl ??
+          profileForEnrich?.avatarUrl ??
+          (playerId ? getCachedPlayerAvatar(playerId) : null);
+        const profileEnrich: ProfileForPartidoEnrich | null = playerId
+          ? {
+              id: playerId,
+              firstName: freshProfile?.firstName ?? profileForEnrich?.firstName ?? myProfile?.firstName,
+              lastName: freshProfile?.lastName ?? profileForEnrich?.lastName ?? myProfile?.lastName,
+              username: freshProfile?.username ?? profileForEnrich?.username ?? myProfile?.username,
+              avatarUrl: resolvedAvatarUrl,
+              eloRating: joinedElo,
+            }
+          : null;
+
+        if (profileEnrich) {
+          cachePlayerAvatar(profileEnrich.id, profileEnrich.avatarUrl);
+          const levelLine = formatPlayerLevelFromElo(profileEnrich.eloRating);
+          if (levelLine !== '—') cachePlayerLevel(profileEnrich.id, levelLine);
+          if (freshProfile?.id) setCurrentPlayerId(freshProfile.id);
+          setPartido((prev) => {
+            const next = enrichPartidoWithProfileAvatar(prev, profileEnrich, {
+              forceSlotIndex: slotIndex,
+            });
+            upsertMisPartido(next);
+            return next;
+          });
+          void refreshProfile({ force: true });
+        }
+
+        setJoiningSlotIndex(null);
+        setSelectedSlotIndex(null);
+
+        const syncGen = ++postJoinSyncGen.current;
+        const matchId = partido.id;
+        const playerIdForRetry =
+          freshProfile?.id ?? profileEnrich?.id ?? currentPlayerId ?? myProfile?.id ?? undefined;
+        void (async () => {
+          const updated = await reloadMatchPartido(matchId, token, {
+            retryIfMissingPlayerId: playerIdForRetry,
+            viewerPlayerId: playerIdForRetry ?? null,
+            maxRetries: 3,
+          });
+          if (syncGen !== postJoinSyncGen.current || !updated || !profileEnrich) return;
+          setPartido((prev) => {
+            const merged = mergePartidoWithServer(prev, updated, profileEnrich, {
+              forceSlotIndex: slotIndex,
+            });
+            if (partidoPlayersDisplayEqual(prev, merged)) return prev;
+            upsertMisPartido(merged);
+            return merged;
+          });
+          onMatchDataChanged?.();
+          void refreshMatches({ scope: 'mine' });
+        })();
+      } catch {
+        Alert.alert('Error', 'No se pudo unir al partido. Inténtalo de nuevo.');
+      } finally {
+        setJoiningSlotIndex(null);
       }
-      const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, token);
-      setJoiningSlotIndex(null);
-      if (!confirmRes.ok) {
-        Alert.alert('Error', 'No se pudo confirmar. Inténtalo de nuevo.');
-        return;
-      }
-      const match = await fetchMatchById(partido.id, token);
-      if (match) {
-        const updated = mapMatchToPartido(match);
-        if (updated) setPartido(updated);
-      }
-      setSelectedSlotIndex(null);
     },
-    [partido.id, session?.access_token, initPaymentSheet, presentPaymentSheet]
+    [
+      partido,
+      currentPlayerId,
+      myProfile?.id,
+      profileForEnrich,
+      session?.access_token,
+      initPaymentSheet,
+      presentPaymentSheet,
+      upsertMisPartido,
+      refreshProfile,
+      refreshMatches,
+      onMatchDataChanged,
+    ],
   );
 
   const handleMatchmakingPay = useCallback(async () => {
@@ -265,49 +467,124 @@ export function PartidoDetailScreen({
     }
     setMatchmakingPayBusy(true);
     const intentRes = await createPaymentIntent(mp.bookingId, token, undefined, mp.participantId);
-    if (!intentRes.ok || !intentRes.clientSecret) {
+    let paymentIntentId: string | undefined;
+    if (paymentIntentAlreadyPaid(intentRes)) {
+      paymentIntentId = intentRes.paymentIntentId;
+    } else if (paymentIntentReadyForSheet(intentRes)) {
+      paymentIntentId = intentRes.paymentIntentId;
+      const returnURL = Linking.createURL('stripe-redirect');
+      const { error: initErr } = await initPaymentSheet({
+        paymentIntentClientSecret: intentRes.clientSecret,
+        merchantDisplayName: 'WeMatch Padel',
+        returnURL,
+      });
+      if (initErr) {
+        setMatchmakingPayBusy(false);
+        Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+        return;
+      }
+      const { error: presentErr } = await presentPaymentSheet();
+      if (presentErr) {
+        setMatchmakingPayBusy(false);
+        if (presentErr.code === 'Canceled') {
+          Alert.alert('Cancelado', 'Pago cancelado.');
+        } else {
+          if (__DEV__) {
+            console.warn('[Stripe presentPaymentSheet]', presentErr.code, presentErr.message);
+          }
+          Alert.alert(
+            'Error',
+            presentErr.message ?? 'Error al procesar el pago. Inténtalo de nuevo.'
+          );
+        }
+        return;
+      }
+    } else {
       setMatchmakingPayBusy(false);
       Alert.alert('Error', intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.');
       return;
     }
-    const returnURL = Linking.createURL('stripe-redirect');
-    const { error: initErr } = await initPaymentSheet({
-      paymentIntentClientSecret: intentRes.clientSecret,
-      merchantDisplayName: 'WeMatch Padel',
-      returnURL,
-    });
-    if (initErr) {
-      setMatchmakingPayBusy(false);
-      Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
-      return;
-    }
-    const { error: presentErr } = await presentPaymentSheet();
-    if (presentErr) {
-      setMatchmakingPayBusy(false);
-      if (presentErr.code === 'Canceled') {
-        Alert.alert('Cancelado', 'Pago cancelado.');
-      } else {
-        Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
-      }
-      return;
-    }
-    const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, token);
-    setMatchmakingPayBusy(false);
+    const confirmRes = await confirmPaymentFromClient(paymentIntentId!, token);
     if (!confirmRes.ok) {
+      setMatchmakingPayBusy(false);
       Alert.alert('Error', 'No se pudo confirmar. Inténtalo de nuevo.');
       return;
     }
-    const match = await fetchMatchById(partido.id, token);
-    if (match) {
-      const updated = mapMatchToPartido(match);
-      if (updated) setPartido({ ...updated, matchmakingPayment: undefined });
+    matchFetchGen.current += 1;
+    const freshProfile = await fetchMyPlayerProfile(token);
+    const payElo = pickProfileEloRating(freshProfile, myProfile, profileForEnrich);
+    const viewerId = currentPlayerId ?? myProfile?.id ?? freshProfile?.id ?? null;
+    const profileEnrich: ProfileForPartidoEnrich | null = freshProfile?.id
+      ? {
+          id: freshProfile.id,
+          firstName: freshProfile.firstName,
+          lastName: freshProfile.lastName,
+          username: freshProfile.username,
+          avatarUrl: freshProfile.avatarUrl,
+          eloRating: payElo,
+        }
+      : profileForEnrich
+        ? { ...profileForEnrich, eloRating: payElo ?? profileForEnrich.eloRating }
+        : null;
+    if (profileEnrich && viewerId) {
+      if (freshProfile?.id) setCurrentPlayerId(freshProfile.id);
+      cachePlayerAvatar(profileEnrich.id, profileEnrich.avatarUrl);
+      const levelLine = formatPlayerLevelFromElo(profileEnrich.eloRating);
+      if (levelLine !== '—') cachePlayerLevel(profileEnrich.id, levelLine);
+      const reservedSlot =
+        partido.playerIdsBySlot?.findIndex((id) => id === viewerId) ??
+        partido.players.findIndex((p) => p.id === viewerId);
+      const forceSlotIndex =
+        reservedSlot >= 0 ? reservedSlot : partido.players.findIndex((p) => p.isFree);
+      setPartido((prev) => {
+        const cleared = {
+          ...prev,
+          matchmakingPayment: undefined,
+          bookingStatus: 'confirmed',
+        };
+        const next = enrichPartidoWithProfileAvatar(cleared, profileEnrich, {
+          forceSlotIndex: forceSlotIndex >= 0 ? forceSlotIndex : undefined,
+        });
+        upsertMisPartido(next);
+        return next;
+      });
+      void refreshProfile({ force: true });
+    }
+    const matchId = partido.id;
+    try {
+      const updated = await reloadMatchPartido(matchId, token, {
+        retryIfMissingPlayerId: viewerId ?? undefined,
+        viewerPlayerId: viewerId,
+        maxRetries: 5,
+      });
+      if (!updated) return;
+      setPartido((prev) => {
+        const merged = mergePartidoWithServer(
+          prev,
+          { ...updated, matchmakingPayment: undefined },
+          profileEnrich,
+        );
+        if (partidoPlayersDisplayEqual(prev, merged)) return prev;
+        upsertMisPartido(merged);
+        return merged;
+      });
+      onMatchDataChanged?.();
+      void refreshMatches({ scope: 'mine' });
+    } finally {
+      setMatchmakingPayBusy(false);
     }
   }, [
-    partido.id,
-    partido.matchmakingPayment,
+    partido,
+    currentPlayerId,
+    myProfile?.id,
+    profileForEnrich,
     session?.access_token,
     initPaymentSheet,
     presentPaymentSheet,
+    upsertMisPartido,
+    refreshProfile,
+    refreshMatches,
+    onMatchDataChanged,
   ]);
 
   const handleDeclineMatchmaking = useCallback(() => {
@@ -332,6 +609,7 @@ export function PartidoDetailScreen({
                 Alert.alert('Error', r.error);
                 return;
               }
+              await leaveMatchmaking(token);
               Alert.alert('Listo', 'Has declinado el partido.', [{ text: 'OK', onPress: () => onBack() }]);
             } finally {
               setDecliningMatchmaking(false);
@@ -350,7 +628,14 @@ export function PartidoDetailScreen({
 
   const teamA = partido.players.slice(0, 2);
   const teamB = partido.players.slice(2, 4);
-  const heroUri = partido.venueImage ?? pickPlaceholderUri(partido.id);
+  const heroPrimaryUri = partido.venueImage?.trim() || pickPlaceholderUri(partido.id);
+  const heroFallbackUri = pickPlaceholderUri(partido.id);
+  const [heroUri, setHeroUri] = useState(heroPrimaryUri);
+
+  useEffect(() => {
+    setHeroUri(partido.venueImage?.trim() || pickPlaceholderUri(partido.id));
+  }, [partido.id, partido.venueImage]);
+
   const venueAddress = partido.venueAddress ?? partido.location;
   const locationLine =
     partido.location && partido.location !== '—'
@@ -383,10 +668,82 @@ export function PartidoDetailScreen({
     partido.matchStatus === 'pending' &&
     partido.bookingStatus === 'pending_payment' &&
     matchPhase !== 'past';
-  const handleSubmitEvaluation = useCallback(
-    async (payload: MatchEvaluationPayload) => {
+  const handleProposeScore = useCallback(
+    async (apiSets: Array<{ a: number; b: number }>, matchEndReason?: string) => {
       const token = session?.access_token;
-      if (!token) return { ok: false as const, error: 'Necesitas iniciar sesión para guardar el feedback.' };
+      if (!token) return { ok: false, error: 'Necesitas iniciar sesión para guardar el marcador.' };
+      const res = await submitMatchScore(
+        partido.id,
+        { sets: apiSets, match_end_reason: matchEndReason as any },
+        token
+      );
+      if (res.ok) {
+        const fresh = await fetchMatchById(partido.id, token);
+        if (fresh) {
+          setPartido(prev => ({
+            ...prev,
+            score_status: fresh.score_status,
+            sets: fresh.sets,
+            score_proposer_id: fresh.score_proposer_id,
+            my_score_vote: fresh.my_score_vote,
+            score_vote_counts: fresh.score_vote_counts,
+          }));
+        }
+        await refreshMatches({ scope: 'mine' });
+        return { ok: true };
+      } else {
+        if (res.status === 409) {
+          const fresh = await fetchMatchById(partido.id, token);
+          if (fresh) {
+            setPartido(prev => ({
+              ...prev,
+              score_status: fresh.score_status,
+              sets: fresh.sets,
+              score_proposer_id: fresh.score_proposer_id,
+              my_score_vote: fresh.my_score_vote,
+              score_vote_counts: fresh.score_vote_counts,
+            }));
+          }
+          return {
+            ok: false,
+            error: 'Otro jugador ya ha propuesto un marcador. La pantalla se actualizará para que puedas votar.',
+          };
+        }
+        return { ok: false, error: res.error };
+      }
+    },
+    [partido.id, session?.access_token, refreshMatches]
+  );
+
+  const handleVoteScore = useCallback(
+    async (vote: 'confirm' | 'reject') => {
+      const token = session?.access_token;
+      if (!token) return { ok: false, error: 'Necesitas iniciar sesión para votar.' };
+      const res = await voteMatchScore(partido.id, vote, token);
+      if (res.ok) {
+        const fresh = await fetchMatchById(partido.id, token);
+        if (fresh) {
+          setPartido(prev => ({
+            ...prev,
+            score_status: fresh.score_status,
+            sets: fresh.sets,
+            score_proposer_id: fresh.score_proposer_id,
+            my_score_vote: fresh.my_score_vote,
+            score_vote_counts: fresh.score_vote_counts,
+          }));
+        }
+        await refreshMatches({ scope: 'mine' });
+        return { ok: true };
+      }
+      return { ok: false, error: res.error };
+    },
+    [partido.id, session?.access_token, refreshMatches]
+  );
+
+  const handleCompleteFeedback = useCallback(
+    async (payload: { teammateRatings: any[]; feedbackText: string }) => {
+      const token = session?.access_token;
+      if (!token) return { ok: false, error: 'Necesitas iniciar sesión para enviar feedback.' };
 
       const levelRatings: SubmitMatchFeedbackBody['level_ratings'] = [];
       for (const rating of payload.teammateRatings) {
@@ -404,55 +761,9 @@ export function PartidoDetailScreen({
 
       if (levelRatings.length !== payload.teammateRatings.length) {
         return {
-          ok: false as const,
+          ok: false,
           error: 'No se pudo mapear a todos los jugadores para enviar el feedback.',
         };
-      }
-
-      let scoreSaved = false;
-      if (payload.sets.length > 0 && currentPlayerId) {
-        const fresh = await fetchMatchById(partido.id, token);
-        const scoreStatus = fresh?.score_status ?? 'pending';
-        const scoreAlreadyOnRecord =
-          scoreStatus !== 'pending' &&
-          Array.isArray(fresh?.sets) &&
-          fresh.sets.length > 0;
-
-        if (scoreAlreadyOnRecord) {
-          scoreSaved = true;
-        } else if (scoreStatus === 'pending') {
-          let team: 'A' | 'B' | null = null;
-          if (fresh?.match_players) {
-            const mine = fresh.match_players.find((mp) => mp.players?.id === currentPlayerId);
-            team = mine?.team ?? null;
-          }
-          if (!team) {
-            return {
-              ok: false as const,
-              error: 'No se pudo determinar tu equipo para guardar el marcador.',
-            };
-          }
-          const apiSets =
-            team === 'A'
-              ? payload.sets.map((s) => ({ a: s.us, b: s.them }))
-              : payload.sets.map((s) => ({ a: s.them, b: s.us }));
-          const usSets = payload.sets.filter((s) => s.us > s.them).length;
-          const themSets = payload.sets.filter((s) => s.them > s.us).length;
-          const isDraw = usSets === themSets;
-
-          const scoreRes = await submitMatchScore(
-            partido.id,
-            {
-              sets: apiSets,
-              match_end_reason: isDraw ? 'draw' : 'completed',
-            },
-            token
-          );
-          if (!scoreRes.ok) {
-            return { ok: false as const, error: scoreRes.error };
-          }
-          scoreSaved = true;
-        }
       }
 
       const res = await submitMatchFeedback(
@@ -465,26 +776,33 @@ export function PartidoDetailScreen({
       );
 
       if (!res.ok) {
-        return {
-          ok: false as const,
-          error: scoreSaved
-            ? `El marcador se guardó, pero no el feedback: ${res.error}`
-            : res.error,
-        };
+        return { ok: false, error: res.error };
       }
+
       setPartido((prev) => ({ ...prev, hasMyFeedback: true }));
-      await refreshMatches({ force: true });
-      return { ok: true as const };
+      await refreshMatches({ scope: 'mine' });
+      return { ok: true };
     },
-    [
-      partido.id,
-      partido.playerIds,
-      partido.playerIdsBySlot,
-      currentPlayerId,
-      session?.access_token,
-      refreshMatches,
-    ]
+    [partido.id, partido.playerIds, partido.playerIdsBySlot, session?.access_token, refreshMatches]
   );
+
+  const handleOpenEvaluation = useCallback(async () => {
+    const token = session?.access_token;
+    if (token) {
+      const fresh = await fetchMatchById(partido.id, token);
+      if (fresh) {
+        setPartido(prev => ({
+          ...prev,
+          score_status: fresh.score_status,
+          sets: fresh.sets,
+          score_proposer_id: fresh.score_proposer_id,
+          my_score_vote: fresh.my_score_vote,
+          score_vote_counts: fresh.score_vote_counts,
+        }));
+      }
+    }
+    setEvaluationVisible(true);
+  }, [partido.id, session?.access_token]);
   /** Usuario apuntado y partido aún no cerrado: barra inferior con finalizar + papelera. */
   const playersFilledCount = partido.players.filter((p) => !p.isFree).length;
   const showFinishBar =
@@ -538,9 +856,12 @@ export function PartidoDetailScreen({
               } else {
                 setCancelOverlay((o) => ({ ...o, message: 'Actualizando partido…' }));
                 Alert.alert('Listo', 'Saliste del partido. Si pagaste con tarjeta, el reembolso se procesará en breve.');
-                const m = await fetchMatchById(partido.id, token);
-                const updated = m ? mapMatchToPartido(m) : null;
-                if (updated) setPartido(updated);
+                matchFetchGen.current += 1;
+                const updated = await reloadMatchPartido(partido.id, token, {
+                  viewerPlayerId: currentPlayerId ?? myProfile?.id ?? null,
+                });
+                if (updated) await syncPartidoAfterMutation(updated);
+                else void refreshMatches({ scope: 'mine' });
               }
               return;
             }
@@ -553,7 +874,14 @@ export function PartidoDetailScreen({
         },
       },
     ]);
-  }, [session?.access_token, partido.id, onBack, playersFilledCount]);
+  }, [
+    session?.access_token,
+    partido,
+    onBack,
+    playersFilledCount,
+    syncPartidoAfterMutation,
+    refreshMatches,
+  ]);
 
   return (
     <View style={styles.root}>
@@ -567,7 +895,14 @@ export function PartidoDetailScreen({
       >
         <View>
           <View style={styles.heroWrap}>
-            <Image source={{ uri: heroUri }} style={styles.heroImg} resizeMode="cover" />
+            <Image
+              source={{ uri: heroUri }}
+              style={styles.heroImg}
+              resizeMode="cover"
+              onError={() => {
+                if (heroUri !== heroFallbackUri) setHeroUri(heroFallbackUri);
+              }}
+            />
             <LinearGradient
               colors={['transparent', 'rgba(15,15,15,0.55)', BG]}
               locations={[0, 0.45, 1]}
@@ -603,8 +938,13 @@ export function PartidoDetailScreen({
             </View>
             <View style={styles.heroBottom}>
               <View style={styles.heroBadgesRow}>
-                <View style={styles.badgeAuto}>
-                  <Text style={styles.badgeAutoText}>Automático</Text>
+                <View style={[styles.matchKindBadge, matchKindBadge.style]}>
+                  {matchKindBadge.icon ? (
+                    <Ionicons name={matchKindBadge.icon} size={10} color="#fff" />
+                  ) : (
+                    <PulseDot />
+                  )}
+                  <Text style={styles.matchKindBadgeText}>{matchKindBadge.label}</Text>
                 </View>
                 <View style={styles.badgePadel}>
                   <Text style={styles.badgePadelText}>Pádel</Text>
@@ -691,6 +1031,12 @@ export function PartidoDetailScreen({
                   label="Fin inscripción"
                   value="Hasta el inicio del partido"
                 />
+                {matchPhase === 'past' ? (
+                  <View style={styles.resultSection}>
+                    <Text style={styles.cardTitle}>Resultado</Text>
+                    <MatchResultBlock partido={partido} />
+                  </View>
+                ) : null}
                 <View style={styles.actionsRow}>
                   <Pressable
                     style={({ pressed }) => [styles.actionCol, pressed && styles.pressed]}
@@ -733,13 +1079,6 @@ export function PartidoDetailScreen({
                   </Pressable>
                 </View>
               </View>
-
-              <View style={styles.statusPill}>
-                <PulseDot />
-                <Text style={styles.statusPillText}>
-                  Partido{'\n'}Abierto
-                </Text>
-              </View>
             </View>
           </View>
 
@@ -756,8 +1095,10 @@ export function PartidoDetailScreen({
                   <View style={styles.teamCol}>
                     {teamA.map((p, i) => (
                       <PlayerSlotDetail
-                        key={i}
+                        key={`slot-${i}-${p.id ?? (p.isFree ? 'free' : p.name ?? 'p')}`}
                         player={p}
+                        slotIndex={i}
+                        playerIdsBySlot={partido.playerIdsBySlot}
                         onJoin={
                           playerContextResolved &&
                           p.isFree &&
@@ -771,6 +1112,7 @@ export function PartidoDetailScreen({
                         selected={selectedSlotIndex === i}
                         lockedByOnboarding={needsOnboardingForJoin}
                         onOpenPublicProfile={onOpenPublicProfile}
+                        currentProfile={profileForEnrich}
                       />
                     ))}
                   </View>
@@ -780,8 +1122,10 @@ export function PartidoDetailScreen({
                       const slotIdx = i + 2;
                       return (
                         <PlayerSlotDetail
-                          key={i}
+                          key={`slot-${slotIdx}-${p.id ?? (p.isFree ? 'free' : p.name ?? 'p')}`}
                           player={p}
+                          slotIndex={slotIdx}
+                          playerIdsBySlot={partido.playerIdsBySlot}
                           onJoin={
                             playerContextResolved &&
                             p.isFree &&
@@ -794,6 +1138,7 @@ export function PartidoDetailScreen({
                           selected={selectedSlotIndex === slotIdx}
                           lockedByOnboarding={needsOnboardingForJoin}
                           onOpenPublicProfile={onOpenPublicProfile}
+                          currentProfile={profileForEnrich}
                         />
                       );
                     })}
@@ -853,7 +1198,7 @@ export function PartidoDetailScreen({
               <Ionicons name="exit-outline" size={22} color="#f87171" />
             </Pressable>
             <Pressable
-              onPress={() => setEvaluationVisible(true)}
+              onPress={handleOpenEvaluation}
               disabled={cancelOverlay.open}
               style={({ pressed }) => [
                 styles.finishBarCta,
@@ -972,8 +1317,15 @@ export function PartidoDetailScreen({
         partido={partido}
         currentPlayerId={currentPlayerId}
         onClose={() => setEvaluationVisible(false)}
-        onComplete={handleSubmitEvaluation}
         onGoHome={onGoHome}
+        scoreStatus={partido.score_status ?? 'pending'}
+        currentSets={partido.sets ?? null}
+        isScoreProposer={partido.score_proposer_id === currentPlayerId}
+        hasVoted={partido.my_score_vote != null}
+        voteCounts={partido.score_vote_counts ?? null}
+        onProposeScore={handleProposeScore}
+        onVoteScore={handleVoteScore}
+        onCompleteFeedback={handleCompleteFeedback}
       />
 
       <ClubInfoSheet
@@ -1015,16 +1367,27 @@ function PlayerSlotDetail({
   selected,
   lockedByOnboarding = false,
   onOpenPublicProfile,
+  currentProfile,
+  slotIndex,
+  playerIdsBySlot,
 }: {
   player: PartidoPlayer;
   onJoin?: () => void;
   joining?: boolean;
   selected?: boolean;
-  /** Pintar candado en la plaza libre porque el usuario no puede unirse
-   * (partido competitivo + onboarding pendiente). */
   lockedByOnboarding?: boolean;
   onOpenPublicProfile?: (playerId: string) => void;
+  currentProfile?: ProfileForPartidoEnrich | null;
+  slotIndex?: number;
+  playerIdsBySlot?: Array<string | null>;
 }) {
+  const displayOpts = { slotIndex, playerIdsBySlot };
+  const avatarUrl =
+    resolvePlayerDisplayAvatar(player, currentProfile, displayOpts) ??
+    normalizePlayerAvatarUrl(player.avatar);
+  const displayInitials = resolvePlayerDisplayInitials(player, currentProfile, displayOpts);
+  const displayLevel = resolvePlayerDisplayLevel(player, currentProfile, displayOpts);
+
   if (player.isFree) {
     return (
       <View style={styles.plSlot}>
@@ -1065,26 +1428,23 @@ function PlayerSlotDetail({
         onPress={() => player.id && onOpenPublicProfile?.(player.id)}
         style={({ pressed }) => [styles.plFill, pressed && styles.pressed]}
       >
-        {player.avatar ? (
-          <Image
-            source={{ uri: player.avatar }}
-            style={styles.plAvatar}
-            resizeMode="cover"
-          />
-        ) : (
-          <Text style={styles.plInitials}>
-            {(player.initial ?? player.name?.slice(0, 2) ?? '?').toUpperCase()}
-          </Text>
-        )}
+        <PartidoSlotAvatar
+          avatarUrl={avatarUrl}
+          initials={displayInitials}
+          size={56}
+          borderRadius={12}
+        />
       </Pressable>
       <Pressable onPress={() => player.id && onOpenPublicProfile?.(player.id)}>
         <Text style={styles.plName} numberOfLines={1}>
           {player.name || 'Jugador'}
         </Text>
       </Pressable>
-      <View style={styles.plLevel}>
-        <Text style={styles.plLevelText}>{player.level.replace(/\./g, ',')}</Text>
-      </View>
+      {displayLevel ? (
+        <View style={styles.plLevel}>
+          <Text style={styles.plLevelText}>{displayLevel}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -1138,18 +1498,29 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   heroBadgesRow: { flexDirection: 'row', gap: 8, marginBottom: 6 },
-  badgeAuto: {
+  matchKindBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 8,
-    backgroundColor: 'rgba(241,143,52,0.9)',
   },
-  badgeAutoText: {
+  matchKindBadgeText: {
     fontSize: 10,
     fontWeight: '800',
     color: '#fff',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  badgeOpen: {
+    backgroundColor: 'rgba(241,143,52,0.9)',
+  },
+  badgePrivate: {
+    backgroundColor: 'rgba(107,114,128,0.85)',
+  },
+  badgeCompetitive: {
+    backgroundColor: 'rgba(217,119,6,0.95)',
   },
   badgePadel: {
     paddingHorizontal: 10,
@@ -1222,6 +1593,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     marginBottom: 16,
+  },
+  resultSection: {
+    marginTop: 4,
+    marginBottom: 8,
   },
   grid3: {
     flexDirection: 'row',
@@ -1318,32 +1693,6 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    overflow: 'visible',
-  },
-  statusPillText: {
-    marginLeft: 10,
-    flexShrink: 0,
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
-    lineHeight: 17,
-    textAlign: 'left',
-    ...Platform.select({
-      android: {
-        includeFontPadding: false,
-      },
-    }),
-  },
   pulseWrap: {
     width: 8,
     height: 8,
@@ -1384,11 +1733,11 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 12,
-    backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
     overflow: 'hidden',
+    backgroundColor: '#F18F34',
   },
   plAvatar: { width: 56, height: 56, borderRadius: 12 },
   plInitials: {

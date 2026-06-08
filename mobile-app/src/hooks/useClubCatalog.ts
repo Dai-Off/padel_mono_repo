@@ -7,6 +7,8 @@ export type ClubCatalogItem = {
   name: string;
   city: string;
   address: string;
+  lat: number | null;
+  lng: number | null;
   distanceKm: number | null;
   imageUrl: string | null;
   sports: Set<string>;
@@ -36,6 +38,8 @@ function buildCatalog(results: SearchCourtResult[]): ClubCatalogItem[] {
       name: r.clubName,
       city: r.city,
       address: r.address,
+      lat: r.lat,
+      lng: r.lng,
       distanceKm: r.distanceKm,
       imageUrl: r.imageUrl,
       sports: new Set([sport]),
