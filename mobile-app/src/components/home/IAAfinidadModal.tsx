@@ -9,6 +9,8 @@ import { sendDirectMessage } from '../../api/messages';
 import { searchPlayers } from '../../api/players';
 import type { PlayerPreferences } from '../../api/players';
 import { AffinityVisibilityToggle } from '../affinity/AffinityVisibilityToggle';
+import { DirectMessageThreadScreen } from '../../screens/DirectMessageThreadScreen';
+import type { MessagePeerNav } from '../../screens/MessagesScreen';
 
 type Option = { id: string; label: string };
 
@@ -199,6 +201,8 @@ function parseCandidatesFromResponse(text: string): MatchCandidate[] {
 
 type IAAfinidadModalProps = {
   visible: boolean;
+  /** Sin fade al reabrir (p. ej. volver del chat de afinidad). */
+  instantShow?: boolean;
   loading: boolean;
   responseText: string | null;
   errorText: string | null;
@@ -214,7 +218,6 @@ type IAAfinidadModalProps = {
   affinityVisible: boolean;
   /** Activa/desactiva la visibilidad; devuelve true si se guardó correctamente. */
   onSetVisible: (visible: boolean) => Promise<boolean>;
-  onDirectMessageSent?: (target: { id: string; displayName: string; avatarUrl: string | null }) => void;
   sentIds?: Set<string>;
   onSentIdsChange?: (newSet: Set<string>) => void;
   /** Abre el perfil público de un jugador */
@@ -364,6 +367,7 @@ function CandidateCard({
 
 export function IAAfinidadModal({
   visible,
+  instantShow = false,
   loading,
   responseText,
   errorText,
@@ -372,7 +376,6 @@ export function IAAfinidadModal({
   onRunSearch,
   affinityVisible,
   onSetVisible,
-  onDirectMessageSent,
   sentIds = new Set(),
   onSentIdsChange,
   onPlayerPress,
@@ -405,6 +408,8 @@ export function IAAfinidadModal({
   const isFormComplete = criteria.days.length > 0 && criteria.slots.length > 0 && !!criteria.style;
 
   const [sendingCandidateId, setSendingCandidateId] = useState<string | null>(null);
+  /** Hilo de chat dentro del mismo modal (sin cerrar → sin flash del home). */
+  const [chatPeer, setChatPeer] = useState<MessagePeerNav | null>(null);
 
   // Sincronizar con props para persistencia
   const [sentCandidateIds, setSentCandidateIds] = useState<Set<string>>(sentIds);
@@ -552,8 +557,7 @@ export function IAAfinidadModal({
       const newSet = new Set([...sentCandidateIds, candidate.id]);
       setSentCandidateIds(newSet);
       onSentIdsChange?.(newSet);
-      // Abrir el hilo de chat (el usuario puede darle back y volver a los resultados)
-      onDirectMessageSent?.({
+      setChatPeer({
         id: exact.id,
         displayName: targetName,
         avatarUrl: null,
@@ -689,6 +693,7 @@ export function IAAfinidadModal({
       setShowForm(false);
       setForceConsent(false);
       setPendingCriteria(null);
+      setChatPeer(null);
       return;
     }
     setCriteria({ days: prefDays, slots: prefSlots, style: prefStyle });
@@ -700,8 +705,29 @@ export function IAAfinidadModal({
   // la pantalla previa con el botón "Buscar jugadores" (ver showPreSearch). Así
   // no se gastan tokens por entradas accidentales y se puede ajustar antes.
 
+  const handleRequestClose = () => {
+    if (chatPeer) {
+      setChatPeer(null);
+      return;
+    }
+    onClose();
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={visible}
+      transparent={!chatPeer}
+      animationType={instantShow ? 'none' : 'fade'}
+      onRequestClose={handleRequestClose}
+      statusBarTranslucent
+    >
+      {chatPeer ? (
+        <DirectMessageThreadScreen
+          peer={chatPeer}
+          standalone
+          onBack={() => setChatPeer(null)}
+        />
+      ) : (
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} />
         <View style={[styles.sheet, { paddingTop: Math.max(insets.top, 10), paddingBottom: Math.max(insets.bottom, 8) }]}>
@@ -1016,6 +1042,7 @@ export function IAAfinidadModal({
           </ScrollView>
         </View>
       </View>
+      )}
     </Modal>
   );
 }

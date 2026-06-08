@@ -13,6 +13,7 @@ import {
   resolveClubIdForBooking,
 } from '../services/paymentRefundService';
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
+import { enrichMatchRowsWithClubImages } from '../lib/clubLogoUrl';
 import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
@@ -52,7 +53,7 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city)
+              clubs (id, name, address, city, logo_url, photo_urls)
             )
           ),
           match_players (
@@ -68,7 +69,7 @@ function expandSelectDiscovery(): string {
             id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city)
+              clubs (id, name, address, city, logo_url, photo_urls)
             )
           ),
           match_players (
@@ -197,8 +198,10 @@ router.get('/', async (req: Request, res: Response) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
           return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
         });
+        await enrichMatchRowsWithClubImages(supabase, filtered);
         return res.json({ ok: true, matches: filtered });
       }
+      await enrichMatchRowsWithClubImages(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -238,6 +241,7 @@ router.get('/', async (req: Request, res: Response) => {
         if (joinable_only && !isJoinableDiscoveryRow(row)) return false;
         return true;
       });
+      await enrichMatchRowsWithClubImages(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -272,8 +276,10 @@ router.get('/', async (req: Request, res: Response) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
           return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
         });
+        await enrichMatchRowsWithClubImages(supabase, filtered);
         return res.json({ ok: true, matches: filtered });
       }
+      await enrichMatchRowsWithClubImages(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -508,6 +514,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       const flattened = flattenMatchRowForClient(
         out as { bookings?: unknown; match_players?: unknown },
       );
+      await enrichMatchRowsWithClubImages(supabase, [flattened]);
       return res.json({
         ok: true,
         match: {
