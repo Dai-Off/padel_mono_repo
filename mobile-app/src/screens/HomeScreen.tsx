@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -25,13 +25,14 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
 import type { PartidoItem } from './PartidosScreen';
-import { IAAfinidadModal } from '../components/home/IAAfinidadModal';
+import { IAAfinidadModal, type AffinityCriteria } from '../components/home/IAAfinidadModal';
 import { OnboardingHardBlockModal } from '../components/onboarding/OnboardingHardBlockModal';
 import { searchAiMatch } from '../api/aiMatch';
 import {
   fetchMatchmakingLeagueConfig,
   type MatchmakingLeagueConfigRow,
 } from '../api/matchmaking';
+import { updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreferences } from '../api/players';
 import { type SeasonPassMissionDto } from '../api/seasonPass';
 import {
   isSeasonPassSpCapped,
@@ -84,10 +85,40 @@ type HomeScreenProps = {
 };
 
 /** Caché a nivel de módulo para que affinityResponse y los IDs enviados sobrevivan al desmonte/remonte de HomeScreen */
-const _affinityCache = { 
+const _affinityCache = {
   response: null as string | null,
   sentIds: new Set<string>()
 };
+
+// Etiquetas legibles para construir el prompt de la IA de afinidad a partir de
+// los criterios (= preferencias del jugador).
+const AFFINITY_DAY_LABELS: Record<string, string> = {
+  mon: 'lunes', tue: 'martes', wed: 'miércoles', thu: 'jueves',
+  fri: 'viernes', sat: 'sábado', sun: 'domingo',
+};
+const AFFINITY_SLOT_LABELS: Record<string, string> = {
+  morning: 'mañana', afternoon: 'tarde', evening: 'noche', night: 'madrugada',
+};
+const AFFINITY_STYLE_LABELS: Record<string, string> = {
+  competitive: 'competitivo', social: 'social', learning: 'aprendizaje', balanced: 'cualquiera',
+};
+
+/**
+ * Construye la frase de solicitud para n8n MANTENIENDO la estructura original
+ * que el flujo ya espera ("Quiero buscar un compañero... Disponibilidad... por
+ * la... Estilo preferido... Dame los mejores jugadores compatibles."). Solo
+ * cambian los valores: la disponibilidad pasa de "hoy/mañana" a los días y
+ * franjas de las preferencias del jugador. No se añaden campos nuevos para no
+ * alterar lo que n8n está entrenado para recibir.
+ */
+function buildAffinityCriteriaPrompt(criteria: AffinityCriteria): string {
+  const dias = criteria.days.map((d) => AFFINITY_DAY_LABELS[d] ?? d);
+  const franjas = criteria.slots.map((s) => AFFINITY_SLOT_LABELS[s] ?? s);
+  const estilo = AFFINITY_STYLE_LABELS[criteria.style] ?? criteria.style;
+  const diasTxt = dias.length ? dias.join(', ') : 'cualquier día';
+  const franjasTxt = franjas.length ? franjas.join(' y ') : 'cualquier franja';
+  return `Quiero buscar un compañero para jugar pádel. Disponibilidad: ${diasTxt} por la ${franjasTxt}. Estilo preferido: ${estilo}. Dame los mejores jugadores compatibles.`;
+}
 
 export function HomeScreen({
   streakRefreshKey = 0,
@@ -113,6 +144,7 @@ export function HomeScreen({
   const {
     profile: myPlayerProfile,
     profileLoading,
+    refreshProfile,
     partidos,
     misPartidos,
     matchesLoading,
@@ -229,11 +261,46 @@ export function HomeScreen({
 
   const listLoading = statsLoading || matchesLoading || tournamentsLoading;
 
-  const handleAffinitySearch = useCallback(
-    async (prompt: string) => {
-      setAffinityLoading(true);
+  // Id de la búsqueda en curso: permite descartar el resultado de una búsqueda
+  // que el usuario canceló (p. ej. al pulsar "Cambiar criterios" en el loader).
+  const affinityRunIdRef = useRef(0);
+
+  const handleAffinityRun = useCallback(
+    async (criteria: AffinityCriteria, persist: boolean) => {
+      const runId = ++affinityRunIdRef.current;
+      // Mostrar el loader de inmediato: si esperásemos al PATCH de preferencias
+      // para activarlo, el modal pintaría un instante la pantalla previa entre
+      // medias (parpadeo "vuelve a Buscar compañeros y luego busca").
       setAffinityError(null);
       setAffinityResponse(null);
+      setAffinityLoading(true);
+
+      // Si el usuario editó criterios en el formulario, los guardamos como
+      // preferencias antes de buscar (los criterios de afinidad SON las
+      // preferencias del jugador).
+      if (persist) {
+        const token = session?.access_token ?? null;
+        if (!token || !myPlayerProfile) {
+          setAffinityError('No se pudieron guardar tus criterios.');
+          setAffinityLoading(false);
+          return;
+        }
+        const res = await updateMyPlayerPreferences(token, {
+          ...myPlayerProfile.preferences,
+          preferredDays: criteria.days as PlayerPreferences['preferredDays'],
+          preferredScheduleSlots:
+            criteria.slots as PlayerPreferences['preferredScheduleSlots'],
+          preferredPlayStyle:
+            criteria.style as PlayerPreferences['preferredPlayStyle'],
+        });
+        if (affinityRunIdRef.current !== runId) return; // descarta si otra búsqueda la reemplazó
+        if (!res.ok) {
+          setAffinityError(res.error);
+          setAffinityLoading(false);
+          return;
+        }
+        void refreshProfile({ force: true });
+      }
 
       const userName =
         [myPlayerProfile?.firstName, myPlayerProfile?.lastName]
@@ -253,13 +320,14 @@ export function HomeScreen({
         `- telefono: ${myPlayerProfile?.phone ?? 'Sin dato'}`,
         '',
         'SOLICITUD DEL USUARIO',
-        prompt,
+        buildAffinityCriteriaPrompt(criteria),
         '',
         'INSTRUCCION IMPORTANTE',
         'Usa el jugador logueado como jugador ancla para el matching.',
       ].join('\n');
 
       const result = await searchAiMatch(enrichedPrompt);
+      if (affinityRunIdRef.current !== runId) return; // descarta si otra búsqueda la reemplazó
       if (result.ok && result.text) {
         setAffinityResponse(result.text);
       } else {
@@ -267,7 +335,28 @@ export function HomeScreen({
       }
       setAffinityLoading(false);
     },
-    [myPlayerProfile, session?.user?.email, session?.user?.user_metadata?.full_name]
+    [myPlayerProfile, refreshProfile, session]
+  );
+
+  // Activa/desactiva la visibilidad en afinidad (gate del modal + auto-activación
+  // al primer uso). Devuelve true si se guardó correctamente.
+  const handleSetAffinityVisible = useCallback(
+    async (visible: boolean): Promise<boolean> => {
+      const token = session?.access_token ?? null;
+      if (!token) {
+        setAffinityError('Inicia sesión para cambiar tu visibilidad.');
+        return false;
+      }
+      setAffinityError(null);
+      const res = await updateAffinityVisible(token, visible);
+      if (!res.ok) {
+        setAffinityError(res.error);
+        return false;
+      }
+      await refreshProfile({ force: true });
+      return true;
+    },
+    [session, refreshProfile]
   );
 
   const homeMissionsFromPass = useMemo(() => {
@@ -479,7 +568,10 @@ export function HomeScreen({
         }}
         sentIds={affinitySentIds}
         onSentIdsChange={updateAffinitySentIds}
-        onSubmit={handleAffinitySearch}
+        preferences={myPlayerProfile?.preferences ?? null}
+        onRunSearch={handleAffinityRun}
+        affinityVisible={myPlayerProfile?.affinityVisible ?? false}
+        onSetVisible={handleSetAffinityVisible}
         onDirectMessageSent={(target) => {
           // Usa el hilo directo de afinidad: back vuelve al modal de resultados
           // en vez de pasar por la lista de chats.
