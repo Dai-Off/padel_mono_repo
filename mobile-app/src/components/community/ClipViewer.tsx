@@ -42,6 +42,8 @@ export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, tok
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [commentsClip, setCommentsClip] = useState<CommunityPost | null>(null);
+  // Altura real del área visible (más fiable que Dimensions con edge-to-edge).
+  const [viewportH, setViewportH] = useState(height);
 
   // Al abrir: mostramos la semilla al instante y cargamos el feed recomendado.
   useEffect(() => {
@@ -79,7 +81,10 @@ export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, tok
 
   return (
     <Modal visible={isVisible} animationType="fade" onRequestClose={onClose}>
-      <View style={styles.container}>
+      <View
+        style={styles.container}
+        onLayout={(e) => setViewportH(Math.round(e.nativeEvent.layout.height))}
+      >
         <FlatList
           data={clips}
           keyExtractor={(item) => item.id}
@@ -89,12 +94,13 @@ export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, tok
               isActive={index === activeIndex}
               muted={muted}
               token={token}
+              cellHeight={viewportH}
               onOpenComments={() => setCommentsClip(item)}
             />
           )}
           pagingEnabled
           showsVerticalScrollIndicator={false}
-          getItemLayout={(_, i) => ({ length: height, offset: height * i, index: i })}
+          getItemLayout={(_, i) => ({ length: viewportH, offset: viewportH * i, index: i })}
           onViewableItemsChanged={onViewRef.current}
           viewabilityConfig={viewConfigRef.current}
           onEndReached={loadMore}
@@ -133,10 +139,11 @@ interface ClipCellProps {
   isActive: boolean;
   muted: boolean;
   token?: string | null;
+  cellHeight: number;
   onOpenComments: () => void;
 }
 
-const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, onOpenComments }) => {
+const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellHeight, onOpenComments }) => {
   const insets = useSafeAreaInsets();
   const url = clip.images?.[0]?.media_url ?? null;
 
@@ -212,7 +219,7 @@ const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, onOpe
   };
 
   return (
-    <View style={styles.cell}>
+    <View style={[styles.cell, { height: cellHeight }]}>
       {url ? (
         <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
       ) : (
@@ -304,7 +311,6 @@ const styles = StyleSheet.create({
   },
   cell: {
     width,
-    height,
     backgroundColor: '#000',
   },
   noVideo: {
