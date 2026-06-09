@@ -28,6 +28,7 @@ import { FeedSkeleton } from '../components/community/FeedSkeleton';
 import { ComingSoon } from '../components/community/ComingSoon';
 import { ClipsGrid } from '../components/community/ClipsGrid';
 import { ClipViewer } from '../components/community/ClipViewer';
+import { StoryEditor } from '../components/community/StoryEditor';
 
 interface CommunityScreenProps {
   onBack: () => void;
@@ -56,6 +57,7 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
   const [isStoryViewerVisible, setIsStoryViewerVisible] = useState(false);
   const [selectedClip, setSelectedClip] = useState<CommunityPost | null>(null);
   const [isClipViewerVisible, setIsClipViewerVisible] = useState(false);
+  const [isStoryEditorVisible, setIsStoryEditorVisible] = useState(false);
 
   const loadData = useCallback(async (isRefreshing = false) => {
     if (isRefreshing) setRefreshing(true);
@@ -107,11 +109,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
     setIsStoryViewerVisible(true);
   };
 
-  // "+" de historias: abre el modal limitado a crear historias.
-  const openCreateStory = () => {
-    setCreateTypes(['story']);
-    setIsCreateModalVisible(true);
-  };
+  // "+" de historias: abre el editor de historias (texto/stickers/filtros).
+  const openCreateStory = () => setIsStoryEditorVisible(true);
 
   // FAB inferior: abre el modal para crear publicación (foto) o reel (vídeo).
   const openCreatePostOrReel = () => {
@@ -223,6 +222,13 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
         seedClip={selectedClip}
         token={token}
         onClose={() => setIsClipViewerVisible(false)}
+      />
+
+      <StoryEditor
+        isVisible={isStoryEditorVisible}
+        token={token}
+        onClose={() => setIsStoryEditorVisible(false)}
+        onSuccess={() => loadData(true)}
       />
 
       {/* Floating Action Button */}

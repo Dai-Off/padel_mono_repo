@@ -298,9 +298,15 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
     return res.status(400).json({ ok: false, error: 'Se requiere al menos un archivo' });
   }
 
-  const { caption, location, post_type } = req.body ?? {};
+  const { caption, location, post_type, overlays: overlaysRaw } = req.body ?? {};
   const type = post_type === 'story' ? 'story' : post_type === 'reel' ? 'reel' : 'post';
   const expiresAt = type === 'story' ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
+
+  // Overlays de historia (texto/stickers/filtro) como metadatos.
+  let overlays: any = null;
+  if (overlaysRaw) {
+    try { overlays = typeof overlaysRaw === 'string' ? JSON.parse(overlaysRaw) : overlaysRaw; } catch { overlays = null; }
+  }
 
   const hasVideo = files.some(f => f.mimetype.startsWith('video/'));
   // Para vídeo exigimos miniatura: la portada del Clip la genera/sube el cliente.
@@ -401,7 +407,8 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
         post_type: type,
         status: 'published',
         moderation_result: lastModerationResult,
-        expires_at: expiresAt
+        expires_at: expiresAt,
+        overlays
       })
       .select()
       .single();

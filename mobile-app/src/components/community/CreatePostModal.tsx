@@ -19,30 +19,7 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createPost } from '../../api/community';
 import { useAuth } from '../../contexts/AuthContext';
-
-type MediaFile = { uri: string; name: string; type: string };
-
-// Nº de frames a moderar según la duración del vídeo (mín 3, máx 5).
-// Acordado: ≤15s → 3 · 16–40s → 4 · 41–60s → 5.
-function framesForDuration(durationMs: number): number {
-  const s = durationMs / 1000;
-  if (s <= 15) return 3;
-  if (s <= 40) return 4;
-  return 5;
-}
-
-// Tiempos (ms) repartidos uniformemente por la duración, incluyendo 0 y el final.
-function sampleTimes(durationMs: number, count: number): number[] {
-  if (count <= 1 || durationMs <= 0) return [0];
-  const step = durationMs / (count - 1);
-  return Array.from({ length: count }, (_, i) => Math.round(i * step));
-}
-
-// Extrae un frame del vídeo como imagen lista para subir.
-async function extractFrame(videoUri: string, timeMs: number, idx: number): Promise<MediaFile> {
-  const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, { time: timeMs, quality: 0.7 });
-  return { uri, name: `frame-${Date.now()}-${idx}.jpg`, type: 'image/jpeg' };
-}
+import { MediaFile, framesForDuration, sampleTimes, extractFrame } from '../../lib/videoFrames';
 
 const { width } = Dimensions.get('window');
 

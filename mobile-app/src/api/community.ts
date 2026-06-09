@@ -1,4 +1,5 @@
 import { API_URL } from "../config";
+import { StoryOverlays } from "../lib/storyOverlays";
 
 export interface CommunityPlayer {
   id: string;
@@ -29,6 +30,7 @@ export interface CommunityPost {
   created_at: string;
   player: CommunityPlayer;
   images: CommunityPostImage[];
+  overlays?: StoryOverlays | null;
 }
 
 export interface StoryGroup {
@@ -116,6 +118,8 @@ export async function createPost(token: string | null | undefined, data: {
   caption?: string;
   location?: string;
   post_type?: string;
+  // Overlays de historia (texto/stickers/filtro).
+  overlays?: StoryOverlays;
 }): Promise<{ ok: boolean; post?: CommunityPost; error?: string }> {
   try {
     const formData = new FormData();
@@ -150,6 +154,7 @@ export async function createPost(token: string | null | undefined, data: {
     if (data.caption) formData.append('caption', data.caption);
     if (data.location) formData.append('location', data.location);
     if (data.post_type) formData.append('post_type', data.post_type);
+    if (data.overlays) formData.append('overlays', JSON.stringify(data.overlays));
 
     const response = await fetch(`${API_URL}/community/posts`, {
       method: 'POST',

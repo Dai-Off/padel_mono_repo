@@ -16,6 +16,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { StoryGroup } from '../../api/community';
 import { formatTimeAgo } from '../../utils/timeAgo';
 import { formatPlayerLabel } from '../../lib/username';
+import { filterById } from '../../lib/storyOverlays';
 
 const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 5000; // 5 seconds
@@ -119,6 +120,12 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
 
   if (!isVisible || !group || !currentStory) return null;
 
+  // Encuadre guardado de la media (mover/zoom/rotar). Si existe, se muestra "cover" recortada.
+  const mt = currentStory.overlays?.media;
+  const mediaTransform = mt
+    ? [{ translateX: mt.x * width }, { translateY: mt.y * height }, { scale: mt.scale }, { rotate: `${mt.rotation}deg` }]
+    : [];
+
   return (
     <Modal
       visible={isVisible}
@@ -140,21 +147,56 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
         {/* Overlay for contrast */}
         <View style={styles.overlay} />
 
-        {/* Contenido principal: vídeo o imagen */}
-        {isVideo ? (
-          <VideoView
-            player={player}
-            style={styles.mainImage}
-            contentFit="contain"
-            nativeControls={false}
-          />
-        ) : (
-          <Image
-            source={{ uri: mediaUrl }}
-            style={styles.mainImage}
-            resizeMode="contain"
-          />
-        )}
+        {/* Contenido principal: vídeo o imagen (con encuadre si lo hay) */}
+        <View style={[styles.mainImage, { overflow: 'hidden' }]}>
+          <View style={[StyleSheet.absoluteFill, { transform: mediaTransform }]}>
+            {isVideo ? (
+              <VideoView
+                player={player}
+                style={StyleSheet.absoluteFill}
+                contentFit={mt ? 'cover' : 'contain'}
+                nativeControls={false}
+              />
+            ) : (
+              <Image
+                source={{ uri: mediaUrl }}
+                style={StyleSheet.absoluteFill}
+                resizeMode={mt ? 'cover' : 'contain'}
+              />
+            )}
+          </View>
+        </View>
+
+        {/* Overlays de la historia: filtro + capas (texto/stickers) */}
+        {(() => {
+          const vf = filterById(currentStory.overlays?.filter);
+          return vf.opacity > 0 ? (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: vf.color, opacity: vf.opacity }]} />
+          ) : null;
+        })()}
+        {currentStory.overlays?.layers?.map(l => (
+          <View
+            key={l.id}
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              transform: [
+                { translateX: l.x * width },
+                { translateY: l.y * height },
+                { scale: l.scale },
+                { rotate: `${l.rotation}deg` },
+              ],
+            }}
+          >
+            {l.type === 'text' ? (
+              <Text style={{ fontSize: 28, fontWeight: '700', color: l.color, fontFamily: 'Outfit_700Bold', textShadowColor: 'rgba(0,0,0,0.4)', textShadowRadius: 4 }}>{l.value}</Text>
+            ) : (
+              <Text style={{ fontSize: 56 }}>{l.value}</Text>
+            )}
+          </View>
+        ))}
 
         {/* Interaction Layer */}
         <TouchableOpacity 
