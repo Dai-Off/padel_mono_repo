@@ -220,7 +220,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
 
       <ClipViewer
         isVisible={isClipViewerVisible}
-        clip={selectedClip}
+        seedClip={selectedClip}
+        token={token}
         onClose={() => setIsClipViewerVisible(false)}
       />
 
