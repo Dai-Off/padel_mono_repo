@@ -137,13 +137,14 @@ router.get('/stories', async (req: Request, res: Response) => {
  * POST /community/posts
  * Crea una publicación o historia.
  */
-router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 'thumbnail', maxCount: 1 }]), async (req: Request, res: Response) => {
+router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 'thumbnail', maxCount: 1 }, { name: 'moderation_frames', maxCount: 5 }]), async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
 
   const filesMap = req.files as { [field: string]: Express.Multer.File[] } | undefined;
   const files = filesMap?.files ?? [];
   const thumbFile = filesMap?.thumbnail?.[0] ?? null;
+  const moderationFrameFiles = filesMap?.moderation_frames ?? [];
 
   if (files.length === 0) {
     return res.status(400).json({ ok: false, error: 'Se requiere al menos un archivo' });
@@ -163,9 +164,11 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
   // Media subido, en el mismo orden que `files`.
   const uploaded: { url: string; mediaType: 'image' | 'video' }[] = [];
   let thumbnailUrl: string | null = null;
+  const moderationFrameUrls: string[] = [];
+  const moderationPaths: string[] = []; // frames de moderación = temporales
   let createdPostId: string | null = null;
 
-  // Sube un buffer al bucket y devuelve su URL pública (registra el path para limpieza).
+  // Sube un buffer al bucket y devuelve su URL pública y su path (registrado para limpieza).
   const uploadBuffer = async (supabase: any, file: Express.Multer.File, idx: string) => {
     const ext = file.originalname.split('.').pop() || 'jpg';
     const path = `${playerId}/${Date.now()}-${idx}.${ext}`;
@@ -175,7 +178,7 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
     if (upErr) throw upErr;
     storagePaths.push(path);
     const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
-    return publicUrl as string;
+    return { url: publicUrl as string, path };
   };
 
   try {
@@ -183,19 +186,28 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
 
     // 1. Subir media a Storage
     for (let i = 0; i < files.length; i++) {
-      const url = await uploadBuffer(supabase, files[i], String(i));
+      const { url } = await uploadBuffer(supabase, files[i], String(i));
       uploaded.push({ url, mediaType: files[i].mimetype.startsWith('video/') ? 'video' : 'image' });
     }
 
     // 1b. Subir miniatura (solo en vídeos)
     if (thumbFile) {
-      thumbnailUrl = await uploadBuffer(supabase, thumbFile, 'thumb');
+      thumbnailUrl = (await uploadBuffer(supabase, thumbFile, 'thumb')).url;
+    }
+
+    // 1c. Subir frames de moderación (temporales, se borran tras moderar)
+    for (let i = 0; i < moderationFrameFiles.length; i++) {
+      const { url, path } = await uploadBuffer(supabase, moderationFrameFiles[i], `mod-${i}`);
+      moderationFrameUrls.push(url);
+      moderationPaths.push(path);
     }
 
     // 2. Moderación (SIGHTENGINE):
-    //    - vídeo: moderamos la miniatura (1 operación), no el vídeo.
+    //    - vídeo: moderamos la portada + los frames de moderación del vídeo.
     //    - imágenes: moderamos cada imagen.
-    const urlsToModerate = hasVideo ? (thumbnailUrl ? [thumbnailUrl] : []) : uploaded.map(u => u.url);
+    const urlsToModerate = hasVideo
+      ? [thumbnailUrl, ...moderationFrameUrls].filter(Boolean) as string[]
+      : uploaded.map(u => u.url);
 
     let isApproved = true;
     let rejectionReason = '';
@@ -220,6 +232,15 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
         error: `Publicación rechazada por moderación: ${rejectionReason}`,
         reason: rejectionReason
       });
+    }
+
+    // Aprobado: los frames de moderación son temporales, se borran ya.
+    if (moderationPaths.length > 0) {
+      await supabase.storage.from(BUCKET).remove(moderationPaths);
+      const modSet = new Set(moderationPaths);
+      for (let i = storagePaths.length - 1; i >= 0; i--) {
+        if (modSet.has(storagePaths[i])) storagePaths.splice(i, 1);
+      }
     }
 
     // 3. Insertar Post

@@ -82,6 +82,8 @@ export async function createPost(token: string | null | undefined, data: {
   files: { uri: string; name: string; type: string }[];
   // Portada del vídeo (obligatoria cuando se sube un Clip).
   thumbnail?: { uri: string; name: string; type: string } | null;
+  // Fotogramas del vídeo para moderación (no se guardan; el backend los borra).
+  moderationFrames?: { uri: string; name: string; type: string }[];
   caption?: string;
   location?: string;
   post_type?: string;
@@ -106,6 +108,15 @@ export async function createPost(token: string | null | undefined, data: {
         type: data.thumbnail.type,
       });
     }
+
+    (data.moderationFrames ?? []).forEach((frame) => {
+      // @ts-ignore: FormData in React Native requires this format
+      formData.append('moderation_frames', {
+        uri: frame.uri,
+        name: frame.name,
+        type: frame.type,
+      });
+    });
 
     if (data.caption) formData.append('caption', data.caption);
     if (data.location) formData.append('location', data.location);
