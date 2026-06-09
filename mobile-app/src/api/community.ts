@@ -78,6 +78,20 @@ export async function fetchStories(token: string | null | undefined): Promise<{ 
   }
 }
 
+export async function fetchReels(token: string | null | undefined, cursor?: string): Promise<{ ok: boolean; reels: CommunityPost[]; next_cursor: string | null; error?: string }> {
+  try {
+    const url = new URL(`${API_URL}/community/reels`);
+    if (cursor) url.searchParams.append("cursor", cursor);
+
+    const response = await fetch(url.toString(), {
+      headers: getHeaders(token),
+    });
+    return await response.json();
+  } catch (err) {
+    return { ok: false, reels: [], next_cursor: null, error: (err as Error).message };
+  }
+}
+
 export async function createPost(token: string | null | undefined, data: {
   files: { uri: string; name: string; type: string }[];
   // Portada del vídeo (obligatoria cuando se sube un Clip).

@@ -91,6 +91,57 @@ router.get('/feed', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /community/reels
+ * Listado de Clips (vídeos) para el grid.
+ */
+router.get('/reels', async (req: Request, res: Response) => {
+  const { playerId } = await getPlayerIdFromBearer(req);
+  const cursor = req.query.cursor as string | undefined;
+  const limit = 18;
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+
+    let query = supabase
+      .from('community_posts')
+      .select(`
+        *,
+        player:players(id, first_name, last_name, username, avatar_url),
+        images:community_post_content(id, media_url, display_order, media_type, thumbnail_url)
+      `)
+      .eq('status', 'published')
+      .eq('post_type', 'reel')
+      .order('created_at', { ascending: false })
+      .limit(limit + 1);
+
+    if (cursor) query = query.lt('created_at', cursor);
+
+    const { data: reels, error } = await query;
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    const hasMore = reels.length > limit;
+    const items = hasMore ? reels.slice(0, limit) : reels;
+    const nextCursor = hasMore ? items[items.length - 1].created_at : null;
+
+    // Marcar los Clips que el usuario actual ha dado like.
+    let myLikes: string[] = [];
+    if (playerId && items.length > 0) {
+      const { data: likes } = await supabase
+        .from('community_likes')
+        .select('post_id')
+        .eq('player_id', playerId)
+        .in('post_id', items.map(p => p.id));
+      myLikes = (likes ?? []).map(l => l.post_id);
+    }
+
+    const enriched = items.map(p => ({ ...p, has_liked: myLikes.includes(p.id) }));
+    return res.json({ ok: true, reels: enriched, next_cursor: nextCursor });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
  * GET /community/stories
  * Historias activas agrupadas por jugador.
  */

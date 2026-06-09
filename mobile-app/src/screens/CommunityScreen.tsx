@@ -26,6 +26,8 @@ import {
 import { StoryViewer } from '../components/community/StoryViewer';
 import { FeedSkeleton } from '../components/community/FeedSkeleton';
 import { ComingSoon } from '../components/community/ComingSoon';
+import { ClipsGrid } from '../components/community/ClipsGrid';
+import { ClipViewer } from '../components/community/ClipViewer';
 
 interface CommunityScreenProps {
   onBack: () => void;
@@ -52,6 +54,8 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
   const [createTypes, setCreateTypes] = useState<PostType[]>(['post', 'reel']);
   const [selectedStoryGroup, setSelectedStoryGroup] = useState<StoryGroup | null>(null);
   const [isStoryViewerVisible, setIsStoryViewerVisible] = useState(false);
+  const [selectedClip, setSelectedClip] = useState<CommunityPost | null>(null);
+  const [isClipViewerVisible, setIsClipViewerVisible] = useState(false);
 
   const loadData = useCallback(async (isRefreshing = false) => {
     if (isRefreshing) setRefreshing(true);
@@ -179,13 +183,19 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
             ) : null
           }
         />
+      ) : activeTab === 'reels' ? (
+        <ClipsGrid
+          token={token}
+          ListHeaderComponent={renderHeader()}
+          onPressClip={(clips, index) => {
+            setSelectedClip(clips[index]);
+            setIsClipViewerVisible(true);
+          }}
+        />
       ) : (
         <View style={{ flex: 1 }}>
           {renderHeader()}
-          <ComingSoon 
-            title={activeTab === 'reels' ? 'Próximamente Reels' : 'Próximamente Noticias'} 
-            icon={activeTab === 'reels' ? 'play-circle-outline' : 'newspaper-outline'}
-          />
+          <ComingSoon title="Próximamente Noticias" icon="newspaper-outline" />
         </View>
       )}
 
@@ -202,10 +212,16 @@ export const CommunityScreen: React.FC<CommunityScreenProps> = ({ onBack, onMess
         allowedTypes={createTypes}
       />
 
-      <StoryViewer 
+      <StoryViewer
         isVisible={isStoryViewerVisible}
         onClose={() => setIsStoryViewerVisible(false)}
         group={selectedStoryGroup}
+      />
+
+      <ClipViewer
+        isVisible={isClipViewerVisible}
+        clip={selectedClip}
+        onClose={() => setIsClipViewerVisible(false)}
       />
 
       {/* Floating Action Button */}
