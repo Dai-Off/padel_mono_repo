@@ -142,6 +142,103 @@ router.get('/reels', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /community/reels/feed?seed=<clipId>&cursor=...
+ * Feed recomendado para el visor inmersivo.
+ * Heurística v1: el clip semilla primero -> más del mismo autor -> recientes.
+ * El cursor codifica `fase|autorId|created_at` para paginar sin huecos.
+ */
+router.get('/reels/feed', async (req: Request, res: Response) => {
+  const { playerId } = await getPlayerIdFromBearer(req);
+  const seedId = req.query.seed as string | undefined;
+  const cursorRaw = req.query.cursor as string | undefined;
+  const limit = 8;
+
+  const SELECT = `
+    *,
+    player:players(id, first_name, last_name, username, avatar_url),
+    images:community_post_content(id, media_url, display_order, media_type, thumbnail_url)
+  `;
+
+  // cursor = "fase|autorId|created_at" (fase: 'a' = mismo autor, 'o' = otros)
+  const cursor = cursorRaw ? (() => {
+    const [phase, authorId, ts] = cursorRaw.split('|');
+    return { phase, authorId: authorId || null, ts };
+  })() : null;
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const result: any[] = [];
+    let authorId: string | null = cursor?.authorId ?? null;
+
+    // Primera página: traemos la semilla, la ponemos primera y fijamos su autor.
+    if (!cursor && seedId) {
+      const { data: seed } = await supabase
+        .from('community_posts').select(SELECT)
+        .eq('id', seedId).eq('post_type', 'reel').maybeSingle();
+      if (seed) {
+        authorId = seed.player_id;
+        result.push(seed);
+      }
+    }
+
+    const fetchPhase = async (phase: 'a' | 'o', beforeTs: string | null) => {
+      let q = supabase.from('community_posts').select(SELECT)
+        .eq('status', 'published').eq('post_type', 'reel');
+      if (phase === 'a') q = q.eq('player_id', authorId as string);
+      else if (authorId) q = q.neq('player_id', authorId);
+      if (seedId) q = q.neq('id', seedId);
+      if (beforeTs) q = q.lt('created_at', beforeTs);
+      const { data } = await q.order('created_at', { ascending: false }).limit(limit + 1);
+      return data ?? [];
+    };
+
+    // Rellenamos la página recorriendo fases hasta llegar al límite.
+    let curPhase: 'a' | 'o' | null = cursor ? (cursor.phase as 'a' | 'o') : (authorId ? 'a' : 'o');
+    let beforeTs: string | null = cursor?.ts ?? null;
+    let nextCursor: string | null = null;
+    let remaining = limit;
+
+    while (remaining > 0 && curPhase) {
+      const batch = await fetchPhase(curPhase, beforeTs);
+      const take = batch.slice(0, remaining);
+      result.push(...take);
+      remaining -= take.length;
+
+      if (batch.length > take.length) {
+        // Quedan más en esta fase: el cursor continúa aquí.
+        const oldest = take[take.length - 1];
+        nextCursor = `${curPhase}|${authorId ?? ''}|${oldest.created_at}`;
+        break;
+      }
+      // Fase agotada: pasamos a la siguiente (a -> o -> fin).
+      if (curPhase === 'a') { curPhase = 'o'; beforeTs = null; }
+      else { curPhase = null; }
+    }
+
+    // Si llenamos justo en el límite pero aún queda una fase por recorrer,
+    // dejamos el cursor al inicio de esa fase (ts vacío) para no perder contenido.
+    if (!nextCursor && curPhase) {
+      nextCursor = `${curPhase}|${authorId ?? ''}|`;
+    }
+
+    // Marcar los Clips con like del usuario actual.
+    let myLikes: string[] = [];
+    if (playerId && result.length > 0) {
+      const { data: likes } = await supabase
+        .from('community_likes').select('post_id')
+        .eq('player_id', playerId)
+        .in('post_id', result.map(p => p.id));
+      myLikes = (likes ?? []).map(l => l.post_id);
+    }
+    const enriched = result.map(p => ({ ...p, has_liked: myLikes.includes(p.id) }));
+
+    return res.json({ ok: true, reels: enriched, next_cursor: nextCursor });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
  * GET /community/stories
  * Historias activas agrupadas por jugador.
  */
