@@ -85,8 +85,8 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
   if (!isVisible || !group) return null;
 
   const currentStory = group.stories[currentIndex];
-  // Stories use community_posts table, images are in currentStory.images
-  const imageUrl = currentStory?.images?.[0]?.image_url || 'https://via.placeholder.com/1000';
+  // Las historias usan la tabla community_posts; su media está en currentStory.images
+  const imageUrl = currentStory?.images?.[0]?.media_url || 'https://via.placeholder.com/1000';
 
   return (
     <Modal

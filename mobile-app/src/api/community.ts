@@ -10,8 +10,10 @@ export interface CommunityPlayer {
 
 export interface CommunityPostImage {
   id: string;
-  image_url: string;
+  media_url: string;
   display_order: number;
+  media_type: 'image' | 'video';
+  thumbnail_url?: string | null;
 }
 
 export interface CommunityPost {
@@ -78,13 +80,15 @@ export async function fetchStories(token: string | null | undefined): Promise<{ 
 
 export async function createPost(token: string | null | undefined, data: {
   files: { uri: string; name: string; type: string }[];
+  // Portada del vídeo (obligatoria cuando se sube un Clip).
+  thumbnail?: { uri: string; name: string; type: string } | null;
   caption?: string;
   location?: string;
   post_type?: string;
 }): Promise<{ ok: boolean; post?: CommunityPost; error?: string }> {
   try {
     const formData = new FormData();
-    
+
     data.files.forEach((file, index) => {
       // @ts-ignore: FormData in React Native requires this format
       formData.append('files', {
@@ -93,6 +97,15 @@ export async function createPost(token: string | null | undefined, data: {
         type: file.type,
       });
     });
+
+    if (data.thumbnail) {
+      // @ts-ignore: FormData in React Native requires this format
+      formData.append('thumbnail', {
+        uri: data.thumbnail.uri,
+        name: data.thumbnail.name,
+        type: data.thumbnail.type,
+      });
+    }
 
     if (data.caption) formData.append('caption', data.caption);
     if (data.location) formData.append('location', data.location);

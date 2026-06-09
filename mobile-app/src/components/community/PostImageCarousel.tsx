@@ -27,9 +27,9 @@ export const PostImageCarousel: React.FC<PostImageCarouselProps> = ({ images }) 
         onScroll={onScroll}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <Image 
-            source={{ uri: item.image_url }} 
-            style={styles.image} 
+          <Image
+            source={{ uri: item.media_url }}
+            style={styles.image}
             resizeMode="cover"
           />
         )}

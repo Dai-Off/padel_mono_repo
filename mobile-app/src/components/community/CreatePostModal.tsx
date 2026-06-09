@@ -34,13 +34,13 @@ interface CreatePostModalProps {
 const TITLE_BY_TYPE: Record<PostType, string> = {
   post: 'Nuevo Post',
   story: 'Nueva historia',
-  reel: 'Nuevo Reel',
+  reel: 'Nuevo Clip',
 };
 
 const TAB_LABEL_BY_TYPE: Record<PostType, string> = {
   post: 'Post',
   story: 'Historia',
-  reel: 'Reel',
+  reel: 'Clip',
 };
 
 type PickerCfg = { mediaTypes: ('images' | 'videos')[]; multiple: boolean; limit: number };
