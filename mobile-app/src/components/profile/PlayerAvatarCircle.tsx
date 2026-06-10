@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { Image, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { normalizePlayerAvatarUrl } from '../../api/playerAvatar';
 import { theme } from '../../theme';
 
 type PlayerAvatarCircleProps = {
   avatarUrl?: string | null;
   initials: string;
   size?: number;
+  /** Por defecto círculo (size/2). Pasá 12 para slots cuadrados de partidos. */
+  borderRadius?: number;
   style?: ViewStyle;
 };
 
@@ -14,62 +17,52 @@ export function PlayerAvatarCircle({
   avatarUrl,
   initials,
   size = 96,
+  borderRadius,
   style,
 }: PlayerAvatarCircleProps) {
-  const radius = size / 2;
-  const fontSize = Math.round(size * 0.32);
-  const uri = avatarUrl?.trim() || null;
-  const isLocal =
-    uri != null &&
-    (uri.startsWith('file://') ||
-      uri.startsWith('content://') ||
-      uri.startsWith('ph://') ||
-      uri.startsWith('data:'));
-  const [loadFailed, setLoadFailed] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const radius = borderRadius ?? size / 2;
+  const fontSize = Math.round(size * (borderRadius != null && borderRadius < size / 2 ? 0.25 : 0.32));
+  const uri = normalizePlayerAvatarUrl(avatarUrl);
+  const [photoFailed, setPhotoFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const label = (initials || '?').toUpperCase().slice(0, 2);
 
   useEffect(() => {
-    setLoadFailed(false);
-    setLoading(false);
-    if (!uri || isLocal) return;
-    const timeout = setTimeout(() => setLoading(false), 12_000);
-    return () => clearTimeout(timeout);
-  }, [uri, isLocal]);
+    setPhotoFailed(false);
+    setLoadAttempt(0);
+  }, [uri]);
 
-  if (!uri || loadFailed) {
-    return (
+  return (
+    <View
+      style={[
+        styles.wrap,
+        { width: size, height: size, borderRadius: radius, backgroundColor: theme.sidebar.avatarGradientFrom },
+        style,
+      ]}
+    >
       <LinearGradient
         colors={[theme.sidebar.avatarGradientFrom, theme.sidebar.avatarGradientTo]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={[styles.wrap, { width: size, height: size, borderRadius: radius }, style]}
+        style={[styles.gradient, { width: size, height: size, borderRadius: radius }]}
       >
-        <Text style={[styles.initials, { fontSize }]}>{initials}</Text>
+        <Text style={[styles.initials, { fontSize }]}>{label}</Text>
       </LinearGradient>
-    );
-  }
-
-  return (
-    <View style={[styles.wrap, { width: size, height: size, borderRadius: radius }, style]}>
-      <Image
-        source={{ uri }}
-        style={StyleSheet.absoluteFill}
-        resizeMode="cover"
-        onLoadStart={() => {
-          if (!isLocal) setLoading(true);
-        }}
-        onLoad={() => setLoading(false)}
-        onLoadEnd={() => setLoading(false)}
-        onError={() => {
-          setLoading(false);
-          setLoadFailed(true);
-        }}
-        accessibilityLabel="Foto de perfil"
-      />
-      {loading ? (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="small" color={theme.auth.accent} />
-        </View>
+      {uri && !photoFailed ? (
+        <Image
+          key={`${uri}-${loadAttempt}`}
+          source={{ uri }}
+          style={[styles.photo, { width: size, height: size, borderRadius: radius }]}
+          resizeMode="cover"
+          onError={() => {
+            if (loadAttempt < 2) {
+              setTimeout(() => setLoadAttempt((n) => n + 1), 1200);
+            } else {
+              setPhotoFailed(true);
+            }
+          }}
+          accessibilityLabel="Foto de perfil"
+        />
       ) : null}
     </View>
   );
@@ -77,19 +70,19 @@ export function PlayerAvatarCircle({
 
 const styles = StyleSheet.create({
   wrap: {
+    overflow: 'hidden',
+  },
+  gradient: {
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
-    backgroundColor: '#1A1A1A',
   },
   initials: {
     color: theme.auth.text,
     fontWeight: '700',
   },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  photo: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
   },
 });

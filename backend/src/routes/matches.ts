@@ -13,16 +13,23 @@ import {
   resolveClubIdForBooking,
 } from '../services/paymentRefundService';
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
+import { enrichMatchRowsWithClubImages } from '../lib/clubLogoUrl';
 import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
+import {
+  matchAffectsElo,
+  normalizeMatchType,
+  parseEloRange,
+  resolveCompetitiveForCreate,
+} from '../lib/openMatchRules';
 
 const router = Router();
 
 const SELECT_LIST =
   'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team';
 const SELECT_ONE =
-  'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_confirmed_at';
+  'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_confirmed_at, score_proposer_id';
 
 /** Supabase expand devuelve relaciones 1:1 a veces como array; aplanamos para clientes. */
 function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?: unknown }>(row: T): T {
@@ -40,19 +47,47 @@ function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?
 }
 
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
-  return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team,
+  return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_proposer_id,
           ${bookingRel} (
             id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type,
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city)
+              clubs (id, name, address, city, logo_url, photo_urls)
             )
           ),
           match_players (
-            id, team, created_at, slot_index,
+            id, team, created_at, slot_index, result,
             players (id, first_name, last_name, elo_rating, liga, avatar_url)
           )`;
+}
+
+/** Listado Buscar partido: sin payment_transactions (menos payload). */
+function expandSelectDiscovery(): string {
+  return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type,
+          bookings!inner (
+            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
+            courts (
+              id, club_id, name, indoor, glass_type, sport,
+              clubs (id, name, address, city, logo_url, photo_urls)
+            )
+          ),
+          match_players (
+            id, team, slot_index,
+            players (id, first_name, last_name, elo_rating, avatar_url)
+          )`;
+}
+
+const DISCOVERY_DEFAULT_DAYS = 14;
+const DISCOVERY_DEFAULT_LIMIT = 100;
+const DISCOVERY_MAX_LIMIT = 150;
+
+function countFilledSlots(row: { match_players?: Array<{ players?: { id?: string } | null }> | null }): number {
+  return (row.match_players ?? []).filter((mp) => Boolean(mp?.players?.id)).length;
+}
+
+function isJoinableDiscoveryRow(row: { match_players?: Array<{ players?: { id?: string } | null }> | null }): boolean {
+  return countFilledSlots(row) < 4;
 }
 
 /**
@@ -84,6 +119,14 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
  *         name: club_id
  *         description: Con expand=1, solo partidos cuyas reservas están en pistas de ese club (evita el límite global de 100).
  *         schema: { type: string, format: uuid }
+ *       - in: query
+ *         name: visibility
+ *         description: Filtra por visibilidad del partido.
+ *         schema: { type: string, enum: [public, private] }
+ *       - in: query
+ *         name: discovery
+ *         description: Listado para Buscar partido (públicos activos, type=open, orden por hora, límite ampliado).
+ *         schema: { type: string, enum: ['1', 'true'] }
  *     responses:
  *       200:
  *         content:
@@ -99,6 +142,9 @@ router.get('/', async (req: Request, res: Response) => {
   const date_from = req.query.date_from as string | undefined;
   const date_to = req.query.date_to as string | undefined;
   const filter_club_id = String(req.query.club_id ?? '').trim() || undefined;
+  const rawVisibility = String(req.query.visibility ?? '').trim().toLowerCase();
+  const visibility = rawVisibility === 'public' || rawVisibility === 'private' ? rawVisibility : undefined;
+  const discovery = req.query.discovery === '1' || req.query.discovery === 'true';
   try {
     await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
@@ -143,6 +189,7 @@ router.get('/', async (req: Request, res: Response) => {
         }
       }
       if (booking_id) mq = mq.eq('booking_id', booking_id);
+      if (visibility) mq = mq.eq('visibility', visibility);
       const { data, error } = await mq;
       if (error) return res.status(500).json({ ok: false, error: error.message });
       const rows = data ?? [];
@@ -151,8 +198,50 @@ router.get('/', async (req: Request, res: Response) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
           return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
         });
+        await enrichMatchRowsWithClubImages(supabase, filtered);
         return res.json({ ok: true, matches: filtered });
       }
+      await enrichMatchRowsWithClubImages(supabase, rows);
+      return res.json({ ok: true, matches: rows });
+    }
+
+    if (expand && discovery) {
+      const joinable_only = req.query.joinable_only !== '0' && req.query.joinable_only !== 'false';
+      const limitRaw = Math.trunc(Number(req.query.limit) || DISCOVERY_DEFAULT_LIMIT);
+      const limit = Math.min(DISCOVERY_MAX_LIMIT, Math.max(1, limitRaw));
+
+      const rangeStart = new Date();
+      rangeStart.setUTCHours(0, 0, 0, 0);
+      const rangeEnd = new Date(rangeStart);
+      rangeEnd.setUTCDate(rangeEnd.getUTCDate() + DISCOVERY_DEFAULT_DAYS);
+      const defaultFrom = rangeStart.toISOString();
+      const defaultTo = rangeEnd.toISOString();
+      const effectiveFrom = date_from ?? defaultFrom;
+      const effectiveTo = date_to ?? defaultTo;
+
+      let q = supabase
+        .from('matches')
+        .select(expandSelectDiscovery())
+        .eq('visibility', 'public')
+        .eq('type', 'open')
+        .not('status', 'eq', 'cancelled')
+        .not('status', 'eq', 'finished')
+        .gt('bookings.end_at', nowIso)
+        .is('bookings.deleted_at', null)
+        .gte('bookings.start_at', effectiveFrom)
+        .lte('bookings.start_at', effectiveTo)
+        .order('start_at', { ascending: true, foreignTable: 'bookings' })
+        .limit(limit);
+      if (booking_id) q = q.eq('booking_id', booking_id);
+      const { data, error } = await q;
+      if (error) return res.status(500).json({ ok: false, error: error.message });
+      const rows = (data ?? []).filter((row: any) => {
+        const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
+        if (getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) === 'past') return false;
+        if (joinable_only && !isJoinableDiscoveryRow(row)) return false;
+        return true;
+      });
+      await enrichMatchRowsWithClubImages(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -164,8 +253,9 @@ router.get('/', async (req: Request, res: Response) => {
           .not('status', 'eq', 'cancelled')
           .not('status', 'eq', 'finished')
           .gt('bookings.end_at', nowIso)
+          .is('bookings.deleted_at', null)
           .order('start_at', { ascending: true, foreignTable: 'bookings' })
-          .limit(100);
+          .limit(visibility === 'public' ? 300 : 100);
       } else {
         q = q.limit(200);
         if (date_from || date_to) {
@@ -177,6 +267,7 @@ router.get('/', async (req: Request, res: Response) => {
       if (date_from) q = q.gte('bookings.start_at', date_from);
       if (date_to) q = q.lte('bookings.start_at', date_to);
       if (booking_id) q = q.eq('booking_id', booking_id);
+      if (visibility) q = q.eq('visibility', visibility);
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
       const rows = data ?? [];
@@ -185,8 +276,10 @@ router.get('/', async (req: Request, res: Response) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
           return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
         });
+        await enrichMatchRowsWithClubImages(supabase, filtered);
         return res.json({ ok: true, matches: filtered });
       }
+      await enrichMatchRowsWithClubImages(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -201,6 +294,7 @@ router.get('/', async (req: Request, res: Response) => {
           .limit(100)
       : supabase.from('matches').select(SELECT_LIST).order('created_at', { ascending: false }).limit(50);
     if (booking_id) q = q.eq('booking_id', booking_id);
+    if (visibility) q = q.eq('visibility', visibility);
     const { data, error } = await q;
     if (error) return res.status(500).json({ ok: false, error: error.message });
     const rows = data ?? [];
@@ -254,16 +348,40 @@ router.get('/mine', async (req: Request, res: Response) => {
       .eq('player_id', playerId);
     if (mpErr) return res.status(500).json({ ok: false, error: mpErr.message });
 
-    const matchIds = [...new Set((mpRows ?? []).map((r: { match_id: string }) => r.match_id))];
-    if (matchIds.length === 0) return res.json({ ok: true, matches: [] });
+    const matchIds = new Set((mpRows ?? []).map((r: { match_id: string }) => r.match_id));
+
+    // Fallback: partidos creados por el jugador (organizador) aunque por alguna razón
+    // todavía no exista fila en match_players.
+    const { data: orgBookings, error: orgBkErr } = await supabase
+      .from('bookings')
+      .select('id')
+      .eq('organizer_player_id', playerId)
+      .is('deleted_at', null)
+      .limit(500);
+    if (orgBkErr) return res.status(500).json({ ok: false, error: orgBkErr.message });
+
+    const bookingIds = [...new Set((orgBookings ?? []).map((b: { id: string }) => b.id))];
+    if (bookingIds.length > 0) {
+      const { data: orgMatches, error: orgMErr } = await supabase
+        .from('matches')
+        .select('id')
+        .in('booking_id', bookingIds)
+        .limit(500);
+      if (orgMErr) return res.status(500).json({ ok: false, error: orgMErr.message });
+      for (const row of orgMatches ?? []) {
+        const id = (row as { id: string }).id;
+        if (id) matchIds.add(id);
+      }
+    }
+
+    if (matchIds.size === 0) return res.json({ ok: true, matches: [] });
 
     const { data, error } = await supabase
       .from('matches')
       .select(expandSelect('bookings'))
-      .in('id', matchIds)
-      .neq('status', 'cancelled')
+      .in('id', [...matchIds])
       .order('created_at', { ascending: false })
-      .limit(Math.min(matchIds.length, 500));
+      .limit(Math.min(matchIds.size, 500));
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
     const filtered = (data ?? []).filter((row: any) => {
@@ -330,7 +448,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const expand = req.query.expand === '1' || req.query.expand === 'true';
   try {
-    await finalizePastMatches();
+    await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
     if (expand) {
       const { data, error } = await supabase
@@ -378,12 +496,33 @@ router.get('/:id', async (req: Request, res: Response) => {
           .maybeSingle();
         hasMyFeedback = !!fbRow;
       }
+      let myScoreVote: string | null = null;
+      const scoreVoteCounts = { confirm: 0, reject: 0 };
+      const { data: votesData } = await supabase
+        .from('score_votes')
+        .select('player_id, vote')
+        .eq('match_id', id);
+      if (votesData) {
+        for (const v of votesData) {
+          if (v.vote === 'confirm') scoreVoteCounts.confirm++;
+          else if (v.vote === 'reject') scoreVoteCounts.reject++;
+          if (viewerId && v.player_id === viewerId) {
+            myScoreVote = v.vote;
+          }
+        }
+      }
       const flattened = flattenMatchRowForClient(
         out as { bookings?: unknown; match_players?: unknown },
       );
+      await enrichMatchRowsWithClubImages(supabase, [flattened]);
       return res.json({
         ok: true,
-        match: { ...flattened, has_my_feedback: hasMyFeedback },
+        match: {
+          ...flattened,
+          has_my_feedback: hasMyFeedback,
+          my_score_vote: myScoreVote,
+          score_vote_counts: scoreVoteCounts,
+        },
       });
     }
     const { data, error } = await supabase
@@ -393,7 +532,30 @@ router.get('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Match not found' });
-    return res.json({ ok: true, match: data });
+    let myScoreVote: string | null = null;
+    const scoreVoteCounts = { confirm: 0, reject: 0 };
+    const { playerId: viewerId } = await getPlayerIdFromBearer(req);
+    const { data: votesData } = await supabase
+      .from('score_votes')
+      .select('player_id, vote')
+      .eq('match_id', id);
+    if (votesData) {
+      for (const v of votesData) {
+        if (v.vote === 'confirm') scoreVoteCounts.confirm++;
+        else if (v.vote === 'reject') scoreVoteCounts.reject++;
+        if (viewerId && v.player_id === viewerId) {
+          myScoreVote = v.vote;
+        }
+      }
+    }
+    return res.json({
+      ok: true,
+      match: {
+        ...data,
+        my_score_vote: myScoreVote,
+        score_vote_counts: scoreVoteCounts,
+      },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -406,7 +568,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  *     tags: [Matches]
  *     summary: Crear reserva y partido
  *     description: |
- *       Partido competitivo abierto (`type=open`) fija `elo_min`/`elo_max` en ±0.5 respecto al organizador (no editables).
+ *       Los partidos `type=open` son siempre amistosos (no afectan ELO). Opcionalmente `elo_min`/`elo_max` filtran quién puede unirse.
  *     requestBody:
  *       required: true
  *       content:
@@ -416,7 +578,7 @@ router.get('/:id', async (req: Request, res: Response) => {
  *             required: [court_id, organizer_player_id, start_at, end_at, total_price_cents]
  *             properties:
  *               type: { type: string, enum: [open, matchmaking], default: open }
- *               competitive: { type: boolean, default: true }
+ *               competitive: { type: boolean, description: 'Solo aplica si type=matchmaking; open siempre amistoso }
  *     responses:
  *       201: { description: Creado }
  *       409: { description: Conflicto de pista }
@@ -495,20 +657,12 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
         return res.status(403).json({ ok: false, error: gate.error });
       }
     }
-    const type = bodyType === 'matchmaking' ? 'matchmaking' : 'open';
-    const isCompetitive = competitive !== false;
-    let eloMinIns = elo_min != null ? Number(elo_min) : null;
-    let eloMaxIns = elo_max != null ? Number(elo_max) : null;
-    if (isCompetitive && type === 'open') {
-      const { data: orgPl } = await supabase
-        .from('players')
-        .select('elo_rating')
-        .eq('id', organizer_player_id)
-        .maybeSingle();
-      const elo = Number((orgPl as { elo_rating?: number } | null)?.elo_rating ?? 3.5);
-      eloMinIns = Math.round((elo - 0.5) * 10) / 10;
-      eloMaxIns = Math.round((elo + 0.5) * 10) / 10;
-    }
+    const type = normalizeMatchType(bodyType);
+    const isCompetitive = resolveCompetitiveForCreate(type, competitive);
+    const eloParsed = parseEloRange(elo_min, elo_max);
+    if (!eloParsed.ok) return res.status(400).json({ ok: false, error: eloParsed.error });
+    const eloMinIns = eloParsed.elo_min;
+    const eloMaxIns = eloParsed.elo_max;
 
     const { data: booking, error: errBooking } = await supabase
       .from('bookings')
@@ -755,13 +909,13 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
 
     const mCompetitive = !!(match as { competitive?: boolean }).competitive;
     const mType = String((match as { type?: string }).type ?? 'open');
-    if (mCompetitive && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
+    if (matchAffectsElo(mCompetitive, mType) && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
       return res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
     }
     const eloJoin = Number((joinPlayer as { elo_rating?: number }).elo_rating ?? 0);
     const eloMin = (match as { elo_min?: number | null }).elo_min;
     const eloMax = (match as { elo_max?: number | null }).elo_max;
-    if (mCompetitive && mType === 'open' && eloMin != null && eloMax != null) {
+    if (eloMin != null && eloMax != null) {
       if (eloJoin < eloMin || eloJoin > eloMax) {
         return res.status(403).json({ ok: false, error: 'Tu nivel no está en el rango permitido para este partido' });
       }
@@ -895,24 +1049,12 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(200).json({ ok: true, match: existing });
     }
 
-    const type = bodyType === 'matchmaking' ? 'matchmaking' : 'open';
-    const isCompetitive = competitive !== false;
-    let eloMinIns = elo_min != null ? Number(elo_min) : null;
-    let eloMaxIns = elo_max != null ? Number(elo_max) : null;
-    if (isCompetitive && type === 'open') {
-      const { data: bk } = await supabase
-        .from('bookings')
-        .select('organizer_player_id')
-        .eq('id', booking_id)
-        .maybeSingle();
-      const orgId = (bk as { organizer_player_id?: string } | null)?.organizer_player_id;
-      if (orgId) {
-        const { data: orgPl } = await supabase.from('players').select('elo_rating').eq('id', orgId).maybeSingle();
-        const elo = Number((orgPl as { elo_rating?: number } | null)?.elo_rating ?? 3.5);
-        eloMinIns = Math.round((elo - 0.5) * 10) / 10;
-        eloMaxIns = Math.round((elo + 0.5) * 10) / 10;
-      }
-    }
+    const type = normalizeMatchType(bodyType);
+    const isCompetitive = resolveCompetitiveForCreate(type, competitive);
+    const eloParsed = parseEloRange(elo_min, elo_max);
+    if (!eloParsed.ok) return res.status(400).json({ ok: false, error: eloParsed.error });
+    const eloMinIns = eloParsed.elo_min;
+    const eloMaxIns = eloParsed.elo_max;
     const { data, error } = await supabase
       .from('matches')
       .insert([
@@ -1221,16 +1363,35 @@ router.put('/:id', async (req: Request, res: Response) => {
   const { visibility, elo_min, elo_max, gender, competitive, status } = body;
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (visibility !== undefined) update.visibility = visibility;
-  if (elo_min !== undefined) update.elo_min = elo_min;
-  if (elo_max !== undefined) update.elo_max = elo_max;
   if (gender !== undefined) update.gender = gender;
-  if (competitive !== undefined) update.competitive = competitive;
   if (status !== undefined) update.status = status;
-  if (Object.keys(update).length === 1) {
-    return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
+  if (elo_min !== undefined || elo_max !== undefined) {
+    const eloParsed = parseEloRange(
+      elo_min !== undefined ? elo_min : null,
+      elo_max !== undefined ? elo_max : null,
+    );
+    if (!eloParsed.ok) return res.status(400).json({ ok: false, error: eloParsed.error });
+    if (elo_min !== undefined) update.elo_min = eloParsed.elo_min;
+    if (elo_max !== undefined) update.elo_max = eloParsed.elo_max;
   }
   try {
     const supabase = getSupabaseServiceRoleClient();
+    if (competitive !== undefined) {
+      const { data: cur } = await supabase.from('matches').select('type').eq('id', id).maybeSingle();
+      const curType = normalizeMatchType((cur as { type?: string } | null)?.type);
+      if (curType === 'open' && competitive === true) {
+        return res.status(400).json({
+          ok: false,
+          error: 'Los partidos abiertos no pueden ser competitivos; usá matchmaking para ranked',
+        });
+      }
+      if (curType === 'matchmaking') {
+        update.competitive = competitive;
+      }
+    }
+    if (Object.keys(update).length === 1) {
+      return res.status(400).json({ ok: false, error: 'No hay campos para actualizar' });
+    }
     const { data, error } = await supabase
       .from('matches')
       .update(update)

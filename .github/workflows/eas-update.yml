@@ -1,0 +1,151 @@
+# OTA update (EAS Update) en push a main, develop o demo.
+# Si no hay APK del ambiente, lo genera automáticamente.
+# Secrets: EXPO_TOKEN (requerido), SLACK_WEBHOOK_URL (avisos Slack)
+
+name: EAS Update (OTA)
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - demo
+    paths:
+      - 'mobile-app/**'
+      - '.github/workflows/eas-update.yml'
+      - '.github/workflows/eas-android.yml'
+      - '.github/scripts/notify-slack-eas.sh'
+      - '.github/scripts/get-latest-apk.sh'
+      - '.github/scripts/build-android-apk.sh'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Rama / canal a publicar (main, develop, demo)'
+        required: true
+        default: 'develop'
+        type: choice
+        options:
+          - main
+          - develop
+          - demo
+
+concurrency:
+  group: eas-update-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update:
+    name: Publish OTA update
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Resolve branch and channel
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BRANCH="${{ inputs.branch }}"
+          else
+            BRANCH="${{ github.ref_name }}"
+          fi
+
+          case "$BRANCH" in
+            main)
+              CHANNEL="production"
+              ENVIRONMENT="production"
+              ENV_KEY="production"
+              ;;
+            develop)
+              CHANNEL="develop"
+              ENVIRONMENT="preview"
+              ENV_KEY="develop"
+              ;;
+            demo)
+              CHANNEL="demo"
+              ENVIRONMENT="preview"
+              ENV_KEY="demo"
+              ;;
+            *)
+              echo "Rama no soportada: $BRANCH"
+              exit 1
+              ;;
+          esac
+
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+          echo "env_key=$ENV_KEY" >> "$GITHUB_OUTPUT"
+          echo "expo_url=https://expo.dev/accounts/tradebotg/projects/padel-app/branches/${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: EAS Update
+        run: |
+          eas update \
+            --branch "$EAS_BRANCH" \
+            --environment "$EAS_ENVIRONMENT" \
+            --platform android \
+            --non-interactive \
+            --auto
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_BRANCH: ${{ steps.target.outputs.branch }}
+          EAS_ENVIRONMENT: ${{ steps.target.outputs.environment }}
+
+      - name: Get latest APK for environment
+        id: apk
+        if: success()
+        run: bash ../.github/scripts/get-latest-apk.sh "${{ steps.target.outputs.env_key }}"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build APK if missing
+        id: build_apk
+        if: success() && steps.apk.outputs.install_url == ''
+        run: bash ../.github/scripts/build-android-apk.sh "${{ steps.target.outputs.env_key }}"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Resolve install links
+        id: install
+        if: success()
+        run: |
+          if [ -n "${{ steps.build_apk.outputs.install_url }}" ]; then
+            echo "install_url=${{ steps.build_apk.outputs.install_url }}" >> "$GITHUB_OUTPUT"
+            echo "build_page_url=${{ steps.build_apk.outputs.build_page_url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "install_url=${{ steps.apk.outputs.install_url }}" >> "$GITHUB_OUTPUT"
+            echo "build_page_url=${{ steps.apk.outputs.build_page_url }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notify Slack
+        if: success()
+        working-directory: .
+        run: bash .github/scripts/notify-slack-eas.sh ota "${{ steps.target.outputs.env_key }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+          CHANNEL: ${{ steps.target.outputs.channel }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          ACTOR: ${{ github.actor }}
+          EXPO_URL: ${{ steps.target.outputs.expo_url }}
+          INSTALL_URL: ${{ steps.install.outputs.install_url }}
+          BUILD_PAGE_URL: ${{ steps.install.outputs.build_page_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

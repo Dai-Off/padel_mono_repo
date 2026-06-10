@@ -1,5 +1,5 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { addDaysLocal, dateKeyLocal, startOfLocalDay } from '../../utils/formatSearch';
+import { addDaysToClubKey, dayKeyInClubTz } from '../../lib/clubTimeZone';
 import { PARTIDOS_MAX_SELECTED_DAYS } from '../../domain/partidosFilters';
 import { filterTheme } from '../filters/filterTheme';
 import { theme } from '../../theme';
@@ -21,7 +21,7 @@ function monthShort(d: Date): string {
 
 /** Selección múltiple de días (max. 7), estilo Playtomic. */
 export function MultiDateStripPicker({ selectedDateKeys, onChange }: MultiDateStripPickerProps) {
-  const todayBase = startOfLocalDay(new Date());
+  const todayKey = dayKeyInClubTz(new Date());
 
   const toggle = (key: string) => {
     if (selectedDateKeys.includes(key)) {
@@ -41,8 +41,8 @@ export function MultiDateStripPicker({ selectedDateKeys, onChange }: MultiDateSt
         contentContainerStyle={styles.content}
       >
         {Array.from({ length: DAYS_AHEAD }, (_, i) => {
-          const d = addDaysLocal(todayBase, i);
-          const key = dateKeyLocal(d);
+          const key = addDaysToClubKey(todayKey, i);
+          const d = new Date(`${key}T12:00:00`);
           const selected = selectedDateKeys.includes(key);
           return (
             <Pressable

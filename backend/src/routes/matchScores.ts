@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
+import { matchAffectsElo } from '../lib/openMatchRules';
 import { applyFriendlyPlayCounts, runLevelingPipeline, type ScoreSet } from '../services/levelingService';
 import { runFraudCheck } from '../services/fraudService';
 import { FEEDBACK_WINDOW_HOURS, MAX_DISPUTE_ROUNDS } from '../lib/levelingConstants';
@@ -198,8 +199,9 @@ router.post('/:id/score', async (req: Request, res: Response) => {
       sets,
       match_end_reason: mer,
       retired_team: rt,
-      score_status: 'pending_confirmation',
-      score_first_proposer_team: team,
+      score_status: 'pending_votes',
+      score_proposer_id: playerId,
+      score_proposed_at: now,
       score_confirmed_at: null,
       updated_at: now,
     })
@@ -213,7 +215,7 @@ router.post('/:id/score', async (req: Request, res: Response) => {
     return res.status(409).json({
       ok: false,
       error:
-        'Ya hay una propuesta de marcador activa. Espera confirmación del rival o propón un contra-marcador.',
+        'Ya hay una propuesta de marcador activa. Espera a que se resuelva la votación.',
     });
   }
 
@@ -226,12 +228,162 @@ router.post('/:id/score', async (req: Request, res: Response) => {
   if (e3) {
     await supabase
       .from('matches')
-      .update({ score_status: 'pending', updated_at: now })
+      .update({ score_status: 'pending', score_proposer_id: null, score_proposed_at: null, updated_at: now })
       .eq('id', matchId);
     return res.status(500).json({ ok: false, error: e3.message });
   }
 
   return res.json({ ok: true });
+});
+
+/**
+ * @openapi
+ * /matches/{id}/score/vote:
+ *   post:
+ *     tags: [Matches — marcador]
+ *     summary: Votar (confirmar o rechazar) la propuesta de marcador
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [vote]
+ *             properties:
+ *               vote:
+ *                 type: string
+ *                 enum: [confirm, reject]
+ *     responses:
+ *       200:
+ *         description: Voto registrado
+ *         content:
+ *           application/json:
+ *             examples:
+ *               ok:
+ *                 value: { ok: true, score_status: "pending_votes", votes: { confirm: 1, reject: 0 } }
+ *       400: { description: Voto inválido }
+ *       401: { description: No autorizado }
+ *       403: { description: No participa o es el proponente }
+ *       409: { description: No está en período de votación o ya votó }
+ */
+router.post('/:id/score/vote', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  const vote = req.body?.vote;
+  if (vote !== 'confirm' && vote !== 'reject') {
+    return res.status(400).json({ ok: false, error: 'vote debe ser "confirm" o "reject"' });
+  }
+
+  const matchId = req.params.id;
+  const supabase = getSupabaseServiceRoleClient();
+
+  const { data: mp, error: e1 } = await supabase
+    .from('match_players')
+    .select('team')
+    .eq('match_id', matchId)
+    .eq('player_id', playerId)
+    .maybeSingle();
+  if (e1) return res.status(500).json({ ok: false, error: e1.message });
+  if (!mp) return res.status(403).json({ ok: false, error: 'No participas en este partido' });
+
+  const { data: match, error: eMatch } = await supabase
+    .from('matches')
+    .select('score_status, score_proposer_id, competitive, type')
+    .eq('id', matchId)
+    .maybeSingle();
+  if (eMatch) return res.status(500).json({ ok: false, error: eMatch.message });
+  if (!match) return res.status(404).json({ ok: false, error: 'Partido no encontrado' });
+  if (match.score_status !== 'pending_votes') {
+    return res.status(409).json({ ok: false, error: 'El partido no está en período de votación' });
+  }
+  if (match.score_proposer_id === playerId) {
+    return res.status(403).json({ ok: false, error: 'El proponente del marcador no puede votar' });
+  }
+
+  const { error: eVote } = await supabase
+    .from('score_votes')
+    .insert({
+      match_id: matchId,
+      player_id: playerId,
+      vote,
+    });
+  if (eVote) {
+    if (eVote.code === '23505') {
+      return res.status(409).json({ ok: false, error: 'Ya has votado para este marcador' });
+    }
+    return res.status(500).json({ ok: false, error: eVote.message });
+  }
+
+  const { data: votes, error: eVotes } = await supabase
+    .from('score_votes')
+    .select('vote')
+    .eq('match_id', matchId);
+  if (eVotes) return res.status(500).json({ ok: false, error: eVotes.message });
+
+  let confirms = 0;
+  let rejects = 0;
+  for (const v of (votes || [])) {
+    if (v.vote === 'confirm') confirms++;
+    else if (v.vote === 'reject') rejects++;
+  }
+
+  if (confirms >= 2) {
+    const now = new Date().toISOString();
+    const { data: upd, error: eUpd } = await supabase
+      .from('matches')
+      .update({ score_status: 'confirmed', score_confirmed_at: now, updated_at: now })
+      .eq('id', matchId)
+      .eq('score_status', 'pending_votes')
+      .select('id')
+      .maybeSingle();
+
+    if (eUpd) return res.status(500).json({ ok: false, error: eUpd.message });
+    if (upd) {
+      const affectsElo = matchAffectsElo(!!match.competitive, match.type);
+      try {
+        if (affectsElo) {
+          await runLevelingPipeline(matchId);
+          runFraudCheck(matchId).catch((e) => console.error('[fraud]', e));
+        } else {
+          await applyFriendlyPlayCounts(matchId);
+        }
+      } catch (err) {
+        console.error('[score/vote confirm pipeline]', err);
+        await supabase
+          .from('matches')
+          .update({
+            score_status: 'pending_votes',
+            score_confirmed_at: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', matchId);
+        return res.status(500).json({ ok: false, error: (err as Error).message });
+      }
+      return res.json({ ok: true, score_status: 'confirmed', votes: { confirm: confirms, reject: rejects } });
+    }
+  }
+
+  if (rejects >= 2) {
+    const now = new Date().toISOString();
+    const { data: upd, error: eUpd } = await supabase
+      .from('matches')
+      .update({ score_status: 'no_result', updated_at: now })
+      .eq('id', matchId)
+      .eq('score_status', 'pending_votes')
+      .select('id')
+      .maybeSingle();
+    if (eUpd) return res.status(500).json({ ok: false, error: eUpd.message });
+    return res.json({ ok: true, score_status: 'no_result', votes: { confirm: confirms, reject: rejects } });
+  }
+
+  return res.json({ ok: true, score_status: 'pending_votes', votes: { confirm: confirms, reject: rejects } });
 });
 
 /**
@@ -284,16 +436,17 @@ router.post('/:id/score/confirm', async (req: Request, res: Response) => {
     .update({ score_status: 'confirmed', score_confirmed_at: now, updated_at: now })
     .eq('id', matchId)
     .eq('score_status', 'pending_confirmation')
-    .select('id, competitive')
+    .select('id, competitive, type')
     .maybeSingle();
 
   if (e2) return res.status(500).json({ ok: false, error: e2.message });
   if (!upd) return res.status(409).json({ ok: false, error: 'No se puede confirmar en este estado' });
 
-  const competitive = !!(upd as { competitive?: boolean }).competitive;
+  const row = upd as { competitive?: boolean; type?: string };
+  const affectsElo = matchAffectsElo(!!row.competitive, row.type);
 
   try {
-    if (competitive) {
+    if (affectsElo) {
       await runLevelingPipeline(matchId);
       runFraudCheck(matchId).catch((e) => console.error('[fraud]', e));
     } else {
@@ -460,14 +613,15 @@ router.post('/:id/score/resolve', async (req: Request, res: Response) => {
       .update({ score_status: 'confirmed', score_confirmed_at: now, updated_at: now })
       .eq('id', matchId)
       .eq('score_status', 'disputed_pending')
-      .select('id, competitive')
+      .select('id, competitive, type')
       .maybeSingle();
     if (e2) return res.status(500).json({ ok: false, error: e2.message });
     if (!upd) return res.status(409).json({ ok: false, error: 'No se pudo confirmar' });
 
-    const competitive = !!(upd as { competitive?: boolean }).competitive;
+    const row = upd as { competitive?: boolean; type?: string };
+    const affectsElo = matchAffectsElo(!!row.competitive, row.type);
     try {
-      if (competitive) {
+      if (affectsElo) {
         await runLevelingPipeline(matchId);
         runFraudCheck(matchId).catch((e) => console.error('[fraud]', e));
       } else {

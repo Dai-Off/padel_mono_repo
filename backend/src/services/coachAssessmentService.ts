@@ -19,10 +19,109 @@ export interface CoachAssessmentResult {
   recommendation: string;
   stats?: {
     matchCount: number;
+    matchesThisWeek: number;
+    matchesThisMonth: number;
     completedObjectives: number;
+    dailyLessonsThisWeek: number;
+    tournamentEnrolledCount: number;
+    tournamentPlayedCount: number;
+    classesAttendedCount: number;
+    coursesCompletedCount: number;
     totalObjectives: number;
     improvementPercentage: number;
   };
+}
+
+function startOfLocalWeek(now: Date): Date {
+  const d = new Date(now);
+  const day = d.getDay();
+  const diff = day === 0 ? 6 : day - 1;
+  d.setDate(d.getDate() - diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function startOfLocalMonth(now: Date): Date {
+  return new Date(now.getFullYear(), now.getMonth(), 1);
+}
+
+async function countCompletedMatchesSince(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string,
+  since: Date,
+): Promise<number> {
+  const { data: mpRows, error: mpErr } = await supabase
+    .from('match_players')
+    .select('match_id')
+    .eq('player_id', playerId);
+  if (mpErr || !mpRows?.length) return 0;
+
+  const matchIds = [...new Set(mpRows.map((r) => String((r as { match_id: string }).match_id)))];
+  const { data: matches, error: mErr } = await supabase
+    .from('matches')
+    .select('id, status, booking_id')
+    .in('id', matchIds)
+    .eq('status', 'completed');
+  if (mErr || !matches?.length) return 0;
+
+  const bookingIds = [
+    ...new Set(
+      matches
+        .map((m) => (m as { booking_id?: string | null }).booking_id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+  ];
+  if (bookingIds.length === 0) return 0;
+
+  const sinceIso = since.toISOString();
+  const { data: bookings, error: bErr } = await supabase
+    .from('bookings')
+    .select('id, start_at')
+    .in('id', bookingIds)
+    .gte('start_at', sinceIso);
+  if (bErr || !bookings?.length) return 0;
+
+  const recentBookingIds = new Set(bookings.map((b) => String((b as { id: string }).id)));
+  return matches.filter((m) => recentBookingIds.has(String((m as { booking_id?: string }).booking_id ?? '')))
+    .length;
+}
+
+async function countTournamentPlayed(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string,
+  now: Date,
+): Promise<number> {
+  const { data: rows, error } = await supabase
+    .from('tournament_inscriptions')
+    .select('tournament_id, tournaments!inner(end_at, status)')
+    .or(`player_id_1.eq.${playerId},player_id_2.eq.${playerId}`)
+    .eq('status', 'confirmed');
+  if (error || !rows?.length) return 0;
+
+  return rows.filter((row) => {
+    const t = (row as { tournaments?: { end_at?: string | null } }).tournaments;
+    const endAt = t?.end_at ? new Date(t.end_at) : null;
+    return endAt != null && Number.isFinite(endAt.getTime()) && endAt.getTime() < now.getTime();
+  }).length;
+}
+
+async function countCoursesWithProgress(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string,
+): Promise<number> {
+  const { data: progressRows, error } = await supabase
+    .from('learning_course_progress')
+    .select('lesson_id, learning_course_lessons!inner(course_id)')
+    .eq('player_id', playerId);
+  if (error || !progressRows?.length) return 0;
+
+  const courseIds = new Set<string>();
+  for (const row of progressRows) {
+    const lesson = (row as { learning_course_lessons?: { course_id?: string } }).learning_course_lessons;
+    const courseId = lesson?.course_id;
+    if (courseId) courseIds.add(String(courseId));
+  }
+  return courseIds.size;
 }
 
 // Weights for each question (from the implementation plan)
@@ -156,26 +255,59 @@ export function calculateAssessment(answers: CoachAnswer[]): CoachAssessmentResu
  */
 async function getPlayerStats(playerId: string) {
   const supabase = getSupabaseServiceRoleClient();
-  
-  // 1. Contar partidos reales
-  const { count: matchCount } = await supabase
-    .from('match_players')
-    .select('*', { count: 'exact', head: true })
-    .eq('player_id', playerId);
+  const now = new Date();
+  const weekStart = startOfLocalWeek(now);
+  const monthStart = startOfLocalMonth(now);
+  const weekStartIso = weekStart.toISOString();
+  const monthStartIso = monthStart.toISOString();
 
-  // 2. Contar objetivos (sesiones de aprendizaje completadas)
-  const { count: completedObjectives } = await supabase
-    .from('learning_sessions')
-    .select('*', { count: 'exact', head: true })
-    .eq('player_id', playerId);
+  const [
+    matchCountRes,
+    completedObjectivesRes,
+    dailyLessonsThisWeekRes,
+    tournamentEnrolledRes,
+    classesAttendedRes,
+    matchesThisWeek,
+    matchesThisMonth,
+    tournamentPlayedCount,
+    coursesCompletedCount,
+  ] = await Promise.all([
+    supabase.from('match_players').select('*', { count: 'exact', head: true }).eq('player_id', playerId),
+    supabase.from('learning_sessions').select('*', { count: 'exact', head: true }).eq('player_id', playerId),
+    supabase
+      .from('learning_sessions')
+      .select('*', { count: 'exact', head: true })
+      .eq('player_id', playerId)
+      .gte('completed_at', weekStartIso),
+    supabase
+      .from('tournament_inscriptions')
+      .select('*', { count: 'exact', head: true })
+      .or(`player_id_1.eq.${playerId},player_id_2.eq.${playerId}`)
+      .in('status', ['confirmed', 'pending']),
+    supabase
+      .from('club_school_course_enrollments')
+      .select('*', { count: 'exact', head: true })
+      .eq('player_id', playerId)
+      .eq('status', 'active'),
+    countCompletedMatchesSince(supabase, playerId, weekStart),
+    countCompletedMatchesSince(supabase, playerId, monthStart),
+    countTournamentPlayed(supabase, playerId, now),
+    countCoursesWithProgress(supabase, playerId),
+  ]);
 
-  // 3. Proporción de mejora (Placeholder por ahora, 0% en el primer test)
   const improvementPercentage = 0;
 
   return {
-    matchCount: matchCount || 0,
-    completedObjectives: completedObjectives || 0,
-    totalObjectives: 10, // Meta semanal por defecto
+    matchCount: matchCountRes.count || 0,
+    matchesThisWeek,
+    matchesThisMonth,
+    completedObjectives: completedObjectivesRes.count || 0,
+    dailyLessonsThisWeek: dailyLessonsThisWeekRes.count || 0,
+    tournamentEnrolledCount: tournamentEnrolledRes.count || 0,
+    tournamentPlayedCount,
+    classesAttendedCount: classesAttendedRes.count || 0,
+    coursesCompletedCount,
+    totalObjectives: 10,
     improvementPercentage,
   };
 }

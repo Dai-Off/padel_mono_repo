@@ -15,7 +15,14 @@ export type CoachAssessment = {
   recommendation: string | null;
   stats?: {
     matchCount: number;
+    matchesThisWeek?: number;
+    matchesThisMonth?: number;
     completedObjectives: number;
+    dailyLessonsThisWeek?: number;
+    tournamentEnrolledCount?: number;
+    tournamentPlayedCount?: number;
+    classesAttendedCount?: number;
+    coursesCompletedCount?: number;
     totalObjectives: number;
     improvementPercentage: number;
   };

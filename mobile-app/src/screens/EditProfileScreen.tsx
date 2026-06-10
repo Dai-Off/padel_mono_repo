@@ -25,7 +25,6 @@ import {
 import { checkUsernameAvailable } from '../api/auth';
 import { validateUsernameLocal } from '../lib/username';
 import {
-  patchMyAvatarUrl,
   uploadPlayerAvatarToStorage,
   type PickedImage,
 } from '../api/playerAvatar';
@@ -350,13 +349,6 @@ export function EditProfileScreen({
         session.refresh_token,
         image,
       );
-      const patch = await patchMyAvatarUrl(token, publicUrl);
-      if (!patch.ok) {
-        const p = await fetchMyPlayerProfile(token);
-        setAvatarUrl(p?.avatarUrl ?? null);
-        Alert.alert('Error', patch.error);
-        return;
-      }
       setAvatarUrl(publicUrl);
       await refreshProfile({ force: true });
       await refreshMatches({ force: true });

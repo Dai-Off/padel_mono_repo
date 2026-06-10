@@ -15,6 +15,30 @@ import { closeActiveMatchmakingSeason } from '../services/matchmakingSeasonServi
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { clearMatchmakingPoolIfPlayerPaid } from '../services/matchmakingPoolCleanup';
 
+type MmWl = { mm_wins: number; mm_losses: number; mm_draws: number };
+const ZERO_MM_WL: MmWl = { mm_wins: 0, mm_losses: 0, mm_draws: 0 };
+
+async function fetchPlayerMatchmakingWl(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string,
+): Promise<MmWl> {
+  try {
+    const { data, error } = await supabase.rpc('player_matchmaking_record', { p_player_id: playerId });
+    if (error) return ZERO_MM_WL;
+    const rows = data as unknown;
+    const row = Array.isArray(rows) ? rows[0] : rows;
+    if (!row || typeof row !== 'object') return ZERO_MM_WL;
+    const r = row as Record<string, unknown>;
+    return {
+      mm_wins: Number(r.wins ?? 0),
+      mm_losses: Number(r.losses ?? 0),
+      mm_draws: Number(r.draws ?? 0),
+    };
+  } catch {
+    return ZERO_MM_WL;
+  }
+}
+
 async function countActiveSearching(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
   clubId: string | null,
@@ -102,6 +126,159 @@ router.get('/league-config', async (_req: Request, res: Response) => {
   } catch (e) {
     return res.status(500).json({ ok: false, error: (e as Error).message });
   }
+});
+
+/**
+ * @openapi
+ * /matchmaking/leaderboard:
+ *   get:
+ *     tags: [Matchmaking]
+ *     summary: Ranking de jugadores en una división MM
+ *     description: |
+ *       Devuelve jugadores ordenados por LP (desc) y ELO (desc) dentro de la misma liga.
+ *       Si no se indica `liga`, usa la liga del jugador autenticado.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: liga
+ *         schema: { type: string }
+ *         description: Código de liga (`matchmaking_leagues.code`). Por defecto, la del jugador.
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 50, default: 15 }
+ *         description: Máximo de filas por página
+ *       - in: query
+ *         name: offset
+ *         schema: { type: integer, minimum: 0, default: 0 }
+ *         description: Desplazamiento para paginación
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok: { type: boolean }
+ *                 liga: { type: string }
+ *                 total: { type: integer, description: Jugadores totales en la división }
+ *                 offset: { type: integer }
+ *                 limit: { type: integer }
+ *                 has_more: { type: boolean }
+ *                 rows:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       rank: { type: integer }
+ *                       player_id: { type: string, format: uuid }
+ *                       first_name: { type: string, nullable: true }
+ *                       last_name: { type: string, nullable: true }
+ *                       username: { type: string, nullable: true }
+ *                       elo_rating: { type: number, nullable: true }
+ *                       lps: { type: integer }
+ *                       mm_wins: { type: integer }
+ *                       mm_losses: { type: integer }
+ *             examples:
+ *               ok:
+ *                 value:
+ *                   ok: true
+ *                   liga: oro_2
+ *                   total: 12
+ *                   rows:
+ *                     - rank: 1
+ *                       player_id: 00000000-0000-4000-8000-000000000001
+ *                       first_name: Ana
+ *                       last_name: López
+ *                       username: ana_lopez
+ *                       elo_rating: 4.25
+ *                       lps: 85
+ *                       mm_wins: 12
+ *                       mm_losses: 5
+ *       400: { description: Liga no indicada y jugador sin liga asignada }
+ *       401: { description: No autenticado }
+ */
+router.get('/leaderboard', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  const supabase = getSupabaseServiceRoleClient();
+  let ligaCode = typeof req.query.liga === 'string' ? req.query.liga.trim() : '';
+  if (!ligaCode) {
+    const { data: me, error: meErr } = await supabase
+      .from('players')
+      .select('liga')
+      .eq('id', playerId)
+      .maybeSingle();
+    if (meErr) return res.status(500).json({ ok: false, error: meErr.message });
+    ligaCode = String((me as { liga?: string | null } | null)?.liga ?? '').trim();
+  }
+  if (!ligaCode) {
+    return res.status(400).json({ ok: false, error: 'No hay liga asignada para mostrar el ranking' });
+  }
+
+  const limitRaw = req.query.limit != null ? Number(req.query.limit) : 15;
+  const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.round(limitRaw))) : 15;
+  const offsetRaw = req.query.offset != null ? Number(req.query.offset) : 0;
+  const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.round(offsetRaw)) : 0;
+
+  const { count: totalCount, error: countErr } = await supabase
+    .from('players')
+    .select('id', { count: 'exact', head: true })
+    .eq('liga', ligaCode)
+    .eq('onboarding_completed', true);
+  if (countErr) return res.status(500).json({ ok: false, error: countErr.message });
+
+  const total = totalCount ?? 0;
+  if (offset >= total && total > 0) {
+    return res.json({
+      ok: true,
+      liga: ligaCode,
+      total,
+      offset,
+      limit,
+      has_more: false,
+      rows: [],
+    });
+  }
+
+  const { data: players, error: qErr } = await supabase
+    .from('players')
+    .select('id, first_name, last_name, username, elo_rating, lps')
+    .eq('liga', ligaCode)
+    .eq('onboarding_completed', true)
+    .order('lps', { ascending: false })
+    .order('elo_rating', { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (qErr) return res.status(500).json({ ok: false, error: qErr.message });
+
+  const rows = await Promise.all(
+    (players ?? []).map(async (p, index) => {
+      const row = p as {
+        id: string;
+        first_name?: string | null;
+        last_name?: string | null;
+        username?: string | null;
+        elo_rating?: number | null;
+        lps?: number | null;
+      };
+      const wl = await fetchPlayerMatchmakingWl(supabase, row.id);
+      return {
+        rank: offset + index + 1,
+        player_id: row.id,
+        first_name: row.first_name ?? null,
+        last_name: row.last_name ?? null,
+        username: row.username ?? null,
+        elo_rating: row.elo_rating != null ? Number(row.elo_rating) : null,
+        lps: Math.max(0, Math.round(Number(row.lps ?? 0))),
+        mm_wins: wl.mm_wins,
+        mm_losses: wl.mm_losses,
+      };
+    }),
+  );
+
+  const hasMore = offset + rows.length < total;
+  return res.json({ ok: true, liga: ligaCode, total, offset, limit, has_more: hasMore, rows });
 });
 
 /**

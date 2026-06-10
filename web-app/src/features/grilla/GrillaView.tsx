@@ -48,6 +48,7 @@ import {
   resolveBookingGridLabel,
   resolveOrganizerFromBooking,
 } from './utils/bookingDisplay';
+import { shouldShowRawBookingInGrid } from './utils/reservationListFilters';
 import {
   pixelsToTime,
   timeToPixels,
@@ -76,6 +77,7 @@ import {
   nowMinutesInClubTz,
   clubClockLabel,
   gridBoundsForClubDay,
+  zonedTimeToUtc,
 } from '../../lib/clubTimeZone';
 import { listSpecialDates } from '../../services/clubSpecialDates';
 import { usePortalMenuPermissions } from '../../hooks/usePortalMenuPermissions';
@@ -576,6 +578,8 @@ const useClubData = (dateOrStr: Date | string) => {
         courts,
         gridReservations,
         listReservations,
+        setGridReservations,
+        setListReservations,
         loading,
         authResolved,
         isCreatingCourt,
@@ -621,7 +625,7 @@ function schedulePendingTournamentStartClear(tournamentId: string, expectedSeq: 
     }, 2500);
 }
 
-/** Grid hides bookings still competing for the court; list shows all. */
+/** Grid: no competing courts; incomplete matches only if 4 players or 100% paid. List shows all. */
 function mapBookings(
     rawBookings: any[],
     courtsData: Court[],
@@ -631,7 +635,7 @@ function mapBookings(
     const visible =
         surface === 'list'
             ? rawBookings
-            : rawBookings.filter((b: any) => b.court_contention_status !== 'competing');
+            : rawBookings.filter((b: any) => shouldShowRawBookingInGrid(b));
     return visible.map((b: any) => {
         const start = new Date(b.start_at);
         const organizer = resolveOrganizerFromBooking(b);
@@ -848,6 +852,8 @@ function GrillaViewInner() {
     courts,
     gridReservations: serverGridReservations,
     listReservations: serverListReservations,
+    setGridReservations,
+    setListReservations,
     loading,
     authResolved,
     isCreatingCourt,
@@ -1739,6 +1745,9 @@ function GrillaViewInner() {
   const applyDrop = (reservationId: string, courtId: string, startTime: string, status: string) => {
     // Capture duration before state mutation (closure captures current reservations)
     const existing = reservations.find(r => r.id === reservationId);
+    const prevCourtId = existing?.courtId;
+    const prevStartTime = existing?.startTime;
+    const prevStatus = existing?.status ?? 'pending_payment';
     const isTournament = existing?.booking_type === 'tournament' && !!existing?.tournamentId;
     const tournamentId = existing?.tournamentId ?? null;
     const didTimeChange = !!existing && existing.startTime !== startTime;
@@ -1769,8 +1778,46 @@ function GrillaViewInner() {
 
     const durationMinutes = existing?.durationMinutes ?? 90;
     const baseDate = formatDateForInput(selectedDate);
-    const startAt = `${baseDate}T${startTime}:00.000Z`;
-    const endAt = new Date(new Date(startAt).getTime() + durationMinutes * 60000).toISOString();
+    const localDateTime = `${baseDate}T${startTime}:00`;
+    const startUtc = zonedTimeToUtc(localDateTime);
+    const startAt = startUtc.toISOString();
+    const endAt = new Date(startUtc.getTime() + durationMinutes * 60000).toISOString();
+
+    // Optimistic update of local cache and useClubData states to eliminate latency/rubberbanding
+    setGridReservations(prev =>
+      prev.map(r =>
+        r.id === reservationId
+          ? { ...r, courtId, startTime, status: status as Reservation['status'] }
+          : (isTournament && didTimeChange && tournamentId && r.tournamentId === tournamentId)
+              ? { ...r, startTime }
+              : r
+      )
+    );
+    setListReservations(prev =>
+      prev.map(r =>
+        r.id === reservationId
+          ? { ...r, courtId, startTime, status: status as Reservation['status'] }
+          : (isTournament && didTimeChange && tournamentId && r.tournamentId === tournamentId)
+              ? { ...r, startTime }
+              : r
+      )
+    );
+
+    if (bookingsCache[baseDate]) {
+      bookingsCache[baseDate] = {
+        data: bookingsCache[baseDate].data.map((b: any) => {
+          if (b.id === reservationId) {
+            return { ...b, court_id: courtId, start_at: startAt, end_at: endAt };
+          }
+          if (isTournament && didTimeChange && tournamentId && linkedTournamentId(b) === tournamentId) {
+            const dur = (new Date(b.end_at).getTime() - new Date(b.start_at).getTime());
+            return { ...b, start_at: startAt, end_at: new Date(startUtc.getTime() + dur).toISOString() };
+          }
+          return b;
+        }),
+        ts: bookingsCache[baseDate].ts
+      };
+    }
 
     if (isTournament && tournamentId) {
       const nextSeq = (tournamentDropRequestSeqRef.current[tournamentId] ?? 0) + 1;
@@ -1814,8 +1861,43 @@ function GrillaViewInner() {
         end_at: endAt,
       }),
     })
-      .then(res => { if (!res.ok) { console.error('Error persisting drop:', res.error); refresh(); } })
-      .catch(err => { console.error('Error persisting drop:', err); refresh(); });
+      .then(() => {
+        // Success: already optimistically updated
+      })
+      .catch(err => {
+        console.error('Error persisting drop:', err);
+
+        // Immediate local state rollback to eliminate refresh() network lag
+        if (existing && prevCourtId && prevStartTime) {
+          setReservations(prev =>
+            prev.map(r => r.id === reservationId ? { ...r, courtId: prevCourtId, startTime: prevStartTime, status: prevStatus } : r)
+          );
+          setGridReservations(prev =>
+            prev.map(r => r.id === reservationId ? { ...r, courtId: prevCourtId, startTime: prevStartTime, status: prevStatus } : r)
+          );
+          setListReservations(prev =>
+            prev.map(r => r.id === reservationId ? { ...r, courtId: prevCourtId, startTime: prevStartTime, status: prevStatus } : r)
+          );
+        }
+
+        const hiddenConflict = serverListReservations.find(r => {
+          if (r.id === reservationId || r.courtId !== courtId) return false;
+          const isShownInGrid = serverGridReservations.some(g => g.id === r.id);
+          if (isShownInGrid) return false;
+          const otherStart = parseTime(r.startTime);
+          const otherEnd = otherStart + r.durationMinutes;
+          const proposedStart = parseTime(startTime);
+          const proposedEnd = proposedStart + durationMinutes;
+          return proposedStart < otherEnd && proposedEnd > otherStart;
+        });
+
+        if (hiddenConflict) {
+          toast.error("Ya hay un partido en ese horario que no está completo");
+        } else {
+          toast.error(err instanceof Error ? err.message : 'Error al guardar los cambios.');
+        }
+        refresh();
+      });
   };
 
   // Detect if a placement creates unusable 30-min gaps after 12:00

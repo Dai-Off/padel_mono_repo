@@ -38,6 +38,8 @@ export type BookingConfirmationData = {
   date?: string;
   slot?: string;
   durationMinutes?: number;
+  /** Tras crear partido público (pago confirmado). */
+  matchId?: string;
 };
 
 type Props = {

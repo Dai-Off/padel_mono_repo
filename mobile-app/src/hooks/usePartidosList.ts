@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fetchMatches } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
-import { fetchMyPlayerId } from '../api/players';
+import { useHomeData } from '../contexts/HomeDataContext';
 import {
   clubsChipLabel,
   countPartidosAdvancedFilters,
@@ -12,6 +12,7 @@ import {
   whenChipLabel,
   type PartidosFiltersState,
 } from '../domain/partidosFilters';
+import { enrichPartidosWithClubImages, isPartidoOpenForDiscovery } from '../lib/partidoPlayerUtils';
 import { loadStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import type { PartidoItem } from '../screens/PartidosScreen';
 import { useClubCatalog } from './useClubCatalog';
@@ -23,14 +24,27 @@ function isPublicJoinableMatch(p: PartidoItem): boolean {
   return filled < 4;
 }
 
+function isOthersOpenMatch(p: PartidoItem, myPlayerId: string | null): boolean {
+  return isPublicJoinableMatch(p) && isPartidoOpenForDiscovery(p, myPlayerId);
+}
+
+function myUpcomingFromHome(misPartidos: PartidoItem[]): PartidoItem[] {
+  return misPartidos.filter((p) => p.matchPhase === 'upcoming' || p.matchPhase === 'live');
+}
+
 export function usePartidosList(token: string | null | undefined, refreshNonce: number) {
+  const { profile, misPartidos, refreshMatches, matchesLoading } = useHomeData();
+  const openLoadGenRef = useRef(0);
   const [filters, setFilters] = useState<PartidosFiltersState>(getInitialPartidosFilters);
   const [openRaw, setOpenRaw] = useState<PartidoItem[]>([]);
-  const [myRaw, setMyRaw] = useState<PartidoItem[]>([]);
-  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(null);
+  const [organizerPlayerId, setOrganizerPlayerId] = useState<string | null>(profile?.id ?? null);
   const [loading, setLoading] = useState(true);
   const [favoriteClubIds, setFavoriteClubIds] = useState<string[]>([]);
   const { clubs, loading: clubsLoading, reload: reloadClubs } = useClubCatalog();
+
+  useEffect(() => {
+    setOrganizerPlayerId(profile?.id ?? null);
+  }, [profile?.id]);
 
   useEffect(() => {
     void loadStoredPreferredClubIds().then(setFavoriteClubIds);
@@ -49,41 +63,62 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
     [clubDistanceById, favoriteClubIds],
   );
 
-  const fetchRange = partidosFetchDateRange(filters);
+  const fetchRange = useMemo(() => partidosFetchDateRange(filters), [filters]);
 
-  const loadPartidos = useCallback(async () => {
+  const myRaw = useMemo(() => myUpcomingFromHome(misPartidos), [misPartidos]);
+
+  /** Tras mutaciones (unirse, crear…): solo revalida "mis partidos" vía HomeDataContext. */
+  useEffect(() => {
+    if (refreshNonce > 0 && token) {
+      void refreshMatches({ scope: 'mine' });
+    }
+  }, [refreshNonce, token, refreshMatches]);
+
+  const loadOpenPartidos = useCallback(async () => {
+    const gen = ++openLoadGenRef.current;
     setLoading(true);
     const { activeOnly, dateFrom, dateTo } = fetchRange;
-    const [playerId, matches] = await Promise.all([
-      token ? fetchMyPlayerId(token) : Promise.resolve(null),
-      fetchMatches({
+
+    try {
+      const openMatches = await fetchMatches({
         expand: true,
         token,
         activeOnly,
+        discovery: true,
+        visibility: 'public',
         dateFrom,
         dateTo,
-      }),
-    ]);
-    setOrganizerPlayerId(playerId);
-    const allPartidos = matches
-      .map(mapMatchToPartido)
-      .filter((p): p is PartidoItem => p != null)
-      .filter((p) => activeOnly === false || p.matchPhase !== 'past');
-    setOpenRaw(allPartidos.filter((p) => p.visibility !== 'private'));
-    setMyRaw(
-      allPartidos.filter(
-        (p) =>
-          p.visibility === 'private' &&
-          playerId != null &&
-          (p.playerIds ?? []).includes(playerId),
-      ),
-    );
-    setLoading(false);
-  }, [token, fetchRange.activeOnly, fetchRange.dateFrom, fetchRange.dateTo]);
+        joinableOnly: true,
+        limit: 100,
+      });
+      if (gen !== openLoadGenRef.current) return;
+      const myId = profile?.id ?? null;
+      const openPartidos = enrichPartidosWithClubImages(
+        openMatches
+          .map((m) => mapMatchToPartido(m))
+          .filter((p): p is PartidoItem => p != null)
+          .filter((p) => p.matchPhase !== 'past')
+          .filter((p) => isPartidoOpenForDiscovery(p, myId)),
+        clubs.map((c) => ({ id: c.id, imageUrl: c.imageUrl })),
+      );
+      setOpenRaw(openPartidos);
+    } catch {
+      if (gen === openLoadGenRef.current) setOpenRaw([]);
+    } finally {
+      if (gen === openLoadGenRef.current) setLoading(false);
+    }
+  }, [
+    token,
+    fetchRange.activeOnly,
+    fetchRange.dateFrom,
+    fetchRange.dateTo,
+    profile?.id,
+    clubs,
+  ]);
 
   useEffect(() => {
-    loadPartidos();
-  }, [loadPartidos, refreshNonce]);
+    void loadOpenPartidos();
+  }, [loadOpenPartidos, refreshNonce]);
 
   const applyFilters = useCallback((next: PartidosFiltersState) => {
     setFilters(next);
@@ -94,9 +129,9 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
   }, []);
 
   const openPartidos = useMemo(() => {
-    const base = openRaw.filter(isPublicJoinableMatch);
+    const base = openRaw.filter((p) => isOthersOpenMatch(p, organizerPlayerId));
     return filterPartidosList(base, filters, filterContext);
-  }, [openRaw, filters, filterContext]);
+  }, [openRaw, filters, filterContext, organizerPlayerId]);
 
   const myPartidos = useMemo(
     () => filterPartidosList(myRaw, filters, filterContext),
@@ -105,10 +140,10 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
 
   const previewCount = useCallback(
     (draft: PartidosFiltersState) => {
-      const base = openRaw.filter(isPublicJoinableMatch);
+      const base = openRaw.filter((p) => isOthersOpenMatch(p, organizerPlayerId));
       return filterPartidosList(base, draft, filterContext).length;
     },
-    [openRaw, filterContext],
+    [openRaw, filterContext, organizerPlayerId],
   );
 
   const labels = useMemo(
@@ -135,6 +170,8 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
     openPartidos,
     myPartidos,
     loading,
+    /** Skeleton de "Mis partidos" mientras HomeDataContext termina el bootstrap. */
+    misPartidosLoading: matchesLoading,
     organizerPlayerId,
     clubs,
     clubsLoading,

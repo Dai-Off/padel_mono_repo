@@ -33,7 +33,12 @@ import {
 } from "../api/payments";
 import { fetchMyPlayerId } from "../api/players";
 import { useAuth } from "../contexts/AuthContext";
+import { useHomeData } from "../contexts/HomeDataContext";
 import { PartidoCard } from "../components/partido/PartidoCard";
+import {
+  defaultFriendlyRange,
+  FriendlyLevelRangeSection,
+} from "../components/partido/FriendlyLevelRangeSection";
 import type { BookingConfirmationData } from "./BookingConfirmationScreen";
 import { PrivateReservationModal } from "../components/partido/PrivateReservationModal";
 import type { PartidoItem } from "./PartidosScreen";
@@ -248,26 +253,41 @@ function CourtCardDynamic({
   duration,
   onToggleDuration,
 }: CourtCardDynamicProps) {
-  const { priceData, loading } = useSlotPrice({
+  const quoteSlot =
+    isExpanded && selectedTimeSlot ? selectedTimeSlot : undefined;
+
+  const { priceData, loading, error: priceError } = useSlotPrice({
     clubId,
     courtId: court.id,
     date: selectedDateStr,
-    slot: isExpanded && selectedTimeSlot ? selectedTimeSlot : undefined,
+    slot: quoteSlot,
     durationMinutes: duration,
     reservationType: "standard",
     token,
   });
 
+  const hasSlotQuote = Boolean(quoteSlot);
+
   const getPriceDisplay = () => {
-    if (isExpanded && selectedTimeSlot) {
-      if (loading) return "Calculando...";
-      if (priceData) return `${(priceData.total_price_cents / 100).toFixed(2)}€`;
+    if (!hasSlotQuote) return priceInfo?.minPriceFormatted ?? "-";
+    if (loading) return "Calculando...";
+    if (priceError) return "—";
+    if (priceData && priceData.total_price_cents > 0) {
+      return `${(priceData.total_price_cents / 100).toFixed(2)} €`;
     }
     return priceInfo?.minPriceFormatted ?? "-";
   };
 
   const finalPriceCents =
-    priceData?.total_price_cents ?? priceInfo?.minPriceCents ?? 0;
+    hasSlotQuote && priceData && priceData.total_price_cents > 0
+      ? priceData.total_price_cents
+      : 0;
+
+  const canReserve =
+    Boolean(selectedTimeSlot) &&
+    !reserving &&
+    !loading &&
+    finalPriceCents > 0;
 
   return (
     <View style={styles.courtCard}>
@@ -293,33 +313,35 @@ function CourtCardDynamic({
       </Pressable>
       {isExpanded && (
         <View style={styles.courtCardActions}>
+          <View style={styles.courtPriceBox}>
+            <Text style={styles.courtPriceAmount}>{getPriceDisplay()}</Text>
+            {hasSlotQuote ? (
+              <Text style={styles.courtPriceHint}>
+                Total · {duration} min
+              </Text>
+            ) : null}
+          </View>
           <Pressable
             onPress={onToggleDuration}
+            accessibilityLabel={`Duración ${duration} minutos. Toca para cambiar entre 60 y 90 minutos`}
             style={({ pressed }) => [
-              styles.courtPriceBtn,
+              styles.courtDurationBtn,
               pressed && styles.pressed,
             ]}
           >
-            <Text style={styles.courtPriceAmount}>{getPriceDisplay()}</Text>
-            <Text style={styles.courtPriceDuration}>{duration} min</Text>
+            <Text style={styles.courtDurationValue}>{duration}</Text>
+            <Text style={styles.courtDurationLabel}>min</Text>
           </Pressable>
           <Pressable
             style={({ pressed }) => [
               styles.courtReservarBtn,
-              (!selectedTimeSlot || reserving || (loading && isExpanded)) &&
-                styles.courtReservarBtnDisabled,
-              pressed &&
-                !reserving &&
-                !loading &&
-                selectedTimeSlot &&
-                styles.pressed,
+              !canReserve && styles.courtReservarBtnDisabled,
+              pressed && canReserve && styles.pressed,
             ]}
             onPress={() =>
-              selectedTimeSlot && !loading
-                ? onReservar(court, finalPriceCents)
-                : undefined
+              canReserve ? onReservar(court, finalPriceCents) : undefined
             }
-            disabled={reserving || !selectedTimeSlot || loading}
+            disabled={!canReserve}
           >
             {reserving ? (
               <ActivityIndicator size="small" color="#1A1A1A" />
@@ -343,6 +365,7 @@ export function ClubDetailScreen({
   onPartidoPress,
 }: ClubDetailScreenProps) {
   const { session } = useAuth();
+  const { profile } = useHomeData();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [activeTab, setActiveTab] = useState<TabId>("Home");
   const [clubPartidos, setClubPartidos] = useState<PartidoItem[]>([]);
@@ -388,10 +411,16 @@ export function ClubDetailScreen({
 
   const loadClubPartidos = useCallback(async () => {
     setPartidosLoading(true);
-    const matches = await fetchMatches({ expand: true, clubId: court.clubId });
+    const matches = await fetchMatches({
+      expand: true,
+      clubId: court.clubId,
+      activeOnly: true,
+      visibility: "public",
+      discovery: true,
+    });
     const filtered = matches
       .filter((m) => matchBelongsToClub(m, court.clubId))
-      .map(mapMatchToPartido)
+      .map((m) => mapMatchToPartido(m))
       .filter((p): p is PartidoItem => p != null)
       .filter((p) => p.matchPhase !== "past")
       .filter((p) => p.visibility !== "private");
@@ -419,6 +448,10 @@ export function ClubDetailScreen({
   const [expandedCourtId, setExpandedCourtId] = useState<string | null>(null);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null);
   const [reserving, setReserving] = useState(false);
+  const [partidoPrivado, setPartidoPrivado] = useState(false);
+  const [restrictByLevel, setRestrictByLevel] = useState(false);
+  const [eloMin, setEloMin] = useState(() => defaultFriendlyRange(3.5).eloMin);
+  const [eloMax, setEloMax] = useState(() => defaultFriendlyRange(3.5).eloMax);
   const dateOptions = getNextDays(7);
 
   const selectedDate = useMemo(() => {
@@ -543,12 +576,16 @@ export function ClubDetailScreen({
   }, [activeTab, selectedDate, loadTimeSlotsForDate, duration]);
 
   useEffect(() => {
+    if (profile?.id) {
+      setOrganizerPlayerId(profile.id);
+      return;
+    }
     if (session?.access_token) {
       fetchMyPlayerId(session.access_token).then(setOrganizerPlayerId);
     } else {
       setOrganizerPlayerId(null);
     }
-  }, [session?.access_token]);
+  }, [profile?.id, session?.access_token]);
 
   const handleReservar = useCallback(
     async (
@@ -573,19 +610,31 @@ export function ClubDetailScreen({
         );
         return;
       }
-      if (!organizerPlayerId || !session?.access_token) {
+      if (!session?.access_token) {
         Alert.alert("Inicia sesión", "Debes iniciar sesión para reservar.");
+        return;
+      }
+      let playerId = organizerPlayerId ?? profile?.id ?? null;
+      if (!playerId) {
+        playerId = await fetchMyPlayerId(session.access_token);
+        if (playerId) setOrganizerPlayerId(playerId);
+      }
+      if (!playerId) {
+        Alert.alert(
+          "Perfil de jugador",
+          "No encontramos tu perfil. Espera un momento e inténtalo de nuevo.",
+        );
         return;
       }
       if (finalPriceCents <= 0) {
         Alert.alert(
-          "No disponible",
-          "No hay precio disponible para esta pista en la fecha seleccionada.",
+          "Precio no disponible",
+          "No pudimos calcular el precio para este horario. Elige otra hora o inténtalo de nuevo.",
         );
         return;
       }
 
-      const shouldOfferPayLater = c.allow_payment_after_play === true;
+      const shouldOfferPayLater = c.allow_payment_after_play === true && partidoPrivado;
       const askPayLaterChoice = () =>
         new Promise<"pay_now" | "pay_later" | "cancel">((resolve) => {
           if (!shouldOfferPayLater) {
@@ -614,7 +663,7 @@ export function ClubDetailScreen({
       if (payChoice === "pay_later") {
         const created = await createPayLaterBooking({
           courtId: c.id,
-          organizerPlayerId,
+          organizerPlayerId: playerId,
           startAtIso: start_at,
           endAtIso: end_at,
           totalPriceCents,
@@ -633,7 +682,7 @@ export function ClubDetailScreen({
           dateTimeFormatted: formatDateTimeForConfirmation(selectedDate, selectedTimeSlot),
           duration: `${duration} min`,
           priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
-          matchVisibility: "private",
+          matchVisibility: partidoPrivado ? "private" : "public",
           clubId: court.clubId,
           courtId: c.id,
           date: localCalendarYmd(selectedDate),
@@ -646,14 +695,16 @@ export function ClubDetailScreen({
       const intentRes = await createIntentForNewMatch(
         {
           court_id: c.id,
-          organizer_player_id: organizerPlayerId,
+          organizer_player_id: playerId,
           start_at,
           end_at,
           total_price_cents: totalPriceCents,
           pay_full: true,
-          visibility: "private",
+          visibility: partidoPrivado ? "private" : "public",
           competitive: false,
           gender: "any",
+          elo_min: !partidoPrivado && restrictByLevel ? eloMin : null,
+          elo_max: !partidoPrivado && restrictByLevel ? eloMax : null,
         },
         session.access_token,
       );
@@ -730,7 +781,7 @@ export function ClubDetailScreen({
         ),
         duration: `${duration} min`,
         priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
-        matchVisibility: "private",
+        matchVisibility: partidoPrivado ? "private" : "public",
         clubId: court.clubId,
         courtId: c.id,
         date: localCalendarYmd(selectedDate),
@@ -742,8 +793,13 @@ export function ClubDetailScreen({
       selectedTimeSlot,
       selectedDate,
       organizerPlayerId,
+      profile?.id,
       session?.access_token,
       court.clubName,
+      partidoPrivado,
+      restrictByLevel,
+      eloMin,
+      eloMax,
       initPaymentSheet,
       presentPaymentSheet,
       loadTimeSlotsForDate,
@@ -1009,8 +1065,36 @@ export function ClubDetailScreen({
             <View style={styles.section}>
               <Text style={styles.reservaTitle}>Reserva una pista</Text>
               <Text style={styles.reservaSub}>
-                Crea un partido privado e invita a tus amigos
+                {partidoPrivado
+                  ? "Crea un partido privado e invita a tus amigos"
+                  : "Publica un partido abierto para encontrar jugadores"}
               </Text>
+              <View style={styles.reservaToggleRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.reservaToggleTitle}>Partido privado</Text>
+                  <Text style={styles.reservaToggleSub}>
+                    Si lo apagas, aparecerá en Buscar partido
+                  </Text>
+                </View>
+                <Switch
+                  value={partidoPrivado}
+                  onValueChange={setPartidoPrivado}
+                  trackColor={{ false: "#e5e7eb", true: theme.auth.accent }}
+                  thumbColor="#fff"
+                />
+              </View>
+              {!partidoPrivado ? (
+                <View style={styles.reservaLevelWrap}>
+                  <FriendlyLevelRangeSection
+                    restrictByLevel={restrictByLevel}
+                    onRestrictByLevelChange={setRestrictByLevel}
+                    eloMin={eloMin}
+                    eloMax={eloMax}
+                    onEloMinChange={setEloMin}
+                    onEloMaxChange={setEloMax}
+                  />
+                </View>
+              ) : null}
               <View style={styles.courtList}>
                 {!selectedTimeSlot ? (
                   <Text style={styles.partidosEmptySubtitle}>
@@ -2119,6 +2203,29 @@ const styles = StyleSheet.create({
     lineHeight: theme.lineHeightFor(theme.fontSize.xs),
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
+  reservaToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: theme.spacing.sm,
+    marginBottom: theme.spacing.sm,
+  },
+  reservaToggleTitle: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: "700",
+    color: "#ffffff",
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+    ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  reservaToggleSub: {
+    marginTop: 2,
+    fontSize: theme.fontSize.xs,
+    color: "rgba(255,255,255,0.6)",
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  reservaLevelWrap: {
+    marginBottom: theme.spacing.md,
+  },
   courtList: {
     gap: theme.spacing.md,
   },
@@ -2159,13 +2266,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.md,
     paddingBottom: theme.spacing.md,
   },
-  courtPriceBtn: {
+  courtPriceBox: {
     flex: 1,
     backgroundColor: theme.auth.accent,
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: theme.spacing.sm,
     alignItems: "center",
+    justifyContent: "center",
   },
   courtPriceAmount: {
     fontSize: 14,
@@ -2176,13 +2284,37 @@ const styles = StyleSheet.create({
     textAlign: "center",
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
-  courtPriceDuration: {
+  courtPriceHint: {
     fontSize: 10,
     color: "rgba(255,255,255,0.9)",
     marginTop: 1,
     lineHeight: 14,
     alignSelf: "stretch",
     textAlign: "center",
+    ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  courtDurationBtn: {
+    minWidth: 56,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+    paddingVertical: 8,
+    paddingHorizontal: theme.spacing.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  courtDurationValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#fff",
+    lineHeight: 18,
+    ...Platform.select({ android: { includeFontPadding: false } }),
+  },
+  courtDurationLabel: {
+    fontSize: 10,
+    color: "rgba(255,255,255,0.75)",
+    lineHeight: 12,
     ...Platform.select({ android: { includeFontPadding: false } }),
   },
   courtReservarBtn: {

@@ -39,9 +39,15 @@ function formatShortTime(iso: string): string {
 type DirectMessageThreadScreenProps = {
   peer: MessagePeerNav;
   onBack: () => void;
+  /** Fuera de ScreenLayout (p. ej. modal de IA Afinidad): aplica safe area superior. */
+  standalone?: boolean;
 };
 
-export function DirectMessageThreadScreen({ peer, onBack }: DirectMessageThreadScreenProps) {
+export function DirectMessageThreadScreen({
+  peer,
+  onBack,
+  standalone = false,
+}: DirectMessageThreadScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const token = session?.access_token;
@@ -128,15 +134,19 @@ export function DirectMessageThreadScreen({ peer, onBack }: DirectMessageThreadS
     setSending(false);
   };
 
+  const toolbarTopPad = standalone ? insets.top + theme.spacing.sm : theme.spacing.md;
+  const headerBlockHeight = toolbarTopPad + theme.spacing.sm + 40 + theme.spacing.sm;
+
   return (
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={theme.headerHeight}
+      keyboardVerticalOffset={standalone ? headerBlockHeight : theme.headerHeight}
     >
-      <View style={styles.toolbar}>
+      <View style={[styles.toolbar, { paddingTop: toolbarTopPad }]}>
         <Pressable
           onPress={onBack}
+          hitSlop={12}
           style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
           accessibilityRole="button"
           accessibilityLabel="Volver"
@@ -217,9 +227,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: theme.spacing.md,
-    ...theme.headerPadding,
+    paddingBottom: theme.spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(255,255,255,0.1)',
+    zIndex: 2,
+    elevation: 2,
   },
   title: {
     flex: 1,

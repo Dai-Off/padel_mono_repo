@@ -1,12 +1,20 @@
-import { toDateStringLocal } from '../utils/dateLocal';
+import { clubLocalDateTimeToUtcIso, dayKeyInClubTz } from '../lib/clubTimeZone';
 
 /**
  * Instante local de inicio de franja `HH:00` o `HH:mm` en un día calendario `YYYY-MM-DD` (local).
  */
 export function localSlotStart(calendarDateStr: string, slot: string): Date {
-  const [yy, mm, dd] = calendarDateStr.split('-').map(Number);
-  const [hh, min = 0] = slot.split(':').map(Number);
-  return new Date(yy, mm - 1, dd, hh, min, 0, 0);
+  const time = normalizeSlotTime(slot);
+  return new Date(clubLocalDateTimeToUtcIso(calendarDateStr, time));
+}
+
+function normalizeSlotTime(slot: string): string {
+  if (slot.includes('T')) {
+    const t = slot.slice(11, 16);
+    if (t.length === 5) return t;
+  }
+  const [hh = '00', mm = '00'] = slot.split(':');
+  return `${hh.padStart(2, '0')}:${mm.padStart(2, '0')}`;
 }
 
 /**
@@ -18,8 +26,9 @@ export function filterSlotsStartingAfterNow(
   slots: string[],
   now: Date = new Date(),
 ): string[] {
-  const sorted = [...slots].sort((a, b) => a.localeCompare(b));
-  if (calendarDateStr !== toDateStringLocal(now)) {
+  const sorted = [...slots].sort((a, b) => normalizeSlotTime(a).localeCompare(normalizeSlotTime(b)));
+  const todayInClub = dayKeyInClubTz(now);
+  if (calendarDateStr !== todayInClub) {
     return sorted;
   }
   const t = now.getTime();
