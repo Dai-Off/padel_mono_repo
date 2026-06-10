@@ -1,5 +1,5 @@
-# Build nativo Android con EAS (manual). Los pushes usan eas-update.yml (OTA).
-# Secrets: EXPO_TOKEN (requerido), SLACK_WEBHOOK_URL (avisos Slack con link al QR)
+# Build nativo Android con EAS (manual o automático desde eas-update si falta APK).
+# Secrets: EXPO_TOKEN (requerido), SLACK_WEBHOOK_URL (avisos Slack)
 
 name: EAS Android Build
 
@@ -51,24 +51,7 @@ jobs:
 
       - name: EAS Build (Android)
         id: build
-        run: |
-          eas build \
-            --platform android \
-            --profile ${{ inputs.profile }} \
-            --non-interactive \
-            --json > ../eas-build.json
-          cat ../eas-build.json
-          BUILD_ID=$(jq -r '.id // empty' ../eas-build.json)
-          INSTALL_URL=$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' ../eas-build.json)
-          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
-          echo "install_url=$INSTALL_URL" >> "$GITHUB_OUTPUT"
-          if [ -n "$BUILD_ID" ]; then
-            echo "build_page_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds/${BUILD_ID}" >> "$GITHUB_OUTPUT"
-            echo "expo_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds/${BUILD_ID}" >> "$GITHUB_OUTPUT"
-          else
-            echo "build_page_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds" >> "$GITHUB_OUTPUT"
-            echo "expo_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds" >> "$GITHUB_OUTPUT"
-          fi
+        run: bash ../.github/scripts/build-android-apk.sh "${{ inputs.profile }}"
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
@@ -85,4 +68,3 @@ jobs:
           INSTALL_URL: ${{ steps.build.outputs.install_url }}
           BUILD_PAGE_URL: ${{ steps.build.outputs.build_page_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-

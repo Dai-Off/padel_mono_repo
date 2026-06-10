@@ -1,4 +1,5 @@
 # OTA update (EAS Update) en push a main, develop o demo.
+# Si no hay APK del ambiente, lo genera automáticamente.
 # Secrets: EXPO_TOKEN (requerido), SLACK_WEBHOOK_URL (avisos Slack)
 
 name: EAS Update (OTA)
@@ -12,8 +13,10 @@ on:
     paths:
       - 'mobile-app/**'
       - '.github/workflows/eas-update.yml'
+      - '.github/workflows/eas-android.yml'
       - '.github/scripts/notify-slack-eas.sh'
       - '.github/scripts/get-latest-apk.sh'
+      - '.github/scripts/build-android-apk.sh'
   workflow_dispatch:
     inputs:
       branch:
@@ -113,6 +116,25 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
+      - name: Build APK if missing
+        id: build_apk
+        if: success() && steps.apk.outputs.install_url == ''
+        run: bash ../.github/scripts/build-android-apk.sh "${{ steps.target.outputs.env_key }}"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Resolve install links
+        id: install
+        if: success()
+        run: |
+          if [ -n "${{ steps.build_apk.outputs.install_url }}" ]; then
+            echo "install_url=${{ steps.build_apk.outputs.install_url }}" >> "$GITHUB_OUTPUT"
+            echo "build_page_url=${{ steps.build_apk.outputs.build_page_url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "install_url=${{ steps.apk.outputs.install_url }}" >> "$GITHUB_OUTPUT"
+            echo "build_page_url=${{ steps.apk.outputs.build_page_url }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Notify Slack
         if: success()
         working-directory: .
@@ -124,7 +146,6 @@ jobs:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
           ACTOR: ${{ github.actor }}
           EXPO_URL: ${{ steps.target.outputs.expo_url }}
-          INSTALL_URL: ${{ steps.apk.outputs.install_url }}
-          BUILD_PAGE_URL: ${{ steps.apk.outputs.build_page_url }}
+          INSTALL_URL: ${{ steps.install.outputs.install_url }}
+          BUILD_PAGE_URL: ${{ steps.install.outputs.build_page_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-

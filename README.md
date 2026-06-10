@@ -62,7 +62,7 @@ Requiere [EAS CLI](https://docs.expo.dev/build/setup/) y cuenta Expo.
 Las tres ramas comparten el mismo proyecto Expo (`padel-app`) pero no se pisan: cada una publica en su canal.
 
 **CI (GitHub Actions):**
-- `eas-update.yml` — publica OTA al pushear a `main`, `develop` o `demo` (solo si cambia `mobile-app/`).
+- `eas-update.yml` — publica OTA al pushear a `main`, `develop` o `demo`. Si el ambiente no tiene APK, lo genera automáticamente (~15 min extra la primera vez).
 - `eas-android.yml` — build nativo Android manual (Actions → EAS Android Build → elegir perfil).
 
 **Setup inicial en Expo (una sola vez, canal `develop`):**
@@ -105,7 +105,7 @@ npx eas update --branch demo --environment preview --platform android
 | Push con cambios en `mobile-app/` | OTA publicado + **link de descarga APK** + **QR** del último build de ese ambiente |
 | Actions → EAS Android Build | APK nuevo + link directo + QR de instalación |
 
-Si un ambiente no tiene APK aún, el mensaje indica correr *EAS Android Build* con el perfil correspondiente (`production`, `develop` o `demo`).
+Si un ambiente no tiene APK aún, `eas-update.yml` lo genera solo. También podés forzar uno con *EAS Android Build* manual.
 
 Sin `SLACK_WEBHOOK_URL` el deploy funciona igual; solo se omite el aviso.
 
