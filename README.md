@@ -51,19 +51,61 @@ npx eas build --platform ios       # IPA (requiere Apple Developer)
 
 Requiere [EAS CLI](https://docs.expo.dev/build/setup/) y cuenta Expo.
 
-### Canales EAS (main vs demo)
+### Ramas y ambientes Expo
 
+| Rama git | Propósito | Canal EAS | Perfil build | Deploy automático |
+|----------|-----------|-----------|--------------|-------------------|
+| `main` | Producción | `production` | `production` | OTA en cada push a `mobile-app/` |
+| `develop` | Pruebas de devs | `develop` | `develop` | OTA en cada push a `mobile-app/` |
+| `demo` | Demos estables | `demo` | `demo` | OTA en cada push a `mobile-app/` |
+
+Las tres ramas comparten el mismo proyecto Expo (`padel-app`) pero no se pisan: cada una publica en su canal.
+
+**CI (GitHub Actions):**
+- `eas-update.yml` — publica OTA al pushear a `main`, `develop` o `demo` (solo si cambia `mobile-app/`).
+- `eas-android.yml` — build nativo Android manual (Actions → EAS Android Build → elegir perfil).
+
+**Setup inicial en Expo (una sola vez, canal `develop`):**
+```bash
+cd mobile-app
+eas channel:create develop
+eas channel:edit develop --branch develop
+```
+
+**Comandos manuales (si hace falta):**
 ```bash
 # Main / producción
 npx eas build --platform android --profile production
 npx eas update --branch main --channel production --environment production
 
-# Demo (rama demo)
+# Develop / pruebas internas
+npx eas build --platform android --profile develop
+npx eas update --branch develop --channel develop --environment preview
+
+# Demo / clientes
 npx eas build --platform android --profile demo
 npx eas update --branch demo --channel demo --environment preview
 ```
 
-`main` y `demo` comparten el mismo proyecto Expo, pero no se pisan porque usan canales distintos (`production` y `demo`).
+**Notificaciones Slack** (OTA y builds con link al QR en Expo):
+
+1. En Slack: [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**.
+2. **Incoming Webhooks** → activar → **Add New Webhook to Workspace** → elegir canal (ej. `#wematch-deploys`).
+3. Copiar la URL del webhook (`https://hooks.slack.com/services/...`).
+4. En GitHub: repo → **Settings → Secrets and variables → Actions → New repository secret**:
+   - Nombre: `SLACK_WEBHOOK_URL`
+   - Valor: la URL del webhook
+5. Listo. Cada OTA o build manual manda un mensaje con color por ambiente:
+   - Producción (`main`) — rojo
+   - Develop — azul
+   - Demo — verde
+
+| Evento | Qué avisa Slack |
+|--------|-----------------|
+| Push con cambios en `mobile-app/` | OTA publicado + link a updates del branch en Expo |
+| Actions → EAS Android Build | APK listo + link a la página del build (ahí está el **QR** de instalación) |
+
+Sin `SLACK_WEBHOOK_URL` el deploy funciona igual; solo se omite el aviso.
 
 ### Conectar con backend
 
