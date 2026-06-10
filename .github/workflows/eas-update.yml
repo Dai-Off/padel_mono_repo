@@ -13,6 +13,7 @@ on:
       - 'mobile-app/**'
       - '.github/workflows/eas-update.yml'
       - '.github/scripts/notify-slack-eas.sh'
+      - '.github/scripts/get-latest-apk.sh'
   workflow_dispatch:
     inputs:
       branch:
@@ -105,6 +106,13 @@ jobs:
           EAS_BRANCH: ${{ steps.target.outputs.branch }}
           EAS_ENVIRONMENT: ${{ steps.target.outputs.environment }}
 
+      - name: Get latest APK for environment
+        id: apk
+        if: success()
+        run: bash ../.github/scripts/get-latest-apk.sh "${{ steps.target.outputs.env_key }}"
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
       - name: Notify Slack
         if: success()
         working-directory: .
@@ -116,5 +124,7 @@ jobs:
           COMMIT_MSG: ${{ github.event.head_commit.message }}
           ACTOR: ${{ github.actor }}
           EXPO_URL: ${{ steps.target.outputs.expo_url }}
+          INSTALL_URL: ${{ steps.apk.outputs.install_url }}
+          BUILD_PAGE_URL: ${{ steps.apk.outputs.build_page_url }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
+

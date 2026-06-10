@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Envía aviso a Slack vía Incoming Webhook.
-# Uso: notify-slack-eas.sh <ota|build> <production|develop|demo> [opciones env]
+# Uso: notify-slack-eas.sh <ota|build> <production|develop|demo>
+# Env: SLACK_WEBHOOK_URL, BRANCH, CHANNEL, COMMIT_MSG, ACTOR, EXPO_URL, RUN_URL,
+#      INSTALL_URL, BUILD_PAGE_URL
 set -euo pipefail
 
 TYPE="${1:?tipo requerido: ota o build}"
@@ -19,6 +21,7 @@ ACTOR="${ACTOR:-github-actions}"
 EXPO_URL="${EXPO_URL:-}"
 RUN_URL="${RUN_URL:-}"
 INSTALL_URL="${INSTALL_URL:-}"
+BUILD_PAGE_URL="${BUILD_PAGE_URL:-}"
 
 case "$ENV_KEY" in
   production)
@@ -45,12 +48,12 @@ esac
 
 if [ "$TYPE" = "ota" ]; then
   TITLE="${ENV_EMOJI} ${ENV_LABEL} — actualización OTA publicada"
-  BODY="La app instalada con canal *${CHANNEL}* recibirá el update al abrirla (no hace falta nuevo QR)."
+  BODY=$'*¿Ya tenés la app?* Se actualiza sola al abrirla.\n*¿No la tenés?* Instalá el APK de este ambiente (link o QR abajo).'
   CTA_LABEL="Ver updates en Expo"
 else
   TITLE="${ENV_EMOJI} ${ENV_LABEL} — build Android listo"
-  BODY="Abrí el link de Expo para ver el *QR de instalación* y descargar el APK."
-  CTA_LABEL="Ver build en Expo (QR)"
+  BODY=$'Nuevo APK publicado. Usá el link directo o el QR para instalar en Android.'
+  CTA_LABEL="Ver build en Expo"
 fi
 
 COMMIT_LINE=""
@@ -77,25 +80,55 @@ else
     ]')
 fi
 
-BUTTONS='[]'
-if [ -n "$EXPO_URL" ]; then
-  BUTTONS=$(jq -n \
-    --arg expo "$EXPO_URL" \
-    --arg run "$RUN_URL" \
-    --arg cta "$CTA_LABEL" \
-    '[
-      {type:"button", text:{type:"plain_text", text:$cta}, url:$expo},
-      (if $run != "" then {type:"button", text:{type:"plain_text", text:"Ver workflow"}, url:$run} else empty end)
-    ]')
-fi
-
+# Bloque de instalación: link directo + QR
 INSTALL_BLOCK='[]'
 if [ -n "$INSTALL_URL" ]; then
-  INSTALL_BLOCK=$(jq -n --arg url "$INSTALL_URL" '[{
+  QR_IMAGE_URL=$(jq -rn --arg u "$INSTALL_URL" '"https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=" + ($u|@uri)')
+  INSTALL_BLOCK=$(jq -n \
+    --arg apk "$INSTALL_URL" \
+    --arg build "$BUILD_PAGE_URL" \
+    --arg qr "$QR_IMAGE_URL" \
+    '[
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: ("*:iphone: Instalar " + (if $build != "" then "<" + $build + "|ver en Expo>" else "APK" end) + "*\n" +
+                 ":point_right: *<" + $apk + "|Descargar APK directo>*")
+        }
+      },
+      {
+        type: "image",
+        title: {type: "plain_text", text: "QR instalación Android", emoji: true},
+        image_url: $qr,
+        alt_text: "QR para descargar el APK"
+      }
+    ]')
+elif [ -n "$BUILD_PAGE_URL" ]; then
+  INSTALL_BLOCK=$(jq -n --arg build "$BUILD_PAGE_URL" '[{
     type: "section",
-    text: {type: "mrkdwn", text: ("*Descarga directa APK:* <" + $url + "|Abrir enlace>")}
+    text: {type: "mrkdwn", text: ("*:warning: Sin link directo de APK.* Abrí <" + $build + "|el build en Expo> para ver QR y descarga.")}
+  }]')
+else
+  INSTALL_BLOCK=$(jq -n --arg profile "$ENV_KEY" '[{
+    type: "section",
+    text: {type: "mrkdwn", text: ("*:warning: No hay APK publicado para `" + $profile + "`.*\nGenerá uno: GitHub Actions → *EAS Android Build* → perfil `" + $profile + "`.")}
   }]')
 fi
+
+BUTTONS='[]'
+BUTTONS=$(jq -n \
+  --arg expo "${EXPO_URL:-}" \
+  --arg build "${BUILD_PAGE_URL:-}" \
+  --arg apk "${INSTALL_URL:-}" \
+  --arg run "${RUN_URL:-}" \
+  --arg cta "$CTA_LABEL" \
+  '[
+    (if $apk != "" then {type:"button", text:{type:"plain_text", text:"Descargar APK"}, url:$apk, style:"primary"} else empty end),
+    (if $build != "" then {type:"button", text:{type:"plain_text", text:"Ver QR en Expo"}, url:$build} else empty end),
+    (if $expo != "" then {type:"button", text:{type:"plain_text", text:$cta}, url:$expo} else empty end),
+    (if $run != "" then {type:"button", text:{type:"plain_text", text:"Ver workflow"}, url:$run} else empty end)
+  ]')
 
 PAYLOAD=$(jq -n \
   --arg title "$TITLE" \

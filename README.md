@@ -102,8 +102,10 @@ npx eas update --branch demo --environment preview --platform android
 
 | Evento | Qué avisa Slack |
 |--------|-----------------|
-| Push con cambios en `mobile-app/` | OTA publicado + link a updates del branch en Expo |
-| Actions → EAS Android Build | APK listo + link a la página del build (ahí está el **QR** de instalación) |
+| Push con cambios en `mobile-app/` | OTA publicado + **link de descarga APK** + **QR** del último build de ese ambiente |
+| Actions → EAS Android Build | APK nuevo + link directo + QR de instalación |
+
+Si un ambiente no tiene APK aún, el mensaje indica correr *EAS Android Build* con el perfil correspondiente (`production`, `develop` o `demo`).
 
 Sin `SLACK_WEBHOOK_URL` el deploy funciona igual; solo se omite el aviso.
 
