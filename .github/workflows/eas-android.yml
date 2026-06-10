@@ -1,85 +1,88 @@
-# Build nativo Android con EAS (manual). Los pushes usan eas-update.yml (OTA).
-# Secrets: EXPO_TOKEN (requerido), SLACK_WEBHOOK_URL (avisos Slack con link al QR)
-
-name: EAS Android Build
-
-on:
-  workflow_dispatch:
-    inputs:
-      profile:
-        description: 'Perfil EAS (main→production, develop→develop, demo→demo)'
-        required: true
-        default: 'production'
-        type: choice
-        options:
-          - production
-          - develop
-          - demo
-
-concurrency:
-  group: eas-android-${{ github.workflow }}-${{ inputs.profile }}
-  cancel-in-progress: true
-
-jobs:
-  build:
-    name: Build Android APK
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mobile-app
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: mobile-app/package-lock.json
-
-      - name: Install dependencies
-        run: npm ci
-
-      - uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Verify EAS login
-        run: eas whoami
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      - name: EAS Build (Android)
-        id: build
-        run: |
-          eas build \
-            --platform android \
-            --profile ${{ inputs.profile }} \
-            --non-interactive \
-            --json > ../eas-build.json
-          cat ../eas-build.json
-          BUILD_ID=$(jq -r '.id // empty' ../eas-build.json)
-          INSTALL_URL=$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' ../eas-build.json)
-          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
-          echo "install_url=$INSTALL_URL" >> "$GITHUB_OUTPUT"
-          if [ -n "$BUILD_ID" ]; then
-            echo "expo_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds/${BUILD_ID}" >> "$GITHUB_OUTPUT"
-          else
-            echo "expo_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Notify Slack
-        if: success()
-        working-directory: .
-        run: bash .github/scripts/notify-slack-eas.sh build "${{ inputs.profile }}"
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          BRANCH: ${{ inputs.profile }}
-          CHANNEL: ${{ inputs.profile }}
-          ACTOR: ${{ github.actor }}
-          EXPO_URL: ${{ steps.build.outputs.expo_url }}
-          INSTALL_URL: ${{ steps.build.outputs.install_url }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
+# Build nativo Android con EAS (manual). Los pushes usan eas-update.yml (OTA).
+# Secrets: EXPO_TOKEN (requerido), SLACK_WEBHOOK_URL (avisos Slack con link al QR)
+
+name: EAS Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Perfil EAS (main→production, develop→develop, demo→demo)'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - develop
+          - demo
+
+concurrency:
+  group: eas-android-${{ github.workflow }}-${{ inputs.profile }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: mobile-app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Verify EAS login
+        run: eas whoami
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: EAS Build (Android)
+        id: build
+        run: |
+          eas build \
+            --platform android \
+            --profile ${{ inputs.profile }} \
+            --non-interactive \
+            --json > ../eas-build.json
+          cat ../eas-build.json
+          BUILD_ID=$(jq -r '.id // empty' ../eas-build.json)
+          INSTALL_URL=$(jq -r '.artifacts.buildUrl // .artifacts.applicationArchiveUrl // empty' ../eas-build.json)
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "install_url=$INSTALL_URL" >> "$GITHUB_OUTPUT"
+          if [ -n "$BUILD_ID" ]; then
+            echo "build_page_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds/${BUILD_ID}" >> "$GITHUB_OUTPUT"
+            echo "expo_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds/${BUILD_ID}" >> "$GITHUB_OUTPUT"
+          else
+            echo "build_page_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds" >> "$GITHUB_OUTPUT"
+            echo "expo_url=https://expo.dev/accounts/tradebotg/projects/padel-app/builds" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Notify Slack
+        if: success()
+        working-directory: .
+        run: bash .github/scripts/notify-slack-eas.sh build "${{ inputs.profile }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          BRANCH: ${{ inputs.profile }}
+          CHANNEL: ${{ inputs.profile }}
+          ACTOR: ${{ github.actor }}
+          EXPO_URL: ${{ steps.build.outputs.expo_url }}
+          INSTALL_URL: ${{ steps.build.outputs.install_url }}
+          BUILD_PAGE_URL: ${{ steps.build.outputs.build_page_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
