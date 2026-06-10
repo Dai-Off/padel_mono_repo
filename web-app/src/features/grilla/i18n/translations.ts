@@ -78,6 +78,17 @@ export interface TranslationKeys {
         alignSuggestion: string; // uses {time}
     };
 
+    // Override Modal
+    override: {
+        title: string;
+        subtitle: string;
+        matchInfo: string; // uses {players}
+        consequence: string;
+        emailNote: string;
+        confirmButton: string;
+        cancelButton: string;
+    };
+
     // FreeSlot Modal
     freeSlot: {
         disabled: string;

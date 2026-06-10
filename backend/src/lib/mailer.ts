@@ -1,4 +1,6 @@
 import nodemailer from 'nodemailer';
+import { getBackendPublicUrl } from './env';
+
 
 function escapeHtml(s: string): string {
   return s
@@ -559,4 +561,164 @@ export async function sendMatchJoinConfirmationEmail(
   `;
   return sendMailSmtp(to, subject, html);
 }
+
+export async function sendBookingRelocatedEmail(
+  to: string,
+  playerName: string,
+  clubName: string,
+  matchDateStr: string,
+  matchTimeStr: string,
+  oldCourtName: string,
+  newCourtName: string,
+  bookingId: string,
+  playerId: string,
+  token: string,
+  deadlineStr: string
+): Promise<{ sent: boolean; error?: string }> {
+  const subject = 'Tu partido ha sido reubicado — WeMatch';
+  const backendUrl = getBackendPublicUrl();
+  const keepUrl = `${backendUrl}/bookings/${bookingId}/player-response?action=keep&player_id=${playerId}&token=${token}`;
+  const refundUrl = `${backendUrl}/bookings/${bookingId}/player-response?action=refund&player_id=${playerId}&token=${token}`;
+
+  const html = `
+    <div style="background-color: #000000; color: #FFFFFF; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px 20px; max-width: 600px; margin: 0 auto; line-height: 1.6;">
+      
+      <div style="text-align: center; margin-bottom: 40px;">
+        <img src="https://oxowmfhnorxnabhzkcmi.supabase.co/storage/v1/object/public/public-assets/imagen_2026-04-22_105702379.png" alt="WeMatch" width="120" style="display: block; margin: 0 auto;" />
+      </div>
+
+      <div style="padding: 0 10px;">
+        <p style="font-size: 16px; margin-bottom: 25px;">
+          Hola <span style="color: #F18F34; font-weight: bold;">${escapeHtml(playerName)}</span>,
+        </p>
+
+        <p style="font-size: 16px; margin-bottom: 25px;">
+          Te informamos que tu partido en <strong style="color: #FFFFFF;">${escapeHtml(clubName)}</strong> ha sido reubicado de la pista <strong>${escapeHtml(oldCourtName)}</strong> a la pista <strong style="color: #F18F34;">${escapeHtml(newCourtName)}</strong> para dar prioridad a un partido completo.
+        </p>
+
+        <div style="background-color: #111111; padding: 25px; border-radius: 12px; margin-bottom: 35px; border: 1px solid #222222;">
+          <h4 style="color: #F18F34; font-size: 18px; margin-top: 0; margin-bottom: 15px; text-transform: uppercase; letter-spacing: 0.5px;">Detalles Actualizados</h4>
+          <table style="width: 100%; border-collapse: collapse; font-size: 15px;">
+            <tr>
+              <td style="padding: 6px 0; color: #AAAAAA; width: 35%;"><strong>Club:</strong></td>
+              <td style="padding: 6px 0; color: #FFFFFF;">${escapeHtml(clubName)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #AAAAAA;"><strong>Fecha:</strong></td>
+              <td style="padding: 6px 0; color: #FFFFFF;">${escapeHtml(matchDateStr)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #AAAAAA;"><strong>Hora:</strong></td>
+              <td style="padding: 6px 0; color: #FFFFFF;">${escapeHtml(matchTimeStr)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #AAAAAA;"><strong>Pista anterior:</strong></td>
+              <td style="padding: 6px 0; color: #FFFFFF; text-decoration: line-through;">${escapeHtml(oldCourtName)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #AAAAAA;"><strong>Pista nueva:</strong></td>
+              <td style="padding: 6px 0; color: #F18F34; font-weight: bold;">${escapeHtml(newCourtName)}</td>
+            </tr>
+          </table>
+        </div>
+
+        <p style="font-size: 15px; color: #DDDDDD; margin-bottom: 25px;">
+          Por favor, selecciona una de las siguientes opciones. <strong>Tienes hasta el ${escapeHtml(deadlineStr)}</strong> para responder, de lo contrario la reserva se cancelará y reembolsará automáticamente.
+        </p>
+
+        <div style="text-align: center; margin-bottom: 40px; margin-top: 30px;">
+          <a href="${keepUrl}" style="background-color: #F18F34; color: #000000; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; margin: 8px 10px; display: inline-block; min-width: 180px;">Mantener reserva</a>
+          <a href="${refundUrl}" style="background-color: #333333; color: #FFFFFF; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; margin: 8px 10px; display: inline-block; min-width: 180px;">Cancelar y reembolsar</a>
+        </div>
+
+        <p style="font-size: 16px; font-weight: bold; color: #F18F34; margin-bottom: 50px;">
+          El equipo de WeMatch
+        </p>
+
+        <hr style="border: 0; border-top: 1px solid #333333; margin-bottom: 30px;" />
+
+        <div style="text-align: center;">
+          <p style="font-size: 13px; color: #AAAAAA; margin-bottom: 15px;">
+            <strong>¿Tienes dudas o necesitas ayuda?</strong><br/>
+            Escríbenos a <a href="mailto:soporte@wematch.com" style="color: #F18F34; text-decoration: none;">soporte@wematch.com</a>
+          </p>
+
+          <div style="margin-bottom: 25px;">
+            <a href="#" style="margin: 0 10px; text-decoration: none;"><img src="https://img.icons8.com/ios-filled/24/FFFFFF/facebook-new.png" width="20" height="20" /></a>
+            <a href="#" style="margin: 0 10px; text-decoration: none;"><img src="https://img.icons8.com/ios-filled/24/FFFFFF/instagram-new.png" width="20" height="20" /></a>
+            <a href="#" style="margin: 0 10px; text-decoration: none;"><img src="https://img.icons8.com/ios-filled/24/FFFFFF/whatsapp.png" width="20" height="20" /></a>
+            <a href="#" style="margin: 0 10px; text-decoration: none;"><img src="https://img.icons8.com/ios-filled/24/FFFFFF/marker.png" width="20" height="20" /></a>
+          </div>
+
+          <p style="font-size: 11px; color: #666666;">
+            © 2024 WeMatch Padel. Todos los derechos reservados.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+  return sendMailSmtp(to, subject, html);
+}
+
+export async function sendBookingCancelledByOverrideEmail(
+  to: string,
+  playerName: string,
+  clubName: string,
+  matchDateStr: string,
+  matchTimeStr: string,
+  courtName: string
+): Promise<{ sent: boolean; error?: string }> {
+  const subject = 'Tu partido ha sido cancelado (sin pista disponible) — WeMatch';
+  const html = `
+    <div style="background-color: #000000; color: #FFFFFF; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px 20px; max-width: 600px; margin: 0 auto; line-height: 1.6;">
+      
+      <div style="text-align: center; margin-bottom: 40px;">
+        <img src="https://oxowmfhnorxnabhzkcmi.supabase.co/storage/v1/object/public/public-assets/imagen_2026-04-22_105702379.png" alt="WeMatch" width="120" style="display: block; margin: 0 auto;" />
+      </div>
+
+      <div style="padding: 0 10px;">
+        <p style="font-size: 16px; margin-bottom: 25px;">
+          Hola <span style="color: #F18F34; font-weight: bold;">${escapeHtml(playerName)}</span>,
+        </p>
+
+        <p style="font-size: 16px; margin-bottom: 25px;">
+          Te informamos que lamentablemente tu partido programado en <strong style="color: #FFFFFF;">${escapeHtml(clubName)}</strong> el día <strong>${escapeHtml(matchDateStr)}</strong> a las <strong>${escapeHtml(matchTimeStr)}</strong> en la pista <strong>${escapeHtml(courtName)}</strong> ha sido cancelado debido a que se le ha dado prioridad a una reserva completa y no encontramos pistas libres alternativas disponibles.
+        </p>
+
+        <div style="background-color: #111111; padding: 25px; border-radius: 12px; margin-bottom: 35px; border: 1px solid #222222; text-align: center;">
+          <h4 style="color: #F18F34; font-size: 18px; margin-top: 0; margin-bottom: 10px; text-transform: uppercase;">Reembolso Procesado</h4>
+          <p style="font-size: 15px; color: #FFFFFF; margin: 0;">
+            El importe pagado para tu inscripción en este partido ha sido reembolsado en su totalidad a tu método de pago / billetera.
+          </p>
+        </div>
+
+        <p style="font-size: 16px; font-weight: bold; color: #F18F34; margin-bottom: 50px;">
+          El equipo de WeMatch
+        </p>
+
+        <hr style="border: 0; border-top: 1px solid #333333; margin-bottom: 30px;" />
+
+        <div style="text-align: center;">
+          <p style="font-size: 13px; color: #AAAAAA; margin-bottom: 15px;">
+            <strong>¿Tienes dudas o necesitas ayuda?</strong><br/>
+            Escríbenos a <a href="mailto:soporte@wematch.com" style="color: #F18F34; text-decoration: none;">soporte@wematch.com</a>
+          </p>
+
+          <div style="margin-bottom: 25px;">
+            <a href="#" style="margin: 0 10px; text-decoration: none;"><img src="https://img.icons8.com/ios-filled/24/FFFFFF/facebook-new.png" width="20" height="20" /></a>
+            <a href="#" style="margin: 0 10px; text-decoration: none;"><img src="https://img.icons8.com/ios-filled/24/FFFFFF/instagram-new.png" width="20" height="20" /></a>
+            <a href="#" style="margin: 0 10px; text-decoration: none;"><img src="https://img.icons8.com/ios-filled/24/FFFFFF/whatsapp.png" width="20" height="20" /></a>
+            <a href="#" style="margin: 0 10px; text-decoration: none;"><img src="https://img.icons8.com/ios-filled/24/FFFFFF/marker.png" width="20" height="20" /></a>
+          </div>
+
+          <p style="font-size: 11px; color: #666666;">
+            © 2024 WeMatch Padel. Todos los derechos reservados.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+  return sendMailSmtp(to, subject, html);
+}
+
 

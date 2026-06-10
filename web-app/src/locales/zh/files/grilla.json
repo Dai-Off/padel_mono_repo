@@ -300,5 +300,14 @@
     "reservaPuntaChino": "华人角预订已确认",
     "disponible": "可用",
     "tiempoPasado": "已过时"
+  },
+  "override": {
+    "title": "已安排未完成的比赛",
+    "subtitle": "此操作将优先处理您的预订",
+    "matchInfo": "已登记 {{players}} / 4 名球员",
+    "consequence": "比赛将被移至其他空闲球场。如果没有可用球场，比赛将被取消并自动退款给球员。",
+    "emailNote": "球员将收到电子邮件，供其选择保留或取消预订。",
+    "confirmButton": "确认并移动",
+    "cancelButton": "取消"
   }
 }

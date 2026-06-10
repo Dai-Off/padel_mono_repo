@@ -256,5 +256,14 @@
     "reservaPuntaChino": "PUNTA CHINO booking reserved",
     "disponible": "Available",
     "tiempoPasado": "Past time"
+  },
+  "override": {
+    "title": "Incomplete match scheduled",
+    "subtitle": "This action will prioritize your booking",
+    "matchInfo": "{{players}} of 4 players registered",
+    "consequence": "The match will be moved to another free court. If no court is available, it will be cancelled and players will be refunded automatically.",
+    "emailNote": "Players will receive an email with options to keep or cancel their reservation.",
+    "confirmButton": "Confirm and move",
+    "cancelButton": "Cancel"
   }
 }

@@ -71,6 +71,15 @@ export const es: TranslationKeys = {
         moveLaterSuggestion: 'Mové el turno a las {time} para eliminar el hueco y alinear las reservas de forma consecutiva.',
         alignSuggestion: 'Alineá el turno a las {time} pegado al turno anterior para evitar generar un hueco invendible de 30 minutos.',
     },
+    override: {
+        title: 'Partido incompleto programado',
+        subtitle: 'Esta acción dará prioridad a tu reserva',
+        matchInfo: '{players} de 4 jugadores inscritos',
+        consequence: 'El partido será movido a otra pista libre. Si no hay pista disponible, se cancelará y los jugadores serán reembolsados automáticamente.',
+        emailNote: 'Los jugadores recibirán un correo con las opciones de mantener o cancelar su reserva.',
+        confirmButton: 'Confirmar y mover',
+        cancelButton: 'Cancelar',
+    },
 
     freeSlot: {
         disabled: 'Deshabilitado',

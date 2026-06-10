@@ -15,6 +15,7 @@ import { PreciosView } from './components/Precios/PreciosView';
 import { TarifasView } from './components/Precios/TarifasView';
 import { LearningContentView } from './components/Learning/LearningContentView';
 import { AdminLearningPage } from './components/Admin/Learning/AdminLearningPage';
+import { BookingResponsePage } from './pages/BookingResponsePage';
 import { authService } from './services/auth';
 import { Toaster } from 'sonner';
 import { ErrorBoundary } from './components/Layout/ErrorBoundary';
@@ -71,6 +72,7 @@ function App() {
         <Route path="/registro" element={<ClubRegistration />} />
         <Route path="/registro-club" element={<RegistroClubInvite />} />
         <Route path="/invitacion-equipo" element={<ClubPortalInviteAccept />} />
+        <Route path="/booking-response" element={<BookingResponsePage />} />
 
         <Route
           path="/admin"
