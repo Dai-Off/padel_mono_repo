@@ -76,15 +76,15 @@ eas channel:edit develop --branch develop
 ```bash
 # Main / producción
 npx eas build --platform android --profile production
-npx eas update --branch main --environment production
+npx eas update --branch main --environment production --platform android
 
 # Develop / pruebas internas
 npx eas build --platform android --profile develop
-npx eas update --branch develop --environment preview
+npx eas update --branch develop --environment preview --platform android
 
 # Demo / clientes
 npx eas build --platform android --profile demo
-npx eas update --branch demo --environment preview
+npx eas update --branch demo --environment preview --platform android
 ```
 
 **Notificaciones Slack** (OTA y builds con link al QR en Expo):

@@ -97,6 +97,7 @@ jobs:
           eas update \
             --branch "$EAS_BRANCH" \
             --environment "$EAS_ENVIRONMENT" \
+            --platform android \
             --non-interactive \
             --auto
         env:
