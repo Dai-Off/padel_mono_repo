@@ -1,19 +1,23 @@
-# APK Android con EAS en cada push a main (solo si cambia mobile-app o este workflow)
-# Requiere el secret EXPO_TOKEN: https://expo.dev/accounts/[tu-cuenta]/settings/access-tokens
+# Build nativo Android con EAS (manual o automático desde eas-update si falta APK).
+# Secrets: EXPO_TOKEN (requerido), SLACK_WEBHOOK_URL (avisos Slack)
 
-name: EAS Android (production APK)
+name: EAS Android Build
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'mobile-app/**'
-      - '.github/workflows/eas-android.yml'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Perfil EAS (main→production, develop→develop, demo→demo)'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - develop
+          - demo
 
 concurrency:
-  group: eas-android-${{ github.workflow }}-${{ github.ref }}
+  group: eas-android-${{ github.workflow }}-${{ inputs.profile }}
   cancel-in-progress: true
 
 jobs:
@@ -45,7 +49,22 @@ jobs:
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
 
-      - name: EAS Build (Android production)
-        run: eas build --platform android --profile production --non-interactive
+      - name: EAS Build (Android)
+        id: build
+        run: bash ../.github/scripts/build-android-apk.sh "${{ inputs.profile }}"
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Notify Slack
+        if: success()
+        working-directory: .
+        run: bash .github/scripts/notify-slack-eas.sh build "${{ inputs.profile }}"
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          BRANCH: ${{ inputs.profile }}
+          CHANNEL: ${{ inputs.profile }}
+          ACTOR: ${{ github.actor }}
+          EXPO_URL: ${{ steps.build.outputs.expo_url }}
+          INSTALL_URL: ${{ steps.build.outputs.install_url }}
+          BUILD_PAGE_URL: ${{ steps.build.outputs.build_page_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

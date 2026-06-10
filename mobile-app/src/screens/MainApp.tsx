@@ -22,7 +22,7 @@ import { PrivateReservationModal } from '../components/partido/PrivateReservatio
 import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
 import { ClubDetailScreen } from './ClubDetailScreen';
 import { CompeticionesScreen } from './CompeticionesScreen';
-import { HomeScreen } from './HomeScreen';
+import { HomeScreen, markAffinityModalPendingReopen } from './HomeScreen';
 import type { PartidoItem } from './PartidosScreen';
 import { PartidoDetailScreen } from './PartidoDetailScreen';
 import { PartidoPrivadoDetailScreen } from './PartidoPrivadoDetailScreen';
@@ -121,9 +121,7 @@ export function MainApp() {
   const [showCommunity, setShowCommunity] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [messagesPeer, setMessagesPeer] = useState<MessagePeerNav | null>(null);
-  /** DM abierto directamente desde IA Afinidad — back vuelve al modal de resultados */
-  const [affinityDmPeer, setAffinityDmPeer] = useState<MessagePeerNav | null>(null);
-  /** Incrementar para que HomeScreen reabra el modal de IA Afinidad */
+  /** Incrementar para que HomeScreen reabra el modal de IA Afinidad (p. ej. volver del perfil) */
   const [affinityReopenSignal, setAffinityReopenSignal] = useState(0);
   const [showCompetitiveLeague, setShowCompetitiveLeague] = useState(false);
   const [competitiveLeagueEntryIntent, setCompetitiveLeagueEntryIntent] =
@@ -381,7 +379,6 @@ export function MainApp() {
     selectedPublicCourse != null ||
     showMessages ||
     showCommunity ||
-    !!affinityDmPeer ||
     showPublicProfile ||
     affinityPublicProfileId !== null;
 
@@ -509,14 +506,9 @@ export function MainApp() {
         setMessagesPeer(null);
         return true;
       }
-      // DM abierto desde IA Afinidad → reabre el modal
-      if (affinityDmPeer) {
-        setAffinityDmPeer(null);
-        setAffinityReopenSignal((s) => s + 1);
-        return true;
-      }
       // Perfil público (genérico o desde afinidad)
       if (affinityPublicProfileId) {
+        markAffinityModalPendingReopen();
         setAffinityPublicProfileId(null);
         setShowPublicProfile(false);
         setAffinityReopenSignal((s) => s + 1);
@@ -601,7 +593,6 @@ export function MainApp() {
     showCommunity,
     showMessages,
     messagesPeer,
-    affinityDmPeer,
     affinityPublicProfileId,
     showPublicProfile,
     showCompetitiveLeague,
@@ -783,18 +774,6 @@ export function MainApp() {
         />
       );
     }
-    // DM abierto desde IA Afinidad: back va directo al Home y reabre el modal
-    if (affinityDmPeer) {
-      return (
-        <DirectMessageThreadScreen
-          peer={affinityDmPeer}
-          onBack={() => {
-            setAffinityDmPeer(null);
-            setAffinityReopenSignal((s) => s + 1);
-          }}
-        />
-      );
-    }
     if ((showPublicProfile && selectedPublicPlayerId) || affinityPublicProfileId) {
       const pid = affinityPublicProfileId || selectedPublicPlayerId || '';
       const isFromAffinity = !!affinityPublicProfileId;
@@ -805,6 +784,7 @@ export function MainApp() {
           onBack={() => {
             setShowPublicProfile(false);
             if (isFromAffinity) {
+              markAffinityModalPendingReopen();
               setAffinityPublicProfileId(null);
               setAffinityReopenSignal((s) => s + 1);
             } else {
@@ -813,14 +793,10 @@ export function MainApp() {
           }}
           onChatPress={(chatPid, name) => {
             setShowPublicProfile(false);
-            if (isFromAffinity) {
-              setAffinityPublicProfileId(null);
-              setAffinityDmPeer({ id: chatPid, displayName: name, avatarUrl: null });
-            } else {
-              setSelectedPublicPlayerId(null);
-              setShowMessages(true);
-              setMessagesPeer({ id: chatPid, displayName: name, avatarUrl: null });
-            }
+            setAffinityPublicProfileId(null);
+            setSelectedPublicPlayerId(null);
+            setShowMessages(true);
+            setMessagesPeer({ id: chatPid, displayName: name, avatarUrl: null });
           }}
         />
       );
@@ -835,7 +811,12 @@ export function MainApp() {
           queueStartedAtMs={competitiveQueueStartedAtMs}
           setQueueStartedAtMs={setCompetitiveQueueStartedAtMs}
           matchmakingBannerState={matchmakingHomeBannerState}
-          onMatchmakingBannerStateChange={handleMatchmakingBannerStateChange}
+          onMatchmakingBannerStateChange={(state, options) => {
+            handleMatchmakingBannerStateChange(state, options);
+            if (state === 'hidden' && options?.force) {
+              setCompetitiveLeagueEntryIntent('default');
+            }
+          }}
           onPartidoPress={(p) => {
             setShowCompetitiveLeague(false);
             setSelectedPartido(p);
@@ -948,7 +929,6 @@ export function MainApp() {
               setMessagesPeer(peer);
               setShowMessages(true);
             }}
-            onOpenAffinityThread={(peer) => setAffinityDmPeer(peer)}
             affinityReopenSignal={affinityReopenSignal}
             onAffinityReopened={() => setAffinityReopenSignal(0)}
             onOpenPublicProfile={(pid) => {
@@ -1098,7 +1078,7 @@ export function MainApp() {
   const layoutBackgroundColor =
     bookingSuccessData != null
       ? '#000000'
-      : showMessages || !!affinityDmPeer
+      : showMessages
         ? '#0A0A0A'
         : showEditProfile || showChangePassword || showPreferences || showAjustes || infoScreen || showMonedero || showTuActividad
           ? '#0F0F0F'

@@ -24,10 +24,12 @@ export function PlayerAvatarCircle({
   const fontSize = Math.round(size * (borderRadius != null && borderRadius < size / 2 ? 0.25 : 0.32));
   const uri = normalizePlayerAvatarUrl(avatarUrl);
   const [photoFailed, setPhotoFailed] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const label = (initials || '?').toUpperCase().slice(0, 2);
 
   useEffect(() => {
     setPhotoFailed(false);
+    setLoadAttempt(0);
   }, [uri]);
 
   return (
@@ -48,11 +50,17 @@ export function PlayerAvatarCircle({
       </LinearGradient>
       {uri && !photoFailed ? (
         <Image
-          key={uri}
+          key={`${uri}-${loadAttempt}`}
           source={{ uri }}
           style={[styles.photo, { width: size, height: size, borderRadius: radius }]}
           resizeMode="cover"
-          onError={() => setPhotoFailed(true)}
+          onError={() => {
+            if (loadAttempt < 2) {
+              setTimeout(() => setLoadAttempt((n) => n + 1), 1200);
+            } else {
+              setPhotoFailed(true);
+            }
+          }}
           accessibilityLabel="Foto de perfil"
         />
       ) : null}

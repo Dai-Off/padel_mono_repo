@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Image,
   Platform,
@@ -129,7 +130,14 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
   const color2 = `rgb(${theme.orb2Color})`;
 
   const { datePart, timePart } = splitDateTime(item.dateTime);
-  const uri = item.venueImage ?? pickPlaceholderUri(item.id);
+  const primaryUri = item.venueImage?.trim() || pickPlaceholderUri(item.id);
+  const fallbackUri = pickPlaceholderUri(item.id);
+  const [thumbUri, setThumbUri] = useState(primaryUri);
+
+  useEffect(() => {
+    setThumbUri(item.venueImage?.trim() || pickPlaceholderUri(item.id));
+  }, [item.id, item.venueImage]);
+
   const libres = countFree(item.players);
   const phaseLabel = matchPhaseLabel(item);
   const isPast = (item.matchPhase ?? 'upcoming') === 'past';
@@ -153,7 +161,14 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
       <View style={styles.inner}>
         <View style={styles.row}>
           <View style={styles.thumbWrap}>
-            <Image source={{ uri }} style={styles.thumb} />
+            <Image
+              source={{ uri: thumbUri }}
+              style={styles.thumb}
+              resizeMode="cover"
+              onError={() => {
+                if (thumbUri !== fallbackUri) setThumbUri(fallbackUri);
+              }}
+            />
             <LinearGradient
               colors={["rgba(0,0,0,0.42)", "transparent"]}
               start={{ x: 0, y: 1 }}

@@ -37,6 +37,17 @@ function playerLevelLine(p: { elo_rating: number }): string {
   return formatSkillNumber(p.elo_rating);
 }
 
+function resolveVenueImage(
+  club: { display_image_url?: string | null; logo_url?: string | null } | null | undefined,
+): string | undefined {
+  const resolved =
+    typeof club?.display_image_url === 'string' ? club.display_image_url.trim() : '';
+  if (resolved && /^https?:\/\//i.test(resolved)) return resolved;
+  const logo = typeof club?.logo_url === 'string' ? club.logo_url.trim() : '';
+  if (logo && /^https?:\/\//i.test(logo)) return logo;
+  return undefined;
+}
+
 export function mapMatchToPartido(
   m: MatchEnriched,
   opts?: { viewerPlayerId?: string | null },
@@ -230,6 +241,7 @@ export function mapMatchToPartido(
     courtType,
     courtSport,
     clubId: court?.club_id ?? club?.id,
+    venueImage: resolveVenueImage(club),
     startAt: b.start_at,
     endAt: b.end_at,
     matchGender,

@@ -9,8 +9,23 @@ export type CreatePaymentIntentResponse = {
   clientSecret?: string;
   paymentIntentId?: string;
   amountCents?: number;
+  /** El cobro ya se realizó (webhook/confirm previo); omitir PaymentSheet. */
+  alreadyPaid?: boolean;
+  code?: string;
   error?: string;
 };
+
+export function paymentIntentReadyForSheet(
+  intentRes: CreatePaymentIntentResponse
+): intentRes is CreatePaymentIntentResponse & { clientSecret: string; paymentIntentId: string } {
+  return !!(intentRes.ok && intentRes.clientSecret && intentRes.paymentIntentId);
+}
+
+export function paymentIntentAlreadyPaid(
+  intentRes: CreatePaymentIntentResponse
+): intentRes is CreatePaymentIntentResponse & { paymentIntentId: string } {
+  return !!(intentRes.ok && intentRes.alreadyPaid && intentRes.paymentIntentId);
+}
 
 export async function confirmPaymentFromClient(
   paymentIntentId: string,
@@ -55,7 +70,9 @@ export async function createPaymentIntent(
       body: JSON.stringify(body),
     });
     const json = (await res.json()) as CreatePaymentIntentResponse;
-    if (!res.ok) return { ok: false, error: json.error ?? 'Error al crear el pago' };
+    if (!res.ok) {
+      return { ok: false, error: json.error ?? 'Error al crear el pago', code: json.code };
+    }
     return json;
   } catch {
     return { ok: false, error: 'Error de conexión' };

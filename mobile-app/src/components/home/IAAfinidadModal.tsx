@@ -7,66 +7,41 @@ import { theme } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { sendDirectMessage } from '../../api/messages';
 import { searchPlayers } from '../../api/players';
+import type { PlayerPreferences } from '../../api/players';
+import { AffinityVisibilityToggle } from '../affinity/AffinityVisibilityToggle';
+import { DirectMessageThreadScreen } from '../../screens/DirectMessageThreadScreen';
+import type { MessagePeerNav } from '../../screens/MessagesScreen';
 
 type Option = { id: string; label: string };
-type OptionGroup = {
-  id: 'sport' | 'day' | 'time' | 'style';
-  title: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  options: Option[];
-};
 
-const GROUPS: OptionGroup[] = [
-  {
-    id: 'sport',
-    title: '¿Qué deporte?',
-    icon: 'trophy-outline',
-    options: [
-      { id: 'padel', label: 'Pádel' },
-      { id: 'tenis', label: 'Tenis' },
-      { id: 'pickleball', label: 'Pickleball' },
-    ],
-  },
-  {
-    id: 'day',
-    title: '¿Cuándo quieres jugar?',
-    icon: 'calendar-outline',
-    options: [
-      { id: 'hoy', label: 'Hoy' },
-      { id: 'manana', label: 'Mañana' },
-      { id: 'esta-semana', label: 'Esta semana' },
-      { id: 'fin-semana', label: 'Este fin de semana' },
-    ],
-  },
-  {
-    id: 'time',
-    title: '¿A qué hora?',
-    icon: 'time-outline',
-    options: [
-      { id: 'manana', label: 'Mañana' },
-      { id: 'tarde', label: 'Tarde' },
-      { id: 'noche', label: 'Noche' },
-    ],
-  },
-  {
-    id: 'style',
-    title: 'Estilo de juego',
-    icon: 'locate-outline',
-    options: [
-      { id: 'competitivo', label: 'Competitivo' },
-      { id: 'social', label: 'Social' },
-      { id: 'aprendizaje', label: 'Aprendizaje' },
-      { id: 'cualquiera', label: 'Cualquiera' },
-    ],
-  },
+// Los criterios de afinidad SON las preferencias del jugador: días y franjas
+// (multi-selección) y estilo (selección única). El deporte se fija en pádel.
+const DAY_OPTIONS: Option[] = [
+  { id: 'mon', label: 'Lun' },
+  { id: 'tue', label: 'Mar' },
+  { id: 'wed', label: 'Mié' },
+  { id: 'thu', label: 'Jue' },
+  { id: 'fri', label: 'Vie' },
+  { id: 'sat', label: 'Sáb' },
+  { id: 'sun', label: 'Dom' },
+];
+const SLOT_OPTIONS: Option[] = [
+  { id: 'morning', label: 'Mañana' },
+  { id: 'afternoon', label: 'Tarde' },
+  { id: 'evening', label: 'Noche' },
+  { id: 'night', label: 'Madrugada' },
+];
+const STYLE_OPTIONS: Option[] = [
+  { id: 'competitive', label: 'Competitivo' },
+  { id: 'social', label: 'Social' },
+  { id: 'learning', label: 'Aprendizaje' },
+  { id: 'balanced', label: 'Cualquiera' },
 ];
 
-type Selections = Record<OptionGroup['id'], string>;
-const DEFAULT_SELECTIONS: Selections = {
-  sport: 'padel',
-  day: '',
-  time: '',
-  style: '',
+export type AffinityCriteria = {
+  days: string[];
+  slots: string[];
+  style: string;
 };
 
 type MatchCandidate = {
@@ -226,12 +201,23 @@ function parseCandidatesFromResponse(text: string): MatchCandidate[] {
 
 type IAAfinidadModalProps = {
   visible: boolean;
+  /** Sin fade al reabrir (p. ej. volver del chat de afinidad). */
+  instantShow?: boolean;
   loading: boolean;
   responseText: string | null;
   errorText: string | null;
   onClose: () => void;
-  onSubmit: (prompt: string) => void;
-  onDirectMessageSent?: (target: { id: string; displayName: string; avatarUrl: string | null }) => void;
+  /** Preferencias actuales del jugador; prefilonan el formulario de criterios. */
+  preferences: PlayerPreferences | null;
+  /**
+   * Lanza la búsqueda. Con `persist=true` los criterios editados se guardan
+   * antes como preferencias del jugador.
+   */
+  onRunSearch: (criteria: AffinityCriteria, persist: boolean) => void;
+  /** Visibilidad actual del jugador en las búsquedas de afinidad. */
+  affinityVisible: boolean;
+  /** Activa/desactiva la visibilidad; devuelve true si se guardó correctamente. */
+  onSetVisible: (visible: boolean) => Promise<boolean>;
   sentIds?: Set<string>;
   onSentIdsChange?: (newSet: Set<string>) => void;
   /** Abre el perfil público de un jugador */
@@ -239,30 +225,34 @@ type IAAfinidadModalProps = {
 };
 
 function OptionSection({
-  group,
-  selectedId,
-  onChange,
+  title,
+  icon,
+  options,
+  selectedIds,
+  onToggle,
 }: {
-  group: OptionGroup;
-  selectedId: string;
-  onChange: (id: string) => void;
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  options: Option[];
+  selectedIds: string[];
+  onToggle: (id: string) => void;
 }) {
   return (
     <View style={styles.section}>
       <View style={styles.sectionTitleRow}>
         <View style={styles.sectionIcon}>
-          <Ionicons name={group.icon} size={14} color="#F18F34" />
+          <Ionicons name={icon} size={14} color="#F18F34" />
         </View>
-        <Text style={styles.sectionTitle}>{group.title}</Text>
+        <Text style={styles.sectionTitle}>{title}</Text>
       </View>
       <View style={styles.optionGrid}>
-        {group.options.map((option) => {
-          const selected = selectedId === option.id;
+        {options.map((option) => {
+          const selected = selectedIds.includes(option.id);
           return (
             <Pressable
               key={option.id}
               style={[styles.optionBtn, selected ? styles.optionBtnSelected : styles.optionBtnDefault]}
-              onPress={() => onChange(option.id)}
+              onPress={() => onToggle(option.id)}
             >
               <Text style={[styles.optionText, selected ? styles.optionTextSelected : styles.optionTextDefault]}>
                 {option.label}
@@ -377,12 +367,15 @@ function CandidateCard({
 
 export function IAAfinidadModal({
   visible,
+  instantShow = false,
   loading,
   responseText,
   errorText,
   onClose,
-  onSubmit,
-  onDirectMessageSent,
+  preferences,
+  onRunSearch,
+  affinityVisible,
+  onSetVisible,
   sentIds = new Set(),
   onSentIdsChange,
   onPlayerPress,
@@ -390,24 +383,139 @@ export function IAAfinidadModal({
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const token = session?.access_token ?? null;
-  const [selections, setSelections] = useState<Selections>(DEFAULT_SELECTIONS);
 
-  const completedSteps = useMemo(
-    () => Object.values(selections).filter((value) => value.length > 0).length,
-    [selections]
-  );
-  const progressPercent = Math.round((completedSteps / GROUPS.length) * 100);
-  const isFormComplete = completedSteps === GROUPS.length;
-  const [showResults, setShowResults] = useState(false);
+  const prefDays = preferences?.preferredDays ?? [];
+  const prefSlots = preferences?.preferredScheduleSlots ?? [];
+  const prefStyle = preferences?.preferredPlayStyle ?? 'balanced';
+  /** Hay datos suficientes para buscar directamente sin pedir nada. */
+  const prefsComplete = prefDays.length > 0 && prefSlots.length > 0;
+
+  const [criteria, setCriteria] = useState<AffinityCriteria>(() => ({
+    days: prefDays,
+    slots: prefSlots,
+    style: prefStyle,
+  }));
+  /** El usuario está en el formulario de criterios (primera vez o editando). */
+  const [showForm, setShowForm] = useState(false);
+  /** Evita relanzar la auto-búsqueda más de una vez por apertura. */
+  const autoSearchedRef = useRef(false);
+
+  const completedSteps =
+    (criteria.days.length > 0 ? 1 : 0) +
+    (criteria.slots.length > 0 ? 1 : 0) +
+    (criteria.style ? 1 : 0);
+  const progressPercent = Math.round((completedSteps / 3) * 100);
+  const isFormComplete = criteria.days.length > 0 && criteria.slots.length > 0 && !!criteria.style;
+
   const [sendingCandidateId, setSendingCandidateId] = useState<string | null>(null);
-  
+  /** Hilo de chat dentro del mismo modal (sin cerrar → sin flash del home). */
+  const [chatPeer, setChatPeer] = useState<MessagePeerNav | null>(null);
+
   // Sincronizar con props para persistencia
   const [sentCandidateIds, setSentCandidateIds] = useState<Set<string>>(sentIds);
   useEffect(() => {
     setSentCandidateIds(sentIds);
   }, [sentIds]);
 
-  const isFormView = !loading && !showResults;
+  /** Guardando el cambio de visibilidad (gate de consentimiento). */
+  const [settingVisible, setSettingVisible] = useState(false);
+  /** Fuerza el gate aunque haya resultados: el usuario intentó buscar sin visibilidad. */
+  const [forceConsent, setForceConsent] = useState(false);
+  /** Búsqueda que quedó pendiente por falta de visibilidad; se lanza al activarla. */
+  const [pendingCriteria, setPendingCriteria] = useState<AffinityCriteria | null>(null);
+
+  // Vistas mutuamente excluyentes del cuerpo del modal:
+  //  - gate de visibilidad: sin visibilidad activa no se puede buscar
+  //  - formulario: editando, o primera vez sin preferencias completas
+  //  - auto-búsqueda en curso: prefs completas, sin resultados aún
+  //  - resultados: hay respuesta de la IA
+  const hasResults = !!responseText;
+  // El gate se muestra mientras no haya visibilidad y: no haya resultados en
+  // pantalla (no bloqueamos ver lo ya buscado), o el usuario haya intentado
+  // buscar de nuevo estando invisible (forceConsent).
+  const needsConsent = !affinityVisible && (!hasResults || forceConsent);
+  // Formulario si: el usuario edita, faltan preferencias, o una búsqueda falló
+  // (errorText) sin resultados — así no se queda el loader colgado.
+  const showFormView =
+    !needsConsent && (showForm || (!hasResults && (!prefsComplete || !!errorText)));
+  // Pantalla previa "Buscar jugadores": visibilidad activa y preferencias
+  // completas, pero aún no se ha buscado. NO se busca solo al entrar (evita
+  // gastar tokens por entradas accidentales y permite ajustar antes de buscar).
+  const showPreSearch = !loading && !needsConsent && !showFormView && !hasResults;
+  const isFormView = !loading && showFormView;
+
+  /** Resumen legible de las preferencias con las que se buscará. */
+  const labelList = (opts: Option[], ids: string[]) =>
+    ids.map((id) => opts.find((o) => o.id === id)?.label ?? id);
+  const preSearchSummary = [
+    labelList(DAY_OPTIONS, prefDays).join(', '),
+    labelList(SLOT_OPTIONS, prefSlots).join(', '),
+    STYLE_OPTIONS.find((o) => o.id === prefStyle)?.label,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  /** Lanza la búsqueda con las preferencias actuales (acción explícita del botón). */
+  const handleSearch = () => {
+    onRunSearch({ days: prefDays, slots: prefSlots, style: prefStyle }, false);
+  };
+
+  const handleActivateVisibility = async () => {
+    if (settingVisible) return;
+    setSettingVisible(true);
+    const ok = await onSetVisible(true);
+    setSettingVisible(false);
+    if (!ok) return;
+    setForceConsent(false);
+    if (pendingCriteria) {
+      // Veníamos de un intento de búsqueda con el formulario estando invisible:
+      // lanzamos esa misma búsqueda ahora que ya somos visibles.
+      autoSearchedRef.current = true;
+      onRunSearch(pendingCriteria, true);
+      setPendingCriteria(null);
+    }
+    // Si no había pendiente, al volverse affinityVisible=true se muestra la
+    // pantalla previa "Buscar jugadores" (o el formulario si faltan preferencias).
+  };
+
+  /** Cambia la visibilidad desde el toggle del modal (vista de resultados). */
+  const handleVisibilityChange = async (next: boolean): Promise<boolean> => {
+    if (settingVisible) return affinityVisible;
+    setSettingVisible(true);
+    const ok = await onSetVisible(next);
+    setSettingVisible(false);
+    return ok;
+  };
+
+  const toggleDay = (id: string) =>
+    setCriteria((p) => ({
+      ...p,
+      days: p.days.includes(id) ? p.days.filter((d) => d !== id) : [...p.days, id],
+    }));
+  const toggleSlot = (id: string) =>
+    setCriteria((p) => ({
+      ...p,
+      slots: p.slots.includes(id) ? p.slots.filter((s) => s !== id) : [...p.slots, id],
+    }));
+  const setStyle = (id: string) => setCriteria((p) => ({ ...p, style: id }));
+
+  const handleSubmitForm = () => {
+    if (!isFormComplete) return;
+    setShowForm(false);
+    const empty = new Set<string>();
+    setSentCandidateIds(empty);
+    onSentIdsChange?.(empty);
+    if (!affinityVisible) {
+      // No se puede buscar sin visibilidad: guardamos la intención y mostramos
+      // el gate; al activar la visibilidad se lanza esta misma búsqueda.
+      setPendingCriteria(criteria);
+      setForceConsent(true);
+      return;
+    }
+    autoSearchedRef.current = true; // ya hemos lanzado búsqueda en esta apertura
+    onRunSearch(criteria, true); // persistir criterios editados como preferencias
+  };
+
   const parsedCandidates = useMemo(
     () => (responseText ? parseCandidatesFromResponse(responseText) : []),
     [responseText]
@@ -449,8 +557,7 @@ export function IAAfinidadModal({
       const newSet = new Set([...sentCandidateIds, candidate.id]);
       setSentCandidateIds(newSet);
       onSentIdsChange?.(newSet);
-      // Abrir el hilo de chat (el usuario puede darle back y volver a los resultados)
-      onDirectMessageSent?.({
+      setChatPeer({
         id: exact.id,
         displayName: targetName,
         avatarUrl: null,
@@ -578,46 +685,49 @@ export function IAAfinidadModal({
     };
   }, [loading, dotA, dotB, dotC, ringA, ringB, ringC, spark, spin]);
 
+  // Al abrir: sincronizar los criterios con las preferencias actuales y salir
+  // del modo formulario. Al cerrar: rearmar la auto-búsqueda para la próxima vez.
   useEffect(() => {
-    if (loading) {
-      setShowResults(false);
+    if (!visible) {
+      autoSearchedRef.current = false;
+      setShowForm(false);
+      setForceConsent(false);
+      setPendingCriteria(null);
+      setChatPeer(null);
       return;
     }
-    if (responseText) {
-      setShowResults(true);
-    }
-  }, [loading, responseText]);
+    setCriteria({ days: prefDays, slots: prefSlots, style: prefStyle });
+    setShowForm(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
-  useEffect(() => {
-    if (!visible) return;
-    // Si hay resultados previos (ej. al volver del chat), mostrarlos directamente
-    // sin resetear el formulario ni los candidatos ya enviados
-    if (responseText) {
-      setShowResults(true);
+  // No se busca automáticamente al entrar: con preferencias completas se muestra
+  // la pantalla previa con el botón "Buscar jugadores" (ver showPreSearch). Así
+  // no se gastan tokens por entradas accidentales y se puede ajustar antes.
+
+  const handleRequestClose = () => {
+    if (chatPeer) {
+      setChatPeer(null);
       return;
     }
-    // Primera apertura o después de buscar nuevamente
-    setSelections(DEFAULT_SELECTIONS);
-    setShowResults(false);
-    setSentCandidateIds(new Set());
-  }, [visible, responseText]);
-
-  const prompt = useMemo(() => {
-    const getLabel = (groupId: OptionGroup['id'], selectedId: string): string => {
-      const group = GROUPS.find((g) => g.id === groupId);
-      return group?.options.find((o) => o.id === selectedId)?.label ?? '';
-    };
-
-    const sport = getLabel('sport', selections.sport);
-    const day = getLabel('day', selections.day);
-    const time = getLabel('time', selections.time);
-    const style = getLabel('style', selections.style);
-
-    return `Quiero buscar un compañero para jugar ${sport}. Disponibilidad: ${day} por la ${time}. Estilo preferido: ${style}. Dame los mejores jugadores compatibles.`;
-  }, [selections]);
+    onClose();
+  };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={visible}
+      transparent={!chatPeer}
+      animationType={instantShow ? 'none' : 'fade'}
+      onRequestClose={handleRequestClose}
+      statusBarTranslucent
+    >
+      {chatPeer ? (
+        <DirectMessageThreadScreen
+          peer={chatPeer}
+          standalone
+          onBack={() => setChatPeer(null)}
+        />
+      ) : (
       <View style={styles.overlay}>
         <Pressable style={styles.backdrop} onPress={onClose} />
         <View style={[styles.sheet, { paddingTop: Math.max(insets.top, 10), paddingBottom: Math.max(insets.bottom, 8) }]}>
@@ -646,7 +756,15 @@ export function IAAfinidadModal({
                 <View>
                   <Text style={styles.headerTitle}>Buscar Compañero con IA</Text>
                   <Text style={styles.headerSubtitle}>
-                    {loading ? 'Buscando...' : isFormView ? `${completedSteps}/4 seleccionados` : 'Resultados IA'}
+                    {loading
+                      ? 'Buscando...'
+                      : needsConsent
+                        ? 'Activa tu visibilidad'
+                        : isFormView
+                          ? 'Define tus preferencias'
+                          : showPreSearch
+                            ? 'Listo para buscar'
+                            : 'Resultados IA'}
                   </Text>
                 </View>
               </View>
@@ -766,7 +884,110 @@ export function IAAfinidadModal({
                   ))}
                 </View>
               </View>
-            ) : showResults ? (
+            ) : needsConsent ? (
+              <View style={styles.gateWrap}>
+                <View style={styles.gateIcon}>
+                  <Ionicons name="people" size={36} color="#F18F34" />
+                </View>
+                <Text style={styles.gateTitle}>Activa tu visibilidad</Text>
+                <Text style={styles.gateText}>
+                  Para encontrar compañeros con la IA de afinidad, también serás
+                  visible para otros jugadores que busquen compañero. Puedes
+                  desactivarlo cuando quieras desde tus preferencias.
+                </Text>
+                <Pressable
+                  style={[styles.gateBtn, settingVisible && styles.gateBtnDisabled]}
+                  onPress={() => void handleActivateVisibility()}
+                  disabled={settingVisible}
+                >
+                  <Ionicons name="sparkles" size={18} color="#fff" />
+                  <Text style={styles.gateBtnText}>
+                    {settingVisible ? 'Activando…' : 'Activar'}
+                  </Text>
+                </Pressable>
+                {!!errorText && (
+                  <View style={styles.errorCard}>
+                    <Text style={styles.errorText}>{errorText}</Text>
+                  </View>
+                )}
+              </View>
+            ) : showFormView ? (
+              <>
+                <OptionSection
+                  title="¿Qué días te viene bien?"
+                  icon="calendar-outline"
+                  options={DAY_OPTIONS}
+                  selectedIds={criteria.days}
+                  onToggle={toggleDay}
+                />
+                <OptionSection
+                  title="¿En qué franjas?"
+                  icon="time-outline"
+                  options={SLOT_OPTIONS}
+                  selectedIds={criteria.slots}
+                  onToggle={toggleSlot}
+                />
+                <OptionSection
+                  title="Estilo de juego"
+                  icon="locate-outline"
+                  options={STYLE_OPTIONS}
+                  selectedIds={[criteria.style]}
+                  onToggle={setStyle}
+                />
+
+                <Text style={styles.formHint}>
+                  Estas preferencias se guardan en tu perfil y se usan para
+                  encontrar jugadores compatibles.
+                </Text>
+
+                <Pressable
+                  style={[
+                    styles.submitBtn,
+                    (loading || !isFormComplete) && styles.submitBtnDisabled,
+                  ]}
+                  onPress={handleSubmitForm}
+                  disabled={loading || !isFormComplete}
+                >
+                  <Ionicons
+                    name="flash"
+                    size={22}
+                    color={loading || !isFormComplete ? '#6b7280' : '#fff'}
+                  />
+                  <Text
+                    style={[
+                      styles.submitText,
+                      (loading || !isFormComplete) && styles.submitTextDisabled,
+                    ]}
+                  >
+                    Buscar Compañero
+                  </Text>
+                </Pressable>
+
+                {!!errorText && (
+                  <View style={styles.errorCard}>
+                    <Text style={styles.errorText}>{errorText}</Text>
+                  </View>
+                )}
+              </>
+            ) : showPreSearch ? (
+              <View style={styles.gateWrap}>
+                <View style={styles.gateIcon}>
+                  <Ionicons name="sparkles" size={36} color="#F18F34" />
+                </View>
+                <Text style={styles.gateTitle}>Buscar compañeros</Text>
+                <Text style={styles.gateText}>
+                  Buscaremos según tus preferencias{preSearchSummary ? `: ${preSearchSummary}` : ''}.
+                </Text>
+                <Pressable style={styles.gateBtn} onPress={handleSearch}>
+                  <Ionicons name="flash" size={18} color="#fff" />
+                  <Text style={styles.gateBtnText}>Buscar jugadores</Text>
+                </Pressable>
+                <Pressable style={styles.searchAgainBtn} onPress={() => setShowForm(true)}>
+                  <Ionicons name="options-outline" size={18} color="#d1d5db" />
+                  <Text style={styles.searchAgainText}>Editar preferencias</Text>
+                </Pressable>
+              </View>
+            ) : (
               <>
                 <View style={styles.resultHead}>
                   <View style={styles.resultIconWrap}>
@@ -776,7 +997,7 @@ export function IAAfinidadModal({
                     {parsedCandidates.length > 0 ? `${parsedCandidates.length} compañeros encontrados!` : 'No se encontraron compañeros'}
                   </Text>
                   <Text style={styles.resultSubtitle}>
-                    {parsedCandidates.length > 0 ? 'Compañeros perfectos para ti' : 'Prueba ajustando filtros para ampliar opciones.'}
+                    {parsedCandidates.length > 0 ? 'Compañeros perfectos para ti' : 'Prueba ajustando tus preferencias para ampliar opciones.'}
                   </Text>
                 </View>
 
@@ -801,64 +1022,27 @@ export function IAAfinidadModal({
                   )}
                 </View>
 
+                <View style={styles.resultsVisibility}>
+                  <AffinityVisibilityToggle
+                    value={affinityVisible}
+                    onChange={handleVisibilityChange}
+                    disabled={settingVisible}
+                  />
+                </View>
+
                 <Pressable
                   style={styles.searchAgainBtn}
-                  onPress={() => {
-                    setSelections(DEFAULT_SELECTIONS);
-                    setShowResults(false);
-                    const empty = new Set<string>();
-                    setSentCandidateIds(empty);
-                    onSentIdsChange?.(empty);
-                  }}
+                  onPress={() => setShowForm(true)}
                 >
-                  <Ionicons name="sparkles" size={18} color="#d1d5db" />
-                  <Text style={styles.searchAgainText}>Buscar Nuevamente</Text>
+                  <Ionicons name="options-outline" size={18} color="#d1d5db" />
+                  <Text style={styles.searchAgainText}>Editar preferencias</Text>
                 </Pressable>
-              </>
-            ) : (
-              <>
-                {GROUPS.map((group) => (
-                  <OptionSection
-                    key={group.id}
-                    group={group}
-                    selectedId={selections[group.id]}
-                    onChange={(id) => setSelections((prev) => ({ ...prev, [group.id]: id }))}
-                  />
-                ))}
-
-                <Pressable
-                  style={[
-                    styles.submitBtn,
-                    (loading || !isFormComplete) && styles.submitBtnDisabled,
-                  ]}
-                  onPress={() => onSubmit(prompt)}
-                  disabled={loading || !isFormComplete}
-                >
-                  <Ionicons
-                    name="flash"
-                    size={22}
-                    color={loading || !isFormComplete ? '#6b7280' : '#fff'}
-                  />
-                  <Text
-                    style={[
-                      styles.submitText,
-                      (loading || !isFormComplete) && styles.submitTextDisabled,
-                    ]}
-                  >
-                    Buscar Compañero
-                  </Text>
-                </Pressable>
-
-                {!!errorText && (
-                  <View style={styles.errorCard}>
-                    <Text style={styles.errorText}>{errorText}</Text>
-                  </View>
-                )}
               </>
             )}
           </ScrollView>
         </View>
       </View>
+      )}
     </Modal>
   );
 }
@@ -1026,6 +1210,65 @@ const styles = StyleSheet.create({
   },
   optionTextDefault: {
     color: '#9ca3af',
+  },
+  formHint: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#6b7280',
+    fontWeight: '500',
+    paddingHorizontal: 2,
+  },
+  gateWrap: {
+    minHeight: 420,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 8,
+    gap: 14,
+  },
+  gateIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(241,143,52,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.2)',
+  },
+  gateTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  gateText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: '#9ca3af',
+    textAlign: 'center',
+    maxWidth: 320,
+  },
+  gateBtn: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    backgroundColor: 'rgba(241,143,52,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(241,143,52,0.32)',
+  },
+  gateBtnDisabled: {
+    opacity: 0.6,
+  },
+  gateBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   submitBtn: {
     marginTop: 4,
@@ -1307,13 +1550,17 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
-  searchAgainBtn: {
+  resultsVisibility: {
     marginTop: 14,
+  },
+  searchAgainBtn: {
+    marginTop: 12,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
     backgroundColor: 'rgba(255,255,255,0.06)',
     paddingVertical: 12,
+    paddingHorizontal: 24,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

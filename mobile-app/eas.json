@@ -13,6 +13,11 @@
       "channel": "demo",
       "environment": "preview"
     },
+    "develop": {
+      "extends": "preview",
+      "channel": "develop",
+      "environment": "preview"
+    },
     "preview": {
       "android": {
         "buildType": "apk"

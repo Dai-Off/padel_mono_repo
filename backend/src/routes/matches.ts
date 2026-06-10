@@ -13,6 +13,7 @@ import {
   resolveClubIdForBooking,
 } from '../services/paymentRefundService';
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
+import { enrichMatchRowsWithClubImages } from '../lib/clubLogoUrl';
 import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
@@ -28,7 +29,7 @@ const router = Router();
 const SELECT_LIST =
   'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team';
 const SELECT_ONE =
-  'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_confirmed_at';
+  'id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_confirmed_at, score_proposer_id';
 
 /** Supabase expand devuelve relaciones 1:1 a veces como array; aplanamos para clientes. */
 function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?: unknown }>(row: T): T {
@@ -46,13 +47,13 @@ function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?
 }
 
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
-  return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team,
+  return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_proposer_id,
           ${bookingRel} (
             id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type,
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city)
+              clubs (id, name, address, city, logo_url, photo_urls)
             )
           ),
           match_players (
@@ -68,7 +69,7 @@ function expandSelectDiscovery(): string {
             id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city)
+              clubs (id, name, address, city, logo_url, photo_urls)
             )
           ),
           match_players (
@@ -197,8 +198,10 @@ router.get('/', async (req: Request, res: Response) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
           return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
         });
+        await enrichMatchRowsWithClubImages(supabase, filtered);
         return res.json({ ok: true, matches: filtered });
       }
+      await enrichMatchRowsWithClubImages(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -238,6 +241,7 @@ router.get('/', async (req: Request, res: Response) => {
         if (joinable_only && !isJoinableDiscoveryRow(row)) return false;
         return true;
       });
+      await enrichMatchRowsWithClubImages(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -272,8 +276,10 @@ router.get('/', async (req: Request, res: Response) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
           return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
         });
+        await enrichMatchRowsWithClubImages(supabase, filtered);
         return res.json({ ok: true, matches: filtered });
       }
+      await enrichMatchRowsWithClubImages(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -490,12 +496,33 @@ router.get('/:id', async (req: Request, res: Response) => {
           .maybeSingle();
         hasMyFeedback = !!fbRow;
       }
+      let myScoreVote: string | null = null;
+      const scoreVoteCounts = { confirm: 0, reject: 0 };
+      const { data: votesData } = await supabase
+        .from('score_votes')
+        .select('player_id, vote')
+        .eq('match_id', id);
+      if (votesData) {
+        for (const v of votesData) {
+          if (v.vote === 'confirm') scoreVoteCounts.confirm++;
+          else if (v.vote === 'reject') scoreVoteCounts.reject++;
+          if (viewerId && v.player_id === viewerId) {
+            myScoreVote = v.vote;
+          }
+        }
+      }
       const flattened = flattenMatchRowForClient(
         out as { bookings?: unknown; match_players?: unknown },
       );
+      await enrichMatchRowsWithClubImages(supabase, [flattened]);
       return res.json({
         ok: true,
-        match: { ...flattened, has_my_feedback: hasMyFeedback },
+        match: {
+          ...flattened,
+          has_my_feedback: hasMyFeedback,
+          my_score_vote: myScoreVote,
+          score_vote_counts: scoreVoteCounts,
+        },
       });
     }
     const { data, error } = await supabase
@@ -505,7 +532,30 @@ router.get('/:id', async (req: Request, res: Response) => {
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
     if (!data) return res.status(404).json({ ok: false, error: 'Match not found' });
-    return res.json({ ok: true, match: data });
+    let myScoreVote: string | null = null;
+    const scoreVoteCounts = { confirm: 0, reject: 0 };
+    const { playerId: viewerId } = await getPlayerIdFromBearer(req);
+    const { data: votesData } = await supabase
+      .from('score_votes')
+      .select('player_id, vote')
+      .eq('match_id', id);
+    if (votesData) {
+      for (const v of votesData) {
+        if (v.vote === 'confirm') scoreVoteCounts.confirm++;
+        else if (v.vote === 'reject') scoreVoteCounts.reject++;
+        if (viewerId && v.player_id === viewerId) {
+          myScoreVote = v.vote;
+        }
+      }
+    }
+    return res.json({
+      ok: true,
+      match: {
+        ...data,
+        my_score_vote: myScoreVote,
+        score_vote_counts: scoreVoteCounts,
+      },
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

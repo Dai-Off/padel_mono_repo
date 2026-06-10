@@ -17,7 +17,10 @@ import {
   STRIPE_META_SEASON_PASS_ELITE,
 } from '../services/seasonPassService';
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
-import { insertGuestMatchPlayerAfterPayment } from '../services/matchPlayerSlotService';
+import {
+  insertGuestMatchPlayerAfterPayment,
+  tryRepairPaidGuestMissingFromMatch,
+} from '../services/matchPlayerSlotService';
 import { sendMatchJoinConfirmationEmail } from '../lib/mailer';
 import { zonedTimeToUtc } from './learningTimezone';
 import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
@@ -136,6 +139,60 @@ const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
 function getStripe(): Stripe {
   if (!stripeSecretKey) throw new Error('STRIPE_SECRET_KEY no configurada');
   return new Stripe(stripeSecretKey);
+}
+
+const REUSABLE_PI_STATUSES = new Set([
+  'requires_payment_method',
+  'requires_confirmation',
+  'requires_action',
+]);
+
+/** Reutiliza un PaymentIntent abierto o detecta uno ya cobrado (evita 409 y PIs huérfanos). */
+async function resolveReusablePaymentIntent(
+  stripe: Stripe,
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  bookingId: string,
+  payerPlayerId: string,
+  amountCents: number,
+): Promise<
+  | { kind: 'reuse'; clientSecret: string; paymentIntentId: string }
+  | { kind: 'already_paid'; paymentIntentId: string }
+  | { kind: 'create_new' }
+> {
+  const { data: openTxs } = await supabase
+    .from('payment_transactions')
+    .select('stripe_payment_intent_id, status')
+    .eq('booking_id', bookingId)
+    .eq('payer_player_id', payerPlayerId)
+    .in('status', ['requires_action', 'processing', 'succeeded'])
+    .order('created_at', { ascending: false })
+    .limit(5);
+
+  for (const tx of openTxs ?? []) {
+    const piId = String(tx.stripe_payment_intent_id ?? '');
+    if (!piId) continue;
+    try {
+      const pi = await stripe.paymentIntents.retrieve(piId);
+      if (pi.status === 'succeeded') {
+        return { kind: 'already_paid', paymentIntentId: pi.id };
+      }
+      if (
+        tx.status === 'requires_action' &&
+        REUSABLE_PI_STATUSES.has(pi.status) &&
+        pi.client_secret &&
+        Number(pi.amount) === amountCents
+      ) {
+        return {
+          kind: 'reuse',
+          clientSecret: pi.client_secret,
+          paymentIntentId: pi.id,
+        };
+      }
+    } catch (err) {
+      console.warn('[payments] resolveReusablePaymentIntent skip PI', piId, err);
+    }
+  }
+  return { kind: 'create_new' };
 }
 
 /**
@@ -689,8 +746,23 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
         res.status(404).json({ ok: false, error: 'Participante no encontrado' });
         return;
       }
+      amountCents = Number(participant.share_amount_cents ?? amountCents);
       if (participant.payment_status === 'paid') {
-        res.status(400).json({ ok: false, error: 'Ya has pagado tu parte' });
+        const { data: paidTx } = await supabase
+          .from('payment_transactions')
+          .select('stripe_payment_intent_id')
+          .eq('booking_id', booking_id)
+          .eq('payer_player_id', player.id)
+          .eq('status', 'succeeded')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        res.json({
+          ok: true,
+          alreadyPaid: true,
+          paymentIntentId: paidTx?.stripe_payment_intent_id ?? undefined,
+          amountCents,
+        });
         return;
       }
       if (player.id !== participant.player_id) {
@@ -702,7 +774,6 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
         res.status(400).json({ ok: false, error: 'La reserva no está pendiente de pago' });
         return;
       }
-      amountCents = Number(participant.share_amount_cents ?? amountCents);
     } else {
       if (typeof slot_index !== 'number' || slot_index < 0 || slot_index > 3) {
         res.status(400).json({ ok: false, error: 'slot_index (0-3) es obligatorio para reservar plaza' });
@@ -724,7 +795,7 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
         .eq('player_id', player.id)
         .maybeSingle();
       if (inMatch) {
-        res.status(409).json({ ok: false, error: 'Ya estás en este partido' });
+        res.status(409).json({ ok: false, code: 'already_in_match', error: 'Ya estás en este partido' });
         return;
       }
       const { data: takenSlots } = await supabase
@@ -733,7 +804,7 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
         .eq('match_id', match.id);
       const slotTaken = (takenSlots ?? []).some((row) => Number(row.slot_index) === Number(slot_index));
       if (slotTaken) {
-        res.status(409).json({ ok: false, error: 'Esa plaza ya está ocupada' });
+        res.status(409).json({ ok: false, code: 'slot_taken', error: 'Esa plaza ya está ocupada' });
         return;
       }
       const { data: existingBookingParticipant } = await supabase
@@ -742,6 +813,25 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
         .eq('booking_id', booking_id)
         .eq('player_id', player.id)
         .maybeSingle();
+      if (existingBookingParticipant?.payment_status === 'paid') {
+        await tryRepairPaidGuestMissingFromMatch(supabase, match.id, booking_id, player.id);
+        const { data: paidTx } = await supabase
+          .from('payment_transactions')
+          .select('stripe_payment_intent_id')
+          .eq('booking_id', booking_id)
+          .eq('payer_player_id', player.id)
+          .eq('status', 'succeeded')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        res.json({
+          ok: true,
+          alreadyPaid: true,
+          paymentIntentId: paidTx?.stripe_payment_intent_id ?? undefined,
+          amountCents,
+        });
+        return;
+      }
       if (existingBookingParticipant && existingBookingParticipant.payment_status !== 'pending') {
         res.status(409).json({ ok: false, error: 'Ya tienes una plaza reservada en este partido' });
         return;
@@ -754,6 +844,47 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
     }
 
     const stripe = getStripe();
+    const resolved = await resolveReusablePaymentIntent(
+      stripe,
+      supabase,
+      booking_id,
+      player.id,
+      amountCents,
+    );
+    if (resolved.kind === 'already_paid') {
+      if (!participant_id && typeof slot_index === 'number') {
+        const { data: matchForRepair } = await supabase
+          .from('matches')
+          .select('id')
+          .eq('booking_id', booking_id)
+          .maybeSingle();
+        if (matchForRepair?.id) {
+          await tryRepairPaidGuestMissingFromMatch(
+            supabase,
+            matchForRepair.id,
+            booking_id,
+            player.id,
+          );
+        }
+      }
+      res.json({
+        ok: true,
+        alreadyPaid: true,
+        paymentIntentId: resolved.paymentIntentId,
+        amountCents,
+      });
+      return;
+    }
+    if (resolved.kind === 'reuse') {
+      res.json({
+        ok: true,
+        clientSecret: resolved.clientSecret,
+        paymentIntentId: resolved.paymentIntentId,
+        amountCents,
+      });
+      return;
+    }
+
     const metadata: Record<string, string> = {
       booking_id,
       payer_player_id: player.id,
@@ -785,7 +916,7 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
 
     const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
 
-    await supabase.from('payment_transactions').insert({
+    const { error: txInsertErr } = await supabase.from('payment_transactions').insert({
       booking_id,
       payer_player_id: player.id,
       amount_cents: amountCents,
@@ -793,6 +924,9 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       stripe_payment_intent_id: paymentIntent.id,
       status: 'requires_action',
     });
+    if (txInsertErr) {
+      console.error('[payments/create-intent] payment_transactions insert:', txInsertErr);
+    }
 
     res.json({
       ok: true,

@@ -11,12 +11,15 @@ export type Match = {
   gender: string | null;
   competitive: boolean;
   status: string;
-  score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | null;
+  score_status?: 'pending' | 'confirmed' | 'disputed' | 'pending_confirmation' | 'pending_votes' | 'no_result' | null;
   sets?: Array<{ a: number; b: number }> | null;
   match_end_reason?: string | null;
   type?: string | null;
   /** Solo en /matches/mine: indica si el jugador autenticado ya envió feedback. */
   has_my_feedback?: boolean;
+  score_proposer_id?: string | null;
+  my_score_vote?: 'confirm' | 'reject' | null;
+  score_vote_counts?: { confirm: number; reject: number } | null;
 };
 
 type PlayerRef = {
@@ -54,7 +57,15 @@ export type MatchBookingExpanded = {
     indoor?: boolean;
     glass_type?: string;
     sport?: string | null;
-    clubs?: { id: string; name: string; address: string; city: string } | null;
+    clubs?: {
+      id: string;
+      name: string;
+      address: string;
+      city: string;
+      logo_url?: string | null;
+      photo_urls?: unknown;
+      display_image_url?: string | null;
+    } | null;
   } | null;
 };
 
@@ -365,6 +376,31 @@ export async function submitMatchScore(
     return { ok: false, error: json.error ?? 'No se pudo guardar el marcador', status: res.status };
   } catch {
     return { ok: false, error: 'Error de conexión', status: 0 };
+  }
+}
+
+export async function voteMatchScore(
+  matchId: string,
+  vote: 'confirm' | 'reject',
+  token: string | null | undefined
+): Promise<{ ok: true; score_status: string; votes: { confirm: number; reject: number } } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/matches/${matchId}/score/vote`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ vote }),
+    });
+    const json = await res.json();
+    if (res.ok && json.ok) {
+      return { ok: true, score_status: json.score_status, votes: json.votes };
+    }
+    return { ok: false, error: json.error ?? 'No se pudo registrar el voto' };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
   }
 }
 
