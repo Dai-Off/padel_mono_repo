@@ -6,16 +6,18 @@ import { moderateImage } from '../services/communityModerationService';
 
 const router = Router();
 
-// Configuración de Multer: en memoria, máx 10 fotos, 5MB cada una
+// Configuración de Multer: en memoria. Acepta imágenes y vídeos (Clips).
+// Límite alto para permitir vídeos de hasta ~60s.
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/quicktime'];
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100 MB
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (allowed.includes(file.mimetype)) {
+    if (ALLOWED_IMAGE_TYPES.includes(file.mimetype) || ALLOWED_VIDEO_TYPES.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Solo se permiten imágenes JPEG, PNG o WebP'));
+      cb(new Error('Formato no permitido. Usa imágenes (JPEG, PNG, WebP) o vídeos (MP4, MOV).'));
     }
   },
 });
@@ -39,7 +41,7 @@ router.get('/feed', async (req: Request, res: Response) => {
       .select(`
         *,
         player:players(id, first_name, last_name, username, avatar_url),
-        images:community_post_images(id, image_url, display_order)
+        images:community_post_content(id, media_url, display_order, media_type, thumbnail_url)
       `)
       .eq('status', 'published')
       .eq('post_type', 'post')
@@ -89,6 +91,154 @@ router.get('/feed', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /community/reels
+ * Listado de Clips (vídeos) para el grid.
+ */
+router.get('/reels', async (req: Request, res: Response) => {
+  const { playerId } = await getPlayerIdFromBearer(req);
+  const cursor = req.query.cursor as string | undefined;
+  const limit = 18;
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+
+    let query = supabase
+      .from('community_posts')
+      .select(`
+        *,
+        player:players(id, first_name, last_name, username, avatar_url),
+        images:community_post_content(id, media_url, display_order, media_type, thumbnail_url)
+      `)
+      .eq('status', 'published')
+      .eq('post_type', 'reel')
+      .order('created_at', { ascending: false })
+      .limit(limit + 1);
+
+    if (cursor) query = query.lt('created_at', cursor);
+
+    const { data: reels, error } = await query;
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+
+    const hasMore = reels.length > limit;
+    const items = hasMore ? reels.slice(0, limit) : reels;
+    const nextCursor = hasMore ? items[items.length - 1].created_at : null;
+
+    // Marcar los Clips que el usuario actual ha dado like.
+    let myLikes: string[] = [];
+    if (playerId && items.length > 0) {
+      const { data: likes } = await supabase
+        .from('community_likes')
+        .select('post_id')
+        .eq('player_id', playerId)
+        .in('post_id', items.map(p => p.id));
+      myLikes = (likes ?? []).map(l => l.post_id);
+    }
+
+    const enriched = items.map(p => ({ ...p, has_liked: myLikes.includes(p.id) }));
+    return res.json({ ok: true, reels: enriched, next_cursor: nextCursor });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * GET /community/reels/feed?seed=<clipId>&cursor=...
+ * Feed recomendado para el visor inmersivo.
+ * Heurística v1: el clip semilla primero -> más del mismo autor -> recientes.
+ * El cursor codifica `fase|autorId|created_at` para paginar sin huecos.
+ */
+router.get('/reels/feed', async (req: Request, res: Response) => {
+  const { playerId } = await getPlayerIdFromBearer(req);
+  const seedId = req.query.seed as string | undefined;
+  const cursorRaw = req.query.cursor as string | undefined;
+  const limit = 8;
+
+  const SELECT = `
+    *,
+    player:players(id, first_name, last_name, username, avatar_url),
+    images:community_post_content(id, media_url, display_order, media_type, thumbnail_url)
+  `;
+
+  // cursor = "fase|autorId|created_at" (fase: 'a' = mismo autor, 'o' = otros)
+  const cursor = cursorRaw ? (() => {
+    const [phase, authorId, ts] = cursorRaw.split('|');
+    return { phase, authorId: authorId || null, ts };
+  })() : null;
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const result: any[] = [];
+    let authorId: string | null = cursor?.authorId ?? null;
+
+    // Primera página: traemos la semilla, la ponemos primera y fijamos su autor.
+    if (!cursor && seedId) {
+      const { data: seed } = await supabase
+        .from('community_posts').select(SELECT)
+        .eq('id', seedId).eq('post_type', 'reel').maybeSingle();
+      if (seed) {
+        authorId = seed.player_id;
+        result.push(seed);
+      }
+    }
+
+    const fetchPhase = async (phase: 'a' | 'o', beforeTs: string | null) => {
+      let q = supabase.from('community_posts').select(SELECT)
+        .eq('status', 'published').eq('post_type', 'reel');
+      if (phase === 'a') q = q.eq('player_id', authorId as string);
+      else if (authorId) q = q.neq('player_id', authorId);
+      if (seedId) q = q.neq('id', seedId);
+      if (beforeTs) q = q.lt('created_at', beforeTs);
+      const { data } = await q.order('created_at', { ascending: false }).limit(limit + 1);
+      return data ?? [];
+    };
+
+    // Rellenamos la página recorriendo fases hasta llegar al límite.
+    let curPhase: 'a' | 'o' | null = cursor ? (cursor.phase as 'a' | 'o') : (authorId ? 'a' : 'o');
+    let beforeTs: string | null = cursor?.ts ?? null;
+    let nextCursor: string | null = null;
+    let remaining = limit;
+
+    while (remaining > 0 && curPhase) {
+      const batch = await fetchPhase(curPhase, beforeTs);
+      const take = batch.slice(0, remaining);
+      result.push(...take);
+      remaining -= take.length;
+
+      if (batch.length > take.length) {
+        // Quedan más en esta fase: el cursor continúa aquí.
+        const oldest = take[take.length - 1];
+        nextCursor = `${curPhase}|${authorId ?? ''}|${oldest.created_at}`;
+        break;
+      }
+      // Fase agotada: pasamos a la siguiente (a -> o -> fin).
+      if (curPhase === 'a') { curPhase = 'o'; beforeTs = null; }
+      else { curPhase = null; }
+    }
+
+    // Si llenamos justo en el límite pero aún queda una fase por recorrer,
+    // dejamos el cursor al inicio de esa fase (ts vacío) para no perder contenido.
+    if (!nextCursor && curPhase) {
+      nextCursor = `${curPhase}|${authorId ?? ''}|`;
+    }
+
+    // Marcar los Clips con like del usuario actual.
+    let myLikes: string[] = [];
+    if (playerId && result.length > 0) {
+      const { data: likes } = await supabase
+        .from('community_likes').select('post_id')
+        .eq('player_id', playerId)
+        .in('post_id', result.map(p => p.id));
+      myLikes = (likes ?? []).map(l => l.post_id);
+    }
+    const enriched = result.map(p => ({ ...p, has_liked: myLikes.includes(p.id) }));
+
+    return res.json({ ok: true, reels: enriched, next_cursor: nextCursor });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
  * GET /community/stories
  * Historias activas agrupadas por jugador.
  */
@@ -102,7 +252,7 @@ router.get('/stories', async (req: Request, res: Response) => {
       .select(`
         *,
         player:players(id, first_name, last_name, username, avatar_url),
-        images:community_post_images(id, image_url, display_order)
+        images:community_post_content(id, media_url, display_order, media_type, thumbnail_url)
       `)
       .eq('status', 'published')
       .eq('post_type', 'story')
@@ -135,49 +285,89 @@ router.get('/stories', async (req: Request, res: Response) => {
  * POST /community/posts
  * Crea una publicación o historia.
  */
-router.post('/posts', upload.array('files', 10), async (req: Request, res: Response) => {
+router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 'thumbnail', maxCount: 1 }, { name: 'moderation_frames', maxCount: 5 }]), async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
 
-  const files = req.files as Express.Multer.File[];
-  if (!files || files.length === 0) {
-    return res.status(400).json({ ok: false, error: 'Se requiere al menos una imagen' });
+  const filesMap = req.files as { [field: string]: Express.Multer.File[] } | undefined;
+  const files = filesMap?.files ?? [];
+  const thumbFile = filesMap?.thumbnail?.[0] ?? null;
+  const moderationFrameFiles = filesMap?.moderation_frames ?? [];
+
+  if (files.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Se requiere al menos un archivo' });
   }
 
-  const { caption, location, post_type } = req.body ?? {};
+  const { caption, location, post_type, overlays: overlaysRaw } = req.body ?? {};
   const type = post_type === 'story' ? 'story' : post_type === 'reel' ? 'reel' : 'post';
   const expiresAt = type === 'story' ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
 
-  const uploadedUrls: string[] = [];
+  // Overlays de historia (texto/stickers/filtro) como metadatos.
+  let overlays: any = null;
+  if (overlaysRaw) {
+    try { overlays = typeof overlaysRaw === 'string' ? JSON.parse(overlaysRaw) : overlaysRaw; } catch { overlays = null; }
+  }
+
+  const hasVideo = files.some(f => f.mimetype.startsWith('video/'));
+  // Para vídeo exigimos miniatura: la portada del Clip la genera/sube el cliente.
+  if (hasVideo && !thumbFile) {
+    return res.status(400).json({ ok: false, error: 'Falta la miniatura (portada) del vídeo' });
+  }
+
   const storagePaths: string[] = [];
+  // Media subido, en el mismo orden que `files`.
+  const uploaded: { url: string; mediaType: 'image' | 'video' }[] = [];
+  let thumbnailUrl: string | null = null;
+  const moderationFrameUrls: string[] = [];
+  const moderationPaths: string[] = []; // frames de moderación = temporales
   let createdPostId: string | null = null;
+
+  // Sube un buffer al bucket y devuelve su URL pública y su path (registrado para limpieza).
+  const uploadBuffer = async (supabase: any, file: Express.Multer.File, idx: string) => {
+    const ext = file.originalname.split('.').pop() || 'jpg';
+    const path = `${playerId}/${Date.now()}-${idx}.${ext}`;
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file.buffer, {
+      contentType: file.mimetype,
+    });
+    if (upErr) throw upErr;
+    storagePaths.push(path);
+    const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    return { url: publicUrl as string, path };
+  };
 
   try {
     const supabase = getSupabaseServiceRoleClient();
 
-    // 1. Subir a Storage
+    // 1. Subir media a Storage
     for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const ext = file.originalname.split('.').pop() || 'jpg';
-      const path = `${playerId}/${Date.now()}-${i}.${ext}`;
-      
-      const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file.buffer, {
-        contentType: file.mimetype,
-      });
-
-      if (upErr) throw upErr;
-      storagePaths.push(path);
-
-      const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
-      uploadedUrls.push(publicUrl);
+      const { url } = await uploadBuffer(supabase, files[i], String(i));
+      uploaded.push({ url, mediaType: files[i].mimetype.startsWith('video/') ? 'video' : 'image' });
     }
 
-    // 2. Moderación (SIGHTENGINE)
+    // 1b. Subir miniatura (solo en vídeos)
+    if (thumbFile) {
+      thumbnailUrl = (await uploadBuffer(supabase, thumbFile, 'thumb')).url;
+    }
+
+    // 1c. Subir frames de moderación (temporales, se borran tras moderar)
+    for (let i = 0; i < moderationFrameFiles.length; i++) {
+      const { url, path } = await uploadBuffer(supabase, moderationFrameFiles[i], `mod-${i}`);
+      moderationFrameUrls.push(url);
+      moderationPaths.push(path);
+    }
+
+    // 2. Moderación (SIGHTENGINE):
+    //    - vídeo: moderamos la portada + los frames de moderación del vídeo.
+    //    - imágenes: moderamos cada imagen.
+    const urlsToModerate = hasVideo
+      ? [thumbnailUrl, ...moderationFrameUrls].filter(Boolean) as string[]
+      : uploaded.map(u => u.url);
+
     let isApproved = true;
     let rejectionReason = '';
     let lastModerationResult = null;
 
-    for (const url of uploadedUrls) {
+    for (const url of urlsToModerate) {
       const mod = await moderateImage(url);
       if (!mod.approved) {
         isApproved = false;
@@ -191,11 +381,20 @@ router.post('/posts', upload.array('files', 10), async (req: Request, res: Respo
     if (!isApproved) {
       // Cleanup: borrar de storage
       await supabase.storage.from(BUCKET).remove(storagePaths);
-      return res.status(400).json({ 
-        ok: false, 
+      return res.status(400).json({
+        ok: false,
         error: `Publicación rechazada por moderación: ${rejectionReason}`,
-        reason: rejectionReason 
+        reason: rejectionReason
       });
+    }
+
+    // Aprobado: los frames de moderación son temporales, se borran ya.
+    if (moderationPaths.length > 0) {
+      await supabase.storage.from(BUCKET).remove(moderationPaths);
+      const modSet = new Set(moderationPaths);
+      for (let i = storagePaths.length - 1; i >= 0; i--) {
+        if (modSet.has(storagePaths[i])) storagePaths.splice(i, 1);
+      }
     }
 
     // 3. Insertar Post
@@ -208,7 +407,8 @@ router.post('/posts', upload.array('files', 10), async (req: Request, res: Respo
         post_type: type,
         status: 'published',
         moderation_result: lastModerationResult,
-        expires_at: expiresAt
+        expires_at: expiresAt,
+        overlays
       })
       .select()
       .single();
@@ -216,17 +416,19 @@ router.post('/posts', upload.array('files', 10), async (req: Request, res: Respo
     if (postErr) throw postErr;
     createdPostId = post.id;
 
-    // 4. Insertar Imágenes
-    const imageRows = uploadedUrls.map((url, i) => ({
+    // 4. Insertar media (la miniatura solo se asocia a las filas de vídeo)
+    const contentRows = uploaded.map((u, i) => ({
       post_id: post.id,
-      image_url: url,
-      display_order: i
+      media_url: u.url,
+      display_order: i,
+      media_type: u.mediaType,
+      thumbnail_url: u.mediaType === 'video' ? thumbnailUrl : null,
     }));
 
-    const { error: imgErr } = await supabase.from('community_post_images').insert(imageRows);
-    if (imgErr) throw imgErr;
+    const { error: contentErr } = await supabase.from('community_post_content').insert(contentRows);
+    if (contentErr) throw contentErr;
 
-    return res.status(201).json({ ok: true, post: { ...post, images: imageRows } });
+    return res.status(201).json({ ok: true, post: { ...post, images: contentRows } });
 
   } catch (err) {
     const supabase = getSupabaseServiceRoleClient();
@@ -434,18 +636,25 @@ router.delete('/posts/:id', async (req: Request, res: Response) => {
     if (!post) return res.status(404).json({ ok: false, error: 'Post no encontrado' });
     if (post.player_id !== playerId) return res.status(403).json({ ok: false, error: 'No tienes permiso para eliminar este post' });
 
-    // Obtener imágenes para borrar de storage
-    const { data: images } = await supabase.from('community_post_images').select('image_url').eq('post_id', id);
-    
+    // Obtener media (y miniaturas) para borrar de storage
+    const { data: content } = await supabase
+      .from('community_post_content')
+      .select('media_url, thumbnail_url')
+      .eq('post_id', id);
+
     const { error } = await supabase.from('community_posts').delete().eq('id', id);
     if (error) return res.status(500).json({ ok: false, error: error.message });
 
-    // Cleanup storage (ignore errors)
-    if (images && images.length > 0) {
-      const paths = images.map(img => {
-        const parts = img.image_url.split('/public/community-posts/');
+    // Cleanup storage (ignore errors). Incluye el vídeo/imagen y su miniatura.
+    if (content && content.length > 0) {
+      const toPath = (url: string | null) => {
+        if (!url) return null;
+        const parts = url.split('/public/community-posts/');
         return parts.length > 1 ? parts[1] : null;
-      }).filter(Boolean) as string[];
+      };
+      const paths = content
+        .flatMap(c => [toPath(c.media_url), toPath(c.thumbnail_url)])
+        .filter(Boolean) as string[];
       if (paths.length > 0) await supabase.storage.from(BUCKET).remove(paths);
     }
 
