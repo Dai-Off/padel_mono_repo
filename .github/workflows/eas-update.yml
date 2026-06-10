@@ -96,14 +96,12 @@ jobs:
         run: |
           eas update \
             --branch "$EAS_BRANCH" \
-            --channel "$EAS_CHANNEL" \
             --environment "$EAS_ENVIRONMENT" \
             --non-interactive \
             --auto
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EAS_BRANCH: ${{ steps.target.outputs.branch }}
-          EAS_CHANNEL: ${{ steps.target.outputs.channel }}
           EAS_ENVIRONMENT: ${{ steps.target.outputs.environment }}
 
       - name: Notify Slack
