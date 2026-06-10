@@ -154,4 +154,4 @@ PAYLOAD=$(jq -n \
     }]
   }')
 
-curl -sf -X POST -H 'Content-type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"
+curl -sf --max-time 30 -X POST -H 'Content-type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"
