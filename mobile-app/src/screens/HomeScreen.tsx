@@ -41,12 +41,23 @@ import {
   seasonSlugToLabel,
   levelMaxResolved,
 } from '../lib/seasonPassHome';
+import { formatLocale, useTranslation } from '../i18n';
+import { es } from '../i18n/es';
+import { zhHK } from '../i18n/zh-HK';
 
 type TabId = 'pistas' | 'partidos' | 'torneos';
 
-function mapSeasonMissionToHome(m: SeasonPassMissionDto): HomeMission {
+function mapSeasonMissionToHome(
+  m: SeasonPassMissionDto,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): HomeMission {
   const pctNum = m.target > 0 ? Math.min(100, Math.round((m.current / m.target) * 100)) : 0;
-  const tag = m.period === 'daily' ? 'Diaria' : m.period === 'weekly' ? 'Semanal' : 'Mensual';
+  const tag =
+    m.period === 'daily'
+      ? t('home.missions.periodDaily')
+      : m.period === 'weekly'
+        ? t('home.missions.periodWeekly')
+        : t('home.missions.periodMonthly');
   return {
     id: m.id,
     tag,
@@ -148,7 +159,10 @@ export function HomeScreen({
   matchmakingBannerState = 'hidden',
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
+  const { locale, t } = useTranslation();
   const { session } = useAuth();
+  const numberLocale = formatLocale(locale);
+  const homeCopy = locale === 'zh-HK' ? zhHK.home : es.home;
   // Datos del home cacheados a nivel de app (sobreviven a remounts del Home
   // cuando navegas a otras pantallas y vuelves). Ver HomeDataContext.
   const {
@@ -245,10 +259,10 @@ export function HomeScreen({
       divisionName,
       leaguePoints: `${lps} / ${lpTarget} LP`,
       ladderProgressPercent,
-      winsLabel: `${wins}V`,
-      lossesLabel: `${losses}D`,
+      winsLabel: t('home.competitiveLeague.wins', { count: wins }),
+      lossesLabel: t('home.competitiveLeague.losses', { count: losses }),
     };
-  }, [myPlayerProfile, leagueRows]);
+  }, [myPlayerProfile, leagueRows, t]);
 
   // useLayoutEffect: reabre el modal antes del paint al volver del chat (sin flash del home).
   useLayoutEffect(() => {
@@ -377,23 +391,26 @@ export function HomeScreen({
 
   const homeMissionsFromPass = useMemo(() => {
     const list = seasonPassMe?.missions ?? [];
-    return list.filter((m) => m.period === 'daily').slice(0, 8).map(mapSeasonMissionToHome);
-  }, [seasonPassMe?.missions]);
+    return list.filter((m) => m.period === 'daily').slice(0, 8).map((m) => mapSeasonMissionToHome(m, t));
+  }, [seasonPassMe?.missions, t]);
 
   const seasonPassCardProps =
     seasonPassMe != null
       ? {
           loading: false as const,
-          seasonLabel: seasonSlugToLabel(seasonPassMe.season.slug),
+          seasonLabel: seasonSlugToLabel(seasonPassMe.season.slug, t),
           seasonTitle: seasonPassMe.season.title,
           levelCurrent: String(seasonPassMe.level),
           levelMax: String(levelMaxResolved(seasonPassMe)),
           progressPercent: Math.min(100, Math.max(0, seasonPassMe.pct * 100)),
-          spCurrent: `${seasonPassMe.into_level.toLocaleString('es-ES')} SP`,
+          spCurrent: `${seasonPassMe.into_level.toLocaleString(numberLocale)} SP`,
           spToNext: isSeasonPassSpCapped(seasonPassMe)
-            ? 'Tope de SP'
-            : `${seasonPassMe.sp_to_next.toLocaleString('es-ES')} SP para nivel ${seasonPassNextLevel(seasonPassMe)}`,
-          nextRewardName: seasonPassHomeNextLine(seasonPassMe),
+            ? t('home.seasonPass.spCap')
+            : t('home.seasonPass.spToNext', {
+                sp: seasonPassMe.sp_to_next.toLocaleString(numberLocale),
+                level: seasonPassNextLevel(seasonPassMe),
+              }),
+          nextRewardName: seasonPassHomeNextLine(seasonPassMe, t),
         }
       : {
           loading: Boolean(session?.access_token && seasonPassLoading),
@@ -602,13 +619,9 @@ export function HomeScreen({
       <OnboardingHardBlockModal
         visible={hardBlockOpen === 'daily-lesson'}
         featureIcon="flame"
-        title="Desbloquea la Lección diaria"
-        subtitle="Completa el cuestionario de nivelación para acceder a tu entrenamiento diario personalizado."
-        bullets={[
-          'Preguntas adaptadas a tu nivel real',
-          'Racha diaria con bonus de SP',
-          'Progreso que evoluciona contigo',
-        ]}
+        title={t('home.hardBlock.dailyLessonTitle')}
+        subtitle={t('home.hardBlock.dailyLessonSub')}
+        bullets={[...homeCopy.hardBlock.dailyLessonBullets]}
         onClose={() => setHardBlockOpen(null)}
         onStart={() => {
           setHardBlockOpen(null);
@@ -619,13 +632,9 @@ export function HomeScreen({
       <OnboardingHardBlockModal
         visible={hardBlockOpen === 'ia-afinidad'}
         featureIcon="people"
-        title="Desbloquea la IA de afinidad"
-        subtitle="Completa el cuestionario de nivelación para encontrar los jugadores más compatibles contigo."
-        bullets={[
-          'Compatibilidad real, no solo nivel',
-          'Jugadores cerca de ti con tu estilo',
-          'Mejora con cada partido que juegas',
-        ]}
+        title={t('home.hardBlock.iaTitle')}
+        subtitle={t('home.hardBlock.iaSub')}
+        bullets={[...homeCopy.hardBlock.iaBullets]}
         onClose={() => setHardBlockOpen(null)}
         onStart={() => {
           setHardBlockOpen(null);
@@ -636,13 +645,9 @@ export function HomeScreen({
       <OnboardingHardBlockModal
         visible={hardBlockOpen === 'matchmaking'}
         featureIcon="trophy"
-        title="Desbloquea la Liga Competitiva"
-        subtitle="Completa el cuestionario de nivelación para acceder al matchmaking competitivo."
-        bullets={[
-          'Partidos 2v2 con matchmaking real',
-          'Sube de división ganando LP',
-          'Compite y gana premios por temporada',
-        ]}
+        title={t('home.hardBlock.leagueTitle')}
+        subtitle={t('home.hardBlock.leagueSub')}
+        bullets={[...homeCopy.hardBlock.leagueBullets]}
         onClose={() => setHardBlockOpen(null)}
         onStart={() => {
           setHardBlockOpen(null);

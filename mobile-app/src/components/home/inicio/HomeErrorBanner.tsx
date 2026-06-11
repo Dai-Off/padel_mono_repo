@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../../i18n';
 
 type Props = {
   /** CTA principal: reintentar fetch de todos los datasets. */
@@ -17,14 +18,15 @@ type Props = {
  * compacto e icono pequeño. Solo destaca por el color del CTA.
  */
 export function HomeErrorBanner({ onRetry, retrying = false }: Props) {
+  const { t } = useTranslation();
   return (
     <View style={styles.wrap}>
       <View style={styles.iconWrap}>
         <Ionicons name="cloud-offline-outline" size={18} color="#9CA3AF" />
       </View>
       <View style={styles.textWrap}>
-        <Text style={styles.title}>No se pudo cargar el inicio</Text>
-        <Text style={styles.subtitle}>Comprueba tu conexión e inténtalo de nuevo.</Text>
+        <Text style={styles.title}>{t('home.errorBanner.title')}</Text>
+        <Text style={styles.subtitle}>{t('home.errorBanner.subtitle')}</Text>
       </View>
       <Pressable
         onPress={onRetry}
@@ -32,7 +34,9 @@ export function HomeErrorBanner({ onRetry, retrying = false }: Props) {
         hitSlop={8}
         style={({ pressed }) => [styles.cta, pressed && styles.ctaPressed, retrying && styles.ctaDisabled]}
       >
-        <Text style={styles.ctaText}>{retrying ? 'Reintentando…' : 'Reintentar'}</Text>
+        <Text style={styles.ctaText}>
+          {retrying ? t('home.errorBanner.retrying') : t('home.errorBanner.retry')}
+        </Text>
       </Pressable>
     </View>
   );

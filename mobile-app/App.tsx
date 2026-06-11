@@ -17,6 +17,7 @@ import { ResetPasswordScreen, type RecoveryPayload } from './src/screens/ResetPa
 import { RequireAuth } from './src/components/auth';
 import { STRIPE_PUBLISHABLE_KEY } from './src/config';
 import { theme } from './src/theme';
+import { I18nProvider } from './src/i18n';
 import { isRecoveryDeepLink, parseSupabaseRecoveryFromUrl } from './src/lib/parseAuthRecoveryUrl';
 import { parseTournamentInviteUrl } from './src/lib/parseTournamentInviteUrl';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -143,13 +144,15 @@ export default function App() {
   return (
     <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} urlScheme={urlScheme}>
       <SafeAreaProvider>
-        <AuthProvider>
-          {/* Montado siempre (no dentro del branch authed) para que un
-              parpadeo de sesión no destruya el cache y dispare reload infinito. */}
-          <HomeDataProvider>
-            <AppContent />
-          </HomeDataProvider>
-        </AuthProvider>
+        <I18nProvider>
+          <AuthProvider>
+            {/* Montado siempre (no dentro del branch authed) para que un
+                parpadeo de sesión no destruya el cache y dispare reload infinito. */}
+            <HomeDataProvider>
+              <AppContent />
+            </HomeDataProvider>
+          </AuthProvider>
+        </I18nProvider>
       </SafeAreaProvider>
     </StripeProvider>
   );
