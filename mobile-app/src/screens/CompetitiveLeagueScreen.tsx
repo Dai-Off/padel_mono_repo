@@ -136,6 +136,7 @@ export function CompetitiveLeagueScreen({
   const [countdownText, setCountdownText] = useState<string>('--:--:--');
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastAppliedEntryIntentRef = useRef<'default' | 'queue' | 'prefs' | null>(null);
+  const refreshStatusRef = useRef<() => Promise<void>>(async () => {});
 
   const clearPollTimer = useCallback(() => {
     if (pollTimerRef.current) {
@@ -227,6 +228,7 @@ export function CompetitiveLeagueScreen({
     setQueueElapsedSec,
     setQueueStartedAtMs,
   ]);
+  refreshStatusRef.current = refreshStatus;
 
   useEffect(() => {
     void fetchMatchmakingLeagueConfig().then(setLeagueRows);
@@ -306,14 +308,14 @@ export function CompetitiveLeagueScreen({
       return () => clearPollTimer();
     }
     setIsHomeBootstrapping(true);
-    void refreshStatus().finally(() => {
+    void refreshStatusRef.current().finally(() => {
       if (!cancelled) setIsHomeBootstrapping(false);
     });
     return () => {
       cancelled = true;
       clearPollTimer();
     };
-  }, [clearPollTimer, refreshStatus, session?.access_token]);
+  }, [clearPollTimer, session?.access_token]);
 
   useEffect(() => {
     if (lastAppliedEntryIntentRef.current === entryIntent) return;
