@@ -1,5 +1,6 @@
 import { useContext, useEffect, useState, useCallback } from 'react';
 import { StyleSheet } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Linking from 'expo-linking';
@@ -142,19 +143,21 @@ export default function App() {
     Constants.appOwnership === 'expo' ? Linking.createURL('/--/') : Linking.createURL('');
 
   return (
-    <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} urlScheme={urlScheme}>
-      <SafeAreaProvider>
-        <I18nProvider>
-          <AuthProvider>
-            {/* Montado siempre (no dentro del branch authed) para que un
-                parpadeo de sesión no destruya el cache y dispare reload infinito. */}
-            <HomeDataProvider>
-              <AppContent />
-            </HomeDataProvider>
-          </AuthProvider>
-        </I18nProvider>
-      </SafeAreaProvider>
-    </StripeProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <StripeProvider publishableKey={STRIPE_PUBLISHABLE_KEY} urlScheme={urlScheme}>
+        <SafeAreaProvider>
+          <I18nProvider>
+            <AuthProvider>
+              {/* Montado siempre (no dentro del branch authed) para que un
+                  parpadeo de sesión no destruya el cache y dispare reload infinito. */}
+              <HomeDataProvider>
+                <AppContent />
+              </HomeDataProvider>
+            </AuthProvider>
+          </I18nProvider>
+        </SafeAreaProvider>
+      </StripeProvider>
+    </GestureHandlerRootView>
   );
 }
 

@@ -10,8 +10,8 @@ interface CommunityTabsProps {
 
 export const CommunityTabs: React.FC<CommunityTabsProps> = ({ activeTab, onTabChange }) => {
   const tabs: { id: CommunityTab; label: string }[] = [
-    { id: 'feed', label: 'Feed' },
-    { id: 'reels', label: 'Reels' },
+    { id: 'feed', label: 'Posts' },
+    { id: 'reels', label: 'Clips' },
     { id: 'noticias', label: 'Noticias' },
   ];
 
