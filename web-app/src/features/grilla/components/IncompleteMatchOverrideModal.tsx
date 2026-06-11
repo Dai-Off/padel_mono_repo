@@ -79,14 +79,6 @@ export const IncompleteMatchOverrideModal: React.FC<IncompleteMatchOverrideModal
                                     <Users className="w-3.5 h-3.5" />
                                     {t('override.matchInfo', { players: playerCount })}
                                 </div>
-                                <div className="mt-2.5 text-xs text-blue-800">
-                                    <span className="font-semibold block mb-0.5">Jugadores inscritos:</span>
-                                    <span className="text-blue-700">
-                                        {conflict.detailedPlayers && conflict.detailedPlayers.length > 0
-                                            ? conflict.detailedPlayers.map(p => p.name || 'Jugador').join(', ')
-                                            : conflict.playerName || 'Sin jugadores'}
-                                    </span>
-                                </div>
                             </div>
                         </div>
                     </div>

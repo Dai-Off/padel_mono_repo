@@ -1638,157 +1638,75 @@ router.post('/:id/override-move', async (req: Request, res: Response) => {
     if (incompleteConflicts.length > 0) {
       const conflictToDisplace = incompleteConflicts[0];
 
-      // Relocate check to only target visible courts (is_hidden = false)
-      const availRes = await getAvailableCourtIds(clubId, conflictToDisplace.start_at, conflictToDisplace.end_at, conflictToDisplace.id, false);
+      const nowIso = new Date().toISOString();
+      const { error: cancelErr } = await supabase
+        .from('bookings')
+        .update({
+          status: 'cancelled',
+          updated_at: nowIso,
+          cancelled_at: nowIso,
+          cancelled_by: 'owner',
+          deleted_at: nowIso,
+        })
+        .eq('id', conflictToDisplace.id);
 
-      if (availRes.ok && availRes.courtIds.length > 0) {
-        const eligibleCourts = availRes.courtIds.filter(cid => cid !== target_court_id);
-        if (eligibleCourts.length > 0) {
-          const newCourtId = eligibleCourts[0];
+      if (cancelErr) return res.status(500).json({ ok: false, error: 'Error al cancelar el partido en conflicto: ' + cancelErr.message });
 
-          const { data: newCourtRow } = await supabase
-             .from('courts')
-             .select('name')
-             .eq('id', newCourtId)
-             .maybeSingle();
-          const newCourtName = (newCourtRow as any)?.name ?? 'Otra Pista';
+      await refundStripeBookingPaymentTransactions(supabase, conflictToDisplace.id, clubId);
 
-          const { error: moveErr } = await supabase
-            .from('bookings')
-            .update({ court_id: newCourtId, updated_at: new Date().toISOString() })
-            .eq('id', conflictToDisplace.id);
-
-          if (moveErr) return res.status(500).json({ ok: false, error: 'Error al reubicar el partido: ' + moveErr.message });
-
-          const deadline = new Date(new Date(conflictToDisplace.start_at).getTime() - 5 * 60 * 60 * 1000);
-          const oldCourtName = (conflictToDisplace.courts as any)?.name ?? 'Pista Original';
-
-          const tz = conflictToDisplace.timezone || 'Europe/Madrid';
-          const formattedDate = new Date(conflictToDisplace.start_at).toLocaleDateString('es-ES', { timeZone: tz });
-          const formattedTime = new Date(conflictToDisplace.start_at).toLocaleTimeString('es-ES', { timeZone: tz, hour: '2-digit', minute: '2-digit' });
-          const formattedDeadline = deadline.toLocaleString('es-ES', { timeZone: tz });
-
-          const secret = process.env.WEBHOOK_SECRET || 'fallback_secret';
-          let notifiedCount = 0;
-          const responseRowsToInsert: any[] = [];
-
-          for (const bp of conflictToDisplace.booking_participants ?? []) {
-            if (!bp.player_id) continue;
-            const player = (bp as any).players;
-            if (!player || !player.email) continue;
-
-            const token = crypto.createHmac('sha256', secret)
-              .update(`${conflictToDisplace.id}:${bp.player_id}`)
-              .digest('hex');
-
-            responseRowsToInsert.push({
-              booking_id: conflictToDisplace.id,
-              player_id: bp.player_id,
-              action: 'keep',
-              deadline: deadline.toISOString(),
-              responded_at: null,
-            });
-
-            await sendBookingRelocatedEmail(
-              player.email,
-              `${player.first_name ?? ''} ${player.last_name ?? ''}`.trim() || 'Jugador',
-              (targetCourt as any).clubs?.name ?? 'WeMatch Club',
-              formattedDate,
-              formattedTime,
-              oldCourtName,
-              newCourtName,
-              conflictToDisplace.id,
-              bp.player_id,
-              token,
-              formattedDeadline
-            );
-            notifiedCount++;
-          }
-
-          if (responseRowsToInsert.length > 0) {
-            await supabase.from('booking_override_responses').upsert(responseRowsToInsert, { onConflict: 'booking_id,player_id' });
-          }
-
-          displacedInfo = {
+      const refundRows: any[] = [];
+      for (const bp of conflictToDisplace.booking_participants ?? []) {
+        if (!bp.player_id) continue;
+        const amt = (bp.paid_amount_cents ?? 0) + (bp.wallet_amount_cents ?? 0);
+        if (amt > 0) {
+          refundRows.push({
+            player_id: bp.player_id,
+            club_id: clubId,
+            amount_cents: amt,
+            concept: `Reembolso por cancelación de reserva (prioridad a partido completo)`,
+            type: 'refund',
             booking_id: conflictToDisplace.id,
-            action: 'relocated',
-            new_court_name: newCourtName,
-            players_notified: notifiedCount,
-          };
+            created_at: nowIso,
+          });
         }
       }
-
-      if (!displacedInfo) {
-        const nowIso = new Date().toISOString();
-        const { error: cancelErr } = await supabase
-          .from('bookings')
-          .update({
-            status: 'cancelled',
-            updated_at: nowIso,
-            cancelled_at: nowIso,
-            cancelled_by: 'owner',
-            deleted_at: nowIso,
-          })
-          .eq('id', conflictToDisplace.id);
-
-        if (cancelErr) return res.status(500).json({ ok: false, error: 'Error al cancelar el partido en conflicto: ' + cancelErr.message });
-
-        await refundStripeBookingPaymentTransactions(supabase, conflictToDisplace.id, clubId);
-
-        const refundRows: any[] = [];
-        for (const bp of conflictToDisplace.booking_participants ?? []) {
-          if (!bp.player_id) continue;
-          const amt = (bp.paid_amount_cents ?? 0) + (bp.wallet_amount_cents ?? 0);
-          if (amt > 0) {
-            refundRows.push({
-              player_id: bp.player_id,
-              club_id: clubId,
-              amount_cents: amt,
-              concept: `Reembolso por cancelación de reserva (reubicación no disponible)`,
-              type: 'refund',
-              booking_id: conflictToDisplace.id,
-              created_at: nowIso,
-            });
-          }
-        }
-        if (refundRows.length > 0) {
-          await supabase.from('wallet_transactions').insert(refundRows);
-        }
-
-        await supabase
-          .from('matches')
-          .update({ status: 'cancelled' })
-          .eq('booking_id', conflictToDisplace.id)
-          .not('status', 'in', '("cancelled","finished")');
-
-        let notifiedCount = 0;
-        const oldCourtName = (conflictToDisplace.courts as any)?.name ?? 'Pista Original';
-        const tz = conflictToDisplace.timezone || 'Europe/Madrid';
-        const formattedDate = new Date(conflictToDisplace.start_at).toLocaleDateString('es-ES', { timeZone: tz });
-        const formattedTime = new Date(conflictToDisplace.start_at).toLocaleTimeString('es-ES', { timeZone: tz, hour: '2-digit', minute: '2-digit' });
-
-        for (const bp of conflictToDisplace.booking_participants ?? []) {
-          if (!bp.player_id) continue;
-          const player = (bp as any).players;
-          if (!player || !player.email) continue;
-
-          await sendBookingCancelledByOverrideEmail(
-            player.email,
-            `${player.first_name ?? ''} ${player.last_name ?? ''}`.trim() || 'Jugador',
-            (targetCourt as any).clubs?.name ?? 'WeMatch Club',
-            formattedDate,
-            formattedTime,
-            oldCourtName
-          );
-          notifiedCount++;
-        }
-
-        displacedInfo = {
-          booking_id: conflictToDisplace.id,
-          action: 'cancelled',
-          players_notified: notifiedCount,
-        };
+      if (refundRows.length > 0) {
+        await supabase.from('wallet_transactions').insert(refundRows);
       }
+
+      await supabase
+        .from('matches')
+        .update({ status: 'cancelled' })
+        .eq('booking_id', conflictToDisplace.id)
+        .not('status', 'in', '("cancelled","finished")');
+
+      let notifiedCount = 0;
+      const oldCourtName = (conflictToDisplace.courts as any)?.name ?? 'Pista Original';
+      const tz = conflictToDisplace.timezone || 'Europe/Madrid';
+      const formattedDate = new Date(conflictToDisplace.start_at).toLocaleDateString('es-ES', { timeZone: tz });
+      const formattedTime = new Date(conflictToDisplace.start_at).toLocaleTimeString('es-ES', { timeZone: tz, hour: '2-digit', minute: '2-digit' });
+
+      for (const bp of conflictToDisplace.booking_participants ?? []) {
+        if (!bp.player_id) continue;
+        const player = (bp as any).players;
+        if (!player || !player.email) continue;
+
+        await sendBookingCancelledByOverrideEmail(
+          player.email,
+          `${player.first_name ?? ''} ${player.last_name ?? ''}`.trim() || 'Jugador',
+          (targetCourt as any).clubs?.name ?? 'WeMatch Club',
+          formattedDate,
+          formattedTime,
+          oldCourtName
+        );
+        notifiedCount++;
+      }
+
+      displacedInfo = {
+        booking_id: conflictToDisplace.id,
+        action: 'cancelled',
+        players_notified: notifiedCount,
+      };
     }
 
     const { data: updatedBooking, error: moveAdminErr } = await supabase
