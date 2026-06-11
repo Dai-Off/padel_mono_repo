@@ -10,6 +10,7 @@ Tarjeta tipo «coach IA»: recomendación, fortalezas y a mejorar según el feed
   `Authorization: Bearer <access_token>`  
   El token es el de Supabase Auth: mismo que devuelve **`POST /auth/login`** en `session.access_token` (o el que use la app móvil).
 - **Parámetro `id`:** UUID del jugador. **Debe ser el del usuario autenticado** (el backend resuelve `player_id` desde el Bearer). Si pedís el insight de otro `id`, responde **403**.
+- **Idioma (opcional):** query `?lang=` (ej. `es`, `en`, `zh-HK`) o cabecera `Accept-Language`. Por defecto **`es`** (mismo comportamiento que antes). OpenAI genera en ese idioma; el fallback por plantilla sigue en español.
 
 ### Obtener tu `player_id`
 
@@ -59,6 +60,7 @@ Siempre es un JSON **plano** (el handler hace `res.json(insight)`), sin envoltor
 | `fortalezas` | `string[]` | Tres frases (vacío si `empty`) |
 | `a_mejorar` | `string[]` | Tres frases (vacío si `empty`) |
 | `insight_source` | `'openai' \| 'template' \| null` | Origen del texto; `null` si `empty` |
+| `locale` | `string` | Locale BCP-47 usado (`es` por defecto) |
 
 Ejemplo mínimo con datos:
 
@@ -153,6 +155,7 @@ Cuando **`empty` es `false`**:
 
 - Servicio: `src/services/postMatchPeerFeedbackInsightService.ts` (consulta Supabase, agregación, fallback).
 - Cliente OpenAI: `src/lib/openaiPeerFeedbackInsight.ts` (prompt, parseo JSON).
+- Locale / prompts: `src/lib/peerFeedbackLanguage.ts` (`?lang=`, Accept-Language, prompts por idioma).
 - Ruta HTTP: `src/routes/players.ts` → `GET /:id/last-peer-feedback-insight`.
 
 ## Relación con el feedback post-partido

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { generatePeerFeedbackCardWithOpenAI } from '../lib/openaiPeerFeedbackInsight';
+import { DEFAULT_PEER_FEEDBACK_LOCALE } from '../lib/peerFeedbackLanguage';
 
 export type PeerFeedbackInsight = {
   ok: true;
@@ -24,6 +25,8 @@ export type PeerFeedbackInsight = {
   a_mejorar: string[];
   /** Origen del texto de la tarjeta (solo cuando `empty` es false). */
   insight_source: 'openai' | 'template' | null;
+  /** Locale BCP-47 usado para generar el texto (`es` por defecto). */
+  locale: string;
 };
 
 type MatchFeedbackRow = {
@@ -258,10 +261,17 @@ export function buildPeerFeedbackInsightFromMultiple(ratings: PeerRatingForPlaye
   return { recommendation_ia, fortalezas, a_mejorar };
 }
 
+export type GetLastPeerFeedbackInsightOptions = {
+  /** Query `lang` o Accept-Language ya parseado; si se omite, se usa `es`. */
+  locale?: string;
+};
+
 export async function getLastPeerFeedbackInsightForPlayer(
   supabase: SupabaseClient,
-  playerId: string
+  playerId: string,
+  options: GetLastPeerFeedbackInsightOptions = {}
 ): Promise<PeerFeedbackInsight> {
+  const locale = options.locale?.trim() || DEFAULT_PEER_FEEDBACK_LOCALE;
   const found = await findLatestMatchPeerRatingsForPlayer(supabase, playerId);
   if (!found || found.ratings.length === 0) {
     return {
@@ -277,6 +287,7 @@ export async function getLastPeerFeedbackInsightForPlayer(
       fortalezas: [],
       a_mejorar: [],
       insight_source: null,
+      locale,
     };
   }
 
@@ -292,6 +303,7 @@ export async function getLastPeerFeedbackInsightForPlayer(
     valoraciones: ratings.map((r) => ({ perceived: r.perceived, comment: r.comment })),
     distribution: { high: nPlus, mid: nZero, low: nMinus },
     average_perceived: Math.round(avg * 100) / 100,
+    locale,
   };
 
   const fromOpenAi = await generatePeerFeedbackCardWithOpenAI(llmInput);
@@ -314,5 +326,7 @@ export async function getLastPeerFeedbackInsightForPlayer(
     fortalezas: sanitizedStrengths,
     a_mejorar: sanitizedImprovements,
     insight_source,
+    locale,
   };
 }
+

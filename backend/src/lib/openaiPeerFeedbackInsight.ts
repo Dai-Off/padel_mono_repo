@@ -3,12 +3,20 @@
  * Sin dependencia npm: usa `fetch`.
  */
 
+import {
+  DEFAULT_PEER_FEEDBACK_LOCALE,
+  buildPeerFeedbackSystemPrompt,
+  buildPeerFeedbackUserContext,
+} from './peerFeedbackLanguage';
+
 export type PeerFeedbackLlmInput = {
   match_id: string;
   /** Solo perceived y comentario opcional por compañero (sin IDs). */
   valoraciones: Array<{ perceived: -1 | 0 | 1; comment: string | null }>;
   distribution: { high: number; mid: number; low: number };
   average_perceived: number;
+  /** BCP-47; por defecto `es` (comportamiento histórico). */
+  locale?: string;
 };
 
 export type PeerFeedbackLlmOutput = {
@@ -65,24 +73,14 @@ export async function generatePeerFeedbackCardWithOpenAI(
   if (!apiKey) return null;
 
   const model = getOpenAiModel();
+  const locale = input.locale?.trim() || DEFAULT_PEER_FEEDBACK_LOCALE;
   const userPayload = {
-    contexto:
-      'Feedback post-partido de pádel: cada compañero valoró al jugador con perceived -1 (por debajo del nivel esperado), 0 (acertado), 1 (por encima). Opcionalmente dejaron un comentario corto.',
+    locale,
+    contexto: buildPeerFeedbackUserContext(locale),
     datos: input,
   };
 
-  const system = [
-    'Eres un coach de pádel para jugadores amateur/intermedio en España.',
-    'Tienes que generar contenido en español, tono natural, cercano y profesional.',
-    'Evita lenguaje grandilocuente, frases de marketing y estilo robótico.',
-    'No uses emojis, iconos ni símbolos decorativos.',
-    'Responde SOLO un objeto JSON (sin markdown ni texto fuera del JSON) con exactamente estas claves:',
-    '- "recommendation_ia": string, un solo párrafo (2-4 frases) que sintetice el feedback del último partido y oriente al siguiente paso.',
-    '- "fortalezas": array de exactamente 3 strings, cada uno una frase corta (máx. ~120 caracteres).',
-    '- "a_mejorar": array de exactamente 3 strings, cada uno una frase corta (máx. ~120 caracteres).',
-    'Basa las listas en las valoraciones numéricas y en los comentarios si existen; no inventes hechos concretos que no aparezcan en los datos (puedes generalizar a técnica/táctica/físico/mental).',
-    'No menciones UUIDs ni "OpenAI". No uses comillas tipográficas raras dentro de los strings.',
-  ].join(' ');
+  const system = buildPeerFeedbackSystemPrompt(locale);
 
   const user = JSON.stringify(userPayload);
 
