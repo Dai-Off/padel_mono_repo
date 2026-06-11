@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { androidReadableText } from './textStyles';
 import { ScalePressable } from './ScalePressable';
 import { LOCK_BADGE_ICON_SIZE, lockBadgeStyles, lockBadgeTint } from './lockBadgeStyles';
+import { useTranslation } from '../../../i18n';
 
 // Color de marca de IA Afinidad para el badge (ámbar/amarillo, destaca sobre
 // el lavanda/púrpura de la card). Triplete RGB para usar con `lockBadgeTint`.
@@ -21,6 +22,7 @@ type IAAfinidadCardProps = {
 };
 
 export function IAAfinidadCard({ onPress, locked = false }: IAAfinidadCardProps) {
+  const { t } = useTranslation();
   return (
     <ScalePressable
       pressedScale={0.985}
@@ -50,22 +52,22 @@ export function IAAfinidadCard({ onPress, locked = false }: IAAfinidadCardProps)
         </LinearGradient>
         <View style={styles.textCol}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>IA Afinidad</Text>
+            <Text style={styles.title}>{t('home.iaAfinidad.title')}</Text>
             {locked ? (
               <View
                 style={[lockBadgeStyles.badge, lockBadgeTint(IA_LOCK_COLOR_RGB)]}
-                accessibilityLabel="Cuestionario de nivelación pendiente"
+                accessibilityLabel={t('home.iaAfinidad.lockedA11y')}
               >
                 <Ionicons name="lock-closed" size={LOCK_BADGE_ICON_SIZE} color={IA_LOCK_COLOR} />
-                <Text style={[lockBadgeStyles.text, { color: IA_LOCK_COLOR }]}>Bloqueado</Text>
+                <Text style={[lockBadgeStyles.text, { color: IA_LOCK_COLOR }]}>
+                  {t('home.iaAfinidad.locked')}
+                </Text>
               </View>
             ) : (
               <Ionicons name="arrow-up" size={22} color="#c084fc" style={styles.arrow} />
             )}
           </View>
-          <Text style={styles.desc}>
-            Descubre jugadores afines a tu estilo, nivel y disponibilidad
-          </Text>
+          <Text style={styles.desc}>{t('home.iaAfinidad.description')}</Text>
         </View>
       </View>
     </ScalePressable>

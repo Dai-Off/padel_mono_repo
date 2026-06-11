@@ -22,6 +22,7 @@ import { ACCENT, ACCENT_SOFT } from "./constants";
 import { DASH, dash } from "./dash";
 import { androidReadableText } from "./textStyles";
 import { ScalePressable } from "./ScalePressable";
+import { useTranslation } from "../../../i18n";
 
 /**
  * Igual que X7 `SeasonPassWidget`: `radial-gradient(circle, rgba(241,143,52,0.22) 0%, transparent 70%)`
@@ -226,6 +227,7 @@ export function SeasonPassHomeCard({
   nextRewardName,
   onPress,
 }: Props) {
+  const { t } = useTranslation();
   const pct =
     progressPercent != null &&
     !Number.isNaN(progressPercent) &&
@@ -264,17 +266,19 @@ export function SeasonPassHomeCard({
               <Text style={[styles.seasonLabel, compact && styles.seasonLabelCompact]}>
                 {seasonLabel != null && String(seasonLabel).trim() !== ""
                   ? seasonLabel
-                  : "Temporada"}
+                  : t("home.seasonPass.seasonFallback")}
               </Text>
               <Text style={[styles.seasonTitle, compact && styles.seasonTitleCompact]}>
                 {seasonTitle != null && String(seasonTitle).trim() !== ""
                   ? seasonTitle
-                  : "Pase de temporada"}
+                  : t("home.seasonPass.titleFallback")}
               </Text>
             </View>
           </View>
           <View style={styles.levelCol}>
-            <Text style={[styles.levelHint, compact && styles.levelHintCompact]}>Nivel</Text>
+            <Text style={[styles.levelHint, compact && styles.levelHintCompact]}>
+              {t("home.seasonPass.level")}
+            </Text>
             {loading ? (
               <View style={{ minHeight: compact ? 28 : 34, justifyContent: "center", alignItems: "flex-end" }}>
                 <ActivityIndicator size="small" color={ACCENT} />
@@ -309,7 +313,9 @@ export function SeasonPassHomeCard({
         </View>
 
         <View style={[styles.nextRow, compact && styles.nextRowCompact]}>
-          <Text style={[styles.nextLabel, compact && styles.barMetaTight]}>Siguiente:</Text>
+          <Text style={[styles.nextLabel, compact && styles.barMetaTight]}>
+            {t("home.seasonPass.next")}
+          </Text>
           <View style={styles.nextContent}>
             <RewardGem size={compact ? 24 : 32} />
             <Text style={[styles.nextName, compact && styles.barMetaTight]} numberOfLines={1}>

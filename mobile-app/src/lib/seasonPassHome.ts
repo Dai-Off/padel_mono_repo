@@ -1,9 +1,13 @@
 import type { SeasonPassMeOk } from '../api/seasonPass';
 
+type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
+
 /** Etiqueta corta desde `season.slug` (p. ej. `s1` → `Temporada 1`). */
-export function seasonSlugToLabel(slug: string): string {
+export function seasonSlugToLabel(slug: string, t: TranslateFn): string {
   const m = /^s(\d+)$/i.exec(String(slug).trim());
-  return m ? `Temporada ${parseInt(m[1], 10)}` : String(slug).trim() || '—';
+  return m
+    ? t('home.seasonPass.seasonSlug', { n: parseInt(m[1], 10) })
+    : String(slug).trim() || '—';
 }
 
 export function levelMaxResolved(me: Pick<SeasonPassMeOk, 'level_max'>): number {
@@ -26,7 +30,7 @@ export function seasonPassNextLevel(me: SeasonPassMeOk): number {
 }
 
 /** Texto fila “Siguiente:” (solo datos del pase). */
-export function seasonPassHomeNextLine(me: SeasonPassMeOk): string {
-  if (isSeasonPassSpCapped(me)) return 'Temporada al máximo';
-  return `Nivel ${seasonPassNextLevel(me)}`;
+export function seasonPassHomeNextLine(me: SeasonPassMeOk, t: TranslateFn): string {
+  if (isSeasonPassSpCapped(me)) return t('home.seasonPass.seasonMax');
+  return t('home.seasonPass.levelN', { n: seasonPassNextLevel(me) });
 }
