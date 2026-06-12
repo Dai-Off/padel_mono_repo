@@ -254,6 +254,16 @@ export function MainApp() {
     [matchmakingTimeoutNoticePending],
   );
 
+  const handleCompetitiveLeagueBannerStateChange = useCallback(
+    (state: MatchmakingHomeBannerState, options?: { force?: boolean }) => {
+      handleMatchmakingBannerStateChange(state, options);
+      if (state === 'hidden' && options?.force) {
+        setCompetitiveLeagueEntryIntent('default');
+      }
+    },
+    [handleMatchmakingBannerStateChange],
+  );
+
   /**
    * Abre el perfil con el modal del cuestionario auto-abierto y guarda la
    * sección de origen para devolver al usuario al completarlo. Usado por todos
@@ -811,12 +821,7 @@ export function MainApp() {
           queueStartedAtMs={competitiveQueueStartedAtMs}
           setQueueStartedAtMs={setCompetitiveQueueStartedAtMs}
           matchmakingBannerState={matchmakingHomeBannerState}
-          onMatchmakingBannerStateChange={(state, options) => {
-            handleMatchmakingBannerStateChange(state, options);
-            if (state === 'hidden' && options?.force) {
-              setCompetitiveLeagueEntryIntent('default');
-            }
-          }}
+          onMatchmakingBannerStateChange={handleCompetitiveLeagueBannerStateChange}
           onPartidoPress={(p) => {
             setShowCompetitiveLeague(false);
             setSelectedPartido(p);

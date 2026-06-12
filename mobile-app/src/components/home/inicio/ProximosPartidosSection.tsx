@@ -16,6 +16,7 @@ import { INICIO_PAD_H } from './constants';
 import { androidReadableText } from './textStyles';
 import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
+import { useTranslation } from '../../../i18n';
 
 const CARD_RADIUS = 12;
 /** Máximo por slide; el real se acota al ancho de pantalla menos padding del home. */
@@ -41,10 +42,6 @@ type Props = {
   onPartidoPress?: (partido: PartidoItem) => void;
 };
 
-function subtitleLine(count: number): string {
-  if (count === 1) return '1 reserva confirmada';
-  return `${count} reservas confirmadas`;
-}
 
 /**
  * Capa absolute inset-0 como en web (hover allí = opacity-100; aquí siempre visible).
@@ -85,6 +82,7 @@ export function ProximosPartidosSection({
   loading,
   onPartidoPress,
 }: Props) {
+  const { t } = useTranslation();
   const theme = useAmbientTheme(OPENWEATHER_API_KEY);
   const insets = useSafeAreaInsets();
   const { width: windowW } = useWindowDimensions();
@@ -108,13 +106,15 @@ export function ProximosPartidosSection({
     <View style={styles.section}>
       <View style={styles.headerRow}>
         <View style={styles.headerTextCol}>
-          <Text style={styles.title}>Mis partidos</Text>
+          <Text style={styles.title}>{t('home.proximosPartidos.title')}</Text>
           <Text style={styles.subtitle}>
             {loading && items.length === 0
-              ? 'Cargando…'
+              ? t('home.proximosPartidos.loading')
               : items.length === 0
-                ? 'Sin reservas activas'
-                : subtitleLine(items.length)}
+                ? t('home.proximosPartidos.empty')
+                : items.length === 1
+                  ? t('home.proximosPartidos.oneConfirmed')
+                  : t('home.proximosPartidos.manyConfirmed', { count: items.length })}
           </Text>
         </View>
       </View>

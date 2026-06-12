@@ -1,6 +1,7 @@
 import { Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 
 type HomeHeaderProps = {
   onMenuPress: () => void;
@@ -18,6 +19,7 @@ export function HomeHeader({
   onNotificationsPress,
   onGroupsPress,
 }: HomeHeaderProps) {
+  const { t } = useTranslation();
   const { width: windowWidth } = useWindowDimensions();
   const narrow = windowWidth < 380;
   const iconSize = narrow ? 22 : 24;
@@ -38,7 +40,7 @@ export function HomeHeader({
           onPress={onMenuPress}
           style={({ pressed }) => [styles.iconBtn, narrow && styles.iconBtnCompact, pressed && styles.iconBtnPressed]}
           accessibilityRole="button"
-          accessibilityLabel="Abrir menú"
+          accessibilityLabel={t('home.header.openMenu')}
         >
           <Ionicons name="menu" size={iconSize} color="#fff" />
         </Pressable>
@@ -51,7 +53,7 @@ export function HomeHeader({
             onPress={onMessagesPress}
             style={({ pressed }) => [styles.iconBtn, narrow && styles.iconBtnCompact, pressed && styles.iconBtnPressed]}
             accessibilityRole="button"
-            accessibilityLabel="Mensajes"
+            accessibilityLabel={t('home.header.messages')}
           >
             <Ionicons name="chatbubble-outline" size={iconSize} color="#fff" />
           </Pressable>
@@ -59,7 +61,7 @@ export function HomeHeader({
             onPress={onNotificationsPress}
             style={({ pressed }) => [styles.iconBtn, narrow && styles.iconBtnCompact, pressed && styles.iconBtnPressed]}
             accessibilityRole="button"
-            accessibilityLabel="Notificaciones"
+            accessibilityLabel={t('home.header.notifications')}
           >
             <Ionicons name="notifications-outline" size={iconSize} color="#fff" />
           </Pressable>
@@ -67,7 +69,7 @@ export function HomeHeader({
             onPress={onGroupsPress}
             style={({ pressed }) => [styles.iconBtn, narrow && styles.iconBtnCompact, pressed && styles.iconBtnPressed]}
             accessibilityRole="button"
-            accessibilityLabel="Grupos"
+            accessibilityLabel={t('home.header.groups')}
           >
             <Ionicons name="people-outline" size={iconSize} color="#fff" />
           </Pressable>

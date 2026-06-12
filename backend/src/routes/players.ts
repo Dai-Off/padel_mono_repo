@@ -7,6 +7,7 @@ import { calcEloRating } from '../services/levelingService';
 import { ligaFromEloWithBands } from '../services/matchmakingLeague';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
+import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
 import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
 import { syncPlayerVector } from '../lib/mailer';
 import {
@@ -1242,8 +1243,15 @@ router.get('/:id/feedback-summary', async (req: Request, res: Response) => {
  *       enviaron `match_feedback` con una entrada en `level_ratings` para ese jugador.
  *       Agrupa **hasta 3 valoraciones distintas** (una por compañero) del mismo `match_id` y genera
  *       la tarjeta: «Recomendación IA», fortalezas y a mejorar (OpenAI si `OPENAI_API_KEY` está configurada;
- *       si no hay clave o falla la API, plantillas locales). `insight_source` indica `openai` o `template`.
+ *       si no hay clave o falla la API, plantillas locales en español). `insight_source` indica `openai` o `template`.
+ *       Idioma opcional: query `lang` (ej. `es`, `en`, `zh-HK`) o cabecera `Accept-Language`; por defecto `es`.
  *       Solo el propio jugador autenticado puede consultar su `id` (privacidad).
+ *     parameters:
+ *       - in: query
+ *         name: lang
+ *         schema:
+ *           type: string
+ *         description: Locale BCP-47 para la tarjeta (default `es`)
  *     security: [{ bearerAuth: [] }]
  */
 router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response) => {
@@ -1259,7 +1267,11 @@ router.get('/:id/last-peer-feedback-insight', async (req: Request, res: Response
   if (e0) return res.status(500).json({ ok: false, error: e0.message });
   if (!exists) return res.status(404).json({ ok: false, error: 'Player not found' });
 
-  const insight = await getLastPeerFeedbackInsightForPlayer(supabase, id);
+  const locale = parsePeerFeedbackLocale(
+    req.query.lang as string | string[] | undefined,
+    req.headers['accept-language'] as string | undefined
+  );
+  const insight = await getLastPeerFeedbackInsightForPlayer(supabase, id, { locale });
   return res.json(insight);
 });
 
