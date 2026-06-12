@@ -42,6 +42,7 @@ import { GrillaQuickNav } from './components/GrillaQuickNav';
 import { GrillaLegend } from './components/GrillaLegend';
 import { BadPracticeModal } from './components/BadPracticeModal';
 import type { GapWarning } from './components/BadPracticeModal';
+import { IncompleteMatchOverrideModal } from './components/IncompleteMatchOverrideModal';
 import { HoverTooltip } from './components/HoverTooltip';
 import {
   formatPlayerDisplayName,
@@ -1055,6 +1056,14 @@ function GrillaViewInner() {
   // Bad practice modal state
   const [gapWarnings, setGapWarnings] = useState<GapWarning[]>([]);
   const [pendingDrop, setPendingDrop] = useState<{ reservationId: string; courtId: string; startTime: string; status: string } | null>(null);
+  const [pendingOverrideDrop, setPendingOverrideDrop] = useState<{
+    reservationId: string;
+    courtId: string;
+    startTime: string;
+    status: string;
+  } | null>(null);
+  const [overrideConflict, setOverrideConflict] = useState<Reservation | null>(null);
+  const [isProcessingOverride, setIsProcessingOverride] = useState(false);
 
   // Swipe gesture state
   const [touchStart, setTouchStart] = useState<{ x: number, y: number } | null>(null);
@@ -1719,6 +1728,28 @@ function GrillaViewInner() {
 
     const newStartMin = parseTime(newStartTime);
 
+    // Detectar conflicto con partidos incompletos (existen en list pero no en grid)
+    const hiddenConflict = serverListReservations.find(r => {
+      if (r.id === reservation.id || r.courtId !== newCourtId) return false;
+      const isInGrid = serverGridReservations.some(g => g.id === r.id);
+      if (isInGrid) return false; // ya se maneja por isValidDrop
+      const otherStart = parseTime(r.startTime);
+      const otherEnd = otherStart + r.durationMinutes;
+      const proposedEnd = newStartMin + reservation.durationMinutes;
+      return newStartMin < otherEnd && proposedEnd > otherStart;
+    });
+
+    if (hiddenConflict) {
+      setPendingOverrideDrop({
+        reservationId: reservation.id,
+        courtId: newCourtId,
+        startTime: newStartTime,
+        status: newStatus,
+      });
+      setOverrideConflict(hiddenConflict);
+      return;
+    }
+
     if (!isValidDrop(newCourtId, newStartMin, reservation.durationMinutes, reservation.id)) {
       console.warn(t('grid.dropRejected'));
       return;
@@ -1898,6 +1929,56 @@ function GrillaViewInner() {
         }
         refresh();
       });
+  };
+
+  const handleConfirmOverride = async () => {
+    if (!pendingOverrideDrop) return;
+    setIsProcessingOverride(true);
+    try {
+      const durationMinutes = reservations.find(r => r.id === pendingOverrideDrop.reservationId)?.durationMinutes ?? 90;
+      const baseDate = formatDateForInput(selectedDate);
+      const localDateTime = `${baseDate}T${pendingOverrideDrop.startTime}:00`;
+      const startUtc = zonedTimeToUtc(localDateTime);
+      const startAt = startUtc.toISOString();
+      const endAt = new Date(startUtc.getTime() + durationMinutes * 60000).toISOString();
+
+      const res = await apiFetchWithAuth<any>(
+        `/bookings/${pendingOverrideDrop.reservationId}/override-move`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            target_court_id: pendingOverrideDrop.courtId,
+            start_at: startAt,
+            end_at: endAt,
+          }),
+        }
+      );
+      if (res.ok) {
+        applyDrop(
+          pendingOverrideDrop.reservationId,
+          pendingOverrideDrop.courtId,
+          pendingOverrideDrop.startTime,
+          pendingOverrideDrop.status,
+        );
+        if (res.displaced?.action === 'relocated') {
+          toast.success(`Partido incompleto movido a ${res.displaced.new_court_name}`);
+        } else if (res.displaced?.action === 'cancelled') {
+          toast.warning('Partido incompleto cancelado (sin pista disponible). Jugadores reembolsados.');
+        }
+      } else {
+        toast.error(res.error || 'Error al procesar el movimiento');
+      }
+    } catch (err) {
+      toast.error('Error al procesar el movimiento');
+    } finally {
+      setIsProcessingOverride(false);
+      setPendingOverrideDrop(null);
+      setOverrideConflict(null);
+      refresh();
+    }
   };
 
   // Detect if a placement creates unusable 30-min gaps after 12:00
@@ -2926,6 +3007,17 @@ function GrillaViewInner() {
           warnings={gapWarnings}
         />
 
+        <IncompleteMatchOverrideModal
+          isOpen={!!pendingOverrideDrop}
+          conflict={overrideConflict}
+          isProcessing={isProcessingOverride}
+          onConfirm={handleConfirmOverride}
+          onClose={() => {
+            setPendingOverrideDrop(null);
+            setOverrideConflict(null);
+          }}
+        />
+
         {maintenanceBlockTarget && (() => {
           const existing = reservations.find(
             r => r.courtId === maintenanceBlockTarget.courtId
@@ -2947,8 +3039,8 @@ function GrillaViewInner() {
         })()}
       {/* Custom Tooltip */}
       <HoverTooltip
-        reservation={hoveredTooltip?.res || null}
-        anchorElement={hoveredTooltip?.el || null}
+        reservation={(pendingOverrideDrop || activeId || draggingCourt) ? null : (hoveredTooltip?.res || null)}
+        anchorElement={(pendingOverrideDrop || activeId || draggingCourt) ? null : (hoveredTooltip?.el || null)}
       />
       </div>
       <MainMenu

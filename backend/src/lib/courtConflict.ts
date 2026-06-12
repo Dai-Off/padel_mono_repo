@@ -119,12 +119,22 @@ export async function hasCourtConflict(courtId: string, startAt: string, endAt: 
 }
 
 /** Returns the subset of courts from the given club that are free for the provided [startAt,endAt]. */
-export async function getAvailableCourtIds(clubId: string, startAt: string, endAt: string, excludeBookingId?: string): Promise<{ ok: true; courtIds: string[] } | { ok: false; error: string }> {
+export async function getAvailableCourtIds(
+  clubId: string,
+  startAt: string,
+  endAt: string,
+  excludeBookingId?: string,
+  includeHidden = true
+): Promise<{ ok: true; courtIds: string[] } | { ok: false; error: string }> {
   const supabase = getSupabaseServiceRoleClient();
-  const { data: courts, error } = await supabase
+  let q = supabase
     .from('courts')
     .select('id')
     .eq('club_id', clubId);
+  if (!includeHidden) {
+    q = q.eq('is_hidden', false);
+  }
+  const { data: courts, error } = await q;
   if (error) return { ok: false, error: error.message };
   const ids = (courts ?? []).map((c: { id: string }) => c.id);
   const results = await Promise.all(ids.map((id) => hasCourtConflict(id, startAt, endAt, excludeBookingId).then((r) => ({ id, conflict: r }))));

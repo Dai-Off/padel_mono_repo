@@ -71,6 +71,15 @@ export const zhHK: TranslationKeys = {
         moveLaterSuggestion: '將時段移至 {time} 以消除空檔並連續對齊預訂。',
         alignSuggestion: '將時段對齊至 {time}，緊接上一時段，避免產生 30 分鐘的不可售空檔。',
     },
+    override: {
+        title: '已安排未完成的比賽',
+        subtitle: '此操作將優先處理您的預訂',
+        matchInfo: '已登記 {players} / 4 名球員',
+        consequence: '比賽將被移至其他空閒球場。如果沒有可用球場，比賽將被取消並自動退款給球員。',
+        emailNote: '球員將收到電子郵件，供其選擇保留或取消預訂。',
+        confirmButton: '確認並移動',
+        cancelButton: '取消',
+    },
 
     freeSlot: {
         disabled: '已停用',

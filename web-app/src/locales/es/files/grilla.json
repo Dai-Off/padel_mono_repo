@@ -256,5 +256,14 @@
     "reservaPuntaChino": "RESERVA PUNTA CHINO reservado",
     "disponible": "Disponible",
     "tiempoPasado": "Tiempo pasado"
+  },
+  "override": {
+    "title": "Partido incompleto programado",
+    "subtitle": "Esta acción dará prioridad a tu reserva",
+    "matchInfo": "{{players}} de 4 jugadores inscritos",
+    "consequence": "El partido será movido a otra pista libre. Si no hay pista disponible, se cancelará y los jugadores serán reembolsados automáticamente.",
+    "emailNote": "Los jugadores recibirán un correo con las opciones de mantener o cancelar su reserva.",
+    "confirmButton": "Confirmar y mover",
+    "cancelButton": "Cancelar"
   }
 }
