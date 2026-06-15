@@ -21,6 +21,7 @@ import { loadProgress, saveProgress, clearProgress, type DailyLessonProgress } f
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
 import { QuestionCard } from '../components/learning/QuestionCard';
 import { VideoPlayer } from '../components/learning/VideoPlayer';
+import { IconGlow } from '../components/ui/IconGlow';
 import { LessonImpactRadar, type SkillValues } from '../components/learning/LessonImpactRadar';
 
 type Props = {
@@ -195,7 +196,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   const resultsScale = useRef(new Animated.Value(0.95)).current;
   const resultsOpacity = useRef(new Animated.Value(0)).current;
   const glowScale = useRef(new Animated.Value(1)).current;
-  const glowOpacity = useRef(new Animated.Value(0.15)).current;
+  const glowOpacity = useRef(new Animated.Value(0.8)).current;
 
   // Cleanup de timers al desmontar
   useEffect(() => {
@@ -218,12 +219,12 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       const breathe = Animated.loop(
         Animated.parallel([
           Animated.sequence([
-            Animated.timing(glowScale, { toValue: 1.3, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            Animated.timing(glowScale, { toValue: 1.12, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
             Animated.timing(glowScale, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
           ]),
           Animated.sequence([
-            Animated.timing(glowOpacity, { toValue: 0.25, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-            Animated.timing(glowOpacity, { toValue: 0.1, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            Animated.timing(glowOpacity, { toValue: 1, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+            Animated.timing(glowOpacity, { toValue: 0.6, duration: 2000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
           ]),
         ]),
       );
@@ -686,7 +687,9 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.lockedContainer}>
           <View style={styles.lockedIconWrap}>
-            <View style={styles.lockedIconGlow} />
+            <View style={styles.lockedIconGlow}>
+              <IconGlow color="#F18F34" size={150} intensity={0.45} />
+            </View>
             <LinearGradient colors={['#F18F34', '#d97706']} style={styles.lockedIconCircle}>
               <Ionicons name="hourglass-outline" size={44} color="#FFFFFF" />
             </LinearGradient>
@@ -746,12 +749,10 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
           <View style={styles.introIconWrap}>
             <Animated.View style={[
               styles.introGlow,
-              {
-                backgroundColor: showCompleted ? '#10B981' : '#F18F34',
-                opacity: glowOpacity,
-                transform: [{ scale: glowScale }],
-              },
-            ]} />
+              { opacity: glowOpacity, transform: [{ scale: glowScale }] },
+            ]}>
+              <IconGlow color={showCompleted ? '#10B981' : '#F18F34'} size={300} />
+            </Animated.View>
             <LinearGradient
               colors={showCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#FFB347']}
               style={styles.introIcon}
@@ -1245,25 +1246,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 28,
   },
+  // Tamaño explícito (150) para contener el halo radial sin recorte. El icono
+  // (88) queda centrado y el contenido inferior se acerca con marginBottom bajo.
   lockedIconWrap: {
-    width: 120,
-    height: 120,
+    width: 150,
+    height: 150,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    overflow: 'visible',
+    marginBottom: 8,
   },
   lockedIconGlow: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#F18F34',
-    opacity: 0.18,
-    shadowColor: '#F18F34',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 40,
-    elevation: 25,
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   lockedIconCircle: {
     width: 88,
@@ -1361,19 +1357,12 @@ const styles = StyleSheet.create({
 
   // Intro
   introContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 32 },
-  introIconWrap: { marginBottom: 24, alignItems: 'center', justifyContent: 'center' },
-  introGlow: {
-    position: 'absolute',
-    width: 220,
-    height: 220,
-    borderRadius: 110,
-    // Simular glow con shadow en iOS y elevation en Android
-    shadowColor: '#F18F34',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 60,
-    elevation: 30,
-  },
+  // El wrap tiene tamaño explícito (240) para CONTENER el halo radial y que no
+  // se recorte (en Android los hijos absolutos que exceden el padre se cortan).
+  // El marginBottom negativo compensa el alto extra para que el título quede
+  // cerca del icono (el texto se solapa con la cola tenue del halo, sin problema).
+  introIconWrap: { width: 300, height: 300, alignItems: 'center', justifyContent: 'center', overflow: 'visible', marginBottom: -70 },
+  introGlow: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   introIcon: { width: 96, height: 96, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   completedBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
