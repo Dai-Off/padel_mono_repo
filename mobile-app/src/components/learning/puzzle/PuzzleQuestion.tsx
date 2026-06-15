@@ -114,7 +114,7 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
   };
 
   return (
-    <View>
+    <View style={styles.root}>
       <View style={styles.statementRow}>
         <Text style={[styles.statement, { flex: 1 }]}>{content.statement}</Text>
         {content.intro_frame && !selected && !confirmed && (
@@ -166,14 +166,16 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
         snap={showingIntro}
       />
 
-      {/* Texto del bocadillo: cambia según la fase */}
+      {/* Bocadillo de altura fija: reserva desde el inicio el espacio del estado
+          "confirmado", así llena el hueco bajo la cancha (queda centrada) y no
+          salta al Confirmar. */}
       <View style={styles.bubble}>
         {!selected && !confirmed && (
-          <Text style={styles.bubbleHint}>Selecciona A, B o C abajo y luego confirma.</Text>
+          <Text style={styles.bubbleHint}>Toca A, B o C para previsualizar la jugada. No se elige hasta que confirmes.</Text>
         )}
         {selected && !confirmed && (
           <>
-            <Text style={styles.bubbleLabel}>
+            <Text style={styles.bubbleLabel} numberOfLines={2}>
               {String.fromCharCode(64 + selected.id)} · {selected.text}
             </Text>
             <Text style={styles.bubbleHint}>Pulsa Confirmar para ver el resultado.</Text>
@@ -186,14 +188,15 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
                 styles.bubbleLabel,
                 selected.is_correct ? styles.colorCorrect : styles.colorIncorrect,
               ]}
+              numberOfLines={2}
             >
               {String.fromCharCode(64 + selected.id)} · {selected.text}
             </Text>
             {selected.explanation ? (
-              <Text style={styles.bubbleExplanation}>{selected.explanation}</Text>
+              <Text style={styles.bubbleExplanation} numberOfLines={3}>{selected.explanation}</Text>
             ) : null}
             {!selected.is_correct && correctOption ? (
-              <Text style={styles.bubbleCorrectHint}>
+              <Text style={styles.bubbleCorrectHint} numberOfLines={1}>
                 Correcta: {String.fromCharCode(64 + correctOption.id)} — {correctOption.text}
               </Text>
             ) : null}
@@ -248,6 +251,8 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
 const BADGE_SIZE = 44;
 
 const styles = StyleSheet.create({
+  // Columna que ocupa el alto disponible: la cancha (flex) absorbe el sobrante.
+  root: { flex: 1 },
   statementRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -265,7 +270,10 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: 'rgba(255,255,255,0.06)',
   },
-  // Bocadillo de texto contextual
+  // Bocadillo de altura fija: reserva desde el inicio el espacio del estado
+  // "confirmado" (label + explicación + correcta). Llena el hueco bajo la cancha
+  // (la deja centrada) y evita el salto al Confirmar. El contenido se alinea
+  // arriba (el label no se mueve al confirmar) y se recorta limpio si excede.
   bubble: {
     marginTop: 10,
     paddingVertical: 10,
@@ -274,7 +282,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    minHeight: 56,
+    height: 118,
+    overflow: 'hidden',
   },
   bubbleHint: {
     color: '#9CA3AF',

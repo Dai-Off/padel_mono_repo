@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { ACCENT } from './constants';
 import { androidReadableText } from './textStyles';
+import { useTranslation } from '../../../i18n';
 
 const CARD_W = 280;
 
@@ -23,6 +24,7 @@ type Props = {
 
 /** Sin misiones: solo cabecera + mensaje vacío (sin tarjeta placeholder). */
 export function MissionsHomeSection({ missions = [] }: Props) {
+  const { t } = useTranslation();
   const hasMissions = missions.length > 0;
 
   if (!hasMissions) {
@@ -31,15 +33,13 @@ export function MissionsHomeSection({ missions = [] }: Props) {
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <Ionicons name="radio-button-on" size={22} color={ACCENT} />
-            <Text style={styles.h2}>Misiones Activas</Text>
+            <Text style={styles.h2}>{t('home.missions.title')}</Text>
           </View>
         </View>
         <View style={styles.empty}>
           <Ionicons name="file-tray-outline" size={40} color="#4b5563" />
-          <Text style={styles.emptyTitle}>No hay misiones activas</Text>
-          <Text style={styles.emptySub}>
-            Cuando tengas misiones, aparecerán aquí.
-          </Text>
+          <Text style={styles.emptyTitle}>{t('home.missions.emptyTitle')}</Text>
+          <Text style={styles.emptySub}>{t('home.missions.emptySub')}</Text>
         </View>
       </View>
     );
@@ -50,10 +50,10 @@ export function MissionsHomeSection({ missions = [] }: Props) {
       <View style={styles.header}>
         <View style={styles.headerLeft}>
           <Ionicons name="radio-button-on" size={22} color={ACCENT} />
-          <Text style={styles.h2}>Misiones Activas</Text>
+          <Text style={styles.h2}>{t('home.missions.title')}</Text>
         </View>
         <Pressable>
-          <Text style={styles.link}>Ver todas</Text>
+          <Text style={styles.link}>{t('home.missions.viewAll')}</Text>
         </Pressable>
       </View>
       <ScrollView

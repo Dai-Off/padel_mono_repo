@@ -75,7 +75,7 @@ export function QuestionCard({ question, onAnswered, onReplayVideo }: Props) {
   })();
 
   return (
-    <View>
+    <View style={question.type === 'puzzle' ? styles.puzzleFill : undefined}>
       {question.has_video && question.video_url && onReplayVideo && !answered && (
         <Pressable
           onPress={onReplayVideo}
@@ -91,6 +91,9 @@ export function QuestionCard({ question, onAnswered, onReplayVideo }: Props) {
 }
 
 const styles = StyleSheet.create({
+  // El puzzle necesita ocupar el alto disponible para que su cancha absorba el
+  // espacio sobrante y nunca haga falta scroll.
+  puzzleFill: { flex: 1 },
   replayBtn: {
     flexDirection: 'row',
     alignItems: 'center',

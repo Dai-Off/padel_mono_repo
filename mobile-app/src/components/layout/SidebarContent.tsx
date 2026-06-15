@@ -221,6 +221,16 @@ export function SidebarContent() {
               ctx?.onNavigateToAjustes?.();
             }}
           />
+          <SidebarRowItem
+            icon="star-outline"
+            title="Valorar clubes"
+            subtitle="Reseñas de clubes donde has jugado"
+            iconVariant="orange"
+            onPress={() => {
+              close?.();
+              ctx?.onNavigateToClubReviews?.();
+            }}
+          />
         </SidebarSection>
 
         <SidebarSection title="Soporte">
