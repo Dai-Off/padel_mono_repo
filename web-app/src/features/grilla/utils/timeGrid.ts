@@ -100,7 +100,7 @@ export type MobileGridFitScale = {
 
 /**
  * Default mobile zoom: fit full day height in the viewport.
- * Horizontal overflow is handled by pan — do not shrink width to show all courts.
+ * Horizontal overflow uses native scroll — do not shrink width to show all courts.
  */
 export function computeMobileGridFitScale(
     viewportWidthPx: number,

@@ -22,8 +22,6 @@ import type {
   DragMoveEvent,
 } from '@dnd-kit/core';
 import { restrictToWindowEdges } from '@dnd-kit/modifiers';
-import { TransformWrapper, TransformComponent, useTransformEffect } from 'react-zoom-pan-pinch';
-import type { ReactZoomPanPinchRef } from 'react-zoom-pan-pinch';
 
 import type { Court, CreateBookingBatchResult, Reservation } from './types';
 import { TimeAxis } from './components/TimeAxis';
@@ -56,12 +54,11 @@ import {
   PIXELS_PER_MINUTE,
   computeCompactPxPerMinute,
   computeMobileCourtLayout,
-  computeMobileGridFitScale,
   estimateMobileGridViewportHeight,
   GRILLA_COMPACT_LAYOUT_MAX_PX,
 } from './utils/timeGrid';
 import { GridBoundsProvider, gridContentHeightPx, parseTimeStrInBounds } from './context/GridBoundsContext';
-import { enumerateDatesInRange } from './utils/recurrenceDates';
+import { enumerateDatesInRange, eachCalendarDateInRange } from './utils/recurrenceDates';
 import { courtVisibleInGridForDate } from './courtVisibility';
 import { ZoomContext, ZoomScales } from './context/ZoomContext';
 import type { ZoomLevel } from './context/ZoomContext';
@@ -660,6 +657,7 @@ function mapBookings(
             id: b.id,
             courtId: b.court_id,
             courtName: courtMap.get(b.court_id) || b.court_id,
+            bookingDate: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`,
             startTime: formatLocalTimeHHmm(start),
             durationMinutes: (new Date(b.end_at).getTime() - start.getTime()) / 60000,
             playerName,
@@ -738,61 +736,6 @@ const formatDate = (date: Date) => {
 
 const formatDateForInput = (date: Date) => {
   return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
-};
-
-// Custom scrollbars for the zoom library
-const ZoomScrollbars = () => {
-  const [transform, setTransform] = useState({ scale: 1, positionX: 0, positionY: 0 });
-
-  useTransformEffect(({ state }) => {
-    setTransform({
-      scale: state.scale,
-      positionX: state.positionX,
-      positionY: state.positionY
-    });
-  });
-
-  const { scale, positionX, positionY } = transform;
-
-  // Don't show scrollbars if not zoomed in (adding a tiny tolerance for floating point errors)
-  if (scale <= 1.01) return null;
-
-  // We estimate content size by multiplying wrapper size by scale
-  // The amount we can pan is (scale - 1) * wrapperSize
-  // The thumb size is proportional to how much is visible (1 / scale)
-  const thumbSizePct = Math.max(10, (1 / scale) * 100);
-
-  // Position is bounded from 0 to negative bounds. Mapped from 0 to 1
-  const maxX = (scale - 1) * window.innerWidth;
-  const maxY = (scale - 1) * window.innerHeight;
-
-  // Calculate percentage scrolled
-  const scrollXPct = maxX > 0 ? Math.min(1, Math.max(0, Math.abs(positionX) / maxX)) : 0;
-  const scrollYPct = maxY > 0 ? Math.min(1, Math.max(0, Math.abs(positionY) / maxY)) : 0;
-
-  // Move the thumb by the scroll percentage of the REMAINING space (100% - thumbSizePct)
-  const thumbLeft = scrollXPct * (100 - thumbSizePct);
-  const thumbTop = scrollYPct * (100 - thumbSizePct);
-
-  return (
-    <>
-      {/* Horizontal Scrollbar */}
-      <div className="absolute bottom-2 left-4 right-4 h-2.5 bg-black/10 rounded-full z-50 overflow-hidden pointer-events-none transition-opacity duration-300">
-        <div
-          className="absolute top-0 bottom-0 bg-black/40 rounded-full"
-          style={{ width: `${thumbSizePct}%`, left: `${thumbLeft}%` }}
-        />
-      </div>
-
-      {/* Vertical Scrollbar */}
-      <div className="absolute top-4 bottom-4 right-2 w-2.5 bg-black/10 rounded-full z-50 overflow-hidden pointer-events-none transition-opacity duration-300">
-        <div
-          className="absolute left-0 right-0 bg-black/40 rounded-full"
-          style={{ height: `${thumbSizePct}%`, top: `${thumbTop}%` }}
-        />
-      </div>
-    </>
-  );
 };
 
 function GrillaViewInner() {
@@ -967,9 +910,7 @@ function GrillaViewInner() {
   }, [focusedCourtId, gridCourts]);
 
   // Ref to control the zoom-pan-pinch library programmatically
-  const transformComponentRef = useRef<ReactZoomPanPinchRef | null>(null);
   const mobileGridViewportRef = useRef<HTMLDivElement | null>(null);
-  const activeMobileScaleRef = useRef<number>(1);
   const tournamentDropRequestSeqRef = useRef<Record<string, number>>({});
 
   const [isMobileDevice, setIsMobileDevice] = useState<boolean>(window.innerWidth <= 768);
@@ -983,7 +924,11 @@ function GrillaViewInner() {
   );
   const [gridViewportWidth, setGridViewportWidth] = useState(0);
   const [gridViewportHeight, setGridViewportHeight] = useState(0);
-  const mobileFitLayoutKeyRef = useRef('');
+
+  const [listDateFrom, setListDateFrom] = useState(() => formatDateForInput(clubToday));
+  const [listDateTo, setListDateTo] = useState(() => formatDateForInput(clubToday));
+  const [listRangeReservations, setListRangeReservations] = useState<Reservation[]>([]);
+  const [listRangeLoading, setListRangeLoading] = useState(false);
 
   const measureMobileGridViewport = useCallback(() => {
     const el = mobileGridViewportRef.current;
@@ -1211,6 +1156,83 @@ function GrillaViewInner() {
           throw new Error(`Failed to delete ${failed.length} booking(s)`);
       }
   }, [removeBookingsFromCache, refresh]);
+
+  const fetchListRange = useCallback(async () => {
+      if (!clubId || courts.length === 0) {
+          setListRangeReservations([]);
+          return;
+      }
+      const from = listDateFrom <= listDateTo ? listDateFrom : listDateTo;
+      const to = listDateFrom <= listDateTo ? listDateTo : listDateFrom;
+      setListRangeLoading(true);
+      try {
+          const tz = encodeURIComponent(clubIanaTimeZone());
+          const bRes = await apiFetchWithAuth<any>(
+              `/bookings?club_id=${encodeURIComponent(clubId)}&date_from=${encodeURIComponent(from)}&date_to=${encodeURIComponent(to)}&time_zone=${tz}`,
+          );
+          const raw = bRes.bookings || [];
+          const days = eachCalendarDateInRange(from, to);
+          const schoolByDay = await Promise.all(
+              days.map(async (ds) => {
+                  const [schoolSlots, privateSlots] = await Promise.all([
+                      schoolCoursesService.slots(clubId, ds),
+                      schoolCoursesService.slotsPrivate(clubId, ds),
+                  ]);
+                  return { ds, schoolSlots, privateSlots };
+              }),
+          );
+          const schoolAsBookings = schoolByDay.flatMap(({ ds, schoolSlots, privateSlots }) => [
+              ...schoolSlots.map((slot: any) => ({
+                  id: `school-slot-${slot.id}`,
+                  court_id: slot.court_id,
+                  start_at: `${ds}T${slot.start_time}:00`,
+                  end_at: `${ds}T${slot.end_time}:00`,
+                  status: 'confirmed',
+                  reservation_type: 'school_course',
+                  source_channel: 'system',
+                  notes: `${slot.course_name}${slot.staff_name ? ` - ${slot.staff_name}` : ''}`,
+                  players: { first_name: 'Curso', last_name: slot.course_name },
+              })),
+              ...privateSlots.map((slot: any) => ({
+                  id: `school-private-slot-${slot.id}`,
+                  court_id: slot.court_id,
+                  start_at: `${ds}T${slot.start_time}:00`,
+                  end_at: `${ds}T${slot.end_time}:00`,
+                  status: 'confirmed',
+                  reservation_type: 'school_individual',
+                  source_channel: 'system',
+                  notes: `Clase particular${slot.student_name ? ` - ${slot.student_name}` : ''}`,
+                  players: { first_name: 'Clase', last_name: slot.student_name ?? 'particular' },
+              })),
+          ]);
+          setListRangeReservations(mapBookings([...raw, ...schoolAsBookings], courts, 'list'));
+      } catch (err) {
+          console.error('Error fetching list range:', err);
+          setListRangeReservations([]);
+      } finally {
+          setListRangeLoading(false);
+      }
+  }, [clubId, courts, listDateFrom, listDateTo]);
+
+  useEffect(() => {
+      if (!isReservationsListView) return;
+      void fetchListRange();
+  }, [isReservationsListView, fetchListRange]);
+
+  const prevListViewRef = useRef(false);
+  useEffect(() => {
+      if (isReservationsListView && !prevListViewRef.current) {
+          setListDateFrom(selectedDateKey);
+          setListDateTo(selectedDateKey);
+      }
+      prevListViewRef.current = isReservationsListView;
+  }, [isReservationsListView, selectedDateKey]);
+
+  const handleDeleteBookingsFromList = useCallback(async (bookingIds: string[]) => {
+      await handleDeleteBookings(bookingIds);
+      await fetchListRange();
+      await refresh();
+  }, [handleDeleteBookings, fetchListRange, refresh]);
 
   // toggleCourtHidden has been moved to useClubData.
 
@@ -1647,7 +1669,7 @@ function GrillaViewInner() {
 
     // delta.y is in screen pixels, but the grid is scaled by CSS zoom,
     // so we need to convert screen delta to grid-space delta
-    const panScale = mobileFullView ? activeMobileScaleRef.current : scale;
+    const panScale = mobileFullView ? 1 : scale;
     const ppm = mobileFullView ? compactPxPerMinute : PIXELS_PER_MINUTE;
     const currentPixels = timeToPixels(activeReservation.startTime, ppm, gridBounds);
     const newPixels = currentPixels + delta.y / panScale;
@@ -1712,7 +1734,7 @@ function GrillaViewInner() {
 
     const newCourtId = over.id as string;
 
-    const panScale = mobileFullView ? activeMobileScaleRef.current : scale;
+    const panScale = mobileFullView ? 1 : scale;
     const ppm = mobileFullView ? compactPxPerMinute : PIXELS_PER_MINUTE;
     const currentPixels = timeToPixels(reservation.startTime, ppm, gridBounds);
     const newPixels = currentPixels + delta.y / panScale;
@@ -2141,52 +2163,6 @@ function GrillaViewInner() {
   const mobileCanvasWidthPx = mobileCourtLayout?.canvasWidthPx;
   const mobileGridOverflows = mobileCourtLayout?.overflowsHorizontally ?? false;
 
-  const mobileGridFit = useMemo(() => {
-    if (!mobileFullView) return { fitScale: 1, minScale: 0.85 };
-    const vw = gridViewportWidth || mobileGridViewportRef.current?.clientWidth || 0;
-    const vh = gridViewportHeight || mobileGridViewportRef.current?.clientHeight || 0;
-    const cw = mobileCanvasWidthPx ?? vw;
-    return computeMobileGridFitScale(vw, vh, cw, nativeGridHeight);
-  }, [
-    mobileFullView,
-    gridViewportWidth,
-    gridViewportHeight,
-    mobileCanvasWidthPx,
-    nativeGridHeight,
-  ]);
-
-  const applyMobileGridFit = useCallback(() => {
-    const ref = transformComponentRef.current;
-    if (!ref || !mobileFullView) return;
-    const { fitScale } = mobileGridFit;
-    ref.centerView(fitScale, 0);
-    activeMobileScaleRef.current = fitScale;
-  }, [mobileFullView, mobileGridFit]);
-
-  useEffect(() => {
-    if (!mobileFullView || gridViewportWidth <= 0 || gridViewportHeight <= 0) return;
-    const layoutKey = `${gridViewportWidth}x${gridViewportHeight}:${mobileCanvasWidthPx ?? 0}:${nativeGridHeight}:${mobileGridFit.fitScale}`;
-    if (mobileFitLayoutKeyRef.current === layoutKey) return;
-
-    const frame = requestAnimationFrame(() => {
-      applyMobileGridFit();
-      mobileFitLayoutKeyRef.current = layoutKey;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [
-    mobileFullView,
-    gridViewportWidth,
-    gridViewportHeight,
-    mobileCanvasWidthPx,
-    nativeGridHeight,
-    mobileGridFit.fitScale,
-    applyMobileGridFit,
-  ]);
-
-  useEffect(() => {
-    if (!mobileFullView) mobileFitLayoutKeyRef.current = '';
-  }, [mobileFullView]);
-
   const isFirstCourt = focusedCourtId === gridCourts[0]?.id;
   const isLastCourt = focusedCourtId === gridCourts[gridCourts.length - 1]?.id;
 
@@ -2430,19 +2406,24 @@ function GrillaViewInner() {
             />
           ) : isReservationsListView ? (
             <ReservationsListPanel
-              reservations={serverListReservations}
+              reservations={listRangeReservations}
               courts={courts}
-              dateStr={formatDateForInput(selectedDate)}
-              clubName={portalClubName}
-              onDateChange={(ds) => {
-                const [y, mo, d] = ds.split('-').map(Number);
-                if (!y || !mo || !d) return;
-                setSelectedDate(new Date(y, mo - 1, d));
+              dateFrom={listDateFrom}
+              dateTo={listDateTo}
+              onDateRangeChange={(from, to) => {
+                setListDateFrom(from);
+                setListDateTo(to);
+                const [y, mo, d] = from.split('-').map(Number);
+                if (y && mo && d) setSelectedDate(new Date(y, mo - 1, d));
               }}
+              clubName={portalClubName}
+              typeConfigs={Object.keys(typeConfigs).length > 0 ? typeConfigs : undefined}
               onEditBooking={(bookingId) => void openBookingForEdit(bookingId)}
-              onDeleteBookings={handleDeleteBookings}
+              onDeleteBookings={handleDeleteBookingsFromList}
               onOpenGrid={() => navigate('/grilla?menu=reservas')}
-              loading={loading}
+              onOpenMenu={() => setIsMenuOpen(true)}
+              onOpenResumen={() => navigate('/grilla?menu=resumen')}
+              loading={listRangeLoading}
             />
           ) : (
           <DndContext
@@ -2752,120 +2733,83 @@ function GrillaViewInner() {
 
                 {mobileFullView ? (
                   <div ref={mobileGridViewportRef} className="grilla-mobile-viewport flex-1 min-h-0">
-                  <TransformWrapper
-                    ref={transformComponentRef}
-                    initialScale={mobileGridFit.fitScale}
-                    minScale={mobileGridFit.minScale}
-                    maxScale={3}
-                    centerZoomedOut
-                    centerOnInit={false}
-                    wheel={{ wheelDisabled: true }}
-                    doubleClick={{ disabled: true }}
-                    panning={{ disabled: activeId !== null, velocityDisabled: false }}
-                    pinch={{ disabled: activeId !== null }}
-                    alignmentAnimation={{ disabled: true }}
-                    disablePadding
-                    limitToBounds={false}
-                    onInit={(ref) => {
-                      transformComponentRef.current = ref;
-                      ref.centerView(mobileGridFit.fitScale, 0);
-                      activeMobileScaleRef.current = mobileGridFit.fitScale;
-                    }}
-                    onTransformed={(_ref, state) => {
-                      activeMobileScaleRef.current = state.scale;
-                    }}
-                  >
-                    <ZoomScrollbars />
-                    <TransformComponent
-                      wrapperStyle={{ width: '100%', height: '100%' }}
-                      contentStyle={{
-                        width: mobileCanvasWidthPx ?? '100%',
+                    <div
+                      style={{
                         height: `${nativeGridHeight}px`,
-                        flexShrink: 0,
+                        width: mobileCanvasWidthPx ?? '100%',
+                        minWidth: mobileGridOverflows ? mobileCanvasWidthPx : undefined,
                       }}
+                      className={clsx(
+                        'grilla-mobile-canvas grilla-flex-shrink flex relative pl-1',
+                        mobileGridOverflows && 'grilla-mobile-canvas--scroll',
+                      )}
                     >
+                      <TimeAxis
+                        position="left"
+                        isCompact
+                        compactPxPerMinute={compactPxPerMinute}
+                      />
+
                       <div
-                        style={{
-                          height: `${nativeGridHeight}px`,
-                          ...(mobileCanvasWidthPx ? { width: mobileCanvasWidthPx } : {}),
-                        }}
                         className={clsx(
-                          'grilla-mobile-canvas grilla-flex-shrink flex relative pl-1',
-                          mobileGridOverflows && 'grilla-mobile-canvas--scroll',
+                          'grilla-mobile-courts-row relative z-10 mb-0',
+                          mobileGridOverflows && 'grilla-mobile-courts-row--scroll',
                         )}
+                        style={
+                          mobileGridOverflows && mobileCourtColWidthPx
+                            ? { width: visibleCourts.length * mobileCourtColWidthPx }
+                            : undefined
+                        }
                       >
-                        <TimeAxis
-                          position="left"
-                          isCompact
-                          compactPxPerMinute={compactPxPerMinute}
-                        />
-
-                        <div
-                          className={clsx(
-                            'grilla-mobile-courts-row relative z-10 mb-0',
-                            mobileGridOverflows && 'grilla-mobile-courts-row--scroll',
-                          )}
-                          style={
-                            mobileGridOverflows && mobileCourtColWidthPx
-                              ? { width: visibleCourts.length * mobileCourtColWidthPx }
-                              : undefined
-                          }
-                        >
-                          <GridBackground compactPxPerMinute={compactPxPerMinute} />
-                          {/* Current time red line — only shown when viewing today */}
-                          {activeChip === 'today' && nowMinutes >= gridBounds.openMin && nowMinutes <= gridBounds.closeMin && (() => {
-                            const topPx = compactHeaderPx + (nowMinutes - gridBounds.openMin) * compactPxPerMinute;
-                            return (
+                        <GridBackground compactPxPerMinute={compactPxPerMinute} />
+                        {activeChip === 'today' && nowMinutes >= gridBounds.openMin && nowMinutes <= gridBounds.closeMin && (() => {
+                          const topPx = compactHeaderPx + (nowMinutes - gridBounds.openMin) * compactPxPerMinute;
+                          return (
+                            <div
+                              className="absolute left-0 right-0 z-30 pointer-events-none"
+                              style={{ top: topPx }}
+                            >
                               <div
-                                className="absolute left-0 right-0 z-30 pointer-events-none"
-                                style={{ top: topPx }}
-                              >
-                                {/* Past overlay */}
-                                <div
-                                  className="absolute left-0 right-0 bg-red-500/5 pointer-events-none"
-                                  style={{ bottom: 0, top: -(topPx - compactHeaderPx) }}
-                                />
-                                {/* Red line */}
-                                <div className="w-full h-[2px] bg-red-500 relative">
-                                  {/* Circle dot on left */}
-                                  <div className="absolute -left-1 -top-[3px] w-2 h-2 rounded-full bg-red-500" />
-                                </div>
+                                className="absolute left-0 right-0 bg-red-500/5 pointer-events-none"
+                                style={{ bottom: 0, top: -(topPx - compactHeaderPx) }}
+                              />
+                              <div className="w-full h-[2px] bg-red-500 relative">
+                                <div className="absolute -left-1 -top-[3px] w-2 h-2 rounded-full bg-red-500" />
                               </div>
-                            );
-                          })()}
-                          {visibleCourts.map(court => (
-                            <CourtColumn
-                              key={`col-${court.id}`}
-                              court={court}
-                              reservations={reservations.filter(r => r.courtId === court.id)}
-                              gridDayKind={gridDayKind}
-                              nowMinutes={nowMinutes}
-                              dragGhost={dragState?.courtId === court.id ? dragState : undefined}
-                              recentlyDroppedId={recentlyDroppedId}
-                              onReservationClick={handleReservationClick}
-                              onFreeSlotClick={handleFreeSlotClick}
-                              onHeaderClick={(courtId) => {
-                                setFocusedCourtId(courtId);
-                              }}
-                              onHeaderHover={setHoveredCourtId}
-                              isMaintenanceBlocked={isNonWorkingDay || reservations.some(r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO')}
-                              isCompactView
-                              compactPxPerMinute={compactPxPerMinute}
-                              mobileColumnWidthPx={mobileCourtColWidthPx}
-                              totalCourts={gridCourts.length}
-                              typeColorOverrides={typeColorOverrides}
-                            />
-                          ))}
-                        </div>
-
-                        <TimeAxis
-                          position="right"
-                          isCompact
-                          compactPxPerMinute={compactPxPerMinute}
-                        />
+                            </div>
+                          );
+                        })()}
+                        {visibleCourts.map(court => (
+                          <CourtColumn
+                            key={`col-${court.id}`}
+                            court={court}
+                            reservations={reservations.filter(r => r.courtId === court.id)}
+                            gridDayKind={gridDayKind}
+                            nowMinutes={nowMinutes}
+                            dragGhost={dragState?.courtId === court.id ? dragState : undefined}
+                            recentlyDroppedId={recentlyDroppedId}
+                            onReservationClick={handleReservationClick}
+                            onFreeSlotClick={handleFreeSlotClick}
+                            onHeaderClick={(courtId) => {
+                              setFocusedCourtId(courtId);
+                            }}
+                            onHeaderHover={setHoveredCourtId}
+                            isMaintenanceBlocked={isNonWorkingDay || reservations.some(r => r.courtId === court.id && r.booking_type === 'blocked' && r.matchType === 'MANTENIMIENTO')}
+                            isCompactView
+                            compactPxPerMinute={compactPxPerMinute}
+                            mobileColumnWidthPx={mobileCourtColWidthPx}
+                            totalCourts={gridCourts.length}
+                            typeColorOverrides={typeColorOverrides}
+                          />
+                        ))}
                       </div>
-                    </TransformComponent>
-                  </TransformWrapper>
+
+                      <TimeAxis
+                        position="right"
+                        isCompact
+                        compactPxPerMinute={compactPxPerMinute}
+                      />
+                    </div>
                   </div>
                 ) : (
                   <div
@@ -2923,7 +2867,7 @@ function GrillaViewInner() {
               {activeReservation ? (
                 <div style={
                   mobileFullView
-                    ? { transform: `scale(${activeMobileScaleRef.current})`, transformOrigin: 'top left', width: activeCardWidth || undefined }
+                    ? { width: activeCardWidth || undefined }
                     : { zoom: scale, width: activeCardWidth || undefined }
                 }>
                   <ReservationCard

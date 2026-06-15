@@ -7,6 +7,7 @@ type SidebarContextValue = {
   onNavigateToMonedero?: () => void;
   onNavigateToTuActividad?: () => void;
   onNavigateToAjustes?: () => void;
+  onNavigateToClubReviews?: () => void;
   onNavigateToEditProfile?: () => void;
   onNavigateToInfo?: (screenId: InfoScreenId) => void;
   onProfilePress?: () => void;
@@ -20,6 +21,7 @@ export function SidebarProvider({
   onNavigateToMonedero,
   onNavigateToTuActividad,
   onNavigateToAjustes,
+  onNavigateToClubReviews,
   onNavigateToEditProfile,
   onNavigateToInfo,
   onProfilePress,
@@ -30,6 +32,7 @@ export function SidebarProvider({
   onNavigateToMonedero?: () => void;
   onNavigateToTuActividad?: () => void;
   onNavigateToAjustes?: () => void;
+  onNavigateToClubReviews?: () => void;
   onNavigateToEditProfile?: () => void;
   onNavigateToInfo?: (screenId: InfoScreenId) => void;
   onProfilePress?: () => void;
@@ -43,6 +46,7 @@ export function SidebarProvider({
         onNavigateToMonedero,
         onNavigateToTuActividad,
         onNavigateToAjustes,
+        onNavigateToClubReviews,
         onNavigateToEditProfile,
         onNavigateToInfo,
         onProfilePress,

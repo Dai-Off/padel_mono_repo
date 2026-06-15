@@ -3,6 +3,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { canAccessClub } from '../lib/clubAccess';
+import { playerCanReviewClub, listClubIdsEligibleForReview } from '../lib/clubReviewEligibility';
 
 const router = Router();
 router.use(attachAuthContext);
@@ -236,7 +237,7 @@ router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: 
  *               review: { id: "uuid", club_id: "…", player_id: "…", rating: 5, comment: "…", created_at: "…", updated_at: "…" }
  *       400: { description: Datos inválidos }
  *       401: { description: Sin token o sesión inválida }
- *       403: { description: El usuario no es un jugador registrado con cuenta }
+ *       403: { description: El usuario no es un jugador registrado con cuenta o no ha jugado en el club }
  *       404: { description: Club no existe }
  */
 router.post('/', async (req: Request, res: Response) => {
@@ -279,6 +280,16 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
 
+    if (!existing?.id) {
+      const eligible = await playerCanReviewClub(supabase, playerId, club_id);
+      if (!eligible) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Solo puedes valorar un club después de jugar un partido, hacer una reserva privada o participar en un torneo allí',
+        });
+      }
+    }
+
     if (existing?.id) {
       const { data: saved, error } = await supabase
         .from('club_reviews')
@@ -303,6 +314,150 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
     return res.json({ ok: true, review: saved });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /club-reviews/eligible-clubs:
+ *   get:
+ *     tags: [Club reviews]
+ *     summary: Clubes donde el jugador puede valorar o ya valoró
+ *     description: |
+ *       Devuelve clubes con actividad previa (partido, reserva privada o torneo jugado)
+ *       y/o reseña existente del jugador autenticado.
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             example:
+ *               ok: true
+ *               clubs:
+ *                 - club_id: "uuid"
+ *                   name: "Club Ejemplo"
+ *                   city: "Madrid"
+ *                   can_review: true
+ *                   review: { id: "uuid", rating: 5, comment: "Genial", created_at: "2026-01-01T12:00:00Z" }
+ *       401: { description: Sin token }
+ *       403: { description: Sin perfil de jugador }
+ */
+router.get('/eligible-clubs', async (req: Request, res: Response) => {
+  const token = getToken(req);
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'Token requerido. Envía Authorization: Bearer <access_token>.' });
+  }
+
+  try {
+    const playerId = await resolvePlayerIdFromToken(token);
+    if (!playerId) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo los jugadores con cuenta vinculada pueden consultar clubes',
+      });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+    const clubIds = await listClubIdsEligibleForReview(supabase, playerId);
+    if (clubIds.length === 0) {
+      return res.json({ ok: true, clubs: [] });
+    }
+
+    const { data: clubs, error: clubsErr } = await supabase
+      .from('clubs')
+      .select('id, name, city')
+      .in('id', clubIds);
+    if (clubsErr) return res.status(500).json({ ok: false, error: clubsErr.message });
+
+    const { data: reviews, error: revErr } = await supabase
+      .from('club_reviews')
+      .select('id, club_id, rating, comment, created_at, updated_at, club_response, club_response_at')
+      .eq('player_id', playerId)
+      .in('club_id', clubIds);
+    if (revErr) return res.status(500).json({ ok: false, error: revErr.message });
+
+    const reviewByClub = new Map(
+      (reviews ?? []).map((r: { club_id: string }) => [r.club_id, r]),
+    );
+
+    const out = await Promise.all(
+      (clubs ?? []).map(async (c: { id: string; name: string; city?: string | null }) => {
+        const existing = reviewByClub.get(c.id) ?? null;
+        const canReview =
+          Boolean(existing) || (await playerCanReviewClub(supabase, playerId, c.id));
+        return {
+          club_id: c.id,
+          name: c.name,
+          city: c.city ?? null,
+          can_review: canReview,
+          review: existing,
+        };
+      }),
+    );
+
+    out.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    return res.json({ ok: true, clubs: out });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /club-reviews/mine:
+ *   get:
+ *     tags: [Club reviews]
+ *     summary: Obtener mi reseña de un club (jugador)
+ *     description: Devuelve la reseña del jugador autenticado para el club, o null si no ha valorado.
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: club_id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: OK
+ *         content:
+ *           application/json:
+ *             example:
+ *               ok: true
+ *               review: { id: "uuid", rating: 5, comment: "Muy bien", created_at: "2026-01-28T12:00:00Z" }
+ *       401: { description: Sin token }
+ *       403: { description: Sin perfil de jugador o sin actividad previa en el club }
+ */
+router.get('/mine', async (req: Request, res: Response) => {
+  const token = getToken(req);
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'Token requerido. Envía Authorization: Bearer <access_token>.' });
+  }
+
+  const club_id = String(req.query.club_id ?? '').trim();
+  if (!club_id) return res.status(400).json({ ok: false, error: 'club_id es obligatorio' });
+
+  try {
+    const playerId = await resolvePlayerIdFromToken(token);
+    if (!playerId) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Solo los jugadores con cuenta vinculada pueden consultar reseñas',
+      });
+    }
+
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('club_reviews')
+      .select('id, created_at, updated_at, club_id, player_id, rating, comment, club_response, club_response_at')
+      .eq('club_id', club_id)
+      .eq('player_id', playerId)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    const canReview = await playerCanReviewClub(supabase, playerId, club_id);
+    return res.json({ ok: true, review: data ?? null, can_review: canReview || Boolean(data) });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
