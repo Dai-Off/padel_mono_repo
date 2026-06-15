@@ -96,6 +96,19 @@ export function VideoPlayer({ videoUrl, preloadedPlayer, area, counter, clubName
     return () => sub.remove();
   }, [player, onVideoEnd]);
 
+  // Al desmontar (vídeo terminado, saltado o cerrado) paramos el player y lo
+  // dejamos al inicio. Con la precarga el player lo gestiona el preloader y
+  // persiste, así que si no lo pausáramos aquí seguiría sonando por detrás de
+  // la pregunta. El reset a 0 lo deja listo para "repetir vídeo".
+  useEffect(() => {
+    return () => {
+      try {
+        player.pause();
+        player.currentTime = 0;
+      } catch { /* player ya liberado */ }
+    };
+  }, [player]);
+
   const badge = AREA_BADGE[area];
 
   return (
