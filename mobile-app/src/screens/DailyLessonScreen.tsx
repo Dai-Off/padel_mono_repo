@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   Pressable,
@@ -14,12 +15,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
 import { useVideoPreloader } from '../hooks/useVideoPreloader';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { submitDailyLesson, submitLessonFeedback, fetchTodayResults, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
 import { loadProgress, saveProgress, clearProgress, type DailyLessonProgress } from '../lib/dailyLessonStorage';
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
 import { QuestionCard } from '../components/learning/QuestionCard';
 import { VideoPlayer } from '../components/learning/VideoPlayer';
-import { Skeleton } from '../components/ui/Skeleton';
 import { LessonImpactRadar, type SkillValues } from '../components/learning/LessonImpactRadar';
 
 type Props = {
@@ -36,6 +37,29 @@ type Phase = 'intro' | 'questions' | 'review' | 'results';
 import { CLUB_IANA_TIMEZONE } from '../lib/clubTimeZone';
 
 const TIMEZONE = CLUB_IANA_TIMEZONE;
+
+// Clave de día calendario en una zona horaria (YYYY-MM-DD). Mismo criterio que
+// la card de la Home para decidir si la última lección cae "hoy".
+function calendarDayKeyInTimeZone(isoOrNow: Date | string, timeZone: string): string {
+  const d = typeof isoOrNow === 'string' ? new Date(isoOrNow) : isoOrNow;
+  if (Number.isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d);
+}
+
+// ¿La última lección completada cae hoy en la zona del club? Se usa con la señal
+// cacheada (HomeData) para pintar la variante correcta del intro al instante,
+// sin esperar al fetch.
+function isLessonCompletedToday(lastLessonIso: string | null, timeZone: string): boolean {
+  if (lastLessonIso == null || String(lastLessonIso).trim() === '') return false;
+  const keyDone = calendarDayKeyInTimeZone(lastLessonIso, timeZone);
+  if (!keyDone) return false;
+  return keyDone === calendarDayKeyInTimeZone(new Date(), timeZone);
+}
 
 const AREA_LABELS: Record<string, { label: string; color: string; bg: string; border: string }> = {
   technique: { label: 'Tecnica', color: '#3B82F6', bg: 'rgba(59,130,246,0.1)', border: 'rgba(59,130,246,0.2)' },
@@ -85,6 +109,10 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   const { session } = useAuth();
   const { questions: hookQuestions, alreadyCompleted, loading, error, requiresOnboarding, notEnoughQuestions } = useDailyLesson(TIMEZONE);
   const streak = useStreak(TIMEZONE);
+  // Señal cacheada (app-level, misma que la card de la Home) de si la lección
+  // de hoy ya está completada. Permite pintar la variante correcta del intro
+  // desde el primer frame mientras el fetch carga en background.
+  const { streak: homeStreak } = useHomeData();
 
   // Preguntas que se muestran. Por defecto vienen del hook (el algoritmo de
   // selección de hoy). Se sobreescriben en dos casos:
@@ -108,6 +136,9 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [showingVideo, setShowingVideo] = useState(false);
+  // UI optimista del intro: true si el usuario pulsó "Empezar" antes de que
+  // llegara el fetch. Muestra spinner en el botón y arranca al cargar.
+  const [pendingStart, setPendingStart] = useState(false);
   const [baseSkills, setBaseSkills] = useState<SkillValues>(DEFAULT_SKILLS);
   const [questionVotes, setQuestionVotes] = useState<Record<string, 'up' | 'down' | null>>({});
 
@@ -494,7 +525,9 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     }
   }, [session?.access_token]);
 
-  const handleStart = () => {
+  // Arranque real de la lección (asume preguntas ya cargadas).
+  const startLessonNow = useCallback(() => {
+    setPendingStart(false);
     setPhase('questions');
     setCurrentIndex(0);
     setAnswers([]);
@@ -528,7 +561,29 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setShowingVideo(false);
       questionStartTime.current = Date.now();
     }
-  };
+  }, [animateProgressTo, session?.user?.id, hookQuestions, alreadyCompleted, questions]);
+
+  // UI optimista: si el usuario pulsa "Empezar" antes de que llegue el fetch,
+  // marcamos la intención y mostramos spinner; el efecto de abajo arranca en
+  // cuanto las preguntas están listas.
+  const handleStart = useCallback(() => {
+    if (loading || questions.length === 0) {
+      setPendingStart(true);
+      return;
+    }
+    startLessonNow();
+  }, [loading, questions.length, startLessonNow]);
+
+  useEffect(() => {
+    if (!pendingStart || loading) return;
+    if (questions.length > 0) {
+      startLessonNow();
+    } else {
+      // No hay lección disponible (error/sin preguntas): la pantalla ya muestra
+      // ese estado, así que solo limpiamos la intención.
+      setPendingStart(false);
+    }
+  }, [pendingStart, loading, questions.length, startLessonNow]);
 
   // Reanudar una lección a medias: usa las preguntas y respuestas guardadas.
   // No se permite volver atrás en las preguntas ya contestadas (anti-cheat).
@@ -552,20 +607,10 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // RENDER: Loading
-  // ---------------------------------------------------------------------------
-  if (loading) {
-    return (
-      <View style={[styles.root, { paddingTop: insets.top }]}>
-        <View style={styles.loadingContainer}>
-          <Skeleton width={200} height={24} variant="dark" borderRadius={8} />
-          <Skeleton width={150} height={16} variant="dark" borderRadius={8} style={{ marginTop: 12 }} />
-          <Skeleton width="80%" height={48} variant="dark" borderRadius={16} style={{ marginTop: 32 }} />
-        </View>
-      </View>
-    );
-  }
+  // Nota: no hay gate de loading a pantalla completa. El intro se renderiza al
+  // instante (UI optimista) y el fetch carga en background; los estados de
+  // borde (onboarding / sin preguntas / error) solo aplican cuando el fetch ya
+  // resolvió (todos son false mientras loading).
 
   // ---------------------------------------------------------------------------
   // RENDER: Bloqueado por falta de cuestionario de nivelación
@@ -668,7 +713,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     );
   }
 
-  if (error || questions.length === 0) {
+  if (!loading && (error || questions.length === 0)) {
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.loadingContainer}>
@@ -688,6 +733,9 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   if (phase === 'intro') {
     const areas = [...new Set(questions.map((q) => q.area))];
     const multiplierText = streak.multiplier > 0 ? `x${(1 + streak.multiplier).toFixed(1)} XP` : null;
+    // Variante "ya completada": mientras carga usamos la señal cacheada de la
+    // Home para no parpadear; cuando el fetch resuelve, manda el valor real.
+    const showCompleted = loading ? isLessonCompletedToday(homeStreak.lastCompleted, TIMEZONE) : alreadyCompleted;
 
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -699,20 +747,20 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             <Animated.View style={[
               styles.introGlow,
               {
-                backgroundColor: alreadyCompleted ? '#10B981' : '#F18F34',
+                backgroundColor: showCompleted ? '#10B981' : '#F18F34',
                 opacity: glowOpacity,
                 transform: [{ scale: glowScale }],
               },
             ]} />
             <LinearGradient
-              colors={alreadyCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#FFB347']}
+              colors={showCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#FFB347']}
               style={styles.introIcon}
             >
-              <Ionicons name={alreadyCompleted ? 'reload' : 'flame'} size={48} color="#fff" />
+              <Ionicons name={showCompleted ? 'reload' : 'flame'} size={48} color="#fff" />
             </LinearGradient>
           </View>
 
-          {alreadyCompleted && (
+          {showCompleted && (
             <View style={styles.completedBadge}>
               <Ionicons name="checkmark" size={12} color="#10B981" />
               <Text style={styles.completedBadgeText}>Completada hoy</Text>
@@ -720,40 +768,48 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
           )}
 
           <Text style={styles.introTitle}>
-            {alreadyCompleted ? 'Repetir leccion' : 'Leccion del dia'}
+            {showCompleted ? 'Repetir leccion' : 'Leccion del dia'}
           </Text>
           <Text style={styles.introSubtitle}>
-            {alreadyCompleted ? 'Las mismas 5 preguntas sin recompensas' : '5 preguntas ~ 3 minutos'}
+            {showCompleted ? 'Las mismas 5 preguntas sin recompensas' : '5 preguntas ~ 3 minutos'}
           </Text>
 
-          {streak.currentStreak > 0 && (
-            <View style={styles.streakBadge}>
-              <Ionicons name="flame" size={16} color="#F97316" />
-              <Text style={styles.streakText}>{streak.currentStreak} dias de racha</Text>
-              {multiplierText && <Text style={styles.multiplierText}>{multiplierText}</Text>}
-            </View>
-          )}
+          {/* Zona de metadatos (racha + temas). Reserva una altura estable para
+              que, al llegar los datos, aparezcan en su sitio sin desplazar el
+              botón ni recentrar la vista. Sin skeleton: durante la carga el
+              espacio queda vacío y el contenido aparece cuando está listo. */}
+          <View style={styles.introMeta}>
+            {streak.currentStreak > 0 && (
+              <View style={styles.streakBadge}>
+                <Ionicons name="flame" size={16} color="#F97316" />
+                <Text style={styles.streakText}>{streak.currentStreak} dias de racha</Text>
+                {multiplierText && <Text style={styles.multiplierText}>{multiplierText}</Text>}
+              </View>
+            )}
 
-          <View style={styles.topicBadges}>
-            {areas.map((area) => {
-              const info = AREA_LABELS[area];
-              if (!info) return null;
-              return (
-                <View key={area} style={[styles.topicBadge, { backgroundColor: info.bg, borderColor: info.border }]}>
-                  <Text style={[styles.topicBadgeText, { color: info.color }]}>{info.label}</Text>
-                </View>
-              );
-            })}
+            {areas.length > 0 && (
+              <View style={styles.topicBadges}>
+                {areas.map((area) => {
+                  const info = AREA_LABELS[area];
+                  if (!info) return null;
+                  return (
+                    <View key={area} style={[styles.topicBadge, { backgroundColor: info.bg, borderColor: info.border }]}>
+                      <Text style={[styles.topicBadgeText, { color: info.color }]}>{info.label}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </View>
 
           {/* Si la lección ya está hecha, ofrecemos también "Ver resultados"
               (recupera la sesión de hoy sin tener que repetir). El botón
               principal pasa a "Repetir lección" para mantener la jerarquía
               visual del CTA principal en cualquier estado. */}
-          {alreadyCompleted && (
+          {showCompleted && (
             <Pressable
               onPress={handleViewResults}
-              disabled={submitting}
+              disabled={submitting || loading}
               style={styles.startButton}
             >
               <View style={styles.viewResultsButton}>
@@ -768,7 +824,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
           {/* Si hay una sesión a medias guardada en local (el usuario salió a
               mitad), el CTA principal pasa a "Continuar lección (N/5)". Sin
               opción de "Empezar de nuevo" — eso eliminaría el anti-cheat. */}
-          {pendingResume && !alreadyCompleted ? (
+          {pendingResume && !showCompleted ? (
             <Pressable onPress={handleResume} style={styles.startButton}>
               <LinearGradient
                 colors={['#F18F34', '#C46A20']}
@@ -783,17 +839,26 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               </LinearGradient>
             </Pressable>
           ) : (
-            <Pressable onPress={handleStart} style={styles.startButton}>
+            <Pressable onPress={handleStart} disabled={pendingStart} style={styles.startButton}>
               <LinearGradient
-                colors={alreadyCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#C46A20']}
+                colors={showCompleted ? ['#10B981', '#059669'] : ['#F18F34', '#C46A20']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
                 style={styles.startGradient}
               >
-                <Ionicons name={alreadyCompleted ? 'reload' : 'play'} size={20} color="#fff" />
-                <Text style={styles.startText}>
-                  {alreadyCompleted ? 'Repetir lección' : 'Empezar'}
-                </Text>
+                {pendingStart ? (
+                  <>
+                    <ActivityIndicator color="#fff" />
+                    <Text style={styles.startText}>Empezando...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name={showCompleted ? 'reload' : 'play'} size={20} color="#fff" />
+                    <Text style={styles.startText}>
+                      {showCompleted ? 'Repetir lección' : 'Empezar'}
+                    </Text>
+                  </>
+                )}
               </LinearGradient>
             </Pressable>
           )}
@@ -1318,14 +1383,17 @@ const styles = StyleSheet.create({
   completedBadgeText: { color: '#10B981', fontSize: 12, fontWeight: '700' },
   introTitle: { color: '#FFFFFF', fontSize: 28, fontWeight: '900', marginBottom: 8 },
   introSubtitle: { color: '#9CA3AF', fontSize: 14, marginBottom: 8 },
+  // Altura reservada para racha + temas: evita el salto/recentrado cuando
+  // llegan los datos en la carga optimista. Cabe la racha + una fila de temas.
+  introMeta: { minHeight: 84, alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 24 },
   streakBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20,
-    backgroundColor: 'rgba(249,115,22,0.1)', borderWidth: 1, borderColor: 'rgba(249,115,22,0.2)', marginBottom: 24,
+    backgroundColor: 'rgba(249,115,22,0.1)', borderWidth: 1, borderColor: 'rgba(249,115,22,0.2)',
   },
   streakText: { color: '#FB923C', fontSize: 14, fontWeight: '700' },
   multiplierText: { color: 'rgba(249,115,22,0.6)', fontSize: 12 },
-  topicBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 32 },
+  topicBadges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
   topicBadge: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 20, borderWidth: 1 },
   topicBadgeText: { fontSize: 11, fontWeight: '700' },
   startButton: { width: '100%', maxWidth: 280, marginBottom: 16 },
