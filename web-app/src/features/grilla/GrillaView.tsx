@@ -923,7 +923,6 @@ function GrillaViewInner() {
     computeCompactPxPerMinute(estimateMobileGridViewportHeight(), { startHour: 7, endHour: 23 })
   );
   const [gridViewportWidth, setGridViewportWidth] = useState(0);
-  const [gridViewportHeight, setGridViewportHeight] = useState(0);
 
   const [listDateFrom, setListDateFrom] = useState(() => formatDateForInput(clubToday));
   const [listDateTo, setListDateTo] = useState(() => formatDateForInput(clubToday));
@@ -939,7 +938,6 @@ function GrillaViewInner() {
       ? el.clientWidth
       : Math.min(window.innerWidth, GRILLA_COMPACT_LAYOUT_MAX_PX);
     setGridViewportWidth(width);
-    setGridViewportHeight(height);
     setCompactPxPerMinute(computeCompactPxPerMinute(height, {
       startHour: gridBounds.startHour,
       endHour: gridBounds.endHour,
