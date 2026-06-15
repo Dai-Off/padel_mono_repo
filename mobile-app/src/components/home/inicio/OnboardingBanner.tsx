@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTranslation } from '../../../i18n';
 import { ScalePressable } from './ScalePressable';
 
 type Props = {
@@ -9,36 +10,36 @@ type Props = {
   variant?: 'onboarding' | 'matchmaking-searching' | 'matchmaking-matched' | 'matchmaking-timeout';
 };
 
-const BANNER_COPY: Record<
+const BANNER_STYLES: Record<
   NonNullable<Props['variant']>,
   {
-    title: string;
-    subtitle: string;
+    titleKey: string;
+    subtitleKey: string;
     iconName: keyof typeof Ionicons.glyphMap;
     colors: [string, string];
   }
 > = {
   onboarding: {
-    title: 'Descubre tu nivel',
-    subtitle: 'Desbloquea todo el contenido',
+    titleKey: 'home.onboardingBanner.discoverLevel',
+    subtitleKey: 'home.onboardingBanner.unlockContent',
     iconName: 'compass',
     colors: ['#F18F34', '#C46A20'],
   },
   'matchmaking-searching': {
-    title: 'Búsqueda competitiva activa',
-    subtitle: 'Busqueda en curso en segundo plano',
+    titleKey: 'home.onboardingBanner.matchmakingSearching',
+    subtitleKey: 'home.onboardingBanner.matchmakingSearchingSub',
     iconName: 'radio-outline',
     colors: ['#F18F34', '#C46A20'],
   },
   'matchmaking-matched': {
-    title: '¡Partido encontrado!',
-    subtitle: 'Entra y confirma tu lugar',
+    titleKey: 'home.onboardingBanner.matchmakingMatched',
+    subtitleKey: 'home.onboardingBanner.matchmakingMatchedSub',
     iconName: 'checkmark-circle',
     colors: ['#16A34A', '#15803D'],
   },
   'matchmaking-timeout': {
-    title: 'No se encontraron jugadores',
-    subtitle: 'Vuelve a configurar parámetros',
+    titleKey: 'home.onboardingBanner.matchmakingTimeout',
+    subtitleKey: 'home.onboardingBanner.matchmakingTimeoutSub',
     iconName: 'time-outline',
     colors: ['#F59E0B', '#D97706'],
   },
@@ -50,7 +51,8 @@ const BANNER_COPY: Record<
  * del Home. Tap → abre el perfil con el modal de onboarding.
  */
 export function OnboardingBanner({ onPress, variant = 'onboarding' }: Props) {
-  const copy = BANNER_COPY[variant];
+  const { t } = useTranslation();
+  const copy = BANNER_STYLES[variant];
   return (
     <ScalePressable onPress={onPress} pressedScale={0.985} style={styles.wrap}>
       <LinearGradient
@@ -68,10 +70,10 @@ export function OnboardingBanner({ onPress, variant = 'onboarding' }: Props) {
 
         <View style={styles.textWrap}>
           <Text style={styles.title} numberOfLines={1}>
-            {copy.title}
+            {t(copy.titleKey)}
           </Text>
           <Text style={styles.subtitle} numberOfLines={1}>
-            {copy.subtitle}
+            {t(copy.subtitleKey)}
           </Text>
         </View>
 
@@ -126,14 +128,11 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 1,
   },
-  // Mismas medidas que `title` de DailyLessonCard (14/900) para que el banner
-  // no domine el home — es un CTA secundario, no el contenido principal.
   title: {
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '900',
   },
-  // Mismas medidas que `subtitle` de DailyLessonCard (10/600 más opaco).
   subtitle: {
     color: 'rgba(255,255,255,0.85)',
     fontSize: 11,

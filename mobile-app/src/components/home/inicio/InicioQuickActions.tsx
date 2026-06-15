@@ -6,6 +6,7 @@ import { androidReadableText } from './textStyles';
 import { ScalePressable } from './ScalePressable';
 import { useAmbientTheme } from '../../../hooks/useAmbientTheme';
 import { OPENWEATHER_API_KEY } from '../../../config';
+import { useTranslation } from '../../../i18n';
 
 /** Coincide con `HomeScreen` / `MainApp` (tabs inferiores). */
 export type HomeNavigateTab = 'pistas' | 'partidos' | 'torneos';
@@ -24,13 +25,14 @@ type Props = {
 function countLine(
   loading: boolean | undefined,
   value: number | null | undefined,
-  singular: string,
-  plural: string
+  oneKey: string,
+  manyKey: string,
+  t: (key: string, params?: Record<string, string | number>) => string,
 ): string {
   if (loading) return DASH;
   if (value == null || Number.isNaN(value)) return DASH;
   const n = Math.max(0, Math.floor(value));
-  return `${n} ${n === 1 ? singular : plural}`;
+  return t(n === 1 ? oneKey : manyKey, { count: n });
 }
 
 export function InicioQuickActions({
@@ -41,18 +43,27 @@ export function InicioQuickActions({
   tournamentsCount,
   loading,
 }: Props) {
+  const { t } = useTranslation();
   const buscarSub = countLine(
     loading,
     openMatchesCount,
-    'partido abierto',
-    'partidos abiertos'
+    'home.quickActions.openMatchOne',
+    'home.quickActions.openMatchMany',
+    t,
   );
-  const pistasSub = countLine(loading, courtsFree, 'pista libre', 'pistas libres');
+  const pistasSub = countLine(
+    loading,
+    courtsFree,
+    'home.quickActions.courtFreeOne',
+    'home.quickActions.courtFreeMany',
+    t,
+  );
   const torneosSub = countLine(
     loading,
     tournamentsCount,
-    'torneo disponible',
-    'torneos disponibles'
+    'home.quickActions.tournamentOne',
+    'home.quickActions.tournamentMany',
+    t,
   );
 
   const theme = useAmbientTheme(OPENWEATHER_API_KEY);
@@ -83,8 +94,8 @@ export function InicioQuickActions({
           <Ionicons name="people" size={26} color={color1} />
         </View>
         <View style={styles.textCol}>
-          <Text style={styles.h3}>Buscar Partido</Text>
-          <Text style={styles.p}>Únete a partidos cerca de ti</Text>
+          <Text style={styles.h3}>{t('home.quickActions.findMatch')}</Text>
+          <Text style={styles.p}>{t('home.quickActions.findMatchSub')}</Text>
           <Text style={[styles.dataLine, { color: color1 }]}>{buscarSub}</Text>
         </View>
         <Ionicons name="arrow-up" size={22} color="#6b7280" style={styles.arrowUp} />
@@ -110,8 +121,8 @@ export function InicioQuickActions({
                 <Ionicons name="location" size={22} color={color2} />
               </View>
               <View style={styles.textColSm}>
-                <Text style={styles.h3sm}>Pistas</Text>
-                <Text style={styles.p}>Reserva tu club</Text>
+                <Text style={styles.h3sm}>{t('home.quickActions.courts')}</Text>
+                <Text style={styles.p}>{t('home.quickActions.courtsSub')}</Text>
                 <Text style={[styles.dataLineSm, { color: color1 }]}>{pistasSub}</Text>
               </View>
             </View>
@@ -136,8 +147,8 @@ export function InicioQuickActions({
                 <Ionicons name="school" size={22} color={color3} />
               </View>
               <View style={styles.textColSm}>
-                <Text style={styles.h3sm}>Clases</Text>
-                <Text style={styles.p}>Mejora tu juego</Text>
+                <Text style={styles.h3sm}>{t('home.quickActions.classes')}</Text>
+                <Text style={styles.p}>{t('home.quickActions.classesSub')}</Text>
                 <Text style={styles.dataLineSm}>{DASH}</Text>
               </View>
             </View>
@@ -162,8 +173,8 @@ export function InicioQuickActions({
           <Ionicons name="trophy" size={26} color={color1} />
         </View>
         <View style={styles.textCol}>
-          <Text style={styles.h3}>Torneos</Text>
-          <Text style={styles.p}>Compite y gana premios</Text>
+          <Text style={styles.h3}>{t('home.quickActions.tournaments')}</Text>
+          <Text style={styles.p}>{t('home.quickActions.tournamentsSub')}</Text>
           <Text style={[styles.dataLine, { color: color1 }]}>{torneosSub}</Text>
         </View>
         <Ionicons name="arrow-up" size={22} color="#6b7280" style={styles.arrowUp} />

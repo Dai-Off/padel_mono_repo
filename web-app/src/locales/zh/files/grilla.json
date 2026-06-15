@@ -36,7 +36,9 @@
     "previous": "上一个",
     "next": "下一个",
     "singleView": "单场视图",
-    "backToGrid": "返回网格"
+    "backToGrid": "返回网格",
+    "backToResumen": "控制中心",
+    "openMenu": "菜单"
   },
   "grid": {
     "dropRejected": "无法放置：时段重叠或超出范围。",
@@ -209,8 +211,8 @@
     "filterPlayers": "球员",
     "filterClient": "客户 / 球员",
     "clientPlaceholder": "姓名…",
-    "filterEloMin": "最低平均 Elo",
-    "filterEloMax": "最高平均 Elo",
+    "filterEloMin": "最低級別",
+    "filterEloMax": "最高級別",
     "filterPriceMin": "最低价格 (€)",
     "filterPriceMax": "最高价格 (€)",
     "filterTimeFrom": "开始时间",
@@ -220,13 +222,16 @@
     "colType": "类型",
     "colClient": "客户",
     "colPlayers": "人数",
-    "colElo": "Elo",
+    "colElo": "級別",
     "colStatus": "状态",
     "colPayment": "付款",
     "colPrice": "价格",
     "colSource": "渠道",
     "colActions": "操作",
     "filterDate": "日期",
+    "filterDateFrom": "开始日期",
+    "filterDateTo": "结束日期",
+    "colDate": "日期",
     "advancedFilters": "更多筛选",
     "viewDetail": "查看详情",
     "selectAll": "全选",
@@ -300,5 +305,14 @@
     "reservaPuntaChino": "华人角预订已确认",
     "disponible": "可用",
     "tiempoPasado": "已过时"
+  },
+  "override": {
+    "title": "已安排未完成的比赛",
+    "subtitle": "此操作将优先处理您的预订",
+    "matchInfo": "已登记 {{players}} / 4 名球员",
+    "consequence": "比赛将被移至其他空闲球场。如果没有可用球场，比赛将被取消并自动退款给球员。",
+    "emailNote": "球员将收到电子邮件，供其选择保留或取消预订。",
+    "confirmButton": "确认并移动",
+    "cancelButton": "取消"
   }
 }
