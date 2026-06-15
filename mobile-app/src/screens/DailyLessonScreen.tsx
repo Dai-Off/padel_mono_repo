@@ -879,6 +879,10 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     const isReview = phase === 'review';
     const qIndex = isReview ? failedIndices[reviewIndex] : currentIndex;
     const question = questions[qIndex];
+    // El puzzle se renderiza sin ScrollView: ocupa exactamente el alto disponible
+    // y su cancha absorbe el espacio sobrante (nunca hace falta scroll). El resto
+    // de tipos mantienen el ScrollView por si su contenido excede la pantalla.
+    const isPuzzle = question?.type === 'puzzle';
     const progressTarget = isReview
       ? (reviewIndex + 1) / failedIndices.length
       : (currentIndex + 1) / questions.length;
@@ -939,17 +943,34 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
         {/* Question con fade — oculta mientras se muestra video */}
         {!showingVideo && (
           <Animated.View style={{ flex: 1, opacity: contentOpacity }}>
-            <ScrollView
-              contentContainerStyle={[styles.questionContent, { paddingBottom: insets.bottom + 32 }]}
-              showsVerticalScrollIndicator={false}
-            >
-              <QuestionCard
-                key={`${qIndex}-${isReview ? 'r' : 'q'}`}
-                question={question}
-                onAnswered={isReview ? handleReviewAnswered : handleQuestionAnswered}
-                onReplayVideo={question.has_video && question.video_url ? () => setShowingVideo(true) : undefined}
-              />
-            </ScrollView>
+            {isPuzzle ? (
+              // flexGrow:1 → rellena la pantalla cuando todo cabe (sin scroll);
+              // si un título muy largo no entra ni con la cancha al mínimo,
+              // entonces (y solo entonces) permite scroll.
+              <ScrollView
+                contentContainerStyle={[styles.questionContent, styles.questionContentFill, { paddingBottom: insets.bottom + 16 }]}
+                showsVerticalScrollIndicator={false}
+              >
+                <QuestionCard
+                  key={`${qIndex}-${isReview ? 'r' : 'q'}`}
+                  question={question}
+                  onAnswered={isReview ? handleReviewAnswered : handleQuestionAnswered}
+                  onReplayVideo={question.has_video && question.video_url ? () => setShowingVideo(true) : undefined}
+                />
+              </ScrollView>
+            ) : (
+              <ScrollView
+                contentContainerStyle={[styles.questionContent, { paddingBottom: insets.bottom + 32 }]}
+                showsVerticalScrollIndicator={false}
+              >
+                <QuestionCard
+                  key={`${qIndex}-${isReview ? 'r' : 'q'}`}
+                  question={question}
+                  onAnswered={isReview ? handleReviewAnswered : handleQuestionAnswered}
+                  onReplayVideo={question.has_video && question.video_url ? () => setShowingVideo(true) : undefined}
+                />
+              </ScrollView>
+            )}
           </Animated.View>
         )}
 
@@ -1423,6 +1444,10 @@ const styles = StyleSheet.create({
   },
   reviewBadgeText: { color: '#FB923C', fontSize: 11, fontWeight: '700' },
   questionContent: { paddingHorizontal: 20, paddingTop: 8 },
+  // Para puzzles (contentContainerStyle de un ScrollView): rellena el viewport
+  // cuando el contenido cabe (sin scroll) y crece para scrollear solo si no
+  // cabe. La cancha absorbe el espacio sobrante.
+  questionContentFill: { flexGrow: 1 },
   // Overlay al enviar resultados al backend. Fondo casi negro (consistente con
   // el resto de la app) con card central y spinner animado en color de marca.
   submittingOverlay: {
