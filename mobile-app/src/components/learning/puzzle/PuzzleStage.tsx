@@ -57,6 +57,7 @@ export function PuzzleStage({
   snap,
 }: Props) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [availH, setAvailH] = useState<number | null>(null);
   const win = useWindowDimensions();
 
   // Defensa: si el frame está malformado (sin players o sin ball), no renderizamos
@@ -64,20 +65,25 @@ export function PuzzleStage({
   // dejamos el guard aquí también para defensa en profundidad.
   const validFrame = !!frame && Array.isArray(frame.players) && !!frame.ball;
 
-  // Calcular dimensiones del Stage. Se reserva un alto fijo para los demás
-  // elementos verticales del visor (header lección, statement, bocadillo,
-  // barra de acciones y márgenes) y la pista usa el resto. Más robusto que un
-  // % fijo: se adapta a pantallas pequeñas/grandes y a statements de 2-3 líneas.
-  const RESERVED_H = 340;
-  const maxH = Math.max(260, win.height - RESERVED_H);
+  // La cancha se ajusta al alto disponible REAL (medido del contenedor flex que
+  // la envuelve), no a una reserva fija: así absorbe el espacio sobrante y nunca
+  // empuja el contenido fuera de pantalla (sin scroll). Mientras no se ha medido,
+  // se usa una estimación para el primer frame.
   const maxW = Math.min(win.width - 24, 440);
-  const widthFromHeight = maxH * STAGE_ASPECT;
-  const stageW = Math.min(maxW, widthFromHeight);
+  // Solo dimensionamos/renderizamos la cancha cuando ya hemos medido el alto
+  // disponible real (availH). Así NO aparece primero a un tamaño estimado y
+  // luego salta al reajustarse. availableH solo se usa dentro del bloque medido.
+  const availableH = availH ?? 0;
+  const stageW = Math.min(maxW, availableH * STAGE_ASPECT);
   const stageH = stageW / STAGE_ASPECT;
 
   const onLayout = (e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
     setSize({ w: width, h: height });
+  };
+
+  const onAreaLayout = (e: LayoutChangeEvent) => {
+    setAvailH(e.nativeEvent.layout.height);
   };
 
   // Ancho visual del jugador como fracción del ancho de la pista (~12% del ancho).
@@ -87,8 +93,10 @@ export function PuzzleStage({
   const durationMs = frame?.duration_ms ?? 1500;
 
   return (
-    <View style={[styles.wrapper, { width: stageW, height: stageH }]}>
-      <View style={styles.stage} onLayout={onLayout}>
+    <View style={styles.area} onLayout={onAreaLayout}>
+      {availH !== null && (
+      <View style={[styles.wrapper, { width: stageW, height: stageH }]}>
+        <View style={styles.stage} onLayout={onLayout}>
         {/* Pista de fondo (incluye paredes y márgenes). */}
         <Court width="100%" height="100%" preserveAspectRatio="xMidYMid meet" />
 
@@ -167,12 +175,24 @@ export function PuzzleStage({
           )
         )}
 
+        </View>
       </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  // Ocupa el alto sobrante (flex) y centra la cancha. Su altura medida es la que
+  // usa la cancha para dimensionarse. El minHeight evita que un título muy largo
+  // la reduzca a un tamaño inservible: si no cabe, el ScrollView padre scrollea.
+  area: {
+    flex: 1,
+    minHeight: 280,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   wrapper: {
     alignSelf: 'center',
   },
