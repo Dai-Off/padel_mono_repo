@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useVideoPlayer, VideoView, type VideoPlayer as ExpoVideoPlayer } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = {
   videoUrl: string;
+  // Player ya precargado/bufferizado por useVideoPreloader. Si viene, se
+  // reutiliza (arranca sin frame negro); si no, se crea uno propio aquí.
+  preloadedPlayer?: ExpoVideoPlayer | null;
   area: string;
   counter: string;
   clubName?: string | null;
@@ -25,34 +28,55 @@ const AREA_BADGE: Record<string, { label: string; color: string; bg: string; bor
   mental_vocabulary: { label: 'VOCABULARIO', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.25)' },
 };
 
-export function VideoPlayer({ videoUrl, area, counter, clubName, clubCity, isReview, onVideoEnd, onSkip, onClose }: Props) {
+export function VideoPlayer({ videoUrl, preloadedPlayer, area, counter, clubName, clubCity, isReview, onVideoEnd, onSkip, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const [ended, setEnded] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const fadeIn = useRef(new Animated.Value(0)).current;
 
-  // No reproducimos en el setup: esperamos a `readyToPlay` para evitar el
-  // frame negro mientras el vídeo bufferiza.
-  const player = useVideoPlayer(videoUrl, (p) => {
+  // Si hay player precargado lo reutilizamos; si no, creamos uno propio. Cuando
+  // hay precargado pasamos `null` como source para no descargar el vídeo dos
+  // veces (este player propio queda vacío y se libera solo al desmontar).
+  // No reproducimos en el setup: esperamos a `readyToPlay` para evitar el negro.
+  const ownPlayer = useVideoPlayer(preloadedPlayer ? null : videoUrl, (p) => {
     p.loop = false;
   });
+  const player = preloadedPlayer ?? ownPlayer;
 
-  // Detectar cuándo el vídeo tiene ya frame listo para mostrarse. Si el player
-  // viene precargado, su status puede ser 'readyToPlay' desde el primer render.
+  const dismissed = useRef(false);
+
+  // Si el vídeo falla al cargar, no dejamos el spinner colgado: avanzamos como
+  // si se hubiera saltado.
+  const failToSkip = useCallback(() => {
+    if (dismissed.current) return;
+    dismissed.current = true;
+    onVideoEnd();
+  }, [onVideoEnd]);
+
+  // Detectar cuándo el vídeo tiene ya frame listo para mostrarse. Adjuntamos el
+  // listener ANTES de leer el status para no perdernos la transición a
+  // readyToPlay si ocurre justo en este instante: con players precargados esa
+  // carrera dejaba el spinner girando para siempre.
   useEffect(() => {
-    if (player.status === 'readyToPlay') {
-      setIsReady(true);
-      return;
-    }
+    let cancelled = false;
     const sub = player.addListener('statusChange', ({ status }) => {
+      if (cancelled) return;
       if (status === 'readyToPlay') setIsReady(true);
+      else if (status === 'error') failToSkip();
     });
-    return () => sub.remove();
-  }, [player]);
+    // El player puede venir ya listo (precargado) o haberlo logrado entre su
+    // creación y este efecto.
+    if (player.status === 'readyToPlay') setIsReady(true);
+    else if (player.status === 'error') failToSkip();
+    return () => { cancelled = true; sub.remove(); };
+  }, [player, failToSkip]);
 
-  // Una vez listo: reproducir y hacer fade-in del vídeo sobre el placeholder.
+  // Una vez listo: reproducir desde el inicio y hacer fade-in sobre el
+  // placeholder. El seek a 0 importa al reutilizar un player precargado que
+  // pudiera no estar en la posición inicial.
   useEffect(() => {
     if (!isReady) return;
+    player.currentTime = 0;
     player.play();
     Animated.timing(fadeIn, {
       toValue: 1,
@@ -60,8 +84,6 @@ export function VideoPlayer({ videoUrl, area, counter, clubName, clubCity, isRev
       useNativeDriver: true,
     }).start();
   }, [isReady, player, fadeIn]);
-
-  const dismissed = useRef(false);
 
   useEffect(() => {
     dismissed.current = false;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
+import { useVideoPreloader } from '../hooks/useVideoPreloader';
 import { submitDailyLesson, submitLessonFeedback, fetchTodayResults, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
 import { loadProgress, saveProgress, clearProgress, type DailyLessonProgress } from '../lib/dailyLessonStorage';
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
@@ -109,6 +110,16 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   const [showingVideo, setShowingVideo] = useState(false);
   const [baseSkills, setBaseSkills] = useState<SkillValues>(DEFAULT_SKILLS);
   const [questionVotes, setQuestionVotes] = useState<Record<string, 'up' | 'down' | null>>({});
+
+  // Precarga de vídeos: bufferiza el vídeo actual y el siguiente por adelantado
+  // (incluido el primero durante la intro, ya que activeQIndex=0) para eliminar
+  // el frame negro al mostrarlos.
+  const videoUrls = useMemo(
+    () => questions.map((q) => (q.has_video && q.video_url ? q.video_url : null)),
+    [questions],
+  );
+  const activeQIndex = phase === 'review' ? (failedIndices[reviewIndex] ?? 0) : currentIndex;
+  const { getPlayer } = useVideoPreloader(videoUrls, activeQIndex);
 
   // Refs para envío bulk de votos like/dislike. Mantenemos el state actual en
   // un ref para poder leerlo desde cleanup de useEffect sin closures stale.
@@ -826,6 +837,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
         {showingVideo && question.has_video && question.video_url && (
           <VideoPlayer
             videoUrl={question.video_url}
+            preloadedPlayer={getPlayer(question.video_url)}
             area={question.area}
             counter={counter}
             clubName={question.club_name}
