@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MenuScreenHeader } from '../components/menuScreen/MenuScreenHeader';
@@ -14,8 +13,7 @@ import { useHomeData } from '../contexts/HomeDataContext';
 import { updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
 import { registerOverlayNestedBack } from '../navigation/overlayBackRef';
 import { theme } from '../theme';
-
-const APP_LANGUAGE_KEY = '@app_language';
+import { type AppLocale, useTranslation } from '../i18n';
 const BG = '#0F0F0F';
 
 const DEFAULT_PREFERENCES: PlayerPreferences = {
@@ -32,11 +30,9 @@ const DEFAULT_PREFERENCES: PlayerPreferences = {
   notifChatMessages: true,
 };
 
-type AppLanguage = 'es' | 'zh-HK';
-
-const LANGUAGE_OPTIONS: { value: AppLanguage; label: string }[] = [
+const LANGUAGE_OPTIONS: { value: AppLocale; label: string }[] = [
   { value: 'es', label: '🇪🇸 Español' },
-  { value: 'zh-HK', label: '🇭🇰 中文 (繁體) - Cantonés' },
+  { value: 'zh-HK', label: '🇭🇰 繁體中文' },
 ];
 
 type AjustesView = 'main' | 'notificaciones' | 'privacidad' | 'privacy-policy' | 'seguridad';
@@ -137,10 +133,10 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { profile, refreshProfile } = useHomeData();
+  const { locale: language, setLocale } = useTranslation();
   const token = session?.access_token;
 
   const [view, setView] = useState<AjustesView>('main');
-  const [language, setLanguage] = useState<AppLanguage>('es');
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -152,19 +148,11 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
     setPrefs(basePrefs);
   }, [basePrefs]);
 
-  useEffect(() => {
-    void (async () => {
-      const stored = await AsyncStorage.getItem(APP_LANGUAGE_KEY);
-      if (stored === 'es' || stored === 'zh-HK') setLanguage(stored);
-    })();
-  }, []);
-
   const languageLabel =
     LANGUAGE_OPTIONS.find((o) => o.value === language)?.label ?? LANGUAGE_OPTIONS[0].label;
 
-  const selectLanguage = async (value: AppLanguage) => {
-    setLanguage(value);
-    await AsyncStorage.setItem(APP_LANGUAGE_KEY, value);
+  const selectLanguage = (value: AppLocale) => {
+    setLocale(value);
     setShowLanguagePicker(false);
   };
 

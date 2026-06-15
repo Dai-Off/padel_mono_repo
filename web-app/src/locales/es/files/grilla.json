@@ -36,7 +36,9 @@
     "previous": "Anterior",
     "next": "Siguiente",
     "singleView": "Vista individual",
-    "backToGrid": "Volver a grilla"
+    "backToGrid": "Volver a grilla",
+    "backToResumen": "Centro de control",
+    "openMenu": "Menú"
   },
   "grid": {
     "dropRejected": "No se puede colocar aquí: solapamiento o fuera de límites.",
@@ -209,8 +211,8 @@
     "filterPlayers": "Jugadores",
     "filterClient": "Cliente / jugador",
     "clientPlaceholder": "Nombre…",
-    "filterEloMin": "Elo medio mín.",
-    "filterEloMax": "Elo medio máx.",
+    "filterEloMin": "Nivel mín.",
+    "filterEloMax": "Nivel máx.",
     "filterPriceMin": "Precio mín. (€)",
     "filterPriceMax": "Precio máx. (€)",
     "filterTimeFrom": "Hora desde",
@@ -220,13 +222,16 @@
     "colType": "Tipo",
     "colClient": "Cliente",
     "colPlayers": "Jug.",
-    "colElo": "Elo",
+    "colElo": "Nivel",
     "colStatus": "Estado",
     "colPayment": "Pago",
     "colPrice": "Precio",
     "colSource": "Canal",
     "colActions": "Acciones",
     "filterDate": "Fecha",
+    "filterDateFrom": "Fecha inicio",
+    "filterDateTo": "Fecha fin",
+    "colDate": "Fecha",
     "advancedFilters": "Más filtros",
     "viewDetail": "Ver detalle",
     "selectAll": "Seleccionar todas",
@@ -256,5 +261,14 @@
     "reservaPuntaChino": "RESERVA PUNTA CHINO reservado",
     "disponible": "Disponible",
     "tiempoPasado": "Tiempo pasado"
+  },
+  "override": {
+    "title": "Partido incompleto programado",
+    "subtitle": "Esta acción dará prioridad a tu reserva",
+    "matchInfo": "{{players}} de 4 jugadores inscritos",
+    "consequence": "El partido será movido a otra pista libre. Si no hay pista disponible, se cancelará y los jugadores serán reembolsados automáticamente.",
+    "emailNote": "Los jugadores recibirán un correo con las opciones de mantener o cancelar su reserva.",
+    "confirmButton": "Confirmar y mover",
+    "cancelButton": "Cancelar"
   }
 }

@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useVideoPlayer, VideoView, type VideoPlayer as ExpoVideoPlayer } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type Props = {
   videoUrl: string;
+  // Player ya precargado/bufferizado por useVideoPreloader. Si viene, se
+  // reutiliza (arranca sin frame negro); si no, se crea uno propio aquí.
+  preloadedPlayer?: ExpoVideoPlayer | null;
   area: string;
   counter: string;
   clubName?: string | null;
@@ -25,25 +28,68 @@ const AREA_BADGE: Record<string, { label: string; color: string; bg: string; bor
   mental_vocabulary: { label: 'VOCABULARIO', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.25)' },
 };
 
-export function VideoPlayer({ videoUrl, area, counter, clubName, clubCity, isReview, onVideoEnd, onSkip, onClose }: Props) {
+export function VideoPlayer({ videoUrl, preloadedPlayer, area, counter, clubName, clubCity, isReview, onVideoEnd, onSkip, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const [ended, setEnded] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const fadeIn = useRef(new Animated.Value(0)).current;
 
-  const player = useVideoPlayer(videoUrl, (p) => {
+  // Si hay player precargado lo reutilizamos; si no, creamos uno propio. Cuando
+  // hay precargado pasamos `null` como source para no descargar el vídeo dos
+  // veces (este player propio queda vacío y se libera solo al desmontar).
+  // No reproducimos en el setup: esperamos a `readyToPlay` para evitar el negro.
+  const ownPlayer = useVideoPlayer(preloadedPlayer ? null : videoUrl, (p) => {
     p.loop = false;
-    p.play();
   });
+  const player = preloadedPlayer ?? ownPlayer;
 
+  const dismissed = useRef(false);
+
+  // Si el vídeo falla al cargar, no dejamos el spinner colgado: avanzamos como
+  // si se hubiera saltado.
+  const failToSkip = useCallback(() => {
+    if (dismissed.current) return;
+    dismissed.current = true;
+    onVideoEnd();
+  }, [onVideoEnd]);
+
+  // Detectar cuándo el vídeo tiene ya frame listo para mostrarse. Adjuntamos el
+  // listener ANTES de leer el status para no perdernos la transición a
+  // readyToPlay si ocurre justo en este instante: con players precargados esa
+  // carrera dejaba el spinner girando para siempre.
   useEffect(() => {
+    let cancelled = false;
+    // Si la instancia de player cambia dentro del mismo montaje (p. ej. el
+    // fallback null→precargado), reseteamos el estado para volver a esperar el
+    // readyToPlay del nuevo player: si no, isReady quedaría stale en true y el
+    // efecto de play no se redispararía (vídeo congelado en el frame 0).
+    setIsReady(false);
+    fadeIn.setValue(0);
+    const sub = player.addListener('statusChange', ({ status }) => {
+      if (cancelled) return;
+      if (status === 'readyToPlay') setIsReady(true);
+      else if (status === 'error') failToSkip();
+    });
+    // El player puede venir ya listo (precargado) o haberlo logrado entre su
+    // creación y este efecto.
+    if (player.status === 'readyToPlay') setIsReady(true);
+    else if (player.status === 'error') failToSkip();
+    return () => { cancelled = true; sub.remove(); };
+  }, [player, failToSkip, fadeIn]);
+
+  // Una vez listo: reproducir desde el inicio y hacer fade-in sobre el
+  // placeholder. El seek a 0 importa al reutilizar un player precargado que
+  // pudiera no estar en la posición inicial.
+  useEffect(() => {
+    if (!isReady) return;
+    player.currentTime = 0;
+    player.play();
     Animated.timing(fadeIn, {
       toValue: 1,
       duration: 300,
       useNativeDriver: true,
     }).start();
-  }, [fadeIn]);
-
-  const dismissed = useRef(false);
+  }, [isReady, player, fadeIn]);
 
   useEffect(() => {
     dismissed.current = false;
@@ -56,16 +102,43 @@ export function VideoPlayer({ videoUrl, area, counter, clubName, clubCity, isRev
     return () => sub.remove();
   }, [player, onVideoEnd]);
 
+  // Al desmontar (vídeo terminado, saltado o cerrado) paramos el player y lo
+  // dejamos al inicio. Con la precarga el player lo gestiona el preloader y
+  // persiste, así que si no lo pausáramos aquí seguiría sonando por detrás de
+  // la pregunta. El reset a 0 lo deja listo para "repetir vídeo".
+  useEffect(() => {
+    return () => {
+      try {
+        player.pause();
+        player.currentTime = 0;
+      } catch { /* player ya liberado */ }
+    };
+  }, [player]);
+
   const badge = AREA_BADGE[area];
 
   return (
-    <Animated.View style={[styles.root, { opacity: fadeIn }]}>
-      <VideoView
-        player={player}
-        style={styles.video}
-        nativeControls={false}
-        contentFit="cover"
-      />
+    <View style={styles.root}>
+      {/* Placeholder de marca mientras bufferiza (evita el flash negro) */}
+      {!isReady && (
+        <View style={styles.placeholder}>
+          <LinearGradient
+            colors={['#1A1206', '#0A0A0A']}
+            style={StyleSheet.absoluteFill}
+          />
+          <ActivityIndicator color={badge?.color ?? '#F18F34'} />
+        </View>
+      )}
+
+      {/* Vídeo: aparece con fade-in solo cuando hay frame listo */}
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: fadeIn }]}>
+        <VideoView
+          player={player}
+          style={styles.video}
+          nativeControls={false}
+          contentFit="cover"
+        />
+      </Animated.View>
 
       <LinearGradient
         colors={['rgba(0,0,0,0.5)', 'transparent', 'rgba(0,0,0,0.7)']}
@@ -133,7 +206,7 @@ export function VideoPlayer({ videoUrl, area, counter, clubName, clubCity, isRev
           </Pressable>
         </View>
       </LinearGradient>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -142,6 +215,11 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000',
     zIndex: 20,
+  },
+  placeholder: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   video: {
     flex: 1,
