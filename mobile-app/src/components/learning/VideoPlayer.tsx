@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,20 +28,38 @@ const AREA_BADGE: Record<string, { label: string; color: string; bg: string; bor
 export function VideoPlayer({ videoUrl, area, counter, clubName, clubCity, isReview, onVideoEnd, onSkip, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const [ended, setEnded] = useState(false);
+  const [isReady, setIsReady] = useState(false);
   const fadeIn = useRef(new Animated.Value(0)).current;
 
+  // No reproducimos en el setup: esperamos a `readyToPlay` para evitar el
+  // frame negro mientras el vídeo bufferiza.
   const player = useVideoPlayer(videoUrl, (p) => {
     p.loop = false;
-    p.play();
   });
 
+  // Detectar cuándo el vídeo tiene ya frame listo para mostrarse. Si el player
+  // viene precargado, su status puede ser 'readyToPlay' desde el primer render.
   useEffect(() => {
+    if (player.status === 'readyToPlay') {
+      setIsReady(true);
+      return;
+    }
+    const sub = player.addListener('statusChange', ({ status }) => {
+      if (status === 'readyToPlay') setIsReady(true);
+    });
+    return () => sub.remove();
+  }, [player]);
+
+  // Una vez listo: reproducir y hacer fade-in del vídeo sobre el placeholder.
+  useEffect(() => {
+    if (!isReady) return;
+    player.play();
     Animated.timing(fadeIn, {
       toValue: 1,
       duration: 300,
       useNativeDriver: true,
     }).start();
-  }, [fadeIn]);
+  }, [isReady, player, fadeIn]);
 
   const dismissed = useRef(false);
 
@@ -59,13 +77,27 @@ export function VideoPlayer({ videoUrl, area, counter, clubName, clubCity, isRev
   const badge = AREA_BADGE[area];
 
   return (
-    <Animated.View style={[styles.root, { opacity: fadeIn }]}>
-      <VideoView
-        player={player}
-        style={styles.video}
-        nativeControls={false}
-        contentFit="cover"
-      />
+    <View style={styles.root}>
+      {/* Placeholder de marca mientras bufferiza (evita el flash negro) */}
+      {!isReady && (
+        <View style={styles.placeholder}>
+          <LinearGradient
+            colors={['#1A1206', '#0A0A0A']}
+            style={StyleSheet.absoluteFill}
+          />
+          <ActivityIndicator color={badge?.color ?? '#F18F34'} />
+        </View>
+      )}
+
+      {/* Vídeo: aparece con fade-in solo cuando hay frame listo */}
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: fadeIn }]}>
+        <VideoView
+          player={player}
+          style={styles.video}
+          nativeControls={false}
+          contentFit="cover"
+        />
+      </Animated.View>
 
       <LinearGradient
         colors={['rgba(0,0,0,0.5)', 'transparent', 'rgba(0,0,0,0.7)']}
@@ -133,7 +165,7 @@ export function VideoPlayer({ videoUrl, area, counter, clubName, clubCity, isRev
           </Pressable>
         </View>
       </LinearGradient>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -142,6 +174,11 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#000',
     zIndex: 20,
+  },
+  placeholder: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   video: {
     flex: 1,
