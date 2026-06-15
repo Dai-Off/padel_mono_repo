@@ -450,8 +450,16 @@ router.post('/block-maintenance', async (req: Request, res: Response) => {
  *         schema: { type: string, format: uuid }
  *       - in: query
  *         name: date
- *         description: YYYY-MM-DD; día civil en `time_zone` (no medianoche UTC).
+ *         description: YYYY-MM-DD; día civil en `time_zone` (no medianoche UTC). Mutuamente excluyente con date_from/date_to.
  *         schema: { type: string, example: "2026-05-12" }
+ *       - in: query
+ *         name: date_from
+ *         description: YYYY-MM-DD inicio de rango (inclusive). Requiere date_to.
+ *         schema: { type: string, example: "2026-05-01" }
+ *       - in: query
+ *         name: date_to
+ *         description: YYYY-MM-DD fin de rango (inclusive). Requiere date_from.
+ *         schema: { type: string, example: "2026-05-07" }
  *       - in: query
  *         name: time_zone
  *         description: IANA (por defecto Europe/Madrid).
@@ -459,12 +467,21 @@ router.post('/block-maintenance', async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: OK
+ *         content:
+ *           application/json:
+ *             example:
+ *               ok: true
+ *               bookings: []
+ *       400:
+ *         description: date, date_from/date_to o time_zone inválidos
  */
 router.get('/', async (req: Request, res: Response) => {
   const court_id = req.query.court_id as string | undefined;
   const club_id = req.query.club_id as string | undefined;
   const organizer_player_id = req.query.organizer_player_id as string | undefined;
   const date = req.query.date as string | undefined; // YYYY-MM-DD
+  const date_from = req.query.date_from as string | undefined;
+  const date_to = req.query.date_to as string | undefined;
   const time_zone = String(req.query.time_zone ?? 'Europe/Madrid').trim() || 'Europe/Madrid';
   try {
     const supabase = getSupabaseServiceRoleClient();
@@ -484,17 +501,30 @@ router.get('/', async (req: Request, res: Response) => {
       }
     }
 
+    const isRangeQuery = Boolean(date_from && date_to);
+    const rangeLimit = isRangeQuery ? 2000 : 200;
+
     let q = supabase
       .from('bookings')
       .select(SELECT_LIST)
       .order('start_at', { ascending: true })
-      .limit(200);
+      .limit(rangeLimit);
 
     if (courtIdsForClub) q = q.in('court_id', courtIdsForClub);
     else if (court_id) q = q.eq('court_id', court_id);
 
     if (organizer_player_id) q = q.eq('organizer_player_id', organizer_player_id);
-    if (date) {
+    if (isRangeQuery) {
+      try {
+        const from = date_from! <= date_to! ? date_from! : date_to!;
+        const to = date_from! <= date_to! ? date_to! : date_from!;
+        const { start } = zonedDayRangeUtcIso(from, time_zone);
+        const { endExclusive } = zonedDayRangeUtcIso(to, time_zone);
+        q = q.gte('start_at', start).lt('start_at', endExclusive);
+      } catch {
+        return res.status(400).json({ ok: false, error: 'date_from, date_to o time_zone invalida' });
+      }
+    } else if (date) {
       try {
         const { start, endExclusive } = zonedDayRangeUtcIso(date, time_zone);
         q = q.gte('start_at', start).lt('start_at', endExclusive);

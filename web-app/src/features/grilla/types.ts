@@ -43,6 +43,7 @@ export interface Reservation {
     locationId?: string;
     courtId: string;
     courtName?: string;
+    bookingDate?: string;     // YYYY-MM-DD for list/range views
     startTime: string;        // e.g. "18:00"
     durationMinutes: number;  // e.g. 90
     playerName: string;

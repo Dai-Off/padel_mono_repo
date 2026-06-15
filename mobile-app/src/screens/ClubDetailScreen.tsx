@@ -381,11 +381,11 @@ export function ClubDetailScreen({
   const [duration, setDuration] = useState(DURATION_MIN);
   const [clubReviews, setClubReviews] = useState<PublicClubReview[]>([]);
   const [reviewsAverage, setReviewsAverage] = useState<number | null>(null);
-
   const loadClubData = useCallback(async () => {
     setClubCourtsLoading(true);
+    const token = session?.access_token;
     const [club, courts, reviewsRes] = await Promise.all([
-      fetchClubById(court.clubId, session?.access_token),
+      fetchClubById(court.clubId, token),
       fetchCourtsByClubId(court.clubId),
       fetchPublicClubReviews(court.clubId),
     ]);

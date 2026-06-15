@@ -55,12 +55,13 @@
   min-height: 0;
   min-width: 0;
   position: relative;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  touch-action: none;
+  touch-action: pan-x pan-y;
 }
 
-/* react-zoom-pan-pinch internal wrappers must fill the viewport */
+/* Legacy transform wrappers — kept for any remaining references */
 .grilla-mobile-viewport .react-transform-wrapper,
 .grilla-mobile-viewport .react-transform-component {
   width: 100% !important;

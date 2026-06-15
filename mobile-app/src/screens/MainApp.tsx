@@ -55,6 +55,7 @@ import { SeasonPassScreen } from './SeasonPassScreen';
 import { PreferencesScreen } from './PreferencesScreen';
 import { PublicProfileScreen } from './PublicProfileScreen';
 import { AjustesScreen } from './AjustesScreen';
+import { ClubReviewsScreen } from './ClubReviewsScreen';
 import { InfoContentScreen } from './InfoContentScreen';
 import type { InfoScreenId } from '../content/infoContent';
 import { consumeOverlayNestedBack, registerOverlayNestedBack } from '../navigation/overlayBackRef';
@@ -116,6 +117,7 @@ export function MainApp() {
   const [profileAutoOpenOnboarding, setProfileAutoOpenOnboarding] = useState(false);
   const [showPreferences, setShowPreferences] = useState(false);
   const [showAjustes, setShowAjustes] = useState(false);
+  const [showClubReviews, setShowClubReviews] = useState(false);
   const [infoScreen, setInfoScreen] = useState<InfoScreenId | null>(null);
   const [infoReturnToProfile, setInfoReturnToProfile] = useState(false);
   const [showCommunity, setShowCommunity] = useState(false);
@@ -357,6 +359,7 @@ export function MainApp() {
     setShowPreferences(false);
     setPreferencesReturnToTuActividad(false);
     setShowAjustes(false);
+    setShowClubReviews(false);
     setInfoScreen(null);
     setInfoReturnToProfile(false);
     setShowTuActividad(false);
@@ -377,6 +380,7 @@ export function MainApp() {
     showChangePassword ||
     showPreferences ||
     showAjustes ||
+    showClubReviews ||
     infoScreen != null ||
     showPartidoDetail ||
     showClubDetail ||
@@ -490,6 +494,11 @@ export function MainApp() {
         setShowAjustes(false);
         return true;
       }
+      // Valorar clubes
+      if (showClubReviews) {
+        setShowClubReviews(false);
+        return true;
+      }
       // Ayuda / legal
       if (infoScreen) {
         closeInfoScreen();
@@ -598,6 +607,7 @@ export function MainApp() {
     showPreferences,
     preferencesReturnToTuActividad,
     showAjustes,
+    showClubReviews,
     infoScreen,
     closeInfoScreen,
     showCommunity,
@@ -737,6 +747,9 @@ export function MainApp() {
     }
     if (showAjustes) {
       return <AjustesScreen onBack={() => setShowAjustes(false)} />;
+    }
+    if (showClubReviews) {
+      return <ClubReviewsScreen onBack={() => setShowClubReviews(false)} />;
     }
     if (infoScreen) {
       return <InfoContentScreen screenId={infoScreen} onBack={closeInfoScreen} />;
@@ -1085,7 +1098,7 @@ export function MainApp() {
       ? '#000000'
       : showMessages
         ? '#0A0A0A'
-        : showEditProfile || showChangePassword || showPreferences || showAjustes || infoScreen || showMonedero || showTuActividad
+        : showEditProfile || showChangePassword || showPreferences || showAjustes || showClubReviews || infoScreen || showMonedero || showTuActividad
           ? '#0F0F0F'
         : showDailyLesson
           ? '#0F0F0F'
@@ -1111,6 +1124,7 @@ export function MainApp() {
     setShowChangePassword(false);
     setShowPreferences(false);
     setShowAjustes(false);
+    setShowClubReviews(false);
     setInfoScreen(null);
     setInfoReturnToProfile(false);
     registerOverlayNestedBack(null);
@@ -1142,6 +1156,10 @@ export function MainApp() {
         onNavigateToAjustes={() => {
           resetSidebarOverlays();
           setShowAjustes(true);
+        }}
+        onNavigateToClubReviews={() => {
+          resetSidebarOverlays();
+          setShowClubReviews(true);
         }}
         onNavigateToInfo={(screenId) => {
           resetSidebarOverlays();
