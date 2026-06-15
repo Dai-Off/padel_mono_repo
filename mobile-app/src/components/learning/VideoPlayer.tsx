@@ -59,6 +59,12 @@ export function VideoPlayer({ videoUrl, preloadedPlayer, area, counter, clubName
   // carrera dejaba el spinner girando para siempre.
   useEffect(() => {
     let cancelled = false;
+    // Si la instancia de player cambia dentro del mismo montaje (p. ej. el
+    // fallback null→precargado), reseteamos el estado para volver a esperar el
+    // readyToPlay del nuevo player: si no, isReady quedaría stale en true y el
+    // efecto de play no se redispararía (vídeo congelado en el frame 0).
+    setIsReady(false);
+    fadeIn.setValue(0);
     const sub = player.addListener('statusChange', ({ status }) => {
       if (cancelled) return;
       if (status === 'readyToPlay') setIsReady(true);
@@ -69,7 +75,7 @@ export function VideoPlayer({ videoUrl, preloadedPlayer, area, counter, clubName
     if (player.status === 'readyToPlay') setIsReady(true);
     else if (player.status === 'error') failToSkip();
     return () => { cancelled = true; sub.remove(); };
-  }, [player, failToSkip]);
+  }, [player, failToSkip, fadeIn]);
 
   // Una vez listo: reproducir desde el inicio y hacer fade-in sobre el
   // placeholder. El seek a 0 importa al reutilizar un player precargado que

@@ -155,7 +155,12 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
     const contentById = new Map(
       (contentRes.data ?? []).map((r: any) => [
         String(r.id),
-        { content: (r.content ?? {}) as Record<string, unknown>, clubs: r.clubs as { name?: string; city?: string } | null },
+        {
+          content: (r.content ?? {}) as Record<string, unknown>,
+          // supabase-js puede devolver el embed del club como objeto o como
+          // array; normalizamos igual que en today-results.
+          clubs: r.clubs as { name?: string; city?: string } | { name?: string; city?: string }[] | null,
+        },
       ]),
     );
     const puzzleByQ = new Map((puzzlesRes.data ?? []).map((p: any) => [String(p.question_id), p]));
@@ -180,7 +185,8 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
       } else {
         content = extra?.content ?? {};
       }
-      const club = extra?.clubs ?? null;
+      const clubRaw = extra?.clubs ?? null;
+      const club = Array.isArray(clubRaw) ? (clubRaw[0] ?? null) : clubRaw;
       return {
         id: q.id,
         type: q.type,
