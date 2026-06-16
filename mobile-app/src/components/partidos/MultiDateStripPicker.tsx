@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { formatLocale, useTranslation, type AppLocale } from '../../i18n';
 import { addDaysToClubKey, dayKeyInClubTz } from '../../lib/clubTimeZone';
 import { PARTIDOS_MAX_SELECTED_DAYS } from '../../domain/partidosFilters';
 import { filterTheme } from '../filters/filterTheme';
@@ -10,18 +12,20 @@ type MultiDateStripPickerProps = {
   onChange: (keys: string[]) => void;
 };
 
-function weekdayLabel(d: Date, index: number): string {
-  if (index === 0) return 'HOY';
-  return d.toLocaleDateString('es', { weekday: 'short' }).slice(0, 3).toUpperCase();
+function weekdayLabel(d: Date, index: number, todayLabel: string, locale: AppLocale): string {
+  if (index === 0) return todayLabel;
+  return d.toLocaleDateString(formatLocale(locale), { weekday: 'short' }).slice(0, 3).toUpperCase();
 }
 
-function monthShort(d: Date): string {
-  return d.toLocaleDateString('es', { month: 'short' }).replace('.', '');
+function monthShort(d: Date, locale: AppLocale): string {
+  return d.toLocaleDateString(formatLocale(locale), { month: 'short' }).replace('.', '');
 }
 
 /** Selección múltiple de días (max. 7), estilo Playtomic. */
 export function MultiDateStripPicker({ selectedDateKeys, onChange }: MultiDateStripPickerProps) {
+  const { t, locale } = useTranslation();
   const todayKey = dayKeyInClubTz(new Date());
+  const todayLabel = t('partidos.multiDateToday');
 
   const toggle = (key: string) => {
     if (selectedDateKeys.includes(key)) {
@@ -34,7 +38,9 @@ export function MultiDateStripPicker({ selectedDateKeys, onChange }: MultiDateSt
 
   return (
     <View>
-      <Text style={styles.hint}>Puedes seleccionar hasta {PARTIDOS_MAX_SELECTED_DAYS} días</Text>
+      <Text style={styles.hint}>
+        {t('partidos.multiDateHint', { max: PARTIDOS_MAX_SELECTED_DAYS })}
+      </Text>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -57,10 +63,10 @@ export function MultiDateStripPicker({ selectedDateKeys, onChange }: MultiDateSt
               accessibilityState={{ selected }}
             >
               <Text style={[styles.weekday, selected && styles.textSelected]}>
-                {weekdayLabel(d, i)}
+                {weekdayLabel(d, i, todayLabel, locale)}
               </Text>
               <Text style={[styles.dayNum, selected && styles.textSelected]}>{d.getDate()}</Text>
-              <Text style={[styles.month, selected && styles.textSelected]}>{monthShort(d)}</Text>
+              <Text style={[styles.month, selected && styles.textSelected]}>{monthShort(d, locale)}</Text>
             </Pressable>
           );
         })}

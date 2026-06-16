@@ -11,32 +11,39 @@ import type { PlayerPreferences } from '../../api/players';
 import { AffinityVisibilityToggle } from '../affinity/AffinityVisibilityToggle';
 import { DirectMessageThreadScreen } from '../../screens/DirectMessageThreadScreen';
 import type { MessagePeerNav } from '../../screens/MessagesScreen';
+import { useTranslation } from '../../i18n';
 
 type Option = { id: string; label: string };
 
-// Los criterios de afinidad SON las preferencias del jugador: días y franjas
-// (multi-selección) y estilo (selección única). El deporte se fija en pádel.
-const DAY_OPTIONS: Option[] = [
-  { id: 'mon', label: 'Lun' },
-  { id: 'tue', label: 'Mar' },
-  { id: 'wed', label: 'Mié' },
-  { id: 'thu', label: 'Jue' },
-  { id: 'fri', label: 'Vie' },
-  { id: 'sat', label: 'Sáb' },
-  { id: 'sun', label: 'Dom' },
-];
-const SLOT_OPTIONS: Option[] = [
-  { id: 'morning', label: 'Mañana' },
-  { id: 'afternoon', label: 'Tarde' },
-  { id: 'evening', label: 'Noche' },
-  { id: 'night', label: 'Madrugada' },
-];
-const STYLE_OPTIONS: Option[] = [
-  { id: 'competitive', label: 'Competitivo' },
-  { id: 'social', label: 'Social' },
-  { id: 'learning', label: 'Aprendizaje' },
-  { id: 'balanced', label: 'Cualquiera' },
-];
+function buildDayOptions(t: (key: string) => string): Option[] {
+  return [
+    { id: 'mon', label: t('common.weekdayMon') },
+    { id: 'tue', label: t('common.weekdayTue') },
+    { id: 'wed', label: t('common.weekdayWed') },
+    { id: 'thu', label: t('common.weekdayThu') },
+    { id: 'fri', label: t('common.weekdayFri') },
+    { id: 'sat', label: t('common.weekdaySat') },
+    { id: 'sun', label: t('common.weekdaySun') },
+  ];
+}
+
+function buildSlotOptions(t: (key: string) => string): Option[] {
+  return [
+    { id: 'morning', label: t('preferences.slotMorning') },
+    { id: 'afternoon', label: t('preferences.slotAfternoon') },
+    { id: 'evening', label: t('preferences.slotEvening') },
+    { id: 'night', label: t('preferences.slotNight') },
+  ];
+}
+
+function buildStyleOptions(t: (key: string) => string): Option[] {
+  return [
+    { id: 'competitive', label: t('preferences.styleCompetitive') },
+    { id: 'social', label: t('preferences.styleSocial') },
+    { id: 'learning', label: t('preferences.styleLearning') },
+    { id: 'balanced', label: t('preferences.styleBalanced') },
+  ];
+}
 
 export type AffinityCriteria = {
   days: string[];
@@ -54,7 +61,7 @@ type MatchCandidate = {
   reason: string;
 };
 
-const AI_AUTO_DM_TEXT = '¡Hola! Me gustaría jugar Pádel contigo. ¿Tienes disponibilidad?';
+const AI_AUTO_DM_TEXT_KEY = 'messages.threadEmpty';
 
 function normalizeText(value: string): string {
   return value
@@ -64,7 +71,10 @@ function normalizeText(value: string): string {
     .toLowerCase();
 }
 
-function parseCandidatesFromResponse(text: string): MatchCandidate[] {
+function parseCandidatesFromResponse(
+  text: string,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): MatchCandidate[] {
   const tryParseJsonLike = (raw: string): unknown | null => {
     const trimmed = raw.trim();
     if (!trimmed) return null;
@@ -129,14 +139,14 @@ function parseCandidatesFromResponse(text: string): MatchCandidate[] {
           id: String(index + 1),
           name,
           matchPercent: Number(p.matchPercent ?? p.compatibility ?? 90),
-          level: String(p.level ?? p.nivel ?? 'Nivel compatible'),
+          level: String(p.level ?? p.nivel ?? t('preferences.partnerSimilar')),
           stats: {
             matches: Number(p.matches ?? p.partidos ?? 0),
             wins: String(p.wins ?? p.victorias ?? '-'),
             distance: String(p.distance ?? p.distancia ?? '-'),
           },
-          tags: Array.isArray(p.tags) ? (p.tags as string[]) : ['Pádel'],
-          reason: String(p.reason ?? p.razon ?? 'Recomendado por la IA.'),
+          tags: Array.isArray(p.tags) ? (p.tags as string[]) : [t('common.sportPadel')],
+          reason: String(p.reason ?? p.razon ?? t('messages.iaMatchReason')),
         } satisfies MatchCandidate;
       })
       .filter((x): x is MatchCandidate => x != null)
@@ -192,10 +202,10 @@ function parseCandidatesFromResponse(text: string): MatchCandidate[] {
     id: `${index + 1}`,
     name,
     matchPercent: Math.max(80, 98 - index * 3),
-    level: 'Nivel compatible',
+    level: t('preferences.partnerSimilar'),
     stats: { matches: 0, wins: '-', distance: '-' },
-    tags: ['Pádel'],
-    reason: 'Recomendado por la IA según afinidad de nivel y disponibilidad.',
+    tags: [t('common.sportPadel')],
+    reason: t('messages.iaMatchReason'),
   }));
 }
 
@@ -278,6 +288,7 @@ function CandidateCard({
   sending: boolean;
   sent: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.candidateCard}>
       <View style={styles.candidateHeader}>
@@ -309,15 +320,15 @@ function CandidateCard({
 
       <View style={styles.statGrid}>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>PARTIDOS</Text>
+          <Text style={styles.statLabel}>{t('messages.iaStatsMatches')}</Text>
           <Text style={styles.statValue}>{candidate.stats.matches}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>VICTORIAS</Text>
+          <Text style={styles.statLabel}>{t('messages.iaStatsWins')}</Text>
           <Text style={styles.statValue}>{candidate.stats.wins}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>DISTANCIA</Text>
+          <Text style={styles.statLabel}>{t('messages.iaStatsDistance')}</Text>
           <Text style={styles.statValue}>{candidate.stats.distance}</Text>
         </View>
       </View>
@@ -325,7 +336,7 @@ function CandidateCard({
       <View style={styles.tagsWrap}>
         {candidate.tags.map((tag, tagIdx) => (
           <View key={`${candidate.id}-${tagIdx}-${tag}`} style={styles.tagPill}>
-            <Text style={styles.tagText}>{tag}</Text>
+            <Text style={styles.tagText}>{tag === 'Pádel' || tag === t('common.sportPadel') ? t('common.sportPadel') : tag}</Text>
           </View>
         ))}
       </View>
@@ -333,14 +344,14 @@ function CandidateCard({
       <View style={styles.reasonBox}>
         <Ionicons name="star" size={14} color="#F18F34" style={{ marginTop: 1 }} />
         <Text style={styles.reasonText}>
-          <Text style={styles.reasonStrong}>Razón del match:</Text> {candidate.reason}
+          <Text style={styles.reasonStrong}>{t('messages.iaMatchReason')}</Text> {candidate.reason}
         </Text>
       </View>
 
       {sent ? (
         <View style={styles.messageBtnSent}>
           <Ionicons name="checkmark-circle" size={16} color="#4ADE80" />
-          <Text style={styles.messageBtnSentText}>Mensaje enviado</Text>
+          <Text style={styles.messageBtnSentText}>{t('messages.messageSent')}</Text>
         </View>
       ) : (
         <Pressable style={[styles.messageBtn, sending && { opacity: 0.7 }]} onPress={() => onMessagePress(candidate)} disabled={sending}>
@@ -357,7 +368,7 @@ function CandidateCard({
             ) : (
               <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
             )}
-            <Text style={styles.messageBtnText}>{sending ? 'Enviando...' : 'Enviar mensaje'}</Text>
+            <Text style={styles.messageBtnText}>{sending ? t('common.saving') : t('messages.title')}</Text>
           </LinearGradient>
         </Pressable>
       )}
@@ -380,9 +391,14 @@ export function IAAfinidadModal({
   onSentIdsChange,
   onPlayerPress,
 }: IAAfinidadModalProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const token = session?.access_token ?? null;
+
+  const dayOptions = useMemo(() => buildDayOptions(t), [t]);
+  const slotOptions = useMemo(() => buildSlotOptions(t), [t]);
+  const styleOptions = useMemo(() => buildStyleOptions(t), [t]);
 
   const prefDays = preferences?.preferredDays ?? [];
   const prefSlots = preferences?.preferredScheduleSlots ?? [];
@@ -448,9 +464,9 @@ export function IAAfinidadModal({
   const labelList = (opts: Option[], ids: string[]) =>
     ids.map((id) => opts.find((o) => o.id === id)?.label ?? id);
   const preSearchSummary = [
-    labelList(DAY_OPTIONS, prefDays).join(', '),
-    labelList(SLOT_OPTIONS, prefSlots).join(', '),
-    STYLE_OPTIONS.find((o) => o.id === prefStyle)?.label,
+    labelList(dayOptions, prefDays).join(', '),
+    labelList(slotOptions, prefSlots).join(', '),
+    styleOptions.find((o) => o.id === prefStyle)?.label,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -517,12 +533,12 @@ export function IAAfinidadModal({
   };
 
   const parsedCandidates = useMemo(
-    () => (responseText ? parseCandidatesFromResponse(responseText) : []),
-    [responseText]
+    () => (responseText ? parseCandidatesFromResponse(responseText, t) : []),
+    [responseText, t]
   );
   const handleCandidateMessage = async (candidate: MatchCandidate) => {
     if (!token) {
-      Alert.alert('Mensajes', 'Inicia sesión para enviar mensajes.');
+      Alert.alert(t('alerts.messages.title'), t('messages.iaLoginMessages'));
       return;
     }
 
@@ -530,7 +546,7 @@ export function IAAfinidadModal({
     try {
       const search = await searchPlayers(candidate.name, token);
       if (!search.ok || search.players.length === 0) {
-        Alert.alert('Mensajes', `No se encontró a "${candidate.name}" para enviarle mensaje.`);
+        Alert.alert(t('alerts.messages.title'), t('messages.iaPlayerNotFoundMessage', { name: candidate.name }));
         return;
       }
 
@@ -546,9 +562,9 @@ export function IAAfinidadModal({
         }) ??
         search.players[0];
 
-      const sent = await sendDirectMessage(exact.id, AI_AUTO_DM_TEXT, token);
+      const sent = await sendDirectMessage(exact.id, t(AI_AUTO_DM_TEXT_KEY, { name: candidate.name }), token);
       if (!sent.ok) {
-        Alert.alert('Mensajes', sent.error);
+        Alert.alert(t('alerts.messages.title'), sent.error);
         return;
       }
 
@@ -569,14 +585,14 @@ export function IAAfinidadModal({
 
   const handlePlayerPress = async (candidate: MatchCandidate) => {
     if (!token) {
-      Alert.alert('Perfil', 'Inicia sesión para ver perfiles.');
+      Alert.alert(t('profile.title'), t('messages.iaLoginProfile'));
       return;
     }
 
     try {
       const search = await searchPlayers(candidate.name, token);
       if (!search.ok || search.players.length === 0) {
-        Alert.alert('Perfil', `No se encontró a "${candidate.name}".`);
+        Alert.alert(t('profile.title'), t('messages.iaPlayerNotFoundProfile', { name: candidate.name }));
         return;
       }
 
@@ -754,17 +770,17 @@ export function IAAfinidadModal({
                   </LinearGradient>
                 </View>
                 <View>
-                  <Text style={styles.headerTitle}>Buscar Compañero con IA</Text>
+                  <Text style={styles.headerTitle}>{t('messages.iaSearchTitle')}</Text>
                   <Text style={styles.headerSubtitle}>
                     {loading
-                      ? 'Buscando...'
+                      ? t('common.loadingEllipsis')
                       : needsConsent
-                        ? 'Activa tu visibilidad'
+                        ? t('messages.iaActivateVisibility')
                         : isFormView
-                          ? 'Define tus preferencias'
+                          ? t('preferences.subtitle')
                           : showPreSearch
-                            ? 'Listo para buscar'
-                            : 'Resultados IA'}
+                            ? t('messages.iaSearchPartners')
+                            : t('messages.iaSearchTitle')}
                   </Text>
                 </View>
               </View>
@@ -855,8 +871,8 @@ export function IAAfinidadModal({
                     </Animated.View>
                   </View>
                 </View>
-                <Text style={styles.loaderTitle}>Buscando compañeros...</Text>
-                <Text style={styles.loaderSubtitle}>Generando recomendaciones...</Text>
+                <Text style={styles.loaderTitle}>{t('messages.iaSearching')}</Text>
+                <Text style={styles.loaderSubtitle}>{t('messages.iaGenerating')}</Text>
                 <View style={styles.loaderDots}>
                   {[dotA, dotB, dotC].map((dot, idx) => (
                     <Animated.View
@@ -889,12 +905,8 @@ export function IAAfinidadModal({
                 <View style={styles.gateIcon}>
                   <Ionicons name="people" size={36} color="#F18F34" />
                 </View>
-                <Text style={styles.gateTitle}>Activa tu visibilidad</Text>
-                <Text style={styles.gateText}>
-                  Para encontrar compañeros con la IA de afinidad, también serás
-                  visible para otros jugadores que busquen compañero. Puedes
-                  desactivarlo cuando quieras desde tus preferencias.
-                </Text>
+                <Text style={styles.gateTitle}>{t('messages.iaActivateVisibility')}</Text>
+                <Text style={styles.gateText}>{t('profile.affinityVisibleSubtitle')}</Text>
                 <Pressable
                   style={[styles.gateBtn, settingVisible && styles.gateBtnDisabled]}
                   onPress={() => void handleActivateVisibility()}
@@ -902,7 +914,7 @@ export function IAAfinidadModal({
                 >
                   <Ionicons name="sparkles" size={18} color="#fff" />
                   <Text style={styles.gateBtnText}>
-                    {settingVisible ? 'Activando…' : 'Activar'}
+                    {settingVisible ? t('common.saving') : t('messages.iaActivateVisibility')}
                   </Text>
                 </Pressable>
                 {!!errorText && (
@@ -914,31 +926,28 @@ export function IAAfinidadModal({
             ) : showFormView ? (
               <>
                 <OptionSection
-                  title="¿Qué días te viene bien?"
+                  title={t('preferences.preferredDaysSub')}
                   icon="calendar-outline"
-                  options={DAY_OPTIONS}
+                  options={dayOptions}
                   selectedIds={criteria.days}
                   onToggle={toggleDay}
                 />
                 <OptionSection
-                  title="¿En qué franjas?"
+                  title={t('preferences.scheduleAvailableSub')}
                   icon="time-outline"
-                  options={SLOT_OPTIONS}
+                  options={slotOptions}
                   selectedIds={criteria.slots}
                   onToggle={toggleSlot}
                 />
                 <OptionSection
-                  title="Estilo de juego"
+                  title={t('preferences.playStyle')}
                   icon="locate-outline"
-                  options={STYLE_OPTIONS}
+                  options={styleOptions}
                   selectedIds={[criteria.style]}
                   onToggle={setStyle}
                 />
 
-                <Text style={styles.formHint}>
-                  Estas preferencias se guardan en tu perfil y se usan para
-                  encontrar jugadores compatibles.
-                </Text>
+                <Text style={styles.formHint}>{t('preferences.clubsPickerSubtitle')}</Text>
 
                 <Pressable
                   style={[
@@ -959,7 +968,7 @@ export function IAAfinidadModal({
                       (loading || !isFormComplete) && styles.submitTextDisabled,
                     ]}
                   >
-                    Buscar Compañero
+                    {t('messages.iaSearchTitle')}
                   </Text>
                 </Pressable>
 
@@ -974,17 +983,17 @@ export function IAAfinidadModal({
                 <View style={styles.gateIcon}>
                   <Ionicons name="sparkles" size={36} color="#F18F34" />
                 </View>
-                <Text style={styles.gateTitle}>Buscar compañeros</Text>
+                <Text style={styles.gateTitle}>{t('messages.iaSearchPartners')}</Text>
                 <Text style={styles.gateText}>
-                  Buscaremos según tus preferencias{preSearchSummary ? `: ${preSearchSummary}` : ''}.
+                  {t('preferences.clubsPickerSubtitle')}{preSearchSummary ? `: ${preSearchSummary}` : ''}.
                 </Text>
                 <Pressable style={styles.gateBtn} onPress={handleSearch}>
                   <Ionicons name="flash" size={18} color="#fff" />
-                  <Text style={styles.gateBtnText}>Buscar jugadores</Text>
+                  <Text style={styles.gateBtnText}>{t('messages.iaSearchPlayers')}</Text>
                 </Pressable>
                 <Pressable style={styles.searchAgainBtn} onPress={() => setShowForm(true)}>
                   <Ionicons name="options-outline" size={18} color="#d1d5db" />
-                  <Text style={styles.searchAgainText}>Editar preferencias</Text>
+                  <Text style={styles.searchAgainText}>{t('messages.iaEditPreferences')}</Text>
                 </Pressable>
               </View>
             ) : (
@@ -994,10 +1003,14 @@ export function IAAfinidadModal({
                     <Ionicons name="checkmark" size={42} color="#fff" />
                   </View>
                   <Text style={styles.resultTitle}>
-                    {parsedCandidates.length > 0 ? `${parsedCandidates.length} compañeros encontrados!` : 'No se encontraron compañeros'}
+                    {parsedCandidates.length > 0
+                      ? t('common.itemsCount', { count: parsedCandidates.length })
+                      : t('messages.noSearchResults')}
                   </Text>
                   <Text style={styles.resultSubtitle}>
-                    {parsedCandidates.length > 0 ? 'Compañeros perfectos para ti' : 'Prueba ajustando tus preferencias para ampliar opciones.'}
+                    {parsedCandidates.length > 0
+                      ? t('messages.iaSearchPartners')
+                      : t('preferences.clubsPickerHint')}
                   </Text>
                 </View>
 
@@ -1015,9 +1028,7 @@ export function IAAfinidadModal({
                     ))
                   ) : (
                     <View style={styles.emptyCandidatesCard}>
-                      <Text style={styles.emptyCandidatesText}>
-                        No se encontraron compañeros.
-                      </Text>
+                      <Text style={styles.emptyCandidatesText}>{t('messages.noSearchResults')}</Text>
                     </View>
                   )}
                 </View>
@@ -1035,7 +1046,7 @@ export function IAAfinidadModal({
                   onPress={() => setShowForm(true)}
                 >
                   <Ionicons name="options-outline" size={18} color="#d1d5db" />
-                  <Text style={styles.searchAgainText}>Editar preferencias</Text>
+                  <Text style={styles.searchAgainText}>{t('messages.iaEditPreferences')}</Text>
                 </Pressable>
               </>
             )}

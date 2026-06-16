@@ -26,6 +26,7 @@ export type TournamentFilterContext = {
   searchQuery: string;
   activeTab: 'disponibles' | 'inscritas' | 'solicitudes';
   canJoin: (row: PublicTournamentRow) => boolean;
+  t: (key: string, params?: Record<string, string | number>) => string;
 };
 
 export function filterTournamentRows(
@@ -43,7 +44,7 @@ export function filterTournamentRows(
     })
     .filter(
       (row) =>
-        matchesSearch(row, ctx.searchQuery) &&
+        matchesSearch(row, ctx.searchQuery, ctx.t) &&
         matchesFormatFilter(row, filters.format) &&
         matchesLevelFilter(row, filters.level) &&
         (ctx.activeTab !== 'disponibles' ||
@@ -71,19 +72,25 @@ export function countTournamentActiveFilters(
   return n;
 }
 
-export function formatFilterChipLabel(filters: TournamentFiltersState): string {
-  return filters.format === 'all' ? 'Formato' : formatFormatLabel(filters.format);
+export function formatFilterChipLabel(
+  filters: TournamentFiltersState,
+  t: (key: string) => string,
+): string {
+  return filters.format === 'all' ? t('torneos.filterFormatDefault') : formatFormatLabel(filters.format, t);
 }
 
-export function levelChipLabel(filters: TournamentFiltersState): string {
-  if (filters.level === 'all') return 'Nivel';
-  if (filters.level === 'principiante') return 'Principiante';
-  if (filters.level === 'medio') return 'Medio';
-  return 'Avanzado';
+export function levelChipLabel(
+  filters: TournamentFiltersState,
+  t: (key: string) => string,
+): string {
+  if (filters.level === 'all') return t('torneos.filterLevelDefault');
+  if (filters.level === 'principiante') return t('torneos.filterLevelBeginner');
+  if (filters.level === 'medio') return t('torneos.filterLevelMedium');
+  return t('torneos.filterLevelAdvanced');
 }
 
-export function joinableChipLabel(joinableOnly: boolean): string {
-  return joinableOnly ? 'Solo me puedo unir' : 'Todas';
+export function joinableChipLabel(joinableOnly: boolean, t: (key: string) => string): string {
+  return joinableOnly ? t('torneos.filterJoinableOnly') : t('torneos.filterJoinableAll');
 }
 
 export const TOURNAMENT_FORMAT_OPTIONS: TournamentFormatFilter[] = [

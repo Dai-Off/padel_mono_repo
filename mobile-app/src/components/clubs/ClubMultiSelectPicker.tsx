@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { ClubCatalogItem } from '../../hooks/useClubCatalog';
 import { useClubCatalog } from '../../hooks/useClubCatalog';
+import { useTranslation } from '../../i18n';
 import { ClubFilterBar } from './ClubFilterBar';
 import { ClubQuickPickers, type ClubQuickPickerKind } from './ClubQuickPickers';
 import { theme } from '../../theme';
@@ -59,18 +60,22 @@ export function ClubMultiSelectBody({
   onChange,
   onClose,
   onDone,
-  title = 'Clubes preferidos',
-  subtitle = 'Elegí uno o varios clubes donde quieras jugar',
+  title,
+  subtitle,
   maxSelection = 20,
-  doneLabel = 'Listo',
+  doneLabel,
   doneDisabled = false,
   clubs,
   loading,
   error,
   onRetry,
 }: ClubMultiSelectBodyProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const reload = onRetry;
+  const resolvedTitle = title ?? t('partidos.filterClubsDefault');
+  const resolvedSubtitle = subtitle ?? t('partidos.clubsPickerPlaySubtitle');
+  const resolvedDoneLabel = doneLabel ?? t('partidos.clubsPickerDone');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<ClubMultiSelectFilters>(DEFAULT_FILTERS);
@@ -93,19 +98,19 @@ export function ClubMultiSelectBody({
 
   const sportChipLabel =
     filters.sport === 'all'
-      ? 'Deporte'
+      ? t('search.filterSport')
       : filters.sport === 'padel'
-        ? 'Pádel'
+        ? t('common.sportPadel')
         : filters.sport === 'tenis'
-          ? 'Tenis'
-          : 'Pickleball';
+          ? t('common.sportTenis')
+          : t('common.sportPickleball');
 
   const cerramientoChipLabel =
     filters.cerramiento === 'all'
-      ? 'Cerramiento'
+      ? t('search.sectionEnclosure')
       : filters.cerramiento === 'indoor'
-        ? 'Interior'
-        : 'Exterior';
+        ? t('common.interior')
+        : t('common.outdoor');
 
   const sportActive = filters.sport !== 'all';
   const cerramientoActive = filters.cerramiento !== 'all';
@@ -127,12 +132,12 @@ export function ClubMultiSelectBody({
   return (
     <View style={[styles.root, { paddingTop: Math.max(insets.top, 8) }]}>
       <View style={styles.header}>
-        <Pressable onPress={onClose} style={styles.iconBtn} accessibilityLabel="Cerrar">
+        <Pressable onPress={onClose} style={styles.iconBtn} accessibilityLabel={t('common.close')}>
           <Ionicons name="close" size={20} color="#fff" />
         </Pressable>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.subtitle}>{subtitle}</Text>
+          <Text style={styles.title}>{resolvedTitle}</Text>
+          <Text style={styles.subtitle}>{resolvedSubtitle}</Text>
         </View>
       </View>
 
@@ -142,7 +147,7 @@ export function ClubMultiSelectBody({
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder="Buscar club o zona..."
+            placeholder={t('search.searchPlaceholder')}
             placeholderTextColor="#737373"
             style={styles.searchInput}
             autoCorrect={false}
@@ -165,13 +170,13 @@ export function ClubMultiSelectBody({
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator color={ACCENT} />
-          <Text style={styles.loadingText}>Cargando clubes…</Text>
+          <Text style={styles.loadingText}>{t('common.searchingClubs')}</Text>
         </View>
       ) : error ? (
         <View style={styles.centered}>
           <Text style={styles.errorText}>{error}</Text>
           <Pressable onPress={() => void reload()} style={styles.retryBtn}>
-            <Text style={styles.retryText}>Reintentar</Text>
+            <Text style={styles.retryText}>{t('common.retry')}</Text>
           </Pressable>
         </View>
       ) : (
@@ -182,7 +187,7 @@ export function ClubMultiSelectBody({
           contentContainerStyle={{ paddingBottom: insets.bottom + 96, paddingHorizontal: 16 }}
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
-            <Text style={styles.emptyText}>No hay clubes que coincidan con tu búsqueda.</Text>
+            <Text style={styles.emptyText}>{t('partidos.clubsPickerEmpty')}</Text>
           }
           renderItem={({ item }) => {
             const active = selectedSet.has(item.id);
@@ -225,12 +230,12 @@ export function ClubMultiSelectBody({
         <View style={styles.footerLeft}>
           <Text style={styles.footerHint}>
             {selectedIds.length === 0
-              ? 'Sin clubes = buscar por distancia'
-              : `${selectedIds.length} seleccionado${selectedIds.length === 1 ? '' : 's'}`}
+              ? t('partidos.sheetDistanceTitle')
+              : t('common.itemsCount', { count: selectedIds.length })}
           </Text>
           {selectedIds.length > 0 ? (
             <Pressable onPress={() => onChange([])} hitSlop={8}>
-              <Text style={styles.clearSelectionText}>Quitar selección</Text>
+              <Text style={styles.clearSelectionText}>{t('common.discard')}</Text>
             </Pressable>
           ) : null}
         </View>
@@ -239,7 +244,7 @@ export function ClubMultiSelectBody({
           style={[styles.doneBtn, doneDisabled && styles.doneBtnDisabled]}
           disabled={doneDisabled}
         >
-          <Text style={styles.doneBtnText}>{doneLabel}</Text>
+          <Text style={styles.doneBtnText}>{resolvedDoneLabel}</Text>
         </Pressable>
       </View>
 

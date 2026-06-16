@@ -59,8 +59,8 @@ import {
   formatEloRange,
   formatFormatLabel,
   formatGenderLabel,
-  formatIsoDateTimeEs,
-  formatShortDateEs,
+  formatIsoDateTime,
+  formatShortDate,
   formatTournamentInscriptionPrice,
   formatTournamentStatus,
   inferTournamentFormatKey,
@@ -69,6 +69,9 @@ import {
   tournamentTitle,
 } from '../domain/tournamentDisplay';
 import { theme } from '../theme';
+import { useTranslation, type AppLocale } from '../i18n';
+
+type TFn = ReturnType<typeof useTranslation>['t'];
 
 const BG = '#0F0F0F';
 const ACCENT = '#F18F34';
@@ -146,9 +149,12 @@ function TeamRowBlock({
   isPair: boolean;
   showElo: boolean;
 }) {
+  const { t } = useTranslation();
   const prefix = isPair ? 'E' : 'J';
-  const label = isPair ? `Equipo ${index}` : `Participante ${index}`;
-  const sub = isPair ? '2 jugadores' : '1 jugador';
+  const label = isPair
+    ? t('torneos.detailTeamLabel', { index })
+    : t('torneos.detailParticipantLabel', { index });
+  const sub = isPair ? t('torneos.detailTwoPlayers') : t('torneos.detailOnePlayer');
   return (
     <View style={styles.teamRow}>
       <View style={styles.teamAvatar}>
@@ -171,49 +177,57 @@ function TeamRowBlock({
 }
 
 function TeamSlotAvailableRow() {
+  const { t } = useTranslation();
   return (
-    <View style={styles.teamRowDashed} accessibilityRole="text" accessibilityLabel="Plaza disponible">
+    <View
+      style={styles.teamRowDashed}
+      accessibilityRole="text"
+      accessibilityLabel={t('torneos.detailSlotAvailableA11y')}
+    >
       <View style={styles.teamAvatarDashed}>
         <Text style={styles.teamAvatarPlus}>+</Text>
       </View>
-      <Text style={styles.teamSlotPlaceholder}>Plaza disponible</Text>
+      <Text style={styles.teamSlotPlaceholder}>{t('torneos.detailSlotAvailable')}</Text>
     </View>
   );
 }
 
 function BracketCuadroEmpty() {
+  const { t } = useTranslation();
   return (
     <View style={styles.bracketEmptyWrap}>
       <View style={styles.bracketEmptyIcon}>
         <Ionicons name="trophy-outline" size={28} color={CUADRO_ICON} />
       </View>
-      <Text style={styles.bracketEmptyTitle}>Cuadro no disponible</Text>
-      <Text style={styles.bracketEmptySub}>
-        El cuadro se generará cuando se completen las inscripciones
-      </Text>
+      <Text style={styles.bracketEmptyTitle}>{t('torneos.detailBracketUnavailable')}</Text>
+      <Text style={styles.bracketEmptySub}>{t('torneos.detailBracketUnavailableSub')}</Text>
     </View>
   );
 }
 
-function stageNameById(stages: TournamentCompetitionPlayerView['stages'], stageId: string | null): string {
-  if (!stageId) return 'Partido';
+function stageNameById(
+  stages: TournamentCompetitionPlayerView['stages'],
+  stageId: string | null,
+  tr: TFn,
+): string {
+  if (!stageId) return tr('torneos.detailMatchDefault');
   const s = stages.find((x) => x.id === stageId);
-  return s?.stage_name?.trim() || 'Partido';
+  return s?.stage_name?.trim() || tr('torneos.detailMatchDefault');
 }
 
-function teamNameById(teams: TournamentCompetitionTeam[], teamId: string | null): string {
-  if (!teamId) return 'Por definir';
-  const t = teams.find((x: TournamentCompetitionTeam) => x.id === teamId);
-  return t?.name?.trim() || 'Por definir';
+function teamNameById(teams: TournamentCompetitionTeam[], teamId: string | null, tr: TFn): string {
+  if (!teamId) return tr('torneos.detailTeamTbd');
+  const team = teams.find((x: TournamentCompetitionTeam) => x.id === teamId);
+  return team?.name?.trim() || tr('torneos.detailTeamTbd');
 }
 
-function prettyMatchStatus(raw: string | null | undefined): string {
+function prettyMatchStatus(raw: string | null | undefined, tr: TFn): string {
   const s = String(raw ?? '').trim().toLowerCase();
-  if (s === 'finished') return 'Finalizado';
-  if (s === 'scheduled') return 'Programado';
-  if (s === 'in_progress') return 'En juego';
-  if (s === 'bye') return 'Pase';
-  return s || 'Pendiente';
+  if (s === 'finished') return tr('torneos.detailMatchFinished');
+  if (s === 'scheduled') return tr('torneos.detailMatchScheduled');
+  if (s === 'in_progress') return tr('torneos.detailMatchInProgress');
+  if (s === 'bye') return tr('torneos.detailMatchBye');
+  return s || tr('torneos.detailMatchPending');
 }
 
 function matchSetsLabel(m: TournamentCompetitionMatch): string | null {
@@ -222,11 +236,11 @@ function matchSetsLabel(m: TournamentCompetitionMatch): string | null {
   return sets.map((s) => `${s.games_a}-${s.games_b}`).join('  ');
 }
 
-function matchScheduleLine(m: TournamentCompetitionMatch): string | null {
+function matchScheduleLine(m: TournamentCompetitionMatch, locale: AppLocale): string | null {
   const sb = m.schedule_booking;
   if (!sb) return null;
-  const a = formatIsoDateTimeEs(sb.start_at) ?? sb.start_at;
-  const b = formatIsoDateTimeEs(sb.end_at) ?? sb.end_at;
+  const a = formatIsoDateTime(locale, sb.start_at) ?? sb.start_at;
+  const b = formatIsoDateTime(locale, sb.end_at) ?? sb.end_at;
   const court = sb.court_name?.trim() ? ` · ${sb.court_name.trim()}` : '';
   return `${a} – ${b}${court}`;
 }
@@ -255,10 +269,10 @@ function buildBo3DemoSets(
   );
 }
 
-function slotLine(slot: TournamentCourtBookingSlot): string {
-  const a = formatIsoDateTimeEs(slot.start_at) ?? slot.start_at;
-  const b = formatIsoDateTimeEs(slot.end_at) ?? slot.end_at;
-  const court = slot.court_name?.trim() ? slot.court_name.trim() : 'Pista';
+function slotLine(slot: TournamentCourtBookingSlot, tr: TFn, locale: AppLocale): string {
+  const a = formatIsoDateTime(locale, slot.start_at) ?? slot.start_at;
+  const b = formatIsoDateTime(locale, slot.end_at) ?? slot.end_at;
+  const court = slot.court_name?.trim() ? slot.court_name.trim() : tr('common.courtFallback');
   return `${court}: ${a} – ${b}`;
 }
 
@@ -271,6 +285,7 @@ function TournamentDetailLoadingSkeleton({
   insetsTop: number;
   insetsBottom: number;
 }) {
+  const { t } = useTranslation();
   const pulse = useRef(new Animated.Value(0.4)).current;
 
   useEffect(() => {
@@ -306,7 +321,7 @@ function TournamentDetailLoadingSkeleton({
               onPress={onClose}
               style={({ pressed }) => [styles.roundBtn, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel="Cerrar"
+              accessibilityLabel={t('common.close')}
             >
               <Ionicons name="arrow-back" size={22} color="#fff" />
             </Pressable>
@@ -345,6 +360,7 @@ export function TournamentDetailScreen({
   onClose,
   onOpenProfileForOnboarding,
 }: Props) {
+  const { t, locale } = useTranslation();
   const insets = useSafeAreaInsets();
   const { session, isLoading: authBooting } = useAuth();
   const loadGenerationRef = useRef(0);
@@ -407,7 +423,7 @@ export function TournamentDetailScreen({
 
         if (!detail.ok) {
           if (opts?.silent) {
-            Alert.alert('Error', detail.error ?? 'No se pudo actualizar el torneo.');
+            Alert.alert(t('alerts.error.title'), detail.error ?? t('torneos.detailUpdateError'));
           } else {
             setError(detail.error);
           }
@@ -428,7 +444,7 @@ export function TournamentDetailScreen({
           nextMyStatus === 'confirmed' &&
           (prevEntryStatusRef.current === 'pending' || nextEntryStatus === 'approved')
         ) {
-          Alert.alert('Inscripción aprobada', 'El organizador aprobó tu solicitud y ya estás inscrito en el torneo.');
+          Alert.alert(t('torneos.registrationApproved'), t('torneos.registrationApprovedBody'));
         }
         const requestId = String(detail.my_entry_request?.id ?? '');
         if (hasActiveInscription && requestId) {
@@ -445,8 +461,8 @@ export function TournamentDetailScreen({
             const alreadySeen = await AsyncStorage.getItem(storageKey);
             if (!alreadySeen) {
               Alert.alert(
-                'Solicitud aprobada',
-                'El organizador aprobó tu solicitud. Ya puedes tocar "Inscribirme" para completar el pago y confirmar tu plaza.',
+                t('torneos.requestApprovedPayTitle'),
+                t('torneos.requestApprovedPayBody'),
               );
               await AsyncStorage.setItem(storageKey, '1');
             }
@@ -489,7 +505,7 @@ export function TournamentDetailScreen({
         }
       }
     },
-    [tournamentId, session?.access_token],
+    [tournamentId, session?.access_token, t],
   );
 
   const submitPlayerMatchResultBo3 = useCallback(
@@ -504,7 +520,7 @@ export function TournamentDetailScreen({
           session.access_token,
         );
         if (!r.ok) {
-          Alert.alert('Resultado', r.error);
+          Alert.alert(t('alerts.tournament.registerResult'), r.error);
           return;
         }
         await load({ silent: true });
@@ -512,7 +528,7 @@ export function TournamentDetailScreen({
         setPlayerResultSubmittingId(null);
       }
     },
-    [tournamentId, session?.access_token, load],
+    [tournamentId, session?.access_token, load, t],
   );
 
   const promptPlayerMatchResult = useCallback(
@@ -521,21 +537,18 @@ export function TournamentDetailScreen({
       if (!side) return;
       const bo = Number(competition?.tournament?.match_rules?.best_of_sets ?? 3);
       if (bo !== 3) {
-        Alert.alert(
-          'Resultado',
-          'Solo podés registrar desde la app en formato al mejor de 3 sets. Pedile al club que cargue el marcador o cambie la configuración.',
-        );
+        Alert.alert(t('alerts.tournament.registerResult'), t('torneos.detailResultBo3Only'));
         return;
       }
-      Alert.alert('Registrar resultado', 'Elegí el desenlace. El club puede corregirlo si hace falta.', [
-        { text: 'Ganamos 2-0', onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'win_2_0')) },
-        { text: 'Ganamos 2-1', onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'win_2_1')) },
-        { text: 'Perdimos 0-2', onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'lose_0_2')) },
-        { text: 'Perdimos 1-2', onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'lose_1_2')) },
-        { text: 'Cancelar', style: 'cancel' },
+      Alert.alert(t('torneos.registerResultTitle'), t('torneos.registerResultBody'), [
+        { text: t('torneos.resultWin20'), onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'win_2_0')) },
+        { text: t('torneos.resultWin21'), onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'win_2_1')) },
+        { text: t('torneos.resultLose02'), onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'lose_0_2')) },
+        { text: t('torneos.resultLose12'), onPress: () => void submitPlayerMatchResultBo3(m.id, buildBo3DemoSets(side, 'lose_1_2')) },
+        { text: t('common.cancel'), style: 'cancel' },
       ]);
     },
-    [competition, submitPlayerMatchResultBo3],
+    [competition, submitPlayerMatchResultBo3, t],
   );
 
   useEffect(() => {
@@ -564,7 +577,7 @@ export function TournamentDetailScreen({
     return () => clearInterval(timer);
   }, [tab, session?.access_token, loadChat]);
 
-  const title = row ? tournamentTitle(row) : '';
+  const title = row ? tournamentTitle(row, t) : '';
   const heroUri = useMemo(() => {
     if (!row) return '';
     const logo = pickClub(row)?.logo_url?.trim();
@@ -572,10 +585,10 @@ export function TournamentDetailScreen({
     return placeholderImageForId(row.id);
   }, [row]);
   const formatKey = row ? inferTournamentFormatKey(row.description) : 'torneo';
-  const formatLabel = formatFormatLabel(formatKey);
-  const genderBadge = row ? formatGenderLabel(row.gender) : null;
+  const formatLabel = formatFormatLabel(formatKey, t);
+  const genderBadge = row ? formatGenderLabel(row.gender, t) : null;
   const club = row ? pickClub(row) : null;
-  const locationLine = row ? formatClubFullAddress(row) || clubLocationLabel(row) : '';
+  const locationLine = row ? formatClubFullAddress(row) || clubLocationLabel(row, t) : '';
 
   const confirmed = counts.confirmed;
   const pending = counts.pending;
@@ -589,10 +602,14 @@ export function TournamentDetailScreen({
   const eloMismatchReason = useMemo(() => {
     if (!row || myElo == null || Number.isNaN(Number(myElo))) return null;
     const elo = Number(myElo);
-    if (eloMin != null && elo < eloMin) return `No cumples el nivel mínimo (${eloMin}). Tu nivel actual es ${Math.round(elo)}.`;
-    if (eloMax != null && elo > eloMax) return `Superas el nivel máximo (${eloMax}). Tu nivel actual es ${Math.round(elo)}.`;
+    if (eloMin != null && elo < eloMin) {
+      return t('torneos.detailEloBelowMin', { min: eloMin, current: Math.round(elo) });
+    }
+    if (eloMax != null && elo > eloMax) {
+      return t('torneos.detailEloAboveMax', { max: eloMax, current: Math.round(elo) });
+    }
     return null;
-  }, [row, myElo, eloMin, eloMax]);
+  }, [row, myElo, eloMin, eloMax, t]);
   const requestStatus = String(myEntryRequest?.status ?? '').toLowerCase();
 
   const handleShare = async () => {
@@ -600,7 +617,7 @@ export function TournamentDetailScreen({
     try {
       await Share.share({
         title,
-        message: `${title}\n${formatShortDateEs(row.start_at)} — ${locationLine}`,
+        message: `${title}\n${formatShortDate(locale,row.start_at)} — ${locationLine}`,
       });
     } catch {
       /* ignore */
@@ -630,29 +647,28 @@ export function TournamentDetailScreen({
     const trySubmitEntryRequest = async (reasonError: string) => {
       if (!session?.access_token) return;
       if (myEntryRequest?.status === 'pending') {
-        Alert.alert('Solicitud pendiente', 'Ya tienes una solicitud pendiente para este torneo.');
+        Alert.alert(t('torneos.requestPending'), t('torneos.requestPendingBody'));
         return;
       }
       const canRequestByRule = /elo|género|genero|categor/i.test(reasonError.toLowerCase());
       if (!canRequestByRule) return;
       Alert.alert(
-        'No cumples requisitos',
-        `${reasonError}\n\n¿Quieres enviar una solicitud al organizador para que revise tu inscripción?`,
+        t('torneos.detailRequirementsTitle'),
+        t('torneos.detailRequirementsBody', { reason: reasonError }),
         [
-          { text: 'Cancelar', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Enviar solicitud',
+            text: t('torneos.sendRequest'),
             onPress: () => {
               void (async () => {
                 const fallbackMessage =
-                  entryRequestMessage.trim() ||
-                  'Hola! Me gustaría participar en este torneo aunque no cumpla el requisito automático. ¿Podrían revisar mi solicitud?';
+                  entryRequestMessage.trim() || t('torneos.detailEntryRequestDefault');
                 const req = await submitTournamentEntryRequest(tournamentId, fallbackMessage, session.access_token);
                 if (!req.ok) {
-                  Alert.alert('Solicitud', req.error);
+                  Alert.alert(t('torneos.requestAlertTitle'), req.error);
                   return;
                 }
-                Alert.alert('Solicitud enviada', 'El organizador verá tu solicitud en su panel.');
+                Alert.alert(t('torneos.requestSent'), t('torneos.requestSentBody'));
                 setEntryRequestMessage('');
                 await load({ silent: true });
               })();
@@ -664,15 +680,15 @@ export function TournamentDetailScreen({
 
     if (!row) return;
     if (!session?.access_token) {
-      Alert.alert('Inicia sesión', 'Necesitas una cuenta para inscribirte en el torneo.');
+      Alert.alert(t('alerts.login.titleAlt'), t('torneos.detailLoginToRegister'));
       return;
     }
     if (!isTournamentStatusOpen(row.status)) {
-      Alert.alert('Torneo', 'Las inscripciones no están abiertas.');
+      Alert.alert(t('torneos.detailTournamentAlertTitle'), t('torneos.registrationsClosed'));
       return;
     }
     if (remaining <= 0 && myStatus !== 'confirmed') {
-      Alert.alert('Cupos completos', 'No hay plazas disponibles.');
+      Alert.alert(t('torneos.fullCapacity'), t('torneos.fullCapacityBody'));
       return;
     }
 
@@ -685,16 +701,16 @@ export function TournamentDetailScreen({
         const r = await joinPublicTournament(row.id, token);
         if (r.ok) {
           Alert.alert(
-            'Listo',
-            r.already_joined ? 'Ya estabas inscrito en este torneo.' : 'Te has inscrito correctamente.',
+            t('alerts.ready.title'),
+            r.already_joined ? t('torneos.detailJoinSuccessAlready') : t('torneos.detailJoinSuccess'),
           );
           await load({ silent: true });
         } else {
-          Alert.alert('No se pudo inscribir', r.error);
+          Alert.alert(t('torneos.detailJoinFailTitle'), r.error);
           await trySubmitEntryRequest(r.error);
         }
       } catch (e) {
-        Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo completar la inscripción.');
+        Alert.alert(t('alerts.error.title'), e instanceof Error ? e.message : t('torneos.detailJoinFailGeneric'));
       } finally {
         setJoining(false);
       }
@@ -706,8 +722,8 @@ export function TournamentDetailScreen({
       setJoining(true);
       const intentRes = await createIntentForTournament(row.id, token);
       if (!intentRes.ok || !intentRes.clientSecret) {
-        const errMsg = intentRes.error ?? 'No se pudo iniciar el pago. Inténtalo de nuevo.';
-        Alert.alert('Error', errMsg);
+        const errMsg = intentRes.error ?? t('common.paymentStartError');
+        Alert.alert(t('alerts.error.title'), errMsg);
         await trySubmitEntryRequest(errMsg);
         return;
       }
@@ -719,21 +735,21 @@ export function TournamentDetailScreen({
         returnURL,
       });
       if (initErr) {
-        Alert.alert('Error', 'Error al configurar el pago. Inténtalo de nuevo.');
+        Alert.alert(t('alerts.error.title'), t('common.paymentConfiguredError'));
         return;
       }
 
       const { error: presentErr } = await presentPaymentSheet();
       if (presentErr) {
         if (presentErr.code !== 'Canceled') {
-          Alert.alert('Error', 'Error al procesar el pago. Inténtalo de nuevo.');
+          Alert.alert(t('alerts.error.title'), t('common.paymentProcessError'));
         }
         return;
       }
 
       const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId!, token);
       if (!confirmRes.ok) {
-        Alert.alert('Error', 'No se pudo confirmar la inscripción. Inténtalo de nuevo.');
+        Alert.alert(t('alerts.error.title'), t('common.paymentConfirmBookingError'));
         return;
       }
 
@@ -746,8 +762,8 @@ export function TournamentDetailScreen({
       setConfirmationModalData({
         courtName: title,
         clubName,
-        dateTimeFormatted: `${formatShortDateEs(row.start_at)} - ${formatShortDateEs(row.end_at)}`,
-        duration: formatDurationMinutes(row.duration_min),
+        dateTimeFormatted: `${formatShortDate(locale,row.start_at)} - ${formatShortDate(locale,row.end_at)}`,
+        duration: formatDurationMinutes(row.duration_min, t),
         priceFormatted: formatTournamentInscriptionPrice(row.price_cents, row.currency ?? 'EUR'),
         matchVisibility: 'private',
         confirmationKind: 'tournament',
@@ -755,7 +771,7 @@ export function TournamentDetailScreen({
       });
       await load({ silent: true });
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Error al procesar el pago.');
+      Alert.alert(t('alerts.error.title'), e instanceof Error ? e.message : t('common.paymentProcessError'));
     } finally {
       setJoining(false);
     }
@@ -765,7 +781,7 @@ export function TournamentDetailScreen({
     if (!row || !session?.access_token) return;
     const email = teammateEmail.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      Alert.alert('Email de pareja', 'Introduce un email válido para tu compañero.');
+      Alert.alert(t('torneos.detailPairEmailTitle'), t('torneos.pairEmailInvalid'));
       return;
     }
 
@@ -773,45 +789,40 @@ export function TournamentDetailScreen({
       setJoining(true);
       const r = await joinTournamentAsPair(row.id, email, session.access_token);
       if (r.ok) {
-        Alert.alert(
-          'Invitación enviada',
-          'Hemos enviado una invitación a tu compañero. Cuando acepte, ambos estaréis inscritos.'
-        );
+        Alert.alert(t('torneos.detailInviteSentTitle'), t('torneos.detailInviteSentBody'));
         setTeammateEmail('');
         await load({ silent: true });
       } else {
-        // Si el error es de ELO o similar, el backend devuelve el mensaje descriptivo
-        Alert.alert('No se pudo invitar', r.error);
-        
-        // Si el error indica que no cumple requisitos, sugerimos enviar solicitud manual (si aplica)
+        Alert.alert(t('torneos.detailInviteFailTitle'), r.error);
+
         const canRequest = /elo|género|genero|categor/i.test(r.error.toLowerCase());
         if (canRequest) {
           Alert.alert(
-            'Requisitos no cumplidos',
-            `${r.error}\n\n¿Quieres enviar una solicitud al organizador para que revise vuestra situación?`,
+            t('torneos.detailRequirementsNotMetTitle'),
+            t('torneos.detailPairRequirementsBody', { error: r.error }),
             [
-              { text: 'No', style: 'cancel' },
+              { text: t('common.no'), style: 'cancel' },
               {
-                text: 'Enviar solicitud',
+                text: t('torneos.sendRequest'),
                 onPress: () => {
-                  const msg = `Hola! Me gustaría inscribirme con mi pareja (${email}) aunque no cumplamos el requisito automático: ${r.error}`;
+                  const msg = t('torneos.detailEntryRequestPairDefault', { email, error: r.error });
                   void (async () => {
                     const req = await submitTournamentEntryRequest(row.id, msg, session.access_token);
                     if (req.ok) {
-                      Alert.alert('Solicitud enviada', 'El organizador revisará vuestro caso.');
+                      Alert.alert(t('torneos.requestSent'), t('torneos.detailPairRequestSent'));
                       await load({ silent: true });
                     } else {
-                      Alert.alert('Error', req.error);
+                      Alert.alert(t('alerts.error.title'), req.error);
                     }
                   })();
-                }
-              }
-            ]
+                },
+              },
+            ],
           );
         }
       }
-    } catch (e) {
-      Alert.alert('Error', 'No se pudo procesar la invitación por parejas.');
+    } catch {
+      Alert.alert(t('alerts.error.title'), t('torneos.detailInviteProcessError'));
     } finally {
       setJoining(false);
     }
@@ -819,16 +830,16 @@ export function TournamentDetailScreen({
 
   const handleLeave = () => {
     if (!row || !session?.access_token) {
-      Alert.alert('Inicia sesión', 'Necesitas una cuenta para gestionar tu inscripción.');
+      Alert.alert(t('alerts.login.titleAlt'), t('torneos.detailLoginToManage'));
       return;
     }
     Alert.alert(
-      'Cancelar inscripción',
-      '¿Seguro que quieres darte de baja de este torneo?',
+      t('torneos.cancelRegistrationTitle'),
+      t('torneos.detailCancelRegistrationBody'),
       [
-        { text: 'No', style: 'cancel' },
+        { text: t('common.no'), style: 'cancel' },
         {
-          text: 'Sí, cancelar',
+          text: t('torneos.cancelRegistrationYes'),
           style: 'destructive',
           onPress: () => {
             void (async () => {
@@ -836,13 +847,13 @@ export function TournamentDetailScreen({
                 setJoining(true);
                 const r = await leaveTournament(row.id, session.access_token!);
                 if (r.ok) {
-                  Alert.alert('Listo', 'Tu inscripción ha sido cancelada.');
+                  Alert.alert(t('alerts.ready.title'), t('torneos.registrationCanceled'));
                   await load({ silent: true });
                 } else {
-                  Alert.alert('No se pudo cancelar', r.error);
+                  Alert.alert(t('torneos.detailCancelFailTitle'), r.error);
                 }
               } catch (e) {
-                Alert.alert('Error', e instanceof Error ? e.message : 'Error al cancelar.');
+                Alert.alert(t('alerts.error.title'), e instanceof Error ? e.message : t('torneos.detailCancelGenericError'));
               } finally {
                 setJoining(false);
               }
@@ -862,29 +873,27 @@ export function TournamentDetailScreen({
     const blockedByElo = Boolean(eloMismatchReason) && requestStatus !== 'approved';
     if (blockedByElo || requestStatus === 'rejected') {
       if (!session?.access_token) {
-        Alert.alert('Inicia sesión', 'Necesitas una cuenta para enviar una solicitud.');
+        Alert.alert(t('alerts.login.titleAlt'), t('torneos.detailLoginToRequest'));
         return;
       }
       if (!isTournamentStatusOpen(row.status) || remaining <= 0) {
-        Alert.alert('Torneo', 'No hay cupo disponible o las inscripciones están cerradas.');
+        Alert.alert(t('torneos.detailTournamentAlertTitle'), t('torneos.detailNoCapacityOrClosed'));
         return;
       }
       if (requestStatus === 'pending') {
-        Alert.alert('Solicitud pendiente', 'Ya enviaste una solicitud al organizador.');
+        Alert.alert(t('torneos.requestPending'), t('torneos.detailRequestAlreadySent'));
         return;
       }
-      const msg =
-        entryRequestMessage.trim() ||
-        'Hola! Me gustaría participar en este torneo aunque no cumpla el requisito automático. ¿Podrían revisar mi solicitud?';
+      const msg = entryRequestMessage.trim() || t('torneos.detailEntryRequestDefault');
       void (async () => {
         setJoining(true);
         try {
           const req = await submitTournamentEntryRequest(row.id, msg, session.access_token);
           if (!req.ok) {
-            Alert.alert('Solicitud', req.error);
+            Alert.alert(t('torneos.requestAlertTitle'), req.error);
             return;
           }
-          Alert.alert('Solicitud enviada', 'Tu solicitud fue enviada al organizador.');
+          Alert.alert(t('torneos.requestSent'), t('torneos.requestSentOrganizer'));
           setEntryRequestMessage('');
           await load({ silent: true });
         } finally {
@@ -901,16 +910,19 @@ export function TournamentDetailScreen({
   };
 
   const ctaLabel = useMemo(() => {
-    if (!row) return 'Inscribirme';
+    if (!row) return t('torneos.ctaRegister');
     const price = formatTournamentInscriptionPrice(row.price_cents, row.currency ?? 'EUR');
-    if (myStatus === 'confirmed' || myStatus === 'pending') return 'Cancelar inscripción';
-    if (requestStatus === 'pending') return 'Solicitud pendiente';
-    if (requestStatus === 'rejected') return 'Solicitud rechazada';
-    if (remaining <= 0) return 'CERRADO';
-    if (requestStatus === 'approved' && (row.price_cents ?? 0) > 0) return `Inscribirme — ${price}`;
-    if (eloMismatchReason) return 'Enviar solicitud';
-    return `Inscribirme — ${price}`;
-  }, [row, myStatus, requestStatus, eloMismatchReason]);
+    if (myStatus === 'confirmed' || myStatus === 'pending') return t('torneos.ctaCancelRegistration');
+    if (requestStatus === 'pending') return t('torneos.ctaRequestPending');
+    if (requestStatus === 'rejected') return t('torneos.ctaRequestRejected');
+    if (remaining <= 0) return t('torneos.cardClosed');
+    if (requestStatus === 'approved' && (row.price_cents ?? 0) > 0) {
+      return t('torneos.ctaRegisterWithPrice', { price });
+    }
+    if (eloMismatchReason) return t('torneos.ctaSendRequest');
+    if ((row.price_cents ?? 0) > 0) return t('torneos.ctaRegisterWithPrice', { price });
+    return t('torneos.ctaRegister');
+  }, [row, myStatus, requestStatus, eloMismatchReason, remaining, t]);
 
   const hasActiveInscription = myStatus === 'confirmed' || myStatus === 'pending';
   const ctaGradientColors = useMemo((): [string, string] => {
@@ -946,7 +958,7 @@ export function TournamentDetailScreen({
       <View style={[styles.root, styles.centered]}>
         <Text style={styles.err}>{error}</Text>
         <Pressable onPress={onClose} style={styles.retryBtn}>
-          <Text style={styles.retryText}>Volver</Text>
+          <Text style={styles.retryText}>{t('common.back')}</Text>
         </Pressable>
       </View>
     );
@@ -956,8 +968,8 @@ export function TournamentDetailScreen({
 
   const { isPair: teamsIsPair, maxTeams, teamsFilled, slotsFree } = tournamentTeamsModel(row, confirmed);
   const equiposTitle = teamsIsPair
-    ? `Equipos inscritos (${teamsFilled}/${maxTeams})`
-    : `Participantes inscritos (${teamsFilled}/${maxTeams})`;
+    ? t('torneos.detailTeamsRegistered', { filled: teamsFilled, max: maxTeams })
+    : t('torneos.detailParticipantsRegistered', { filled: teamsFilled, max: maxTeams });
   const competitionTeams = competition?.teams ?? [];
   const participantRows = [...participants].sort((a, b) => {
     const na = `${a.first_name ?? ''} ${a.last_name ?? ''}`.trim().toLowerCase();
@@ -978,10 +990,10 @@ export function TournamentDetailScreen({
   const tournamentWindow = agenda?.tournament_window ?? competition?.tournament_window;
   const tournamentWindowLine =
     tournamentWindow?.start_at && tournamentWindow?.end_at
-      ? `${formatIsoDateTimeEs(tournamentWindow.start_at) ?? tournamentWindow.start_at} — ${
-          formatIsoDateTimeEs(tournamentWindow.end_at) ?? tournamentWindow.end_at
+      ? `${formatIsoDateTime(locale,tournamentWindow.start_at) ?? tournamentWindow.start_at} — ${
+          formatIsoDateTime(locale,tournamentWindow.end_at) ?? tournamentWindow.end_at
         }`
-      : `${formatShortDateEs(row.start_at)} — ${formatShortDateEs(row.end_at)}`;
+      : `${formatShortDate(locale,row.start_at)} — ${formatShortDate(locale,row.end_at)}`;
 
   return (
     <View style={styles.root}>
@@ -996,15 +1008,15 @@ export function TournamentDetailScreen({
       >
         {!!row && !!eloMismatchReason && requestStatus !== 'approved' && myStatus !== 'confirmed' ? (
           <View style={[styles.card, { marginHorizontal: 20, marginTop: 10 }]}>
-            <Text style={styles.cardTitleSm}>No cumples los requisitos</Text>
+            <Text style={styles.cardTitleSm}>{t('torneos.detailRequirementsCardTitle')}</Text>
             <Text style={styles.normasEmpty}>{eloMismatchReason}</Text>
             <Text style={[styles.teamSub, { marginTop: 6 }]}>
-              Puedes enviar una solicitud al organizador para que la revise.
+              {t('torneos.detailRequirementsHint')}
             </Text>
             <TextInput
               value={entryRequestMessage}
               onChangeText={setEntryRequestMessage}
-              placeholder="Mensaje para el organizador (opcional)"
+              placeholder={t('torneos.detailEntryMessagePlaceholder')}
               placeholderTextColor="rgba(255,255,255,0.45)"
               style={[styles.chatInput, { marginTop: 10 }]}
               multiline
@@ -1013,23 +1025,24 @@ export function TournamentDetailScreen({
         ) : null}
         {!!row && requestStatus === 'approved' && myStatus !== 'confirmed' ? (
           <View style={[styles.card, { marginHorizontal: 20, marginTop: 10 }]}>
-            <Text style={styles.cardTitleSm}>Solicitud aprobada</Text>
+            <Text style={styles.cardTitleSm}>{t('torneos.detailRequestApprovedCardTitle')}</Text>
             <Text style={styles.normasEmpty}>
-              Ya puedes inscribirte al torneo{(row.price_cents ?? 0) > 0 ? ' y completar el pago' : ''}.
+              {t('torneos.detailRequestApprovedCardBody')}
+              {(row.price_cents ?? 0) > 0 ? t('torneos.detailRequestApprovedPaySuffix') : ''}.
             </Text>
           </View>
         ) : null}
         {!!row && requestStatus === 'pending' && myStatus !== 'confirmed' ? (
           <View style={[styles.card, { marginHorizontal: 20, marginTop: 10 }]}>
-            <Text style={styles.cardTitleSm}>Solicitud pendiente</Text>
-            <Text style={styles.normasEmpty}>Tu solicitud está en revisión por el organizador.</Text>
+            <Text style={styles.cardTitleSm}>{t('torneos.requestPending')}</Text>
+            <Text style={styles.normasEmpty}>{t('torneos.detailRequestPendingCardBody')}</Text>
           </View>
         ) : null}
         {!!row && requestStatus === 'rejected' && myStatus !== 'confirmed' ? (
           <View style={[styles.card, { marginHorizontal: 20, marginTop: 10 }]}>
-            <Text style={styles.cardTitleSm}>Solicitud rechazada</Text>
+            <Text style={styles.cardTitleSm}>{t('torneos.detailRequestRejectedCardTitle')}</Text>
             <Text style={styles.normasEmpty}>
-              {myEntryRequest?.response_message?.trim() || 'El organizador rechazó tu solicitud. Puedes enviar una nueva solicitud.'}
+              {myEntryRequest?.response_message?.trim() || t('torneos.detailRequestRejectedDefault')}
             </Text>
           </View>
         ) : null}
@@ -1046,7 +1059,7 @@ export function TournamentDetailScreen({
               onPress={onClose}
               style={({ pressed }) => [styles.roundBtn, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel="Cerrar"
+              accessibilityLabel={t('common.close')}
             >
               <Ionicons name="arrow-back" size={22} color="#fff" />
             </Pressable>
@@ -1054,7 +1067,7 @@ export function TournamentDetailScreen({
               onPress={handleShare}
               style={({ pressed }) => [styles.roundBtn, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel="Compartir"
+              accessibilityLabel={t('torneos.detailShareA11y')}
             >
               <Ionicons name="share-social-outline" size={20} color="#fff" />
             </Pressable>
@@ -1087,22 +1100,22 @@ export function TournamentDetailScreen({
         >
           {(
             [
-              { id: 'info' as const, label: 'Información' },
-              { id: 'equipos' as const, label: 'Equipos' },
-              { id: 'cuadro' as const, label: 'Cuadro' },
-              { id: 'chat' as const, label: 'Chat' },
-              { id: 'partidos' as const, label: 'Mis partidos' },
+              { id: 'info' as const, label: t('torneos.detailTabInfo') },
+              { id: 'equipos' as const, label: t('torneos.detailTabTeams') },
+              { id: 'cuadro' as const, label: t('torneos.detailTabBracket') },
+              { id: 'chat' as const, label: t('torneos.detailTabChat') },
+              { id: 'partidos' as const, label: t('torneos.detailTabMyMatches') },
             ]
-          ).map((t) => (
+          ).map((tabItem) => (
             <Pressable
-              key={t.id}
-              onPress={() => setTab(t.id)}
+              key={tabItem.id}
+              onPress={() => setTab(tabItem.id)}
               style={[
                 styles.tabPill,
-                tab === t.id ? styles.tabPillActive : styles.tabPillIdle,
+                tab === tabItem.id ? styles.tabPillActive : styles.tabPillIdle,
               ]}
             >
-              <Text style={[styles.tabPillText, tab !== t.id && styles.tabPillTextIdle]}>{t.label}</Text>
+              <Text style={[styles.tabPillText, tab !== tabItem.id && styles.tabPillTextIdle]}>{tabItem.label}</Text>
             </Pressable>
           ))}
         </ScrollView>
@@ -1110,20 +1123,20 @@ export function TournamentDetailScreen({
         {tab === 'info' ? (
           <View style={styles.body}>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Detalles del torneo</Text>
+              <Text style={styles.cardTitle}>{t('torneos.detailTournamentDetails')}</Text>
               <View style={styles.grid3}>
                 <View style={styles.statCell}>
-                  <Text style={styles.statCap}>Precio</Text>
+                  <Text style={styles.statCap}>{t('torneos.detailPrice')}</Text>
                   <Text style={styles.statVal}>
                     {formatTournamentInscriptionPrice(row.price_cents, row.currency ?? 'EUR')}
                   </Text>
                 </View>
                 <View style={styles.statCell}>
-                  <Text style={styles.statCap}>Nivel</Text>
-                  <Text style={styles.statVal}>{formatEloRange(row.elo_min, row.elo_max)}</Text>
+                  <Text style={styles.statCap}>{t('torneos.detailLevel')}</Text>
+                  <Text style={styles.statVal}>{formatEloRange(row.elo_min, row.elo_max, t)}</Text>
                 </View>
                 <View style={styles.statCell}>
-                  <Text style={styles.statCap}>Plazas</Text>
+                  <Text style={styles.statCap}>{t('torneos.detailSlots')}</Text>
                   <Text style={styles.statVal}>
                     {confirmed}/{maxP}
                   </Text>
@@ -1133,71 +1146,71 @@ export function TournamentDetailScreen({
               <View style={styles.rows}>
                 <DetailRow
                   icon="information-circle-outline"
-                  cap="Estado"
-                  text={formatTournamentStatus(row.status)}
+                  cap={t('torneos.detailStatus')}
+                  text={formatTournamentStatus(row.status, t)}
                 />
                 <DetailRow
                   icon="calendar-outline"
-                  cap="Periodo del torneo"
-                  text={`${formatShortDateEs(row.start_at)} — ${formatShortDateEs(row.end_at)}`}
+                  cap={t('torneos.detailPeriod')}
+                  text={`${formatShortDate(locale,row.start_at)} — ${formatShortDate(locale,row.end_at)}`}
                 />
                 <DetailRow
                   icon="time-outline"
-                  cap="Duración del partido"
-                  text={formatDurationMinutes(row.duration_min)}
+                  cap={t('torneos.detailMatchDuration')}
+                  text={formatDurationMinutes(row.duration_min, t)}
                 />
-                <DetailRow icon="trophy-outline" cap="Estilo (según descripción)" text={formatLabel} />
+                <DetailRow icon="trophy-outline" cap={t('torneos.detailStyleLabel')} text={formatLabel} />
                 <DetailRow
                   icon="people-outline"
-                  cap="Inscripción"
+                  cap={t('torneos.detailRegistration')}
                   text={
                     row.registration_mode === 'pair'
-                      ? 'Parejas'
+                      ? t('torneos.detailRegistrationPair')
                       : row.registration_mode === 'both'
-                        ? 'Individual o parejas'
-                        : 'Individual'
+                        ? t('torneos.detailRegistrationBoth')
+                        : t('torneos.detailRegistrationIndividual')
                   }
                 />
                 {row.registration_closed_at ? (
                   <DetailRow
                     icon="alarm-outline"
-                    cap="Cierre de inscripciones"
-                    text={formatIsoDateTimeEs(row.registration_closed_at) ?? row.registration_closed_at}
+                    cap={t('torneos.detailRegistrationCloses')}
+                    text={formatIsoDateTime(locale,row.registration_closed_at) ?? row.registration_closed_at}
                   />
                 ) : null}
                 {row.cancellation_cutoff_at ? (
                   <DetailRow
                     icon="alert-circle-outline"
-                    cap="Límite de cancelación"
-                    text={formatIsoDateTimeEs(row.cancellation_cutoff_at) ?? row.cancellation_cutoff_at}
+                    cap={t('torneos.detailCancellationLimit')}
+                    text={formatIsoDateTime(locale,row.cancellation_cutoff_at) ?? row.cancellation_cutoff_at}
                   />
                 ) : null}
                 {row.invite_ttl_minutes != null ? (
                   <DetailRow
                     icon="hourglass-outline"
-                    cap="Validez de invitación"
-                    text={`${row.invite_ttl_minutes} minutos`}
+                    cap={t('torneos.detailInviteValidity')}
+                    text={t('common.durationMin', { minutes: row.invite_ttl_minutes })}
                   />
                 ) : null}
                 {row.visibility ? (
                   <DetailRow
                     icon="eye-outline"
-                    cap="Visibilidad"
+                    cap={t('torneos.detailVisibility')}
                     text={
                       row.visibility === 'public'
-                        ? 'Pública'
+                        ? t('torneos.detailVisibilityPublic')
                         : row.visibility === 'private'
-                        ? 'Privada'
-                        : row.visibility
+                          ? t('torneos.detailVisibilityPrivate')
+                          : row.visibility
                     }
                   />
                 ) : null}
                 {row.cancelled_at ? (
                   <DetailRow
                     icon="close-circle-outline"
-                    cap="Cancelado"
+                    cap={t('torneos.detailCancelled')}
                     text={
-                      [formatIsoDateTimeEs(row.cancelled_at) ?? row.cancelled_at, row.cancelled_reason]
+                      [formatIsoDateTime(locale,row.cancelled_at) ?? row.cancelled_at, row.cancelled_reason]
                         .filter(Boolean)
                         .join(' — ') || '—'
                     }
@@ -1206,22 +1219,22 @@ export function TournamentDetailScreen({
                 {row.closed_at ? (
                   <DetailRow
                     icon="lock-closed-outline"
-                    cap="Cerrado"
-                    text={formatIsoDateTimeEs(row.closed_at) ?? row.closed_at}
+                    cap={t('torneos.detailClosedLabel')}
+                    text={formatIsoDateTime(locale,row.closed_at) ?? row.closed_at}
                   />
                 ) : null}
               </View>
 
               {club?.description?.trim() ? (
                 <View style={styles.descBlock}>
-                  <Text style={styles.descBlockTitle}>Club</Text>
+                  <Text style={styles.descBlockTitle}>{t('torneos.detailClub')}</Text>
                   <Text style={styles.descBlockBody}>{club.description.trim()}</Text>
                 </View>
               ) : null}
 
               {row.description?.trim() ? (
                 <View style={styles.descBlock}>
-                  <Text style={styles.descBlockTitle}>Descripción</Text>
+                  <Text style={styles.descBlockTitle}>{t('torneos.detailDescription')}</Text>
                   <Text style={styles.descBlockBody}>{row.description.trim()}</Text>
                 </View>
               ) : null}
@@ -1243,7 +1256,7 @@ export function TournamentDetailScreen({
                       {club.name}
                     </Text>
                     <Text style={styles.clubRowSub} numberOfLines={2}>
-                      {club.address || locationLine || 'Dirección no especificada'}
+                      {club.address || locationLine || t('torneos.detailAddressUnspecified')}
                     </Text>
                   </View>
                   <View style={styles.clubRowMap}>
@@ -1255,9 +1268,11 @@ export function TournamentDetailScreen({
 
             <View style={styles.card}>
               <View style={styles.progressHead}>
-                <Text style={styles.cardTitleSm}>Plazas ocupadas</Text>
+                <Text style={styles.cardTitleSm}>{t('torneos.detailSpotsOccupied')}</Text>
                 <Text style={styles.progressRest}>
-                  {remaining} restante{remaining === 1 ? '' : 's'}
+                  {remaining === 1
+                    ? t('torneos.detailSpotsRemainingOne', { count: remaining })
+                    : t('torneos.detailSpotsRemainingMany', { count: remaining })}
                 </Text>
               </View>
               <View style={styles.progressTrack}>
@@ -1272,7 +1287,7 @@ export function TournamentDetailScreen({
 
             {prizesList.length > 0 || (row.prize_total_cents && row.prize_total_cents > 0) ? (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Premios</Text>
+                <Text style={styles.cardTitle}>{t('torneos.detailPrizes')}</Text>
                 {prizesList.length > 0 ? (
                   prizesList.map((p, i) => (
                     <View key={`${p.label}-${i}`} style={styles.prizeRow}>
@@ -1285,14 +1300,16 @@ export function TournamentDetailScreen({
                   ))
                 ) : (
                   <Text style={styles.prizeSub}>
-                    Bolsa total: {formatTournamentInscriptionPrice(row.prize_total_cents ?? 0, row.currency ?? 'EUR')}
+                    {t('torneos.detailPrizePoolTotal', {
+                      amount: formatTournamentInscriptionPrice(row.prize_total_cents ?? 0, row.currency ?? 'EUR'),
+                    })}
                   </Text>
                 )}
               </View>
             ) : null}
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Normas</Text>
+              <Text style={styles.cardTitle}>{t('torneos.detailRules')}</Text>
               {normasLines(row.normas).length > 0 ? (
                 normasLines(row.normas).map((line, i) => (
                   <View key={i} style={styles.normaRow}>
@@ -1301,7 +1318,7 @@ export function TournamentDetailScreen({
                   </View>
                 ))
               ) : (
-                <Text style={styles.normasEmpty}>El club no ha publicado normas para este torneo.</Text>
+                <Text style={styles.normasEmpty}>{t('torneos.detailNoRules')}</Text>
               )}
             </View>
           </View>
@@ -1310,7 +1327,7 @@ export function TournamentDetailScreen({
             <View style={styles.card}>
               <Text style={styles.cardTitle}>
                 {competitionTeams.length > 0
-                  ? `Equipos inscritos (${competitionTeams.length})`
+                  ? t('torneos.detailTeamsRegisteredDynamic', { count: competitionTeams.length })
                   : equiposTitle}
               </Text>
               <View style={styles.teamList}>
@@ -1323,13 +1340,13 @@ export function TournamentDetailScreen({
                           </Text>
                         </View>
                         <View style={styles.teamRowText}>
-                          <Text style={styles.teamName}>{team.name || `Equipo ${i + 1}`}</Text>
-                          <Text style={styles.teamSub}>Slot #{team.slot_index}</Text>
+                          <Text style={styles.teamName}>{team.name || t('torneos.detailTeamLabel', { index: i + 1 })}</Text>
+                          <Text style={styles.teamSub}>{t('torneos.detailSlotPrefix', { index: team.slot_index })}</Text>
                         </View>
                       </View>
                     ))
                   : participantRows.map((p) => {
-                      const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
+                      const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || t('common.playerFallback');
                       const initials = fullName
                         .split(' ')
                         .filter(Boolean)
@@ -1350,7 +1367,9 @@ export function TournamentDetailScreen({
                           <View style={styles.teamRowText}>
                             <Text style={styles.teamName}>{fullName}</Text>
                             <Text style={styles.teamSub}>
-                              Nivel {p.elo_rating != null ? Math.round(Number(p.elo_rating)) : '—'}
+                              {t('torneos.detailPlayerLevel', {
+                                level: p.elo_rating != null ? Math.round(Number(p.elo_rating)) : '—',
+                              })}
                             </Text>
                           </View>
                         </View>
@@ -1364,7 +1383,7 @@ export function TournamentDetailScreen({
         ) : tab === 'cuadro' ? (
           <View style={styles.body}>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Cuadro del torneo</Text>
+              <Text style={styles.cardTitle}>{t('torneos.detailBracketTitle')}</Text>
               {competitionMatches.length === 0 ? (
                 <BracketCuadroEmpty />
               ) : (
@@ -1373,37 +1392,36 @@ export function TournamentDetailScreen({
                     <View key={m.id} style={styles.teamRow}>
                       <View style={styles.teamRowText}>
                         <Text style={styles.teamName}>
-                          {stageNameById(competitionStages, m.stage_id)} · R{m.round_number ?? '-'} M
+                          {stageNameById(competitionStages, m.stage_id, t)} · R{m.round_number ?? '-'} M
                           {m.match_number ?? '-'}
                         </Text>
                         <Text style={styles.teamSub}>
-                          {teamNameById(competitionTeams, m.team_a_id)} vs{' '}
-                          {teamNameById(competitionTeams, m.team_b_id)}
+                          {teamNameById(competitionTeams, m.team_a_id, t)} vs{' '}
+                          {teamNameById(competitionTeams, m.team_b_id, t)}
                         </Text>
-                        <Text style={styles.teamSub}>{prettyMatchStatus(m.status)}</Text>
-                        {matchScheduleLine(m) ? (
-                          <Text style={styles.teamSub}>{matchScheduleLine(m)}</Text>
+                        <Text style={styles.teamSub}>{prettyMatchStatus(m.status, t)}</Text>
+                        {matchScheduleLine(m, locale) ? (
+                          <Text style={styles.teamSub}>{matchScheduleLine(m, locale)}</Text>
                         ) : null}
                         {matchSetsLabel(m) ? (
-                          <Text style={styles.teamSub}>Resultado: {matchSetsLabel(m)}</Text>
+                          <Text style={styles.teamSub}>
+                            {t('torneos.detailResultLabel', { sets: matchSetsLabel(m) ?? '' })}
+                          </Text>
                         ) : null}
                       </View>
                     </View>
                   ))}
                 </View>
               )}
-              <Text style={styles.apiNote}>
-                Si un cruce tiene reserva de pista vinculada, verás fecha y pista. Si no, el club asignará
-                horario dentro del marco del torneo.
-              </Text>
+              <Text style={styles.apiNote}>{t('torneos.detailBracketNote')}</Text>
             </View>
           </View>
         ) : tab === 'chat' ? (
           <View style={styles.body}>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Chat del torneo</Text>
+              <Text style={styles.cardTitle}>{t('torneos.detailChatTitle')}</Text>
               {!session?.access_token ? (
-                <Text style={styles.normasEmpty}>Inicia sesión para ver y escribir en el chat.</Text>
+                <Text style={styles.normasEmpty}>{t('torneos.detailChatLoginRequired')}</Text>
               ) : (
                 <>
                   <ScrollView
@@ -1414,15 +1432,15 @@ export function TournamentDetailScreen({
                   >
                     {chatMessages.length === 0 ? (
                       <Text style={styles.normasEmpty}>
-                        {chatLoading ? 'Cargando mensajes...' : 'Aún no hay mensajes. Sé el primero en escribir.'}
+                        {chatLoading ? t('torneos.detailChatLoading') : t('torneos.detailChatEmpty')}
                       </Text>
                     ) : (
                       chatMessages.map((m) => (
                         <View key={m.id} style={styles.chatMessageBubble}>
-                          <Text style={styles.chatAuthor}>{m.author_name || 'Jugador'}</Text>
+                          <Text style={styles.chatAuthor}>{m.author_name || t('common.playerFallback')}</Text>
                           <Text style={styles.chatMessageText}>{m.message}</Text>
                           <Text style={styles.chatDate}>
-                            {formatIsoDateTimeEs(m.created_at) ?? formatShortDateEs(m.created_at)}
+                            {formatIsoDateTime(locale,m.created_at) ?? formatShortDate(locale,m.created_at)}
                           </Text>
                         </View>
                       ))
@@ -1432,7 +1450,7 @@ export function TournamentDetailScreen({
                     <TextInput
                       value={chatDraft}
                       onChangeText={setChatDraft}
-                      placeholder="Escribe un mensaje…"
+                      placeholder={t('torneos.detailChatPlaceholder')}
                       placeholderTextColor="rgba(255,255,255,0.45)"
                       style={styles.chatInput}
                       editable={!chatSending}
@@ -1446,7 +1464,7 @@ export function TournamentDetailScreen({
                         try {
                           const res = await sendTournamentChatMessage(tournamentId, msg, session.access_token);
                           if (!res.ok) {
-                            Alert.alert('Chat', res.error);
+                            Alert.alert(t('torneos.detailChatAlertTitle'), res.error);
                             return;
                           }
                           setChatDraft('');
@@ -1483,14 +1501,16 @@ export function TournamentDetailScreen({
         ) : (
           <View style={styles.body}>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Marco del torneo</Text>
+              <Text style={styles.cardTitle}>{t('torneos.detailTournamentFrame')}</Text>
               {!session?.access_token ? (
-                <Text style={styles.normasEmpty}>Inicia sesión para ver reservas y cruces con horario.</Text>
+                <Text style={styles.normasEmpty}>{t('torneos.detailLoginAgenda')}</Text>
               ) : (
                 <>
                   <Text style={styles.teamSub}>{tournamentWindowLine}</Text>
                   {tournamentWindow?.duration_min != null ? (
-                    <Text style={styles.teamSub}>Duración prevista: {tournamentWindow.duration_min} min</Text>
+                    <Text style={styles.teamSub}>
+                      {t('torneos.detailExpectedDuration', { minutes: tournamentWindow.duration_min })}
+                    </Text>
                   ) : null}
                   {agendaError ? <Text style={styles.apiNote}>{agendaError}</Text> : null}
                 </>
@@ -1499,11 +1519,11 @@ export function TournamentDetailScreen({
 
             {session?.access_token && myGridSlots.length > 0 ? (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Tus reservas en la grilla</Text>
+                <Text style={styles.cardTitle}>{t('torneos.detailMyReservations')}</Text>
                 <View style={{ gap: 8 }}>
                   {myGridSlots.map((s) => (
                     <Text key={s.booking_id} style={styles.teamSub}>
-                      {slotLine(s)}
+                      {slotLine(s, t, locale)}
                     </Text>
                   ))}
                 </View>
@@ -1512,11 +1532,11 @@ export function TournamentDetailScreen({
 
             {session?.access_token && gridSlots.length > 0 ? (
               <View style={styles.card}>
-                <Text style={styles.cardTitle}>Pistas reservadas para el torneo</Text>
+                <Text style={styles.cardTitle}>{t('torneos.detailCourtsReserved')}</Text>
                 <View style={{ gap: 8 }}>
                   {gridSlots.map((s) => (
                     <Text key={s.booking_id} style={styles.teamSub}>
-                      {slotLine(s)}
+                      {slotLine(s, t, locale)}
                     </Text>
                   ))}
                 </View>
@@ -1524,35 +1544,35 @@ export function TournamentDetailScreen({
             ) : null}
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Mis cruces</Text>
+              <Text style={styles.cardTitle}>{t('torneos.detailMyMatches')}</Text>
               {!session?.access_token ? (
-                <Text style={styles.normasEmpty}>Inicia sesión para ver tus partidos del torneo.</Text>
+                <Text style={styles.normasEmpty}>{t('torneos.detailMyMatchesLoginRequired')}</Text>
               ) : myCompetitionMatches.length === 0 ? (
-                <Text style={styles.normasEmpty}>
-                  Aún no tienes cruces asignados o el cuadro todavía no está generado.
-                </Text>
+                <Text style={styles.normasEmpty}>{t('torneos.detailMyMatchesEmpty')}</Text>
               ) : (
                 <View style={{ gap: 10 }}>
                   {myCompetitionMatches.map((m) => (
                     <View key={m.id} style={styles.teamRow}>
                       <View style={styles.teamRowText}>
                         <Text style={styles.teamName}>
-                          {stageNameById(competitionStages, m.stage_id)} · R{m.round_number ?? '-'} M
+                          {stageNameById(competitionStages, m.stage_id, t)} · R{m.round_number ?? '-'} M
                           {m.match_number ?? '-'}
                         </Text>
                         <Text style={styles.teamSub}>
-                          {teamNameById(competitionTeams, m.team_a_id)} vs{' '}
-                          {teamNameById(competitionTeams, m.team_b_id)}
+                          {teamNameById(competitionTeams, m.team_a_id, t)} vs{' '}
+                          {teamNameById(competitionTeams, m.team_b_id, t)}
                         </Text>
-                        <Text style={styles.teamSub}>{prettyMatchStatus(m.status)}</Text>
+                        <Text style={styles.teamSub}>{prettyMatchStatus(m.status, t)}</Text>
                         <Text style={styles.teamSub}>
-                          {matchScheduleLine(m) ??
+                          {matchScheduleLine(m, locale) ??
                             (gridSlots.length > 0
-                              ? 'Hora del cruce: consulta las reservas de pista arriba o espera asignación.'
-                              : 'Hora: pendiente de asignación por el club')}
+                              ? t('torneos.detailMatchTimeCheckReservations')
+                              : t('torneos.detailMatchTimePending'))}
                         </Text>
                         {matchSetsLabel(m) ? (
-                          <Text style={styles.teamSub}>Resultado: {matchSetsLabel(m)}</Text>
+                          <Text style={styles.teamSub}>
+                            {t('torneos.detailResultLabel', { sets: matchSetsLabel(m) ?? '' })}
+                          </Text>
                         ) : null}
                         {playerResultsMode &&
                         m.status !== 'finished' &&
@@ -1566,7 +1586,9 @@ export function TournamentDetailScreen({
                             style={{ marginTop: 8, alignSelf: 'flex-start' }}
                           >
                             <Text style={{ color: ACCENT, fontSize: 13, fontWeight: '600' }}>
-                              {playerResultSubmittingId === m.id ? 'Guardando…' : 'Cargar resultado'}
+                              {playerResultSubmittingId === m.id
+                                ? t('torneos.detailSavingResult')
+                                : t('torneos.detailLoadResult')}
                             </Text>
                           </Pressable>
                         ) : null}
@@ -1591,11 +1613,13 @@ export function TournamentDetailScreen({
       >
         {row.registration_mode === 'pair' && !hasActiveInscription && isTournamentStatusOpen(row.status) && remaining > 0 && (
           <View style={{ marginBottom: 12 }}>
-            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginBottom: 6, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>Email de tu pareja</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginBottom: 6, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              {t('torneos.detailPairEmailLabel')}
+            </Text>
             <TextInput
               value={teammateEmail}
               onChangeText={setTeammateEmail}
-              placeholder="compañero@email.com"
+              placeholder={t('torneos.detailPairEmailPlaceholder')}
               placeholderTextColor="rgba(255,255,255,0.3)"
               keyboardType="email-address"
               autoCapitalize="none"
@@ -1642,7 +1666,7 @@ export function TournamentDetailScreen({
       <OnboardingSoftBlockBanner
         visible={blockedByOnboarding}
         onPress={() => onOpenProfileForOnboarding?.()}
-        message="Completa tu nivel para inscribirte"
+        message={t('torneos.detailOnboardingBanner')}
         bottomOffset={90}
       />
     </View>

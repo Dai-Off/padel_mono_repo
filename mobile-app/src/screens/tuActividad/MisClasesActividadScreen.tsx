@@ -7,12 +7,14 @@ import { ActivityEmptyState } from '../../components/tuActividad/ActivityEmptySt
 import { TuActividadHeader } from '../../components/tuActividad/TuActividadHeader';
 import { TuActividadListSkeleton } from '../../components/tuActividad/TuActividadListSkeleton';
 import { theme } from '../../theme';
+import { useTranslation } from '../../i18n';
 
 type MisClasesActividadScreenProps = {
   onBack: () => void;
 };
 
 export function MisClasesActividadScreen({ onBack }: MisClasesActividadScreenProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { loading, refreshing, error, enrollments, refresh } = useTuActividadData();
 
@@ -29,19 +31,19 @@ export function MisClasesActividadScreen({ onBack }: MisClasesActividadScreenPro
   const summary = useMemo(() => {
     if (sorted.length === 0) return null;
     if (activeCount > 0) {
-      return activeCount === 1 ? '1 clase activa' : `${activeCount} clases activas`;
+      return activeCount === 1 ? t('activity.classesActiveOne') : t('activity.classesActiveMany', { count: activeCount });
     }
-    return 'Historial de inscripciones';
-  }, [sorted.length, activeCount]);
+    return t('activity.classesHistorySub');
+  }, [sorted.length, activeCount, t]);
 
   if (loading) {
-    return <TuActividadListSkeleton title="Clases" onBack={onBack} />;
+    return <TuActividadListSkeleton title={t('activity.rowClasses')} onBack={onBack} />;
   }
 
   if (error && sorted.length === 0) {
     return (
       <View style={styles.container}>
-        <TuActividadHeader title="Clases" onBack={onBack} />
+        <TuActividadHeader title={t('activity.rowClasses')} onBack={onBack} />
         <View style={styles.centered}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
@@ -51,7 +53,7 @@ export function MisClasesActividadScreen({ onBack }: MisClasesActividadScreenPro
 
   return (
     <View style={styles.container}>
-      <TuActividadHeader title="Clases" onBack={onBack} />
+      <TuActividadHeader title={t('activity.rowClasses')} onBack={onBack} />
       <FlatList
         data={sorted}
         keyExtractor={(item) => item.id}
@@ -73,8 +75,8 @@ export function MisClasesActividadScreen({ onBack }: MisClasesActividadScreenPro
         ListEmptyComponent={
           <ActivityEmptyState
             icon="school-outline"
-            title="Sin clases"
-            message="Cuando te inscribas en una clase de la escuela, la verás listada aquí."
+            title={t('activity.classesEmptyTitle')}
+            message={t('activity.classesEmptyBody')}
           />
         }
         renderItem={({ item }) => <ActividadClaseCard enrollment={item} />}

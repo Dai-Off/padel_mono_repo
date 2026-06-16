@@ -17,6 +17,7 @@ import {
   placeLabelFromCoords,
   type MapCoords,
 } from '../../lib/getCurrentPlaceLabel';
+import { useTranslation } from '../../i18n';
 
 const ACCENT = '#F18F34';
 const BG = '#0F0F0F';
@@ -81,6 +82,7 @@ export function PlayLocationPickerModal({
   onClose,
   onConfirm,
 }: PlayLocationPickerModalProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const webRef = useRef<WebView>(null);
   const [pin, setPin] = useState<MapCoords>(DEFAULT_COORDS);
@@ -91,12 +93,12 @@ export function PlayLocationPickerModal({
 
   const initMap = useCallback(async () => {
     setBooting(true);
-    const gps = await getCurrentMapCoords();
+    const gps = await getCurrentMapCoords(t);
     const coords = gps.ok ? gps.coords : DEFAULT_COORDS;
     setPin(coords);
     setMapHtml(buildMapHtml(coords.latitude, coords.longitude));
     setBooting(false);
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (visible) void initMap();
@@ -115,10 +117,10 @@ export function PlayLocationPickerModal({
 
   const centerOnGps = async () => {
     setCenteringGps(true);
-    const gps = await getCurrentMapCoords();
+    const gps = await getCurrentMapCoords(t);
     setCenteringGps(false);
     if (!gps.ok) {
-      Alert.alert('Ubicación', gps.error);
+      Alert.alert(t('alerts.location.title'), gps.error);
       return;
     }
     setPin(gps.coords);
@@ -129,10 +131,10 @@ export function PlayLocationPickerModal({
 
   const handleConfirm = async () => {
     setConfirming(true);
-    const result = await placeLabelFromCoords(pin.latitude, pin.longitude);
+    const result = await placeLabelFromCoords(pin.latitude, pin.longitude, t);
     setConfirming(false);
     if (!result.ok) {
-      Alert.alert('Ubicación', result.error);
+      Alert.alert(t('alerts.location.title'), result.error);
       return;
     }
     onConfirm(result.label);
@@ -143,14 +145,14 @@ export function PlayLocationPickerModal({
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <Pressable style={styles.headerBtn} onPress={onClose} accessibilityLabel="Cerrar mapa">
+          <Pressable style={styles.headerBtn} onPress={onClose} accessibilityLabel={t('common.close')}>
             <Ionicons name="close" size={22} color="#fff" />
           </Pressable>
-          <Text style={styles.headerTitle}>¿Dónde juegas?</Text>
+          <Text style={styles.headerTitle}>{t('profile.playLocationTitle')}</Text>
           <View style={styles.headerBtn} />
         </View>
 
-        <Text style={styles.hint}>Toca el mapa o arrastra el pin. También puedes usar tu ubicación actual.</Text>
+        <Text style={styles.hint}>{t('profile.playLocationHint')}</Text>
 
         <View style={styles.mapWrap}>
           {booting ? (
@@ -182,7 +184,7 @@ export function PlayLocationPickerModal({
             ) : (
               <>
                 <Ionicons name="navigate" size={18} color={ACCENT} />
-                <Text style={styles.secondaryBtnText}>Mi ubicación</Text>
+                <Text style={styles.secondaryBtnText}>{t('profile.playLocationMyGps')}</Text>
               </>
             )}
           </Pressable>
@@ -195,7 +197,7 @@ export function PlayLocationPickerModal({
             {confirming ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
-              <Text style={styles.primaryBtnText}>Usar este lugar</Text>
+              <Text style={styles.primaryBtnText}>{t('profile.playLocationUse')}</Text>
             )}
           </Pressable>
         </View>

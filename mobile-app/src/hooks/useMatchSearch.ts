@@ -4,6 +4,7 @@ import {
   sportLabelForFilters,
   type SearchFiltersState,
 } from '../domain/searchFilters';
+import { useTranslation } from '../i18n';
 import {
   formatDateForChip,
   formatTimeRangeForChip,
@@ -11,7 +12,15 @@ import {
 } from '../utils/formatSearch';
 import { useSearchCourts } from './useSearchCourts';
 
+const TIME_PRESET_LABEL_KEYS: Record<string, string> = {
+  allday: 'search.timePresetAllDay',
+  morning: 'search.timePresetMorning',
+  afternoon: 'search.timePresetAfternoon',
+  evening: 'search.timePresetEvening',
+};
+
 export function useMatchSearch() {
+  const { t, locale } = useTranslation();
   const [filters, setFilters] = useState<SearchFiltersState>(getInitialSearchFilters);
 
   const { results, listResults, resultCount, loading, fetchError, refetch } =
@@ -29,10 +38,11 @@ export function useMatchSearch() {
     setFilters(getInitialSearchFilters());
   }, []);
 
-  const sportLabel = sportLabelForFilters(filters.sport);
-  const dateLabel = filters.date == null ? 'Hoy' : formatDateForChip(filters.date);
+  const sportLabel = sportLabelForFilters(filters.sport, t);
+  const dateLabel =
+    filters.date == null ? t('common.today') : formatDateForChip(filters.date, locale);
   const timeRangeLabel = (() => {
-    if (!filters.timeRange) return 'Todo el día';
+    if (!filters.timeRange) return t('search.timePresetAllDay');
     const preset = TIME_RANGE_PRESETS.find(
       (p) =>
         p.range != null &&
@@ -40,8 +50,8 @@ export function useMatchSearch() {
         p.range.end === filters.timeRange!.end,
     );
     if (preset) {
-      const short = preset.label.split(' (')[0];
-      return short;
+      const key = TIME_PRESET_LABEL_KEYS[preset.id];
+      if (key) return t(key);
     }
     return formatTimeRangeForChip(filters.timeRange.start, filters.timeRange.end);
   })();

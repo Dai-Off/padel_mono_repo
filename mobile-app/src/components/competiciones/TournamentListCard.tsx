@@ -14,13 +14,14 @@ import {
   clubLocationLabel,
   formatEloRange,
   formatFormatLabel,
-  formatShortDateEs,
+  formatShortDate,
   formatTournamentInscriptionPrice,
   inferTournamentFormatKey,
   placeholderImageForId,
   tournamentTitle,
 } from '../../domain/tournamentDisplay';
 import { theme } from '../../theme';
+import { useTranslation } from '../../i18n';
 
 const ACCENT = '#F18F34';
 
@@ -42,14 +43,15 @@ export function TournamentListCard({
   userElo,
   lockedByOnboarding = false,
 }: TournamentListCardProps) {
-  const title = tournamentTitle(row);
+  const { t, locale } = useTranslation();
+  const title = tournamentTitle(row, t);
   const uri = placeholderImageForId(row.id);
   const formatKey = inferTournamentFormatKey(row.description);
-  const formatLabel = formatFormatLabel(formatKey);
-  const start = formatShortDateEs(row.start_at);
-  const end = formatShortDateEs(row.end_at);
+  const formatLabel = formatFormatLabel(formatKey, t);
+  const start = formatShortDate(locale, row.start_at);
+  const end = formatShortDate(locale, row.end_at);
   const sameDay = start === end;
-  const location = clubLocationLabel(row);
+  const location = clubLocationLabel(row, t);
   const confirmed = row.confirmed_count ?? 0;
   const spotsLabel = `${confirmed}/${row.max_players}`;
   const priceLabel = formatTournamentInscriptionPrice(row.price_cents, row.currency ?? 'EUR');
@@ -89,7 +91,7 @@ export function TournamentListCard({
             <View style={styles.priceBadge}>
               <Text style={styles.priceMain}>{priceLabel}</Text>
               <Text style={styles.priceSub}>
-                {registrationPair ? '/equipo' : '/persona'}
+                {registrationPair ? t('torneos.cardPriceTeam') : t('torneos.cardPricePerson')}
               </Text>
             </View>
           </View>
@@ -125,7 +127,7 @@ export function TournamentListCard({
               </View>
               <View style={styles.chip}>
                 <Text style={styles.chipMutedText}>
-                  📊 Nivel {formatEloRange(row.elo_min, row.elo_max)}
+                  📊 {t('torneos.cardLevelPrefix')} {formatEloRange(row.elo_min, row.elo_max, t)}
                 </Text>
               </View>
               <View style={styles.chip}>
@@ -133,12 +135,12 @@ export function TournamentListCard({
               </View>
               {confirmed >= (row.max_players ?? 0) && (
                 <View style={[styles.chip, styles.chipClosed]}>
-                  <Text style={styles.chipClosedText}>CERRADO</Text>
+                  <Text style={styles.chipClosedText}>{t('torneos.cardClosed')}</Text>
                 </View>
               )}
               {eloMismatch && (
                 <View style={[styles.chip, styles.chipError]}>
-                  <Text style={styles.chipErrorText}>Nivel no compatible</Text>
+                  <Text style={styles.chipErrorText}>{t('torneos.cardLevelMismatch')}</Text>
                 </View>
               )}
             </View>
@@ -152,7 +154,7 @@ export function TournamentListCard({
           <View pointerEvents="none" style={styles.lockOverlay}>
             <View style={styles.lockBadge}>
               <Ionicons name="lock-closed" size={14} color="#FCD34D" />
-              <Text style={styles.lockBadgeText}>Requiere nivel</Text>
+              <Text style={styles.lockBadgeText}>{t('torneos.cardRequiresLevel')}</Text>
             </View>
           </View>
         )}

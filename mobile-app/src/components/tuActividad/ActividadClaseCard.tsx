@@ -2,16 +2,17 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { CourseEnrollment } from '../../api/schoolCourses';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
-const WEEKDAY_ES: Record<string, string> = {
-  mon: 'Lun',
-  tue: 'Mar',
-  wed: 'Mié',
-  thu: 'Jue',
-  fri: 'Vie',
-  sat: 'Sáb',
-  sun: 'Dom',
+const WEEKDAY_KEYS: Record<string, string> = {
+  mon: 'common.weekdayMon',
+  tue: 'common.weekdayTue',
+  wed: 'common.weekdayWed',
+  thu: 'common.weekdayThu',
+  fri: 'common.weekdayFri',
+  sat: 'common.weekdaySat',
+  sun: 'common.weekdaySun',
 };
 
 type ActividadClaseCardProps = {
@@ -19,11 +20,12 @@ type ActividadClaseCardProps = {
 };
 
 export function ActividadClaseCard({ enrollment }: ActividadClaseCardProps) {
+  const { t } = useTranslation();
   const course = enrollment.course;
   if (!course) return null;
 
   const daysLabel = (course.days ?? [])
-    .map((d) => WEEKDAY_ES[d.weekday] ?? d.weekday)
+    .map((d) => t(WEEKDAY_KEYS[d.weekday] ?? d.weekday))
     .join(', ');
   const timeLabel =
     course.days?.[0] != null
@@ -51,11 +53,11 @@ export function ActividadClaseCard({ enrollment }: ActividadClaseCardProps) {
         </View>
         {cancelled ? (
           <View style={styles.statusBadgeMuted}>
-            <Text style={styles.statusTextMuted}>Cancelada</Text>
+            <Text style={styles.statusTextMuted}>{t('activity.classesStatusCancelled')}</Text>
           </View>
         ) : (
           <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>Activa</Text>
+            <Text style={styles.statusText}>{t('activity.classesStatusActive')}</Text>
           </View>
         )}
       </View>

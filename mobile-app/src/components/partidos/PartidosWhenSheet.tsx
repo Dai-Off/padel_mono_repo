@@ -7,6 +7,7 @@ import { FilterApplyFooter } from '../filters/FilterApplyFooter';
 import { filterTheme } from '../filters/filterTheme';
 import type { PartidosFiltersState } from '../../domain/partidosFilters';
 import { TIME_RANGE_PRESETS, timeRangePresetMatches } from '../../utils/formatSearch';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 type PartidosWhenSheetProps = {
@@ -24,6 +25,7 @@ export function PartidosWhenSheet({
   onClose,
   onApply,
 }: PartidosWhenSheetProps) {
+  const { t } = useTranslation();
   const [local, setLocal] = useState(draft);
 
   useEffect(() => {
@@ -48,28 +50,39 @@ export function PartidosWhenSheet({
   return (
     <FilterBottomSheet
       visible={visible}
-      title="¿Cuándo quieres jugar?"
+      title={t('partidos.sheetWhenTitle')}
       onClose={onClose}
       onClear={() => setLocal((s) => ({ ...s, selectedDateKeys: [], timeRange: null }))}
       footer={footer}
       contentStyle={styles.body}
     >
       <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
-        <Text style={styles.sectionTitle}>Selecciona tus días (máx. 7)</Text>
+        <Text style={styles.sectionTitle}>
+          {t('partidos.multiDateHint', { max: 7 })}
+        </Text>
         <MultiDateStripPicker
           selectedDateKeys={local.selectedDateKeys}
           onChange={(keys) => setLocal((s) => ({ ...s, selectedDateKeys: keys }))}
         />
 
-        <Text style={[styles.sectionTitle, styles.sectionGap]}>Selecciona tu hora</Text>
-        {TIME_RANGE_PRESETS.map((preset) => (
+        <Text style={[styles.sectionTitle, styles.sectionGap]}>{t('search.filterTime')}</Text>
+        {TIME_RANGE_PRESETS.map((preset) => {
+          const presetLabel =
+            preset.id === 'allday'
+              ? t('search.timePresetAllDay')
+              : preset.id === 'morning'
+                ? t('search.timePresetMorning')
+                : preset.id === 'afternoon'
+                  ? t('search.timePresetAfternoon')
+                  : t('search.timePresetEvening');
+          return (
           <FilterOptionRow
             key={preset.id}
             mode="radio"
-            title={preset.label.split(' (')[0]}
+            title={presetLabel.split(' (')[0]}
             subtitle={
               preset.range
-                ? `${preset.range.start} - ${preset.range.end}`
+                ? t('search.timeRangeFormat', { start: preset.range.start, end: preset.range.end })
                 : undefined
             }
             selected={timeRangePresetMatches(preset.id, local.timeRange)}
@@ -80,7 +93,8 @@ export function PartidosWhenSheet({
               }))
             }
           />
-        ))}
+        );
+        })}
       </ScrollView>
     </FilterBottomSheet>
   );

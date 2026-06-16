@@ -16,6 +16,7 @@ import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId } from '../api/players';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 import type { PartidoItem } from './PartidosScreen';
 
@@ -32,6 +33,7 @@ function StatusDot({ color }: { color: string }) {
 
 /** Pantalla de detalle para partidos privados. Flujo aparte: sin join, sin chat, solo reserva. */
 export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDetailScreenProps) {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const [clubInfoVisible, setClubInfoVisible] = useState(false);
   const [partidoLocal, setPartidoLocal] = useState(partido);
@@ -80,29 +82,29 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
   const handleCancelReserva = useCallback(() => {
     const token = session?.access_token;
     if (!token) {
-      Alert.alert('Iniciar sesión', 'Necesitas iniciar sesión para cancelar la reserva.');
+      Alert.alert(t('alerts.login.title'), t('alerts.privateCancel.title'));
       return;
     }
     Alert.alert(
-      '¿Cancelar reserva?',
-      'Se anulará la pista y el partido privado. Si pagaste con tarjeta en la app, se procesará el reembolso.',
+      t('alerts.privateCancel.title'),
+      t('alerts.leaveMatch.bodySolo'),
       [
-        { text: 'No', style: 'cancel' },
+        { text: t('common.no'), style: 'cancel' },
         {
-          text: 'Sí, cancelar',
+          text: t('alerts.leaveMatch.yesCancel'),
           style: 'destructive',
           onPress: async () => {
-            setCancelOverlay({ open: true, message: 'Cancelando reserva…' });
+            setCancelOverlay({ open: true, message: t('common.loading') });
             try {
               const r = await cancelMatchAsOrganizer(partidoLocal.id, token);
               if (r.ok) {
-                Alert.alert('Listo', 'La reserva quedó cancelada.');
+                Alert.alert(t('alerts.ready.title'), t('alerts.privateCancel.done'));
                 onBack();
                 return;
               }
               const extra =
                 r.refund_errors?.length ? `\n\n${r.refund_errors.slice(0, 3).join('\n')}` : '';
-              Alert.alert('No se pudo cancelar', `${r.error}${extra}`);
+              Alert.alert(t('alerts.privateCancel.fail'), `${r.error}${extra}`);
             } finally {
               setCancelOverlay({ open: false, message: '' });
             }
@@ -110,7 +112,7 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
         },
       ]
     );
-  }, [session?.access_token, partidoLocal.id, onBack]);
+  }, [session?.access_token, partidoLocal.id, onBack, t]);
 
   return (
     <View style={styles.container}>
@@ -119,7 +121,7 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
           style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}
           onPress={onBack}
           accessibilityRole="button"
-          accessibilityLabel="Volver"
+          accessibilityLabel={t('common.back')}
         >
           <Ionicons name="arrow-back" size={20} color={theme.auth.text} />
         </Pressable>
@@ -144,21 +146,21 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
               <Text style={styles.sportEmoji}>🎾</Text>
             </View>
             <View style={styles.infoTopBody}>
-              <Text style={styles.sportTitle}>PÁDEL</Text>
+              <Text style={styles.sportTitle}>{t('common.sportPadel').toUpperCase()}</Text>
               <Text style={styles.sportDate}>{partidoLocal.dateTime}</Text>
             </View>
           </View>
           <View style={styles.infoGrid}>
             <View style={styles.infoCell}>
-              <Text style={styles.infoCellLabel}>GÉNERO</Text>
+              <Text style={styles.infoCellLabel}>{t('alerts.genderPicker.title').toUpperCase()}</Text>
               <Text style={styles.infoCellValue}>{partidoLocal.typeLabel}</Text>
             </View>
             <View style={styles.infoCell}>
-              <Text style={styles.infoCellLabel}>NIVEL</Text>
+              <Text style={styles.infoCellLabel}>{t('partidos.friendlyLevelSection').toUpperCase()}</Text>
               <Text style={styles.infoCellValue}>{partidoLocal.levelRange}</Text>
             </View>
             <View style={styles.infoCell}>
-              <Text style={styles.infoCellLabel}>PRECIO</Text>
+              <Text style={styles.infoCellLabel}>{t('common.sortByPrice').toUpperCase()}</Text>
               <Text style={styles.infoCellValue}>{partidoLocal.price}</Text>
             </View>
           </View>
@@ -167,16 +169,16 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
         <View style={styles.statusRow}>
           <View style={styles.statusBadge}>
             <StatusDot color="#6b7280" />
-            <Text style={styles.statusText}>Partido Privado</Text>
+            <Text style={styles.statusText}>{t('partidos.detailPrivateMatch')}</Text>
           </View>
           <View style={styles.statusBadge}>
             <StatusDot color="#22c55e" />
-            <Text style={styles.statusText}>Pista reservada</Text>
+            <Text style={styles.statusText}>{t('partidos.createMarkCourtReserved')}</Text>
           </View>
         </View>
 
         <View style={styles.playersCard}>
-          <Text style={styles.playersTitle}>Reserva</Text>
+          <Text style={styles.playersTitle}>{t('partidos.yourReservation')}</Text>
           <View style={styles.privateReservadoRow}>
             <View style={styles.privateReservadoAvatar}>
               {(() => {
@@ -193,9 +195,9 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
             </View>
             <View>
               <Text style={styles.privateReservadoName}>
-                {partidoLocal.players.find((p) => !p.isFree)?.name ?? 'Tú'}
+                {partidoLocal.players.find((p) => !p.isFree)?.name ?? t('common.you')}
               </Text>
-              <Text style={styles.privateReservadoSub}>Organizador · Pista reservada</Text>
+              <Text style={styles.privateReservadoSub}>{t('partidos.createMarkCourtReserved')}</Text>
             </View>
           </View>
         </View>
@@ -204,7 +206,7 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
           style={({ pressed }) => [styles.venueBtn, pressed && styles.pressed]}
           onPress={() => setClubInfoVisible(true)}
           accessibilityRole="button"
-          accessibilityLabel="Info del club"
+            accessibilityLabel={t('partidos.detailTabInfo')}
         >
           {venueImage ? (
             <Image source={{ uri: venueImage }} style={styles.venueImage} />
@@ -226,13 +228,13 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
             onPress={handleCancelReserva}
             disabled={cancelOverlay.open}
             accessibilityRole="button"
-            accessibilityLabel="Cancelar reserva"
+            accessibilityLabel={t('alerts.privateCancel.title')}
           >
             <Ionicons name="close-circle-outline" size={20} color="#f87171" />
-            <Text style={styles.cancelReservaBtnText}>Cancelar reserva</Text>
+            <Text style={styles.cancelReservaBtnText}>{t('alerts.privateCancel.title')}</Text>
           </Pressable>
         ) : session?.access_token && !userIsOrganizer ? (
-          <Text style={styles.cancelHint}>Solo el organizador puede cancelar esta reserva.</Text>
+          <Text style={styles.cancelHint}>{t('alerts.leaveMatch.bodyMulti')}</Text>
         ) : null}
 
         <ClubInfoSheet
@@ -247,7 +249,7 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
           <View style={styles.cancelModalCard}>
             <ActivityIndicator size="large" color={theme.auth.accent} />
             <Text style={styles.cancelModalText}>{cancelOverlay.message}</Text>
-            <Text style={styles.cancelModalHint}>Puede tardar unos segundos si hay reembolso.</Text>
+            <Text style={styles.cancelModalHint}>{t('alerts.matchEval.retryLater')}</Text>
           </View>
         </View>
       </Modal>

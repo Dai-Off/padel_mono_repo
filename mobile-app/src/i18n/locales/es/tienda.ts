@@ -1,0 +1,31 @@
+import type { TiendaTranslationKeys } from '../../sections/tienda';
+
+export const tienda: TiendaTranslationKeys = {
+  searchPlaceholder: 'Buscar palas, zapatillas, ropa...',
+  categories: {
+    all: 'Todo',
+    palas: 'Palas',
+    pelotas: 'Pelotas',
+    calzado: 'Calzado',
+    ropa: 'Ropa',
+    accesorios: 'Accesorios',
+  },
+  filters: 'Filtros',
+  sortFeatured: 'Destacados',
+  bannerTitle: 'Nueva Colección',
+  bannerSub: 'Primavera 2026',
+  bannerCta: 'Explorar ahora',
+  aiShoppingTitle: 'Tu IA personal de compras',
+  aiShoppingSub: 'Recomendaciones según tu nivel y estilo',
+  gridTitle: 'Catálogo',
+  gridTitleCount: 'Catálogo ({count})',
+  gridTitleAll: 'Todos los productos',
+  mockProduct1Name: 'Pala Nox AT10 Luxury',
+  mockProduct2Name: 'Pala Bullpadel Hack 03',
+  mockProduct3Name: 'Mochila Adidas Padel Tour',
+  mockProduct4Name: 'Zapatillas Asics Gel Padel Pro',
+  mockProduct5Name: 'Grip Hesacore Tour',
+  mockProduct6Name: 'Pelotas Head Padel Pro',
+  mockProduct7Name: 'Pantalón Adidas Club',
+  mockProduct8Name: 'Camiseta técnica Wilson',
+};

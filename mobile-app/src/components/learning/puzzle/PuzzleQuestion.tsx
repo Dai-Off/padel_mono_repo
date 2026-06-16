@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { PuzzleStage } from './PuzzleStage';
 import type { PuzzleContent, PuzzleFrame, PuzzleOption } from '../../../types/puzzle';
+import { useTranslation } from '../../../i18n';
 
 type Props = {
   content: PuzzleContent;
@@ -10,6 +11,7 @@ type Props = {
 };
 
 export function PuzzleQuestion({ content, onAnswered }: Props) {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<PuzzleOption | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   // Si el puzzle tiene intro_frame: arrancamos mostrándolo y al siguiente tick
@@ -61,11 +63,11 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
     return (
       <View>
         <Text style={styles.statement}>
-          {content?.statement ?? 'Puzzle no disponible.'}
+          {content?.statement ?? t('learning.puzzleUnavailable')}
         </Text>
         <View style={styles.bubble}>
           <Text style={styles.bubbleHint}>
-            El contenido de este puzzle está incompleto. Salta al siguiente.
+            {t('learning.puzzleIncomplete')}
           </Text>
         </View>
       </View>
@@ -171,14 +173,14 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
           salta al Confirmar. */}
       <View style={styles.bubble}>
         {!selected && !confirmed && (
-          <Text style={styles.bubbleHint}>Toca A, B o C para previsualizar la jugada. No se elige hasta que confirmes.</Text>
+          <Text style={styles.bubbleHint}>{t('learning.puzzlePreviewHint')}</Text>
         )}
         {selected && !confirmed && (
           <>
             <Text style={styles.bubbleLabel} numberOfLines={2}>
               {String.fromCharCode(64 + selected.id)} · {selected.text}
             </Text>
-            <Text style={styles.bubbleHint}>Pulsa Confirmar para ver el resultado.</Text>
+            <Text style={styles.bubbleHint}>{t('learning.puzzleConfirmHint')}</Text>
           </>
         )}
         {confirmed && selected && (
@@ -197,7 +199,10 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
             ) : null}
             {!selected.is_correct && correctOption ? (
               <Text style={styles.bubbleCorrectHint} numberOfLines={1}>
-                Correcta: {String.fromCharCode(64 + correctOption.id)} — {correctOption.text}
+                {t('learning.puzzleCorrectAnswer', {
+                  letter: String.fromCharCode(64 + correctOption.id),
+                  text: correctOption.text,
+                })}
               </Text>
             ) : null}
           </>
@@ -240,7 +245,7 @@ export function PuzzleQuestion({ content, onAnswered }: Props) {
               selected && pressed && styles.confirmBtnPressed,
             ]}
           >
-            <Text style={selected ? styles.confirmTextActive : styles.confirmText}>Confirmar</Text>
+            <Text style={selected ? styles.confirmTextActive : styles.confirmText}>{t('learning.puzzleConfirm')}</Text>
           </Pressable>
         )}
       </View>

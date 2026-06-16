@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from 'rea
 import { LinearGradient } from 'expo-linear-gradient';
 import { StoryGroup } from '../../api/community';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 
 interface StoriesRowProps {
   groups: StoryGroup[];
@@ -11,6 +12,8 @@ interface StoriesRowProps {
 }
 
 export const StoriesRow: React.FC<StoriesRowProps> = ({ groups, onPressStory, onPressAdd }) => {
+  const { t } = useTranslation();
+
   return (
     <ScrollView 
       horizontal 
@@ -26,7 +29,7 @@ export const StoriesRow: React.FC<StoriesRowProps> = ({ groups, onPressStory, on
             <Ionicons name="add" size={14} color="#000" />
           </View>
         </View>
-        <Text style={styles.addText}>Tu historia</Text>
+        <Text style={styles.addText}>{t('community.storyYourStory')}</Text>
       </TouchableOpacity>
 
       {groups.map((group) => (

@@ -40,7 +40,7 @@ function runTests() {
 
   // Test 1: Prioridad Física
   console.log('Caso 1: Jugador con debilidad Física (Nivel Intermedio)');
-  const planFisico = generateWeeklyPlan(mockPhysicalWeakAssessment);
+  const planFisico = generateWeeklyPlan(mockPhysicalWeakAssessment, (key) => key);
   
   console.log(`- Objetivo Semanal: ${planFisico.weeklyObjective.title}`);
   console.log(`  Categoría esperada: physical | Obtenida: ${planFisico.weeklyObjective.category}`);
@@ -51,7 +51,7 @@ function runTests() {
 
   // Test 2: Prioridad Táctica
   console.log('Caso 2: Jugador con debilidad Táctica (Nivel Profesional)');
-  const planTactico = generateWeeklyPlan(mockTacticalWeakAssessment);
+  const planTactico = generateWeeklyPlan(mockTacticalWeakAssessment, (key) => key);
   
   console.log(`- Objetivo Semanal: ${planTactico.weeklyObjective.title}`);
   console.log(`  Categoría esperada: tactical | Obtenida: ${planTactico.weeklyObjective.category}`);
