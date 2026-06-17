@@ -69,7 +69,7 @@ export function ProfileScreen({
   onOnboardingCompleted,
 }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const { session } = useAuth();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -110,7 +110,7 @@ export function ProfileScreen({
       if (p) {
         setProfile(p);
         setCoverUrl(p.coverUrl);
-        fetchMyPeerFeedbackInsight(token, p.id).then(setPeerInsight).catch(() => {});
+        fetchMyPeerFeedbackInsight(token, p.id, locale).then(setPeerInsight).catch(() => {});
         setProfileLoading(false);
         return;
       }
@@ -128,7 +128,7 @@ export function ProfileScreen({
     } finally {
       setProfileLoading(false);
     }
-  }, [t]);
+  }, [locale, t]);
 
   useEffect(() => {
     const token = session?.access_token;
@@ -138,8 +138,8 @@ export function ProfileScreen({
       return;
     }
     void loadProfile(token);
-    fetchMyCoachAssessment(token).then(setAssessment).catch(() => {});
-  }, [session?.access_token, loadProfile]);
+    fetchMyCoachAssessment(token, locale).then(setAssessment).catch(() => {});
+  }, [session?.access_token, loadProfile, locale]);
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
   const displayName = profile
@@ -155,7 +155,7 @@ export function ProfileScreen({
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
-    fetchMyCoachAssessment(session.access_token).then(setAssessment).catch(() => {});
+    fetchMyCoachAssessment(session.access_token, locale).then(setAssessment).catch(() => {});
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).

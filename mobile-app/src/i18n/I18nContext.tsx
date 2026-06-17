@@ -14,6 +14,7 @@ import {
   isAppLocale,
   type AppLocale,
 } from './constants';
+import { syncApiLocale } from '../api/backendLang';
 import { es } from './es';
 import { zhHK } from './zh-HK';
 import type { TranslationKeys } from './translations';
@@ -53,6 +54,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
         const stored = await AsyncStorage.getItem(APP_LANGUAGE_KEY);
         if (mounted && isAppLocale(stored)) {
           setLocaleState(stored);
+          syncApiLocale(stored);
         }
       } finally {
         if (mounted) setReady(true);
@@ -65,6 +67,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const setLocale = useCallback((next: AppLocale) => {
     setLocaleState(next);
+    syncApiLocale(next);
     void AsyncStorage.setItem(APP_LANGUAGE_KEY, next);
   }, []);
 
