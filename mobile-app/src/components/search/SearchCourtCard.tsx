@@ -10,14 +10,15 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { SearchCourtResult } from '../../api/search';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
-function getCerramientoLabel(indoor: boolean): string {
-  return indoor ? 'Indoor' : 'Exterior';
+function getCerramientoLabel(indoor: boolean, t: (key: string) => string): string {
+  return indoor ? t('common.indoor') : t('common.outdoor');
 }
 
-function getParedesLabel(glassType: string): string {
-  return glassType === 'panoramic' ? 'Panorámico' : 'Muro';
+function getParedesLabel(glassType: string, t: (key: string) => string): string {
+  return glassType === 'panoramic' ? t('common.wallPanoramico') : t('common.wallMuro');
 }
 
 type SearchCourtCardProps = {
@@ -36,6 +37,7 @@ export function SearchCourtCard({
   onTimeSlotPress,
   onFavoritePress,
 }: SearchCourtCardProps) {
+  const { t } = useTranslation();
   const imageUri = court.imageUrl;
   const title = court.courtName || court.clubName;
   const locationLine =
@@ -62,7 +64,7 @@ export function SearchCourtCard({
             onPress={onFavoritePress}
             style={({ pressed: p }) => [styles.favButton, p && styles.pressed]}
             accessibilityRole="button"
-            accessibilityLabel="Favorito"
+            accessibilityLabel={t('common.favorite')}
           >
             <Ionicons name="heart-outline" size={14} color="#fff" />
           </Pressable>
@@ -110,10 +112,10 @@ export function SearchCourtCard({
               </View>
               <View style={styles.tags}>
                 <View style={styles.tag}>
-                  <Text style={styles.tagText}>{getCerramientoLabel(court.indoor)}</Text>
+                  <Text style={styles.tagText}>{getCerramientoLabel(court.indoor, t)}</Text>
                 </View>
                 <View style={styles.tag}>
-                  <Text style={styles.tagText}>{getParedesLabel(court.glassType)}</Text>
+                  <Text style={styles.tagText}>{getParedesLabel(court.glassType, t)}</Text>
                 </View>
               </View>
               <ScrollView
@@ -127,7 +129,7 @@ export function SearchCourtCard({
                     onPress={() => onTimeSlotPress?.(court.id, slot)}
                     style={({ pressed }) => [styles.slotButton, pressed && styles.pressed]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Reservar a las ${slot}`}
+                    accessibilityLabel={t('common.bookAtTime', { time: slot })}
                   >
                     <Text style={styles.slotText}>{slot}</Text>
                   </Pressable>

@@ -1,5 +1,6 @@
 import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 import { filterTheme } from './filterTheme';
 import { theme } from '../../theme';
 
@@ -17,12 +18,14 @@ type FilterSearchHeaderProps = {
 export function FilterSearchHeader({
   searchQuery,
   onSearchChange,
-  placeholder = 'Buscar...',
+  placeholder,
   onBack,
   onFiltersPress,
   advancedFilterCount = 0,
   showFiltersButton = true,
 }: FilterSearchHeaderProps) {
+  const { t } = useTranslation();
+  const resolvedPlaceholder = placeholder ?? t('search.searchPlaceholder');
   return (
     <View style={styles.topRow}>
       {onBack ? (
@@ -30,7 +33,7 @@ export function FilterSearchHeader({
           onPress={onBack}
           style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Volver"
+          accessibilityLabel={t('common.back')}
         >
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
@@ -42,7 +45,7 @@ export function FilterSearchHeader({
         <TextInput
           value={searchQuery}
           onChangeText={onSearchChange}
-          placeholder={placeholder}
+          placeholder={resolvedPlaceholder}
           placeholderTextColor="#737373"
           style={styles.searchInput}
           returnKeyType="search"
@@ -59,7 +62,7 @@ export function FilterSearchHeader({
             pressed && styles.pressed,
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Filtros"
+          accessibilityLabel={t('search.filtersTitle')}
         >
           <Ionicons
             name="options-outline"

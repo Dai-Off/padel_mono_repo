@@ -1,5 +1,6 @@
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "../../i18n";
 import { theme } from "../../theme";
 import { PlayerAvatarCircle } from "../profile/PlayerAvatarCircle";
 import { useHomeData } from "../../contexts/HomeDataContext";
@@ -17,6 +18,7 @@ function PlayerSlot({
   slotIndex,
   playerIdsBySlot,
   currentProfile,
+  freeLabel,
 }: {
   player: PartidoPlayer;
   isPrivate?: boolean;
@@ -24,6 +26,7 @@ function PlayerSlot({
   slotIndex: number;
   playerIdsBySlot?: Array<string | null>;
   currentProfile: ProfileForPartidoEnrich | null;
+  freeLabel: string;
 }) {
   const displayOpts = { slotIndex, playerIdsBySlot };
   const d = surface === "dark";
@@ -53,7 +56,7 @@ function PlayerSlot({
             isPrivate && styles.playerFreeLabelPrivate,
           ]}
         >
-          Libre
+          {freeLabel}
         </Text>
       </View>
     );
@@ -91,6 +94,7 @@ export function PartidoCard({
   onPress,
   surface = "light",
 }: PartidoCardProps) {
+  const { t } = useTranslation();
   const d = surface === "dark";
   const { profile } = useHomeData();
   const currentProfile: ProfileForPartidoEnrich | null = profile?.id
@@ -135,7 +139,7 @@ export function PartidoCard({
                 d && item.mode !== "competitivo" && styles.cardBadgeTextDark,
               ]}
             >
-              {item.mode === "competitivo" ? "Competitivo" : "Amistoso"}
+              {item.mode === "competitivo" ? t('common.competitive') : t('common.friendly')}
             </Text>
           </View>
         </View>
@@ -188,7 +192,7 @@ export function PartidoCard({
               d && styles.privateReservadoLabelDark,
             ]}
           >
-            Tu reserva
+            {t('partidos.yourReservation')}
           </Text>
         </View>
       ) : (
@@ -202,6 +206,7 @@ export function PartidoCard({
               slotIndex={i}
               playerIdsBySlot={item.playerIdsBySlot}
               currentProfile={currentProfile}
+              freeLabel={t('partidos.slotFree')}
             />
           ))}
         </View>

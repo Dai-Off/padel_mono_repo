@@ -1,0 +1,189 @@
+import type { AlertsTranslationKeys } from '../../sections/alerts';
+
+export const alerts: AlertsTranslationKeys = {
+  session: {
+    title: '工作階段',
+    loginRequired: '請登入以…',
+  },
+  login: {
+    title: '登入',
+    titleAlt: '請登入',
+  },
+  permissionDenied: {
+    title: '權限被拒',
+  },
+  error: {
+    title: '錯誤',
+  },
+  ready: {
+    title: '完成',
+  },
+  canceled: {
+    title: '已取消',
+  },
+  paymentRegistered: {
+    title: '付款已記錄',
+  },
+  slotPending: {
+    title: '位置待定',
+  },
+  slotTaken: {
+    title: '位置已被佔用',
+    body: '該位置已不可用。請選擇其他位置。',
+  },
+  matchFull: {
+    title: '球局已滿',
+    body: '已沒有空餘位置。請選擇其他球局。',
+  },
+  scheduleConflict: {
+    title: '時間不可用',
+    body: '你在該時段已有球局。請選擇其他球局。',
+  },
+  alreadyInMatch: {
+    title: '你已在球局中',
+    body: '你已經是此球局的一員。',
+  },
+  matchCompletedWhilePaying: '你在付款期間球局已滿。',
+  slotAssigned: {
+    title: '位置已分配',
+    body: '你選擇的位置已被佔用，付款已在另一位置完成。',
+  },
+  paymentPending: {
+    body: '你的付款已記錄，但你尚未出現在球局中…',
+  },
+  declineMatch: {
+    title: '拒絕球局',
+    body: '將為四名球員取消預約及球局…',
+    yes: '是，拒絕',
+    done: '你已拒絕此球局。',
+  },
+  leaveMatch: {
+    titleCancel: '取消球局？',
+    titleLeave: '離開球局？',
+    bodySolo: '你是唯一球員：預約將被取消…',
+    bodyMulti: '你將離開你的位置；其他球員繼續…',
+    yesCancel: '是，全部取消',
+    yesLeave: '是，離開',
+    doneCancel: '球局及預約已取消。',
+    doneLeave: '你已離開球局。如以信用卡付款，退款將很快處理。',
+    fail: '無法完成',
+  },
+  privateCancel: {
+    title: '取消預約',
+    done: '預約已取消。',
+    fail: '無法取消',
+  },
+  tournamentInvite: {
+    accepted: '已接受邀請',
+    acceptedBody: '你已成功報名此錦標賽。',
+    title: '錦標賽邀請',
+  },
+  tournament: {
+    sportAlert: '目前所有錦標賽均為板式網球。',
+    registrationClosed: '報名尚未開放。',
+    requestSent: '申請已送出',
+    registrationCanceled: '你的報名已取消。',
+    registerResult: '登記賽果',
+  },
+  favorites: {
+    title: '收藏',
+    body: '即將可以將「{club}」加入收藏。',
+  },
+  web: {
+    title: '網站',
+    body: '球會連結即將推出。',
+  },
+  phone: {
+    title: '電話',
+    body: '球會聯絡方式即將推出。',
+  },
+  review: {
+    title: '評價',
+    ratingTitle: '評分',
+    selectStars: '請選擇 1 至 5 星。',
+    deleteTitle: '刪除評價',
+    deleteBody: '要移除你對此球會的評價嗎？',
+  },
+  profile: {
+    coverPhoto: '封面相片',
+    profilePhoto: '個人相片',
+    unsaved: '尚未儲存的變更',
+    saved: '資料已成功儲存。',
+    comingSoon: '即將推出',
+  },
+  genderPicker: {
+    title: '性別',
+  },
+  messages: {
+    title: '訊息',
+  },
+  preferences: {
+    title: '偏好設定',
+    saved: '變更已儲存。',
+  },
+  location: {
+    title: '位置',
+  },
+  createMatch: {
+    profileNotFound: '找不到你的個人檔案。請稍候再試。',
+    calculatingPrice: '請稍候，我們正在計算準確價格。',
+    login: '請登入以建立球局。',
+    noSlots: {
+      title: '沒有可用球場',
+      body: '所選日期及時間沒有可用球場。',
+    },
+  },
+  matchEval: {
+    saveScoreFail: '無法儲存比分',
+    voteFail: '無法記錄投票',
+    saveFail: '無法儲存',
+    retryLater: '請幾秒後再試。',
+  },
+  onboarding: {
+    order: '順序',
+    selection: '選擇',
+    selectOne: '請選擇一個選項以繼續。',
+    selectMany: '請至少選擇一個選項。',
+    phase2: '第 2 階段',
+  },
+  seasonPass: {
+    login: '你需要帳戶才能購買 Elite 通行證。',
+    activated: 'Elite 通行證已啟用（{plan}）。',
+    loginRequiredLoad: '請登入以查看你的通行證進度。',
+    loadFail: '無法載入通行證。後端及遷移 049 + 050 是否已啟用？',
+    loading: '載入通行證中…',
+    displayFail: '無法顯示通行證。',
+    daysRemaining: '尚餘 {count} 天',
+    currentLevel: '你目前的等級',
+    totalSp: 'SP 總計',
+    levelShort: '等級 {level}',
+    spRemaining: '尚欠 {sp} SP',
+    spInLevel: '本等級 {into} / {total} SP',
+    elitePass: 'Elite 通行證',
+    eliteActive: 'Elite 通行證已啟用',
+    tabRewards: '🏆 獎勵',
+    tabMissions: '⚡ 任務',
+    legendElite: 'Elite 通行證',
+    legendFree: '免費通行證',
+    howEarnSp: '如何賺取 SP',
+    noMissionsConfigured: '本賽季暫無任務設定。',
+    spAvailable: '可獲 SP',
+    completed: '已完成',
+    missionCompleted: '已完成！',
+    missionCloses: '截止 · {label}',
+    noMissionsInTab: '此分頁暫無任務。',
+    modalBenefitsDefault: '福利視本賽季設定而定。',
+    getEliteCta: '購買 Elite 通行證（信用卡付款）',
+    continueFree: '繼續使用免費通行證',
+    confirmFail: '無法確認 Elite 通行證。請再試一次。',
+  },
+  clubReviews: {
+    login: '請登入以評價球會。',
+    notYet: {
+      title: '暫時無法評價',
+    },
+  },
+  favoriteClubs: {
+    title: '收藏球會',
+  },
+};

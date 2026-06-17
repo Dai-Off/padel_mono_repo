@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 type MenuScreenHeaderProps = {
@@ -9,13 +10,15 @@ type MenuScreenHeaderProps = {
 
 /** Header compartido (Tu Actividad, Ajustes, etc.). ScreenLayout ya aplica safe-area. */
 export function MenuScreenHeader({ title, onBack }: MenuScreenHeaderProps) {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.header}>
       <Pressable
         onPress={onBack}
         style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
         accessibilityRole="button"
-        accessibilityLabel="Volver"
+        accessibilityLabel={t('common.back')}
       >
         <Ionicons name="arrow-back" size={20} color="#fff" />
       </Pressable>

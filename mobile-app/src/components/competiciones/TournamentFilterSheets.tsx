@@ -13,6 +13,7 @@ import {
 } from '../../domain/tournamentDisplay';
 import { TOURNAMENT_FORMAT_OPTIONS, TOURNAMENT_LEVEL_OPTIONS } from '../../domain/tournamentFilters';
 import { theme } from '../../theme';
+import { useTranslation } from '../../i18n';
 
 export type TournamentSheetKind = 'format' | 'level' | 'all' | null;
 
@@ -25,11 +26,11 @@ type TournamentFilterSheetsProps = {
   onApply: (next: TournamentFiltersState) => void;
 };
 
-function levelLabel(key: TournamentLevelFilter): string {
-  if (key === 'all') return 'Todos';
-  if (key === 'principiante') return 'Principiante';
-  if (key === 'medio') return 'Medio';
-  return 'Avanzado';
+function levelLabel(key: TournamentLevelFilter, t: (key: string) => string): string {
+  if (key === 'all') return t('common.allOption');
+  if (key === 'principiante') return t('torneos.filterLevelBeginner');
+  if (key === 'medio') return t('torneos.filterLevelMedium');
+  return t('torneos.filterLevelAdvanced');
 }
 
 export function TournamentFilterSheets({
@@ -40,6 +41,7 @@ export function TournamentFilterSheets({
   onClose,
   onApply,
 }: TournamentFilterSheetsProps) {
+  const { t } = useTranslation();
   const [local, setLocal] = useState(draft);
   const visible = kind != null;
 
@@ -55,8 +57,8 @@ export function TournamentFilterSheets({
   const footer = (next: TournamentFiltersState) => (
     <FilterApplyFooter
       resultCount={resultCount}
-      singularLabel="Ver 1 torneo"
-      pluralLabel={`Ver ${resultCount} torneos`}
+      singularLabel={t('torneos.seeOneTournament')}
+      pluralLabel={t('torneos.seeManyTournaments', { count: resultCount })}
       onPress={() => applyAndClose(next)}
     />
   );
@@ -65,7 +67,7 @@ export function TournamentFilterSheets({
     return (
       <FilterBottomSheet
         visible={visible}
-        title="Formato"
+        title={t('torneos.filterFormatDefault')}
         onClose={onClose}
         footer={footer(local)}
       >
@@ -73,7 +75,7 @@ export function TournamentFilterSheets({
           {TOURNAMENT_FORMAT_OPTIONS.map((key) => (
             <FilterPill
               key={key}
-              label={key === 'all' ? 'Todos' : formatFormatLabel(key)}
+              label={key === 'all' ? t('common.allOption') : formatFormatLabel(key, t)}
               selected={local.format === key}
               onPress={() => applyAndClose({ ...local, format: key })}
             />
@@ -87,7 +89,7 @@ export function TournamentFilterSheets({
     return (
       <FilterBottomSheet
         visible={visible}
-        title="Nivel"
+        title={t('torneos.filterLevelDefault')}
         onClose={onClose}
         footer={footer(local)}
       >
@@ -95,7 +97,7 @@ export function TournamentFilterSheets({
           {TOURNAMENT_LEVEL_OPTIONS.map((key) => (
             <FilterPill
               key={key}
-              label={levelLabel(key)}
+              label={levelLabel(key, t)}
               selected={local.level === key}
               onPress={() => applyAndClose({ ...local, level: key })}
             />
@@ -109,7 +111,7 @@ export function TournamentFilterSheets({
     return (
       <FilterBottomSheet
         visible={visible}
-        title="Filtros"
+        title={t('torneos.filterTitle')}
         onClose={onClose}
         onClear={() =>
           setLocal({
@@ -121,24 +123,24 @@ export function TournamentFilterSheets({
         footer={footer(local)}
       >
         <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
-          <Text style={styles.sectionTitle}>Formato</Text>
+          <Text style={styles.sectionTitle}>{t('torneos.filterFormatDefault')}</Text>
           <View style={styles.chipRow}>
             {TOURNAMENT_FORMAT_OPTIONS.map((key) => (
               <FilterPill
                 key={key}
-                label={key === 'all' ? 'Todos' : formatFormatLabel(key)}
+                label={key === 'all' ? t('common.allOption') : formatFormatLabel(key, t)}
                 selected={local.format === key}
                 onPress={() => setLocal((s) => ({ ...s, format: key }))}
               />
             ))}
           </View>
 
-          <Text style={[styles.sectionTitle, styles.sectionGap]}>Nivel</Text>
+          <Text style={[styles.sectionTitle, styles.sectionGap]}>{t('torneos.filterLevelDefault')}</Text>
           <View style={styles.chipRow}>
             {TOURNAMENT_LEVEL_OPTIONS.map((key) => (
               <FilterPill
                 key={key}
-                label={levelLabel(key)}
+                label={levelLabel(key, t)}
                 selected={local.level === key}
                 onPress={() => setLocal((s) => ({ ...s, level: key }))}
               />
@@ -147,17 +149,17 @@ export function TournamentFilterSheets({
 
           {showJoinableSection ? (
             <>
-              <Text style={[styles.sectionTitle, styles.sectionGap]}>Disponibilidad</Text>
+              <Text style={[styles.sectionTitle, styles.sectionGap]}>{t('torneos.filterAvailability')}</Text>
               <FilterOptionRow
                 mode="radio"
-                title="Solo torneos a los que me puedo unir"
+                title={t('torneos.filterJoinableOption')}
                 selected={local.joinableOnly}
                 onPress={() => setLocal((s) => ({ ...s, joinableOnly: true }))}
               />
               <FilterOptionRow
                 mode="radio"
-                title="Mostrar todos"
-                subtitle="Incluye torneos fuera de mi nivel o completos"
+                title={t('torneos.filterShowAll')}
+                subtitle={t('torneos.filterShowAllSub')}
                 selected={!local.joinableOnly}
                 onPress={() => setLocal((s) => ({ ...s, joinableOnly: false }))}
               />

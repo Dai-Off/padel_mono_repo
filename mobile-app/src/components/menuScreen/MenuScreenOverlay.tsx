@@ -1,6 +1,7 @@
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 
 type MenuScreenOverlayProps = {
   visible: boolean;
@@ -10,12 +11,14 @@ type MenuScreenOverlayProps = {
 };
 
 export function MenuScreenOverlay({ visible, title, onClose, children }: MenuScreenOverlayProps) {
+  const { t } = useTranslation();
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.root}>
         <BlurView intensity={16} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.backdrop} />
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Cerrar" />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel={t('common.close')} />
         <View style={styles.card}>
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
@@ -23,7 +26,7 @@ export function MenuScreenOverlay({ visible, title, onClose, children }: MenuScr
               onPress={onClose}
               style={({ pressed }) => [styles.closeBtn, pressed && { opacity: 0.85 }]}
               accessibilityRole="button"
-              accessibilityLabel="Cerrar"
+              accessibilityLabel={t('common.close')}
             >
               <Ionicons name="close" size={20} color="#fff" />
             </Pressable>

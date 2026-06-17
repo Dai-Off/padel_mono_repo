@@ -17,6 +17,7 @@ import { fetchPublicPlayerProfile, type PublicPlayerProfile } from '../api/playe
 import { useTranslation } from '../i18n/I18nContext';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
+import { formatLocale, useTranslation } from '../i18n';
 
 type PublicProfileScreenProps = {
   playerId: string;
@@ -31,6 +32,8 @@ function getInitials(firstName?: string | null, lastName?: string | null): strin
 }
 
 export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicProfileScreenProps) {
+  const { t, locale } = useTranslation();
+  const dateLocale = formatLocale(locale);
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { locale } = useTranslation();
@@ -57,16 +60,16 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
   if (!profile) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={styles.errorText}>No se pudo cargar el perfil.</Text>
+        <Text style={styles.errorText}>{t('profile.profileLoadFail')}</Text>
         <Pressable onPress={onBack} style={styles.backBtn}>
-          <Text style={styles.backBtnText}>Volver</Text>
+          <Text style={styles.backBtnText}>{t('common.back')}</Text>
         </Pressable>
       </View>
     );
   }
 
   const initials = getInitials(profile.firstName, profile.lastName);
-  const displayName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || 'Jugador';
+  const displayName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || t('common.playerFallback');
 
   return (
     <View style={styles.container}>
@@ -77,7 +80,9 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
           <Pressable onPress={onBack} style={styles.headerIconBtn}>
             <Ionicons name="chevron-back" size={24} color="#fff" />
           </Pressable>
-          <Text style={styles.headerTitle} numberOfLines={1}>Perfil de {profile.firstName}</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>
+            {t('profile.title')} {profile.firstName}
+          </Text>
           <Pressable 
             onPress={() => onChatPress?.(profile.id, displayName)} 
             style={styles.headerIconBtn}
@@ -108,7 +113,7 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
         <View style={styles.profileCardWrap}>
           <View style={styles.profileCard}>
             <View style={styles.eloBadge}>
-              <Text style={styles.eloLabel}>NIVEL</Text>
+              <Text style={styles.eloLabel}>{t('profile.levelLabel')}</Text>
               <Text style={styles.eloValue}>
                 {profile.eloRating?.toFixed(2) ?? '--'}
               </Text>
@@ -132,7 +137,7 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
                     color="#6B7280" 
                   />
                   <Text style={styles.genderText}>
-                    {profile.gender === 'female' ? 'Jugadora' : 'Jugador'}
+                    {profile.gender === 'female' ? t('common.female') : t('common.male')}
                   </Text>
                 </View>
               </View>
@@ -142,12 +147,12 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{profile.mmWins + profile.mmLosses + profile.mmDraws}</Text>
-                <Text style={styles.statLabel}>PARTIDOS</Text>
+                <Text style={styles.statLabel}>{t('profile.matchesStat')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{profile.mmWins}</Text>
-                <Text style={styles.statLabel}>VICTORIAS</Text>
+                <Text style={styles.statLabel}>{t('messages.iaStatsWins')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
@@ -166,7 +171,7 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
                 />
                 <Ionicons name="trophy-outline" size={16} color="#F18F34" />
                 <Text style={styles.ligaText}>
-                  Liga Matchmaking: <Text style={styles.ligaName}>{profile.liga.toUpperCase()}</Text>
+                  {t('common.competitive')}: <Text style={styles.ligaName}>{profile.liga.toUpperCase()}</Text>
                 </Text>
               </View>
             )}
@@ -183,7 +188,7 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
           <View style={styles.emptyCardContainer}>
             <View style={styles.emptyCard}>
               <Ionicons name="analytics-outline" size={24} color="#374151" />
-              <Text style={styles.emptyCardText}>Este jugador aún no ha completado su nivelación de Coach IA.</Text>
+              <Text style={styles.emptyCardText}>{t('onboarding.profileLevelCoachDesc')}</Text>
             </View>
           </View>
         )}
@@ -191,15 +196,15 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
         {/* Recent Matches */}
         {profile.recentMatches?.length > 0 && (
           <View style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>Últimos Partidos</Text>
+            <Text style={styles.sectionTitle}>{t('profile.coachMatches')}</Text>
             {profile.recentMatches.map((m: any, idx: number) => (
               <View key={m.match_id} style={[styles.matchItem, idx === profile.recentMatches.length -1 && { borderBottomWidth: 0 }]}>
                 <View style={styles.matchInfo}>
                   <Text style={styles.matchDate}>
-                    {new Date(m.matches.start_at).toLocaleDateString()}
+                    {new Date(m.matches.start_at).toLocaleDateString(dateLocale)}
                   </Text>
                   <Text style={styles.matchType}>
-                    {m.matches.match_type === 'matchmaking' ? 'Competición' : 'Amistoso'}
+                    {m.matches.match_type === 'matchmaking' ? t('common.competitive') : t('common.friendly')}
                   </Text>
                 </View>
                 <View style={[
@@ -207,7 +212,11 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
                   m.result === 'win' ? styles.resultWin : m.result === 'loss' ? styles.resultLoss : styles.resultDraw
                 ]}>
                   <Text style={styles.resultText}>
-                    {m.result === 'win' ? 'VICTORIA' : m.result === 'loss' ? 'DERROTA' : 'EMPATE'}
+                    {m.result === 'win'
+                      ? t('messages.iaStatsWins')
+                      : m.result === 'loss'
+                        ? t('profile.coachDistLow').toUpperCase()
+                        : t('profile.coachDistNormal').toUpperCase()}
                   </Text>
                 </View>
               </View>

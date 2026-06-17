@@ -18,12 +18,14 @@ import { TuActividadHeader } from '../../components/tuActividad/TuActividadHeade
 import { TuActividadListSkeleton } from '../../components/tuActividad/TuActividadListSkeleton';
 import { TournamentDetailScreen } from '../TournamentDetailScreen';
 import { theme } from '../../theme';
+import { useTranslation } from '../../i18n';
 
 type MisCompeticionesActividadScreenProps = {
   onBack: () => void;
 };
 
 export function MisCompeticionesActividadScreen({ onBack }: MisCompeticionesActividadScreenProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { profile } = useHomeData();
   const {
@@ -52,18 +54,18 @@ export function MisCompeticionesActividadScreen({ onBack }: MisCompeticionesActi
   const summary = useMemo(() => {
     if (tournaments.length === 0) return null;
     return tournaments.length === 1
-      ? '1 competición a la que te uniste'
-      : `${tournaments.length} competiciones`;
-  }, [tournaments.length]);
+      ? t('activity.competitionsSummaryOne')
+      : t('activity.competitionsSummaryMany', { count: tournaments.length });
+  }, [tournaments.length, t]);
 
   if (loading) {
-    return <TuActividadListSkeleton title="Competiciones" onBack={onBack} rows={3} />;
+    return <TuActividadListSkeleton title={t('activity.rowCompetitions')} onBack={onBack} rows={3} />;
   }
 
   if (error && tournaments.length === 0) {
     return (
       <View style={styles.container}>
-        <TuActividadHeader title="Competiciones" onBack={onBack} />
+        <TuActividadHeader title={t('activity.rowCompetitions')} onBack={onBack} />
         <View style={styles.centered}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
@@ -73,7 +75,7 @@ export function MisCompeticionesActividadScreen({ onBack }: MisCompeticionesActi
 
   return (
     <View style={styles.container}>
-      <TuActividadHeader title="Competiciones" onBack={onBack} />
+      <TuActividadHeader title={t('activity.rowCompetitions')} onBack={onBack} />
       <FlatList
         data={tournaments}
         keyExtractor={(item) => item.id}
@@ -102,8 +104,8 @@ export function MisCompeticionesActividadScreen({ onBack }: MisCompeticionesActi
         ListEmptyComponent={
           <ActivityEmptyState
             icon="shield-outline"
-            title="Sin competiciones"
-            message="Cuando te inscribas en un torneo o liga, aparecerá en este listado."
+            title={t('activity.competitionsEmptyTitle')}
+            message={t('activity.competitionsEmptyBody')}
           />
         }
         renderItem={({ item }) => (

@@ -1,6 +1,9 @@
 import { clubLocalMinutesFromIso, clubLocalDateTimeToUtcIso, dayKeyInClubTz } from '../lib/clubTimeZone';
+import { formatLocale, type AppLocale } from '../i18n/constants';
 import { dateKeyLocal, startOfLocalDay, TIME_RANGE_PRESETS } from '../utils/formatSearch';
 import type { PartidoItem } from '../screens/PartidosScreen';
+
+export type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
 
 export type PartidosSportFilter = 'padel' | 'tenis' | 'pickleball' | 'all';
 
@@ -206,24 +209,33 @@ export function countPartidosAdvancedFilters(filters: PartidosFiltersState): num
   return n;
 }
 
-export function sportChipLabel(sport: PartidosSportFilter): string {
-  if (sport === 'padel') return 'Pádel';
-  if (sport === 'tenis') return 'Tenis';
-  if (sport === 'pickleball') return 'Pickleball';
-  return 'Deporte';
+const TIME_PRESET_LABEL_KEYS: Record<string, string> = {
+  allday: 'search.timePresetAllDay',
+  morning: 'search.timePresetMorning',
+  afternoon: 'search.timePresetAfternoon',
+  evening: 'search.timePresetEvening',
+};
+
+export function sportChipLabel(sport: PartidosSportFilter, t: TranslateFn): string {
+  if (sport === 'padel') return t('common.sportPadel');
+  if (sport === 'tenis') return t('common.sportTenis');
+  if (sport === 'pickleball') return t('common.sportPickleball');
+  return t('partidos.filterSportDefault');
 }
 
-export function clubsChipLabel(selectedCount: number, totalCatalog: number): string {
+export function clubsChipLabel(selectedCount: number, totalCatalog: number, t: TranslateFn): string {
   if (selectedCount > 0) {
-    return selectedCount === 1 ? '1 club' : `${selectedCount} clubes`;
+    return selectedCount === 1 ? t('common.oneClub') : t('common.clubsCountLabel', { count: selectedCount });
   }
-  if (totalCatalog > 0) return `${totalCatalog} clubes`;
-  return 'Clubes';
+  if (totalCatalog > 0) return t('common.clubsCountLabel', { count: totalCatalog });
+  return t('partidos.filterClubsDefault');
 }
 
 export function whenChipLabel(
   selectedDateKeys: string[],
   timeRange: { start: string; end: string } | null,
+  t: TranslateFn,
+  locale: AppLocale,
 ): string {
   if (timeRange) {
     const preset = TIME_RANGE_PRESETS.find(
@@ -232,15 +244,18 @@ export function whenChipLabel(
         p.range.start === timeRange.start &&
         p.range.end === timeRange.end,
     );
-    if (preset) return preset.label.split(' (')[0];
+    if (preset) {
+      const key = TIME_PRESET_LABEL_KEYS[preset.id];
+      if (key) return t(key);
+    }
   }
-  if (selectedDateKeys.length === 0) return 'Cuándo';
-  if (selectedDateKeys.length > 1) return `${selectedDateKeys.length} días`;
+  if (selectedDateKeys.length === 0) return t('partidos.filterWhenDefault');
+  if (selectedDateKeys.length > 1) return t('partidos.filterWhenDays', { count: selectedDateKeys.length });
   const d = new Date(selectedDateKeys[0] + 'T12:00:00');
-  if (Number.isNaN(d.getTime())) return 'Cuándo';
-  const weekday = d.toLocaleDateString('es', { weekday: 'short' });
-  const month = d.toLocaleDateString('es', { month: 'short' });
-  return `${weekday}, ${d.getDate()} ${month}`;
+  if (Number.isNaN(d.getTime())) return t('partidos.filterWhenDefault');
+  const weekday = d.toLocaleDateString(formatLocale(locale), { weekday: 'short' });
+  const month = d.toLocaleDateString(formatLocale(locale), { month: 'short' });
+  return t('partidos.filterWhenDate', { weekday, day: d.getDate(), month });
 }
 
 /** Ventana por defecto al buscar partidos abiertos (evita descargar todo el histórico). */

@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 import { AppFilterBar } from '../filters/AppFilterBar';
 import { filterTheme } from '../filters/filterTheme';
 
@@ -36,6 +37,7 @@ export function SearchFilterBar({
   advancedCount = 0,
   onAdvancedPress,
 }: SearchFilterBarProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const rightInset = Math.max(FILTER_BAR_RIGHT_INSET, insets.right + 8);
 
@@ -69,9 +71,9 @@ export function SearchFilterBar({
       trailing={
         <>
           {showCercaBadge ? (
-            <View style={styles.cercaBadge} accessibilityLabel="Orden: cercanía">
+            <View style={styles.cercaBadge} accessibilityLabel={t('common.sortByDistance')}>
               <Ionicons name="navigate-outline" size={12} color={filterTheme.accent} />
-              <Text style={styles.cercaText}>Cerca</Text>
+              <Text style={styles.cercaText}>{t('common.nearbyBadge')}</Text>
             </View>
           ) : null}
           <View style={{ width: rightInset, flexShrink: 0 }} />

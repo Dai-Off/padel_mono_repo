@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { LayoutAnimation, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { ExplanationCard } from './ExplanationCard';
+import { useTranslation } from '../../i18n';
 
 type Pair = { left: string; right: string };
 
@@ -17,6 +18,7 @@ type Props = {
 type ShuffledRight = { text: string; correctIndex: number; key: string };
 
 export function MatchColumnsQuestion({ content, onAnswered }: Props) {
+  const { t } = useTranslation();
   const lefts = content.pairs.map((p) => p.left);
 
   // Barajar la columna derecha (indice estable para animar layout)
@@ -126,10 +128,10 @@ export function MatchColumnsQuestion({ content, onAnswered }: Props) {
 
   return (
     <View>
-      <Text style={styles.question}>{content.question?.trim() || 'Empareja cada elemento'}</Text>
+      <Text style={styles.question}>{content.question?.trim() || t('learning.questionMatchColumns')}</Text>
       <View style={styles.hintRow}>
         <Ionicons name="link-outline" size={12} color="#9CA3AF" />
-        <Text style={styles.hint}>{matchedCount}/{lefts.length} EMPAREJADOS</Text>
+        <Text style={styles.hint}>{t('learning.questionMatched', { matched: matchedCount, total: lefts.length })}</Text>
       </View>
 
       <View style={styles.columns}>
@@ -171,7 +173,7 @@ export function MatchColumnsQuestion({ content, onAnswered }: Props) {
         <Pressable onPress={handleSubmit} style={styles.submitButton}>
           <View style={styles.submitInner}>
             <Ionicons name="checkmark" size={16} color="#fff" />
-            <Text style={styles.submitText}>Comprobar</Text>
+            <Text style={styles.submitText}>{t('learning.questionCheck')}</Text>
           </View>
         </Pressable>
       )}

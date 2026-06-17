@@ -25,6 +25,7 @@ import {
 } from '../api/payments';
 import { BackHeader } from '../components/layout/BackHeader';
 import { theme } from '../theme';
+import { formatLocale, useTranslation } from '../i18n';
 
 type TusPagosScreenProps = {
   onBack: () => void;
@@ -53,6 +54,8 @@ function PayOption({ icon, title, onPress }: PayOptionProps) {
 
 export function TusPagosScreen({ onBack, onTransaccionesPress, onMonederoPress }: TusPagosScreenProps) {
   const insets = useSafeAreaInsets();
+  const { t, locale } = useTranslation();
+  const numberLocale = formatLocale(locale);
   const { session } = useAuth();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const [loadingMetodos, setLoadingMetodos] = useState(false);
@@ -86,24 +89,24 @@ export function TusPagosScreen({ onBack, onTransaccionesPress, onMonederoPress }
   const handleMetodosPago = async () => {
     const token = session?.access_token;
     if (!token) {
-      Alert.alert('Sesión requerida', 'Inicia sesión para gestionar tus métodos de pago.');
+      Alert.alert(t('common.sessionRequired'), t('wallet.loginManagePayments'));
       return;
     }
     setLoadingMetodos(true);
     try {
       const res = await fetchCustomerPortalUrl(token);
       if (!res.ok || !res.url) {
-        Alert.alert('Error', res.error ?? 'No se pudo abrir');
+        Alert.alert(t('common.error'), res.error ?? t('common.openError'));
         return;
       }
       const canOpen = await Linking.canOpenURL(res.url);
       if (canOpen) {
         await Linking.openURL(res.url);
       } else {
-        Alert.alert('Error', 'No se puede abrir el navegador');
+        Alert.alert(t('common.error'), t('common.browserOpenError'));
       }
     } catch {
-      Alert.alert('Error', 'Error de conexión');
+      Alert.alert(t('common.error'), t('common.connectionError'));
     } finally {
       setLoadingMetodos(false);
     }
@@ -112,14 +115,14 @@ export function TusPagosScreen({ onBack, onTransaccionesPress, onMonederoPress }
   const handlePayPendingBooking = async (booking: PendingBookingPayment) => {
     const token = session?.access_token;
     if (!token) {
-      Alert.alert('Sesión requerida', 'Inicia sesión para pagar.');
+      Alert.alert(t('common.sessionRequired'), t('wallet.loginToPay'));
       return;
     }
     setPayingBookingId(booking.booking_id);
     try {
       const intentRes = await createPaymentIntent(booking.booking_id, token, undefined, booking.participant_id);
       if (!intentRes.ok || !intentRes.clientSecret || !intentRes.paymentIntentId) {
-        Alert.alert('Error', intentRes.error ?? 'No se pudo iniciar el pago');
+        Alert.alert(t('common.error'), intentRes.error ?? t('common.paymentStartError'));
         return;
       }
       const returnURL = ExpoLinking.createURL('stripe-redirect');
@@ -129,22 +132,22 @@ export function TusPagosScreen({ onBack, onTransaccionesPress, onMonederoPress }
         returnURL,
       });
       if (initErr) {
-        Alert.alert('Error', 'No se pudo configurar el pago');
+        Alert.alert(t('common.error'), t('common.paymentConfiguredError'));
         return;
       }
       const { error: presentErr } = await presentPaymentSheet();
       if (presentErr) {
         if (presentErr.code !== 'Canceled') {
-          Alert.alert('Error', 'No se pudo procesar el pago');
+          Alert.alert(t('common.error'), t('common.paymentProcessError'));
         }
         return;
       }
       const confirmRes = await confirmPaymentFromClient(intentRes.paymentIntentId, token);
       if (!confirmRes.ok) {
-        Alert.alert('Error', confirmRes.error ?? 'No se pudo confirmar el pago');
+        Alert.alert(t('common.error'), confirmRes.error ?? t('common.paymentConfirmError'));
         return;
       }
-      Alert.alert('Pago realizado', 'La reserva quedó pagada.');
+      Alert.alert(t('common.paymentDone'), t('wallet.paymentSuccessBooking'));
       await loadPendingBookings();
     } finally {
       setPayingBookingId(null);
@@ -153,7 +156,7 @@ export function TusPagosScreen({ onBack, onTransaccionesPress, onMonederoPress }
 
   return (
     <View style={styles.container}>
-      <BackHeader title="Tus pagos" onBack={onBack} />
+      <BackHeader title={t('wallet.yourPaymentsTitle')} onBack={onBack} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + (insets.bottom ?? 0) }]}
@@ -174,35 +177,35 @@ export function TusPagosScreen({ onBack, onTransaccionesPress, onMonederoPress }
             ) : (
               <Ionicons name="card-outline" size={24} color="#4b5563" style={styles.optionIcon} />
             )}
-            <Text style={styles.optionTitle}>Métodos de pago</Text>
+            <Text style={styles.optionTitle}>{t('wallet.paymentMethods')}</Text>
             <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
           </Pressable>
           <View style={styles.optionDivider} />
-          <PayOption icon="cash-outline" title="Monedero del club" onPress={onMonederoPress} />
+          <PayOption icon="cash-outline" title={t('wallet.clubWallet')} onPress={onMonederoPress} />
           <View style={styles.optionDivider} />
           <PayOption
             icon="document-text-outline"
-            title="Todas las transacciones"
+            title={t('wallet.allTransactions')}
             onPress={onTransaccionesPress}
           />
           <View style={styles.optionDivider} />
-          <PayOption icon="home-outline" title="Membresías de clubes" onPress={() => {}} />
+          <PayOption icon="home-outline" title={t('wallet.clubMemberships')} onPress={() => {}} />
         </View>
 
         <View style={styles.pendingSection}>
-          <Text style={styles.pendingTitle}>Reservas pendientes de pago</Text>
+          <Text style={styles.pendingTitle}>{t('wallet.pendingBookingsTitle')}</Text>
           {loadingPending ? (
             <ActivityIndicator size="small" color="#4b5563" />
           ) : pendingBookings.length === 0 ? (
-            <Text style={styles.pendingEmpty}>No tienes reservas pendientes.</Text>
+            <Text style={styles.pendingEmpty}>{t('wallet.pendingBookingsEmpty')}</Text>
           ) : (
             pendingBookings.map((booking) => (
               <View key={booking.booking_id} style={styles.pendingCard}>
                 <Text style={styles.pendingName}>
-                  {booking.club_name ?? 'Club'} · {booking.court_name ?? 'Pista'}
+                  {booking.club_name ?? t('common.clubFallback')} · {booking.court_name ?? t('common.courtFallback')}
                 </Text>
                 <Text style={styles.pendingMeta}>
-                  {new Date(booking.start_at).toLocaleString()} · {(booking.amount_due_cents / 100).toFixed(2)} €
+                  {new Date(booking.start_at).toLocaleString(numberLocale)} · {(booking.amount_due_cents / 100).toFixed(2)} €
                 </Text>
                 <Pressable
                   style={({ pressed }) => [
@@ -216,7 +219,7 @@ export function TusPagosScreen({ onBack, onTransaccionesPress, onMonederoPress }
                   {payingBookingId === booking.booking_id ? (
                     <ActivityIndicator size="small" color="#fff" />
                   ) : (
-                    <Text style={styles.pendingPayText}>Pagar ahora</Text>
+                    <Text style={styles.pendingPayText}>{t('wallet.payNow')}</Text>
                   )}
                 </Pressable>
               </View>

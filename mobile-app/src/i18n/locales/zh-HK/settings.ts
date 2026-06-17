@@ -1,0 +1,30 @@
+import type { SettingsTranslationKeys } from '../../sections/settings';
+
+export const settings: SettingsTranslationKeys = {
+  title: '設定',
+  languageSection: '語言',
+  languageAppLabel: '應用程式語言',
+  languageSelectA11y: '選擇語言',
+  languageHint: '選擇應用程式顯示語言',
+  languageEs: '🇪🇸 Español',
+  languageZhHk: '🇭🇰 繁體中文',
+  configSection: '設定',
+  privacy: '私隱',
+  notifications: '通知',
+  security: '安全',
+  dangerZone: '危險區域',
+  deleteAccount: '刪除你的帳戶',
+  deleteAccountA11y: '刪除你的帳戶',
+  deleteAccountBody:
+    '此操作無法復原。如要刪除帳戶，請透過應用程式或你常打的球會聯絡客服。',
+  notifMessages: '訊息',
+  notifNewMatches: '新球局',
+  notifCompetitions: '競賽',
+  notifClasses: '課程',
+  privacyIntro1: '控制你分享的資訊及 WeMatch 如何使用你的活動數據。',
+  privacyIntro2: '你可於個人檔案的「偏好設定」管理收藏球會、打球偏好及可見度。',
+  privacyViewPolicy: '查看完整私隱政策',
+  privacyViewPolicyA11y: '查看完整私隱政策',
+  lastUpdated: '最後更新：{date}',
+  contactFallback: '聯絡',
+};

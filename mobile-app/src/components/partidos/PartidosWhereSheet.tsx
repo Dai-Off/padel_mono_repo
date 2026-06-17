@@ -19,6 +19,7 @@ import {
   PARTIDOS_DISTANCE_STEPS_KM,
   nearestDistanceStep,
 } from '../../domain/partidosFilters';
+import { useTranslation } from '../../i18n';
 import type { ClubCatalogItem } from '../../hooks/useClubCatalog';
 import { theme } from '../../theme';
 
@@ -43,6 +44,7 @@ export function PartidosWhereSheet({
   onClose,
   onApply,
 }: PartidosWhereSheetProps) {
+  const { t } = useTranslation();
   const [local, setLocal] = useState(draft);
 
   useEffect(() => {
@@ -87,7 +89,7 @@ export function PartidosWhereSheet({
   return (
     <FilterBottomSheet
       visible={visible}
-      title="¿Dónde quieres jugar?"
+      title={t('partidos.sheetWhereTitle')}
       onClose={onClose}
       onClear={() =>
         setLocal((s) => ({
@@ -102,7 +104,7 @@ export function PartidosWhereSheet({
     >
       <View style={styles.searchRow}>
         <Ionicons name="location-outline" size={18} color={filterTheme.textMuted} />
-        <Text style={styles.searchPlaceholder}>Cerca de mí</Text>
+        <Text style={styles.searchPlaceholder}>{t('common.nearbyBadge')}</Text>
         <Ionicons name="navigate-outline" size={18} color={filterTheme.accent} />
       </View>
 
@@ -145,7 +147,7 @@ export function PartidosWhereSheet({
 
       <FilterOptionRow
         mode="checkbox"
-        title="Clubes favoritos"
+        title={t('alerts.favoriteClubs.title')}
         selected={local.useFavoriteClubsOnly}
         onPress={() =>
           setLocal((s) => ({ ...s, useFavoriteClubsOnly: !s.useFavoriteClubsOnly }))
@@ -153,7 +155,7 @@ export function PartidosWhereSheet({
       />
       <FilterOptionRow
         mode="checkbox"
-        title="Seleccione una distancia"
+        title={t('partidos.sheetDistanceTitle')}
         selected={local.useDistanceFilter}
         onPress={() =>
           setLocal((s) => ({ ...s, useDistanceFilter: !s.useDistanceFilter }))
@@ -163,7 +165,7 @@ export function PartidosWhereSheet({
       {local.useDistanceFilter ? (
         <View style={styles.distanceBlock}>
           <View style={styles.distanceHeader}>
-            <Text style={styles.distanceLabel}>Distancia máxima</Text>
+            <Text style={styles.distanceLabel}>{t('search.sectionMaxDistance')}</Text>
             <Text style={styles.distanceValue}>{local.maxDistanceKm} km</Text>
           </View>
           <View style={styles.stepsRow}>

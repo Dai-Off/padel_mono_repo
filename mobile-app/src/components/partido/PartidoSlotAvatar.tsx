@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { normalizePlayerAvatarUrl } from '../../api/playerAvatar';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 type PartidoSlotAvatarProps = {
@@ -21,6 +22,7 @@ export function PartidoSlotAvatar({
   size = 56,
   borderRadius = 12,
 }: PartidoSlotAvatarProps) {
+  const { t } = useTranslation();
   const uri = normalizePlayerAvatarUrl(avatarUrl);
   const [photoFailed, setPhotoFailed] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
@@ -59,7 +61,7 @@ export function PartidoSlotAvatar({
               setPhotoFailed(true);
             }
           }}
-          accessibilityLabel="Foto de perfil"
+          accessibilityLabel={t('alerts.profile.profilePhoto')}
         />
       ) : null}
     </View>

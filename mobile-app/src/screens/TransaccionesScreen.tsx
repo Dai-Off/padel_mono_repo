@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchTransactions, type Transaction } from '../api/payments';
 import { BackHeader } from '../components/layout/BackHeader';
+import { formatLocale, useTranslation } from '../i18n';
 import { theme } from '../theme';
 
 type TransaccionesScreenProps = {
@@ -25,17 +26,18 @@ function formatAmount(cents: number, currency: string, opts?: { negative?: boole
   return opts?.negative ? `− ${core}` : core;
 }
 
-function formatDate(iso: string): string {
+function formatDate(iso: string, t: (key: string, params?: Record<string, string | number>) => string, numberLocale: string): string {
   const d = new Date(iso);
   const now = new Date();
   const today = now.toDateString() === d.toDateString();
-  if (today) return `Hoy, ${d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+  const time = d.toLocaleTimeString(numberLocale, { hour: '2-digit', minute: '2-digit' });
+  if (today) return t('common.todayWithTime', { time });
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   if (yesterday.toDateString() === d.toDateString()) {
-    return `Ayer, ${d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+    return t('common.yesterdayWithTime', { time });
   }
-  return d.toLocaleDateString('es-ES', {
+  return d.toLocaleDateString(numberLocale, {
     day: 'numeric',
     month: 'short',
     hour: '2-digit',
@@ -43,30 +45,41 @@ function formatDate(iso: string): string {
   });
 }
 
-function TransactionRow({ t }: { t: Transaction }) {
+function TransactionRow({
+  t,
+  numberLocale,
+  tx,
+}: {
+  t: (key: string, params?: Record<string, string | number>) => string;
+  numberLocale: string;
+  tx: Transaction;
+}) {
   const desc =
-    t.summary_label?.trim() ||
-    (t.club_name && t.court_name
-      ? `${t.club_name} · ${t.court_name}`
-      : t.club_name ?? t.court_name ?? (t.tournament_name ? `Torneo: ${t.tournament_name}` : 'Pago en app'));
+    tx.summary_label?.trim() ||
+    (tx.club_name && tx.court_name
+      ? `${tx.club_name} · ${tx.court_name}`
+      : tx.club_name ?? tx.court_name ?? (tx.tournament_name ? t('wallet.txTournamentDesc', { name: tx.tournament_name }) : t('wallet.txDefaultDesc')));
 
-  const isRefunded = t.status === 'refunded';
-  const isPaid = t.status === 'succeeded';
+  const isRefunded = tx.status === 'refunded';
+  const isPaid = tx.status === 'succeeded';
   const kindLabel = isRefunded
-    ? 'Reembolso'
+    ? t('wallet.txKindRefund')
     : isPaid
-      ? 'Pago'
-      : t.status === 'requires_action'
-        ? 'Pendiente'
-        : t.status === 'processing'
-          ? 'Procesando'
-          : t.status === 'failed'
-            ? 'Fallido'
-            : t.status;
+      ? t('wallet.txKindPayment')
+      : tx.status === 'requires_action'
+        ? t('wallet.txKindPending')
+        : tx.status === 'processing'
+          ? t('wallet.txKindProcessing')
+          : tx.status === 'failed'
+            ? t('wallet.txKindFailed')
+            : tx.status;
 
   const dateLine = isRefunded
-    ? `${formatDate(t.created_at)} · reembolso ${formatDate(t.updated_at ?? t.created_at)}`
-    : formatDate(t.created_at);
+    ? t('wallet.txRefundLine', {
+        date: formatDate(tx.created_at, t, numberLocale),
+        refundDate: formatDate(tx.updated_at ?? tx.created_at, t, numberLocale),
+      })
+    : formatDate(tx.created_at, t, numberLocale);
 
   return (
     <View style={styles.row}>
@@ -94,7 +107,7 @@ function TransactionRow({ t }: { t: Transaction }) {
         </View>
       </View>
       <Text style={[styles.rowAmount, isRefunded && styles.rowAmountRefund]}>
-        {formatAmount(t.amount_cents, t.currency, { negative: isRefunded })}
+        {formatAmount(tx.amount_cents, tx.currency, { negative: isRefunded })}
       </Text>
     </View>
   );
@@ -102,6 +115,8 @@ function TransactionRow({ t }: { t: Transaction }) {
 
 export function TransaccionesScreen({ onBack }: TransaccionesScreenProps) {
   const insets = useSafeAreaInsets();
+  const { locale, t } = useTranslation();
+  const numberLocale = formatLocale(locale);
   const { session } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -111,14 +126,14 @@ export function TransaccionesScreen({ onBack }: TransaccionesScreenProps) {
   const load = useCallback(async () => {
     const token = session?.access_token;
     if (!token) {
-      setError('Inicia sesión para ver tus transacciones');
+      setError(t('wallet.transactionsLogin'));
       setTransactions([]);
       setLoading(false);
       return;
     }
     const res = await fetchTransactions(token);
     if (!res.ok) {
-      setError(res.error ?? 'Error al cargar');
+      setError(res.error ?? t('wallet.transactionsLoadError'));
       setTransactions([]);
     } else {
       setError(null);
@@ -126,7 +141,7 @@ export function TransaccionesScreen({ onBack }: TransaccionesScreenProps) {
     }
     setLoading(false);
     setRefreshing(false);
-  }, [session?.access_token]);
+  }, [session?.access_token, t]);
 
   useEffect(() => {
     setLoading(true);
@@ -140,7 +155,7 @@ export function TransaccionesScreen({ onBack }: TransaccionesScreenProps) {
 
   return (
     <View style={styles.container}>
-      <BackHeader title="Todas las transacciones" onBack={onBack} />
+      <BackHeader title={t('wallet.transactionsTitle')} onBack={onBack} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[
@@ -162,14 +177,14 @@ export function TransaccionesScreen({ onBack }: TransaccionesScreenProps) {
         ) : transactions.length === 0 ? (
           <View style={styles.center}>
             <Ionicons name="receipt-outline" size={48} color="#9ca3af" />
-            <Text style={styles.emptyText}>No hay transacciones</Text>
-            <Text style={styles.emptySub}>Pagos y reembolsos de la app aparecerán aquí</Text>
+            <Text style={styles.emptyText}>{t('wallet.transactionsEmpty')}</Text>
+            <Text style={styles.emptySub}>{t('wallet.transactionsEmptySub')}</Text>
           </View>
         ) : (
           <View style={styles.list}>
-            {transactions.map((t) => (
-              <View key={t.id} style={styles.rowWrapper}>
-                <TransactionRow t={t} />
+            {transactions.map((item) => (
+              <View key={item.id} style={styles.rowWrapper}>
+                <TransactionRow t={t} numberLocale={numberLocale} tx={item} />
               </View>
             ))}
           </View>

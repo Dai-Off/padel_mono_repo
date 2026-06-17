@@ -21,6 +21,7 @@ import {
   type OnboardingAnswerPayload,
   type OnboardingQuestionPayload,
 } from '../../api/playerOnboarding';
+import { useTranslation } from '../../i18n';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -121,6 +122,7 @@ export function OnboardingLevelModal({
   onCompleted,
   savedEloRating = null,
 }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const donePulse = useRef(new Animated.Value(1)).current;
@@ -196,7 +198,7 @@ export function OnboardingLevelModal({
 
   const applyNextState = useCallback(
     async (nextAnswers: OnboardingAnswerPayload[]) => {
-      if (!accessToken) throw new Error('Sesión requerida');
+      if (!accessToken) throw new Error(t('common.sessionRequired'));
       const state = await fetchOnboardingNext(accessToken, nextAnswers);
       if (state.type === 'complete') {
         setSubmitting(true);
@@ -209,9 +211,9 @@ export function OnboardingLevelModal({
             setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
             return;
           }
-          const msg = e instanceof Error ? e.message : 'No se pudo guardar tu nivel';
+          const msg = e instanceof Error ? e.message : t('onboarding.levelModalSaveError');
           setBootError(msg);
-          Alert.alert('Error', msg);
+          Alert.alert(t('alerts.error.title'), msg);
         } finally {
           setSubmitting(false);
         }
@@ -222,7 +224,7 @@ export function OnboardingLevelModal({
         setSingleSelected(null);
         setMultiSelected([]);
         const n = nextAnswers.length + 1;
-        setView({ kind: 'single', question: state.question, stepLabel: `Cuestionario oficial · Paso ${n}` });
+        setView({ kind: 'single', question: state.question, stepLabel: t('onboarding.levelModalStepOfficial', { n }) });
         return;
       }
       setAnswers(nextAnswers);
@@ -245,9 +247,9 @@ export function OnboardingLevelModal({
             setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
             return;
           }
-          const msg = e instanceof Error ? e.message : 'No se pudo guardar tu nivel';
+          const msg = e instanceof Error ? e.message : t('onboarding.levelModalSaveError');
           setBootError(msg);
-          Alert.alert('Error', msg);
+          Alert.alert(t('alerts.error.title'), msg);
         } finally {
           setSubmitting(false);
         }
@@ -255,7 +257,7 @@ export function OnboardingLevelModal({
       }
       setView({ kind: 'phase2_intro', questions: state.questions });
     },
-    [accessToken],
+    [accessToken, t],
   );
 
   useEffect(() => {
@@ -266,7 +268,7 @@ export function OnboardingLevelModal({
     (async () => {
       try {
         if (!accessToken) {
-          setBootError('Inicia sesión para continuar');
+          setBootError(t('onboarding.levelModalBootLogin'));
           setView({ kind: 'loading' });
           return;
         }
@@ -277,7 +279,7 @@ export function OnboardingLevelModal({
           return;
         }
         if (state.type === 'question') {
-          setView({ kind: 'single', question: state.question, stepLabel: 'Cuestionario oficial · Paso 1' });
+          setView({ kind: 'single', question: state.question, stepLabel: t('onboarding.levelModalStepOfficial', { n: 1 }) });
         } else if (state.type === 'phase2') {
           const drafts: Record<string, string[]> = {};
           for (const q of state.questions) {
@@ -287,21 +289,21 @@ export function OnboardingLevelModal({
           }
           setOrderDrafts(drafts);
           if (!state.questions.length) {
-            setBootError('No hay preguntas de Fase 2 disponibles. Cierra e intenta de nuevo o contacta al club.');
+            setBootError(t('onboarding.levelModalBootNoPhase2'));
             return;
           }
           setView({ kind: 'phase2_intro', questions: state.questions });
         }
       } catch (e) {
         if (!cancelled) {
-          setBootError(e instanceof Error ? e.message : 'Error al cargar');
+          setBootError(e instanceof Error ? e.message : t('common.connectionError'));
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [visible, accessToken, resetLocal, animateOpen]);
+  }, [visible, accessToken, resetLocal, animateOpen, t]);
 
   useEffect(() => {
     if (view.kind !== 'done') {
@@ -347,19 +349,19 @@ export function OnboardingLevelModal({
     if (q.type === 'order') {
       const steps = orderDrafts[q.question_key] ?? getOrderClientSteps(q);
       if (!steps.length) {
-        Alert.alert('Orden', 'No hay pasos para ordenar.');
+        Alert.alert(t('alerts.onboarding.order'), t('onboarding.levelModalOrderEmpty'));
         return;
       }
       value = [...steps];
     } else if (q.type === 'multi') {
       if (multiSelected.length === 0) {
-        Alert.alert('Selección', 'Elige al menos una opción.');
+        Alert.alert(t('alerts.onboarding.selection'), t('alerts.onboarding.selectMany'));
         return;
       }
       value = [...multiSelected];
     } else {
       if (singleSelected === null) {
-        Alert.alert('Selección', 'Elige una opción para continuar.');
+        Alert.alert(t('alerts.onboarding.selection'), t('alerts.onboarding.selectOne'));
         return;
       }
       value = singleSelected;
@@ -369,7 +371,7 @@ export function OnboardingLevelModal({
       setSubmitting(true);
       await applyNextState(next);
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo avanzar');
+      Alert.alert(t('alerts.error.title'), e instanceof Error ? e.message : t('common.connectionError'));
     } finally {
       setSubmitting(false);
     }
@@ -398,7 +400,7 @@ export function OnboardingLevelModal({
   const submitPhase2 = async () => {
     if (view.kind !== 'phase2') return;
     if (!accessToken) {
-      Alert.alert('Sesión', 'Tenés que iniciar sesión de nuevo.');
+      Alert.alert(t('alerts.session.title'), t('onboarding.levelModalSessionRelogin'));
       return;
     }
     const nextVals: Record<string, unknown> = { ...phase2Values };
@@ -410,8 +412,8 @@ export function OnboardingLevelModal({
       const orderEmpty = q.type === 'order' && Array.isArray(v) && v.length === 0;
       if (v === undefined || orderEmpty || (q.type === 'multi' && Array.isArray(v) && v.length === 0)) {
         Alert.alert(
-          'Fase 2',
-          'Falta completar alguna pregunta. En las de orden, tocá «Confirmar orden» después de ordenar (o reordená si no hay pasos visibles).',
+          t('alerts.onboarding.phase2'),
+          t('onboarding.levelModalPhase2Incomplete'),
         );
         return;
       }
@@ -428,7 +430,7 @@ export function OnboardingLevelModal({
         setView({ kind: 'already_done', elo: savedEloRatingRef.current ?? null });
         return;
       }
-      Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo guardar');
+      Alert.alert(t('alerts.error.title'), e instanceof Error ? e.message : t('onboarding.levelModalSaveError'));
     } finally {
       setSubmitting(false);
     }
@@ -460,9 +462,9 @@ export function OnboardingLevelModal({
         (phase2Values[q.question_key] as unknown[]).length > 0;
       return (
         <View style={styles.block}>
-          <Text style={styles.orderHint}>Ordena de arriba a abajo (1 = primero). Usa las flechas.</Text>
+          <Text style={styles.orderHint}>{t('onboarding.levelModalOrderHint')}</Text>
           {steps.length === 0 ? (
-            <Text style={styles.orderEmptyWarn}>No se pudieron cargar los pasos. Cierra y abre de nuevo el cuestionario.</Text>
+            <Text style={styles.orderEmptyWarn}>{t('onboarding.levelModalOrderEmpty')}</Text>
           ) : null}
           {steps.map((step, i) => (
             <View key={`${q.question_key}-${i}`} style={styles.orderRow}>
@@ -485,9 +487,9 @@ export function OnboardingLevelModal({
                   setPhase2Values((p) => ({ ...p, [q.question_key]: [...latest] }));
                 }}
               >
-                <Text style={styles.secondaryBtnText}>Confirmar orden</Text>
+                <Text style={styles.secondaryBtnText}>{t('onboarding.levelModalConfirmOrder')}</Text>
               </Pressable>
-              {orderConfirmed ? <Text style={styles.orderConfirmed}>Orden registrado para enviar</Text> : null}
+              {orderConfirmed ? <Text style={styles.orderConfirmed}>{t('onboarding.levelModalOrderConfirmed')}</Text> : null}
             </>
           ) : null}
         </View>
@@ -552,7 +554,7 @@ export function OnboardingLevelModal({
         <Text style={styles.errorText}>{bootError}</Text>
         <Pressable style={styles.primaryWrap} onPress={handleClose}>
           <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
-            <Text style={styles.primaryText}>Cerrar</Text>
+            <Text style={styles.primaryText}>{t('common.close')}</Text>
           </LinearGradient>
         </Pressable>
       </View>
@@ -561,23 +563,21 @@ export function OnboardingLevelModal({
     inner = (
       <View style={styles.centerPad}>
         <ActivityIndicator size="large" color="#F18F34" />
-        <Text style={styles.muted}>Cargando cuestionario…</Text>
+        <Text style={styles.muted}>{t('onboarding.levelModalLoading')}</Text>
       </View>
     );
   } else if (view.kind === 'already_done') {
     inner = (
       <View style={styles.centerPad}>
         <Ionicons name="checkmark-circle" size={48} color="#34D399" style={{ marginBottom: 8 }} />
-        <Text style={styles.alreadyDoneTitle}>Nivelación del club completada</Text>
-        <Text style={styles.alreadyDoneBody}>
-          Ya completaste la nivelación inicial del club. No tenés pasos pendientes.
-        </Text>
+        <Text style={styles.alreadyDoneTitle}>{t('onboarding.levelModalAlreadyDoneTitle')}</Text>
+        <Text style={styles.alreadyDoneBody}>{t('onboarding.profileLevelCoachDesc')}</Text>
         {view.elo != null && Number.isFinite(view.elo) ? (
-          <Text style={styles.alreadyDoneElo}>Tu nivel en perfil: {view.elo.toFixed(2)}</Text>
+          <Text style={styles.alreadyDoneElo}>{t('onboarding.levelModalAlreadyDoneElo', { elo: view.elo.toFixed(2) })}</Text>
         ) : null}
         <Pressable style={styles.primaryWrap} onPress={handleClose}>
           <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
-            <Text style={styles.primaryText}>Cerrar</Text>
+            <Text style={styles.primaryText}>{t('common.close')}</Text>
           </LinearGradient>
         </Pressable>
       </View>
@@ -588,7 +588,7 @@ export function OnboardingLevelModal({
         <View style={styles.header}>
           <View style={styles.handle} />
           <View style={styles.headerRow}>
-            <Text style={styles.kicker}>Nivelación del club · {view.stepLabel}</Text>
+            <Text style={styles.kicker}>{t('onboarding.levelModalKicker', { step: view.stepLabel })}</Text>
             <Pressable onPress={handleClose} style={styles.iconClose}>
               <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
             </Pressable>
@@ -609,7 +609,7 @@ export function OnboardingLevelModal({
               {submitting ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.primaryText}>Siguiente</Text>
+                <Text style={styles.primaryText}>{t('onboarding.levelModalNext')}</Text>
               )}
             </LinearGradient>
           </Pressable>
@@ -622,7 +622,7 @@ export function OnboardingLevelModal({
         <View style={styles.header}>
           <View style={styles.handle} />
           <View style={styles.headerRow}>
-            <Text style={styles.kicker}>Fase 2 de 2</Text>
+            <Text style={styles.kicker}>{t('onboarding.levelModalPhase2Kicker')}</Text>
             <Pressable onPress={handleClose} style={styles.iconClose}>
               <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
             </Pressable>
@@ -634,13 +634,9 @@ export function OnboardingLevelModal({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.questionTitle}>Afinamos tu nivel con 5 preguntas técnicas</Text>
-          <Text style={styles.phase2IntroBody}>
-            Ya completaste la fase 1. Ahora necesitamos terminar la fase 2 para calcular y guardar tu nivel final.
-          </Text>
-          <Text style={styles.phase2IntroHint}>
-            Solo al terminar todas las preguntas se calcula tu resultado.
-          </Text>
+          <Text style={styles.questionTitle}>{t('onboarding.levelModalPhase2Title')}</Text>
+          <Text style={styles.phase2IntroBody}>{t('onboarding.hardBlockIaSub')}</Text>
+          <Text style={styles.phase2IntroHint}>{t('onboarding.levelModalPhase2Incomplete')}</Text>
         </ScrollView>
         <View style={[styles.footer, { paddingBottom: footerPadding }]}>
           <Pressable
@@ -649,13 +645,13 @@ export function OnboardingLevelModal({
               setView({
                 kind: 'phase2',
                 questions: view.questions,
-                stepLabel: `Fase 2 · ${view.questions.length} preguntas`,
+                stepLabel: t('onboarding.levelModalPhase2Questions', { count: view.questions.length }),
               })
             }
             style={styles.primaryWrap}
           >
             <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
-              <Text style={styles.primaryText}>Ir a las preguntas de Fase 2</Text>
+              <Text style={styles.primaryText}>{t('onboarding.levelModalPhase2Cta')}</Text>
             </LinearGradient>
           </Pressable>
         </View>
@@ -682,7 +678,7 @@ export function OnboardingLevelModal({
           {view.questions.map((q, idx) => (
             <View key={q.question_key} style={styles.phase2Block}>
               <Text style={styles.phase2Label}>
-                Pregunta {idx + 1} de {view.questions.length}
+                {t('onboarding.levelModalPhase2Questions', { count: view.questions.length })} · {idx + 1}/{view.questions.length}
               </Text>
               <Text style={styles.questionTitle}>{q.text}</Text>
               {renderQuestionBody(q, 'phase2')}
@@ -701,7 +697,7 @@ export function OnboardingLevelModal({
               {submitting ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.primaryText}>Calcular y guardar mi nivel</Text>
+                <Text style={styles.primaryText}>{t('onboarding.levelModalCalculateSave')}</Text>
               )}
             </LinearGradient>
           </Pressable>
@@ -709,7 +705,7 @@ export function OnboardingLevelModal({
       </>
     );
   } else if (view.kind === 'done') {
-    const eloLabel = Number.isFinite(view.elo) ? view.elo.toFixed(2) : '—';
+    const eloLabel = Number.isFinite(view.elo) ? view.elo.toFixed(2) : t('profile.publicProfileFallback');
     inner = (
       <View style={styles.doneRoot}>
         <Pressable style={[styles.iconClose, styles.doneClose]} onPress={handleClose}>
@@ -720,13 +716,10 @@ export function OnboardingLevelModal({
             <Ionicons name="sparkles" size={28} color="#fff" />
           </LinearGradient>
         </Animated.View>
-        <Text style={styles.doneTitle}>¡Nivelación completada con éxito!</Text>
-        <Text style={styles.doneEloLabel}>Tu nivel ELO inicial</Text>
+        <Text style={styles.doneTitle}>{t('onboarding.levelModalDoneTitle')}</Text>
+        <Text style={styles.doneEloLabel}>{t('onboarding.levelModalDoneEloLabel')}</Text>
         <Text style={styles.doneElo}>{eloLabel}</Text>
-        <Text style={styles.doneSub}>
-          Tu nivel inicial ya quedo configurado. Desde ahora vas a recibir emparejamientos y experiencias adaptadas a tu
-          perfil dentro del club.
-        </Text>
+        <Text style={styles.doneSub}>{t('onboarding.profileLevelCoachDesc')}</Text>
         <Pressable
           style={styles.primaryWrap}
           onPress={() => {
@@ -735,7 +728,7 @@ export function OnboardingLevelModal({
           }}
         >
           <LinearGradient pointerEvents="none" colors={['#F18F34', '#E95F32']} style={styles.primaryGrad}>
-            <Text style={styles.primaryText}>Listo</Text>
+            <Text style={styles.primaryText}>{t('onboarding.levelModalReady')}</Text>
           </LinearGradient>
         </Pressable>
       </View>

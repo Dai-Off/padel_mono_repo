@@ -10,17 +10,18 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { SearchClubGroup } from '../../domain/aggregateCourtsByClub';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 const IMAGE_SIZE = 112;
 const MAX_VISIBLE_SLOTS = 3;
 
-function getCerramientoLabel(indoor: boolean): string {
-  return indoor ? 'Indoor' : 'Exterior';
+function getCerramientoLabel(indoor: boolean, t: (key: string) => string): string {
+  return indoor ? t('common.indoor') : t('common.outdoor');
 }
 
-function getParedesLabel(glassType: string): string {
-  return glassType === 'panoramic' ? 'Cristal' : 'Muro';
+function getParedesLabel(glassType: string, t: (key: string) => string): string {
+  return glassType === 'panoramic' ? t('common.wallCristal') : t('common.wallMuro');
 }
 
 function locationDisplayText(city: string, address: string): string {
@@ -36,6 +37,7 @@ type SearchClubCardProps = {
 
 /** Tarjeta de club (tab Pistas), alineada al layout web: imagen + meta + tags + franja de horas. */
 export function SearchClubCard({ group, onPress, onFavoritePress }: SearchClubCardProps) {
+  const { t } = useTranslation();
   const { representative: c } = group;
   const imageUri = c.imageUrl;
   const distanceLabel = c.distanceKm != null ? `${Math.round(c.distanceKm)}km` : '';
@@ -56,7 +58,7 @@ export function SearchClubCard({ group, onPress, onFavoritePress }: SearchClubCa
           onPress={() => onFavoritePress?.()}
           style={({ pressed: p }) => [styles.favButton, p && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Añadir a favoritos"
+          accessibilityLabel={t('common.addToFavorites')}
           hitSlop={8}
         >
           <Ionicons name="heart-outline" size={14} color="#fff" />
@@ -111,10 +113,10 @@ export function SearchClubCard({ group, onPress, onFavoritePress }: SearchClubCa
 
           <View style={styles.tagsRow}>
             <View style={styles.tag}>
-              <Text style={styles.tagText}>{getCerramientoLabel(c.indoor)}</Text>
+              <Text style={styles.tagText}>{getCerramientoLabel(c.indoor, t)}</Text>
             </View>
             <View style={styles.tag}>
-              <Text style={styles.tagText}>{getParedesLabel(c.glassType)}</Text>
+              <Text style={styles.tagText}>{getParedesLabel(c.glassType, t)}</Text>
             </View>
           </View>
 

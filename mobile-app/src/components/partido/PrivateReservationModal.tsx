@@ -14,6 +14,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
+import { useTranslation } from '../../i18n';
 import { useSlotPrice } from '../../hooks/useSlotPrice';
 
 const ORANGE = '#F18F34';
@@ -61,6 +62,7 @@ function PrivateInfoRow({
  * Bottom sheet modal para confirmación de reserva privada (diseño Figma: header check + filas + email + Entendido).
  */
 export function PrivateReservationModal({ visible, data, onClose }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { height: screenH } = useWindowDimensions();
   const titleLine = `${data.courtName} - ${data.clubName}`;
@@ -77,10 +79,10 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
   });
 
   const getPriceValue = () => {
-    if (loading) return 'Calculando...';
+    if (loading) return t('common.loadingEllipsis');
     if (priceData) {
       if (priceData.source === 'none') {
-        return 'No disponible, contacta al club.';
+        return t('search.clubPriceError');
       }
       return `${(priceData.total_price_cents / 100).toFixed(2)} €`;
     }
@@ -96,7 +98,7 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
       statusBarTranslucent
     >
       <View style={styles.overlayRoot}>
-        <Pressable style={styles.backdropPress} onPress={onClose} accessibilityLabel="Cerrar fondo">
+        <Pressable style={styles.backdropPress} onPress={onClose} accessibilityLabel={t('common.close')}>
           <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFill} />
           <View style={styles.backdropDim} />
         </Pressable>
@@ -119,7 +121,7 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
                 style={[styles.closeFab, { top: Math.max(insets.top, 12) + 4 }]}
                 hitSlop={12}
                 accessibilityRole="button"
-                accessibilityLabel="Cerrar"
+                accessibilityLabel={t('common.close')}
               >
                 <Ionicons name="close" size={22} color="#4b5563" />
               </Pressable>
@@ -128,8 +130,8 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
                 <Ionicons name="checkmark" size={40} color="#fff" />
               </View>
 
-              <Text style={[styles.headerTitle, androidLabel({})]}>¡Reserva Confirmada!</Text>
-              <Text style={[styles.headerSub, androidLabel({})]}>Tu plaza ha sido reservada con éxito</Text>
+              <Text style={[styles.headerTitle, androidLabel({})]}>{t('alerts.ready.title')}</Text>
+              <Text style={[styles.headerSub, androidLabel({})]}>{t('common.paymentDone')}</Text>
             </LinearGradient>
 
             <View style={styles.body}>
@@ -137,7 +139,7 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
                 <View style={styles.badge}>
                   <Text style={styles.badgeEmoji}>{kind === 'tournament' ? '🏆' : '🎾'}</Text>
                   <Text style={[styles.badgeText, androidLabel({})]}>
-                    {kind === 'tournament' ? 'Torneo' : 'Partido'}
+                    {kind === 'tournament' ? t('common.comingSoon') : t('partidos.detailOpenMatch')}
                   </Text>
                 </View>
               </View>
@@ -145,18 +147,18 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
               <Text style={[styles.title, androidLabel({})]}>{titleLine}</Text>
 
               <View style={styles.rows}>
-                <PrivateInfoRow icon="calendar-outline" label="Fecha y hora" value={data.dateTimeFormatted} />
-                <PrivateInfoRow icon="time-outline" label="Duración" value={data.duration} />
-                <PrivateInfoRow icon="location-outline" label="Club" value={data.clubName} />
+                <PrivateInfoRow icon="calendar-outline" label={t('partidos.createDateTime')} value={data.dateTimeFormatted} />
+                <PrivateInfoRow icon="time-outline" label={t('partidos.detailDuration')} value={data.duration} />
+                <PrivateInfoRow icon="location-outline" label={t('common.clubFallback')} value={data.clubName} />
                 {data.spotsLine ? (
-                  <PrivateInfoRow icon="people-outline" label="Plazas" value={data.spotsLine} />
+                  <PrivateInfoRow icon="people-outline" label={t('common.playerCount')} value={data.spotsLine} />
                 ) : null}
-                <PrivateInfoRow icon="cash-outline" label="Precio" value={getPriceValue()} />
+                <PrivateInfoRow icon="cash-outline" label={t('common.sortByPrice')} value={getPriceValue()} />
               </View>
 
               <View style={styles.emailBox}>
                 <Text style={[styles.emailText, androidLabel({})]}>
-                  📧 Recibirás un email de confirmación con todos los detalles
+                  📧 {t('search.clubBookingConfirmError')}
                 </Text>
               </View>
             </View>
@@ -165,7 +167,7 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
           <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
             <Pressable onPress={onClose} style={({ pressed }) => [styles.ctaOuter, pressed && styles.pressed]}>
               <View style={styles.ctaSolid}>
-                <Text style={[styles.ctaText, androidLabel({})]}>Entendido</Text>
+                <Text style={[styles.ctaText, androidLabel({})]}>{t('common.understood')}</Text>
               </View>
             </Pressable>
           </View>

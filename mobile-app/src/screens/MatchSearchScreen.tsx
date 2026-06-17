@@ -10,6 +10,7 @@ import {
 import { FilterSearchHeader } from '../components/filters/FilterSearchHeader';
 import { filterTheme } from '../components/filters/filterTheme';
 import { countAdvancedSearchFilters } from '../domain/searchFilters';
+import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 import { SearchResultsList } from '../components/search/SearchResultsList';
 import { aggregateCourtsByClub } from '../domain/aggregateCourtsByClub';
@@ -25,6 +26,7 @@ type MatchSearchScreenProps = {
 
 /** Buscador de pistas (tab Pistas). */
 export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [filtersSheetVisible, setFiltersSheetVisible] = useState(false);
   const [quickPicker, setQuickPicker] = useState<SearchQuickPickerKind>(null);
@@ -74,7 +76,7 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
         <FilterSearchHeader
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          placeholder="Buscar club o zona..."
+          placeholder={t('search.searchPlaceholder')}
           onBack={onBack}
           showFiltersButton={false}
         />
@@ -111,8 +113,8 @@ export function MatchSearchScreen({ onCourtPress, onBack }: MatchSearchScreenPro
           onClubPress={onCourtPress}
           onFavoritePress={(court) =>
             Alert.alert(
-              'Favoritos',
-              `Próximamente podrás guardar «${court.clubName}» en favoritos.`,
+              t('search.favoritesAlertTitle'),
+              t('search.favoritesAlertBody', { clubName: court.clubName }),
             )
           }
         />

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { DailyLessonQuestion } from '../../api/dailyLessons';
+import { useTranslation } from '../../i18n';
 import { TestClassicQuestion } from './TestClassicQuestion';
 import { TrueFalseQuestion } from './TrueFalseQuestion';
 import { MultiSelectQuestion } from './MultiSelectQuestion';
@@ -17,6 +18,7 @@ type Props = {
 };
 
 export function QuestionCard({ question, onAnswered, onReplayVideo }: Props) {
+  const { t } = useTranslation();
   const [answered, setAnswered] = useState(false);
   const c = question.content as Record<string, unknown>;
 
@@ -82,7 +84,7 @@ export function QuestionCard({ question, onAnswered, onReplayVideo }: Props) {
           style={({ pressed }) => [styles.replayBtn, pressed && styles.replayPressed]}
         >
           <Ionicons name="reload" size={14} color="#F18F34" />
-          <Text style={styles.replayText}>Repetir video</Text>
+          <Text style={styles.replayText}>{t('learning.videoReplay')}</Text>
         </Pressable>
       )}
       {questionComponent}

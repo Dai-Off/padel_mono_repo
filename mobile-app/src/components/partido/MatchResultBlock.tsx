@@ -6,6 +6,7 @@ import {
   outcomeColor,
   outcomeLabel,
 } from '../../domain/matchOutcome';
+import { useTranslation } from '../../i18n';
 import type { PartidoItem } from '../../screens/PartidosScreen';
 
 type MatchResultBlockProps = {
@@ -14,6 +15,7 @@ type MatchResultBlockProps = {
 };
 
 export function MatchResultBlock({ partido, compact = false }: MatchResultBlockProps) {
+  const { t } = useTranslation();
   const outcome = classifyPartidoOutcome(partido);
   const hasScore = Array.isArray(partido.sets) && partido.sets.length > 0;
   const scoreText = hasScore ? formatSetsScore(partido.sets!, partido.myTeam) : null;
@@ -23,7 +25,7 @@ export function MatchResultBlock({ partido, compact = false }: MatchResultBlockP
     return (
       <View style={[styles.row, compact && styles.rowCompact]}>
         <Ionicons name="close-circle-outline" size={compact ? 14 : 16} color={color} />
-        <Text style={[styles.label, compact && styles.labelCompact, { color }]}>Partido cancelado</Text>
+        <Text style={[styles.label, compact && styles.labelCompact, { color }]}>{t('partidos.matchCanceled')}</Text>
       </View>
     );
   }

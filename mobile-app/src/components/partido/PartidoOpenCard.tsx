@@ -18,6 +18,7 @@ import {
   type ProfileForPartidoEnrich,
 } from "../../lib/partidoPlayerUtils";
 import type { PartidoItem, PartidoPlayer } from "../../screens/PartidosScreen";
+import { useTranslation } from "../../i18n";
 
 import { useAmbientTheme } from "../../hooks/useAmbientTheme";
 import { OPENWEATHER_API_KEY } from "../../config";
@@ -65,14 +66,13 @@ function countFree(players: PartidoPlayer[]): number {
   return players.filter((p) => p.isFree).length;
 }
 
-function matchPhaseLabel(item: PartidoItem): string {
+function matchPhaseLabel(item: PartidoItem, t: (key: string) => string): string {
   const phase = item.matchPhase ?? 'upcoming';
   if (phase === 'past') {
     const status = String(item.matchStatus ?? '').toLowerCase();
-    return status === 'cancelled' ? 'Cancelado' : 'Finalizado';
+    return status === 'cancelled' ? t('partidos.statusCancelled') : t('partidos.statusFinished');
   }
-  // En el home “mis partidos” normalmente incluye próximos y en curso.
-  return 'Próximo';
+  return t('partidos.statusUpcoming');
 }
 
 type Props = {
@@ -115,6 +115,7 @@ function PlayerFace({
 
 /** Tarjeta alineada al listado web (imagen + meta + slots horizontales). */
 export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
+  const { t } = useTranslation();
   const theme = useAmbientTheme(OPENWEATHER_API_KEY);
   const { profile } = useHomeData();
   const currentProfile: ProfileForPartidoEnrich | null = profile?.id
@@ -139,7 +140,7 @@ export function PartidoOpenCard({ item, onPress, fullWidth }: Props) {
   }, [item.id, item.venueImage]);
 
   const libres = countFree(item.players);
-  const phaseLabel = matchPhaseLabel(item);
+  const phaseLabel = matchPhaseLabel(item, t);
   const isPast = (item.matchPhase ?? 'upcoming') === 'past';
 
   return (

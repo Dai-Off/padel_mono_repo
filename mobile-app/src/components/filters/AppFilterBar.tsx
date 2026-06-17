@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 import { FilterChipButton } from './FilterChipButton';
 import { filterTheme } from './filterTheme';
 
@@ -31,6 +32,8 @@ export function AppFilterBar({
   paddingHorizontal = 16,
   trailing,
 }: AppFilterBarProps) {
+  const { t } = useTranslation();
+
   return (
     <ScrollView
       horizontal
@@ -46,7 +49,7 @@ export function AppFilterBar({
             pressed && styles.pressed,
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Más filtros"
+          accessibilityLabel={t('search.filtersTitle')}
         >
           <Ionicons
             name="options-outline"
