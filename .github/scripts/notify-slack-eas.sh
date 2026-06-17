@@ -22,6 +22,7 @@ EXPO_URL="${EXPO_URL:-}"
 RUN_URL="${RUN_URL:-}"
 INSTALL_URL="${INSTALL_URL:-}"
 BUILD_PAGE_URL="${BUILD_PAGE_URL:-}"
+DEPLOY_REASON="${DEPLOY_REASON:-}"
 
 case "$ENV_KEY" in
   production)
@@ -52,7 +53,17 @@ if [ "$TYPE" = "ota" ]; then
   CTA_LABEL="Ver updates en Expo"
 else
   TITLE="${ENV_EMOJI} ${ENV_LABEL} — build Android listo"
-  BODY=$'Nuevo APK publicado. Usá el link directo o el QR para instalar en Android.'
+  case "$DEPLOY_REASON" in
+    native_changes)
+      BODY=$':warning: *Cambios nativos detectados* (deps, plugins, config nativa).\nEl OTA no alcanza: *reinstalá el APK* con el link o QR de abajo.'
+      ;;
+    no_apk)
+      BODY=$'Primer APK de este ambiente. Instalá con el link directo o el QR.'
+      ;;
+    *)
+      BODY=$'Nuevo APK publicado. Usá el link directo o el QR para instalar en Android.'
+      ;;
+  esac
   CTA_LABEL="Ver build en Expo"
 fi
 

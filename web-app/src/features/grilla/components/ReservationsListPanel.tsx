@@ -5,6 +5,8 @@ import {
     ChevronRight,
     Calendar,
     LayoutGrid,
+    Menu,
+    BarChart3,
     X,
     Pencil,
     Eye,
@@ -67,12 +69,16 @@ const SOURCE_OPTIONS = [
 type Props = {
     reservations: Reservation[];
     courts: Court[];
-    dateStr: string;
+    dateFrom: string;
+    dateTo: string;
     clubName?: string;
-    onDateChange: (dateStr: string) => void;
+    typeConfigs?: Record<string, { color: string | null; display_name: string; is_system: boolean }>;
+    onDateRangeChange: (dateFrom: string, dateTo: string) => void;
     onEditBooking: (bookingId: string) => void;
     onDeleteBookings: (bookingIds: string[]) => Promise<void>;
     onOpenGrid: () => void;
+    onOpenMenu: () => void;
+    onOpenResumen: () => void;
     loading?: boolean;
 };
 
@@ -94,15 +100,26 @@ function shiftDateStr(dateStr: string, days: number): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function shiftDateRange(from: string, to: string, days: number): { from: string; to: string } {
+    return {
+        from: shiftDateStr(from, days),
+        to: shiftDateStr(to, days),
+    };
+}
+
 export const ReservationsListPanel: React.FC<Props> = ({
     reservations,
     courts,
-    dateStr,
+    dateFrom,
+    dateTo,
     clubName,
-    onDateChange,
+    typeConfigs,
+    onDateRangeChange,
     onEditBooking,
     onDeleteBookings,
     onOpenGrid,
+    onOpenMenu,
+    onOpenResumen,
     loading,
 }) => {
     const { t } = useGrillaTranslation();
@@ -116,7 +133,7 @@ export const ReservationsListPanel: React.FC<Props> = ({
 
     useEffect(() => {
         setSelectedIds(new Set());
-    }, [dateStr, reservations]);
+    }, [dateFrom, dateTo, reservations]);
 
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -135,9 +152,25 @@ export const ReservationsListPanel: React.FC<Props> = ({
         [courts],
     );
 
+    const normalizedFrom = dateFrom <= dateTo ? dateFrom : dateTo;
+    const normalizedTo = dateFrom <= dateTo ? dateTo : dateFrom;
+    const isMultiDay = normalizedFrom !== normalizedTo;
+
+    const reservationTypeOptions = useMemo(() => {
+        const configured = typeConfigs ? Object.keys(typeConfigs) : [];
+        const fromData = new Set(reservations.map((r) => r.booking_type));
+        const values = new Set([...configured, ...fromData]);
+        return RESERVATION_TYPE_OPTIONS.filter((opt) => values.has(opt.value));
+    }, [typeConfigs, reservations]);
+
     const sorted = useMemo(
-        () => [...reservations].sort((a, b) => a.startTime.localeCompare(b.startTime)),
-        [reservations],
+        () => [...reservations].sort((a, b) => {
+            const da = a.bookingDate ?? normalizedFrom;
+            const db = b.bookingDate ?? normalizedFrom;
+            if (da !== db) return da.localeCompare(db);
+            return a.startTime.localeCompare(b.startTime);
+        }),
+        [reservations, normalizedFrom],
     );
 
     const filtered = useMemo(() => filterReservations(sorted, filters), [sorted, filters]);
@@ -201,13 +234,13 @@ export const ReservationsListPanel: React.FC<Props> = ({
     }, [filters, typeLabel, t]);
 
     const handleExportExcel = () => {
-        const rows = buildReservationExcelRows(filtered, dateStr, {
+        const rows = buildReservationExcelRows(filtered, normalizedFrom, {
             status: statusLabel,
             type: typeLabel,
         });
         downloadReservationsExcel({
             rows,
-            dateStr,
+            dateStr: isMultiDay ? `${normalizedFrom}_${normalizedTo}` : normalizedFrom,
             clubName,
             filterSummary,
         });
@@ -245,15 +278,33 @@ export const ReservationsListPanel: React.FC<Props> = ({
                         </p>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <button
+                            type="button"
+                            onClick={onOpenMenu}
+                            title={t('navigation.openMenu')}
+                            className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50"
+                        >
+                            <Menu className="w-4 h-4" />
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onOpenResumen}
+                            title={t('navigation.backToResumen')}
+                            className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-[#006A6A]/5 hover:border-[#006A6A] hover:text-[#006A6A]"
+                        >
+                            <BarChart3 className="w-4 h-4" />
+                        </button>
                         <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
-                            <button type="button" onClick={() => onDateChange(shiftDateStr(dateStr, -1))} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-r border-gray-200">
+                            <button type="button" onClick={() => { const next = shiftDateRange(normalizedFrom, normalizedTo, -1); onDateRangeChange(next.from, next.to); }} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-r border-gray-200">
                                 <ChevronLeft className="w-4 h-4" />
                             </button>
                             <div className="px-3 py-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-[90px] justify-center">
-                                {formatDateLabel(dateStr)}
+                                {isMultiDay
+                                    ? `${formatDateLabel(normalizedFrom)} – ${formatDateLabel(normalizedTo)}`
+                                    : formatDateLabel(normalizedFrom)}
                                 <Calendar className="w-3.5 h-3.5 text-gray-400" />
                             </div>
-                            <button type="button" onClick={() => onDateChange(shiftDateStr(dateStr, 1))} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-l border-gray-200">
+                            <button type="button" onClick={() => { const next = shiftDateRange(normalizedFrom, normalizedTo, 1); onDateRangeChange(next.from, next.to); }} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-l border-gray-200">
                                 <ChevronRight className="w-4 h-4" />
                             </button>
                         </div>
@@ -305,6 +356,7 @@ export const ReservationsListPanel: React.FC<Props> = ({
                                     filters={filters}
                                     setFilter={setFilter}
                                     typeLabel={typeLabel}
+                                    reservationTypeOptions={reservationTypeOptions}
                                     activeFilterCount={advancedFilterCount}
                                     clearFilters={clearFilters}
                                     onClose={() => setShowAdvancedFilters(false)}
@@ -317,8 +369,11 @@ export const ReservationsListPanel: React.FC<Props> = ({
 
                 {/* Filtros principales siempre visibles */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                    <FilterField label={t('reservationsList.filterDate')}>
-                        <input type="date" value={dateStr} onChange={(e) => e.target.value && onDateChange(e.target.value)} className={inputClass} />
+                    <FilterField label={t('reservationsList.filterDateFrom')}>
+                        <input type="date" value={dateFrom} onChange={(e) => e.target.value && onDateRangeChange(e.target.value, dateTo)} className={inputClass} />
+                    </FilterField>
+                    <FilterField label={t('reservationsList.filterDateTo')}>
+                        <input type="date" value={dateTo} onChange={(e) => e.target.value && onDateRangeChange(dateFrom, e.target.value)} className={inputClass} />
                     </FilterField>
                     <FilterField label={t('reservationsList.filterCourt')}>
                         <select value={filters.court} onChange={(e) => setFilter('court', e.target.value)} className={inputClass}>
@@ -371,6 +426,7 @@ export const ReservationsListPanel: React.FC<Props> = ({
                                     />
                                 </th>
                                 <th className="px-3 py-2.5">{t('reservationsList.colTime')}</th>
+                                {isMultiDay && <th className="px-3 py-2.5">{t('reservationsList.colDate')}</th>}
                                 <th className="px-3 py-2.5">{t('reservationsList.colCourt')}</th>
                                 <th className="px-3 py-2.5">{t('reservationsList.colType')}</th>
                                 <th className="px-3 py-2.5">{t('reservationsList.colClient')}</th>
@@ -412,6 +468,11 @@ export const ReservationsListPanel: React.FC<Props> = ({
                                             {res.startTime} – {getReservationEndTime(res)}
                                             <span className="text-gray-400 ml-1">({res.durationMinutes}′)</span>
                                         </td>
+                                        {isMultiDay && (
+                                            <td className="px-3 py-2.5 whitespace-nowrap text-gray-600">
+                                                {res.bookingDate ? formatDateLabel(res.bookingDate) : '—'}
+                                            </td>
+                                        )}
                                         <td className="px-3 py-2.5 font-medium">{res.courtName ?? '—'}</td>
                                         <td className="px-3 py-2.5">
                                             <span className="inline-block px-1.5 py-0.5 rounded bg-gray-100 text-[10px] font-semibold">
@@ -473,7 +534,7 @@ export const ReservationsListPanel: React.FC<Props> = ({
 
             <ReservationDetailModal
                 reservation={detailReservation}
-                dateStr={dateStr}
+                dateStr={detailReservation?.bookingDate ?? normalizedFrom}
                 onClose={() => setDetailReservation(null)}
                 onEdit={onEditBooking}
             />
@@ -507,13 +568,14 @@ const AdvancedFiltersPanel = React.forwardRef<
         filters: ReservationListFilters;
         setFilter: <K extends keyof ReservationListFilters>(key: K, value: ReservationListFilters[K]) => void;
         typeLabel: (type: string) => string;
+        reservationTypeOptions: readonly { value: string; labelKey: string }[];
         activeFilterCount: number;
         clearFilters: () => void;
         onClose: () => void;
         t: (key: string, opts?: Record<string, string | number>) => string;
     }
 >(function AdvancedFiltersPanel(
-    { filters, setFilter, typeLabel, activeFilterCount, clearFilters, onClose, t },
+    { filters, setFilter, typeLabel, reservationTypeOptions, activeFilterCount, clearFilters, onClose, t },
     ref,
 ) {
     const inputClass = 'w-full px-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-[#006A6A]';
@@ -524,7 +586,7 @@ const AdvancedFiltersPanel = React.forwardRef<
                 <FilterField label={t('reservationsList.filterType')}>
                     <select value={filters.reservationType} onChange={(e) => setFilter('reservationType', e.target.value)} className={inputClass}>
                         <option value="">{t('reservationsList.all')}</option>
-                        {RESERVATION_TYPE_OPTIONS.map((opt) => (
+                        {reservationTypeOptions.map((opt) => (
                             <option key={opt.value} value={opt.value}>{typeLabel(opt.value)}</option>
                         ))}
                     </select>

@@ -7,6 +7,7 @@ import { DASH, dash } from './dash';
 import { androidReadableText } from './textStyles';
 import { ScalePressable } from './ScalePressable';
 import { LOCK_BADGE_ICON_SIZE, lockBadgeStyles, lockBadgeTint } from './lockBadgeStyles';
+import { useTranslation } from '../../../i18n';
 
 // Triplete RGB del color AMBER (#f59e0b) para tintar el badge sin repetir
 // la conversión hex→rgba en cada uso.
@@ -113,6 +114,7 @@ export function CompetitiveLeagueHomeCard({
   onPress,
   locked = false,
 }: Props) {
+  const { t } = useTranslation();
   const pct =
     ladderProgressPercent != null &&
     !Number.isNaN(ladderProgressPercent) &&
@@ -152,7 +154,7 @@ export function CompetitiveLeagueHomeCard({
             <View style={styles.titleBlock}>
               <View style={[styles.titleLine, compact && styles.titleLineCompact]}>
                 <Text style={[styles.title, compact && styles.titleCompact]}>
-                  Liga Competitiva
+                  {t('home.competitiveLeague.title')}
                 </Text>
                 <View style={[styles.badge2v2, compact && styles.badge2v2Compact]}>
                   <Text style={[styles.badge2v2Text, compact && styles.badge2v2TextCompact]}>
@@ -163,17 +165,19 @@ export function CompetitiveLeagueHomeCard({
                 </View>
               </View>
               <Text style={[styles.sub, compact && styles.subCompact]}>
-                Partidos rankeados por parejas
+                {t('home.competitiveLeague.subtitle')}
               </Text>
             </View>
           </View>
           {locked ? (
             <View
               style={[lockBadgeStyles.badge, lockBadgeTint(AMBER_RGB)]}
-              accessibilityLabel="Cuestionario de nivelación pendiente"
+              accessibilityLabel={t('home.competitiveLeague.lockedA11y')}
             >
               <Ionicons name="lock-closed" size={LOCK_BADGE_ICON_SIZE} color={AMBER} />
-              <Text style={[lockBadgeStyles.text, { color: AMBER }]}>Bloqueado</Text>
+              <Text style={[lockBadgeStyles.text, { color: AMBER }]}>
+                {t('home.competitiveLeague.locked')}
+              </Text>
             </View>
           ) : (
             <Ionicons name="chevron-forward" size={compact ? 18 : 22} color="#6b7280" />
@@ -182,13 +186,17 @@ export function CompetitiveLeagueHomeCard({
 
         <View style={[styles.midRow, compact && styles.midRowCompact]}>
           <View>
-            <Text style={[styles.smallCap, compact && styles.smallCapCompact]}>Tu división</Text>
+            <Text style={[styles.smallCap, compact && styles.smallCapCompact]}>
+              {t('home.competitiveLeague.yourDivision')}
+            </Text>
             <Text style={[styles.division, compact && styles.divisionCompact, { color: AMBER }]}>
               {dash(divisionName)}
             </Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={[styles.smallCap, compact && styles.smallCapCompact]}>League Points</Text>
+            <Text style={[styles.smallCap, compact && styles.smallCapCompact]}>
+              {t('home.competitiveLeague.leaguePoints')}
+            </Text>
             <Text style={[styles.lp, compact && styles.lpCompact]}>{dash(leaguePoints)}</Text>
           </View>
         </View>
@@ -239,7 +247,7 @@ export function CompetitiveLeagueHomeCard({
                 !compact && (Platform.OS === 'ios' ? styles.footerHint : styles.footerHintAndroid),
               ]}
             >
-              Toca para buscar partido 2v2 (matchmaking rankeado)
+              {t('home.competitiveLeague.footerHint')}
             </Text>
           </View>
         </View>

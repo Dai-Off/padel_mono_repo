@@ -62,8 +62,11 @@ Requiere [EAS CLI](https://docs.expo.dev/build/setup/) y cuenta Expo.
 Las tres ramas comparten el mismo proyecto Expo (`padel-app`) pero no se pisan: cada una publica en su canal.
 
 **CI (GitHub Actions):**
-- `eas-update.yml` — publica OTA al pushear a `main`, `develop` o `demo`. Si el ambiente no tiene APK, lo genera automáticamente (~15 min extra la primera vez).
-- `eas-android.yml` — build nativo Android manual (Actions → EAS Android Build → elegir perfil).
+- `eas-update.yml` — al pushear a `main`, `develop` o `demo`, compara el *fingerprint* de Expo con el último APK:
+  - Solo JS/TS → **OTA** (~2 min)
+  - Deps nativas, plugins, `app.json`, `android/` → **APK nuevo** (~15 min)
+  - Sin APK en el ambiente → **APK nuevo**
+- `eas-android.yml` — build Android manual si hace falta forzarlo.
 
 **Setup inicial en Expo (una sola vez, canal `develop`):**
 ```bash

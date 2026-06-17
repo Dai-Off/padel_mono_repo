@@ -22,8 +22,11 @@ import { useHomeData } from '../../../contexts/HomeDataContext';
 // con su propia frescura). En esta card consumimos del HomeDataContext.
 import { loadProgress } from '../../../lib/dailyLessonStorage';
 import { CLUB_IANA_TIMEZONE } from '../../../lib/clubTimeZone';
+import { useTranslation } from '../../../i18n';
+import { es } from '../../../i18n/es';
+import { zhHK } from '../../../i18n/zh-HK';
 
-const WEEK_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
+const WEEK_DAY_COUNT = 7;
 const TIMEZONE = CLUB_IANA_TIMEZONE;
 
 // Tiers de bonus alineados con backend (learningStreaks.getMultiplier):
@@ -32,11 +35,11 @@ const TIMEZONE = CLUB_IANA_TIMEZONE;
 //   racha 8-20 → x2    (multiplier 1.0 → factor 2.0)
 //   racha 21-45→ x2.5  (multiplier 1.5 → factor 2.5)
 //   racha 46+  → x3    (multiplier 2.0 → factor 3.0)
-const BONUS_TIERS = [
-  { minStreak: 3,  label: 'Bonus x1.5 SP', color: '#FB923C' },
-  { minStreak: 8,  label: 'Bonus x2 SP',   color: '#FDBA74' },
-  { minStreak: 21, label: 'Bonus x2.5 SP', color: '#FCD34D' },
-  { minStreak: 46, label: 'Bonus x3 SP',   color: '#FCD34D' },
+const BONUS_TIER_KEYS = [
+  { minStreak: 3, labelKey: 'home.dailyLesson.bonus15', color: '#FB923C' },
+  { minStreak: 8, labelKey: 'home.dailyLesson.bonus2', color: '#FDBA74' },
+  { minStreak: 21, labelKey: 'home.dailyLesson.bonus25', color: '#FCD34D' },
+  { minStreak: 46, labelKey: 'home.dailyLesson.bonus3', color: '#FCD34D' },
 ] as const;
 
 type Props = {
@@ -106,20 +109,29 @@ function DailyLessonIconBackdropSvg({ color }: { color: string }) {
 // Devuelve el texto del badge de bonus (sin la llama ni la racha — esos los
 // renderiza el caller). En modo countdown añade el "en N más" para indicar
 // cuánto falta para el primer tier.
-function getBonusInfo(streak: number): { text: string; color: string } {
+function getBonusInfo(
+  streak: number,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): { text: string; color: string } {
   if (streak < 3) {
     const remaining = 3 - streak;
-    const dayWord = remaining === 1 ? 'día restante' : 'días restantes';
+    const daysLabel =
+      remaining === 1
+        ? t('home.dailyLesson.dayRemainingOne')
+        : t('home.dailyLesson.dayRemainingMany');
     return {
-      text: `${remaining} ${dayWord} para Bonus x1.5 SP`,
+      text: t('home.dailyLesson.bonusCountdown', { remaining, daysLabel }),
       color: '#9CA3AF',
     };
   }
-  for (let i = BONUS_TIERS.length - 1; i >= 0; i--) {
-    const t = BONUS_TIERS[i];
-    if (streak >= t.minStreak) return { text: t.label, color: t.color };
+  for (let i = BONUS_TIER_KEYS.length - 1; i >= 0; i--) {
+    const tier = BONUS_TIER_KEYS[i];
+    if (streak >= tier.minStreak) {
+      return { text: t(tier.labelKey), color: tier.color };
+    }
   }
-  return { text: BONUS_TIERS[0].label, color: BONUS_TIERS[0].color };
+  const fallback = BONUS_TIER_KEYS[0];
+  return { text: t(fallback.labelKey), color: fallback.color };
 }
 
 function getMultiplierLabel(multiplier: number): string | null {
@@ -157,7 +169,10 @@ export function DailyLessonCard({
   variant = 'default',
   streakRefreshKey = 0,
 }: Props) {
+  const { locale, t } = useTranslation();
   const { session } = useAuth();
+  const weekLabels =
+    locale === 'zh-HK' ? zhHK.home.dailyLesson.weekDays : es.home.dailyLesson.weekDays;
   // Profile cacheado a nivel de app (HomeDataContext). Evita el GET /players/me
   // que esta card hacía al montar — el dato ya está cargado tras el login.
   const { profile, streak, streakLoading } = useHomeData();
@@ -199,7 +214,7 @@ export function DailyLessonCard({
 
   const dayEnterRef = useRef<Animated.Value[] | null>(null);
   if (!dayEnterRef.current) {
-    dayEnterRef.current = WEEK_LABELS.map(() => new Animated.Value(0));
+    dayEnterRef.current = Array.from({ length: WEEK_DAY_COUNT }, () => new Animated.Value(0));
   }
   const dayEnter = dayEnterRef.current;
 
@@ -208,7 +223,7 @@ export function DailyLessonCard({
   const completedToday = isLessonCompletedToday(lastCompleted, TIMEZONE);
 
   const multiplierLabel = getMultiplierLabel(multiplier);
-  const bonusFromStreak = getBonusInfo(currentStreak);
+  const bonusFromStreak = getBonusInfo(currentStreak, t);
 
   /** Fondo: pulso tipo Motion (~5s easeInOut 0↔1). */
   useEffect(() => {
@@ -538,8 +553,8 @@ export function DailyLessonCard({
                 </LinearGradient>
               </View>
               <View style={styles.titleCol}>
-                <Text style={styles.title}>Lección diaria</Text>
-                <Text style={styles.subtitle}>Racha semanal</Text>
+                <Text style={styles.title}>{t('home.dailyLesson.title')}</Text>
+                <Text style={styles.subtitle}>{t('home.dailyLesson.subtitle')}</Text>
                 {!isCarousel && multiplierLabel ? (
                   <Text style={styles.subtitleXp}>{multiplierLabel}</Text>
                 ) : null}
@@ -554,15 +569,17 @@ export function DailyLessonCard({
               // (Lección, IA, Liga) sean visualmente idénticas.
               <View
                 style={styles.lockedBadge}
-                accessibilityLabel="Cuestionario de nivelación pendiente"
+                accessibilityLabel={t('home.dailyLesson.lockedA11y')}
               >
                 <Ionicons name="lock-closed" size={12} color={color1} />
-                <Text style={[styles.lockedBadgeText, { color: color1 }]}>Bloqueado</Text>
+                <Text style={[styles.lockedBadgeText, { color: color1 }]}>
+                  {t('home.dailyLesson.locked')}
+                </Text>
               </View>
             ) : completedToday ? (
               <View style={styles.hechaBadge}>
                 <Ionicons name="checkmark-circle" size={12} color={color1} />
-                <Text style={[styles.hechaText, { color: color1 }]}>Hecha</Text>
+                <Text style={[styles.hechaText, { color: color1 }]}>{t('home.dailyLesson.done')}</Text>
               </View>
             ) : (
               <Animated.View
@@ -572,7 +589,7 @@ export function DailyLessonCard({
                 {/* "Continuar" cuando hay una sesión a medias guardada. La
                     pantalla detalle hace lo mismo (resume vs nueva). */}
                 <Text style={[styles.ctaInline, { color: color1 }]}>
-                  {hasResume ? 'Continuar' : 'Empezar'}
+                  {hasResume ? t('home.dailyLesson.continue') : t('home.dailyLesson.start')}
                 </Text>
                 <Ionicons name="chevron-forward" size={14} color={color1} />
               </Animated.View>
@@ -588,7 +605,9 @@ export function DailyLessonCard({
             <View style={styles.streakInline}>
               <Ionicons name="flame" size={10} color="#FB923C" />
               <Text style={styles.streakText}>
-                {currentStreak} día{currentStreak === 1 ? '' : 's'}
+                {t(currentStreak === 1 ? 'home.dailyLesson.dayOne' : 'home.dailyLesson.dayMany', {
+                  count: currentStreak,
+                })}
               </Text>
             </View>
             <Text style={[styles.bonusText, { color: bonusFromStreak.color }]}>
@@ -597,7 +616,7 @@ export function DailyLessonCard({
           </View>
 
           <View style={[styles.daysRow, isCarousel && styles.daysRowCarousel]}>
-            {WEEK_LABELS.map((label, i) => {
+            {weekLabels.map((label, i) => {
               const status = getDayStatus(i, todayIndex, currentStreak, completedToday);
               const enter = dayEnter[i];
               const colStyle = {

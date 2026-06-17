@@ -24,11 +24,9 @@ import {
 import { LivePingRing } from './LivePingRing';
 import { INICIO_ENTER_EASING } from './inicioMotion';
 import { ScalePressable } from './ScalePressable';
+import { useTranslation } from '../../../i18n';
 
 const AnimatedImage = Animated.createAnimatedComponent(Image);
-
-/** Evita que Android parta el título y solo pinte «En». */
-const TITLE_EN_DIRECTO = 'En\u00A0Directo';
 
 const CARD_W = 280;
 
@@ -58,9 +56,11 @@ function filledSlots(p: PartidoItem): number {
 function EnDirectoLiveCard({
   p,
   onPartidoPress,
+  t,
 }: {
   p: PartidoItem;
   onPartidoPress?: (partido: PartidoItem) => void;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }) {
   const imgScale = useRef(new Animated.Value(1)).current;
 
@@ -74,9 +74,13 @@ function EnDirectoLiveCard({
   };
 
   const { date, time } = splitDateTime(p.dateTime);
-  const modeLabel = p.mode === 'competitivo' ? 'Competitivo' : 'Partido';
+  const modeLabel =
+    p.mode === 'competitivo' ? t('home.enDirecto.competitive') : t('home.enDirecto.casual');
   const filled = filledSlots(p);
-  const badge = filled === 1 ? '1 jugador' : `${filled} jugadores`;
+  const badge =
+    filled === 1
+      ? t('home.enDirecto.playerOne')
+      : t('home.enDirecto.playerMany', { count: filled });
 
   return (
     <ScalePressable
@@ -178,12 +182,15 @@ export function EnDirectoSection({
   onPartidoPress,
   onOpenPartidos,
 }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const countLine = loading
-    ? 'Buscando partidos en curso…'
+    ? t('home.enDirecto.loading')
     : partidos.length === 0
-      ? 'Nadie en pista en este momento'
-      : `${partidos.length} partido${partidos.length === 1 ? '' : 's'} en curso`;
+      ? t('home.enDirecto.emptyCount')
+      : partidos.length === 1
+        ? t('home.enDirecto.liveOne', { count: partidos.length })
+        : t('home.enDirecto.liveMany', { count: partidos.length });
 
   return (
     <View style={styles.section}>
@@ -212,7 +219,7 @@ export function EnDirectoSection({
                   ? { textBreakStrategy: 'simple' as const }
                   : {})}
               >
-                {TITLE_EN_DIRECTO}
+                {t('home.enDirecto.title')}
               </Text>
             </View>
           </View>
@@ -229,7 +236,7 @@ export function EnDirectoSection({
         ]}
       >
           {partidos.map((p) => (
-            <EnDirectoLiveCard key={p.id} p={p} onPartidoPress={onPartidoPress} />
+            <EnDirectoLiveCard key={p.id} p={p} onPartidoPress={onPartidoPress} t={t} />
           ))}
       </ScrollView>
       ) : (
@@ -252,7 +259,7 @@ export function EnDirectoSection({
             <ScalePressable
               onPress={() => onOpenPartidos?.()}
               accessibilityRole="button"
-              accessibilityLabel="Ver partidos abiertos"
+              accessibilityLabel={t('home.enDirecto.exploreMatchesA11y')}
               pressedScale={0.99}
               style={({ pressed }) => [
                 styles.emptyStateOuter,
@@ -278,7 +285,7 @@ export function EnDirectoSection({
                     ? { textBreakStrategy: 'simple' as const }
                     : {})}
                 >
-                  No hay partidos en directo
+                  {t('home.enDirecto.emptyTitle')}
                 </Text>
                 <Text
                   style={styles.emptySubtitle}
@@ -286,12 +293,12 @@ export function EnDirectoSection({
                     ? { textBreakStrategy: 'simple' as const }
                     : {})}
                 >
-                  Ahora mismo no hay ningún partido dentro de su horario.{'\n'}
-                  Cuando alguien esté jugando, lo mostraremos aquí.
+                  {t('home.enDirecto.emptySubtitle')}
                 </Text>
                 <View style={styles.emptyCtaWrap}>
                   <Text style={styles.emptyCtaText}>
-                    Explorar partidos <Text style={styles.emptyCtaChevronText}>›</Text>
+                    {t('home.enDirecto.exploreMatches')}{' '}
+                    <Text style={styles.emptyCtaChevronText}>›</Text>
                   </Text>
                 </View>
               </LinearGradient>

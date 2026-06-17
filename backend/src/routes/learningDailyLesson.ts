@@ -29,81 +29,80 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
 
     const timezone = String(req.query.timezone ?? 'UTC').trim() || 'UTC';
 
-    // Check if already completed today
     const { start, end } = getTodayRange(timezone);
     const supabase = getSupabaseServiceRoleClient();
 
-    const { data: todaySession, error: sessionErr } = await supabase
-      .from('learning_sessions')
-      .select('id, correct_count, total_count, score, xp_earned, completed_at')
-      .eq('player_id', player.id)
-      .gte('completed_at', start)
-      .lte('completed_at', end)
-      .order('completed_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (sessionErr) return res.status(500).json({ ok: false, error: sessionErr.message });
-
-    // Fetch all active questions and user history in parallel (also needed for repeat)
-    const [questionsRes, historyRes] = await Promise.all([
+    // ---------------------------------------------------------------------
+    // FASE 1 — Solo metadatos ligeros (sin `content`).
+    // El algoritmo de selección únicamente usa id/type/level/area + historial,
+    // así que evitamos transferir el JSON `content` de TODO el banco para
+    // acabar usando solo 5 preguntas. Las 4 consultas van en paralelo:
+    //  - sesión de hoy (already_completed)
+    //  - metadatos de preguntas publicadas
+    //  - historial del jugador
+    //  - ids de puzzles válidos (para excluir huérfanos antes de seleccionar)
+    // ---------------------------------------------------------------------
+    const [sessionRes, questionsRes, historyRes, puzzleIdsRes] = await Promise.all([
+      supabase
+        .from('learning_sessions')
+        .select('id, correct_count, total_count, score, xp_earned, completed_at')
+        .eq('player_id', player.id)
+        .gte('completed_at', start)
+        .lte('completed_at', end)
+        .order('completed_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
       supabase
         .from('learning_questions')
-        .select('id, type, level, area, has_video, video_url, content, created_by_club, clubs:created_by_club(name, city)')
         // Solo se sirven preguntas publicadas. Drafts e inactivas se quedan fuera.
+        .select('id, type, level, area, has_video, video_url')
         .eq('status', 'published'),
       supabase
         .from('learning_question_log')
         .select('question_id, answered_correctly, answered_at')
         .eq('player_id', player.id)
         .order('answered_at', { ascending: true }),
+      supabase
+        .from('learning_puzzles')
+        .select('question_id'),
     ]);
 
+    if (sessionRes.error) return res.status(500).json({ ok: false, error: sessionRes.error.message });
     if (questionsRes.error) return res.status(500).json({ ok: false, error: questionsRes.error.message });
     if (historyRes.error) return res.status(500).json({ ok: false, error: historyRes.error.message });
+    if (puzzleIdsRes.error) return res.status(500).json({ ok: false, error: puzzleIdsRes.error.message });
 
-    let questions = (questionsRes.data ?? []) as QuestionRow[];
+    const todaySession = sessionRes.data;
+
+    type QuestionMetaRow = {
+      id: string; type: string; level: number; area: string;
+      has_video: boolean; video_url: string | null;
+    };
+    const metaRows = (questionsRes.data ?? []) as QuestionMetaRow[];
     const history = (historyRes.data ?? []) as HistoryEntry[];
 
-    if (questions.length === 0) {
+    if (metaRows.length === 0) {
       // Sin preguntas publicadas en absoluto. Mismo flag para que el mobile
       // muestre la pantalla "Lección no disponible" en vez de un error genérico.
       return res.json({ ok: true, already_completed: false, questions: [], not_enough_questions: true });
     }
 
-    // Para preguntas type='puzzle', el `content` está en learning_puzzles. Mergear.
-    const puzzleIds = questions.filter((q) => q.type === 'puzzle').map((q) => q.id);
-    if (puzzleIds.length > 0) {
-      const { data: puzzles, error: puzzleErr } = await supabase
-        .from('learning_puzzles')
-        .select('question_id, statement, intro_frame, initial_frame, options, schema_version')
-        .in('question_id', puzzleIds);
-      if (puzzleErr) return res.status(500).json({ ok: false, error: puzzleErr.message });
-      const byQ = new Map((puzzles ?? []).map((p) => [String(p.question_id), p]));
-      const orphans: string[] = [];
-      for (const q of questions) {
-        if (q.type === 'puzzle') {
-          const p = byQ.get(String(q.id));
-          if (p) {
-            q.content = {
-              schema_version: p.schema_version,
-              statement: p.statement,
-              intro_frame: p.intro_frame,
-              initial_frame: p.initial_frame,
-              options: p.options,
-            };
-          } else {
-            orphans.push(q.id);
-          }
-        }
-      }
-      // Excluir puzzles huérfanos (sin fila en learning_puzzles): el cliente
-      // crashearía al intentar renderizarlos sin initial_frame ni options.
-      if (orphans.length > 0) {
-        console.warn('[daily-lesson] Puzzles huérfanos excluidos:', orphans);
-        questions = questions.filter((q) => !orphans.includes(q.id));
-      }
-    }
+    // Excluir puzzles huérfanos (type='puzzle' sin fila en learning_puzzles)
+    // ANTES de seleccionar: el cliente crashearía al renderizarlos sin
+    // initial_frame ni options. Basta con el set de ids válidos (consulta de
+    // solo ids), sin traer el content de todos los puzzles.
+    const validPuzzleIds = new Set((puzzleIdsRes.data ?? []).map((p) => String(p.question_id)));
+    const questions: QuestionRow[] = metaRows
+      .filter((m) => m.type !== 'puzzle' || validPuzzleIds.has(String(m.id)))
+      .map((m) => ({
+        id: m.id,
+        type: m.type,
+        level: m.level,
+        area: m.area,
+        has_video: m.has_video,
+        video_url: m.video_url,
+        content: {}, // se rellena en FASE 2 solo para las seleccionadas
+      }));
 
     // Group history by question_id
     const historyByQuestion = new Map<string, HistoryEntry[]>();
@@ -129,17 +128,72 @@ router.get('/daily-lesson', requireAuth, async (req: Request, res: Response) => 
       });
     }
 
+    // ---------------------------------------------------------------------
+    // FASE 2 — Traer el `content` pesado SOLO para las 5 seleccionadas.
+    //  - learning_questions: content + club (para preguntas no-puzzle)
+    //  - learning_puzzles: content del puzzle (vive en otra tabla)
+    // ---------------------------------------------------------------------
+    const selectedIds = selected.map((q) => q.id);
+    const selectedPuzzleIds = selected.filter((q) => q.type === 'puzzle').map((q) => q.id);
+
+    const [contentRes, puzzlesRes] = await Promise.all([
+      supabase
+        .from('learning_questions')
+        .select('id, content, clubs:created_by_club(name, city)')
+        .in('id', selectedIds),
+      selectedPuzzleIds.length > 0
+        ? supabase
+            .from('learning_puzzles')
+            .select('question_id, statement, intro_frame, initial_frame, options, schema_version')
+            .in('question_id', selectedPuzzleIds)
+        : Promise.resolve({ data: [] as any[], error: null }),
+    ]);
+
+    if (contentRes.error) return res.status(500).json({ ok: false, error: contentRes.error.message });
+    if (puzzlesRes.error) return res.status(500).json({ ok: false, error: puzzlesRes.error.message });
+
+    const contentById = new Map(
+      (contentRes.data ?? []).map((r: any) => [
+        String(r.id),
+        {
+          content: (r.content ?? {}) as Record<string, unknown>,
+          // supabase-js puede devolver el embed del club como objeto o como
+          // array; normalizamos igual que en today-results.
+          clubs: r.clubs as { name?: string; city?: string } | { name?: string; city?: string }[] | null,
+        },
+      ]),
+    );
+    const puzzleByQ = new Map((puzzlesRes.data ?? []).map((p: any) => [String(p.question_id), p]));
+
     // Sanitize content — remove correct answers
     const clientQuestions = selected.map((q) => {
-      const raw = q as unknown as Record<string, unknown>;
-      const club = raw.clubs as { name?: string; city?: string } | null;
+      const extra = contentById.get(String(q.id));
+      let content: Record<string, unknown>;
+      if (q.type === 'puzzle') {
+        const p = puzzleByQ.get(String(q.id));
+        // Los huérfanos ya se excluyeron en FASE 1, pero por seguridad mergeamos
+        // solo si existe la fila.
+        content = p
+          ? {
+              schema_version: p.schema_version,
+              statement: p.statement,
+              intro_frame: p.intro_frame,
+              initial_frame: p.initial_frame,
+              options: p.options,
+            }
+          : {};
+      } else {
+        content = extra?.content ?? {};
+      }
+      const clubRaw = extra?.clubs ?? null;
+      const club = Array.isArray(clubRaw) ? (clubRaw[0] ?? null) : clubRaw;
       return {
         id: q.id,
         type: q.type,
         area: q.area,
         has_video: q.has_video,
         video_url: q.video_url,
-        content: sanitizeContent(q.type, q.content),
+        content: sanitizeContent(q.type, content),
         club_name: club?.name ?? null,
         club_city: club?.city ?? null,
       };

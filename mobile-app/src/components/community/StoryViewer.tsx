@@ -12,9 +12,11 @@ import {
   Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { StoryGroup } from '../../api/community';
 import { formatTimeAgo } from '../../utils/timeAgo';
 import { formatPlayerLabel } from '../../lib/username';
+import { filterById } from '../../lib/storyOverlays';
 
 const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 5000; // 5 seconds
@@ -29,64 +31,100 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
   const [currentIndex, setCurrentIndex] = useState(0);
   const progress = useRef(new Animated.Value(0)).current;
   const isPaused = useRef(false);
+  const indexRef = useRef(0);
+
+  const currentStory = group?.stories?.[currentIndex];
+  const currentMedia = currentStory?.images?.[0];
+  const isVideo = currentMedia?.media_type === 'video';
+  const mediaUrl = currentMedia?.media_url || 'https://via.placeholder.com/1000';
+  // Fondo borroso: para vídeo usamos la portada (no se puede usar el vídeo como imagen).
+  const bgUrl = isVideo ? (currentMedia?.thumbnail_url || 'https://via.placeholder.com/1000') : mediaUrl;
+
+  // Reproductor de vídeo: se crea una vez y se le cambia la fuente al pasar de historia.
+  const player = useVideoPlayer(null, (p) => {
+    p.loop = false;
+    p.timeUpdateEventInterval = 0.1;
+  });
+
+  // Inicia una historia: si es vídeo lo reproduce (el progreso lo llevan sus eventos);
+  // si es imagen, usa el temporizador fijo de 5s.
+  const startStory = (index: number) => {
+    if (!group) return;
+    indexRef.current = index;
+    setCurrentIndex(index);
+    progress.stopAnimation();
+    progress.setValue(0);
+    const media = group.stories[index]?.images?.[0];
+    const vid = media?.media_type === 'video';
+    try { player.pause(); } catch {}
+    if (vid && media?.media_url) {
+      try {
+        player.replace(media.media_url);
+        player.play();
+      } catch {}
+    } else {
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: STORY_DURATION,
+        useNativeDriver: false, // la animación de width requiere false
+      }).start(({ finished }) => {
+        if (finished && !isPaused.current) goNext();
+      });
+    }
+  };
+
+  const goNext = () => {
+    if (!group) return;
+    const idx = indexRef.current;
+    if (idx < group.stories.length - 1) startStory(idx + 1);
+    else onClose();
+  };
+
+  const goPrev = () => {
+    const idx = indexRef.current;
+    startStory(idx > 0 ? idx - 1 : 0);
+  };
+
+  // Referencia estable a goNext para los listeners del reproductor.
+  const goNextRef = useRef(goNext);
+  useEffect(() => { goNextRef.current = goNext; });
+
+  // Listeners del reproductor: avanzar al terminar y mover la barra de progreso.
+  useEffect(() => {
+    const endSub = player.addListener('playToEnd', () => {
+      if (!isPaused.current) goNextRef.current();
+    });
+    const timeSub = player.addListener('timeUpdate', (e: any) => {
+      const dur = player.duration;
+      if (dur > 0) progress.setValue(Math.min(e.currentTime / dur, 1));
+    });
+    return () => { endSub.remove(); timeSub.remove(); };
+  }, [player]);
 
   useEffect(() => {
     if (isVisible && group) {
-      setCurrentIndex(0);
-      startProgress(0);
+      startStory(0);
     } else {
       progress.stopAnimation();
       progress.setValue(0);
+      try { player.pause(); } catch {}
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVisible, group]);
-
-  const startProgress = (index: number) => {
-    progress.setValue(0);
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: STORY_DURATION,
-      useNativeDriver: false, // width animation requires false
-    }).start(({ finished }) => {
-      if (finished && !isPaused.current) {
-        handleNext();
-      }
-    });
-  };
-
-  const handleNext = () => {
-    if (!group) return;
-    if (currentIndex < group.stories.length - 1) {
-      setCurrentIndex(prev => prev + 1);
-      startProgress(currentIndex + 1);
-    } else {
-      onClose();
-    }
-  };
-
-  const handlePrev = () => {
-    if (currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1);
-      startProgress(currentIndex - 1);
-    } else {
-      // Re-start current if it's the first one
-      startProgress(0);
-    }
-  };
 
   const handleTap = (evt: any) => {
     const x = evt.nativeEvent.locationX;
-    if (x < width * 0.3) {
-      handlePrev();
-    } else {
-      handleNext();
-    }
+    if (x < width * 0.3) goPrev();
+    else goNext();
   };
 
-  if (!isVisible || !group) return null;
+  if (!isVisible || !group || !currentStory) return null;
 
-  const currentStory = group.stories[currentIndex];
-  // Stories use community_posts table, images are in currentStory.images
-  const imageUrl = currentStory?.images?.[0]?.image_url || 'https://via.placeholder.com/1000';
+  // Encuadre guardado de la media (mover/zoom/rotar). Si existe, se muestra "cover" recortada.
+  const mt = currentStory.overlays?.media;
+  const mediaTransform = mt
+    ? [{ translateX: mt.x * width }, { translateY: mt.y * height }, { scale: mt.scale }, { rotate: `${mt.rotation}deg` }]
+    : [];
 
   return (
     <Modal
@@ -99,22 +137,66 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
         <StatusBar hidden />
         
         {/* Background Layer: Blurred Mirror */}
-        <Image 
-          source={{ uri: imageUrl }} 
-          style={styles.backgroundImage} 
-          resizeMode="cover" 
+        <Image
+          source={{ uri: bgUrl }}
+          style={styles.backgroundImage}
+          resizeMode="cover"
           blurRadius={25}
         />
-        
+
         {/* Overlay for contrast */}
         <View style={styles.overlay} />
-        
-        {/* Main Image: Contained without cropping */}
-        <Image 
-          source={{ uri: imageUrl }} 
-          style={styles.mainImage} 
-          resizeMode="contain" 
-        />
+
+        {/* Contenido principal: vídeo o imagen (con encuadre si lo hay) */}
+        <View style={[styles.mainImage, { overflow: 'hidden' }]}>
+          <View style={[StyleSheet.absoluteFill, { transform: mediaTransform }]}>
+            {isVideo ? (
+              <VideoView
+                player={player}
+                style={StyleSheet.absoluteFill}
+                contentFit={mt ? 'cover' : 'contain'}
+                nativeControls={false}
+              />
+            ) : (
+              <Image
+                source={{ uri: mediaUrl }}
+                style={StyleSheet.absoluteFill}
+                resizeMode={mt ? 'cover' : 'contain'}
+              />
+            )}
+          </View>
+        </View>
+
+        {/* Overlays de la historia: filtro + capas (texto/stickers) */}
+        {(() => {
+          const vf = filterById(currentStory.overlays?.filter);
+          return vf.opacity > 0 ? (
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: vf.color, opacity: vf.opacity }]} />
+          ) : null;
+        })()}
+        {currentStory.overlays?.layers?.map(l => (
+          <View
+            key={l.id}
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              transform: [
+                { translateX: l.x * width },
+                { translateY: l.y * height },
+                { scale: l.scale },
+                { rotate: `${l.rotation}deg` },
+              ],
+            }}
+          >
+            {l.type === 'text' ? (
+              <Text style={{ fontSize: 28, fontWeight: '700', color: l.color, fontFamily: 'Outfit_700Bold', textShadowColor: 'rgba(0,0,0,0.4)', textShadowRadius: 4 }}>{l.value}</Text>
+            ) : (
+              <Text style={{ fontSize: 56 }}>{l.value}</Text>
+            )}
+          </View>
+        ))}
 
         {/* Interaction Layer */}
         <TouchableOpacity 
@@ -124,21 +206,24 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
           onLongPress={() => {
             isPaused.current = true;
             progress.stopAnimation();
+            if (isVideo) { try { player.pause(); } catch {} }
           }}
           onPressOut={() => {
-            if (isPaused.current) {
-              isPaused.current = false;
-              // Resume (simplified: just restart or continue from value)
-              // For simplicity now, we re-start the segment
-              const currentVal = (progress as any)._value;
-              Animated.timing(progress, {
-                toValue: 1,
-                duration: STORY_DURATION * (1 - currentVal),
-                useNativeDriver: false,
-              }).start(({ finished }) => {
-                if (finished) handleNext();
-              });
+            if (!isPaused.current) return;
+            isPaused.current = false;
+            if (isVideo) {
+              try { player.play(); } catch {}
+              return;
             }
+            // Imagen: reanudar el temporizador desde donde estaba.
+            const currentVal = (progress as any)._value;
+            Animated.timing(progress, {
+              toValue: 1,
+              duration: STORY_DURATION * (1 - currentVal),
+              useNativeDriver: false,
+            }).start(({ finished }) => {
+              if (finished) goNext();
+            });
           }}
         >
           {/* Progress Bars */}
