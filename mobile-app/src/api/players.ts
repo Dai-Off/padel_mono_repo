@@ -1,4 +1,6 @@
 import { API_URL } from "../config";
+import { withLangQuery } from "./backendLang";
+import type { AppLocale } from "../i18n/constants";
 
 type PlayersResponse = {
   ok?: boolean;
@@ -481,9 +483,10 @@ export type PublicPlayerProfile = {
 export async function fetchPublicPlayerProfile(
   playerId: string,
   token?: string | null,
+  locale?: AppLocale,
 ): Promise<PublicPlayerProfile | null> {
   try {
-    const res = await fetch(`${API_URL}/players/${playerId}/public-profile`, {
+    const res = await fetch(withLangQuery(`${API_URL}/players/${playerId}/public-profile`, locale), {
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

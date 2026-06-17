@@ -1,4 +1,6 @@
 import { API_URL } from '../config';
+import { withLangQuery } from './backendLang';
+import type { AppLocale } from '../i18n/constants';
 
 export type PeerFeedbackInsight = {
   ok: boolean;
@@ -20,13 +22,17 @@ export type PeerFeedbackInsight = {
  */
 export async function fetchMyPeerFeedbackInsight(
   token: string | null | undefined,
-  playerId: string
+  playerId: string,
+  locale?: AppLocale,
 ): Promise<PeerFeedbackInsight | null> {
   if (!token || !playerId) return null;
   try {
-    const res = await fetch(`${API_URL}/players/${playerId}/last-peer-feedback-insight`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await fetch(
+      withLangQuery(`${API_URL}/players/${playerId}/last-peer-feedback-insight`, locale),
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
     
     if (!res.ok) {
         console.warn('[fetchMyPeerFeedbackInsight] HTTP error:', res.status);

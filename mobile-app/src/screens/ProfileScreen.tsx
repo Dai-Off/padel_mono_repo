@@ -25,6 +25,7 @@ import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSecti
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
 import { fetchMyCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
 import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
+import { useTranslation } from '../i18n/I18nContext';
 import {
   uploadPlayerCoverToStorage,
   type PickedImage,
@@ -69,6 +70,7 @@ export function ProfileScreen({
 }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const { locale } = useTranslation();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -103,7 +105,7 @@ export function ProfileScreen({
       if (p) {
         setProfile(p);
         setCoverUrl(p.coverUrl);
-        fetchMyPeerFeedbackInsight(token, p.id).then(setPeerInsight).catch(() => {});
+        fetchMyPeerFeedbackInsight(token, p.id, locale).then(setPeerInsight).catch(() => {});
         setProfileLoading(false);
         return;
       }
@@ -121,7 +123,7 @@ export function ProfileScreen({
     } finally {
       setProfileLoading(false);
     }
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
     const token = session?.access_token;
@@ -131,8 +133,8 @@ export function ProfileScreen({
       return;
     }
     void loadProfile(token);
-    fetchMyCoachAssessment(token).then(setAssessment).catch(() => {});
-  }, [session?.access_token, loadProfile]);
+    fetchMyCoachAssessment(token, locale).then(setAssessment).catch(() => {});
+  }, [session?.access_token, loadProfile, locale]);
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
   const displayName = profile
@@ -148,7 +150,7 @@ export function ProfileScreen({
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
-    fetchMyCoachAssessment(session.access_token).then(setAssessment).catch(() => {});
+    fetchMyCoachAssessment(session.access_token, locale).then(setAssessment).catch(() => {});
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).

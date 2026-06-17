@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchPublicPlayerProfile, type PublicPlayerProfile } from '../api/players';
+import { useTranslation } from '../i18n/I18nContext';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 
@@ -32,17 +33,18 @@ function getInitials(firstName?: string | null, lastName?: string | null): strin
 export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const { locale } = useTranslation();
   const [profile, setProfile] = useState<PublicPlayerProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    fetchPublicPlayerProfile(playerId, session?.access_token)
+    fetchPublicPlayerProfile(playerId, session?.access_token, locale)
       .then((p) => {
         setProfile(p);
       })
       .finally(() => setLoading(false));
-  }, [playerId, session?.access_token]);
+  }, [playerId, session?.access_token, locale]);
 
   if (loading) {
     return (
