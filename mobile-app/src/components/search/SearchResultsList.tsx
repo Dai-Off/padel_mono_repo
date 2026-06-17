@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { SearchCourtResult } from '../../api/search';
 import type { SearchClubGroup } from '../../domain/aggregateCourtsByClub';
+import { useTranslation } from '../../i18n';
 import { SearchClubCard } from './SearchClubCard';
 import { SearchCourtCardSkeleton } from './SearchCourtCardSkeleton';
 import { theme } from '../../theme';
@@ -25,10 +26,12 @@ export function SearchResultsList({
   onClubPress,
   onFavoritePress,
 }: SearchResultsListProps) {
+  const { t } = useTranslation();
+
   if (loading) {
     return (
       <View style={styles.container}>
-        <Text style={styles.resultCount}>Buscando clubes…</Text>
+        <Text style={styles.resultCount}>{t('common.searchingClubs')}</Text>
         <View style={styles.list}>
           {Array.from({ length: SKELETON_COUNT }).map((_, i) => (
             <SearchCourtCardSkeleton key={i} />
@@ -45,16 +48,15 @@ export function SearchResultsList({
           onPress={onRetry}
           style={({ pressed }) => [styles.errorBanner, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Reintentar cargar clubes"
+          accessibilityLabel={t('common.retry')}
         >
-          <Text style={styles.errorText}>
-            No se pudo actualizar la lista. Toca para reintentar.
-          </Text>
+          <Text style={styles.errorText}>{t('common.listUpdateError')}</Text>
         </Pressable>
       ) : null}
       <Text style={styles.resultCount}>
-        {clubGroups.length}{' '}
-        {clubGroups.length === 1 ? 'club encontrado' : 'clubes encontrados'}
+        {clubGroups.length === 1
+          ? t('common.clubFoundOne', { count: clubGroups.length })
+          : t('common.clubFoundMany', { count: clubGroups.length })}
       </Text>
       <View style={styles.list}>
         {clubGroups.map((group) => (

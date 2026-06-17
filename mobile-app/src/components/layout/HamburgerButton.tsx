@@ -13,7 +13,7 @@ export function HamburgerButton({
   onPress,
   color = '#fff',
   size = 24,
-  accessibilityLabel = 'Abrir menú',
+  accessibilityLabel,
 }: HamburgerButtonProps) {
   return (
     <Pressable

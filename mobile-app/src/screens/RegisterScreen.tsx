@@ -14,12 +14,14 @@ import {
   AuthFooter,
 } from '../components/auth';
 import { theme } from '../theme';
+import { useTranslation } from '../i18n';
 
 type RegisterScreenProps = {
   onGoToLogin: () => void;
 };
 
 export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
+  const { t } = useTranslation();
   const { setSession } = useAuth();
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
@@ -44,17 +46,17 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
     }
 
     if (!e || !p) {
-      setError('Email y contraseña son obligatorios');
+      setError(t('common.emailPasswordRequired'));
       return;
     }
 
     if (p.length < 6) {
-      setError('La contraseña debe tener al menos 6 caracteres');
+      setError(t('common.passwordMin6'));
       return;
     }
 
     if (p !== cp) {
-      setError('Las contraseñas no coinciden');
+      setError(t('common.passwordsMismatch'));
       return;
     }
 
@@ -82,10 +84,10 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
           setShowConfirmMessage(true);
         }
       } else {
-        setError(res.error ?? 'Error al registrarse');
+        setError(res.error ?? t('auth.registerError'));
       }
     } catch {
-      setError('Error de conexión. ¿Está el backend corriendo?');
+      setError(t('common.connectionErrorBackend'));
     } finally {
       setLoading(false);
     }
@@ -98,13 +100,12 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
           <View style={styles.confirmIcon}>
             <Ionicons name="mail-open-outline" size={40} color={theme.auth.accent} />
           </View>
-          <Text style={styles.confirmTitle}>¡Revisa tu email!</Text>
+          <Text style={styles.confirmTitle}>{t('auth.confirmEmailTitle')}</Text>
           <Text style={styles.confirmText}>
-            Te hemos enviado un enlace para confirmar tu cuenta. Haz clic en el
-            enlace del correo y vuelve aquí para iniciar sesión.
+            {t('auth.confirmEmailBody')}
           </Text>
           <Text style={styles.confirmHint}>
-            ¿No lo ves? Revisa la carpeta de spam.
+            {t('auth.confirmEmailSpam')}
           </Text>
           <AuthButton
             onPress={() => {
@@ -113,7 +114,7 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
             }}
             icon="log-in-outline"
           >
-            Ir a iniciar sesión
+            {t('auth.goToLogin')}
           </AuthButton>
         </View>
       </AuthLayout>
@@ -127,61 +128,61 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
       {error ? <ErrorBanner message={error} /> : null}
 
       <AuthInput
-        label="Nombre (opcional)"
+        label={t('auth.nameOptionalLabel')}
         icon="person-outline"
-        placeholder="Tu nombre"
+        placeholder={t('auth.namePlaceholder')}
         autoCapitalize="words"
         autoComplete="name"
         value={name}
-        onChangeText={(t) => { setName(t); clearError(); }}
+        onChangeText={(text) => { setName(text); clearError(); }}
         editable={!loading}
       />
 
       <AuthInput
-        label="Usuario"
+        label={t('auth.usernameLabel')}
         icon="at-outline"
-        placeholder="tu_usuario"
+        placeholder={t('auth.usernamePlaceholder')}
         autoCapitalize="none"
         autoCorrect={false}
         value={username}
-        onChangeText={(t) => {
-          setUsername(t.replace(/\s/g, '').toLowerCase());
+        onChangeText={(text) => {
+          setUsername(text.replace(/\s/g, '').toLowerCase());
           clearError();
         }}
         editable={!loading}
       />
 
       <AuthInput
-        label="Correo Electrónico"
+        label={t('auth.emailLabel')}
         icon="mail-outline"
-        placeholder="tu@email.com"
+        placeholder={t('auth.emailPlaceholder')}
         keyboardType="email-address"
         autoCapitalize="none"
         autoComplete="email"
         value={email}
-        onChangeText={(t) => { setEmail(t); clearError(); }}
+        onChangeText={(text) => { setEmail(text); clearError(); }}
         editable={!loading}
       />
 
       <AuthInput
-        label="Contraseña"
+        label={t('auth.passwordLabel')}
         icon="lock-closed-outline"
-        placeholder="Mín. 6 caracteres"
+        placeholder={t('auth.passwordMinPlaceholder')}
         secureTextEntry
         autoComplete="new-password"
         value={password}
-        onChangeText={(t) => { setPassword(t); clearError(); }}
+        onChangeText={(text) => { setPassword(text); clearError(); }}
         editable={!loading}
       />
 
       <AuthInput
-        label="Confirmar contraseña"
+        label={t('auth.confirmPasswordLabel')}
         icon="lock-closed-outline"
-        placeholder="••••••••"
+        placeholder={t('auth.passwordPlaceholder')}
         secureTextEntry
         autoComplete="new-password"
         value={confirmPassword}
-        onChangeText={(t) => { setConfirmPassword(t); clearError(); }}
+        onChangeText={(text) => { setConfirmPassword(text); clearError(); }}
         editable={!loading}
       />
 
@@ -191,12 +192,12 @@ export function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
         disabled={loading}
         icon="person-add-outline"
       >
-        Registrarse
+        {t('auth.registerTitle')}
       </AuthButton>
 
       <AuthFormLink
-        prompt="¿Ya tienes cuenta?"
-        action="Inicia sesión"
+        prompt={t('auth.hasAccountPrompt')}
+        action={t('auth.loginLink')}
         onPress={onGoToLogin}
         disabled={loading}
       />

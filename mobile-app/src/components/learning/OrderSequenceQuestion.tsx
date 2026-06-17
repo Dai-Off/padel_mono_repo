@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ExplanationCard } from './ExplanationCard';
+import { useTranslation } from '../../i18n';
 
 type Props = {
   content: {
@@ -14,6 +15,7 @@ type Props = {
 };
 
 export function OrderSequenceQuestion({ content, onAnswered }: Props) {
+  const { t } = useTranslation();
   // Barajar pasos al montar
   const shuffledSteps = useMemo(() => {
     const indexed = content.steps.map((step, i) => ({ step, correctIndex: i }));
@@ -74,7 +76,7 @@ export function OrderSequenceQuestion({ content, onAnswered }: Props) {
 
       {ordered.length > 0 && (
         <View style={styles.zone}>
-          <Text style={styles.zoneLabel}>TU ORDEN</Text>
+          <Text style={styles.zoneLabel}>{t('learning.orderYourOrder')}</Text>
           <View style={styles.items}>
             {ordered.map((item, i) => (
               <Pressable
@@ -94,7 +96,7 @@ export function OrderSequenceQuestion({ content, onAnswered }: Props) {
 
       {available.length > 0 && (
         <View style={styles.zone}>
-          <Text style={styles.zoneLabel}>TOCA PARA ORDENAR</Text>
+          <Text style={styles.zoneLabel}>{t('learning.orderTapToOrder')}</Text>
           <View style={styles.items}>
             {available.map((item, i) => (
               <Pressable
@@ -121,7 +123,7 @@ export function OrderSequenceQuestion({ content, onAnswered }: Props) {
             style={styles.submitGradient}
           >
             <Ionicons name="checkmark" size={16} color="#fff" />
-            <Text style={styles.submitText}>Comprobar orden</Text>
+            <Text style={styles.submitText}>{t('learning.questionCheckOrder')}</Text>
           </LinearGradient>
         </Pressable>
       )}

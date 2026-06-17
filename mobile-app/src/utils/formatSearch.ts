@@ -1,3 +1,6 @@
+import type { AppLocale } from '../i18n/constants';
+import { formatLocale } from '../i18n/constants';
+
 export function startOfLocalDay(d: Date): Date {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
@@ -18,9 +21,8 @@ export function dateKeyLocal(d: Date): string {
 }
 
 /** Formato corto de fecha para chips: "27 ene" */
-export function formatDateForChip(date: Date): string {
-  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-  return `${date.getDate()} ${months[date.getMonth()]}`;
+export function formatDateForChip(date: Date, locale: AppLocale): string {
+  return new Intl.DateTimeFormat(formatLocale(locale), { day: 'numeric', month: 'short' }).format(date);
 }
 
 /** Formato de rango horario para chips: "00:00 - 23:59" */

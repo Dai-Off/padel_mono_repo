@@ -19,6 +19,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useHomeData } from "../contexts/HomeDataContext";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { androidReadableText } from "../components/home/inicio/textStyles";
+import { useTranslation } from "../i18n";
 
 
 const { width } = Dimensions.get("window");
@@ -36,6 +37,7 @@ export function EducationalCourseDetailScreen({
   onBack,
   onOpenProfileForOnboarding,
 }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [expandedLessonId, setExpandedLessonId] = useState<string | null>(null);
@@ -112,14 +114,14 @@ export function EducationalCourseDetailScreen({
           <View style={styles.heroContent}>
             <View style={styles.tagRow}>
               <View style={styles.courseTag}>
-                <Text style={styles.tagText}>Curso</Text>
+                <Text style={styles.tagText}>{t('learning.eduCourseTag')}</Text>
               </View>
               <View style={styles.levelTag}>
-                <Text style={styles.levelTagText}>Nivel {course.elo_min % 1 === 0 ? course.elo_min.toFixed(0) : course.elo_min.toFixed(1)}-{course.elo_max % 1 === 0 ? course.elo_max.toFixed(0) : course.elo_max.toFixed(1)}</Text>
+                <Text style={styles.levelTagText}>{t('learning.coursesLevelRange', { min: course.elo_min % 1 === 0 ? course.elo_min.toFixed(0) : course.elo_min.toFixed(1), max: course.elo_max % 1 === 0 ? course.elo_max.toFixed(0) : course.elo_max.toFixed(1) })}</Text>
               </View>
             </View>
             <Text style={styles.title}>{course.title}</Text>
-            <Text style={styles.subtitle}>{course.description || "Aprender la técnica correcta desde cero"}</Text>
+            <Text style={styles.subtitle}>{course.description || t('learning.eduCourseDefaultDesc')}</Text>
           </View>
         </View>
 
@@ -128,19 +130,19 @@ export function EducationalCourseDetailScreen({
           <View style={styles.statsGrid}>
             <View style={styles.statBox}>
               <Text style={styles.statValue}>{course.elo_min % 1 === 0 ? course.elo_min.toFixed(0) : course.elo_min.toFixed(1)}-{course.elo_max % 1 === 0 ? course.elo_max.toFixed(0) : course.elo_max.toFixed(1)}</Text>
-              <Text style={styles.statLabel}>NIVEL</Text>
+              <Text style={styles.statLabel}>{t('learning.eduStatLevel')}</Text>
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statValue}>{course.total_lessons || 6}</Text>
-              <Text style={styles.statLabel}>LECCIONES</Text>
+              <Text style={styles.statLabel}>{t('learning.eduStatLessons')}</Text>
             </View>
             <View style={styles.statBox}>
-              <Text style={styles.statValue}>30 min</Text>
-              <Text style={styles.statLabel}>DURACIÓN</Text>
+              <Text style={styles.statValue}>{t('common.durationMin', { minutes: 30 })}</Text>
+              <Text style={styles.statLabel}>{t('learning.eduStatDuration')}</Text>
             </View>
             <View style={styles.statBox}>
               <Text style={styles.statValue}>342</Text>
-              <Text style={styles.statLabel}>ALUMNOS</Text>
+              <Text style={styles.statLabel}>{t('learning.eduStatStudents')}</Text>
             </View>
           </View>
 
@@ -151,9 +153,9 @@ export function EducationalCourseDetailScreen({
                 <Ionicons name="medal-outline" size={24} color="#9CA3AF" />
             </View>
             <View style={styles.rewardInfo}>
-                <Text style={styles.rewardHeader}>RECOMPENSA DEL CURSO</Text>
-                <Text style={styles.rewardTitle}>Muro de la Red</Text>
-                <Text style={styles.rewardDesc}>Completaste tu primer curso de volea</Text>
+                <Text style={styles.rewardHeader}>{t('learning.eduRewardHeader')}</Text>
+                <Text style={styles.rewardTitle}>{t('learning.eduRewardTitle')}</Text>
+                <Text style={styles.rewardDesc}>{t('learning.eduRewardDesc')}</Text>
             </View>
           </View>
 
@@ -164,7 +166,11 @@ export function EducationalCourseDetailScreen({
                     <Text style={styles.coachInitials}>{(course.coach_name || 'C').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}</Text>
                 </View>
                 <View style={styles.coachInfo}>
-                    <Text style={styles.coachName}>Coach {course.coach_name || 'Sin asignar'}</Text>
+                    <Text style={styles.coachName}>
+                      {t('learning.eduCoachPrefix', {
+                        name: course.coach_name || t('learning.eduCoachUnassigned'),
+                      })}
+                    </Text>
                     <Text style={styles.coachClub}>{course.club_name || ''}</Text>
                 </View>
                 <View style={styles.ratingBox}>
@@ -176,7 +182,7 @@ export function EducationalCourseDetailScreen({
           {/* Lessons List */}
           <View style={styles.lessonsSection}>
             <Text style={styles.sectionTitle}>
-              <Ionicons name="book-outline" size={16} color="#F18F34" /> Lecciones ({lessons.length})
+              <Ionicons name="book-outline" size={16} color="#F18F34" /> {t('learning.eduLessonsSection', { count: lessons.length })}
             </Text>
             <View style={styles.lessonsList}>
               {lessonsLoading ? (
@@ -235,7 +241,7 @@ export function EducationalCourseDetailScreen({
                             ) : (
                               <>
                                 <Ionicons name="checkmark-circle-outline" size={16} color="#34D399" />
-                                <Text style={styles.completeBtnText}>Marcar como completada</Text>
+                                <Text style={styles.completeBtnText}>{t('learning.eduMarkComplete')}</Text>
                               </>
                             )}
                           </Pressable>
@@ -243,7 +249,7 @@ export function EducationalCourseDetailScreen({
                         {lesson.status === 'completed' && (
                           <View style={[styles.completeBtn, { backgroundColor: 'rgba(16,185,129,0.08)' }]}>
                             <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                            <Text style={[styles.completeBtnText, { color: '#10B981' }]}>Completada</Text>
+                            <Text style={[styles.completeBtnText, { color: '#10B981' }]}>{t('learning.eduCompleted')}</Text>
                           </View>
                         )}
                     </View>
@@ -262,33 +268,33 @@ export function EducationalCourseDetailScreen({
                         <Ionicons name="medal" size={20} color="white" />
                     </View>
                     <View>
-                        <Text style={styles.certSubtitle}>Sesión práctica + Certificación</Text>
-                        <Text style={styles.certHint}>Practica lo aprendido con tu entrenador</Text>
+                        <Text style={styles.certSubtitle}>{t('learning.eduCertSubtitle')}</Text>
+                        <Text style={styles.certHint}>{t('learning.eduCertHint')}</Text>
                     </View>
                 </View>
 
                 <View style={styles.certWarningBox}>
                     <Ionicons name="school-outline" size={16} color="#6B7280" />
                     <Text style={styles.certWarningText}>
-                        No es un examen. Es una sesión práctica con Coach <Text style={{ color: 'white', fontWeight: 'bold' }}>{course.coach_name || 'tu entrenador'}</Text> donde pones en práctica lo aprendido. Sin presión, solo aprendizaje real.
+                        {t('learning.eduCertWarning', { coach: course.coach_name || t('learning.eduYourCoach') })}
                     </Text>
                 </View>
 
                 <View style={styles.priceBox}>
                     <View>
-                        <Text style={styles.priceLabel}>Precio de la sesión</Text>
-                        <Text style={styles.priceSubLabel}>1ª certificación gratuita</Text>
+                        <Text style={styles.priceLabel}>{t('learning.eduSessionPrice')}</Text>
+                        <Text style={styles.priceSubLabel}>{t('learning.eduFirstCertFree')}</Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.priceValue}>GRATIS</Text>
-                        <Text style={styles.priceBadge}>Lead magnet</Text>
+                        <Text style={styles.priceValue}>{t('learning.eduFree')}</Text>
+                        <Text style={styles.priceBadge}>{t('learning.eduLeadMagnet')}</Text>
                     </View>
                 </View>
 
                 <View style={styles.giftBox}>
                     <Text style={{ fontSize: 14 }}>🎁</Text>
                     <Text style={styles.giftText}>
-                        Al certificarte, recibes <Text style={{ color: '#F18F34', fontWeight: 'bold' }}>50% dto.</Text> en tu primera mensualidad de clases en {course.club_name || 'el club'}
+                        {t('learning.eduGiftDiscount', { discount: '50% dto.', club: course.club_name || t('common.clubFallback') })}
                     </Text>
                 </View>
 
@@ -296,12 +302,12 @@ export function EducationalCourseDetailScreen({
                     {lessons.length > 0 && lessons.every(l => l.status === 'completed') ? (
                       <>
                         <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                        <Text style={[styles.lockText, { color: '#10B981' }]}>Desbloqueado</Text>
+                        <Text style={[styles.lockText, { color: '#10B981' }]}>{t('learning.eduUnlocked')}</Text>
                       </>
                     ) : (
                       <>
-                        <Text style={styles.lockText}>Completa las {lessons.length} lecciones para desbloquear</Text>
-                        <Text style={styles.lockSubText}>{Math.max(0, lessons.length - lessons.filter(l => l.status === 'completed').length)} lecciones restantes</Text>
+                        <Text style={styles.lockText}>{t('learning.eduCompleteLessonsUnlock', { count: lessons.length })}</Text>
+                        <Text style={styles.lockSubText}>{t('learning.eduLessonsRemaining', { count: Math.max(0, lessons.length - lessons.filter(l => l.status === 'completed').length) })}</Text>
                       </>
                     )}
                 </View>
@@ -340,7 +346,7 @@ export function EducationalCourseDetailScreen({
                     onPress={onOpenProfileForOnboarding}
                   >
                     <Ionicons name="compass" size={18} color="white" />
-                    <Text style={styles.startBtnText}>Descubre tu nivel para desbloquear</Text>
+                    <Text style={styles.startBtnText}>{t('learning.eduDiscoverLevelUnlock')}</Text>
                   </Pressable>
                 </LinearGradient>
               );
@@ -348,7 +354,7 @@ export function EducationalCourseDetailScreen({
             return (
               <View style={styles.lockedCtaPrimary}>
                 <Ionicons name="lock-closed" size={18} color="#9CA3AF" />
-                <Text style={styles.lockedCtaText}>Curso bloqueado</Text>
+                <Text style={styles.lockedCtaText}>{t('learning.eduCourseLocked')}</Text>
               </View>
             );
           }
@@ -358,7 +364,7 @@ export function EducationalCourseDetailScreen({
               <LinearGradient colors={["#10B981", "#059669"]} style={styles.startBtn}>
                 <View style={styles.startBtnInner}>
                   <Ionicons name="school" size={20} color="white" />
-                  <Text style={styles.startBtnText}>Pedir clase practica</Text>
+                  <Text style={styles.startBtnText}>{t('learning.eduRequestPractice')}</Text>
                 </View>
               </LinearGradient>
             );
@@ -372,7 +378,7 @@ export function EducationalCourseDetailScreen({
               >
                 <Ionicons name="play" size={20} color="white" />
                 <Text style={styles.startBtnText}>
-                  {completedCount > 0 ? `Continuar (${completedCount}/${lessons.length})` : 'Empezar curso'}
+                  {completedCount > 0 ? t('learning.eduContinueCourse', { completed: completedCount, total: lessons.length }) : t('learning.eduStartCourse')}
                 </Text>
               </Pressable>
             </LinearGradient>

@@ -21,6 +21,7 @@ import type {
   PartidosSizeFilter,
   PartidosSortBy,
 } from '../../domain/partidosFilters';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 type PartidosMoreFiltersModalProps = {
@@ -37,6 +38,7 @@ export function PartidosMoreFiltersModal({
   onApply,
 }: PartidosMoreFiltersModalProps) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const [local, setLocal] = useState(filters);
 
   useEffect(() => {
@@ -67,10 +69,10 @@ export function PartidosMoreFiltersModal({
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <Pressable onPress={onClose} style={styles.headerBtn} accessibilityLabel="Volver">
+          <Pressable onPress={onClose} style={styles.headerBtn} accessibilityLabel={t('common.back')}>
             <Ionicons name="arrow-back" size={22} color={filterTheme.text} />
           </Pressable>
-          <Text style={styles.headerTitle}>Más filtros</Text>
+          <Text style={styles.headerTitle}>{t('search.filtersTitle')}</Text>
           <Pressable
             onPress={() =>
               setLocal((s) => ({
@@ -85,7 +87,7 @@ export function PartidosMoreFiltersModal({
             }
             style={styles.headerBtn}
           >
-            <Text style={styles.clearAll}>Borrar todo</Text>
+            <Text style={styles.clearAll}>{t('common.discard')}</Text>
           </Pressable>
         </View>
 
@@ -94,119 +96,131 @@ export function PartidosMoreFiltersModal({
           contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.sectionLabel}>Ordenar por</Text>
+          <Text style={styles.sectionLabel}>{t('search.sectionSortBy')}</Text>
           <FilterOptionRow
             mode="radio"
-            title="Relevancia"
+            title={t('common.relevance')}
             selected={local.sortBy === 'relevance'}
             onPress={() => setSort('relevance')}
           />
           <FilterOptionRow
             mode="radio"
-            title="Más recientes"
+            title={t('common.mostRecent')}
             selected={local.sortBy === 'recent'}
             onPress={() => setSort('recent')}
           />
           <FilterOptionRow
             mode="radio"
-            title="Número de jugadores"
+            title={t('common.playerCount')}
             selected={local.sortBy === 'players'}
             onPress={() => setSort('players')}
           />
           <FilterOptionRow
             mode="radio"
-            title="Más cercanos"
+            title={t('common.nearest')}
             selected={local.sortBy === 'distance'}
             onPress={() => setSort('distance')}
           />
 
           <View style={styles.divider} />
-          <Text style={styles.sectionLabel}>Tipo de partido</Text>
+          <Text style={styles.sectionLabel}>{t('partidos.createMatchType')}</Text>
           <FilterOptionRow
             mode="radio"
-            title="Todo"
-            subtitle="Mostrar todos los partidos"
+            title={t('partidos.moreFiltersAll')}
+            subtitle={t('partidos.moreFiltersAllSub')}
             selected={local.matchType === 'all'}
             onPress={() => setMatchType('all')}
           />
           <FilterOptionRow
             mode="radio"
-            title="Competitivo"
+            title={t('partidos.moreFiltersCompetitive')}
             selected={local.matchType === 'competitive'}
             onPress={() => setMatchType('competitive')}
           />
           <FilterOptionRow
             mode="radio"
-            title="Amistoso"
+            title={t('partidos.moreFiltersFriendly')}
             selected={local.matchType === 'friendly'}
             onPress={() => setMatchType('friendly')}
           />
 
           <View style={styles.divider} />
-          <Text style={styles.sectionLabel}>Jugar con</Text>
+          <Text style={styles.sectionLabel}>{t('partidos.createGenderSection')}</Text>
           <FilterOptionRow
             mode="checkbox"
-            title="Todos los jugadores"
+            title={t('partidos.moreFiltersAllPlayers')}
             selected={local.gender === 'all'}
             onPress={() => setGender('all')}
           />
           <FilterOptionRow
             mode="checkbox"
-            title="Solo hombres"
-            subtitle="El partido solo admite hombres"
+            title={t('partidos.moreFiltersMenOnly')}
+            subtitle={t('partidos.moreFiltersMenOnlySub')}
             selected={local.gender === 'male'}
             onPress={() => setGender('male')}
           />
           <FilterOptionRow
             mode="checkbox"
-            title="Solo mujeres"
-            subtitle="El partido solo admite mujeres"
+            title={t('partidos.moreFiltersWomenOnly')}
+            subtitle={t('partidos.moreFiltersWomenOnlySub')}
             selected={local.gender === 'female'}
             onPress={() => setGender('female')}
           />
           <FilterOptionRow
             mode="checkbox"
-            title="Mixto"
-            subtitle="Un hombre y una mujer en cada equipo"
+            title={t('partidos.moreFiltersMixed')}
+            subtitle={t('partidos.moreFiltersMixedSub')}
             selected={local.gender === 'mixed'}
             onPress={() => setGender('mixed')}
           />
 
           <View style={styles.divider} />
-          <Text style={styles.sectionLabel}>Cerramiento</Text>
+          <Text style={styles.sectionLabel}>{t('search.sectionEnclosure')}</Text>
           {(['indoor', 'outdoor', 'cubierta'] as const).map((id) => (
             <FilterOptionRow
               key={id}
               mode="checkbox"
-              title={id === 'indoor' ? 'Interior' : id === 'outdoor' ? 'Exterior' : 'Cubierta'}
+              title={
+                id === 'indoor'
+                  ? t('common.interior')
+                  : id === 'outdoor'
+                    ? t('common.outdoor')
+                    : t('common.covered')
+              }
               selected={local.cerramiento === id}
               onPress={() => toggleCerramiento(id)}
             />
           ))}
 
           <View style={styles.divider} />
-          <Text style={styles.sectionLabel}>Paredes</Text>
+          <Text style={styles.sectionLabel}>{t('search.sectionWalls')}</Text>
           {(['muro', 'cristal', 'panoramico'] as const).map((id) => (
             <FilterOptionRow
               key={id}
               mode="checkbox"
-              title={id === 'muro' ? 'Muro' : id === 'cristal' ? 'Cristal' : 'Panorámico'}
+              title={
+                id === 'muro'
+                  ? t('common.wallMuro')
+                  : id === 'cristal'
+                    ? t('common.wallCristal')
+                    : t('common.wallPanoramico')
+              }
               selected={local.paredes === id}
               onPress={() => toggleParedes(id)}
             />
           ))}
 
           <View style={styles.divider} />
-          <Text style={styles.sectionLabel}>Tamaño</Text>
+          <Text style={styles.sectionLabel}>{t('common.playerCount')}</Text>
           <FilterOptionRow
             mode="checkbox"
-            title="Dobles"
+            title={t('common.doubles')}
             selected={local.size === 'doubles'}
             onPress={() => toggleSize('doubles')}
           />
           <FilterOptionRow
             mode="checkbox"
-            title="Individual"
+            title={t('common.singles')}
             selected={local.size === 'individual'}
             onPress={() => toggleSize('individual')}
           />
@@ -214,7 +228,7 @@ export function PartidosMoreFiltersModal({
 
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
           <FilterApplyFooter
-            label="Aplicar filtros"
+            label={t('common.applyFilters')}
             onPress={() => {
               onApply(local);
               onClose();

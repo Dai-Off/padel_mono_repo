@@ -20,6 +20,7 @@ import {
   type WalletTransaction,
 } from '../api/wallet';
 import { BackHeader } from '../components/layout/BackHeader';
+import { formatLocale, useTranslation } from '../i18n';
 import { theme } from '../theme';
 
 const CARD = 'rgba(255,255,255,0.06)';
@@ -36,17 +37,22 @@ function formatEuros(cents: number): string {
   return `${sign}${n.toFixed(2).replace('.', ',')} €`;
 }
 
-function formatDate(iso: string): string {
+function formatDate(
+  iso: string,
+  t: (key: string, params?: Record<string, string | number>) => string,
+  numberLocale: string,
+): string {
   const d = new Date(iso);
   const now = new Date();
   const today = now.toDateString() === d.toDateString();
-  if (today) return `Hoy, ${d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+  const time = d.toLocaleTimeString(numberLocale, { hour: '2-digit', minute: '2-digit' });
+  if (today) return t('common.todayWithTime', { time });
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
   if (yesterday.toDateString() === d.toDateString()) {
-    return `Ayer, ${d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}`;
+    return t('common.yesterdayWithTime', { time });
   }
-  return d.toLocaleDateString('es-ES', {
+  return d.toLocaleDateString(numberLocale, {
     day: 'numeric',
     month: 'short',
     hour: '2-digit',
@@ -54,24 +60,35 @@ function formatDate(iso: string): string {
   });
 }
 
-function typeLabel(type: string): string {
+function typeLabel(
+  type: string,
+  t: (key: string, params?: Record<string, string | number>) => string,
+): string {
   switch (type) {
     case 'credit':
-      return 'Abono';
+      return t('wallet.txTypeCredit');
     case 'debit':
-      return 'Cargo';
+      return t('wallet.txTypeDebit');
     case 'refund':
-      return 'Devolución';
+      return t('wallet.txTypeRefund');
     case 'adjustment':
-      return 'Ajuste';
+      return t('wallet.txTypeAdjustment');
     case 'organizer_debt':
-      return 'Deuda organizador';
+      return t('wallet.txTypeOrganizerDebt');
     default:
       return type;
   }
 }
 
-function WalletTransactionRow({ tx }: { tx: WalletTransaction }) {
+function WalletTransactionRow({
+  tx,
+  t,
+  numberLocale,
+}: {
+  tx: WalletTransaction;
+  t: (key: string, params?: Record<string, string | number>) => string;
+  numberLocale: string;
+}) {
   const positive = tx.amount_cents > 0;
   return (
     <View style={styles.txRow}>
@@ -87,7 +104,7 @@ function WalletTransactionRow({ tx }: { tx: WalletTransaction }) {
             {tx.concept}
           </Text>
           <Text style={styles.txMeta}>
-            {formatDate(tx.created_at)} · {typeLabel(tx.type)}
+            {formatDate(tx.created_at, t, numberLocale)} · {typeLabel(tx.type, t)}
           </Text>
         </View>
       </View>
@@ -105,12 +122,16 @@ function ClubBalanceCard({
   loadingTx,
   transactions,
   onToggle,
+  t,
+  numberLocale,
 }: {
   item: ClubWalletBalance;
   expanded: boolean;
   loadingTx: boolean;
   transactions: WalletTransaction[];
   onToggle: () => void;
+  t: (key: string, params?: Record<string, string | number>) => string;
+  numberLocale: string;
 }) {
   const positive = item.balance_cents > 0;
   const debt = item.balance_cents < 0;
@@ -133,10 +154,10 @@ function ClubBalanceCard({
           </LinearGradient>
           <View style={styles.clubTextBlock}>
             <Text style={styles.clubName} numberOfLines={1}>
-              {item.club_name ?? 'Club'}
+              {item.club_name ?? t('common.clubFallback')}
             </Text>
             <Text style={styles.clubHint}>
-              {positive ? 'Saldo a favor' : debt ? 'Saldo pendiente' : 'Sin saldo'}
+              {positive ? t('wallet.walletBalancePositive') : debt ? t('wallet.walletBalanceDebt') : t('wallet.walletBalanceZero')}
             </Text>
           </View>
         </View>
@@ -159,9 +180,9 @@ function ClubBalanceCard({
           {loadingTx ? (
             <ActivityIndicator size="small" color={theme.auth.accent} style={styles.txLoader} />
           ) : transactions.length === 0 ? (
-            <Text style={styles.txEmpty}>Sin movimientos recientes.</Text>
+            <Text style={styles.txEmpty}>{t('wallet.walletNoMovements')}</Text>
           ) : (
-            transactions.map((tx) => <WalletTransactionRow key={tx.id} tx={tx} />)
+            transactions.map((tx) => <WalletTransactionRow key={tx.id} tx={tx} t={t} numberLocale={numberLocale} />)
           )}
         </View>
       )}
@@ -171,6 +192,8 @@ function ClubBalanceCard({
 
 export function MonederoScreen({ onBack }: MonederoScreenProps) {
   const insets = useSafeAreaInsets();
+  const { locale, t } = useTranslation();
+  const numberLocale = formatLocale(locale);
   const { session } = useAuth();
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [balances, setBalances] = useState<ClubWalletBalance[]>([]);
@@ -187,19 +210,19 @@ export function MonederoScreen({ onBack }: MonederoScreenProps) {
     if (!token) {
       setBalances([]);
       setTotalCents(0);
-      setError('Inicia sesión para ver tu monedero.');
+      setError(t('wallet.walletLogin'));
       return;
     }
     const pid = playerId ?? (await fetchMyPlayerId(token));
     if (!pid) {
-      setError('No se encontró tu perfil de jugador.');
+      setError(t('wallet.walletProfileNotFound'));
       return;
     }
     if (!playerId) setPlayerId(pid);
 
     const res = await fetchPlayerWalletBalances(pid, token);
     if (!res.ok) {
-      setError(res.error ?? 'No se pudo cargar el monedero');
+      setError(res.error ?? t('wallet.walletLoadError'));
       setBalances([]);
       setTotalCents(0);
       return;
@@ -207,7 +230,7 @@ export function MonederoScreen({ onBack }: MonederoScreenProps) {
     setError(null);
     setBalances(res.balances ?? []);
     setTotalCents(res.total_balance_cents ?? 0);
-  }, [session?.access_token, playerId]);
+  }, [session?.access_token, playerId, t]);
 
   useEffect(() => {
     setLoading(true);
@@ -244,7 +267,7 @@ export function MonederoScreen({ onBack }: MonederoScreenProps) {
 
   return (
     <View style={styles.container}>
-      <BackHeader title="Monedero" onBack={onBack} tone="dark" />
+      <BackHeader title={t('wallet.walletTitle')} onBack={onBack} tone="dark" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + (insets.bottom ?? 0) }]}
@@ -267,7 +290,7 @@ export function MonederoScreen({ onBack }: MonederoScreenProps) {
           >
             <Ionicons name="wallet-outline" size={28} color={EMERALD.color} />
           </LinearGradient>
-          <Text style={styles.summaryLabel}>Saldo total en clubes</Text>
+          <Text style={styles.summaryLabel}>{t('wallet.walletTotalLabel')}</Text>
           {loading ? (
             <ActivityIndicator size="small" color={theme.auth.accent} style={styles.summaryLoader} />
           ) : (
@@ -282,10 +305,7 @@ export function MonederoScreen({ onBack }: MonederoScreenProps) {
               {formatEuros(totalCents)}
             </Text>
           )}
-          <Text style={styles.summaryHint}>
-            Saldo a favor que el club te ha cargado (bonos, devoluciones o ajustes). Puedes usarlo al
-            reservar o pagar en el club.
-          </Text>
+          <Text style={styles.summaryHint}>{t('wallet.walletTotalHint')}</Text>
         </View>
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -297,15 +317,13 @@ export function MonederoScreen({ onBack }: MonederoScreenProps) {
         ) : balances.length === 0 && !error ? (
           <View style={styles.emptyBox}>
             <Ionicons name="wallet-outline" size={48} color={theme.auth.textMuted} />
-            <Text style={styles.emptyTitle}>Sin saldo en clubes</Text>
-            <Text style={styles.emptyText}>
-              Cuando un club te abone saldo a favor o un bono, aparecerá aquí por club.
-            </Text>
+            <Text style={styles.emptyTitle}>{t('wallet.walletEmptyTitle')}</Text>
+            <Text style={styles.emptyText}>{t('wallet.walletEmptyBody')}</Text>
           </View>
         ) : (
           <View style={styles.clubList}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Por club</Text>
+              <Text style={styles.sectionTitle}>{t('wallet.walletByClub')}</Text>
               <LinearGradient
                 colors={['rgba(241,143,52,0.2)', 'transparent']}
                 start={{ x: 0, y: 0.5 }}
@@ -321,6 +339,8 @@ export function MonederoScreen({ onBack }: MonederoScreenProps) {
                 loadingTx={loadingClubTx && expandedClubId === item.club_id}
                 transactions={expandedClubId === item.club_id ? clubTransactions : []}
                 onToggle={() => void handleToggleClub(item.club_id)}
+                t={t}
+                numberLocale={numberLocale}
               />
             ))}
           </View>

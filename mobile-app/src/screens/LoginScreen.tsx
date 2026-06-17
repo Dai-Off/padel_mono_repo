@@ -24,6 +24,7 @@ import {
   loginForgotLabel,
 } from '../styles/authScreenStyles';
 import { SafeText } from '../components/ui/SafeText';
+import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 
 type LoginScreenProps = {
@@ -32,6 +33,7 @@ type LoginScreenProps = {
 };
 
 export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) {
+  const { t } = useTranslation();
   const { setSession } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -50,7 +52,7 @@ export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) 
     const p = password;
 
     if (!e || !p) {
-      setError('Email o usuario y contraseña son obligatorios');
+      setError(t('common.emailUserPasswordRequired'));
       return;
     }
 
@@ -68,11 +70,11 @@ export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) 
           user: res.user,
         });
       } else {
-        setError(res.error ?? 'Error al iniciar sesión');
+        setError(res.error ?? t('auth.loginError'));
         setErrorCode(res.error_code);
       }
     } catch {
-      setError('Error de conexión. ¿Está el backend corriendo?');
+      setError(t('common.connectionErrorBackend'));
     } finally {
       setLoading(false);
     }
@@ -93,25 +95,25 @@ export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) 
         ) : null}
 
         <AuthInput
-          label="Email o usuario"
+          label={t('auth.emailOrUserLabel')}
           icon="mail-outline"
-          placeholder="tu@email.com o usuario"
+          placeholder={t('auth.emailOrUserPlaceholder')}
           keyboardType="email-address"
           autoCapitalize="none"
           autoComplete="email"
           value={email}
-          onChangeText={(t) => { setEmail(t); clearError(); }}
+          onChangeText={(text) => { setEmail(text); clearError(); }}
           editable={!loading}
         />
 
         <AuthInput
-          label="Contraseña"
+          label={t('auth.passwordLabel')}
           icon="lock-closed-outline"
-          placeholder="••••••••"
+          placeholder={t('auth.passwordPlaceholder')}
           secureTextEntry
           autoComplete="password"
           value={password}
-          onChangeText={(t) => { setPassword(t); clearError(); }}
+          onChangeText={(text) => { setPassword(text); clearError(); }}
           editable={!loading}
         />
 
@@ -129,7 +131,7 @@ export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) 
                   ) : null}
                 </View>
                 <View style={styles.checkboxLabelOuter}>
-                  <SafeText style={styles.checkboxLabel}>Recordarme</SafeText>
+                  <SafeText style={styles.checkboxLabel}>{t('auth.rememberMe')}</SafeText>
                 </View>
               </View>
             </Pressable>
@@ -141,7 +143,7 @@ export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) 
               disabled={loading}
             >
               <SafeText style={loginForgotLabel}>
-                ¿Olvidaste tu contraseña?
+                {t('auth.forgotPassword')}
               </SafeText>
             </Pressable>
           </View>
@@ -153,12 +155,12 @@ export function LoginScreen({ onGoToRegister, onGoToForgot }: LoginScreenProps) 
           disabled={loading}
           icon="arrow-forward"
         >
-          Iniciar Sesión
+          {t('auth.loginTitle')}
         </AuthButton>
 
         <AuthFormLink
-          prompt="¿No tienes cuenta?"
-          action="Regístrate gratis"
+          prompt={t('auth.noAccountPrompt')}
+          action={t('auth.registerFree')}
           onPress={onGoToRegister}
           disabled={loading}
         />

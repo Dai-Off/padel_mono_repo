@@ -1,0 +1,32 @@
+import type { MessagesTranslationKeys } from '../../sections/messages';
+
+export const messages: MessagesTranslationKeys = {
+  title: 'Mensajes',
+  backA11y: 'Volver',
+  newConversationA11y: 'Nueva conversación',
+  searchConversations: 'Buscar conversaciones',
+  loginToView: 'Inicia sesión para ver tus mensajes',
+  emptyConversations:
+    'No hay conversaciones todavía. Pulsa el lápiz para buscar un jugador y empezar a chatear.',
+  newConversationTitle: 'Nueva conversación',
+  searchPlayersPlaceholder: 'Nombre, apellido o @usuario',
+  noSearchResults: 'Sin resultados',
+  threadEmpty: 'Escribe el primer mensaje para {name}.',
+  threadInputPlaceholder: 'Escribe un mensaje…',
+  messageSent: 'Mensaje enviado',
+  iaSearchTitle: 'Buscar Compañero con IA',
+  iaSearching: 'Buscando compañeros...',
+  iaGenerating: 'Generando recomendaciones...',
+  iaActivateVisibility: 'Activa tu visibilidad',
+  iaSearchPartners: 'Buscar compañeros',
+  iaSearchPlayers: 'Buscar jugadores',
+  iaEditPreferences: 'Editar preferencias',
+  iaStatsMatches: 'PARTIDOS',
+  iaStatsWins: 'VICTORIAS',
+  iaStatsDistance: 'DISTANCIA',
+  iaMatchReason: 'Razón del match:',
+  iaLoginMessages: 'Inicia sesión para enviar mensajes.',
+  iaLoginProfile: 'Inicia sesión para ver perfiles.',
+  iaPlayerNotFoundMessage: 'No se encontró a "{name}" para enviarle mensaje.',
+  iaPlayerNotFoundProfile: 'No se encontró a "{name}".',
+};

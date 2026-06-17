@@ -19,13 +19,14 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { createPost } from '../../api/community';
 import { buildVideoCoverAndFrames } from '../../lib/videoFrames';
+import { useTranslation } from '../../i18n';
 import { Transformable } from './Transformable';
 import {
   StoryFilterId,
   StoryLayer,
   StoryOverlays,
   MediaTransform,
-  STORY_FILTERS,
+  getStoryFilters,
   filterById,
   TEXT_COLORS,
 } from '../../lib/storyOverlays';
@@ -47,6 +48,8 @@ let layerSeq = 0;
 const nextId = () => `l${Date.now()}_${layerSeq++}`;
 
 export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onClose, onSuccess }) => {
+  const { t } = useTranslation();
+  const storyFilters = getStoryFilters(t);
   const [media, setMedia] = useState<Media | null>(null);
   const [layers, setLayers] = useState<StoryLayer[]>([]);
   const [filter, setFilter] = useState<StoryFilterId>('none');
@@ -80,7 +83,7 @@ export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onCl
     (async () => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería.');
+        Alert.alert(t('common.permissionDenied'), t('common.permissionGallery'));
         onClose();
         return;
       }
@@ -166,15 +169,15 @@ export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onCl
         overlays,
       });
       if (res.ok) { onSuccess(); reset(); onClose(); }
-      else Alert.alert('Error', res.error || 'No se pudo publicar la historia');
+      else Alert.alert(t('common.error'), res.error || t('community.storyPublishError'));
     } catch {
-      Alert.alert('Error', 'No se pudo preparar la historia. Inténtalo de nuevo.');
+      Alert.alert(t('common.error'), t('community.storyPrepareError'));
     } finally {
       setLoading(false);
     }
   };
 
-  const f = filterById(filter);
+  const f = filterById(filter, storyFilters);
 
   if (!isVisible) return null;
 
@@ -252,7 +255,7 @@ export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onCl
         {showFilters && (
           <View style={styles.filterBar}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              {STORY_FILTERS.map(opt => (
+              {storyFilters.map(opt => (
                 <TouchableOpacity key={opt.id} style={styles.filterChip} onPress={() => setFilter(opt.id)}>
                   <View style={[styles.filterSwatch, opt.id === filter && styles.filterSwatchActive]}>
                     {opt.opacity > 0
@@ -273,7 +276,7 @@ export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onCl
           return (
             <TouchableOpacity style={styles.editTextBtn} onPress={openTextEditor}>
               <Ionicons name="create-outline" size={16} color="#FFF" />
-              <Text style={styles.editTextLabel}>Editar texto</Text>
+              <Text style={styles.editTextLabel}>{t('community.storyEditText')}</Text>
             </TouchableOpacity>
           );
         })()}
@@ -283,7 +286,7 @@ export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onCl
           <TouchableOpacity style={styles.shareBtn} onPress={handleShare} disabled={loading}>
             {loading
               ? <ActivityIndicator size="small" color="#FFF" />
-              : <><Text style={styles.shareText}>Compartir historia</Text><Ionicons name="arrow-forward" size={18} color="#FFF" /></>}
+              : <><Text style={styles.shareText}>{t('community.storyShare')}</Text><Ionicons name="arrow-forward" size={18} color="#FFF" /></>}
           </TouchableOpacity>
         )}
 
@@ -312,7 +315,7 @@ export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onCl
               style={[styles.textInput, { color: textDraft.color }]}
               value={textDraft.value}
               onChangeText={(t) => setTextDraft({ ...textDraft, value: t })}
-              placeholder="Escribe algo..."
+              placeholder={t('community.storyTextPlaceholder')}
               placeholderTextColor="rgba(255,255,255,0.5)"
               autoFocus
               multiline
@@ -324,7 +327,7 @@ export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onCl
               ))}
             </View>
             <TouchableOpacity style={styles.doneBtn} onPress={addText}>
-              <Text style={styles.doneText}>Listo</Text>
+              <Text style={styles.doneText}>{t('community.storyDone')}</Text>
             </TouchableOpacity>
           </View>
         )}

@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 export const FRIENDLY_ELO_MIN = 0;
@@ -79,15 +80,20 @@ export function FriendlyLevelRangeSection({
   onEloMinChange,
   onEloMaxChange,
 }: FriendlyLevelRangeSectionProps) {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.section}>
       <View style={styles.switchRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.sectionTitle}>Nivel de jugadores</Text>
+          <Text style={styles.sectionTitle}>{t('partidos.friendlyLevelSection')}</Text>
           <Text style={styles.sectionSub}>
             {restrictByLevel
-              ? `Solo nivel ${formatFriendlyElo(eloMin)} – ${formatFriendlyElo(eloMax)}`
-              : 'Cualquier nivel puede unirse'}
+              ? t('partidos.playerLevelRange', {
+                  min: formatFriendlyElo(eloMin),
+                  max: formatFriendlyElo(eloMax),
+                })
+              : t('partidos.friendlyLevelAny')}
           </Text>
         </View>
         <Switch
@@ -101,7 +107,7 @@ export function FriendlyLevelRangeSection({
       {restrictByLevel ? (
         <View style={styles.steppers}>
           <LevelStepper
-            label="Nivel mínimo"
+            label={t('partidos.friendlyLevelMin')}
             value={eloMin}
             onChange={(next) => {
               onEloMinChange(next);
@@ -109,7 +115,7 @@ export function FriendlyLevelRangeSection({
             }}
           />
           <LevelStepper
-            label="Nivel máximo"
+            label={t('partidos.friendlyLevelMax')}
             value={eloMax}
             onChange={(next) => {
               onEloMaxChange(next);

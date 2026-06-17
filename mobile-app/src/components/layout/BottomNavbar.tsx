@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 
 /** Alineado a la BottomNav web (Inicio, Pistas, Tienda, Torneos, Partidos). */
 export type MainTabId =
@@ -17,17 +18,17 @@ export type MainTabId =
 
 type TabConfig = {
   id: MainTabId;
-  label: string;
+  labelKey: string;
   icon: ComponentProps<typeof Ionicons>['name'];
 };
 
 const TABS: TabConfig[] = [
-  { id: 'inicio', label: 'Inicio', icon: 'home' },
-  { id: 'pistas', label: 'Pistas', icon: 'calendar' },
-  { id: 'tienda', label: 'Tienda', icon: 'bag-handle-outline' },
-  { id: 'torneos', label: 'Torneos', icon: 'trophy' },
-  { id: 'partidos', label: 'Partidos', icon: 'flash' },
-  { id: 'perfil', label: 'Perfil', icon: 'person' },
+  { id: 'inicio', labelKey: 'nav.tabInicio', icon: 'home' },
+  { id: 'pistas', labelKey: 'nav.tabPistas', icon: 'calendar' },
+  { id: 'tienda', labelKey: 'nav.tabTienda', icon: 'bag-handle-outline' },
+  { id: 'torneos', labelKey: 'nav.tabTorneos', icon: 'trophy' },
+  { id: 'partidos', labelKey: 'nav.tabPartidos', icon: 'flash' },
+  { id: 'perfil', labelKey: 'nav.tabPerfil', icon: 'person' },
 ];
 
 const GRADIENT = ['#F18F34', '#FFA940'] as const;
@@ -52,7 +53,7 @@ function TabButton({
   isActive,
   onPress,
 }: {
-  tab: TabConfig;
+  tab: TabConfig & { label: string };
   isActive: boolean;
   onPress: () => void;
 }) {
@@ -114,6 +115,7 @@ function TabButton({
 }
 
 export function BottomNavbar({ activeTab, onTabChange }: BottomNavbarProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const bottomPad = Math.max(
     insets.bottom,
@@ -154,7 +156,7 @@ export function BottomNavbar({ activeTab, onTabChange }: BottomNavbarProps) {
         {TABS.map((tab) => (
           <TabButton
             key={tab.id}
-            tab={tab}
+            tab={{ ...tab, label: t(tab.labelKey) }}
             isActive={activeTab === tab.id}
             onPress={() => onTabChange(tab.id)}
           />

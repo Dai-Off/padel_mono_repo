@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { BookingSuccessRadialBg } from '../components/partido/BookingSuccessRadialBg';
+import { useTranslation } from '../i18n';
 import { useSlotPrice } from '../hooks/useSlotPrice';
 
 const ORANGE = '#F18F34';
@@ -46,13 +47,6 @@ type Props = {
   data: BookingConfirmationData;
   onClose: () => void;
 };
-
-function resolvePlayersHint(data: BookingConfirmationData): string {
-  if (data.playersLine != null && data.playersLine.trim() !== '') {
-    return data.playersLine;
-  }
-  return '1 de 4 jugadores\u00A0confirmados';
-}
 
 function androidLabel(base: TextStyle): TextStyle {
   if (Platform.OS !== 'android') return base;
@@ -113,8 +107,12 @@ function EmptySlot({ small }: { small?: boolean }) {
 
 /** Partido público / unirse: «¡TE HAS UNIDO!» + equipos + meta + CTA. */
 function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
+  const { t } = useTranslation();
   const { date: datePart, time: timePart } = splitDateTime(data.dateTimeFormatted);
-  const playersLine = resolvePlayersHint(data);
+  const playersLine =
+    data.playersLine != null && data.playersLine.trim() !== ''
+      ? data.playersLine
+      : t('partidos.detailAlreadyInMatch');
 
   const { priceData, loading } = useSlotPrice({
     clubId: data.clubId,
@@ -126,10 +124,10 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
   });
 
   const renderPrice = () => {
-    if (loading) return ' · Calculando precio...';
+    if (loading) return ` · ${t('common.loadingEllipsis')}`;
     if (priceData) {
       if (priceData.source === 'none') {
-        return ' · Precio no disponible, contacta al club.';
+        return ` · ${t('search.clubPriceError')}`;
       }
       return ` · ${(priceData.total_price_cents / 100).toFixed(2)} €`;
     }
@@ -141,7 +139,7 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
       <View style={styles.pill}>
         <Ionicons name="trophy" size={14} color="#FACC15" />
         <Text style={[styles.pillText, androidLabel({})]} numberOfLines={1}>
-          ¡TE HAS UNIDO!
+          {t('partidos.detailAlreadyInMatch').toUpperCase()}
         </Text>
         <Ionicons name="trophy" size={14} color="#FACC15" />
       </View>
@@ -173,9 +171,9 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
         <View style={styles.cardInner}>
           <View style={styles.teamsRow}>
             <View style={styles.teamCol}>
-              <Text style={[styles.teamLabelA, androidLabel({})]}>Equipo A</Text>
+              <Text style={[styles.teamLabelA, androidLabel({})]}>{t('partidos.evalUs')}</Text>
               <View style={styles.teamAvatars}>
-                <AvatarSlot initials="TÚ" gradientColors={[ORANGE, ORANGE_END]} level="1.0" />
+                <AvatarSlot initials={t('common.youShort')} gradientColors={[ORANGE, ORANGE_END]} level="1.0" />
               </View>
             </View>
 
@@ -187,7 +185,7 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
             </View>
 
             <View style={styles.teamCol}>
-              <Text style={[styles.teamLabelB, androidLabel({})]}>Equipo B</Text>
+              <Text style={[styles.teamLabelB, androidLabel({})]}>{t('partidos.evalThem')}</Text>
               <View style={styles.teamAvatars}>
                 <EmptySlot small />
                 <EmptySlot small />
@@ -207,7 +205,7 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
           <View style={styles.metaRow}>
             <View style={styles.metaItem}>
               <Ionicons name="flash" size={12} color={ORANGE} />
-              <Text style={[styles.metaStrong, androidLabel({})]}>Pádel</Text>
+              <Text style={[styles.metaStrong, androidLabel({})]}>{t('common.sportPadel')}</Text>
             </View>
           </View>
           <View style={styles.metaClubRow}>
@@ -237,7 +235,7 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
         <Pressable onPress={onClose} style={({ pressed }) => [pressed && styles.pressed]}>
           <LinearGradient colors={[ORANGE, ORANGE_END]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.ctaGradient}>
             <Ionicons name="flash" size={18} color="#fff" />
-            <Text style={[styles.ctaLabel, androidLabel({})]}>¡Vamos a jugar!</Text>
+            <Text style={[styles.ctaLabel, androidLabel({})]}>{t('partidos.startMatchFab')}</Text>
           </LinearGradient>
         </Pressable>
         <Text style={[styles.playersHint, androidLabel({})]}>{playersLine}</Text>
@@ -248,6 +246,7 @@ function PublicMatchJoinedConfirmation({ data, onClose }: Props) {
 
 /** Solo partido público / unirse (pantalla completa). La reserva privada usa `PrivateReservationModal`. */
 export function BookingConfirmationScreen({ data, onClose }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { width: winW, height: winH } = useWindowDimensions();
 
@@ -262,7 +261,7 @@ export function BookingConfirmationScreen({ data, onClose }: Props) {
         style={[styles.closeBtn, { top: insets.top + 8, right: 16 }]}
         hitSlop={12}
         accessibilityRole="button"
-        accessibilityLabel="Cerrar"
+        accessibilityLabel={t('common.close')}
       >
         <Ionicons name="close" size={22} color="rgba(255,255,255,0.85)" />
       </Pressable>

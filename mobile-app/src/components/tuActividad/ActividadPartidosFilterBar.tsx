@@ -1,13 +1,14 @@
 import { Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 import type { ActivityOutcomeFilter } from '../../domain/matchOutcome';
 import { theme } from '../../theme';
+import { useTranslation } from '../../i18n';
 
-const FILTERS: { id: ActivityOutcomeFilter; label: string }[] = [
-  { id: 'all', label: 'Todos' },
-  { id: 'won', label: 'Ganados' },
-  { id: 'lost', label: 'Perdidos' },
-  { id: 'incomplete', label: 'No completados' },
-  { id: 'cancelled', label: 'Cancelados' },
+const FILTER_KEYS: { id: ActivityOutcomeFilter; labelKey: string }[] = [
+  { id: 'all', labelKey: 'activity.matchesFilterAll' },
+  { id: 'won', labelKey: 'activity.matchesFilterWon' },
+  { id: 'lost', labelKey: 'activity.matchesFilterLost' },
+  { id: 'incomplete', labelKey: 'activity.matchesFilterIncomplete' },
+  { id: 'cancelled', labelKey: 'activity.matchesFilterCancelled' },
 ];
 
 type ActividadPartidosFilterBarProps = {
@@ -16,13 +17,14 @@ type ActividadPartidosFilterBarProps = {
 };
 
 export function ActividadPartidosFilterBar({ value, onChange }: ActividadPartidosFilterBarProps) {
+  const { t } = useTranslation();
   return (
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.row}
     >
-      {FILTERS.map((f) => {
+      {FILTER_KEYS.map((f) => {
         const active = value === f.id;
         return (
           <Pressable
@@ -36,7 +38,7 @@ export function ActividadPartidosFilterBar({ value, onChange }: ActividadPartido
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
           >
-            <Text style={[styles.chipText, active && styles.chipTextActive]}>{f.label}</Text>
+            <Text style={[styles.chipText, active && styles.chipTextActive]}>{t(f.labelKey)}</Text>
           </Pressable>
         );
       })}
