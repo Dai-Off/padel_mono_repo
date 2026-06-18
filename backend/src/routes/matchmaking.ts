@@ -998,8 +998,13 @@ router.post('/pair-invite/:id/accept', async (req: Request, res: Response) => {
   if (invite.status !== 'pending') return res.status(409).json({ ok: false, error: 'La invitación ya no está pendiente' });
   if (inviteExpired(invite)) return res.status(409).json({ ok: false, error: 'La invitación caducó' });
 
+  // Al aceptar, renovamos la caducidad: la pareja queda lista para buscar y no debe
+  // expirar por el contador original de la invitación.
   const nowIso = new Date().toISOString();
-  await supabase.from('matchmaking_pair_invites').update({ status: 'accepted', updated_at: nowIso }).eq('id', invite.id);
+  await supabase
+    .from('matchmaking_pair_invites')
+    .update({ status: 'accepted', updated_at: nowIso, expires_at: computeDefaultInviteExpiry() })
+    .eq('id', invite.id);
   return res.json({ ok: true });
 });
 

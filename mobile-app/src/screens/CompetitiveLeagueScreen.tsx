@@ -920,6 +920,9 @@ export function CompetitiveLeagueScreen({
   const rankingLoadedCount = rankingRows.length;
   const rankingPlayerCount = rankingTotal > 0 ? rankingTotal : rankingLoadedCount;
 
+  // Invitaciones aceptadas pendientes de buscar partido (cualquiera de los dos puede iniciar).
+  const acceptedInvitesCount = (status?.pair_invites ?? []).filter((i) => i.status === 'accepted').length;
+
   return (
     <View style={styles.container}>
       {step === 'home' ? (
@@ -1032,6 +1035,11 @@ export function CompetitiveLeagueScreen({
                     <Text style={styles.searchTitle}>Buscar partido</Text>
                     <Text style={styles.searchSubtitle}>Matchmaking competitivo 2v2</Text>
                   </View>
+                  {acceptedInvitesCount > 0 ? (
+                    <View style={styles.notifBadge}>
+                      <Text style={styles.notifBadgeText}>{acceptedInvitesCount}</Text>
+                    </View>
+                  ) : null}
                   <Ionicons name="chevron-forward" size={20} color="#f6ddbf" />
                 </Pressable>
               </LinearGradient>
@@ -1557,6 +1565,11 @@ export function CompetitiveLeagueScreen({
               <Text style={styles.modeOptionTitle}>{t('competitive.mode.friend')}</Text>
               <Text style={styles.modeOptionSub}>{t('competitive.mode.friendSub')}</Text>
             </View>
+            {acceptedInvitesCount > 0 ? (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>{acceptedInvitesCount}</Text>
+              </View>
+            ) : null}
             <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
           </Pressable>
         </View>
@@ -1766,6 +1779,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,158,11,0.35)',
     overflow: 'hidden',
   },
+  notifBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  notifBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   searchCardPress: {
     paddingHorizontal: 11,
     paddingVertical: 9,
