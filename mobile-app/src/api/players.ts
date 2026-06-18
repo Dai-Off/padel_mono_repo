@@ -427,6 +427,7 @@ export type PlayerSearchHit = {
   first_name?: string | null;
   last_name?: string | null;
   username?: string | null;
+  onboarding_completed?: boolean;
 };
 
 /** Lista jugadores; con `q` filtra por nombre o teléfono (misma API que el panel). */

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -14,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { searchPlayers, type PlayerSearchHit } from '../../api/players';
-import { fetchMatchmakingStatus, type PairInvite } from '../../api/matchmaking';
+import { cancelPairInvite, fetchMatchmakingStatus, type PairInvite } from '../../api/matchmaking';
 
 const BG = '#0F0F0F';
 const ACCENT = theme.auth.accent;
@@ -43,6 +44,8 @@ export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState<PairInvite[]>([]);
+  const [pending, setPending] = useState<PairInvite[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!visible) return;
@@ -62,49 +65,86 @@ export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted
     };
   }, [query, token, visible]);
 
-  // Compañeros que ya aceptaron mi invitación (listos para buscar directamente).
+  // Invitaciones que envié: aceptadas (listas para buscar) y pendientes (esperando respuesta).
   useEffect(() => {
     if (!visible) {
       setAccepted([]);
+      setPending([]);
       return;
     }
     let cancelled = false;
     (async () => {
       const st = await fetchMatchmakingStatus(token);
       if (cancelled) return;
-      setAccepted((st?.pair_invites ?? []).filter((i) => i.role === 'inviter' && i.status === 'accepted'));
+      const invs = st?.pair_invites ?? [];
+      setAccepted(invs.filter((i) => i.role === 'inviter' && i.status === 'accepted'));
+      setPending(invs.filter((i) => i.role === 'inviter' && i.status === 'pending'));
     })();
     return () => {
       cancelled = true;
     };
-  }, [visible, token]);
+  }, [visible, token, refreshKey]);
+
+  const handleCancelInvite = async (inv: PairInvite) => {
+    const res = await cancelPairInvite(inv.id, token);
+    if (!res.ok) Alert.alert('No se pudo', res.error);
+    setRefreshKey((k) => k + 1);
+  };
 
   const exclude = new Set(excludeIds ?? []);
-  const list = players.filter((p) => !exclude.has(p.id));
+  // Oculta a uno mismo y a quien no ha completado el onboarding (no puede jugar competitiva).
+  const list = players.filter((p) => !exclude.has(p.id) && p.onboarding_completed !== false);
 
-  const acceptedHeader =
-    onSelectAccepted && accepted.length > 0 ? (
+  const showAccepted = !!onSelectAccepted && accepted.length > 0;
+  const showPending = pending.length > 0;
+  const listHeader =
+    showAccepted || showPending ? (
       <View style={styles.acceptedBlock}>
-        <Text style={styles.sectionLabel}>Listos para jugar</Text>
-        {accepted.map((inv) => (
-          <Pressable
-            key={inv.id}
-            onPress={() => {
-              onSelectAccepted(inv);
-              onClose();
-            }}
-            style={({ pressed }) => [styles.row, styles.acceptedRow, pressed && { opacity: 0.85 }]}
-          >
-            <View style={styles.avatar}>
-              <Ionicons name="checkmark-circle" size={18} color={ACCENT} />
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.name}>{inv.other_player_name}</Text>
-              <Text style={styles.meta}>Aceptó tu invitación · tocá para buscar</Text>
-            </View>
-            <Ionicons name="flash" size={18} color={ACCENT} />
-          </Pressable>
-        ))}
+        {showAccepted ? (
+          <>
+            <Text style={styles.sectionLabel}>Listos para jugar</Text>
+            {accepted.map((inv) => (
+              <Pressable
+                key={inv.id}
+                onPress={() => {
+                  onSelectAccepted?.(inv);
+                  onClose();
+                }}
+                style={({ pressed }) => [styles.row, styles.acceptedRow, pressed && { opacity: 0.85 }]}
+              >
+                <View style={styles.avatar}>
+                  <Ionicons name="checkmark-circle" size={18} color={ACCENT} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.name}>{inv.other_player_name}</Text>
+                  <Text style={styles.meta}>Aceptó tu invitación · tocá para buscar</Text>
+                </View>
+                <Ionicons name="flash" size={18} color={ACCENT} />
+              </Pressable>
+            ))}
+          </>
+        ) : null}
+        {showPending ? (
+          <>
+            <Text style={[styles.sectionLabel, showAccepted ? { marginTop: 12 } : null]}>
+              Pendientes (esperando respuesta)
+            </Text>
+            {pending.map((inv) => (
+              <View key={inv.id} style={[styles.row, styles.pendingRow]}>
+                <View style={styles.avatar}>
+                  <Ionicons name="hourglass-outline" size={18} color="#9CA3AF" />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.name}>{inv.other_player_name}</Text>
+                  <Text style={styles.meta}>Esperando respuesta</Text>
+                </View>
+                <Pressable onPress={() => void handleCancelInvite(inv)} hitSlop={8} style={styles.cancelBtn}>
+                  <Text style={styles.cancelBtnText}>Cancelar</Text>
+                </Pressable>
+              </View>
+            ))}
+          </>
+        ) : null}
         <Text style={[styles.sectionLabel, { marginTop: 12 }]}>O invitá a otro jugador</Text>
       </View>
     ) : null;
@@ -151,7 +191,7 @@ export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted
             keyExtractor={(item) => item.id}
             contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 16 }}
             keyboardShouldPersistTaps="handled"
-            ListHeaderComponent={acceptedHeader}
+            ListHeaderComponent={listHeader}
             ListEmptyComponent={<Text style={styles.emptyText}>No se encontraron jugadores.</Text>}
             renderItem={({ item }) => (
               <Pressable
@@ -233,4 +273,7 @@ const styles = StyleSheet.create({
   acceptedBlock: { marginBottom: 4 },
   sectionLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   acceptedRow: { borderColor: 'rgba(241,143,52,0.45)', backgroundColor: 'rgba(241,143,52,0.08)' },
+  pendingRow: { borderColor: 'rgba(255,255,255,0.06)', backgroundColor: '#101010' },
+  cancelBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: '#262626' },
+  cancelBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
 });
