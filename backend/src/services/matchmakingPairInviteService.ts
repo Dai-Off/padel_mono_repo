@@ -6,6 +6,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { PREMADE_MAX_GAP } from './matchmakingShared';
+import { getMatchmakingBlockUntil } from './matchmakingService';
 
 /** TTL por defecto de una invitación si la ventana de disponibilidad no acota antes. */
 const PAIR_INVITE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -131,6 +132,15 @@ export async function assertPairEligible(
   const gap = Math.abs(Number(a.elo_rating ?? 0) - Number(b.elo_rating ?? 0));
   if (gap > PREMADE_MAX_GAP) {
     return { ok: false, status: 400, error: `La diferencia de nivel con tu compañero es demasiado alta (máx ${PREMADE_MAX_GAP})` };
+  }
+
+  // Ninguno de los dos puede tener el matchmaking bloqueado por sanción.
+  const [blockA, blockB] = await Promise.all([
+    getMatchmakingBlockUntil(inviterId),
+    getMatchmakingBlockUntil(inviteeId),
+  ]);
+  if (blockA || blockB) {
+    return { ok: false, status: 403, error: 'Tú o tu compañero tenéis el matchmaking bloqueado temporalmente por sanción' };
   }
 
   const { data: inPool } = await supabase
