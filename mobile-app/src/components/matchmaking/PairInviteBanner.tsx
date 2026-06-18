@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../contexts/AuthContext';
@@ -22,7 +22,8 @@ export function PairInviteBanner({ invites, onChanged }: Props) {
   const token = session?.access_token ?? null;
   const [busy, setBusy] = useState(false);
 
-  const invite = invites.find((i) => i.role === 'invitee' && i.status === 'pending');
+  const pending = invites.filter((i) => i.role === 'invitee' && i.status === 'pending');
+  const invite = pending[0];
   if (!invite) return null;
 
   const run = async (fn: () => Promise<{ ok: boolean; error?: string }>) => {
@@ -41,10 +42,17 @@ export function PairInviteBanner({ invites, onChanged }: Props) {
       end={{ x: 1, y: 1 }}
       style={styles.card}
     >
+      {pending.length > 1 ? (
+        <Text style={styles.countNote}>{t('competitive.banner.count', { n: pending.length })}</Text>
+      ) : null}
       <View style={styles.row}>
-        <View style={styles.iconWrap}>
-          <Ionicons name="people" size={18} color="#fff" />
-        </View>
+        {invite.other_player_avatar ? (
+          <Image source={{ uri: invite.other_player_avatar }} style={styles.avatarImg} />
+        ) : (
+          <View style={styles.iconWrap}>
+            <Ionicons name="people" size={18} color="#fff" />
+          </View>
+        )}
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.title} numberOfLines={2}>
             {t('competitive.banner.invitesYou', { name: invite.other_player_name })}
@@ -84,6 +92,18 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 12,
   },
+  countNote: {
+    alignSelf: 'flex-start',
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
+  avatarImg: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   iconWrap: {
     width: 40,
