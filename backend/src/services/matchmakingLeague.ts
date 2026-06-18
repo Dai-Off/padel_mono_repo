@@ -50,3 +50,15 @@ export function ligaFromEloWithBands(elo: number, bands: LeagueEloBand[]): strin
 export function higherLigaRank(a: string, b: string): string {
   return leagueIndex(a) >= leagueIndex(b) ? a : b;
 }
+
+/** Sube un escalón de liga (tope elite). */
+export function nextLiga(l: string): LeagueName {
+  const i = leagueIndex(l);
+  return i >= LEAGUE_ORDER.length - 1 ? LEAGUE_ORDER[LEAGUE_ORDER.length - 1] : LEAGUE_ORDER[i + 1];
+}
+
+/** Baja un escalón de liga (suelo bronce). */
+export function prevLiga(l: string): LeagueName {
+  const i = leagueIndex(l);
+  return i <= 0 ? LEAGUE_ORDER[0] : LEAGUE_ORDER[i - 1];
+}

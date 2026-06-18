@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { leagueIndex } from './matchmakingLeague';
+import { leagueIndex, prevLiga } from './matchmakingLeague';
 
 /** Asigna la temporada MM activa si el jugador aún no tiene una (registro / migraciones). */
 export async function assignActiveMatchmakingSeasonIfNull(
@@ -94,13 +94,17 @@ export async function closeActiveMatchmakingSeason(
     if (e3) throw new Error(e3.message);
 
     for (const p of list) {
+      // Soft reset: la liga visible baja un tramo (suelo bronce) para reavivar la
+      // escalada. El mu/sigma no se tocan; el acelerador de LP recolocará rápido.
+      const nuevaLiga = prevLiga(p.liga);
       const { error: e4 } = await supabase
         .from('players')
         .update({
+          liga: nuevaLiga,
           lps: 0,
           league_season_id: newId,
           mm_shield_matches: 0,
-          mm_peak_liga: p.liga,
+          mm_peak_liga: nuevaLiga,
           updated_at: nowIso,
         })
         .eq('id', p.id);

@@ -1,7 +1,7 @@
 /**
  * Economía de LP / ascenso / descenso en partidos matchmaking (doc 10 §3.3–3.5, §4 pendientes resueltos con valores provisionales).
  */
-import { LEAGUE_ORDER, leagueIndex, ligaFromEloWithBands, type LeagueName, type LeagueEloBand } from './matchmakingLeague';
+import { LEAGUE_ORDER, leagueIndex, ligaFromEloWithBands, nextLiga, prevLiga, type LeagueEloBand } from './matchmakingLeague';
 
 /** LP base victoria / derrota (provisionales; doc 10 §4.4). */
 export const LP_WIN_BASE = 15;
@@ -46,18 +46,6 @@ function avgLeagueIndexForTeam(team: 'A' | 'B', rows: MmLeagueRow[]): number {
 
 function higherLigaByIndex(a: string, b: string): string {
   return leagueIndex(a) >= leagueIndex(b) ? a : b;
-}
-
-function nextLiga(l: string): LeagueName {
-  const i = leagueIndex(l);
-  if (i >= LEAGUE_ORDER.length - 1) return LEAGUE_ORDER[LEAGUE_ORDER.length - 1];
-  return LEAGUE_ORDER[i + 1];
-}
-
-function prevLiga(l: string): LeagueName {
-  const i = leagueIndex(l);
-  if (i <= 0) return LEAGUE_ORDER[0];
-  return LEAGUE_ORDER[i - 1];
 }
 
 /**
