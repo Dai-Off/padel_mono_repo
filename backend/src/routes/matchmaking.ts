@@ -11,7 +11,7 @@ import {
   releaseMatchmakingProposal,
   runMatchmakingCycle,
 } from '../services/matchmakingService';
-import { closeActiveMatchmakingSeason } from '../services/matchmakingSeasonService';
+import { closeActiveMatchmakingSeason, getSeasonTransitionForPlayer } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { clearMatchmakingPoolIfPlayerPaid } from '../services/matchmakingPoolCleanup';
 import {
@@ -600,6 +600,22 @@ router.get('/pair-invites', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
   const pairInvites = await getActionablePairInvites(supabase, playerId);
   return res.json({ ok: true, pair_invites: pairInvites });
+});
+
+/**
+ * @openapi
+ * /matchmaking/season-transition:
+ *   get:
+ *     tags: [Matchmaking]
+ *     summary: Última transición de temporada del jugador (modal de fin de temporada)
+ *     description: Devuelve la liga con la que cerró la temporada anterior y la liga actual tras el soft reset, o null si no aplica.
+ */
+router.get('/season-transition', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const transition = await getSeasonTransitionForPlayer(supabase, playerId);
+  return res.json({ ok: true, transition });
 });
 
 /**
