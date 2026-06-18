@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Linking,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -10,15 +12,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerId } from '../api/players';
-import {
-  fetchPlayerWalletBalances,
-  fetchWalletBalance,
-  type ClubWalletBalance,
-  type WalletTransaction,
-} from '../api/wallet';
+import { fetchCustomerPortalUrl, fetchPendingBookings } from '../api/payments';
+import { fetchPlayerWalletBalances } from '../api/wallet';
 import { BackHeader } from '../components/layout/BackHeader';
 import { formatLocale, useTranslation } from '../i18n';
 import { theme } from '../theme';
@@ -29,468 +26,385 @@ const EMERALD = theme.sidebar.iconVariants.emerald;
 
 type MonederoScreenProps = {
   onBack: () => void;
+  onPagosPendientesPress?: () => void;
+  onMovimientosPress?: () => void;
+  onTransaccionesPress?: () => void;
 };
 
-function formatEuros(cents: number): string {
-  const sign = cents < 0 ? '− ' : '';
-  const n = Math.abs(cents) / 100;
-  return `${sign}${n.toFixed(2).replace('.', ',')} €`;
+function formatAmount(cents: number, locale: string): string {
+  const abs = Math.abs(cents) / 100;
+  return `${abs.toLocaleString(locale, { minimumFractionDigits: 0, maximumFractionDigits: 2 })} €`;
 }
 
-function formatDate(
-  iso: string,
-  t: (key: string, params?: Record<string, string | number>) => string,
-  numberLocale: string,
-): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const today = now.toDateString() === d.toDateString();
-  const time = d.toLocaleTimeString(numberLocale, { hour: '2-digit', minute: '2-digit' });
-  if (today) return t('common.todayWithTime', { time });
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (yesterday.toDateString() === d.toDateString()) {
-    return t('common.yesterdayWithTime', { time });
-  }
-  return d.toLocaleDateString(numberLocale, {
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function typeLabel(
-  type: string,
-  t: (key: string, params?: Record<string, string | number>) => string,
-): string {
-  switch (type) {
-    case 'credit':
-      return t('wallet.txTypeCredit');
-    case 'debit':
-      return t('wallet.txTypeDebit');
-    case 'refund':
-      return t('wallet.txTypeRefund');
-    case 'adjustment':
-      return t('wallet.txTypeAdjustment');
-    case 'organizer_debt':
-      return t('wallet.txTypeOrganizerDebt');
-    default:
-      return type;
-  }
-}
-
-function WalletTransactionRow({
-  tx,
-  t,
-  numberLocale,
+function LinkRow({
+  icon,
+  title,
+  subtitle,
+  badge,
+  onPress,
+  disabled,
 }: {
-  tx: WalletTransaction;
-  t: (key: string, params?: Record<string, string | number>) => string;
-  numberLocale: string;
+  icon: ComponentProps<typeof Ionicons>['name'];
+  title: string;
+  subtitle?: string;
+  badge?: number;
+  onPress?: () => void;
+  disabled?: boolean;
 }) {
-  const positive = tx.amount_cents > 0;
   return (
-    <View style={styles.txRow}>
-      <View style={styles.txLeft}>
-        <Ionicons
-          name={positive ? 'arrow-down-circle' : 'arrow-up-circle'}
-          size={18}
-          color={positive ? EMERALD.color : theme.auth.error}
-          style={styles.txIcon}
-        />
-        <View style={styles.txTextBlock}>
-          <Text style={styles.txConcept} numberOfLines={2}>
-            {tx.concept}
-          </Text>
-          <Text style={styles.txMeta}>
-            {formatDate(tx.created_at, t, numberLocale)} · {typeLabel(tx.type, t)}
-          </Text>
-        </View>
+    <Pressable
+      style={({ pressed }) => [styles.linkRow, pressed && !disabled && styles.pressed, disabled && styles.btnDisabled]}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+    >
+      <Ionicons
+        name={icon}
+        size={22}
+        color={disabled ? theme.auth.textMuted : theme.auth.accent}
+        style={styles.linkIcon}
+      />
+      <View style={styles.linkTextBlock}>
+        <Text style={[styles.linkTitle, disabled && styles.linkTitleDisabled]}>{title}</Text>
+        {subtitle ? <Text style={styles.linkSubtitle}>{subtitle}</Text> : null}
       </View>
-      <Text style={[styles.txAmount, positive ? styles.txAmountPositive : styles.txAmountNegative]}>
-        {positive ? '+' : ''}
-        {formatEuros(tx.amount_cents)}
-      </Text>
-    </View>
+      {badge != null && badge > 0 ? (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+        </View>
+      ) : null}
+      {!disabled ? <Ionicons name="chevron-forward" size={18} color={theme.auth.textMuted} /> : null}
+    </Pressable>
   );
 }
 
-function ClubBalanceCard({
-  item,
-  expanded,
-  loadingTx,
-  transactions,
-  onToggle,
-  t,
-  numberLocale,
-}: {
-  item: ClubWalletBalance;
-  expanded: boolean;
-  loadingTx: boolean;
-  transactions: WalletTransaction[];
-  onToggle: () => void;
-  t: (key: string, params?: Record<string, string | number>) => string;
-  numberLocale: string;
-}) {
-  const positive = item.balance_cents > 0;
-  const debt = item.balance_cents < 0;
-  const iconVariant = positive ? EMERALD : theme.sidebar.iconVariants.orange;
-
-  return (
-    <View style={styles.clubCard}>
-      <Pressable
-        style={({ pressed }) => [styles.clubHeader, pressed && styles.clubHeaderPressed]}
-        onPress={onToggle}
-      >
-        <View style={styles.clubHeaderLeft}>
-          <LinearGradient
-            colors={[iconVariant.from, iconVariant.to]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.clubIconBox}
-          >
-            <Ionicons name="business-outline" size={20} color={iconVariant.color} />
-          </LinearGradient>
-          <View style={styles.clubTextBlock}>
-            <Text style={styles.clubName} numberOfLines={1}>
-              {item.club_name ?? t('common.clubFallback')}
-            </Text>
-            <Text style={styles.clubHint}>
-              {positive ? t('wallet.walletBalancePositive') : debt ? t('wallet.walletBalanceDebt') : t('wallet.walletBalanceZero')}
-            </Text>
-          </View>
-        </View>
-        <View style={styles.clubHeaderRight}>
-          <Text
-            style={[
-              styles.clubBalance,
-              positive && styles.balancePositive,
-              debt && styles.balanceDebt,
-              !positive && !debt && styles.balanceNeutral,
-            ]}
-          >
-            {formatEuros(item.balance_cents)}
-          </Text>
-          <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={18} color={theme.auth.textMuted} />
-        </View>
-      </Pressable>
-      {expanded && (
-        <View style={styles.txList}>
-          {loadingTx ? (
-            <ActivityIndicator size="small" color={theme.auth.accent} style={styles.txLoader} />
-          ) : transactions.length === 0 ? (
-            <Text style={styles.txEmpty}>{t('wallet.walletNoMovements')}</Text>
-          ) : (
-            transactions.map((tx) => <WalletTransactionRow key={tx.id} tx={tx} t={t} numberLocale={numberLocale} />)
-          )}
-        </View>
-      )}
-    </View>
-  );
-}
-
-export function MonederoScreen({ onBack }: MonederoScreenProps) {
+export function MonederoScreen({
+  onBack,
+  onPagosPendientesPress,
+  onMovimientosPress,
+  onTransaccionesPress,
+}: MonederoScreenProps) {
   const insets = useSafeAreaInsets();
   const { locale, t } = useTranslation();
   const numberLocale = formatLocale(locale);
   const { session } = useAuth();
-  const [playerId, setPlayerId] = useState<string | null>(null);
-  const [balances, setBalances] = useState<ClubWalletBalance[]>([]);
+
   const [totalCents, setTotalCents] = useState(0);
+  const [pendingCount, setPendingCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [openingMethods, setOpeningMethods] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandedClubId, setExpandedClubId] = useState<string | null>(null);
-  const [clubTransactions, setClubTransactions] = useState<WalletTransaction[]>([]);
-  const [loadingClubTx, setLoadingClubTx] = useState(false);
 
-  const loadBalances = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     const token = session?.access_token;
     if (!token) {
-      setBalances([]);
       setTotalCents(0);
+      setPendingCount(0);
       setError(t('wallet.walletLogin'));
       return;
     }
-    const pid = playerId ?? (await fetchMyPlayerId(token));
+
+    const pid = await fetchMyPlayerId(token);
     if (!pid) {
       setError(t('wallet.walletProfileNotFound'));
-      return;
-    }
-    if (!playerId) setPlayerId(pid);
-
-    const res = await fetchPlayerWalletBalances(pid, token);
-    if (!res.ok) {
-      setError(res.error ?? t('wallet.walletLoadError'));
-      setBalances([]);
       setTotalCents(0);
+      setPendingCount(0);
       return;
     }
+
+    const [balancesRes, pendingRes] = await Promise.all([
+      fetchPlayerWalletBalances(pid, token),
+      fetchPendingBookings(token),
+    ]);
+
+    if (!balancesRes.ok) {
+      setError(balancesRes.error ?? t('wallet.walletLoadError'));
+      setTotalCents(0);
+      setPendingCount(0);
+      return;
+    }
+
     setError(null);
-    setBalances(res.balances ?? []);
-    setTotalCents(res.total_balance_cents ?? 0);
-  }, [session?.access_token, playerId, t]);
+    setTotalCents(balancesRes.total_balance_cents ?? 0);
+    setPendingCount(
+      pendingRes.ok && Array.isArray(pendingRes.bookings) ? pendingRes.bookings.length : 0,
+    );
+  }, [session?.access_token, t]);
 
   useEffect(() => {
     setLoading(true);
-    void loadBalances().finally(() => setLoading(false));
-  }, [loadBalances]);
+    void loadAll().finally(() => setLoading(false));
+  }, [loadAll]);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadBalances();
-    if (expandedClubId && playerId && session?.access_token) {
-      const res = await fetchWalletBalance(playerId, expandedClubId, session.access_token);
-      if (res.ok) setClubTransactions(res.transactions ?? []);
-    }
+    await loadAll();
     setRefreshing(false);
   };
 
-  const handleToggleClub = async (clubId: string) => {
-    if (expandedClubId === clubId) {
-      setExpandedClubId(null);
-      setClubTransactions([]);
+  const handleMethods = async () => {
+    const token = session?.access_token;
+    if (!token) {
+      Alert.alert(t('common.sessionRequired'), t('wallet.loginManagePayments'));
       return;
     }
-    setExpandedClubId(clubId);
-    const token = session?.access_token;
-    if (!token || !playerId) return;
-    setLoadingClubTx(true);
+    setOpeningMethods(true);
     try {
-      const res = await fetchWalletBalance(playerId, clubId, token);
-      setClubTransactions(res.ok ? res.transactions ?? [] : []);
+      const res = await fetchCustomerPortalUrl(token);
+      if (!res.ok || !res.url) {
+        Alert.alert(t('common.error'), res.error ?? t('common.openError'));
+        return;
+      }
+      const canOpen = await Linking.canOpenURL(res.url);
+      if (canOpen) {
+        await Linking.openURL(res.url);
+      } else {
+        Alert.alert(t('common.error'), t('common.browserOpenError'));
+      }
+    } catch {
+      Alert.alert(t('common.error'), t('common.connectionError'));
     } finally {
-      setLoadingClubTx(false);
+      setOpeningMethods(false);
     }
   };
+
+  const pendingSubtitle =
+    pendingCount > 0
+      ? t('wallet.walletPendingPaymentsSub', { count: pendingCount })
+      : t('wallet.walletPendingPaymentsSubEmpty');
 
   return (
     <View style={styles.container}>
       <BackHeader title={t('wallet.walletTitle')} onBack={onBack} tone="dark" />
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + (insets.bottom ?? 0) }]}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => void onRefresh()}
-            tintColor={theme.auth.accent}
-            colors={[theme.auth.accent]}
-          />
-        }
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.summaryCard}>
-          <LinearGradient
-            colors={[EMERALD.from, EMERALD.to]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.summaryIconWrap}
-          >
-            <Ionicons name="wallet-outline" size={28} color={EMERALD.color} />
-          </LinearGradient>
-          <Text style={styles.summaryLabel}>{t('wallet.walletTotalLabel')}</Text>
-          {loading ? (
-            <ActivityIndicator size="small" color={theme.auth.accent} style={styles.summaryLoader} />
-          ) : (
+      {loading ? (
+        <View style={styles.centerLoader}>
+          <ActivityIndicator size="large" color={theme.auth.accent} />
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + (insets.bottom ?? 0) }]}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void onRefresh()}
+              tintColor={theme.auth.accent}
+              colors={[theme.auth.accent]}
+            />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.balanceCard}>
+            <Text style={styles.balanceLabel}>{t('wallet.walletAvailableBalance')}</Text>
             <Text
               style={[
-                styles.summaryAmount,
+                styles.balanceAmount,
                 totalCents > 0 && styles.balancePositive,
                 totalCents < 0 && styles.balanceDebt,
                 totalCents === 0 && styles.balanceNeutral,
               ]}
             >
-              {formatEuros(totalCents)}
+              {formatAmount(totalCents, numberLocale)}
             </Text>
-          )}
-          <Text style={styles.summaryHint}>{t('wallet.walletTotalHint')}</Text>
-        </View>
-
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-        {loading ? (
-          <View style={styles.centerLoader}>
-            <ActivityIndicator size="large" color={theme.auth.accent} />
+            <Text style={styles.balanceHint}>{t('wallet.walletClubBalanceHint')}</Text>
+            <Pressable style={[styles.primaryBtn, styles.btnDisabled]} disabled>
+              <Text style={[styles.primaryBtnText, styles.btnTextDisabled]}>
+                {t('wallet.walletLoadFunds')}
+              </Text>
+            </Pressable>
           </View>
-        ) : balances.length === 0 && !error ? (
-          <View style={styles.emptyBox}>
-            <Ionicons name="wallet-outline" size={48} color={theme.auth.textMuted} />
-            <Text style={styles.emptyTitle}>{t('wallet.walletEmptyTitle')}</Text>
-            <Text style={styles.emptyText}>{t('wallet.walletEmptyBody')}</Text>
+
+          <View style={styles.actionRow}>
+            <Pressable style={[styles.secondaryBtn, styles.actionBtn, styles.btnDisabled]} disabled>
+              <Text style={[styles.secondaryBtnText, styles.btnTextDisabled]}>
+                {t('wallet.walletWithdraw')}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.secondaryBtn,
+                styles.actionBtn,
+                pressed && styles.pressed,
+                openingMethods && styles.btnDisabled,
+              ]}
+              onPress={() => void handleMethods()}
+              disabled={openingMethods}
+            >
+              {openingMethods ? (
+                <ActivityIndicator size="small" color={theme.auth.text} />
+              ) : (
+                <Text style={styles.secondaryBtnText}>{t('wallet.paymentMethods')}</Text>
+              )}
+            </Pressable>
           </View>
-        ) : (
-          <View style={styles.clubList}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>{t('wallet.walletByClub')}</Text>
-              <LinearGradient
-                colors={['rgba(241,143,52,0.2)', 'transparent']}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={styles.sectionTitleLine}
+
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t('wallet.walletActivitySection')}</Text>
+            <View style={styles.linksCard}>
+              <LinkRow
+                icon="time-outline"
+                title={t('wallet.walletPendingPayments')}
+                subtitle={pendingSubtitle}
+                badge={pendingCount}
+                onPress={onPagosPendientesPress}
+              />
+              <View style={styles.linkDivider} />
+              <LinkRow
+                icon="swap-vertical-outline"
+                title={t('wallet.walletRecentMovements')}
+                subtitle={t('wallet.walletMovementsSub')}
+                onPress={onMovimientosPress}
+              />
+              <View style={styles.linkDivider} />
+              <LinkRow
+                icon="document-text-outline"
+                title={t('wallet.allTransactions')}
+                subtitle={t('wallet.allTransactionsSub')}
+                onPress={onTransaccionesPress}
+              />
+              <View style={styles.linkDivider} />
+              <LinkRow
+                icon="home-outline"
+                title={t('wallet.clubMemberships')}
+                subtitle={t('wallet.clubMembershipsSoon')}
+                disabled
               />
             </View>
-            {balances.map((item) => (
-              <ClubBalanceCard
-                key={item.club_id}
-                item={item}
-                expanded={expandedClubId === item.club_id}
-                loadingTx={loadingClubTx && expandedClubId === item.club_id}
-                transactions={expandedClubId === item.club_id ? clubTransactions : []}
-                onToggle={() => void handleToggleClub(item.club_id)}
-                t={t}
-                numberLocale={numberLocale}
-              />
-            ))}
           </View>
-        )}
-      </ScrollView>
+        </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.auth.bg },
+  centerLoader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { flex: 1 },
-  scrollContent: { padding: theme.spacing.lg, gap: theme.spacing.md },
-  summaryCard: {
+  scrollContent: { padding: theme.spacing.lg, gap: theme.spacing.lg },
+  balanceCard: {
     backgroundColor: CARD,
     borderRadius: 16,
     padding: theme.spacing.lg,
     borderWidth: 1,
     borderColor: BORDER,
-    alignItems: 'center',
-    gap: 6,
+    gap: theme.spacing.sm,
   },
-  summaryIconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  summaryLabel: {
+  balanceLabel: {
     fontSize: theme.fontSize.sm,
     color: theme.auth.textMuted,
     fontWeight: '600',
   },
-  summaryAmount: { fontSize: 32, fontWeight: '800', color: theme.auth.text },
-  summaryLoader: { marginVertical: 8 },
-  summaryHint: {
+  balanceAmount: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: theme.auth.text,
+  },
+  balanceHint: {
     fontSize: theme.fontSize.xs,
     color: theme.auth.textMuted,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginTop: 4,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+    marginBottom: theme.spacing.xs,
   },
+  balancePositive: { color: EMERALD.color },
+  balanceDebt: { color: theme.auth.accent },
+  balanceNeutral: { color: theme.auth.text },
+  primaryBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    borderRadius: 12,
+    backgroundColor: theme.auth.accent,
+    paddingVertical: 12,
+    paddingHorizontal: theme.spacing.md,
+  },
+  primaryBtnText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: theme.spacing.sm,
+  },
+  actionBtn: {
+    flex: 1,
+  },
+  secondaryBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD,
+    paddingVertical: 12,
+    paddingHorizontal: theme.spacing.md,
+  },
+  secondaryBtnText: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: '700',
+    color: theme.auth.text,
+  },
+  pressed: { opacity: 0.88 },
+  btnDisabled: { opacity: 0.45 },
+  btnTextDisabled: { color: theme.auth.textMuted },
   errorText: {
     fontSize: theme.fontSize.sm,
     color: theme.auth.error,
     textAlign: 'center',
   },
-  centerLoader: {
-    paddingVertical: theme.spacing.xl,
-    alignItems: 'center',
-  },
-  emptyBox: {
-    alignItems: 'center',
-    paddingVertical: theme.spacing.xl,
-    gap: theme.spacing.sm,
-    paddingHorizontal: theme.spacing.lg,
-  },
-  emptyTitle: { fontSize: theme.fontSize.base, fontWeight: '700', color: theme.auth.text },
-  emptyText: {
-    fontSize: theme.fontSize.sm,
-    color: theme.auth.textMuted,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 4,
-  },
+  section: { gap: theme.spacing.sm },
   sectionTitle: {
-    fontSize: 11,
+    fontSize: theme.fontSize.base,
     fontWeight: '700',
-    letterSpacing: 1.4,
-    color: theme.auth.accent,
-    textTransform: 'uppercase',
+    color: theme.auth.text,
   },
-  sectionTitleLine: {
-    flex: 1,
-    height: 1,
-    borderRadius: 1,
-  },
-  clubList: { gap: theme.spacing.sm },
-  clubCard: {
+  linksCard: {
+    backgroundColor: CARD,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: BORDER,
-    borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: CARD,
   },
-  clubHeader: {
+  linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: theme.spacing.md,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.md,
     gap: theme.spacing.sm,
   },
-  clubHeaderPressed: { backgroundColor: 'rgba(255,255,255,0.04)' },
-  clubHeaderLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    minWidth: 0,
+  linkIcon: { width: 28 },
+  linkTextBlock: { flex: 1, gap: 2 },
+  linkTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: '600',
+    color: theme.auth.text,
   },
-  clubHeaderRight: { alignItems: 'flex-end', gap: 4 },
-  clubIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+  linkTitleDisabled: { color: theme.auth.textMuted },
+  linkSubtitle: {
+    fontSize: theme.fontSize.xs,
+    color: theme.auth.textMuted,
+  },
+  badge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    backgroundColor: theme.auth.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  clubTextBlock: { flex: 1, minWidth: 0 },
-  clubName: { fontSize: theme.fontSize.base, fontWeight: '700', color: theme.auth.text },
-  clubHint: { fontSize: theme.fontSize.xs, color: theme.auth.textMuted, marginTop: 2 },
-  clubBalance: { fontSize: theme.fontSize.base, fontWeight: '700' },
-  balancePositive: { color: EMERALD.color },
-  balanceDebt: { color: theme.auth.accent },
-  balanceNeutral: { color: theme.auth.text },
-  txList: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: BORDER,
-    paddingHorizontal: theme.spacing.md,
-    paddingBottom: theme.spacing.sm,
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#fff',
   },
-  txLoader: { paddingVertical: theme.spacing.md },
-  txEmpty: {
-    fontSize: theme.fontSize.sm,
-    color: theme.auth.textMuted,
-    paddingVertical: theme.spacing.md,
-    textAlign: 'center',
+  linkDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: BORDER,
+    marginHorizontal: theme.spacing.md,
   },
-  txRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    gap: theme.spacing.sm,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  txLeft: { flex: 1, flexDirection: 'row', gap: 8, minWidth: 0 },
-  txIcon: { marginTop: 2 },
-  txTextBlock: { flex: 1, minWidth: 0 },
-  txConcept: { fontSize: theme.fontSize.sm, fontWeight: '600', color: theme.auth.text },
-  txMeta: { fontSize: theme.fontSize.xs, color: theme.auth.textMuted, marginTop: 2 },
-  txAmount: { fontSize: theme.fontSize.sm, fontWeight: '700' },
-  txAmountPositive: { color: EMERALD.color },
-  txAmountNegative: { color: theme.auth.error },
 });
