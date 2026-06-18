@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Modal,
   Pressable,
@@ -14,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTranslation } from '../../i18n';
 import { searchPlayers, type PlayerSearchHit } from '../../api/players';
 import { cancelPairInvite, createPairInvite, fetchMatchmakingStatus, type PairInvite } from '../../api/matchmaking';
 import { Toast } from '../ui/Toast';
@@ -38,6 +38,7 @@ type Props = {
 export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeIds }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
+  const { t } = useTranslation();
   const token = session?.access_token ?? null;
   const [query, setQuery] = useState('');
   const [players, setPlayers] = useState<PlayerSearchHit[]>([]);
@@ -47,6 +48,11 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
   const [pending, setPending] = useState<PairInvite[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toastVariant, setToastVariant] = useState<'success' | 'error'>('success');
+  const showToast = (msg: string, variant: 'success' | 'error' = 'success') => {
+    setToastVariant(variant);
+    setToastMsg(msg);
+  };
 
   useEffect(() => {
     if (!visible) return;
@@ -89,17 +95,17 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
 
   const handleCancelInvite = async (inv: PairInvite) => {
     const res = await cancelPairInvite(inv.id, token);
-    if (!res.ok) Alert.alert('No se pudo', res.error);
+    if (!res.ok) showToast(res.error, 'error');
     setRefreshKey((k) => k + 1);
   };
 
   const handleInvite = async (player: PlayerSearchHit) => {
     const res = await createPairInvite(player.id, token);
     if (!res.ok) {
-      Alert.alert('No se pudo', res.error);
+      showToast(res.error, 'error');
       return;
     }
-    setToastMsg(`Invitación enviada a ${playerDisplayName(player)}`);
+    showToast(t('competitive.partner.inviteSent', { name: playerDisplayName(player) }), 'success');
     setRefreshKey((k) => k + 1);
   };
 
@@ -114,7 +120,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
       <View style={styles.acceptedBlock}>
         {showAccepted ? (
           <>
-            <Text style={styles.sectionLabel}>Listos para jugar</Text>
+            <Text style={styles.sectionLabel}>{t('competitive.partner.ready')}</Text>
             {accepted.map((inv) => (
               <Pressable
                 key={inv.id}
@@ -129,7 +135,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.name}>{inv.other_player_name}</Text>
-                  <Text style={styles.meta}>Aceptó tu invitación · tocá para buscar</Text>
+                  <Text style={styles.meta}>{t('competitive.partner.acceptedSub')}</Text>
                 </View>
                 <Ionicons name="flash" size={18} color={ACCENT} />
               </Pressable>
@@ -139,7 +145,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
         {showPending ? (
           <>
             <Text style={[styles.sectionLabel, showAccepted ? { marginTop: 12 } : null]}>
-              Pendientes (esperando respuesta)
+              {t('competitive.partner.pending')}
             </Text>
             {pending.map((inv) => (
               <View key={inv.id} style={[styles.row, styles.pendingRow]}>
@@ -148,16 +154,16 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.name}>{inv.other_player_name}</Text>
-                  <Text style={styles.meta}>Esperando respuesta</Text>
+                  <Text style={styles.meta}>{t('competitive.partner.waiting')}</Text>
                 </View>
                 <Pressable onPress={() => void handleCancelInvite(inv)} hitSlop={8} style={styles.cancelBtn}>
-                  <Text style={styles.cancelBtnText}>Cancelar</Text>
+                  <Text style={styles.cancelBtnText}>{t('competitive.common.cancel')}</Text>
                 </Pressable>
               </View>
             ))}
           </>
         ) : null}
-        <Text style={[styles.sectionLabel, { marginTop: 12 }]}>O invitá a otro jugador</Text>
+        <Text style={[styles.sectionLabel, { marginTop: 12 }]}>{t('competitive.partner.orInvite')}</Text>
       </View>
     ) : null;
 
@@ -169,8 +175,8 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
             <Ionicons name="close" size={20} color="#fff" />
           </Pressable>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.title}>Jugar con un amigo</Text>
-            <Text style={styles.subtitle}>Elige una pareja aceptada o invita a un jugador</Text>
+            <Text style={styles.title}>{t('competitive.partner.title')}</Text>
+            <Text style={styles.subtitle}>{t('competitive.partner.subtitle')}</Text>
           </View>
         </View>
 
@@ -180,7 +186,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
             <TextInput
               value={query}
               onChangeText={setQuery}
-              placeholder="Buscar jugador..."
+              placeholder={t('competitive.partner.searchPlaceholder')}
               placeholderTextColor="#737373"
               style={styles.searchInput}
               autoCorrect={false}
@@ -204,7 +210,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
             contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 16 }}
             keyboardShouldPersistTaps="handled"
             ListHeaderComponent={listHeader}
-            ListEmptyComponent={<Text style={styles.emptyText}>No se encontraron jugadores.</Text>}
+            ListEmptyComponent={<Text style={styles.emptyText}>{t('competitive.partner.empty')}</Text>}
             renderItem={({ item }) => (
               <Pressable
                 onPress={() => void handleInvite(item)}
@@ -222,7 +228,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
             )}
           />
         )}
-        <Toast message={toastMsg} onHide={() => setToastMsg(null)} />
+        <Toast message={toastMsg} variant={toastVariant} onHide={() => setToastMsg(null)} />
       </View>
     </Modal>
   );

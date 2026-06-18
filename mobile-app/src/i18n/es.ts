@@ -146,4 +146,54 @@ export const es: TranslationKeys = {
       ],
     },
   },
+  competitive: {
+    mode: {
+      title: '¿Cómo quieres jugar?',
+      solo: 'Jugar solo',
+      soloSub: 'Te buscamos compañero y pareja rival',
+      friend: 'Con un amigo',
+      friendSub: 'Invita o elige una pareja ya aceptada',
+    },
+    search: {
+      cta: 'Buscar partido competitivo',
+      ctaWith: 'Buscar con {name}',
+      searchingWith: 'Buscas partido con {name}',
+      searching: 'Buscando...',
+    },
+    shield: {
+      activeOne: 'Escudo activo · {n} partido',
+      activeMany: 'Escudo activo · {n} partidos',
+    },
+    lp: {
+      progress: '{lps} / {target} LP',
+      only: '{lps} LP',
+      promoteLine: 'Al llegar a {n} LP subes de división automáticamente',
+      maxDivision: 'Estás en la división máxima',
+    },
+    demanding: {
+      title: 'Partido exigente',
+      message:
+        'Tú y {name} tenéis más de un nivel de diferencia. El partido se buscará al nivel de {liga}.',
+      searchAnyway: 'Buscar igualmente',
+    },
+    partner: {
+      title: 'Jugar con un amigo',
+      subtitle: 'Elige una pareja aceptada o invita a un jugador',
+      searchPlaceholder: 'Buscar jugador...',
+      empty: 'No se encontraron jugadores.',
+      ready: 'Listos para jugar',
+      acceptedSub: 'Aceptó tu invitación · toca para buscar',
+      orInvite: 'O invita a otro jugador',
+      pending: 'Pendientes (esperando respuesta)',
+      waiting: 'Esperando respuesta',
+      inviteSent: 'Invitación enviada a {name}',
+    },
+    banner: {
+      invitesYou: '{name} te invita a un partido competitivo',
+      sub: 'Si aceptas, podréis buscar partido juntos desde "Jugar con un amigo"',
+      reject: 'Rechazar',
+      accept: 'Aceptar',
+    },
+    common: { cancel: 'Cancelar', couldNot: 'No se pudo' },
+  },
 };

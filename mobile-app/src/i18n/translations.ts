@@ -130,6 +130,29 @@ export interface HomeTranslationKeys {
   };
 }
 
+export interface CompetitiveTranslationKeys {
+  mode: { title: string; solo: string; soloSub: string; friend: string; friendSub: string };
+  search: { cta: string; ctaWith: string; searchingWith: string; searching: string };
+  shield: { activeOne: string; activeMany: string };
+  lp: { progress: string; only: string; promoteLine: string; maxDivision: string };
+  demanding: { title: string; message: string; searchAnyway: string };
+  partner: {
+    title: string;
+    subtitle: string;
+    searchPlaceholder: string;
+    empty: string;
+    ready: string;
+    acceptedSub: string;
+    orInvite: string;
+    pending: string;
+    waiting: string;
+    inviteSent: string;
+  };
+  banner: { invitesYou: string; sub: string; reject: string; accept: string };
+  common: { cancel: string; couldNot: string };
+}
+
 export interface TranslationKeys {
   home: HomeTranslationKeys;
+  competitive: CompetitiveTranslationKeys;
 }

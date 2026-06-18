@@ -54,6 +54,7 @@ import {
   type PairInvite,
 } from '../api/matchmaking';
 import { useHomeData } from '../contexts/HomeDataContext';
+import { useTranslation } from '../i18n';
 import { getMatchBooking } from '../domain/matchLifecycle';
 
 type Step = 'home' | 'prefs' | 'queue' | 'found';
@@ -114,6 +115,7 @@ export function CompetitiveLeagueScreen({
   const [isHomeBootstrapping, setIsHomeBootstrapping] = useState(true);
   // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
   const { profile } = useHomeData();
+  const { t } = useTranslation();
   const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
   const [rankingRows, setRankingRows] = useState<MatchmakingLeaderboardRow[]>([]);
   const [rankingTotal, setRankingTotal] = useState(0);
@@ -458,7 +460,7 @@ export function CompetitiveLeagueScreen({
       if (req.status !== 'granted') {
         setLocationIssue({
           message:
-            'Activa el permiso de ubicación para buscar por distancia, o elegí uno o más clubes preferidos.',
+            'Activa el permiso de ubicación para buscar por distancia, o elige uno o más clubes preferidos.',
           action: 'open_settings',
         });
         return;
@@ -591,7 +593,7 @@ export function CompetitiveLeagueScreen({
       payload.preferred_club_ids = allClubIds;
     } else if (preferredClubIds.length === 0 && clubsInRange.length === 0) {
       setErrorText(
-        `No hay clubes dentro de ${distanceKm} km. Ampliá la distancia o elegí clubes preferidos.`,
+        `No hay clubes dentro de ${distanceKm} km. Amplía la distancia o elige clubes preferidos.`,
       );
       return;
     } else if (preferredClubIds.length > 0) {
@@ -638,11 +640,11 @@ export function CompetitiveLeagueScreen({
           ? searchPartner.target_liga.charAt(0).toUpperCase() + searchPartner.target_liga.slice(1)
           : 'el jugador superior';
         Alert.alert(
-          'Partido exigente',
-          `Tú y ${searchPartner.other_player_name} tenéis más de un nivel de diferencia. El partido se buscará al nivel de ${liga}.`,
+          t('competitive.demanding.title'),
+          t('competitive.demanding.message', { name: searchPartner.other_player_name, liga }),
           [
-            { text: 'Cancelar', style: 'cancel' },
-            { text: 'Buscar igualmente', onPress: () => void proceed() },
+            { text: t('competitive.common.cancel'), style: 'cancel' },
+            { text: t('competitive.demanding.searchAnyway'), onPress: () => void proceed() },
           ],
         );
         return;
@@ -964,7 +966,9 @@ export function CompetitiveLeagueScreen({
             <View style={styles.lpRow}>
               <Text style={styles.lpCap}>LEAGUE POINTS (LP)</Text>
               <Text style={styles.lp}>
-                {lpTarget != null ? `${profile?.lps ?? 0} / ${lpTarget} LP` : `${profile?.lps ?? 0} LP`}
+                {lpTarget != null
+                  ? t('competitive.lp.progress', { lps: profile?.lps ?? 0, target: lpTarget })
+                  : t('competitive.lp.only', { lps: profile?.lps ?? 0 })}
               </Text>
             </View>
             <View style={styles.track}>
@@ -974,8 +978,12 @@ export function CompetitiveLeagueScreen({
               <View style={styles.shieldBadge}>
                 <Ionicons name="shield-checkmark" size={13} color="#60A5FA" />
                 <Text style={styles.shieldBadgeText}>
-                  Escudo activo · {profile?.mmShieldMatches}{' '}
-                  {profile?.mmShieldMatches === 1 ? 'partido' : 'partidos'}
+                  {t(
+                    profile?.mmShieldMatches === 1
+                      ? 'competitive.shield.activeOne'
+                      : 'competitive.shield.activeMany',
+                    { n: profile?.mmShieldMatches ?? 0 },
+                  )}
                 </Text>
               </View>
             ) : null}
@@ -1051,8 +1059,8 @@ export function CompetitiveLeagueScreen({
                 <Text style={styles.howLine}>
                   ★{' '}
                   {lpTarget != null
-                    ? `Al llegar a ${lpTarget} LP subes de división automáticamente`
-                    : 'Estás en la división máxima'}
+                    ? t('competitive.lp.promoteLine', { n: lpTarget })
+                    : t('competitive.lp.maxDivision')}
                 </Text>
                 <Text style={styles.howLine}>🔁 Los rankings se reinician al final de cada Pase de Temporada</Text>
               </View>
@@ -1167,7 +1175,9 @@ export function CompetitiveLeagueScreen({
           {searchPartner ? (
             <View style={styles.partnerLockRow}>
               <Ionicons name="people" size={16} color="#F59E0B" />
-              <Text style={styles.partnerLockText}>Buscas partido con {searchPartner.other_player_name}</Text>
+              <Text style={styles.partnerLockText}>
+                {t('competitive.search.searchingWith', { name: searchPartner.other_player_name })}
+              </Text>
             </View>
           ) : null}
 
@@ -1232,7 +1242,7 @@ export function CompetitiveLeagueScreen({
               </View>
             ) : preferredClubIds.length > 0 ? (
               <Text style={styles.distanceByClubsHint}>
-                Buscás en {preferredClubIds.length} club{preferredClubIds.length === 1 ? '' : 'es'} elegido
+                Buscas en {preferredClubIds.length} club{preferredClubIds.length === 1 ? '' : 'es'} elegido
                 {preferredClubIds.length === 1 ? '' : 's'}. Quitá la selección de clubes para buscar por distancia.
               </Text>
             ) : (
@@ -1273,9 +1283,9 @@ export function CompetitiveLeagueScreen({
                     {MATCHMAKING_DEMO
                       ? 'Cargando clubes…'
                       : searchCoords
-                        ? `Ningún club dentro de ${distanceKm} km. Ampliá la distancia o elegí clubes preferidos.`
+                        ? `Ningún club dentro de ${distanceKm} km. Amplía la distancia o elige clubes preferidos.`
                         : locationIssue
-                          ? 'Sin ubicación activa. Activá el GPS o elegí clubes preferidos arriba.'
+                          ? 'Sin ubicación activa. Activa el GPS o elige clubes preferidos arriba.'
                           : 'Activa ubicación para ver clubes disponibles.'}
                   </Text>
                 ) : (
@@ -1351,10 +1361,10 @@ export function CompetitiveLeagueScreen({
             <Ionicons name={searchPartner ? 'people' : 'flash'} size={16} color="#fff" />
             <Text style={styles.primaryBtnText}>
               {loading
-                ? 'Buscando...'
+                ? t('competitive.search.searching')
                 : searchPartner
-                  ? `Buscar con ${searchPartner.other_player_name}`
-                  : 'Buscar partido competitivo'}
+                  ? t('competitive.search.ctaWith', { name: searchPartner.other_player_name })
+                  : t('competitive.search.cta')}
             </Text>
           </Pressable>
           {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
@@ -1499,7 +1509,7 @@ export function CompetitiveLeagueScreen({
 
       <FilterBottomSheet
         visible={modeSheetVisible}
-        title="¿Cómo quieres jugar?"
+        title={t('competitive.mode.title')}
         onClose={() => setModeSheetVisible(false)}
       >
         <View style={styles.modeSheetCol}>
@@ -1515,8 +1525,8 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="person" size={24} color="#fff" />
             </LinearGradient>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.modeOptionTitle}>Jugar solo</Text>
-              <Text style={styles.modeOptionSub}>Te buscamos compañero y rivales</Text>
+              <Text style={styles.modeOptionTitle}>{t('competitive.mode.solo')}</Text>
+              <Text style={styles.modeOptionSub}>{t('competitive.mode.soloSub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
           </Pressable>
@@ -1531,8 +1541,8 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="people" size={24} color="#fff" />
             </LinearGradient>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.modeOptionTitle}>Con un amigo</Text>
-              <Text style={styles.modeOptionSub}>Invita o elige una pareja ya aceptada</Text>
+              <Text style={styles.modeOptionTitle}>{t('competitive.mode.friend')}</Text>
+              <Text style={styles.modeOptionSub}>{t('competitive.mode.friendSub')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
           </Pressable>

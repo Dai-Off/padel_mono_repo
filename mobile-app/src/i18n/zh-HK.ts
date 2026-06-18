@@ -142,4 +142,53 @@ export const zhHK: TranslationKeys = {
       ],
     },
   },
+  competitive: {
+    mode: {
+      title: '你想怎麼玩？',
+      solo: '單人尋找',
+      soloSub: '我們為你尋找隊友和對手',
+      friend: '和朋友一起',
+      friendSub: '邀請朋友，或選擇已接受的隊友',
+    },
+    search: {
+      cta: '尋找競技比賽',
+      ctaWith: '與 {name} 一起尋找',
+      searchingWith: '正在與 {name} 尋找比賽',
+      searching: '尋找中…',
+    },
+    shield: {
+      activeOne: '護盾啟用 · 剩 {n} 場',
+      activeMany: '護盾啟用 · 剩 {n} 場',
+    },
+    lp: {
+      progress: '{lps} / {target} LP',
+      only: '{lps} LP',
+      promoteLine: '達到 {n} LP 即自動升級',
+      maxDivision: '你已在最高組別',
+    },
+    demanding: {
+      title: '高難度比賽',
+      message: '你和 {name} 的等級相差超過一級，將以 {liga} 的等級尋找比賽。',
+      searchAnyway: '仍然尋找',
+    },
+    partner: {
+      title: '和朋友一起',
+      subtitle: '選擇已接受的隊友，或邀請玩家',
+      searchPlaceholder: '搜尋玩家…',
+      empty: '找不到玩家。',
+      ready: '可以開始',
+      acceptedSub: '已接受你的邀請 · 點擊尋找',
+      orInvite: '或邀請其他玩家',
+      pending: '待回覆',
+      waiting: '等待回覆',
+      inviteSent: '已向 {name} 發送邀請',
+    },
+    banner: {
+      invitesYou: '{name} 邀請你打競技賽',
+      sub: '接受後，可在「和朋友一起」中一起尋找比賽',
+      reject: '拒絕',
+      accept: '接受',
+    },
+    common: { cancel: '取消', couldNot: '無法完成' },
+  },
 };

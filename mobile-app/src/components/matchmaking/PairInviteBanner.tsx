@@ -1,11 +1,10 @@
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../../theme';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTranslation } from '../../i18n';
 import { acceptPairInvite, rejectPairInvite, type PairInvite } from '../../api/matchmaking';
-
-const ACCENT = theme.auth.accent;
 
 type Props = {
   invites: PairInvite[];
@@ -15,10 +14,11 @@ type Props = {
 
 /**
  * Banner en Home: invitaciones de pareja RECIBIDAS pendientes (entrega in-app por polling).
- * Aceptar/Rechazar; tras aceptar, la pareja queda lista y se busca desde "Jugar con un amigo".
+ * Naranja para destacar como el resto de banners del Home (búsqueda/onboarding).
  */
 export function PairInviteBanner({ invites, onChanged }: Props) {
   const { session } = useAuth();
+  const { t } = useTranslation();
   const token = session?.access_token ?? null;
   const [busy, setBusy] = useState(false);
 
@@ -30,25 +30,30 @@ export function PairInviteBanner({ invites, onChanged }: Props) {
     setBusy(true);
     const res = await fn();
     setBusy(false);
-    if (!res.ok && res.error) Alert.alert('No se pudo', res.error);
+    if (!res.ok && res.error) Alert.alert(t('competitive.common.couldNot'), res.error);
     onChanged();
   };
 
   return (
-    <View style={styles.card}>
+    <LinearGradient
+      colors={['#F18F34', '#C46A20']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.card}
+    >
       <View style={styles.row}>
         <View style={styles.iconWrap}>
-          <Ionicons name="people" size={18} color={ACCENT} />
+          <Ionicons name="people" size={18} color="#fff" />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.title} numberOfLines={2}>
-            {invite.other_player_name} te invita a competitiva
+            {t('competitive.banner.invitesYou', { name: invite.other_player_name })}
           </Text>
           <Text style={styles.sub} numberOfLines={2}>
-            Si aceptas, podréis buscar partido juntos desde "Jugar con un amigo"
+            {t('competitive.banner.sub')}
           </Text>
         </View>
-        {busy ? <ActivityIndicator color={ACCENT} /> : null}
+        {busy ? <ActivityIndicator color="#fff" /> : null}
       </View>
 
       <View style={styles.actions}>
@@ -57,26 +62,25 @@ export function PairInviteBanner({ invites, onChanged }: Props) {
           disabled={busy}
           onPress={() => void run(() => rejectPairInvite(invite.id, token))}
         >
-          <Text style={styles.btnGhostText}>Rechazar</Text>
+          <Text style={styles.btnGhostText}>{t('competitive.banner.reject')}</Text>
         </Pressable>
         <Pressable
           style={[styles.btn, styles.btnPrimary]}
           disabled={busy}
           onPress={() => void run(() => acceptPairInvite(invite.id, token))}
         >
-          <Text style={styles.btnPrimaryText}>Aceptar</Text>
+          <Text style={styles.btnPrimaryText}>{t('competitive.banner.accept')}</Text>
         </Pressable>
       </View>
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#141414',
     borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(241,143,52,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
     padding: 14,
     gap: 12,
   },
@@ -85,16 +89,22 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(241,143,52,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  sub: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
+  title: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  sub: { color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 },
   actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
   btn: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
-  btnGhost: { backgroundColor: '#262626' },
+  btnGhost: {
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
   btnGhostText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  btnPrimary: { backgroundColor: ACCENT },
-  btnPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  btnPrimary: { backgroundColor: '#fff' },
+  btnPrimaryText: { color: '#C46A20', fontSize: 14, fontWeight: '800' },
 });
