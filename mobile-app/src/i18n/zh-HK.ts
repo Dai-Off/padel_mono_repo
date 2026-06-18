@@ -194,6 +194,14 @@ export const zhHK: TranslationKeys = {
       acceptSearch: '接受並尋找',
       count: '你有 {n} 個邀請 · 逐一回覆',
     },
+    season: {
+      endKicker: '賽季結束',
+      endedIn: '你停留在 {liga}',
+      newKicker: '新賽季',
+      newLiga: '你的組別是 {liga}',
+      next: '下一步',
+      cta: '迎接新賽季！',
+    },
     common: { cancel: '取消', couldNot: '無法完成' },
   },
 };

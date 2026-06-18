@@ -199,6 +199,14 @@ export const es: TranslationKeys = {
       acceptSearch: 'Aceptar y buscar',
       count: 'Tienes {n} invitaciones · responde una a una',
     },
+    season: {
+      endKicker: 'Fin de temporada',
+      endedIn: 'Quedaste en {liga}',
+      newKicker: 'Nueva temporada',
+      newLiga: 'Tu liga es {liga}',
+      next: 'Siguiente',
+      cta: '¡A por la nueva temporada!',
+    },
     common: { cancel: 'Cancelar', couldNot: 'No se pudo' },
   },
 };

@@ -251,6 +251,38 @@ export async function fetchMatchmakingStatus(
   }
 }
 
+export type SeasonTransition = {
+  /** Temporada nueva (activa). Clave para recordar que ya se mostró. */
+  season_id: string;
+  previous_liga: string;
+  previous_season_name: string;
+  new_liga: string;
+  new_season_name: string;
+};
+
+/** Última transición de temporada del jugador (para el modal de fin de temporada). null si no aplica. */
+export async function fetchSeasonTransition(
+  token: string | null | undefined,
+): Promise<SeasonTransition | null> {
+  if (!token) return null;
+  try {
+    const res = await fetch(`${API_URL}/matchmaking/season-transition`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { ok: boolean; transition?: SeasonTransition | null };
+    if (!json.ok) return null;
+    return json.transition ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Versión ligera: solo las invitaciones de pareja accionables (para el selector de compañero). */
 export async function fetchPairInvites(token: string | null | undefined): Promise<PairInvite[]> {
   if (!token) return [];
