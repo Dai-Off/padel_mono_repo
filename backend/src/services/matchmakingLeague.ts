@@ -50,12 +50,3 @@ export function ligaFromEloWithBands(elo: number, bands: LeagueEloBand[]): strin
 export function higherLigaRank(a: string, b: string): string {
   return leagueIndex(a) >= leagueIndex(b) ? a : b;
 }
-
-/**
- * Doc 10 §3.2: si la liga MM y la banda de elo divergen en 2+ escalones, alinear con el elo tras el partido.
- */
-export function reconcileLigaWithElo(currentLiga: string, newElo: number, bands: LeagueEloBand[] | null): string {
-  const eloLiga = bands?.length ? ligaFromEloWithBands(newElo, bands) : ligaFromElo(newElo);
-  if (Math.abs(leagueIndex(eloLiga) - leagueIndex(currentLiga)) >= 2) return eloLiga;
-  return currentLiga;
-}

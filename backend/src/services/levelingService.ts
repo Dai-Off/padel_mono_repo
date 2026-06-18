@@ -4,7 +4,6 @@ import { syncPlayerVector } from '../lib/mailer';
 import { computeMatchmakingLeagueUpdates, type MmLeagueRow } from './matchmakingLeagueEconomy';
 import { getActiveMatchmakingSeasonId } from './matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from './matchmakingLeagueConfigService';
-import { higherLigaRank, reconcileLigaWithElo } from './matchmakingLeague';
 
 export const COMEBACK_BONUS = 1.1;
 export const WINDOW_SIZE = 20;
@@ -366,13 +365,6 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
       };
     });
     pLeagueUpdates = computeMatchmakingLeagueUpdates(mmRows, winnerTeam, seasonId, bands);
-    for (const row of pLeagueUpdates) {
-      const u = playerUpdates[row.id];
-      if (!u) continue;
-      const nextLiga = reconcileLigaWithElo(row.liga, u.newElo, bands);
-      row.liga = nextLiga;
-      row.mm_peak_liga = higherLigaRank(row.mm_peak_liga, nextLiga);
-    }
   }
 
   const { error: rpcErr } = await supabase.rpc('apply_leveling_pipeline', {
