@@ -1521,6 +1521,7 @@ export function CompetitiveLeagueScreen({
         onClose={() => setPartnerPickerVisible(false)}
         onSelect={setSelectedPartner}
         onSelectAccepted={(inv) => void handleSearchWithAccepted(inv)}
+        excludeIds={profile?.id ? [profile.id] : undefined}
       />
     </View>
   );
