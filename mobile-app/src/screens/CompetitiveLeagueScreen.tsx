@@ -338,6 +338,10 @@ export function CompetitiveLeagueScreen({
       setStep('prefs');
       if (matchmakingBannerState === 'timed_out') {
         setErrorText('No se encontraron jugadores. Ajusta los parámetros y vuelve a intentar.');
+        // Limpiamos la búsqueda anterior: revierte la invitación de pareja a 'accepted' y nos
+        // saca del pool, para que el reintento parta de cero (y la pareja siga en "Listos para jugar").
+        const token = session?.access_token ?? null;
+        if (token) void leaveMatchmaking(token);
       }
       lastAppliedEntryIntentRef.current = entryIntent;
       return;
@@ -892,7 +896,17 @@ export function CompetitiveLeagueScreen({
   useEffect(() => {
     if (matchmakingBannerState !== 'timed_out') return;
     setErrorText('No se encontraron jugadores. Ajusta los parámetros y vuelve a intentar.');
-    setSearchPartner(null);
+    if (searchPartner) {
+      // Era búsqueda en pareja: salimos de la cola (revierte la invitación a 'accepted' y nos
+      // saca a ambos del pool) pero CONSERVAMOS al compañero para poder re-buscar juntos.
+      const token = session?.access_token ?? null;
+      if (token) void leaveMatchmaking(token);
+      setStatus(null);
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
+    } else {
+      setSearchPartner(null);
+    }
     setStep('prefs');
   }, [matchmakingBannerState]);
 
