@@ -148,6 +148,8 @@ export interface CompetitiveTranslationKeys {
     pending: string;
     waiting: string;
     inviteSent: string;
+    received: string;
+    invitedYou: string;
   };
   banner: { invitesYou: string; sub: string; reject: string; accept: string; acceptSearch: string; count: string };
   common: { cancel: string; couldNot: string };

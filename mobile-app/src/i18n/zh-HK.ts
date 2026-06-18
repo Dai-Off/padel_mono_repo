@@ -183,6 +183,8 @@ export const zhHK: TranslationKeys = {
       pending: '待回覆',
       waiting: '等待回覆',
       inviteSent: '已向 {name} 發送邀請',
+      received: '收到的邀請',
+      invitedYou: '邀請你一起玩',
     },
     banner: {
       invitesYou: '{name} 邀請你打競技賽',

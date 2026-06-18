@@ -16,7 +16,14 @@ import { theme } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTranslation } from '../../i18n';
 import { searchPlayers, type PlayerSearchHit } from '../../api/players';
-import { cancelPairInvite, createPairInvite, fetchMatchmakingStatus, type PairInvite } from '../../api/matchmaking';
+import {
+  acceptPairInvite,
+  cancelPairInvite,
+  createPairInvite,
+  fetchMatchmakingStatus,
+  rejectPairInvite,
+  type PairInvite,
+} from '../../api/matchmaking';
 import { Toast } from '../ui/Toast';
 
 const BG = '#0F0F0F';
@@ -49,6 +56,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
   const [error, setError] = useState<string | null>(null);
   const [accepted, setAccepted] = useState<PairInvite[]>([]);
   const [pending, setPending] = useState<PairInvite[]>([]);
+  const [received, setReceived] = useState<PairInvite[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [toastVariant, setToastVariant] = useState<'success' | 'error'>('success');
@@ -87,6 +95,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
     if (!visible) {
       setAccepted([]);
       setPending([]);
+      setReceived([]);
       return;
     }
     let cancelled = false;
@@ -94,9 +103,11 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
       const st = await fetchMatchmakingStatus(token);
       if (cancelled) return;
       const invs = st?.pair_invites ?? [];
-      // Aceptadas: cualquiera de los dos puede buscar. Pendientes enviadas: solo el invitador (cancelar).
+      // Aceptadas: cualquiera de los dos puede buscar. Enviadas pendientes: solo el invitador (cancelar).
+      // Recibidas pendientes: las que me han enviado y debo aceptar/rechazar.
       setAccepted(invs.filter((i) => i.status === 'accepted'));
       setPending(invs.filter((i) => i.role === 'inviter' && i.status === 'pending'));
+      setReceived(invs.filter((i) => i.role === 'invitee' && i.status === 'pending'));
     })();
     return () => {
       cancelled = true;
@@ -105,6 +116,19 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
 
   const handleCancelInvite = async (inv: PairInvite) => {
     const res = await cancelPairInvite(inv.id, token);
+    if (!res.ok) showToast(res.error, 'error');
+    setRefreshKey((k) => k + 1);
+  };
+
+  // Aceptar una invitación recibida: pasa a "Listos para jugar" (luego se busca tocándola).
+  const handleAcceptReceived = async (inv: PairInvite) => {
+    const res = await acceptPairInvite(inv.id, token);
+    if (!res.ok) showToast(res.error, 'error');
+    setRefreshKey((k) => k + 1);
+  };
+
+  const handleRejectReceived = async (inv: PairInvite) => {
+    const res = await rejectPairInvite(inv.id, token);
     if (!res.ok) showToast(res.error, 'error');
     setRefreshKey((k) => k + 1);
   };
@@ -132,14 +156,41 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
   // Oculta a uno mismo y a quien no ha completado el onboarding (no puede jugar competitiva).
   const list = players.filter((p) => !exclude.has(p.id) && p.onboarding_completed !== false);
 
+  const showReceived = received.length > 0;
   const showAccepted = !!onSelectAccepted && accepted.length > 0;
   const showPending = pending.length > 0;
   const listHeader =
-    showAccepted || showPending ? (
+    showReceived || showAccepted || showPending ? (
       <View style={styles.acceptedBlock}>
+        {showReceived ? (
+          <>
+            <Text style={styles.sectionLabel}>{t('competitive.partner.received')}</Text>
+            {received.map((inv) => (
+              <View key={inv.id} style={[styles.row, styles.acceptedRow]}>
+                {renderAvatar(inv.other_player_avatar)}
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.name} numberOfLines={1}>
+                    {inv.other_player_name}
+                  </Text>
+                  <Text style={styles.meta}>{t('competitive.partner.invitedYou')}</Text>
+                </View>
+                <View style={styles.receivedActions}>
+                  <Pressable onPress={() => void handleRejectReceived(inv)} hitSlop={6} style={styles.cancelBtn}>
+                    <Text style={styles.cancelBtnText}>{t('competitive.banner.reject')}</Text>
+                  </Pressable>
+                  <Pressable onPress={() => void handleAcceptReceived(inv)} hitSlop={6} style={styles.acceptBtn}>
+                    <Text style={styles.acceptBtnText}>{t('competitive.banner.accept')}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            ))}
+          </>
+        ) : null}
         {showAccepted ? (
           <>
-            <Text style={styles.sectionLabel}>{t('competitive.partner.ready')}</Text>
+            <Text style={[styles.sectionLabel, showReceived ? { marginTop: 12 } : null]}>
+              {t('competitive.partner.ready')}
+            </Text>
             {accepted.map((inv) => (
               <Pressable
                 key={inv.id}
@@ -161,7 +212,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
         ) : null}
         {showPending ? (
           <>
-            <Text style={[styles.sectionLabel, showAccepted ? { marginTop: 12 } : null]}>
+            <Text style={[styles.sectionLabel, showReceived || showAccepted ? { marginTop: 12 } : null]}>
               {t('competitive.partner.pending')}
             </Text>
             {pending.map((inv) => (
@@ -311,4 +362,7 @@ const styles = StyleSheet.create({
   pendingRow: { borderColor: 'rgba(255,255,255,0.06)', backgroundColor: '#101010' },
   cancelBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: '#262626' },
   cancelBtnText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  receivedActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  acceptBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: ACCENT },
+  acceptBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 });

@@ -188,6 +188,8 @@ export const es: TranslationKeys = {
       pending: 'Pendientes (esperando respuesta)',
       waiting: 'Esperando respuesta',
       inviteSent: 'Invitación enviada a {name}',
+      received: 'Invitaciones recibidas',
+      invitedYou: 'Te ha invitado a jugar',
     },
     banner: {
       invitesYou: '{name} te invita a un partido competitivo',
