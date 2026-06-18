@@ -498,13 +498,20 @@ export function CompetitiveLeagueScreen({
     return row?.label ?? profile.liga ?? 'Sin división';
   }, [profile, leagueRows]);
 
+  // LP necesarios para ascender desde la liga actual (null en elite, que no asciende).
+  const lpTarget = useMemo(() => {
+    if (!profile) return null;
+    const row = leagueRows?.find((r) => r.code === profile.liga);
+    if (!row) return null;
+    return row.lps_to_promote && row.lps_to_promote > 0 ? row.lps_to_promote : null;
+  }, [profile, leagueRows]);
+
   const progressPct = useMemo(() => {
     if (!profile) return 0;
-    const row = leagueRows?.find((r) => r.code === profile.liga);
-    const target = row?.lps_to_promote && row.lps_to_promote > 0 ? row.lps_to_promote : 100;
+    const target = lpTarget ?? 100;
     const lps = profile.lps ?? 0;
     return Math.max(0, Math.min(100, Math.round((lps / target) * 100)));
-  }, [profile, leagueRows]);
+  }, [profile, lpTarget]);
   const winCount = profile?.mmWins ?? 0;
   const lossCount = profile?.mmLosses ?? 0;
   const wr = winCount + lossCount > 0 ? Math.round((winCount / (winCount + lossCount)) * 100) : 0;
@@ -956,7 +963,9 @@ export function CompetitiveLeagueScreen({
             </View>
             <View style={styles.lpRow}>
               <Text style={styles.lpCap}>LEAGUE POINTS (LP)</Text>
-              <Text style={styles.lp}>{profile?.lps ?? 0} / 100 LP</Text>
+              <Text style={styles.lp}>
+                {lpTarget != null ? `${profile?.lps ?? 0} / ${lpTarget} LP` : `${profile?.lps ?? 0} LP`}
+              </Text>
             </View>
             <View style={styles.track}>
               <View style={[styles.fill, { width: `${progressPct}%` }]} />
@@ -1030,7 +1039,12 @@ export function CompetitiveLeagueScreen({
                 <Text style={styles.howLine}>⚔️ Todos los partidos son 2v2 por parejas</Text>
                 <Text style={styles.howLine}>↗ Victoria: +20 a +25 LP según el nivel del rival</Text>
                 <Text style={styles.howLine}>↘ Derrota: -15 a -20 LP según la diferencia de nivel</Text>
-                <Text style={styles.howLine}>★ Al llegar a 100 LP subes de división automáticamente</Text>
+                <Text style={styles.howLine}>
+                  ★{' '}
+                  {lpTarget != null
+                    ? `Al llegar a ${lpTarget} LP subes de división automáticamente`
+                    : 'Estás en la división máxima'}
+                </Text>
                 <Text style={styles.howLine}>🔁 Los rankings se reinician al final de cada Pase de Temporada</Text>
               </View>
             </>
