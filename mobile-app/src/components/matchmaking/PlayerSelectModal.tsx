@@ -21,6 +21,8 @@ import { Toast } from '../ui/Toast';
 
 const BG = '#0F0F0F';
 const ACCENT = theme.auth.accent;
+/** Mínimo de caracteres para lanzar la búsqueda de jugadores. */
+const MIN_SEARCH_CHARS = 2;
 
 export function playerDisplayName(p: PlayerSearchHit): string {
   const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim();
@@ -57,6 +59,13 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
 
   useEffect(() => {
     if (!visible) return;
+    // No cargamos jugadores hasta que el usuario escriba algo (evita listar "randoms").
+    if (query.trim().length < MIN_SEARCH_CHARS) {
+      setPlayers([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -216,7 +225,13 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
             contentContainerStyle={{ paddingBottom: insets.bottom + 24, paddingHorizontal: 16 }}
             keyboardShouldPersistTaps="handled"
             ListHeaderComponent={listHeader}
-            ListEmptyComponent={<Text style={styles.emptyText}>{t('competitive.partner.empty')}</Text>}
+            ListEmptyComponent={
+              <Text style={styles.emptyText}>
+                {query.trim().length < MIN_SEARCH_CHARS
+                  ? t('competitive.partner.searchHint')
+                  : t('competitive.partner.empty')}
+              </Text>
+            }
             renderItem={({ item }) => (
               <Pressable
                 onPress={() => void handleInvite(item)}

@@ -180,6 +180,7 @@ export const es: TranslationKeys = {
       title: 'Jugar con un amigo',
       subtitle: 'Elige una pareja aceptada o invita a un jugador',
       searchPlaceholder: 'Buscar jugador...',
+      searchHint: 'Escribe el nombre o usuario para buscar un jugador',
       empty: 'No se encontraron jugadores.',
       ready: 'Listos para jugar',
       acceptedSub: 'Aceptó tu invitación · toca para buscar',

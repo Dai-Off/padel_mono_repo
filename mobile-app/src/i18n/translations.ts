@@ -140,6 +140,7 @@ export interface CompetitiveTranslationKeys {
     title: string;
     subtitle: string;
     searchPlaceholder: string;
+    searchHint: string;
     empty: string;
     ready: string;
     acceptedSub: string;

@@ -175,6 +175,7 @@ export const zhHK: TranslationKeys = {
       title: '和朋友一起',
       subtitle: '選擇已接受的隊友，或邀請玩家',
       searchPlaceholder: '搜尋玩家…',
+      searchHint: '輸入名稱或用戶名來搜尋球員',
       empty: '找不到玩家。',
       ready: '可以開始',
       acceptedSub: '已接受你的邀請 · 點擊尋找',
