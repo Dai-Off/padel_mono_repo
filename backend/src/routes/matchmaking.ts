@@ -20,6 +20,7 @@ import {
   enqueueBothPaired,
   getActionablePairInvites,
   normalizePairPrefs,
+  recentRejectionExists,
   type PairInvitePrefs,
 } from '../services/matchmakingPairInviteService';
 
@@ -954,6 +955,11 @@ router.post('/pair-invite', async (req: Request, res: Response) => {
 
   const elig = await assertPairEligible(supabase, playerId, inviteeId);
   if (!elig.ok) return res.status(elig.status).json({ ok: false, error: elig.error });
+
+  // Anti-spam: si el invitado rechazó hace poco, no permitir re-invitar todavía.
+  if (await recentRejectionExists(supabase, playerId, inviteeId)) {
+    return res.status(429).json({ ok: false, error: 'Este jugador rechazó tu invitación hace poco. Inténtalo más tarde.' });
+  }
 
   // Libera el índice único marcando como vencidas las invitaciones activas ya caducadas de este par.
   const nowIso = new Date().toISOString();

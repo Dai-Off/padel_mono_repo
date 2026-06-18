@@ -10,6 +10,8 @@ import { getMatchmakingBlockUntil } from './matchmakingService';
 
 /** TTL por defecto de una invitación si la ventana de disponibilidad no acota antes. */
 const PAIR_INVITE_TTL_MS = 6 * 60 * 60 * 1000;
+/** Tras un rechazo, el invitador no puede volver a invitar al mismo jugador durante este tiempo. */
+export const PAIR_INVITE_REINVITE_COOLDOWN_MS = 60 * 60 * 1000;
 
 export type PairInvitePrefs = {
   available_from: string;
@@ -154,6 +156,24 @@ export async function assertPairEligible(
   return { ok: true };
 }
 
+/** True si el invitado rechazó una invitación de este invitador dentro del cooldown. */
+export async function recentRejectionExists(
+  supabase: SupabaseClient,
+  inviterId: string,
+  inviteeId: string,
+): Promise<boolean> {
+  const since = new Date(Date.now() - PAIR_INVITE_REINVITE_COOLDOWN_MS).toISOString();
+  const { data } = await supabase
+    .from('matchmaking_pair_invites')
+    .select('id')
+    .eq('inviter_player_id', inviterId)
+    .eq('invitee_player_id', inviteeId)
+    .eq('status', 'rejected')
+    .gt('resolved_at', since)
+    .limit(1);
+  return (data ?? []).length > 0;
+}
+
 function poolRowFromPrefs(playerId: string, partnerId: string, prefs: PairInvitePrefs) {
   return {
     player_id: playerId,
@@ -218,7 +238,9 @@ export async function getActionablePairInvites(
   const { data } = await supabase
     .from('matchmaking_pair_invites')
     .select('id, inviter_player_id, invitee_player_id, status, expires_at')
-    .or(`and(invitee_player_id.eq.${playerId},status.eq.pending),and(inviter_player_id.eq.${playerId},status.eq.accepted)`)
+    .or(
+      `and(invitee_player_id.eq.${playerId},status.eq.pending),and(inviter_player_id.eq.${playerId},status.eq.accepted),and(inviter_player_id.eq.${playerId},status.eq.pending)`,
+    )
     .gt('expires_at', nowIso);
 
   const rows = (data ?? []) as {
