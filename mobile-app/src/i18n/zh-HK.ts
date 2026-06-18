@@ -185,6 +185,8 @@ export const zhHK: TranslationKeys = {
       inviteSent: '已向 {name} 發送邀請',
       received: '收到的邀請',
       invitedYou: '邀請你一起玩',
+      leavePair: '解除搭檔',
+      leavePairMsg: '確定不再和 {name} 一起玩嗎？',
     },
     banner: {
       invitesYou: '{name} 邀請你打競技賽',

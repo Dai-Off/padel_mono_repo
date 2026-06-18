@@ -97,7 +97,9 @@ export function SeasonTransitionModal({ visible, transition, onClose }: Props) {
       <View style={styles.root}>
         <Animated.View style={[styles.card, { opacity: anim, transform: [{ translateY }, { scale }] }]}>
           <Text style={styles.kicker}>{kicker}</Text>
-          <Text style={styles.season}>{seasonName}</Text>
+          <Text style={styles.season} numberOfLines={2}>
+            {seasonName}
+          </Text>
 
           <Animated.View style={[styles.badgeWrap, { transform: [{ scale: badgePulse }] }]}>
             <LinearGradient colors={theme.colors} style={styles.badge}>
@@ -105,7 +107,9 @@ export function SeasonTransitionModal({ visible, transition, onClose }: Props) {
             </LinearGradient>
           </Animated.View>
 
-          <Text style={styles.ligaLine}>{ligaLine}</Text>
+          <Text style={styles.ligaLine} numberOfLines={2}>
+            {ligaLine}
+          </Text>
 
           <View style={styles.dots}>
             <View style={[styles.dot, isEnd && styles.dotActive]} />

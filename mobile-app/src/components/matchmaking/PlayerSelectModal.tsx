@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Image,
   Modal,
@@ -136,6 +137,24 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
     setRefreshKey((k) => k + 1);
   };
 
+  // Dejar una pareja aceptada: el invitador cancela, el invitado rechaza (ambos válidos en backend).
+  const handleLeavePair = (inv: PairInvite) => {
+    Alert.alert(t('competitive.partner.leavePair'), t('competitive.partner.leavePairMsg', { name: inv.other_player_name }), [
+      { text: t('competitive.common.cancel'), style: 'cancel' },
+      {
+        text: t('competitive.partner.leavePair'),
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            const res = await (inv.role === 'inviter' ? cancelPairInvite : rejectPairInvite)(inv.id, token);
+            if (!res.ok) showToast(res.error, 'error');
+            setRefreshKey((k) => k + 1);
+          })();
+        },
+      },
+    ]);
+  };
+
   const handleInvite = async (player: PlayerSearchHit) => {
     const res = await createPairInvite(player.id, token);
     if (!res.ok) {
@@ -213,6 +232,14 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
                   <Text style={styles.name}>{inv.other_player_name}</Text>
                   <Text style={styles.meta}>{t('competitive.partner.acceptedSub')}</Text>
                 </View>
+                <Pressable
+                  onPress={() => handleLeavePair(inv)}
+                  hitSlop={8}
+                  style={styles.leaveBtn}
+                  accessibilityLabel={t('competitive.partner.leavePair')}
+                >
+                  <Ionicons name="close" size={16} color="#9CA3AF" />
+                </Pressable>
                 <Ionicons name="flash" size={18} color={ACCENT} />
               </Pressable>
             ))}
@@ -374,4 +401,12 @@ const styles = StyleSheet.create({
   receivedActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   acceptBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: ACCENT },
   acceptBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  leaveBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

@@ -150,6 +150,8 @@ export interface CompetitiveTranslationKeys {
     inviteSent: string;
     received: string;
     invitedYou: string;
+    leavePair: string;
+    leavePairMsg: string;
   };
   banner: { invitesYou: string; sub: string; reject: string; accept: string; acceptSearch: string; count: string };
   season: { endKicker: string; endedIn: string; newKicker: string; newLiga: string; next: string; cta: string };

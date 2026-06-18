@@ -190,6 +190,8 @@ export const es: TranslationKeys = {
       inviteSent: 'Invitación enviada a {name}',
       received: 'Invitaciones recibidas',
       invitedYou: 'Te ha invitado a jugar',
+      leavePair: 'Dejar pareja',
+      leavePairMsg: '¿Quieres dejar de jugar con {name}?',
     },
     banner: {
       invitesYou: '{name} te invita a un partido competitivo',
