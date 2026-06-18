@@ -308,10 +308,10 @@ router.get('/:id/chat-summary', requireClubOwnerOrAdminOrPortalStaff, async (req
 });
 
 /**
- * GET /clubs/:id/public
+ * GET /clubs/miniapp/:id/public
  * Public endpoint for the MiniApp — returns non-sensitive club info without auth.
  */
-router.get('/:id/public', async (req: Request, res: Response) => {
+router.get('/miniapp/:id/public', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const supabase = getSupabaseServiceRoleClient();
