@@ -42,6 +42,17 @@ type ApiError = {
   error?: string;
 };
 
+/** Invitación de pareja accionable por el jugador (banner en Home). */
+export type PairInvite = {
+  id: string;
+  /** 'invitee' = me invitaron (pendiente); 'inviter' = yo invité y aceptaron. */
+  role: 'invitee' | 'inviter';
+  status: string;
+  other_player_id: string;
+  other_player_name: string;
+  expires_at: string;
+};
+
 export type MatchmakingStatusResponse = {
   ok: boolean;
   status: 'not_in_pool' | 'searching' | 'matched' | 'blocked' | string;
@@ -57,6 +68,8 @@ export type MatchmakingStatusResponse = {
   searching_count?: number;
   /** Si aplica club en la fila de cola, búsquedas en ese club */
   searching_in_club_count?: number | null;
+  /** Invitaciones de pareja accionables (banners por polling). */
+  pair_invites?: PairInvite[];
 };
 
 export type MatchmakingLeaderboardRow = {
@@ -281,6 +294,72 @@ export async function rejectMatchmakingProposal(
     return { ok: false, error: 'Error de conexión' };
   }
 }
+
+// ---- Invitaciones de pareja (premade duo) ----
+
+/** Payload para invitar: mismas prefs de cola que join + el jugador invitado. */
+export type PairInvitePayload = Omit<MatchmakingJoinPayload, 'paired_with_id'> & {
+  invitee_player_id: string;
+};
+
+export async function createPairInvite(
+  body: PairInvitePayload,
+  token: string | null | undefined
+): Promise<{ ok: true; invite_id: string } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/matchmaking/pair-invite`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; invite_id?: string };
+    if (res.ok && json.invite_id) return { ok: true, invite_id: json.invite_id };
+    return { ok: false, error: json.error ?? 'No se pudo enviar la invitación' };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+async function postPairInviteAction(
+  inviteId: string,
+  action: 'accept' | 'accept-and-search' | 'start-search' | 'reject' | 'cancel',
+  token: string | null | undefined
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/matchmaking/pair-invite/${inviteId}/${action}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
+    });
+    if (!res.ok) return { ok: false, error: await parseErrorMessage(res) };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+export const acceptPairInvite = (id: string, token: string | null | undefined) =>
+  postPairInviteAction(id, 'accept', token);
+export const acceptAndSearchPairInvite = (id: string, token: string | null | undefined) =>
+  postPairInviteAction(id, 'accept-and-search', token);
+export const startSearchPairInvite = (id: string, token: string | null | undefined) =>
+  postPairInviteAction(id, 'start-search', token);
+export const rejectPairInvite = (id: string, token: string | null | undefined) =>
+  postPairInviteAction(id, 'reject', token);
+export const cancelPairInvite = (id: string, token: string | null | undefined) =>
+  postPairInviteAction(id, 'cancel', token);
 
 export async function respondMatchmakingExpansion(
   accept: boolean,
