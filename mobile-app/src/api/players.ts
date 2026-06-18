@@ -27,6 +27,7 @@ type MeResponse = {
     mm_wins?: number | null;
     mm_losses?: number | null;
     mm_draws?: number | null;
+    mm_shield_matches?: number | null;
     preferred_side?: string | null;
     preferred_schedule_slots?: string[] | null;
     preferred_days?: string[] | null;
@@ -87,6 +88,8 @@ export type MyPlayerProfile = {
   mmWins: number;
   mmLosses: number;
   mmDraws: number;
+  /** Partidos restantes de escudo anti-descenso tras ascender (0 = sin escudo). */
+  mmShieldMatches: number;
   preferences: PlayerPreferences;
   /**
    * Visibilidad en las búsquedas de la IA de afinidad. Desactivada por defecto;
@@ -237,6 +240,7 @@ export async function fetchMyPlayerProfile(
       mmWins: parseInt0(json.player.mm_wins),
       mmLosses: parseInt0(json.player.mm_losses),
       mmDraws: parseInt0(json.player.mm_draws),
+      mmShieldMatches: parseInt0(json.player.mm_shield_matches),
       preferences: {
         preferredSide: prefSide,
         preferredScheduleSlots: prefSlots,

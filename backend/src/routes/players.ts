@@ -174,7 +174,7 @@ const SELECT_PUBLIC_INTERNAL = `
   affinity_visible,
   play_location, birth_date, profile_description,
   onboarding_completed,
-  liga, lps, mm_peak_liga
+  liga, lps, mm_peak_liga, mm_shield_matches
 `;
 
 const AVATAR_URL_MAX = 2048;
