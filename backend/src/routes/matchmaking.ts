@@ -1018,7 +1018,7 @@ router.post('/pair-invite/:id/accept-and-search', async (req: Request, res: Resp
   if (!norm.ok) return res.status(norm.status).json({ ok: false, error: norm.error });
   const elig = await assertPairEligible(supabase, invite.inviter_player_id, invite.invitee_player_id);
   if (!elig.ok) return res.status(elig.status).json({ ok: false, error: elig.error });
-  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, norm.prefs);
+  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, norm.prefs, playerId);
   if (!enq.ok) return res.status(enq.status).json({ ok: false, error: enq.error });
 
   const nowIso = new Date().toISOString();
@@ -1050,7 +1050,7 @@ router.post('/pair-invite/:id/start-search', async (req: Request, res: Response)
   if (!norm.ok) return res.status(norm.status).json({ ok: false, error: norm.error });
   const elig = await assertPairEligible(supabase, invite.inviter_player_id, invite.invitee_player_id);
   if (!elig.ok) return res.status(elig.status).json({ ok: false, error: elig.error });
-  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, norm.prefs);
+  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, norm.prefs, playerId);
   if (!enq.ok) return res.status(enq.status).json({ ok: false, error: enq.error });
 
   const nowIso = new Date().toISOString();

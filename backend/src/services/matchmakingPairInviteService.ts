@@ -142,14 +142,8 @@ export async function assertPairEligible(
     return { ok: false, status: 403, error: 'Tú o tu compañero tenéis el matchmaking bloqueado temporalmente por sanción' };
   }
 
-  const { data: inPool } = await supabase
-    .from('matchmaking_pool')
-    .select('player_id')
-    .in('player_id', [inviterId, inviteeId]);
-  if ((inPool ?? []).length > 0) {
-    return { ok: false, status: 409, error: 'Tú o tu compañero ya estáis en la cola de matchmaking' };
-  }
-
+  // Nota: estar en cola NO impide invitar ni aceptar (es solo una intención de jugar juntos).
+  // El bloqueo por estar en cola se aplica únicamente al encolar (enqueueBothPaired).
   return { ok: true };
 }
 
@@ -191,19 +185,28 @@ function poolRowFromPrefs(playerId: string, partnerId: string, prefs: PairInvite
   };
 }
 
-/** Encola a los dos miembros con paired_with_id mutuo. Revalida que ninguno esté ya en cola. */
+/**
+ * Encola a los dos miembros con paired_with_id mutuo. Revalida que ninguno esté ya en cola.
+ * `callerId` (quien dispara la búsqueda) permite afinar el mensaje: "tú" vs "tu compañero".
+ */
 export async function enqueueBothPaired(
   supabase: SupabaseClient,
   inviterId: string,
   inviteeId: string,
   prefs: PairInvitePrefs,
+  callerId?: string,
 ): Promise<Ok<unknown> | Fail> {
   const { data: inPool } = await supabase
     .from('matchmaking_pool')
     .select('player_id')
     .in('player_id', [inviterId, inviteeId]);
-  if ((inPool ?? []).length > 0) {
-    return { ok: false, status: 409, error: 'Tú o tu compañero ya estáis en la cola de matchmaking' };
+  const poolIds = new Set((inPool ?? []).map((r) => (r as { player_id: string }).player_id));
+  if (poolIds.size > 0) {
+    const callerInPool = callerId != null && poolIds.has(callerId);
+    const error = callerInPool
+      ? 'Ya estás en la cola de matchmaking. Sal de la búsqueda actual para buscar con tu compañero.'
+      : 'Tu compañero ya está buscando partido. Espera a que termine para buscar juntos.';
+    return { ok: false, status: 409, error };
   }
 
   const { error } = await supabase
