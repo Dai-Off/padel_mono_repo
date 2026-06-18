@@ -15,9 +15,13 @@ export function maxLeagueSpread(ids: string[], ligaById: Map<string, string>): n
   return Math.max(...idx) - Math.min(...idx);
 }
 
-/** Máximo 1 salto de liga (bronce↔plata OK, bronce↔oro no). */
+/** Tope de diferencia de liga permitido al emparejar. La preferencia por misma
+ *  liga se aplica como penalización ponderada del score en matchmakingService. */
+export const MAX_LEAGUE_SPREAD = 2;
+
+/** Compatible si los 4 jugadores están dentro de MAX_LEAGUE_SPREAD escalones. */
 export function leaguesMatchmakingCompatible(ids: string[], ligaById: Map<string, string>): boolean {
-  return maxLeagueSpread(ids, ligaById) <= 1;
+  return maxLeagueSpread(ids, ligaById) <= MAX_LEAGUE_SPREAD;
 }
 
 /** Asignación inicial por elo 0–7 (valores provisionales doc 10). */

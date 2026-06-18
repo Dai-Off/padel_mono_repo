@@ -24,6 +24,9 @@ export { exceedsLevelSpread, bestTeamSplitSync, MAX_LEVEL_SPREAD, BASE_WIN_PROB_
 export type { PoolRow, SkillRow } from './matchmakingShared';
 
 const MAX_UNIT_COMBINATIONS = 12000;
+/** Penalización de score por cada escalón de diferencia de liga: prefiere misma
+ *  liga y solo acepta ligas cercanas (hasta MAX_LEAGUE_SPREAD) si el balance lo compensa. */
+const LEAGUE_SPREAD_PENALTY = 0.08;
 
 export type MatchmakingCycleResult = {
   formed: number;
@@ -346,10 +349,13 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
 
       const ls = maxLeagueSpread(ids, ligaById);
       const split = q.split;
+      // Score efectivo = balance OpenSkill penalizado por la diferencia de liga.
+      const effScore = split.score - LEAGUE_SPREAD_PENALTY * ls;
+      const comboBestEff = comboBest ? comboBest.split.score - LEAGUE_SPREAD_PENALTY * comboBest.leagueSpread : -Infinity;
       const betterCombo =
         !comboBest ||
-        split.score > comboBest.split.score + 1e-9 ||
-        (Math.abs(split.score - comboBest.split.score) < 1e-9 && ls < comboBest.leagueSpread);
+        effScore > comboBestEff + 1e-9 ||
+        (Math.abs(effScore - comboBestEff) < 1e-9 && ls < comboBest.leagueSpread);
       if (betterCombo) {
         comboBest = { flatRows, ids, split, clubId, slot, courtId, leagueSpread: ls };
       }
@@ -364,10 +370,12 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
       continue;
     }
 
+    const comboEff = comboBest.split.score - LEAGUE_SPREAD_PENALTY * comboBest.leagueSpread;
+    const bestEff = best ? best.split.score - LEAGUE_SPREAD_PENALTY * best.leagueSpread : -Infinity;
     const better =
       !best ||
-      comboBest.split.score > best.split.score + 1e-9 ||
-      (Math.abs(comboBest.split.score - best.split.score) < 1e-9 && comboBest.leagueSpread < best.leagueSpread);
+      comboEff > bestEff + 1e-9 ||
+      (Math.abs(comboEff - bestEff) < 1e-9 && comboBest.leagueSpread < best.leagueSpread);
 
     if (better) {
       best = comboBest;
