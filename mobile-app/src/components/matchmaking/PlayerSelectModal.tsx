@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   Modal,
   Pressable,
   StyleSheet,
@@ -109,6 +110,15 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
     setRefreshKey((k) => k + 1);
   };
 
+  const renderAvatar = (url?: string | null) =>
+    url ? (
+      <Image source={{ uri: url }} style={styles.avatar} />
+    ) : (
+      <View style={styles.avatar}>
+        <Ionicons name="person" size={18} color="#9CA3AF" />
+      </View>
+    );
+
   const exclude = new Set(excludeIds ?? []);
   // Oculta a uno mismo y a quien no ha completado el onboarding (no puede jugar competitiva).
   const list = players.filter((p) => !exclude.has(p.id) && p.onboarding_completed !== false);
@@ -130,9 +140,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
                 }}
                 style={({ pressed }) => [styles.row, styles.acceptedRow, pressed && { opacity: 0.85 }]}
               >
-                <View style={styles.avatar}>
-                  <Ionicons name="checkmark-circle" size={18} color={ACCENT} />
-                </View>
+                {renderAvatar(inv.other_player_avatar)}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.name}>{inv.other_player_name}</Text>
                   <Text style={styles.meta}>{t('competitive.partner.acceptedSub')}</Text>
@@ -149,9 +157,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
             </Text>
             {pending.map((inv) => (
               <View key={inv.id} style={[styles.row, styles.pendingRow]}>
-                <View style={styles.avatar}>
-                  <Ionicons name="hourglass-outline" size={18} color="#9CA3AF" />
-                </View>
+                {renderAvatar(inv.other_player_avatar)}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.name}>{inv.other_player_name}</Text>
                   <Text style={styles.meta}>{t('competitive.partner.waiting')}</Text>
@@ -216,9 +222,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
                 onPress={() => void handleInvite(item)}
                 style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
               >
-                <View style={styles.avatar}>
-                  <Ionicons name="person" size={18} color="#9CA3AF" />
-                </View>
+                {renderAvatar(item.avatar_url)}
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.name}>{playerDisplayName(item)}</Text>
                   {item.username ? <Text style={styles.meta}>@{item.username}</Text> : null}

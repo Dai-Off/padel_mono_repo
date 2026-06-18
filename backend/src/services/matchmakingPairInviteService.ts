@@ -219,6 +219,7 @@ export type ActionablePairInvite = {
   status: string;
   other_player_id: string;
   other_player_name: string;
+  other_player_avatar: string | null;
   expires_at: string;
   /** Diferencia de elo (0-7) entre ambos; >1 implica inflado del débil al buscar. */
   level_gap: number;
@@ -253,11 +254,11 @@ export async function getActionablePairInvites(
   const otherIds = [...new Set(rows.map((r) => (r.invitee_player_id === playerId ? r.inviter_player_id : r.invitee_player_id)))];
   const { data: pdata } = await supabase
     .from('players')
-    .select('id, first_name, last_name, elo_rating, liga')
+    .select('id, first_name, last_name, elo_rating, liga, avatar_url')
     .in('id', [playerId, ...otherIds]);
   const byId = new Map(
     (pdata ?? []).map((p) => {
-      const r = p as { id: string; first_name?: string | null; last_name?: string | null; elo_rating?: number | null; liga?: string | null };
+      const r = p as { id: string; first_name?: string | null; last_name?: string | null; elo_rating?: number | null; liga?: string | null; avatar_url?: string | null };
       return [r.id, r];
     }),
   );
@@ -279,6 +280,7 @@ export async function getActionablePairInvites(
       status: r.status,
       other_player_id: otherId,
       other_player_name: nameOf(otherId),
+      other_player_avatar: byId.get(otherId)?.avatar_url ?? null,
       expires_at: r.expires_at,
       level_gap: Math.abs(meElo - otherElo),
       target_liga: meElo >= otherElo ? meLiga : otherLiga,

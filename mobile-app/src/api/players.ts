@@ -431,6 +431,7 @@ export type PlayerSearchHit = {
   first_name?: string | null;
   last_name?: string | null;
   username?: string | null;
+  avatar_url?: string | null;
   onboarding_completed?: boolean;
 };
 

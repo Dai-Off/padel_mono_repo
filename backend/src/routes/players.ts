@@ -1351,7 +1351,7 @@ router.get('/', async (req: Request, res: Response) => {
     let q = supabase
       .from('players')
       .select(
-        `id, created_at, first_name, last_name, email, phone, username, status, auth_user_id, onboarding_completed,
+        `id, created_at, first_name, last_name, email, phone, username, status, auth_user_id, onboarding_completed, avatar_url,
          mu, sigma, elo_rating, sp, matches_played_competitive, matches_played_friendly, matches_played_matchmaking`
       )
       .order('created_at', { ascending: false })

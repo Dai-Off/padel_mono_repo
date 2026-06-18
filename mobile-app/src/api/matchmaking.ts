@@ -49,6 +49,7 @@ export type PairInvite = {
   status: string;
   other_player_id: string;
   other_player_name: string;
+  other_player_avatar?: string | null;
   expires_at: string;
   /** Diferencia de nivel con el otro jugador; >1 implica buscar al nivel del superior. */
   level_gap?: number;
