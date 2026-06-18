@@ -6,6 +6,10 @@ export const MAX_LEVEL_SPREAD = 1.0;
 export const BASE_WIN_PROB_MIN = 0.35;
 export const BASE_WIN_PROB_MAX = 0.65;
 export const STREAK_THRESHOLD = 4;
+/** Pareja premade: diferencia real de elo máxima para invitar (0-7). */
+export const PREMADE_MAX_GAP = 1.5;
+/** Pareja premade: al débil se le trata como `fuerte − este valor` para emparejar. */
+export const PREMADE_FLOOR_GAP = 1.0;
 
 export type PoolRow = {
   id: string;
