@@ -43,7 +43,7 @@ import { EditProfileScreen } from './EditProfileScreen';
 import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile } from '../api/players';
-import { fetchMatchmakingStatus, leaveMatchmaking } from '../api/matchmaking';
+import { fetchMatchmakingStatus, leaveMatchmaking, type PairInvite } from '../api/matchmaking';
 import { UsernameSetupModal } from '../components/profile/UsernameSetupModal';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
 import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
@@ -132,6 +132,8 @@ export function MainApp() {
   const [competitiveQueueStartedAtMs, setCompetitiveQueueStartedAtMs] = useState<number | null>(null);
   const [matchmakingHomeBannerState, setMatchmakingHomeBannerState] =
     useState<MatchmakingHomeBannerState>('hidden');
+  const [pairInvites, setPairInvites] = useState<PairInvite[]>([]);
+  const [pairInviteNonce, setPairInviteNonce] = useState(0);
   const [matchmakingTimeoutNoticePending, setMatchmakingTimeoutNoticePending] = useState(false);
   const matchmakingTimeoutInFlightRef = useRef(false);
   const [showSeasonPass, setShowSeasonPass] = useState(false);
@@ -183,6 +185,7 @@ export function MainApp() {
     const pollStatus = async () => {
       const status = await fetchMatchmakingStatus(token);
       if (cancelled) return;
+      setPairInvites(status?.pair_invites ?? []);
       if (status?.status === 'matched') {
         setMatchmakingHomeBannerState('matched');
         setMatchmakingTimeoutNoticePending(false);
@@ -225,7 +228,7 @@ export function MainApp() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [competitiveQueueStartedAtMs, matchmakingTimeoutNoticePending, session?.access_token]);
+  }, [competitiveQueueStartedAtMs, matchmakingTimeoutNoticePending, pairInviteNonce, session?.access_token]);
 
   const handleMatchmakingBannerStateChange = useCallback(
     (state: MatchmakingHomeBannerState, options?: { force?: boolean }) => {
@@ -942,6 +945,8 @@ export function MainApp() {
             onCoursesPress={() => setShowCourses(true)}
             onOpenCompetitiveLeague={openCompetitiveLeagueFromHome}
             matchmakingBannerState={matchmakingHomeBannerState}
+            pairInvites={pairInvites}
+            onPairInvitesChanged={() => setPairInviteNonce((n) => n + 1)}
             onOpenSeasonPass={() => setShowSeasonPass(true)}
             onOpenMessageThread={(peer) => {
               setMessagesPeer(peer);

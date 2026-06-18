@@ -51,6 +51,10 @@ export type PairInvite = {
   other_player_id: string;
   other_player_name: string;
   expires_at: string;
+  /** Diferencia de nivel con el otro jugador; >1 implica buscar al nivel del superior. */
+  level_gap?: number;
+  /** Liga a la que se buscará el partido (la del jugador de mayor nivel). */
+  target_liga?: string;
 };
 
 export type MatchmakingStatusResponse = {

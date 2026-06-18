@@ -656,21 +656,39 @@ export function CompetitiveLeagueScreen({
     async (invite: PairInvite) => {
       const token = session?.access_token ?? null;
       if (!token) return;
-      setErrorText(null);
-      clearPollTimer();
-      setLoading(true);
-      const res = await startSearchPairInvite(invite.id, token);
-      setLoading(false);
-      if (!res.ok) {
-        setErrorText(res.error);
+      const proceed = async () => {
+        setErrorText(null);
+        clearPollTimer();
+        setLoading(true);
+        const res = await startSearchPairInvite(invite.id, token);
+        setLoading(false);
+        if (!res.ok) {
+          setErrorText(res.error);
+          return;
+        }
+        setSelectedPartner(null);
+        setQueueStartedAtMs(Date.now());
+        setQueueElapsedSec(0);
+        onMatchmakingBannerStateChange?.('searching', { force: true });
+        setStep('queue');
+        await pollStatus();
+      };
+      // Aviso antes de buscar si hay >1 de diferencia de nivel.
+      if ((invite.level_gap ?? 0) > 1) {
+        const liga = invite.target_liga
+          ? invite.target_liga.charAt(0).toUpperCase() + invite.target_liga.slice(1)
+          : 'el jugador superior';
+        Alert.alert(
+          'Partido exigente',
+          `Tú y ${invite.other_player_name} tenéis más de un nivel de diferencia. El partido se buscará al nivel de ${liga}.`,
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Buscar igualmente', onPress: () => void proceed() },
+          ],
+        );
         return;
       }
-      setSelectedPartner(null);
-      setQueueStartedAtMs(Date.now());
-      setQueueElapsedSec(0);
-      onMatchmakingBannerStateChange?.('searching', { force: true });
-      setStep('queue');
-      await pollStatus();
+      await proceed();
     },
     [
       clearPollTimer,

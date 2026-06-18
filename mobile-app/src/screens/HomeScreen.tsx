@@ -31,7 +31,9 @@ import { searchAiMatch } from '../api/aiMatch';
 import {
   fetchMatchmakingLeagueConfig,
   type MatchmakingLeagueConfigRow,
+  type PairInvite,
 } from '../api/matchmaking';
+import { PairInviteBanner } from '../components/matchmaking/PairInviteBanner';
 import { updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreferences } from '../api/players';
 import { type SeasonPassMissionDto } from '../api/seasonPass';
 import {
@@ -91,6 +93,8 @@ type HomeScreenProps = {
   /** Abre el perfil con el modal del cuestionario auto-abierto (banner + hard blocks). */
   onOpenProfileForOnboarding?: () => void;
   matchmakingBannerState?: 'hidden' | 'searching' | 'matched' | 'timed_out';
+  pairInvites?: PairInvite[];
+  onPairInvitesChanged?: () => void;
 };
 
 /** Caché a nivel de módulo para que affinityResponse y los IDs enviados sobrevivan al desmonte/remonte de HomeScreen */
@@ -157,6 +161,8 @@ export function HomeScreen({
   onOpenAffinityPublicProfile,
   onOpenProfileForOnboarding,
   matchmakingBannerState = 'hidden',
+  pairInvites,
+  onPairInvitesChanged,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { locale, t } = useTranslation();
@@ -468,6 +474,11 @@ export function HomeScreen({
         {/* Banner proactivo: visible arriba de todo si el jugador no ha
             completado el cuestionario de nivelación. Tap → perfil con modal
             del onboarding auto-abierto. */}
+        {pairInvites && pairInvites.length > 0 && (
+          <InicioEnterBlock enterIndex={0}>
+            <PairInviteBanner invites={pairInvites} onChanged={() => onPairInvitesChanged?.()} />
+          </InicioEnterBlock>
+        )}
         {matchmakingBannerState !== 'hidden' && (
           <InicioEnterBlock enterIndex={0}>
             <OnboardingBanner
