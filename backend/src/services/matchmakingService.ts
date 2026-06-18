@@ -11,6 +11,7 @@ import {
   BASE_WIN_PROB_MIN,
   BASE_WIN_PROB_MAX,
   STREAK_THRESHOLD,
+  PREMADE_FLOOR_GAP,
   buildUnits,
   iterUnitCombos,
   resolveCandidateClubIds,
@@ -18,6 +19,7 @@ import {
   intersectRange,
   exceedsLevelSpread,
   bestTeamSplitSync,
+  fixedPairsFromRows,
 } from './matchmakingShared';
 
 export { exceedsLevelSpread, bestTeamSplitSync, MAX_LEVEL_SPREAD, BASE_WIN_PROB_MIN, BASE_WIN_PROB_MAX, STREAK_THRESHOLD };
@@ -254,6 +256,28 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
     ligaById.set(row.id, row.liga ?? 'bronce');
   }
 
+  // Pareja premade: inflar el nivel efectivo del miembro débil SOLO para emparejar
+  // (gravedad hacia `fuerte − PREMADE_FLOOR_GAP`). NO se persiste: el pipeline de
+  // nivelación lee de `players` fresco, así que el LP/mu post-partido usa el nivel real.
+  const premadeIds = new Set<string>();
+  for (const [p1, p2] of fixedPairsFromRows(rows)) {
+    const e1 = eloById.get(p1);
+    const e2 = eloById.get(p2);
+    if (e1 == null || e2 == null) continue;
+    const strongId = e1 >= e2 ? p1 : p2;
+    const weakId = e1 >= e2 ? p2 : p1;
+    const realEloWeak = eloById.get(weakId)!;
+    const effEloWeak = Math.max(realEloWeak, eloById.get(strongId)! - PREMADE_FLOOR_GAP);
+    if (effEloWeak > realEloWeak) {
+      eloById.set(weakId, effEloWeak);
+      const sk = skillsById.get(weakId);
+      if (sk) skillsById.set(weakId, { ...sk, mu: sk.mu + (effEloWeak - realEloWeak) * (50 / 7) });
+    }
+    ligaById.set(weakId, ligaById.get(strongId) ?? ligaById.get(weakId) ?? 'bronce');
+    premadeIds.add(strongId);
+    premadeIds.add(weakId);
+  }
+
   const synergyMap = await buildSynergyMap(supabase, poolIds);
 
   const ctx: QuartetPreCourtContext = {
@@ -264,6 +288,7 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
     skillsById,
     synergyMap,
     ligaById,
+    premadeIds,
   };
 
   type QuartetPick = {

@@ -465,7 +465,18 @@ router.delete('/leave', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
   const supabase = getSupabaseServiceRoleClient();
+  const { data: myRow } = await supabase
+    .from('matchmaking_pool')
+    .select('paired_with_id')
+    .eq('player_id', playerId)
+    .maybeSingle();
+  const partnerId = (myRow as { paired_with_id?: string | null } | null)?.paired_with_id ?? null;
   await supabase.from('matchmaking_pool').delete().eq('player_id', playerId);
+  // Si estaba emparejado, sacar también al compañero: la búsqueda de pareja se cancela
+  // (si no, quedaría en cola sin poder emparejarse, ya que buildUnits salta a un pareja sin compañero).
+  if (partnerId) {
+    await supabase.from('matchmaking_pool').delete().eq('player_id', partnerId).eq('paired_with_id', playerId);
+  }
   return res.json({ ok: true });
 });
 

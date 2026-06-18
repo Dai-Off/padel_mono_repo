@@ -61,13 +61,18 @@ export function groupSatisfiesEloWindows(
   ids: string[],
   eloById: Map<string, number>,
   recentById: Map<string, ('win' | 'loss')[]>,
+  premadeIds?: Set<string>,
 ): boolean {
   for (const id of ids) {
+    // Los miembros de una pareja premade quedan acotados por exceedsLevelSpread
+    // (sobre elo efectivo) + balance de win prob, no por estas ventanas ±0.5.
+    if (premadeIds?.has(id)) continue;
     const elo = eloById.get(id);
     if (elo == null) return false;
     const w = eloWindowFromRecent(elo, recentById.get(id) ?? []);
     for (const other of ids) {
       if (other === id) continue;
+      if (premadeIds?.has(other)) continue;
       const e2 = eloById.get(other);
       if (e2 == null) return false;
       if (e2 < w.min || e2 > w.max) return false;
@@ -356,6 +361,8 @@ export type QuartetPreCourtContext = {
   skillsById: Map<string, SkillRow>;
   synergyMap: Map<string, number>;
   ligaById: Map<string, string>;
+  /** Miembros de una pareja premade: exentos del filtro de ventanas de elo. */
+  premadeIds?: Set<string>;
 };
 
 /** Valida cuarteto sin comprobar pista (matchmaking + §6.1). */
@@ -377,7 +384,7 @@ export function quartetPreCourtValid(
   if (!slot) return null;
   const elos = ids.map((id) => ctx.eloById.get(id)).filter((x): x is number => x != null);
   if (elos.length !== 4 || exceedsLevelSpread(elos)) return null;
-  if (!groupSatisfiesEloWindows(ids, ctx.eloById, ctx.recentById)) return null;
+  if (!groupSatisfiesEloWindows(ids, ctx.eloById, ctx.recentById, ctx.premadeIds)) return null;
   const fixedPairs = fixedPairsFromRows(flatRows);
   const split = bestTeamSplitSync(ids, fixedPairs, ctx.skillsById, ctx.synergyMap);
   if (!split) return null;
