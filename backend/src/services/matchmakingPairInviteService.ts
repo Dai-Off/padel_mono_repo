@@ -193,6 +193,10 @@ export type ActionablePairInvite = {
   other_player_id: string;
   other_player_name: string;
   expires_at: string;
+  /** Diferencia de elo (0-7) entre ambos; >1 implica inflado del débil al buscar. */
+  level_gap: number;
+  /** Liga del jugador de mayor nivel: el partido se busca a este nivel. */
+  target_liga: string;
 };
 
 /** Invitaciones que el jugador puede accionar: pendientes recibidas y aceptadas que él envió. */
@@ -217,24 +221,37 @@ export async function getActionablePairInvites(
   if (!rows.length) return [];
 
   const otherIds = [...new Set(rows.map((r) => (r.invitee_player_id === playerId ? r.inviter_player_id : r.invitee_player_id)))];
-  const { data: names } = await supabase.from('players').select('id, first_name, last_name').in('id', otherIds);
-  const nameById = new Map(
-    (names ?? []).map((p) => {
-      const r = p as { id: string; first_name?: string | null; last_name?: string | null };
-      return [r.id, [r.first_name, r.last_name].filter(Boolean).join(' ').trim() || 'Jugador'];
+  const { data: pdata } = await supabase
+    .from('players')
+    .select('id, first_name, last_name, elo_rating, liga')
+    .in('id', [playerId, ...otherIds]);
+  const byId = new Map(
+    (pdata ?? []).map((p) => {
+      const r = p as { id: string; first_name?: string | null; last_name?: string | null; elo_rating?: number | null; liga?: string | null };
+      return [r.id, r];
     }),
   );
+  const nameOf = (id: string): string => {
+    const r = byId.get(id);
+    return [r?.first_name, r?.last_name].filter(Boolean).join(' ').trim() || 'Jugador';
+  };
+  const meElo = Number(byId.get(playerId)?.elo_rating ?? 0);
+  const meLiga = String(byId.get(playerId)?.liga ?? 'bronce');
 
   return rows.map((r) => {
     const isInvitee = r.invitee_player_id === playerId;
     const otherId = isInvitee ? r.inviter_player_id : r.invitee_player_id;
+    const otherElo = Number(byId.get(otherId)?.elo_rating ?? 0);
+    const otherLiga = String(byId.get(otherId)?.liga ?? 'bronce');
     return {
       id: r.id,
       role: isInvitee ? ('invitee' as const) : ('inviter' as const),
       status: r.status,
       other_player_id: otherId,
-      other_player_name: nameById.get(otherId) ?? 'Jugador',
+      other_player_name: nameOf(otherId),
       expires_at: r.expires_at,
+      level_gap: Math.abs(meElo - otherElo),
+      target_liga: meElo >= otherElo ? meLiga : otherLiga,
     };
   });
 }
