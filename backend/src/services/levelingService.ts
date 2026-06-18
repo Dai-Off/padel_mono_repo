@@ -348,6 +348,7 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
       sort_order: r.sort_order,
       elo_min: r.elo_min,
       elo_max: r.elo_max,
+      lps_to_promote: r.lps_to_promote,
     }));
     const mmRows: MmLeagueRow[] = mps.map((mp) => {
       const pl = flatPlayers.find((p) => p.id === mp.player_id)!;

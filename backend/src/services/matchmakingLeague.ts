@@ -37,6 +37,8 @@ export type LeagueEloBand = {
   sort_order: number;
   elo_min: number;
   elo_max: number;
+  /** LP a descontar al ascender DESDE esta liga; null/ausente = constante de código. */
+  lps_to_promote?: number | null;
 };
 
 /** Liga según filas de `matchmaking_leagues` (orden por sort_order). */

@@ -48,6 +48,12 @@ function higherLigaByIndex(a: string, b: string): string {
   return leagueIndex(a) >= leagueIndex(b) ? a : b;
 }
 
+/** LP necesarios para ascender DESDE `liga` (config por liga; fallback a la constante global). */
+function promoteThresholdFor(liga: string, bands: LeagueEloBand[]): number {
+  const v = bands.find((b) => b.code === liga)?.lps_to_promote;
+  return typeof v === 'number' && v > 0 ? v : LP_PROMOTE_THRESHOLD;
+}
+
 /**
  * Calcula estado de liga/LP tras un partido MM (4 jugadores). `winnerTeam` null = empate.
  */
@@ -95,8 +101,10 @@ export function computeMatchmakingLeagueUpdates(
     let promoted = false;
 
     if (!draw) {
-      while (lps >= LP_PROMOTE_THRESHOLD && leagueIndex(liga) < LEAGUE_ORDER.length - 1) {
-        lps -= LP_PROMOTE_THRESHOLD;
+      while (leagueIndex(liga) < LEAGUE_ORDER.length - 1) {
+        const threshold = promoteThresholdFor(liga, bands);
+        if (lps < threshold) break;
+        lps -= threshold;
         liga = nextLiga(liga);
         promoted = true;
         shield = MM_SHIELD_MATCHES_AFTER_PROMO;
