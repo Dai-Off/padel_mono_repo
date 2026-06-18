@@ -970,6 +970,15 @@ export function CompetitiveLeagueScreen({
             <View style={styles.track}>
               <View style={[styles.fill, { width: `${progressPct}%` }]} />
             </View>
+            {(profile?.mmShieldMatches ?? 0) > 0 ? (
+              <View style={styles.shieldBadge}>
+                <Ionicons name="shield-checkmark" size={13} color="#34D399" />
+                <Text style={styles.shieldBadgeText}>
+                  Escudo activo · {profile?.mmShieldMatches}{' '}
+                  {profile?.mmShieldMatches === 1 ? 'partido' : 'partidos'}
+                </Text>
+              </View>
+            ) : null}
             <Text style={styles.heroFoot}>Ranking reiniciado al final del Pase Temporada 1</Text>
           </LinearGradient>
 
@@ -1968,6 +1977,20 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   partnerLockText: { color: '#fff', fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  shieldBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 10,
+    backgroundColor: 'rgba(52,211,153,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(52,211,153,0.45)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  shieldBadgeText: { color: '#34D399', fontSize: 12, fontWeight: '700' },
   modeSheetCol: { gap: 12, paddingBottom: 8 },
   modeOption: {
     flexDirection: 'row',
