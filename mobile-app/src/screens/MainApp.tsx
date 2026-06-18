@@ -134,6 +134,7 @@ export function MainApp() {
     useState<MatchmakingHomeBannerState>('hidden');
   const [pairInvites, setPairInvites] = useState<PairInvite[]>([]);
   const [pairInviteNonce, setPairInviteNonce] = useState(0);
+  const [competitivePartnerInvite, setCompetitivePartnerInvite] = useState<PairInvite | null>(null);
   const [matchmakingTimeoutNoticePending, setMatchmakingTimeoutNoticePending] = useState(false);
   const matchmakingTimeoutInFlightRef = useRef(false);
   const [showSeasonPass, setShowSeasonPass] = useState(false);
@@ -406,6 +407,14 @@ export function MainApp() {
       setActiveTab('perfil');
     }
   }, [infoReturnToProfile]);
+
+  // Tras aceptar una invitación desde el banner: abrir Liga competitiva en preferencias
+  // con ese compañero ya fijado para buscar.
+  const openCompetitiveWithPartner = useCallback((invite: PairInvite) => {
+    setCompetitivePartnerInvite(invite);
+    setCompetitiveLeagueEntryIntent('default');
+    setShowCompetitiveLeague(true);
+  }, []);
 
   const openCompetitiveLeagueFromHome = useCallback(() => {
     if (matchmakingHomeBannerState === 'timed_out') {
@@ -838,6 +847,8 @@ export function MainApp() {
           setQueueStartedAtMs={setCompetitiveQueueStartedAtMs}
           matchmakingBannerState={matchmakingHomeBannerState}
           onMatchmakingBannerStateChange={handleCompetitiveLeagueBannerStateChange}
+          pendingPartnerInvite={competitivePartnerInvite}
+          onPartnerApplied={() => setCompetitivePartnerInvite(null)}
           onPartidoPress={(p) => {
             setShowCompetitiveLeague(false);
             setSelectedPartido(p);
@@ -947,6 +958,7 @@ export function MainApp() {
             matchmakingBannerState={matchmakingHomeBannerState}
             pairInvites={pairInvites}
             onPairInvitesChanged={() => setPairInviteNonce((n) => n + 1)}
+            onAcceptInviteAndSearch={openCompetitiveWithPartner}
             onOpenSeasonPass={() => setShowSeasonPass(true)}
             onOpenMessageThread={(peer) => {
               setMessagesPeer(peer);

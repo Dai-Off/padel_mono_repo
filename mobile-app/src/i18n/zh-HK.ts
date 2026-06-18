@@ -188,6 +188,7 @@ export const zhHK: TranslationKeys = {
       sub: '接受後，可在「和朋友一起」中一起尋找比賽',
       reject: '拒絕',
       accept: '接受',
+      acceptSearch: '接受並尋找',
       count: '你有 {n} 個邀請 · 逐一回覆',
     },
     common: { cancel: '取消', couldNot: '無法完成' },

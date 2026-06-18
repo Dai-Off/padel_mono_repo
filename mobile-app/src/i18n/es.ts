@@ -193,6 +193,7 @@ export const es: TranslationKeys = {
       sub: 'Si aceptas, podréis buscar partido juntos desde "Jugar con un amigo"',
       reject: 'Rechazar',
       accept: 'Aceptar',
+      acceptSearch: 'Aceptar y buscar',
       count: 'Tienes {n} invitaciones · responde una a una',
     },
     common: { cancel: 'Cancelar', couldNot: 'No se pudo' },

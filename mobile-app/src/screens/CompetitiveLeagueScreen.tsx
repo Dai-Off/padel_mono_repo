@@ -91,6 +91,9 @@ type Props = {
     state: 'hidden' | 'searching' | 'matched' | 'timed_out',
     options?: { force?: boolean },
   ) => void;
+  /** Compañero (invitación aceptada) con quien ir directo a buscar al abrir la pantalla. */
+  pendingPartnerInvite?: PairInvite | null;
+  onPartnerApplied?: () => void;
 };
 
 export function CompetitiveLeagueScreen({
@@ -103,6 +106,8 @@ export function CompetitiveLeagueScreen({
   setQueueStartedAtMs,
   matchmakingBannerState = 'hidden',
   onMatchmakingBannerStateChange,
+  pendingPartnerInvite,
+  onPartnerApplied,
 }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -346,6 +351,14 @@ export function CompetitiveLeagueScreen({
       lastAppliedEntryIntentRef.current = entryIntent;
     }
   }, [entryIntent, matchmakingBannerState, status?.status]);
+
+  // Llegada desde "Aceptar y buscar" del banner: ir a preferencias con ese compañero fijado.
+  useEffect(() => {
+    if (!pendingPartnerInvite) return;
+    setSearchPartner(pendingPartnerInvite);
+    setStep('prefs');
+    onPartnerApplied?.();
+  }, [pendingPartnerInvite, onPartnerApplied]);
 
   useEffect(() => {
     const token = session?.access_token ?? null;
