@@ -34,7 +34,6 @@ export type MatchmakingJoinPayload = {
   search_lng?: number;
   preferred_side?: 'drive' | 'backhand' | 'any';
   gender?: 'male' | 'female' | 'mixed' | 'any';
-  paired_with_id?: string;
 };
 
 type ApiError = {
@@ -302,7 +301,7 @@ export async function rejectMatchmakingProposal(
 // ---- Invitaciones de pareja (premade duo) ----
 
 /** Payload para invitar: mismas prefs de cola que join + el jugador invitado. */
-export type PairInvitePayload = Omit<MatchmakingJoinPayload, 'paired_with_id'> & {
+export type PairInvitePayload = MatchmakingJoinPayload & {
   invitee_player_id: string;
 };
 

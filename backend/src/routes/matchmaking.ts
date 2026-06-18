@@ -314,7 +314,6 @@ router.get('/leaderboard', async (req: Request, res: Response) => {
  *               gender: { type: string, default: any }
  *               available_from: { type: string, format: date-time }
  *               available_until: { type: string, format: date-time }
- *               paired_with_id: { type: string, format: uuid }
  *               search_lat: { type: number, description: Obligatorio si max_distance_km }
  *               search_lng: { type: number }
  *     responses:
@@ -334,7 +333,6 @@ router.post('/join', async (req: Request, res: Response) => {
     gender,
     available_from,
     available_until,
-    paired_with_id,
     search_lat,
     search_lng,
   } = req.body ?? {};
@@ -402,10 +400,9 @@ router.post('/join', async (req: Request, res: Response) => {
   const { data: existing } = await supabase.from('matchmaking_pool').select('id').eq('player_id', playerId).maybeSingle();
   if (existing) return res.status(409).json({ ok: false, error: 'Ya estás en la cola de matchmaking' });
 
-  if (paired_with_id) {
-    const { data: buddy } = await supabase.from('players').select('id').eq('id', paired_with_id).maybeSingle();
-    if (!buddy) return res.status(400).json({ ok: false, error: 'paired_with_id no existe' });
-  }
+  // El emparejamiento en pareja va exclusivamente por el flujo de invitaciones
+  // (POST /matchmaking/pair-invite), que valida nivel (gap <= 1.5) y consentimiento.
+  // /join es siempre individual: ignoramos cualquier paired_with_id del body.
 
   const side =
     preferred_side && ['drive', 'backhand', 'any'].includes(preferred_side) ? preferred_side : null;
@@ -429,7 +426,7 @@ router.post('/join', async (req: Request, res: Response) => {
 
   const { error: insErr } = await supabase.from('matchmaking_pool').insert({
     player_id: playerId,
-    paired_with_id: paired_with_id ?? null,
+    paired_with_id: null,
     club_id: resolvedClubId,
     preferred_club_ids: poolPreferredClubIds,
     max_distance_km: maxKm,
