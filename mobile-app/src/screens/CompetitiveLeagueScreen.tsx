@@ -972,7 +972,7 @@ export function CompetitiveLeagueScreen({
             </View>
             {(profile?.mmShieldMatches ?? 0) > 0 ? (
               <View style={styles.shieldBadge}>
-                <Ionicons name="shield-checkmark" size={13} color="#34D399" />
+                <Ionicons name="shield-checkmark" size={13} color="#60A5FA" />
                 <Text style={styles.shieldBadgeText}>
                   Escudo activo · {profile?.mmShieldMatches}{' '}
                   {profile?.mmShieldMatches === 1 ? 'partido' : 'partidos'}
@@ -1983,14 +1983,14 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     gap: 6,
     marginTop: 10,
-    backgroundColor: 'rgba(52,211,153,0.12)',
+    backgroundColor: 'rgba(59,130,246,0.12)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(52,211,153,0.45)',
+    borderColor: 'rgba(59,130,246,0.45)',
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  shieldBadgeText: { color: '#34D399', fontSize: 12, fontWeight: '700' },
+  shieldBadgeText: { color: '#60A5FA', fontSize: 12, fontWeight: '700' },
   modeSheetCol: { gap: 12, paddingBottom: 8 },
   modeOption: {
     flexDirection: 'row',
