@@ -28,6 +28,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
 import { PlayerSelectModal } from '../components/matchmaking/PlayerSelectModal';
+import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
 import { useClubCatalog } from '../hooks/useClubCatalog';
 import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
 import { computeMatchAvailabilityWindow } from '../lib/matchAvailabilityWindow';
@@ -55,7 +56,7 @@ import {
 import { useHomeData } from '../contexts/HomeDataContext';
 import { getMatchBooking } from '../domain/matchLifecycle';
 
-type Step = 'home' | 'mode' | 'prefs' | 'queue' | 'found';
+type Step = 'home' | 'prefs' | 'queue' | 'found';
 type MainTab = 'liga' | 'ranking';
 type SearchArea = 'club' | 'km5' | 'km10' | 'km25';
 type SearchForm = {
@@ -130,6 +131,7 @@ export function CompetitiveLeagueScreen({
   const [preferredClubIds, setPreferredClubIds] = useState<string[]>([]);
   const [clubPickerVisible, setClubPickerVisible] = useState(false);
   const [partnerPickerVisible, setPartnerPickerVisible] = useState(false);
+  const [modeSheetVisible, setModeSheetVisible] = useState(false);
   const [searchPartner, setSearchPartner] = useState<PairInvite | null>(null);
   const [preferredClubsHydrated, setPreferredClubsHydrated] = useState(false);
   const preferredClubsSeedDoneRef = useRef(false);
@@ -981,7 +983,7 @@ export function CompetitiveLeagueScreen({
                   style={styles.searchCardPress}
                   onPress={() => {
                     setSearchPartner(null);
-                    setStep('mode');
+                    setModeSheetVisible(true);
                   }}
                 >
                   <View style={styles.searchIconWrap}>
@@ -1125,48 +1127,10 @@ export function CompetitiveLeagueScreen({
         )
       )}
 
-      {step === 'mode' && (
-        <View style={[styles.content, { paddingTop: FLOW_TOP_PADDING, paddingBottom: insets.bottom + 20 }]}>
-          <View style={styles.stepHeader}>
-            <Pressable style={styles.stepBackBtn} onPress={() => setStep('home')}>
-              <Ionicons name="arrow-back" size={16} color="#fff" />
-            </Pressable>
-            <View>
-              <Text style={styles.sectionTitle}>¿Cómo quieres jugar?</Text>
-              <Text style={styles.stepSubtitle}>Busca tú solo o invita a un compañero</Text>
-            </View>
-          </View>
-
-          <Pressable
-            style={[styles.clubPickerBtn, { marginBottom: 12 }]}
-            onPress={() => {
-              setSearchPartner(null);
-              setStep('prefs');
-            }}
-          >
-            <Ionicons name="person" size={20} color="#F59E0B" style={{ marginRight: 10 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.clubPickerBtnTitle}>Jugar solo</Text>
-              <Text style={styles.clubPickerBtnSub}>Te buscamos compañero y pareja rival</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
-          </Pressable>
-
-          <Pressable style={styles.clubPickerBtn} onPress={() => setPartnerPickerVisible(true)}>
-            <Ionicons name="people" size={20} color="#F59E0B" style={{ marginRight: 10 }} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.clubPickerBtnTitle}>Jugar con un amigo</Text>
-              <Text style={styles.clubPickerBtnSub}>Invita a un compañero o elige una pareja ya aceptada</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
-          </Pressable>
-        </View>
-      )}
-
       {step === 'prefs' && (
         <ScrollView contentContainerStyle={[styles.content, { paddingTop: FLOW_TOP_PADDING, paddingBottom: insets.bottom + 32 }]}>
           <View style={styles.stepHeader}>
-            <Pressable style={styles.stepBackBtn} onPress={() => setStep('mode')}>
+            <Pressable style={styles.stepBackBtn} onPress={() => setStep('home')}>
               <Ionicons name="arrow-back" size={16} color="#fff" />
             </Pressable>
             <View>
@@ -1509,6 +1473,48 @@ export function CompetitiveLeagueScreen({
         title="Clubes para matchmaking"
         subtitle="Podés elegir varios. Sin selección, usamos la distancia máxima."
       />
+
+      <FilterBottomSheet
+        visible={modeSheetVisible}
+        title="¿Cómo quieres jugar?"
+        onClose={() => setModeSheetVisible(false)}
+      >
+        <View style={styles.modeSheetCol}>
+          <Pressable
+            style={({ pressed }) => [styles.modeOption, pressed && { opacity: 0.85 }]}
+            onPress={() => {
+              setModeSheetVisible(false);
+              setSearchPartner(null);
+              setStep('prefs');
+            }}
+          >
+            <LinearGradient colors={['#8A4A0B', '#D4861F']} style={styles.modeOptionIcon}>
+              <Ionicons name="person" size={24} color="#fff" />
+            </LinearGradient>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.modeOptionTitle}>Jugar solo</Text>
+              <Text style={styles.modeOptionSub}>Te buscamos compañero y rivales</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.modeOption, pressed && { opacity: 0.85 }]}
+            onPress={() => {
+              setModeSheetVisible(false);
+              setPartnerPickerVisible(true);
+            }}
+          >
+            <LinearGradient colors={['#1E40AF', '#3B82F6']} style={styles.modeOptionIcon}>
+              <Ionicons name="people" size={24} color="#fff" />
+            </LinearGradient>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.modeOptionTitle}>Con un amigo</Text>
+              <Text style={styles.modeOptionSub}>Invita o elige una pareja ya aceptada</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+          </Pressable>
+        </View>
+      </FilterBottomSheet>
 
       <PlayerSelectModal
         visible={partnerPickerVisible}
@@ -1948,6 +1954,27 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   partnerLockText: { color: '#fff', fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  modeSheetCol: { gap: 12, paddingBottom: 8 },
+  modeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: '#141414',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  modeOptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeOptionTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  modeOptionSub: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
   clubRow: {
     borderRadius: 12,
     borderWidth: 1,
