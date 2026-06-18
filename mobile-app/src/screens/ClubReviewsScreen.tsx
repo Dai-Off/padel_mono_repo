@@ -18,6 +18,7 @@ import {
 import { ClubReviewModal } from '../components/clubs/ClubReviewModal';
 import { MenuScreenHeader } from '../components/menuScreen/MenuScreenHeader';
 import { useAuth } from '../contexts/AuthContext';
+import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 
 type Props = {
@@ -25,6 +26,7 @@ type Props = {
 };
 
 export function ClubReviewsScreen({ onBack }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const token = session?.access_token;
@@ -51,13 +53,13 @@ export function ClubReviewsScreen({ onBack }: Props) {
 
   const openClub = (club: EligibleClubReviewItem) => {
     if (!token) {
-      Alert.alert('Inicia sesión', 'Debes iniciar sesión para valorar un club.');
+      Alert.alert(t('alerts.login.titleAlt'), t('search.clubReviewsLogin'));
       return;
     }
     if (!club.can_review && !club.review) {
       Alert.alert(
-        'Aún no puedes valorar',
-        'Solo puedes dejar reseña después de jugar un partido, hacer una reserva privada o participar en un torneo en ese club.',
+        t('alerts.clubReviews.notYet.title'),
+        t('search.clubReviewsNotYetBody'),
       );
       return;
     }
@@ -79,25 +81,21 @@ export function ClubReviewsScreen({ onBack }: Props) {
 
   return (
     <View style={styles.container}>
-      <MenuScreenHeader title="Valorar clubes" onBack={onBack} />
+      <MenuScreenHeader title={t('search.reviewRate')} onBack={onBack} />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + (insets.bottom ?? 0) }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.intro}>
-          Valora los clubes donde ya jugaste un partido, reservaste una pista privada o participaste en un torneo.
-        </Text>
+        <Text style={styles.intro}>{t('search.clubReviewsNotYetBody')}</Text>
 
         {loading ? (
           <ActivityIndicator color={theme.auth.accent} style={styles.loader} />
         ) : clubs.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="star-outline" size={32} color="#6b7280" />
-            <Text style={styles.emptyTitle}>Sin clubes para valorar</Text>
-            <Text style={styles.emptyText}>
-              Cuando completes una actividad en un club, aparecerá aquí para que puedas dejar tu reseña.
-            </Text>
+            <Text style={styles.emptyTitle}>{t('search.clubReviewsNotYet')}</Text>
+            <Text style={styles.emptyText}>{t('search.clubReviewsNotYetBody')}</Text>
           </View>
         ) : (
           clubs.map((club) => (
@@ -117,7 +115,7 @@ export function ClubReviewsScreen({ onBack }: Props) {
                 {club.review ? (
                   <Text style={styles.stars}>{'★'.repeat(club.review.rating)}</Text>
                 ) : club.can_review ? (
-                  <Text style={styles.pending}>Valorar</Text>
+                  <Text style={styles.pending}>{t('search.reviewRate')}</Text>
                 ) : null}
                 <Ionicons name="chevron-forward" size={16} color="#6b7280" />
               </View>

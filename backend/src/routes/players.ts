@@ -8,6 +8,7 @@ import { ligaFromEloWithBands } from '../services/matchmakingLeague';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
+import { localizeCoachAssessmentText } from '../lib/coachAssessmentLanguage';
 import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
 import { syncPlayerVector } from '../lib/mailer';
 import {
@@ -1409,12 +1410,23 @@ router.get('/', async (req: Request, res: Response) => {
  *     tags: [Players]
  *     summary: Perfil público de otro jugador (MVP)
  *     description: Retorna solo datos públicos (nombre, avatar, elo, radar, liga mm, record) para visualización social.
+ *       Idioma opcional para `coach_assessment`: query `lang` (ej. `es`, `en`, `zh-HK`) o cabecera `Accept-Language`; por defecto `es`.
+ *     parameters:
+ *       - in: query
+ *         name: lang
+ *         schema:
+ *           type: string
+ *         description: Locale BCP-47 para textos del coach (default `es`)
  *     responses:
  *       200: { description: Perfil público cargado }
  *       404: { description: Jugador no encontrado }
  */
 router.get('/:id/public-profile', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const locale = parsePeerFeedbackLocale(
+    req.query.lang as string | string[] | undefined,
+    req.headers['accept-language'] as string | undefined
+  );
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: player, error: pErr } = await supabase
@@ -1444,14 +1456,17 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
       .order('created_at', { ascending: false })
       .limit(10);
 
+    const coachLocalized = coach ? localizeCoachAssessmentText(coach, locale) : null;
+
     return res.json({
       ok: true,
       player: {
         ...publicData,
         ...wl,
-        coach_assessment: coach || null,
-        recent_matches: recentMatches || []
-      }
+        coach_assessment: coachLocalized,
+        recent_matches: recentMatches || [],
+      },
+      locale,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

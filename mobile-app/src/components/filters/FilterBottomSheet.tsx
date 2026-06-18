@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 import { filterTheme } from './filterTheme';
 
@@ -30,12 +31,14 @@ export function FilterBottomSheet({
   title,
   onClose,
   onClear,
-  clearLabel = 'Borrar',
+  clearLabel,
   children,
   footer,
   contentStyle,
 }: FilterBottomSheetProps) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
+  const resolvedClearLabel = clearLabel ?? t('common.discard');
 
   return (
     <Modal
@@ -45,7 +48,7 @@ export function FilterBottomSheet({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <Pressable style={styles.overlay} onPress={onClose} accessibilityLabel="Cerrar">
+      <Pressable style={styles.overlay} onPress={onClose} accessibilityLabel={t('common.close')}>
         <Pressable
           style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, theme.spacing.lg) }]}
           onPress={(e) => e.stopPropagation()}
@@ -56,7 +59,7 @@ export function FilterBottomSheet({
               onPress={onClose}
               style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel="Cerrar"
+              accessibilityLabel={t('common.close')}
             >
               <Ionicons name="close" size={22} color={filterTheme.textMuted} />
             </Pressable>
@@ -66,9 +69,9 @@ export function FilterBottomSheet({
                 onPress={onClear}
                 style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}
                 accessibilityRole="button"
-                accessibilityLabel={clearLabel}
+                accessibilityLabel={resolvedClearLabel}
               >
-                <Text style={styles.clearText}>{clearLabel}</Text>
+                <Text style={styles.clearText}>{resolvedClearLabel}</Text>
               </Pressable>
             ) : (
               <View style={styles.headerBtn} />

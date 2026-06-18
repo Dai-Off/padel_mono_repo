@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from '../../i18n';
 
 type Props = {
   /** Si false el banner no se renderiza. */
@@ -36,11 +37,14 @@ type Props = {
 export function OnboardingSoftBlockBanner({
   visible,
   onPress,
-  message = 'Completa tu nivel para participar',
-  ctaLabel = 'Completar ahora',
+  message,
+  ctaLabel,
   bottomOffset = 72,
 }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
+  const resolvedMessage = message ?? t('onboarding.softBlockDefault');
+  const resolvedCtaLabel = ctaLabel ?? t('onboarding.softBlockCta');
   if (!visible) return null;
 
   return (
@@ -53,7 +57,7 @@ export function OnboardingSoftBlockBanner({
           <Ionicons name="lock-closed" size={16} color="#F18F34" />
         </View>
         <Text style={styles.message} numberOfLines={2}>
-          {message}
+          {resolvedMessage}
         </Text>
         <Pressable onPress={onPress} hitSlop={6} style={styles.ctaWrap}>
           <LinearGradient
@@ -62,7 +66,7 @@ export function OnboardingSoftBlockBanner({
             end={{ x: 1, y: 0 }}
             style={styles.ctaGradient}
           >
-            <Text style={styles.ctaText}>{ctaLabel}</Text>
+            <Text style={styles.ctaText}>{resolvedCtaLabel}</Text>
             <Ionicons name="arrow-forward" size={13} color="#FFFFFF" />
           </LinearGradient>
         </Pressable>

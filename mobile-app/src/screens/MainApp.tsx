@@ -4,6 +4,7 @@ import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTranslation } from '../i18n';
 import type { SearchCourtResult } from '../api/search';
 import { BackHeader } from '../components/layout/BackHeader';
 import { BottomNavbar, type MainTabId } from '../components/layout/BottomNavbar';
@@ -82,6 +83,7 @@ type MatchmakingHomeBannerState = 'hidden' | 'searching' | 'matched' | 'timed_ou
 const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
 
 export function MainApp() {
+  const { t } = useTranslation();
   const sidebar = useSidebar(false);
   const { session } = useAuth();
   const { profile, refreshMatches, syncMisPartidoFromMatchId } = useHomeData();
@@ -277,14 +279,14 @@ export function MainApp() {
       if (!accessToken) return;
       const result = await acceptTournamentInvite(accessToken, inviteToken, tournamentId);
       if (result.ok) {
-        Alert.alert('Invitación aceptada', 'Ya estás inscrito en el torneo.');
+        Alert.alert(t('alerts.tournamentInvite.accepted'), t('alerts.tournamentInvite.acceptedBody'));
         setActiveTab('torneos');
         setOpenTournamentId(tournamentId);
       } else {
-        Alert.alert('Invitación al torneo', result.error);
+        Alert.alert(t('alerts.tournamentInvite.title'), result.error);
       }
     },
-    [session?.access_token],
+    [session?.access_token, t],
   );
 
   const consumeInviteUrl = useCallback(
@@ -1038,14 +1040,14 @@ export function MainApp() {
       : activeTab === 'tienda'
           ? (
               <BackHeader
-                title="Tienda"
+                title={t('nav.tabTienda')}
                 tone="dark"
                 onBack={() => setActiveTab('inicio')}
                 rightSlot={(
                   <View style={styles.tiendaHeaderRight}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Asistente de compras"
+                      accessibilityLabel={t('nav.tiendaShoppingAssistant')}
                       hitSlop={8}
                       style={({ pressed }) => [
                         styles.tiendaHeaderIconBase,
@@ -1062,7 +1064,7 @@ export function MainApp() {
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Carrito"
+                      accessibilityLabel={t('nav.tiendaCart')}
                       hitSlop={8}
                       style={({ pressed }) => [
                         styles.tiendaHeaderCart,
@@ -1078,7 +1080,7 @@ export function MainApp() {
           : activeTab === 'partidos'
               ? (
                   <BackHeader
-                    title="Partidos"
+                    title={t('nav.tabPartidos')}
                     tone="dark"
                     onBack={() => setActiveTab('inicio')}
                   />

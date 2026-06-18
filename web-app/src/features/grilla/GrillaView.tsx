@@ -2814,6 +2814,7 @@ function GrillaViewInner() {
                     style={{
                       height: `${nativeGridHeight}px`,
                       zoom: scale,
+                      width: '100%',
                       // Fallback para navs muy antiguos (transform rompe position: sticky)
                       ...(typeof CSS !== 'undefined' && CSS.supports && !CSS.supports('zoom', '1') ? {
                         transform: `scale(${scale})`,
@@ -2822,7 +2823,7 @@ function GrillaViewInner() {
                       } : {})
                     }}
                     className={clsx(
-                      "flex relative pl-4 md:pl-8 overflow-hidden",
+                      "flex relative w-full min-w-0 pl-4 md:pl-8",
                       focusedCourtId && !activeId && "touch-pan-y"
                     )}
                     onTouchStart={focusedCourtId && !activeId ? onTouchStart : undefined}
@@ -2831,7 +2832,7 @@ function GrillaViewInner() {
                   >
                     <TimeAxis position="left" isCompact={false} />
 
-                    <div className="flex relative z-10 mb-0 overflow-hidden">
+                    <div className="flex flex-1 w-full min-w-0 relative z-10 mb-0">
                       <GridBackground />
                       {visibleCourts.map(court => (
                         <CourtColumn

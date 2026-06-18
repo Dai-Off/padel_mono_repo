@@ -144,7 +144,7 @@ export const CourtColumn: React.FC<Props> = ({
                 ? "flex-none shrink-0"
                 : isCompactView
                     ? "flex-1 min-w-0 basis-0"
-                    : "min-w-[81px] max-w-[161px]",
+                    : "flex-1 min-w-[81px] basis-0",
             isFocusedMode && !isCurrentlyFocused && "bg-gray-50 opacity-60 grayscale-[20%]"
         )}
             style={

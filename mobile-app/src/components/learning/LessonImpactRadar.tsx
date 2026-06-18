@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Polygon, Line, Circle, Text as SvgText } from 'react-native-svg';
+import { useTranslation } from '../../i18n';
 
 const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
 
@@ -25,17 +26,18 @@ const COLORS = {
   tactical: '#818CF8',
 };
 
-const LABELS = {
-  technical: 'Técnico',
-  physical: 'Físico',
-  mental: 'Mental',
-  tactical: 'Táctico',
+const LABEL_KEYS: Record<keyof SkillValues, 'skillTechnical' | 'skillPhysical' | 'skillMental' | 'skillTactical'> = {
+  technical: 'skillTechnical',
+  physical: 'skillPhysical',
+  mental: 'skillMental',
+  tactical: 'skillTactical',
 };
 
 // Clamp 0..100
 const clamp = (n: number) => Math.max(0, Math.min(100, n));
 
 export function LessonImpactRadar({ baseSkills, deltas }: Props) {
+  const { t } = useTranslation();
   const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -83,7 +85,7 @@ export function LessonImpactRadar({ baseSkills, deltas }: Props) {
 
   const renderSkillRow = (key: keyof SkillValues) => {
     const color = COLORS[key];
-    const label = LABELS[key];
+    const label = t(`learning.${LABEL_KEYS[key]}`);
     const base = clamp(baseSkills[key]);
     const delta = deltas[key];
     const final = clamp(base + delta);
@@ -117,7 +119,7 @@ export function LessonImpactRadar({ baseSkills, deltas }: Props) {
         <View style={styles.headerIcon}>
           <Ionicons name="locate-outline" size={14} color="#A855F7" />
         </View>
-        <Text style={styles.headerTitle}>Impacto en tus stats</Text>
+        <Text style={styles.headerTitle}>{t('learning.radarImpactTitle')}</Text>
       </View>
 
       <View style={styles.chartWrap}>
@@ -162,10 +164,10 @@ export function LessonImpactRadar({ baseSkills, deltas }: Props) {
           )}
 
           {/* Etiquetas de ejes */}
-          <SvgText x={center} y={center - maxRadius - 12} textAnchor="middle" fontSize="10" fontWeight="bold" fill={COLORS.technical}>Técnico</SvgText>
-          <SvgText x={center + maxRadius + 8} y={center + 3} textAnchor="start" fontSize="10" fontWeight="bold" fill={COLORS.physical}>Físico</SvgText>
-          <SvgText x={center} y={center + maxRadius + 18} textAnchor="middle" fontSize="10" fontWeight="bold" fill={COLORS.mental}>Mental</SvgText>
-          <SvgText x={center - maxRadius - 8} y={center + 3} textAnchor="end" fontSize="10" fontWeight="bold" fill={COLORS.tactical}>Táctico</SvgText>
+          <SvgText x={center} y={center - maxRadius - 12} textAnchor="middle" fontSize="10" fontWeight="bold" fill={COLORS.technical}>{t('learning.skillTechnical')}</SvgText>
+          <SvgText x={center + maxRadius + 8} y={center + 3} textAnchor="start" fontSize="10" fontWeight="bold" fill={COLORS.physical}>{t('learning.skillPhysical')}</SvgText>
+          <SvgText x={center} y={center + maxRadius + 18} textAnchor="middle" fontSize="10" fontWeight="bold" fill={COLORS.mental}>{t('learning.skillMental')}</SvgText>
+          <SvgText x={center - maxRadius - 8} y={center + 3} textAnchor="end" fontSize="10" fontWeight="bold" fill={COLORS.tactical}>{t('learning.skillTactical')}</SvgText>
 
           {/* Punto central */}
           <Circle cx={center} cy={center} r="3" fill="#F18F34" />

@@ -5,6 +5,7 @@ import { useVideoPlayer, VideoView, type VideoPlayer as ExpoVideoPlayer } from '
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from '../../i18n';
 
 type Props = {
   videoUrl: string;
@@ -21,14 +22,15 @@ type Props = {
   onClose: () => void;
 };
 
-const AREA_BADGE: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  technique: { label: 'TECNICA', color: '#F18F34', bg: 'rgba(241,143,52,0.15)', border: 'rgba(241,143,52,0.25)' },
-  tactics: { label: 'TACTICA', color: '#A855F7', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.25)' },
-  physical: { label: 'FISICO', color: '#22C55E', bg: 'rgba(34,197,94,0.15)', border: 'rgba(34,197,94,0.25)' },
-  mental_vocabulary: { label: 'VOCABULARIO', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.25)' },
+const AREA_BADGE_COLORS: Record<string, { color: string; bg: string; border: string; labelKey: 'areaTechniqueUpper' | 'areaTacticsUpper' | 'areaPhysicalUpper' | 'areaVocabularyUpper' }> = {
+  technique: { labelKey: 'areaTechniqueUpper', color: '#F18F34', bg: 'rgba(241,143,52,0.15)', border: 'rgba(241,143,52,0.25)' },
+  tactics: { labelKey: 'areaTacticsUpper', color: '#A855F7', bg: 'rgba(168,85,247,0.15)', border: 'rgba(168,85,247,0.25)' },
+  physical: { labelKey: 'areaPhysicalUpper', color: '#22C55E', bg: 'rgba(34,197,94,0.15)', border: 'rgba(34,197,94,0.25)' },
+  mental_vocabulary: { labelKey: 'areaVocabularyUpper', color: '#F59E0B', bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.25)' },
 };
 
 export function VideoPlayer({ videoUrl, preloadedPlayer, area, counter, clubName, clubCity, isReview, onVideoEnd, onSkip, onClose }: Props) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [ended, setEnded] = useState(false);
   const [isReady, setIsReady] = useState(false);
@@ -115,7 +117,10 @@ export function VideoPlayer({ videoUrl, preloadedPlayer, area, counter, clubName
     };
   }, [player]);
 
-  const badge = AREA_BADGE[area];
+  const badgeColors = AREA_BADGE_COLORS[area];
+  const badge = badgeColors
+    ? { ...badgeColors, label: t(`learning.${badgeColors.labelKey}`) }
+    : null;
 
   return (
     <View style={styles.root}>
@@ -156,7 +161,7 @@ export function VideoPlayer({ videoUrl, preloadedPlayer, area, counter, clubName
             {isReview && (
               <View style={styles.reviewBadge}>
                 <Ionicons name="reload" size={12} color="#F18F34" />
-                <Text style={styles.reviewText}>Repaso</Text>
+                <Text style={styles.reviewText}>{t('learning.videoReview')}</Text>
               </View>
             )}
             <Text style={styles.counter}>{counter}</Text>
@@ -201,7 +206,7 @@ export function VideoPlayer({ videoUrl, preloadedPlayer, area, counter, clubName
             hitSlop={8}
             style={({ pressed }) => [styles.skipBtn, pressed && styles.skipPressed]}
           >
-            <Text style={styles.skipText}>{ended ? 'Continuar' : 'Saltar video'}</Text>
+            <Text style={styles.skipText}>{ended ? t('learning.videoContinue') : t('learning.videoSkip')}</Text>
             <Ionicons name="arrow-forward" size={14} color="rgba(255,255,255,0.6)" />
           </Pressable>
         </View>

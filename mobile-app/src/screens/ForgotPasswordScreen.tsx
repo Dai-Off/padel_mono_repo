@@ -10,6 +10,7 @@ import {
   AuthFooter,
 } from '../components/auth';
 import { forgotPassword } from '../api/auth';
+import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 
 type ForgotPasswordScreenProps = {
@@ -17,6 +18,7 @@ type ForgotPasswordScreenProps = {
 };
 
 export function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProps) {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -25,7 +27,7 @@ export function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProp
   const handleSubmit = async () => {
     const e = email.trim();
     if (!e) {
-      setError('Por favor ingresa tu correo electrónico');
+      setError(t('auth.forgotEmailRequired'));
       return;
     }
 
@@ -37,12 +39,12 @@ export function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProp
       if (res.ok) {
         setSuccess(true);
       } else if (res.httpStatus === 429) {
-        setError(res.error ?? 'Demasiados intentos. Espera unos minutos.');
+        setError(res.error ?? t('common.tooManyAttempts'));
       } else {
-        setError(res.error ?? 'Error al enviar el correo de recuperación');
+        setError(res.error ?? t('auth.forgotError'));
       }
     } catch {
-      setError('Error de conexión con el servidor');
+      setError(t('common.connectionErrorServer'));
     } finally {
       setLoading(false);
     }
@@ -58,7 +60,7 @@ export function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProp
         {error ? <ErrorBanner message={error} variant="error" /> : null}
         {success ? (
           <ErrorBanner 
-            message="Si el correo existe, recibirás un enlace para restablecer tu contraseña en unos minutos." 
+            message={t('auth.forgotSuccess')} 
             variant="info" 
           />
         ) : null}
@@ -66,9 +68,9 @@ export function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProp
         {!success ? (
           <>
             <AuthInput
-              label="Correo Electrónico"
+              label={t('auth.emailLabel')}
               icon="mail-outline"
-              placeholder="tu@email.com"
+              placeholder={t('auth.emailPlaceholder')}
               keyboardType="email-address"
               autoCapitalize="none"
               value={email}
@@ -83,15 +85,15 @@ export function ForgotPasswordScreen({ onBackToLogin }: ForgotPasswordScreenProp
                 disabled={loading}
                 icon="mail-unread-outline"
               >
-                Enviar enlace
+                {t('auth.forgotTitle')}
               </AuthButton>
             </View>
           </>
         ) : null}
 
         <AuthFormLink
-          prompt="¿Ya te acordaste?"
-          action="Volver al inicio"
+          prompt={t('auth.forgotRememberPrompt')}
+          action={t('auth.forgotBackLink')}
           onPress={onBackToLogin}
           disabled={loading}
         />

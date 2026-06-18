@@ -2,14 +2,8 @@ import { StyleSheet, View } from 'react-native';
 import { FilterBottomSheet } from '../filters/FilterBottomSheet';
 import { FilterPill } from '../filters/FilterPill';
 import type { PartidosSportFilter } from '../../domain/partidosFilters';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
-
-const OPTIONS: { id: PartidosSportFilter; label: string }[] = [
-  { id: 'padel', label: 'Pádel' },
-  { id: 'tenis', label: 'Tenis' },
-  { id: 'pickleball', label: 'Pickleball' },
-  { id: 'all', label: 'Todos' },
-];
 
 type PartidosSportSheetProps = {
   visible: boolean;
@@ -19,10 +13,18 @@ type PartidosSportSheetProps = {
 };
 
 export function PartidosSportSheet({ visible, sport, onClose, onSelect }: PartidosSportSheetProps) {
+  const { t } = useTranslation();
+  const options: { id: PartidosSportFilter; label: string }[] = [
+    { id: 'padel', label: t('common.sportPadel') },
+    { id: 'tenis', label: t('common.sportTenis') },
+    { id: 'pickleball', label: t('common.sportPickleball') },
+    { id: 'all', label: t('common.sportAll') },
+  ];
+
   return (
-    <FilterBottomSheet visible={visible} title="Deporte" onClose={onClose}>
+    <FilterBottomSheet visible={visible} title={t('partidos.sheetSportTitle')} onClose={onClose}>
       <View style={styles.row}>
-        {OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <FilterPill
             key={opt.id}
             label={opt.label}

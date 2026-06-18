@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { PartidoItem } from '../../screens/PartidosScreen';
+import { useTranslation } from '../../i18n';
 import { MatchResultBlock } from '../partido/MatchResultBlock';
 import { theme } from '../../theme';
 
@@ -11,7 +12,8 @@ type ActividadPartidoCardProps = {
 };
 
 export function ActividadPartidoCard({ partido, onPress }: ActividadPartidoCardProps) {
-  const modeLabel = partido.mode === 'competitivo' ? 'Competitivo' : 'Amistoso';
+  const { t } = useTranslation();
+  const modeLabel = partido.mode === 'competitivo' ? t('common.competitive') : t('common.friendly');
   const modeColor = partido.mode === 'competitivo' ? theme.auth.accent : '#38bdf8';
 
   return (

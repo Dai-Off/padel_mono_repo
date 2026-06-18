@@ -12,6 +12,7 @@ import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker
 import { useClubCatalog } from '../hooks/useClubCatalog';
 import { saveStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import { theme } from '../theme';
+import { useTranslation } from '../i18n';
 
 type PreferencesScreenProps = {
   onBack: () => void;
@@ -195,6 +196,7 @@ function preferencesEqual(a: PlayerPreferences, b: PlayerPreferences): boolean {
 
 export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const { session } = useAuth();
   const token = session?.access_token;
 
@@ -248,8 +250,8 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
 
   const selectedClubLabels = useMemo(() => {
     const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
-    return selectedClubIds.map((id) => byId.get(id) ?? 'Club');
-  }, [clubCatalog, selectedClubIds]);
+    return selectedClubIds.map((id) => byId.get(id) ?? t('common.clubFallback'));
+  }, [clubCatalog, selectedClubIds, t]);
 
   const toggleScheduleSlot = (slot: PlayerPreferences['preferredScheduleSlots'][number]) => {
     setPrefs((prev) => {
@@ -282,14 +284,14 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
 
   const save = async () => {
     if (!token) {
-      Alert.alert('Preferencias', 'Inicia sesión para guardar cambios.');
+      Alert.alert(t('preferences.prefsTitleAlert'), t('common.loginRequiredToSave'));
       return;
     }
     setSaving(true);
     const res = await updateMyPlayerPreferences(token, prefs, { affinityVisible });
     setSaving(false);
     if (!res.ok) {
-      Alert.alert('Preferencias', res.error);
+      Alert.alert(t('preferences.prefsTitleAlert'), res.error);
       return;
     }
     setBase(res.player.preferences);
@@ -302,7 +304,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
       .filter((id): id is string => !!id);
     void saveStoredPreferredClubIds(idsForMm);
     void refreshGlobalProfile({ force: true });
-    Alert.alert('Preferencias', 'Cambios guardados.');
+    Alert.alert(t('preferences.prefsTitleAlert'), t('preferences.prefsSaved'));
   };
 
   return (
@@ -312,8 +314,8 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
           <Ionicons name="arrow-back" size={18} color="#fff" />
         </Pressable>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title}>Preferencias de Juego</Text>
-          <Text style={styles.subtitle}>Personaliza tu experiencia</Text>
+          <Text style={styles.title}>{t('preferences.title')}</Text>
+          <Text style={styles.subtitle}>{t('preferences.subtitle')}</Text>
         </View>
       </View>
 
@@ -333,15 +335,15 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <TargetIcon />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Lado Preferido</Text>
-                <Text style={styles.cardSubtitle}>¿De qué lado prefieres jugar?</Text>
+                <Text style={styles.cardTitle}>{t('preferences.sidePreferred')}</Text>
+                <Text style={styles.cardSubtitle}>{t('preferences.sidePreferredSub')}</Text>
               </View>
             </View>
             <View style={styles.sideGrid}>
               {[
-                { id: 'right', label: 'Derecha' },
-                { id: 'left', label: 'Izquierda' },
-                { id: 'both', label: 'Ambos' },
+                { id: 'right', label: t('preferences.sideRight') },
+                { id: 'left', label: t('preferences.sideLeft') },
+                { id: 'both', label: t('preferences.sideBoth') },
               ].map((opt) => (
                 <Pressable
                   key={opt.id}
@@ -377,8 +379,8 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <HeartIcon color="#FACC15" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Clubes Favoritos</Text>
-                <Text style={styles.cardSubtitle}>Marca tus clubes de confianza</Text>
+                <Text style={styles.cardTitle}>{t('preferences.favoriteClubs')}</Text>
+                <Text style={styles.cardSubtitle}>{t('preferences.favoriteClubsSub')}</Text>
               </View>
             </View>
             <Pressable style={styles.clubPickerBtn} onPress={() => setClubPickerVisible(true)}>
@@ -388,12 +390,14 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
               <View style={styles.clubTextCol}>
                 <Text style={styles.clubName}>
                   {selectedClubIds.length === 0
-                    ? 'Elegir clubes favoritos'
-                    : `${selectedClubIds.length} club${selectedClubIds.length === 1 ? '' : 'es'} seleccionado${selectedClubIds.length === 1 ? '' : 's'}`}
+                    ? t('preferences.chooseFavoriteClubs')
+                    : selectedClubIds.length === 1
+                      ? t('preferences.clubsSelectedOne', { count: selectedClubIds.length })
+                      : t('preferences.clubsSelectedMany', { count: selectedClubIds.length })}
                 </Text>
                 <Text style={styles.clubSubtitle} numberOfLines={2}>
                   {selectedClubIds.length === 0
-                    ? 'Buscar y filtrar como en torneos'
+                    ? t('preferences.clubsPickerHint')
                     : selectedClubLabels.join(' · ')}
                 </Text>
               </View>
@@ -407,16 +411,16 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <ClockIcon />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Horario Disponible</Text>
-                <Text style={styles.cardSubtitle}>¿Cuándo sueles jugar?</Text>
+                <Text style={styles.cardTitle}>{t('preferences.scheduleAvailable')}</Text>
+                <Text style={styles.cardSubtitle}>{t('preferences.scheduleAvailableSub')}</Text>
               </View>
             </View>
             <View style={styles.columnGap}>
               {[
-                { id: 'morning', label: 'Mañana', time: '08:00 - 12:00', emoji: '🌅' },
-                { id: 'afternoon', label: 'Tarde', time: '12:00 - 18:00', emoji: '☀️' },
-                { id: 'evening', label: 'Noche', time: '18:00 - 22:00', emoji: '🌆' },
-                { id: 'night', label: 'Madrugada', time: '22:00 - 24:00', emoji: '🌙' },
+                { id: 'morning', label: t('preferences.slotMorning'), time: t('preferences.slotMorningTime'), emoji: '🌅' },
+                { id: 'afternoon', label: t('preferences.slotAfternoon'), time: t('preferences.slotAfternoonTime'), emoji: '☀️' },
+                { id: 'evening', label: t('preferences.slotEvening'), time: t('preferences.slotEveningTime'), emoji: '🌆' },
+                { id: 'night', label: t('preferences.slotNight'), time: t('preferences.slotNightTime'), emoji: '🌙' },
               ].map((slot) => {
                 const active = prefs.preferredScheduleSlots.includes(slot.id as PlayerPreferences['preferredScheduleSlots'][number]);
                 return (
@@ -463,19 +467,19 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <GlobeIcon />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Días Preferidos</Text>
-                <Text style={styles.cardSubtitle}>Selecciona tus días favoritos</Text>
+                <Text style={styles.cardTitle}>{t('preferences.preferredDays')}</Text>
+                <Text style={styles.cardSubtitle}>{t('preferences.preferredDaysSub')}</Text>
               </View>
             </View>
             <View style={styles.daysGrid}>
               {[
-                { id: 'mon', label: 'Lun' },
-                { id: 'tue', label: 'Mar' },
-                { id: 'wed', label: 'Mié' },
-                { id: 'thu', label: 'Jue' },
-                { id: 'fri', label: 'Vie' },
-                { id: 'sat', label: 'Sáb' },
-                { id: 'sun', label: 'Dom' },
+                { id: 'mon', label: t('common.weekdayMon') },
+                { id: 'tue', label: t('common.weekdayTue') },
+                { id: 'wed', label: t('common.weekdayWed') },
+                { id: 'thu', label: t('common.weekdayThu') },
+                { id: 'fri', label: t('common.weekdayFri') },
+                { id: 'sat', label: t('common.weekdaySat') },
+                { id: 'sun', label: t('common.weekdaySun') },
               ].map((day) => {
                 const active = prefs.preferredDays.includes(day.id as PlayerPreferences['preferredDays'][number]);
                 return (
@@ -510,16 +514,16 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <ZapIcon />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Estilo de Juego</Text>
-                <Text style={styles.cardSubtitle}>¿Cómo te gusta jugar?</Text>
+                <Text style={styles.cardTitle}>{t('preferences.playStyle')}</Text>
+                <Text style={styles.cardSubtitle}>{t('preferences.playStyleSub')}</Text>
               </View>
             </View>
             <View style={styles.playStyleGrid}>
               {[
-                { id: 'competitive', label: 'Competitivo' },
-                { id: 'social', label: 'Social' },
-                { id: 'learning', label: 'Aprendizaje' },
-                { id: 'balanced', label: 'Equilibrado' },
+                { id: 'competitive', label: t('preferences.styleCompetitive') },
+                { id: 'social', label: t('preferences.styleSocial') },
+                { id: 'learning', label: t('preferences.styleLearning') },
+                { id: 'balanced', label: t('preferences.styleBalanced') },
               ].map((opt) => (
                 <Pressable
                   key={opt.id}
@@ -551,8 +555,8 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <ClockIconRed />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Duración del Partido</Text>
-                <Text style={styles.cardSubtitle}>Tiempo preferido de juego</Text>
+                <Text style={styles.cardTitle}>{t('preferences.matchDuration')}</Text>
+                <Text style={styles.cardSubtitle}>{t('preferences.matchDurationSub')}</Text>
               </View>
             </View>
             <View style={styles.durationGrid}>
@@ -569,11 +573,11 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                       end={{ x: 1, y: 1 }}
                       style={styles.durationOptionActive}
                     >
-                      <Text style={styles.durationOptionTextActive}>{m} min</Text>
+                      <Text style={styles.durationOptionTextActive}>{t('common.durationMin', { minutes: m })}</Text>
                     </LinearGradient>
                   ) : (
                     <View style={styles.durationOptionIdle}>
-                      <Text style={styles.durationOptionTextIdle}>{m} min</Text>
+                      <Text style={styles.durationOptionTextIdle}>{t('common.durationMin', { minutes: m })}</Text>
                     </View>
                   )}
                 </Pressable>
@@ -587,16 +591,16 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <UsersIcon />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Nivel de Compañero</Text>
-                <Text style={styles.cardSubtitle}>Nivel que buscas en rivales</Text>
+                <Text style={styles.cardTitle}>{t('preferences.partnerLevel')}</Text>
+                <Text style={styles.cardSubtitle}>{t('preferences.partnerLevelSub')}</Text>
               </View>
             </View>
             <View style={styles.partnerLevelGrid}>
               {[
-                { id: 'similar', label: 'Similar' },
-                { id: 'higher', label: 'Superior' },
-                { id: 'lower', label: 'Inferior' },
-                { id: 'any', label: 'Cualquiera' },
+                { id: 'similar', label: t('preferences.partnerSimilar') },
+                { id: 'higher', label: t('preferences.partnerHigher') },
+                { id: 'lower', label: t('preferences.partnerLower') },
+                { id: 'any', label: t('preferences.partnerAny') },
               ].map((opt) => (
                 <Pressable
                   key={opt.id}
@@ -628,31 +632,31 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <Text style={styles.notificationHeaderEmoji}>🔔</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>Notificaciones</Text>
-                <Text style={styles.cardSubtitle}>Mantente informado</Text>
+                <Text style={styles.cardTitle}>{t('preferences.notificationsSection')}</Text>
+                <Text style={styles.cardSubtitle}>{t('preferences.notificationsSectionSub')}</Text>
               </View>
             </View>
             <View style={styles.columnGap}>
               {[
                 {
                   key: 'notifNewMatches',
-                  label: 'Nuevos partidos',
-                  subtitle: 'Notificaciones de nuevas oportunidades',
+                  label: t('preferences.notifNewMatchesSub'),
+                  subtitle: t('preferences.notifNewMatchesSub'),
                 },
                 {
                   key: 'notifTournamentReminders',
-                  label: 'Recordatorios de torneos',
-                  subtitle: 'Avisos de competiciones',
+                  label: t('preferences.notifTournamentReminders'),
+                  subtitle: t('preferences.notifTournamentRemindersSub'),
                 },
                 {
                   key: 'notifClassUpdates',
-                  label: 'Actualizaciones de clases',
-                  subtitle: 'Novedades de tus cursos',
+                  label: t('preferences.notifClassUpdates'),
+                  subtitle: t('preferences.notifClassUpdatesSub'),
                 },
                 {
                   key: 'notifChatMessages',
-                  label: 'Alertas de mensajes',
-                  subtitle: 'Nuevos mensajes en chat',
+                  label: t('preferences.notifChatAlerts'),
+                  subtitle: t('preferences.notifChatAlertsSub'),
                 },
               ].map((row) => {
                 const active = prefs[row.key as keyof PlayerPreferences] as boolean;
@@ -681,8 +685,8 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                 <Ionicons name="sparkles" size={16} color={ACCENT} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>IA de afinidad</Text>
-                <Text style={styles.cardSubtitle}>Quién puede encontrarte</Text>
+                <Text style={styles.cardTitle}>{t('preferences.affinityIa')}</Text>
+                <Text style={styles.cardSubtitle}>{t('preferences.affinityIaSub')}</Text>
               </View>
             </View>
             <AffinityVisibilityToggle
@@ -701,7 +705,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
               style={styles.restoreBtn}
               disabled={!dirty || saving}
             >
-              <Text style={styles.restoreText}>Restaurar</Text>
+              <Text style={styles.restoreText}>{t('preferences.restore')}</Text>
             </Pressable>
             <Pressable
               onPress={() => void save()}
@@ -710,7 +714,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
             >
               {!dirty || saving ? (
                 <View style={styles.saveBtnDisabledInner}>
-                  {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveText}>Guardar Cambios</Text>}
+                  {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveText}>{t('preferences.saveChanges')}</Text>}
                 </View>
               ) : (
                 <LinearGradient
@@ -719,7 +723,7 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
                   end={{ x: 1, y: 0.5 }}
                   style={styles.saveBtnGradient}
                 >
-                  {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveText}>Guardar Cambios</Text>}
+                  {saving ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.saveText}>{t('preferences.saveChanges')}</Text>}
                 </LinearGradient>
               )}
             </Pressable>
@@ -732,8 +736,8 @@ export function PreferencesScreen({ onBack }: PreferencesScreenProps) {
         selectedIds={selectedClubIds}
         onChange={applySelectedClubIds}
         onClose={() => setClubPickerVisible(false)}
-        title="Clubes favoritos"
-        subtitle="Se usan también en matchmaking competitivo"
+        title={t('preferences.clubsPickerTitle')}
+        subtitle={t('preferences.clubsPickerSubtitle')}
       />
     </View>
   );

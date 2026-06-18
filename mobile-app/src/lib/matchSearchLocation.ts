@@ -1,5 +1,5 @@
 import * as Location from 'expo-location';
-import { getCurrentMapCoords } from './getCurrentPlaceLabel';
+import { getCurrentMapCoords, type TranslateFn } from './getCurrentPlaceLabel';
 
 export type SearchCoordinates = { lat: number; lng: number };
 
@@ -31,27 +31,24 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
 }
 
 /** Comprueba permiso y GPS sin esperar fix (respuesta inmediata). */
-export async function probeDeviceLocationIssue(): Promise<LocationIssue | null> {
+export async function probeDeviceLocationIssue(t: TranslateFn): Promise<LocationIssue | null> {
   const perm = await Location.getForegroundPermissionsAsync();
   if (perm.status === 'undetermined') {
     return {
-      message:
-        'Necesitamos tu ubicación para buscar por distancia. Activá la ubicación o elegí uno o más clubes preferidos.',
+      message: t('common.locationNeedForDistance'),
       action: 'request_permission',
     };
   }
   if (perm.status !== 'granted') {
     return {
-      message:
-        'Activa el permiso de ubicación para buscar por distancia, o elegí uno o más clubes preferidos.',
+      message: t('common.locationPermissionForDistance'),
       action: 'open_settings',
     };
   }
   const servicesOn = await Location.hasServicesEnabledAsync();
   if (!servicesOn) {
     return {
-      message:
-        'Activa la ubicación (GPS) en los ajustes del dispositivo, o elegí uno o más clubes preferidos.',
+      message: t('common.locationGpsForDistance'),
       action: 'open_settings',
     };
   }
@@ -60,9 +57,10 @@ export async function probeDeviceLocationIssue(): Promise<LocationIssue | null> 
 
 /** Ubicación con timeout corto: evita esperas largas cuando el GPS no responde. */
 export async function resolveDeviceSearchCoordinatesFast(
-  timeoutMs = 5000,
+  timeoutMs: number,
+  t: TranslateFn,
 ): Promise<ResolveSearchCoordsResult> {
-  const issue = await probeDeviceLocationIssue();
+  const issue = await probeDeviceLocationIssue(t);
   if (issue) return { ok: false, error: issue.message };
 
   try {
@@ -92,14 +90,13 @@ export async function resolveDeviceSearchCoordinatesFast(
 
   return {
     ok: false,
-    error:
-      'No se pudo obtener tu ubicación. Elegí uno o más clubes preferidos para buscar sin GPS.',
+    error: t('common.locationCouldNotGetPickClubs'),
   };
 }
 
 /** Ubicación del dispositivo para búsqueda por distancia (producción). */
-export async function resolveDeviceSearchCoordinates(): Promise<ResolveSearchCoordsResult> {
-  const res = await getCurrentMapCoords();
+export async function resolveDeviceSearchCoordinates(t: TranslateFn): Promise<ResolveSearchCoordsResult> {
+  const res = await getCurrentMapCoords(t);
   if (!res.ok) return res;
   return {
     ok: true,
