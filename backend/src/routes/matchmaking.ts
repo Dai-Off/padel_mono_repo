@@ -373,7 +373,7 @@ router.post('/join', async (req: Request, res: Response) => {
     if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
       return res.status(400).json({
         ok: false,
-        error: 'search_lat y search_lng son obligatorios cuando indicás max_distance_km',
+        error: 'search_lat y search_lng son obligatorios cuando indicas max_distance_km',
       });
     }
   }
@@ -383,7 +383,7 @@ router.post('/join', async (req: Request, res: Response) => {
   if (blockedUntil) {
     return res.status(403).json({
       ok: false,
-      error: 'Tenés matchmaking bloqueado temporalmente por rechazos recientes',
+      error: 'Tienes matchmaking bloqueado temporalmente por rechazos recientes',
       blocked_until: blockedUntil,
     });
   }
@@ -946,7 +946,7 @@ router.post('/pair-invite', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
   const blockedUntil = await getMatchmakingBlockUntil(playerId);
   if (blockedUntil) {
-    return res.status(403).json({ ok: false, error: 'Tenés matchmaking bloqueado temporalmente', blocked_until: blockedUntil });
+    return res.status(403).json({ ok: false, error: 'Tienes matchmaking bloqueado temporalmente', blocked_until: blockedUntil });
   }
 
   const elig = await assertPairEligible(supabase, playerId, inviteeId);
@@ -980,7 +980,7 @@ router.post('/pair-invite', async (req: Request, res: Response) => {
     .maybeSingle();
   if (error) {
     if ((error as { code?: string }).code === '23505') {
-      return res.status(409).json({ ok: false, error: 'Ya tenés una invitación activa con este jugador' });
+      return res.status(409).json({ ok: false, error: 'Ya tienes una invitación activa con este jugador' });
     }
     return res.status(500).json({ ok: false, error: error.message });
   }
@@ -994,7 +994,7 @@ router.post('/pair-invite/:id/accept', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
   const invite = await loadPairInvite(supabase, req.params.id);
   if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
-  if (invite.invitee_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No sos el invitado' });
+  if (invite.invitee_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No eres el invitado' });
   if (invite.status !== 'pending') return res.status(409).json({ ok: false, error: 'La invitación ya no está pendiente' });
   if (inviteExpired(invite)) return res.status(409).json({ ok: false, error: 'La invitación caducó' });
 
@@ -1010,7 +1010,7 @@ router.post('/pair-invite/:id/accept-and-search', async (req: Request, res: Resp
   const supabase = getSupabaseServiceRoleClient();
   const invite = await loadPairInvite(supabase, req.params.id);
   if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
-  if (invite.invitee_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No sos el invitado' });
+  if (invite.invitee_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No eres el invitado' });
   if (invite.status !== 'pending') return res.status(409).json({ ok: false, error: 'La invitación ya no está pendiente' });
   if (inviteExpired(invite)) return res.status(409).json({ ok: false, error: 'La invitación caducó' });
 
@@ -1041,7 +1041,7 @@ router.post('/pair-invite/:id/start-search', async (req: Request, res: Response)
   const invite = await loadPairInvite(supabase, req.params.id);
   if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
   if (invite.inviter_player_id !== playerId && invite.invitee_player_id !== playerId) {
-    return res.status(403).json({ ok: false, error: 'No formás parte de esta invitación' });
+    return res.status(403).json({ ok: false, error: 'No formas parte de esta invitación' });
   }
   if (invite.status !== 'accepted') return res.status(409).json({ ok: false, error: 'La invitación no está aceptada' });
   if (inviteExpired(invite)) return res.status(409).json({ ok: false, error: 'La invitación caducó' });
@@ -1071,7 +1071,7 @@ router.post('/pair-invite/:id/reject', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
   const invite = await loadPairInvite(supabase, req.params.id);
   if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
-  if (invite.invitee_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No sos el invitado' });
+  if (invite.invitee_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No eres el invitado' });
   if (!['pending', 'accepted'].includes(invite.status)) {
     return res.status(409).json({ ok: false, error: 'La invitación ya no se puede rechazar' });
   }
@@ -1090,7 +1090,7 @@ router.post('/pair-invite/:id/cancel', async (req: Request, res: Response) => {
   const supabase = getSupabaseServiceRoleClient();
   const invite = await loadPairInvite(supabase, req.params.id);
   if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
-  if (invite.inviter_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No sos el invitador' });
+  if (invite.inviter_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No eres el invitador' });
   if (!['pending', 'accepted'].includes(invite.status)) {
     return res.status(409).json({ ok: false, error: 'La invitación ya no se puede cancelar' });
   }

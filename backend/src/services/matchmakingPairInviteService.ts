@@ -55,7 +55,7 @@ export function normalizePairPrefs(body: Record<string, unknown>): { ok: true; p
   const lng = body.search_lng != null ? Number(body.search_lng) : null;
   if (maxKm != null && Number.isFinite(maxKm) && maxKm > 0) {
     if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
-      return { ok: false, status: 400, error: 'search_lat y search_lng son obligatorios cuando indicás max_distance_km' };
+      return { ok: false, status: 400, error: 'search_lat y search_lng son obligatorios cuando indicas max_distance_km' };
     }
   }
 
@@ -114,7 +114,7 @@ export async function assertPairEligible(
   inviterId: string,
   inviteeId: string,
 ): Promise<Ok<unknown> | Fail> {
-  if (inviterId === inviteeId) return { ok: false, status: 400, error: 'No podés invitarte a vos mismo' };
+  if (inviterId === inviteeId) return { ok: false, status: 400, error: 'No puedes invitarte a ti mismo' };
 
   const { data: players } = await supabase
     .from('players')
