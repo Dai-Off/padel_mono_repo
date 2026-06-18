@@ -14,7 +14,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchPublicPlayerProfile, type PublicPlayerProfile } from '../api/players';
-import { useTranslation } from '../i18n/I18nContext';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 import { formatLocale, useTranslation } from '../i18n';
@@ -36,7 +35,6 @@ export function PublicProfileScreen({ playerId, onBack, onChatPress }: PublicPro
   const dateLocale = formatLocale(locale);
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
-  const { locale } = useTranslation();
   const [profile, setProfile] = useState<PublicPlayerProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
