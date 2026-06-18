@@ -473,6 +473,17 @@ router.delete('/leave', async (req: Request, res: Response) => {
   // (si no, quedaría en cola sin poder emparejarse, ya que buildUnits salta a un pareja sin compañero).
   if (partnerId) {
     await supabase.from('matchmaking_pool').delete().eq('player_id', partnerId).eq('paired_with_id', playerId);
+    // La invitación vuelve a 'accepted' (no queda atascada en 'searching'): la pareja sigue
+    // lista en "Listos para jugar" y puede volver a buscar sin tener que re-invitar.
+    const nowIso = new Date().toISOString();
+    await supabase
+      .from('matchmaking_pair_invites')
+      .update({ status: 'accepted', updated_at: nowIso, resolved_at: null, expires_at: computeDefaultInviteExpiry() })
+      .or(
+        `and(inviter_player_id.eq.${playerId},invitee_player_id.eq.${partnerId}),` +
+          `and(inviter_player_id.eq.${partnerId},invitee_player_id.eq.${playerId})`,
+      )
+      .eq('status', 'searching');
   }
   return res.json({ ok: true });
 });
