@@ -8,10 +8,8 @@ export const LP_WIN_BASE = 15;
 export const LP_LOSS_BASE = 12;
 /** LP necesarios netos en la temporada para ascender un escalón (se descuentan al promocionar). */
 export const LP_PROMOTE_THRESHOLD = 100;
-/** LP tras descenso (doc 10 §4.8 protección parcial). */
-export const LP_AFTER_DEMOTE = 45;
-/** Partidos MM con bloqueo de descenso tras ascender (doc 10 §3.4). */
-export const MM_SHIELD_MATCHES_AFTER_PROMO = 5;
+/** Partidos MM con bloqueo de descenso tras ascender (escudo). */
+export const MM_SHIELD_MATCHES_AFTER_PROMO = 3;
 /** Ajuste cross-liga: bonus LP si gana el equipo con media de liga más baja. */
 export const CROSS_LIGA_LP_PER_INDEX_GAP = 4;
 /** Penalidad extra de LP si pierde el equipo con media de liga más alta. */
@@ -70,7 +68,6 @@ export function computeMatchmakingLeagueUpdates(
 
   for (const r of rows) {
     const win = winnerTeam != null && r.team === winnerTeam;
-    const loss = winnerTeam != null && r.team !== winnerTeam;
     const draw = winnerTeam == null;
 
     const avgMy = r.team === 'A' ? avgA : avgB;
@@ -94,13 +91,14 @@ export function computeMatchmakingLeagueUpdates(
       delta = -(LP_LOSS_BASE + cross);
     }
 
-    let lps = Math.max(0, r.lps + delta);
+    let lps = r.lps + delta; // puede quedar negativo en derrota (descenso continuo)
     let liga = r.liga;
     let shield = r.mm_shield_matches;
     let peak = r.mm_peak_liga || r.liga;
     let promoted = false;
 
     if (!draw) {
+      // Ascenso: el excedente de LP se arrastra a la nueva división.
       while (leagueIndex(liga) < LEAGUE_ORDER.length - 1) {
         const threshold = promoteThresholdFor(liga, bands);
         if (lps < threshold) break;
@@ -111,11 +109,14 @@ export function computeMatchmakingLeagueUpdates(
       }
     }
 
-    if (loss && !promoted && lps === 0 && leagueIndex(liga) > 0 && shield === 0) {
+    // Descenso continuo: si los LP caen por debajo de 0, bajas un escalón y el
+    // déficit se descuenta del umbral de la división inferior (aterrizas alto).
+    // El escudo activo (shield > 0) bloquea el descenso: te quedas a 0.
+    while (lps < 0 && leagueIndex(liga) > 0 && shield === 0) {
       liga = prevLiga(liga);
-      lps = LP_AFTER_DEMOTE;
-      shield = 0;
+      lps = promoteThresholdFor(liga, bands) + lps;
     }
+    lps = Math.max(0, lps);
 
     if (!promoted) {
       shield = Math.max(0, shield - 1);
