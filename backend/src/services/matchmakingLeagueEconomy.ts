@@ -1,7 +1,7 @@
 /**
  * Economía de LP / ascenso / descenso en partidos matchmaking (doc 10 §3.3–3.5, §4 pendientes resueltos con valores provisionales).
  */
-import { LEAGUE_ORDER, leagueIndex, type LeagueName } from './matchmakingLeague';
+import { LEAGUE_ORDER, leagueIndex, ligaFromEloWithBands, type LeagueName, type LeagueEloBand } from './matchmakingLeague';
 
 /** LP base victoria / derrota (provisionales; doc 10 §4.4). */
 export const LP_WIN_BASE = 15;
@@ -16,6 +16,13 @@ export const MM_SHIELD_MATCHES_AFTER_PROMO = 5;
 export const CROSS_LIGA_LP_PER_INDEX_GAP = 4;
 /** Penalidad extra de LP si pierde el equipo con media de liga más alta. */
 export const CROSS_LIGA_LOSS_EXTRA_PER_INDEX_GAP = 3;
+/**
+ * Acelerador de LP (gravedad hacia la liga real). Multiplica SOLO las ganancias
+ * cuando el jugador está infravalorado: su liga objetivo (según elo conservador
+ * post-partido) está por encima de su liga actual. Unidireccional: nunca penaliza.
+ */
+export const K_BOOST = 0.5;
+export const BOOST_MAX = 2.5;
 
 const EPS = 1e-9;
 
@@ -27,6 +34,8 @@ export type MmLeagueRow = {
   mm_shield_matches: number;
   mm_peak_liga: string;
   league_season_id: string | null;
+  /** Elo conservador (mu − 2σ) post-partido; modula el acelerador de LP. */
+  newElo: number;
 };
 
 function avgLeagueIndexForTeam(team: 'A' | 'B', rows: MmLeagueRow[]): number {
@@ -58,6 +67,7 @@ export function computeMatchmakingLeagueUpdates(
   rows: MmLeagueRow[],
   winnerTeam: 'A' | 'B' | null,
   activeSeasonId: string,
+  bands: LeagueEloBand[],
 ): { id: string; lps: number; liga: string; mm_shield_matches: number; mm_peak_liga: string; league_season_id: string }[] {
   const avgA = avgLeagueIndexForTeam('A', rows);
   const avgB = avgLeagueIndexForTeam('B', rows);
@@ -78,7 +88,12 @@ export function computeMatchmakingLeagueUpdates(
     } else if (win) {
       const gap = Math.max(0, avgOpp - avgMy);
       const cross = gap > EPS ? Math.round(CROSS_LIGA_LP_PER_INDEX_GAP * gap) : 0;
-      delta = LP_WIN_BASE + cross;
+      // Acelerador: si la liga objetivo (elo conservador post-partido) está por
+      // encima de la liga actual, el infravalorado sube más rápido a su sitio.
+      const ligaObjetivo = ligaFromEloWithBands(r.newElo, bands);
+      const ligaGap = leagueIndex(ligaObjetivo) - leagueIndex(r.liga);
+      const boost = ligaGap >= 1 ? Math.min(1 + K_BOOST * ligaGap, BOOST_MAX) : 1;
+      delta = Math.round(LP_WIN_BASE * boost) + cross;
     } else {
       const gap = Math.max(0, avgMy - avgOpp);
       const cross = gap > EPS ? Math.round(CROSS_LIGA_LOSS_EXTRA_PER_INDEX_GAP * gap) : 0;

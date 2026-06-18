@@ -343,6 +343,13 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
   if (matchIsMm) {
     const seasonId = await getActiveMatchmakingSeasonId(supabase);
     if (!seasonId) throw new Error('No hay temporada de matchmaking activa');
+    const leagueBands = await getMatchmakingLeagueConfigRows(supabase);
+    const bands = leagueBands.map((r) => ({
+      code: r.code,
+      sort_order: r.sort_order,
+      elo_min: r.elo_min,
+      elo_max: r.elo_max,
+    }));
     const mmRows: MmLeagueRow[] = mps.map((mp) => {
       const pl = flatPlayers.find((p) => p.id === mp.player_id)!;
       const liga = String(pl.liga ?? 'bronce');
@@ -354,16 +361,11 @@ export async function runLevelingPipeline(matchId: string): Promise<void> {
         mm_shield_matches: Math.max(0, Math.floor(Number(pl.mm_shield_matches ?? 0))),
         mm_peak_liga: String(pl.mm_peak_liga ?? liga),
         league_season_id: pl.league_season_id ?? null,
+        // Elo conservador post-partido (mu − 2σ) ya calculado en playerUpdates.
+        newElo: playerUpdates[mp.player_id]?.newElo ?? Number(pl.elo_rating ?? 0),
       };
     });
-    pLeagueUpdates = computeMatchmakingLeagueUpdates(mmRows, winnerTeam, seasonId);
-    const leagueBands = await getMatchmakingLeagueConfigRows(supabase);
-    const bands = leagueBands.map((r) => ({
-      code: r.code,
-      sort_order: r.sort_order,
-      elo_min: r.elo_min,
-      elo_max: r.elo_max,
-    }));
+    pLeagueUpdates = computeMatchmakingLeagueUpdates(mmRows, winnerTeam, seasonId, bands);
     for (const row of pLeagueUpdates) {
       const u = playerUpdates[row.id];
       if (!u) continue;
