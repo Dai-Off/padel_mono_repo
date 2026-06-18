@@ -8,8 +8,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { PREMADE_MAX_GAP } from './matchmakingShared';
 import { getMatchmakingBlockUntil } from './matchmakingService';
 
-/** TTL por defecto de una invitación si la ventana de disponibilidad no acota antes. */
-const PAIR_INVITE_TTL_MS = 6 * 60 * 60 * 1000;
+/** Vigencia de una invitación de pareja (es una intención de jugar juntos, no una búsqueda). */
+const PAIR_INVITE_DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Tras un rechazo, el invitador no puede volver a invitar al mismo jugador durante este tiempo. */
 export const PAIR_INVITE_REINVITE_COOLDOWN_MS = 60 * 60 * 1000;
 
@@ -94,12 +94,9 @@ export function normalizePairPrefs(body: Record<string, unknown>): { ok: true; p
   };
 }
 
-/** expires_at = fin de la ventana de disponibilidad, acotado por el TTL máximo. */
-export function computeInviteExpiry(prefs: PairInvitePrefs): string {
-  const cap = Date.now() + PAIR_INVITE_TTL_MS;
-  const end = new Date(prefs.available_until).getTime();
-  const ms = Number.isFinite(end) && end > Date.now() && end < cap ? end : cap;
-  return new Date(ms).toISOString();
+/** Vigencia por defecto de la invitación (desacoplada de las prefs de búsqueda). */
+export function computeDefaultInviteExpiry(): string {
+  return new Date(Date.now() + PAIR_INVITE_DEFAULT_TTL_MS).toISOString();
 }
 
 async function eloOf(supabase: SupabaseClient, ids: string[]): Promise<Map<string, number>> {
@@ -235,12 +232,13 @@ export async function getActionablePairInvites(
   playerId: string,
 ): Promise<ActionablePairInvite[]> {
   const nowIso = new Date().toISOString();
+  // Todas las invitaciones activas (pending/accepted) en las que participa el jugador,
+  // como invitador o invitado. El cliente las categoriza por role + status.
   const { data } = await supabase
     .from('matchmaking_pair_invites')
     .select('id, inviter_player_id, invitee_player_id, status, expires_at')
-    .or(
-      `and(invitee_player_id.eq.${playerId},status.eq.pending),and(inviter_player_id.eq.${playerId},status.eq.accepted),and(inviter_player_id.eq.${playerId},status.eq.pending)`,
-    )
+    .or(`invitee_player_id.eq.${playerId},inviter_player_id.eq.${playerId}`)
+    .in('status', ['pending', 'accepted'])
     .gt('expires_at', nowIso);
 
   const rows = (data ?? []) as {

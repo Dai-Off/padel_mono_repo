@@ -16,12 +16,11 @@ import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueCon
 import { clearMatchmakingPoolIfPlayerPaid } from '../services/matchmakingPoolCleanup';
 import {
   assertPairEligible,
-  computeInviteExpiry,
+  computeDefaultInviteExpiry,
   enqueueBothPaired,
   getActionablePairInvites,
   normalizePairPrefs,
   recentRejectionExists,
-  type PairInvitePrefs,
 } from '../services/matchmakingPairInviteService';
 
 type MmWl = { mm_wins: number; mm_losses: number; mm_draws: number };
@@ -916,7 +915,6 @@ type PairInviteRow = {
   inviter_player_id: string;
   invitee_player_id: string;
   status: string;
-  prefs: PairInvitePrefs;
   expires_at: string;
 };
 
@@ -926,7 +924,7 @@ async function loadPairInvite(
 ): Promise<PairInviteRow | null> {
   const { data } = await supabase
     .from('matchmaking_pair_invites')
-    .select('id, inviter_player_id, invitee_player_id, status, prefs, expires_at')
+    .select('id, inviter_player_id, invitee_player_id, status, expires_at')
     .eq('id', id)
     .maybeSingle();
   return (data as PairInviteRow | null) ?? null;
@@ -936,16 +934,14 @@ function inviteExpired(invite: PairInviteRow): boolean {
   return new Date(invite.expires_at).getTime() <= Date.now();
 }
 
-// Crear invitación de pareja (invitador). Body: invitee_player_id + prefs de cola.
+// Crear invitación de pareja (invitador). Body: invitee_player_id. Las preferencias
+// NO se fijan aquí: se eligen al buscar (start-search / accept-and-search).
 router.post('/pair-invite', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
 
   const inviteeId = typeof req.body?.invitee_player_id === 'string' ? req.body.invitee_player_id.trim() : '';
   if (!inviteeId) return res.status(400).json({ ok: false, error: 'invitee_player_id es obligatorio' });
-
-  const norm = normalizePairPrefs((req.body ?? {}) as Record<string, unknown>);
-  if (!norm.ok) return res.status(norm.status).json({ ok: false, error: norm.error });
 
   const supabase = getSupabaseServiceRoleClient();
   const blockedUntil = await getMatchmakingBlockUntil(playerId);
@@ -977,8 +973,8 @@ router.post('/pair-invite', async (req: Request, res: Response) => {
       inviter_player_id: playerId,
       invitee_player_id: inviteeId,
       status: 'pending',
-      prefs: norm.prefs,
-      expires_at: computeInviteExpiry(norm.prefs),
+      prefs: null,
+      expires_at: computeDefaultInviteExpiry(),
     })
     .select('id')
     .maybeSingle();
@@ -1007,7 +1003,7 @@ router.post('/pair-invite/:id/accept', async (req: Request, res: Response) => {
   return res.json({ ok: true });
 });
 
-// Aceptar y buscar (invitado): encola a ambos y dispara el ciclo.
+// Aceptar y buscar (invitado): acepta + encola a ambos con LAS prefs del invitado (body).
 router.post('/pair-invite/:id/accept-and-search', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
@@ -1018,9 +1014,11 @@ router.post('/pair-invite/:id/accept-and-search', async (req: Request, res: Resp
   if (invite.status !== 'pending') return res.status(409).json({ ok: false, error: 'La invitación ya no está pendiente' });
   if (inviteExpired(invite)) return res.status(409).json({ ok: false, error: 'La invitación caducó' });
 
+  const norm = normalizePairPrefs((req.body ?? {}) as Record<string, unknown>);
+  if (!norm.ok) return res.status(norm.status).json({ ok: false, error: norm.error });
   const elig = await assertPairEligible(supabase, invite.inviter_player_id, invite.invitee_player_id);
   if (!elig.ok) return res.status(elig.status).json({ ok: false, error: elig.error });
-  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, invite.prefs);
+  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, norm.prefs);
   if (!enq.ok) return res.status(enq.status).json({ ok: false, error: enq.error });
 
   const nowIso = new Date().toISOString();
@@ -1034,20 +1032,25 @@ router.post('/pair-invite/:id/accept-and-search', async (req: Request, res: Resp
   return res.json({ ok: true });
 });
 
-// Iniciar búsqueda (invitador) tras un accept a secas: encola a ambos.
+// Iniciar búsqueda de una pareja ya aceptada (cualquiera de los dos): encola a ambos
+// con LAS prefs de quien busca (body).
 router.post('/pair-invite/:id/start-search', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
   const supabase = getSupabaseServiceRoleClient();
   const invite = await loadPairInvite(supabase, req.params.id);
   if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
-  if (invite.inviter_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No sos el invitador' });
+  if (invite.inviter_player_id !== playerId && invite.invitee_player_id !== playerId) {
+    return res.status(403).json({ ok: false, error: 'No formás parte de esta invitación' });
+  }
   if (invite.status !== 'accepted') return res.status(409).json({ ok: false, error: 'La invitación no está aceptada' });
   if (inviteExpired(invite)) return res.status(409).json({ ok: false, error: 'La invitación caducó' });
 
+  const norm = normalizePairPrefs((req.body ?? {}) as Record<string, unknown>);
+  if (!norm.ok) return res.status(norm.status).json({ ok: false, error: norm.error });
   const elig = await assertPairEligible(supabase, invite.inviter_player_id, invite.invitee_player_id);
   if (!elig.ok) return res.status(elig.status).json({ ok: false, error: elig.error });
-  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, invite.prefs);
+  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, norm.prefs);
   if (!enq.ok) return res.status(enq.status).json({ ok: false, error: enq.error });
 
   const nowIso = new Date().toISOString();
