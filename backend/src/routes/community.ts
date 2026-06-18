@@ -282,11 +282,11 @@ router.get('/stories', async (req: Request, res: Response) => {
 });
 
 /**
- * POST /community/upload-thumbnail
+ * POST /community/miniapp/upload-thumbnail
  * Sube solo la miniatura (portada) de un clip. Devuelve su URL pública.
  * Necesario porque WeChat solo permite un archivo por Taro.uploadFile.
  */
-router.post('/upload-thumbnail', upload.single('thumbnail'), async (req: Request, res: Response) => {
+router.post('/miniapp/upload-thumbnail', upload.single('thumbnail'), async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
 
