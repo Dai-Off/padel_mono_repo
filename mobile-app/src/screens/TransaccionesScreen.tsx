@@ -15,18 +15,32 @@ import { BackHeader } from '../components/layout/BackHeader';
 import { formatLocale, useTranslation } from '../i18n';
 import { theme } from '../theme';
 
+const CARD = 'rgba(255,255,255,0.06)';
+const BORDER = 'rgba(255,255,255,0.08)';
+const EMERALD = theme.sidebar.iconVariants.emerald;
+const SKY = theme.sidebar.iconVariants.sky;
+
 type TransaccionesScreenProps = {
   onBack: () => void;
 };
 
-function formatAmount(cents: number, currency: string, opts?: { negative?: boolean }): string {
+function formatAmount(
+  cents: number,
+  currency: string,
+  locale: string,
+  opts?: { negative?: boolean },
+): string {
   const n = Math.abs(cents) / 100;
-  const amount = n.toFixed(2).replace('.', ',');
+  const amount = n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const core = currency === 'EUR' ? `${amount} €` : `${amount} ${currency}`;
   return opts?.negative ? `− ${core}` : core;
 }
 
-function formatDate(iso: string, t: (key: string, params?: Record<string, string | number>) => string, numberLocale: string): string {
+function formatDate(
+  iso: string,
+  t: (key: string, params?: Record<string, string | number>) => string,
+  numberLocale: string,
+): string {
   const d = new Date(iso);
   const now = new Date();
   const today = now.toDateString() === d.toDateString();
@@ -58,7 +72,11 @@ function TransactionRow({
     tx.summary_label?.trim() ||
     (tx.club_name && tx.court_name
       ? `${tx.club_name} · ${tx.court_name}`
-      : tx.club_name ?? tx.court_name ?? (tx.tournament_name ? t('wallet.txTournamentDesc', { name: tx.tournament_name }) : t('wallet.txDefaultDesc')));
+      : tx.club_name ??
+        tx.court_name ??
+        (tx.tournament_name
+          ? t('wallet.txTournamentDesc', { name: tx.tournament_name })
+          : t('wallet.txDefaultDesc')));
 
   const isRefunded = tx.status === 'refunded';
   const isPaid = tx.status === 'succeeded';
@@ -81,15 +99,13 @@ function TransactionRow({
       })
     : formatDate(tx.created_at, t, numberLocale);
 
+  const iconColor = isRefunded ? SKY.color : isPaid ? EMERALD.color : theme.auth.textMuted;
+  const iconName = isRefunded ? 'arrow-undo' : isPaid ? 'checkmark-circle' : 'time-outline';
+
   return (
     <View style={styles.row}>
       <View style={styles.rowLeft}>
-        <Ionicons
-          name={isRefunded ? 'arrow-undo' : isPaid ? 'checkmark-circle' : 'ellipse-outline'}
-          size={18}
-          color={isRefunded ? '#0891b2' : isPaid ? '#16a34a' : '#9ca3af'}
-          style={styles.rowIcon}
-        />
+        <Ionicons name={iconName} size={20} color={iconColor} style={styles.rowIcon} />
         <View style={styles.rowTextBlock}>
           <Text style={styles.rowDesc} numberOfLines={2}>
             {desc}
@@ -107,7 +123,7 @@ function TransactionRow({
         </View>
       </View>
       <Text style={[styles.rowAmount, isRefunded && styles.rowAmountRefund]}>
-        {formatAmount(tx.amount_cents, tx.currency, { negative: isRefunded })}
+        {formatAmount(tx.amount_cents, tx.currency, numberLocale, { negative: isRefunded })}
       </Text>
     </View>
   );
@@ -128,7 +144,6 @@ export function TransaccionesScreen({ onBack }: TransaccionesScreenProps) {
     if (!token) {
       setError(t('wallet.transactionsLogin'));
       setTransactions([]);
-      setLoading(false);
       return;
     }
     const res = await fetchTransactions(token);
@@ -139,100 +154,144 @@ export function TransaccionesScreen({ onBack }: TransaccionesScreenProps) {
       setError(null);
       setTransactions(res.transactions ?? []);
     }
-    setLoading(false);
-    setRefreshing(false);
   }, [session?.access_token, t]);
 
   useEffect(() => {
     setLoading(true);
-    load();
+    void load().finally(() => setLoading(false));
   }, [load]);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    load();
+    await load();
+    setRefreshing(false);
   }, [load]);
 
   return (
     <View style={styles.container}>
-      <BackHeader title={t('wallet.transactionsTitle')} onBack={onBack} />
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingBottom: 24 + (insets.bottom ?? 0) },
-        ]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        showsVerticalScrollIndicator={false}
-      >
-        {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator size="large" color="#1a1a1a" />
-          </View>
-        ) : error ? (
-          <View style={styles.center}>
-            <Ionicons name="alert-circle-outline" size={48} color="#9ca3af" />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : transactions.length === 0 ? (
-          <View style={styles.center}>
-            <Ionicons name="receipt-outline" size={48} color="#9ca3af" />
-            <Text style={styles.emptyText}>{t('wallet.transactionsEmpty')}</Text>
-            <Text style={styles.emptySub}>{t('wallet.transactionsEmptySub')}</Text>
-          </View>
-        ) : (
-          <View style={styles.list}>
-            {transactions.map((item) => (
-              <View key={item.id} style={styles.rowWrapper}>
-                <TransactionRow t={t} numberLocale={numberLocale} tx={item} />
-              </View>
-            ))}
-          </View>
-        )}
-      </ScrollView>
+      <BackHeader title={t('wallet.transactionsTitle')} onBack={onBack} tone="dark" />
+      {loading ? (
+        <View style={styles.centerLoader}>
+          <ActivityIndicator size="large" color={theme.auth.accent} />
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: 24 + (insets.bottom ?? 0) },
+          ]}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => void onRefresh()}
+              tintColor={theme.auth.accent}
+              colors={[theme.auth.accent]}
+            />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          {error ? (
+            <View style={styles.stateBox}>
+              <Ionicons name="alert-circle-outline" size={48} color={theme.auth.error} />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          ) : transactions.length === 0 ? (
+            <View style={styles.stateBox}>
+              <Ionicons name="receipt-outline" size={48} color={theme.auth.textMuted} />
+              <Text style={styles.emptyText}>{t('wallet.transactionsEmpty')}</Text>
+              <Text style={styles.emptySub}>{t('wallet.transactionsEmptySub')}</Text>
+            </View>
+          ) : (
+            <View style={styles.listCard}>
+              {transactions.map((item, index) => (
+                <View key={item.id}>
+                  <TransactionRow t={t} numberLocale={numberLocale} tx={item} />
+                  {index < transactions.length - 1 ? <View style={styles.rowDivider} /> : null}
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: theme.auth.bg },
+  centerLoader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   scroll: { flex: 1 },
   scrollContent: { flexGrow: 1, padding: theme.spacing.lg },
-  center: {
+  stateBox: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 48,
+    paddingVertical: theme.spacing.xxl,
     gap: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.lg,
   },
-  errorText: { fontSize: theme.fontSize.base, color: '#6b7280', textAlign: 'center' },
-  emptyText: { fontSize: theme.fontSize.base, fontWeight: '600', color: '#374151' },
-  emptySub: { fontSize: theme.fontSize.sm, color: '#9ca3af' },
-  list: { gap: 0 },
-  rowWrapper: {
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e5e7eb',
+  errorText: {
+    fontSize: theme.fontSize.base,
+    color: theme.auth.error,
+    textAlign: 'center',
+    lineHeight: theme.lineHeightFor(theme.fontSize.base),
+  },
+  emptyText: {
+    fontSize: theme.fontSize.base,
+    fontWeight: '700',
+    color: theme.auth.text,
+    textAlign: 'center',
+  },
+  emptySub: {
+    fontSize: theme.fontSize.sm,
+    color: theme.auth.textMuted,
+    textAlign: 'center',
+    lineHeight: theme.lineHeightFor(theme.fontSize.sm),
+  },
+  listCard: {
+    backgroundColor: CARD,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    overflow: 'hidden',
+  },
+  rowDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: BORDER,
+    marginHorizontal: theme.spacing.md,
   },
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     paddingVertical: theme.spacing.md,
-    paddingHorizontal: 0,
+    paddingHorizontal: theme.spacing.md,
+    gap: theme.spacing.sm,
   },
   rowLeft: { flexDirection: 'row', alignItems: 'flex-start', flex: 1, minWidth: 0, gap: 10 },
   rowIcon: { marginTop: 2 },
   rowTextBlock: { flex: 1, minWidth: 0 },
-  rowDesc: { fontSize: theme.fontSize.base, fontWeight: '500', color: '#111827' },
-  rowDate: { fontSize: theme.fontSize.sm, color: '#6b7280', marginTop: 2 },
+  rowDesc: { fontSize: theme.fontSize.sm, fontWeight: '600', color: theme.auth.text },
+  rowDate: {
+    fontSize: theme.fontSize.xs,
+    color: theme.auth.textMuted,
+    marginTop: 2,
+    lineHeight: theme.lineHeightFor(theme.fontSize.xs),
+  },
   rowKind: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6b7280',
+    fontSize: theme.fontSize.xs,
+    fontWeight: '700',
+    color: theme.auth.textMuted,
     marginTop: 4,
   },
-  rowKindPaid: { color: '#16a34a' },
-  rowKindRefund: { color: '#0891b2' },
-  rowAmount: { fontSize: theme.fontSize.base, fontWeight: '600', color: '#111827' },
-  rowAmountRefund: { color: '#0891b2' },
+  rowKindPaid: { color: EMERALD.color },
+  rowKindRefund: { color: SKY.color },
+  rowAmount: {
+    fontSize: theme.fontSize.sm,
+    fontWeight: '700',
+    color: theme.auth.text,
+    marginTop: 2,
+  },
+  rowAmountRefund: { color: SKY.color },
 });
