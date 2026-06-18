@@ -577,6 +577,22 @@ router.get('/status', async (req: Request, res: Response) => {
 
 /**
  * @openapi
+ * /matchmaking/pair-invites:
+ *   get:
+ *     tags: [Matchmaking]
+ *     summary: Invitaciones de pareja accionables del jugador
+ *     description: Versión ligera (solo invitaciones) para el selector de compañero, sin contar el pool ni disparar ciclos.
+ */
+router.get('/pair-invites', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const pairInvites = await getActionablePairInvites(supabase, playerId);
+  return res.json({ ok: true, pair_invites: pairInvites });
+});
+
+/**
+ * @openapi
  * /matchmaking/expansion-respond:
  *   post:
  *     tags: [Matchmaking]

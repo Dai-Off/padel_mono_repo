@@ -251,6 +251,27 @@ export async function fetchMatchmakingStatus(
   }
 }
 
+/** Versión ligera: solo las invitaciones de pareja accionables (para el selector de compañero). */
+export async function fetchPairInvites(token: string | null | undefined): Promise<PairInvite[]> {
+  if (!token) return [];
+  try {
+    const res = await fetch(`${API_URL}/matchmaking/pair-invites`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+      },
+      cache: 'no-store' as RequestCache,
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { ok: boolean; pair_invites?: PairInvite[] };
+    if (!json.ok) return [];
+    return json.pair_invites ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchMatchmakingProposal(
   token: string | null | undefined
 ): Promise<MatchmakingProposalResponse | null> {

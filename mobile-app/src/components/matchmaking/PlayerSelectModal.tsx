@@ -20,7 +20,7 @@ import {
   acceptPairInvite,
   cancelPairInvite,
   createPairInvite,
-  fetchMatchmakingStatus,
+  fetchPairInvites,
   rejectPairInvite,
   type PairInvite,
 } from '../../api/matchmaking';
@@ -57,6 +57,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
   const [accepted, setAccepted] = useState<PairInvite[]>([]);
   const [pending, setPending] = useState<PairInvite[]>([]);
   const [received, setReceived] = useState<PairInvite[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [toastVariant, setToastVariant] = useState<'success' | 'error'>('success');
@@ -96,18 +97,20 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
       setAccepted([]);
       setPending([]);
       setReceived([]);
+      setInvitesLoading(false);
       return;
     }
     let cancelled = false;
+    setInvitesLoading(true);
     (async () => {
-      const st = await fetchMatchmakingStatus(token);
+      const invs = await fetchPairInvites(token);
       if (cancelled) return;
-      const invs = st?.pair_invites ?? [];
       // Aceptadas: cualquiera de los dos puede buscar. Enviadas pendientes: solo el invitador (cancelar).
       // Recibidas pendientes: las que me han enviado y debo aceptar/rechazar.
       setAccepted(invs.filter((i) => i.status === 'accepted'));
       setPending(invs.filter((i) => i.role === 'inviter' && i.status === 'pending'));
       setReceived(invs.filter((i) => i.role === 'invitee' && i.status === 'pending'));
+      setInvitesLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -159,8 +162,13 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
   const showReceived = received.length > 0;
   const showAccepted = !!onSelectAccepted && accepted.length > 0;
   const showPending = pending.length > 0;
+  const invitesEmpty = !showReceived && !showAccepted && !showPending;
   const listHeader =
-    showReceived || showAccepted || showPending ? (
+    invitesLoading && invitesEmpty ? (
+      <View style={styles.invitesLoadingWrap}>
+        <ActivityIndicator color={ACCENT} />
+      </View>
+    ) : showReceived || showAccepted || showPending ? (
       <View style={styles.acceptedBlock}>
         {showReceived ? (
           <>
@@ -357,6 +365,7 @@ const styles = StyleSheet.create({
   name: { color: '#fff', fontSize: 15, fontWeight: '600' },
   meta: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
   acceptedBlock: { marginBottom: 4 },
+  invitesLoadingWrap: { paddingVertical: 24, alignItems: 'center' },
   sectionLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
   acceptedRow: { borderColor: 'rgba(241,143,52,0.45)', backgroundColor: 'rgba(241,143,52,0.08)' },
   pendingRow: { borderColor: 'rgba(255,255,255,0.06)', backgroundColor: '#101010' },
