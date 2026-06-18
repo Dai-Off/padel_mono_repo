@@ -542,6 +542,22 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
       .eq('player_id', q.player_id);
   }
 
+  // Parejas premade: tras emparejar, la invitación vuelve a 'accepted' (no queda colgada en
+  // 'searching'). Así la pareja sigue en "Listos para jugar" y puede repetir partido con un
+  // toque, sin tener que re-invitar. Vigencia renovada (7 días, igual que computeDefaultInviteExpiry).
+  const pairExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  for (const q of best.flatRows) {
+    if (!q.paired_with_id) continue;
+    await supabase
+      .from('matchmaking_pair_invites')
+      .update({ status: 'accepted', resolved_at: null, updated_at: nowIso, expires_at: pairExpiry })
+      .or(
+        `and(inviter_player_id.eq.${q.player_id},invitee_player_id.eq.${q.paired_with_id}),` +
+          `and(inviter_player_id.eq.${q.paired_with_id},invitee_player_id.eq.${q.player_id})`,
+      )
+      .eq('status', 'searching');
+  }
+
   return { formed: 1, expired, expansion_prompts };
 }
 
