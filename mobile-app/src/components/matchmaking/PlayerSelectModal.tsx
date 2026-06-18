@@ -15,7 +15,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { searchPlayers, type PlayerSearchHit } from '../../api/players';
-import { cancelPairInvite, fetchMatchmakingStatus, type PairInvite } from '../../api/matchmaking';
+import { cancelPairInvite, createPairInvite, fetchMatchmakingStatus, type PairInvite } from '../../api/matchmaking';
+import { Toast } from '../ui/Toast';
 
 const BG = '#0F0F0F';
 const ACCENT = theme.auth.accent;
@@ -28,14 +29,13 @@ export function playerDisplayName(p: PlayerSearchHit): string {
 type Props = {
   visible: boolean;
   onClose: () => void;
-  onSelect: (player: PlayerSearchHit) => void;
-  /** Tocar un compañero que ya aceptó tu invitación: busca partido directamente con él. */
+  /** Tocar una pareja ya aceptada: ir a preferencias para buscar con ella. */
   onSelectAccepted?: (invite: PairInvite) => void;
   /** Ids a ocultar de los resultados (ej. uno mismo). */
   excludeIds?: string[];
 };
 
-export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted, excludeIds }: Props) {
+export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeIds }: Props) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const token = session?.access_token ?? null;
@@ -46,6 +46,7 @@ export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted
   const [accepted, setAccepted] = useState<PairInvite[]>([]);
   const [pending, setPending] = useState<PairInvite[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -77,7 +78,8 @@ export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted
       const st = await fetchMatchmakingStatus(token);
       if (cancelled) return;
       const invs = st?.pair_invites ?? [];
-      setAccepted(invs.filter((i) => i.role === 'inviter' && i.status === 'accepted'));
+      // Aceptadas: cualquiera de los dos puede buscar. Pendientes enviadas: solo el invitador (cancelar).
+      setAccepted(invs.filter((i) => i.status === 'accepted'));
       setPending(invs.filter((i) => i.role === 'inviter' && i.status === 'pending'));
     })();
     return () => {
@@ -88,6 +90,16 @@ export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted
   const handleCancelInvite = async (inv: PairInvite) => {
     const res = await cancelPairInvite(inv.id, token);
     if (!res.ok) Alert.alert('No se pudo', res.error);
+    setRefreshKey((k) => k + 1);
+  };
+
+  const handleInvite = async (player: PlayerSearchHit) => {
+    const res = await createPairInvite(player.id, token);
+    if (!res.ok) {
+      Alert.alert('No se pudo', res.error);
+      return;
+    }
+    setToastMsg(`Invitación enviada a ${playerDisplayName(player)}`);
     setRefreshKey((k) => k + 1);
   };
 
@@ -157,8 +169,8 @@ export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted
             <Ionicons name="close" size={20} color="#fff" />
           </Pressable>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.title}>Invitar compañero</Text>
-            <Text style={styles.subtitle}>Buscá al jugador con el que querés jugar</Text>
+            <Text style={styles.title}>Jugar con un amigo</Text>
+            <Text style={styles.subtitle}>Elige una pareja aceptada o invita a un jugador</Text>
           </View>
         </View>
 
@@ -195,10 +207,7 @@ export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted
             ListEmptyComponent={<Text style={styles.emptyText}>No se encontraron jugadores.</Text>}
             renderItem={({ item }) => (
               <Pressable
-                onPress={() => {
-                  onSelect(item);
-                  onClose();
-                }}
+                onPress={() => void handleInvite(item)}
                 style={({ pressed }) => [styles.row, pressed && { opacity: 0.85 }]}
               >
                 <View style={styles.avatar}>
@@ -208,11 +217,12 @@ export function PlayerSelectModal({ visible, onClose, onSelect, onSelectAccepted
                   <Text style={styles.name}>{playerDisplayName(item)}</Text>
                   {item.username ? <Text style={styles.meta}>@{item.username}</Text> : null}
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#6B7280" />
+                <Ionicons name="person-add-outline" size={18} color={ACCENT} />
               </Pressable>
             )}
           />
         )}
+        <Toast message={toastMsg} onHide={() => setToastMsg(null)} />
       </View>
     </Modal>
   );

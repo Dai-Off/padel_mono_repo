@@ -3,19 +3,9 @@ import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
-import {
-  acceptPairInvite,
-  acceptAndSearchPairInvite,
-  rejectPairInvite,
-  startSearchPairInvite,
-  type PairInvite,
-} from '../../api/matchmaking';
+import { acceptPairInvite, rejectPairInvite, type PairInvite } from '../../api/matchmaking';
 
 const ACCENT = theme.auth.accent;
-
-function ligaLabel(l?: string): string {
-  return l ? l.charAt(0).toUpperCase() + l.slice(1) : 'el jugador superior';
-}
 
 type Props = {
   invites: PairInvite[];
@@ -23,16 +13,16 @@ type Props = {
   onChanged: () => void;
 };
 
-/** Banner en Home: invitaciones de pareja accionables (entrega in-app por polling). */
+/**
+ * Banner en Home: invitaciones de pareja RECIBIDAS pendientes (entrega in-app por polling).
+ * Aceptar/Rechazar; tras aceptar, la pareja queda lista y se busca desde "Jugar con un amigo".
+ */
 export function PairInviteBanner({ invites, onChanged }: Props) {
   const { session } = useAuth();
   const token = session?.access_token ?? null;
   const [busy, setBusy] = useState(false);
 
-  // Prioriza una invitación recibida pendiente; si no, una mía ya aceptada.
-  const invite =
-    invites.find((i) => i.role === 'invitee' && i.status === 'pending') ??
-    invites.find((i) => i.role === 'inviter' && i.status === 'accepted');
+  const invite = invites.find((i) => i.role === 'invitee' && i.status === 'pending');
   if (!invite) return null;
 
   const run = async (fn: () => Promise<{ ok: boolean; error?: string }>) => {
@@ -44,24 +34,6 @@ export function PairInviteBanner({ invites, onChanged }: Props) {
     onChanged();
   };
 
-  // Antes de buscar, si hay >1 de diferencia de nivel, avisar que se busca al nivel del superior.
-  const confirmSearch = (fn: () => Promise<{ ok: boolean; error?: string }>) => {
-    if ((invite.level_gap ?? 0) > 1) {
-      Alert.alert(
-        'Partido exigente',
-        `Tú y ${invite.other_player_name} tenéis más de un nivel de diferencia. El partido se buscará al nivel de ${ligaLabel(invite.target_liga)} (el del jugador de mayor nivel).`,
-        [
-          { text: 'Cancelar', style: 'cancel' },
-          { text: 'Buscar igualmente', onPress: () => void run(fn) },
-        ],
-      );
-      return;
-    }
-    void run(fn);
-  };
-
-  const isInvitee = invite.role === 'invitee';
-
   return (
     <View style={styles.card}>
       <View style={styles.row}>
@@ -70,51 +42,30 @@ export function PairInviteBanner({ invites, onChanged }: Props) {
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.title} numberOfLines={2}>
-            {isInvitee
-              ? `${invite.other_player_name} te invita a competitiva`
-              : `${invite.other_player_name} aceptó tu invitación`}
+            {invite.other_player_name} te invita a competitiva
           </Text>
-          <Text style={styles.sub} numberOfLines={1}>
-            {isInvitee ? 'Jugaríais juntos como pareja' : 'Tocá buscar para encontrar partido juntos'}
+          <Text style={styles.sub} numberOfLines={2}>
+            Si aceptas, podréis buscar partido juntos desde "Jugar con un amigo"
           </Text>
         </View>
         {busy ? <ActivityIndicator color={ACCENT} /> : null}
       </View>
 
       <View style={styles.actions}>
-        {isInvitee ? (
-          <>
-            <Pressable
-              style={[styles.btn, styles.btnGhost]}
-              disabled={busy}
-              onPress={() => void run(() => rejectPairInvite(invite.id, token))}
-            >
-              <Text style={styles.btnGhostText}>Rechazar</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.btn, styles.btnSecondary]}
-              disabled={busy}
-              onPress={() => void run(() => acceptPairInvite(invite.id, token))}
-            >
-              <Text style={styles.btnSecondaryText}>Aceptar</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.btn, styles.btnPrimary]}
-              disabled={busy}
-              onPress={() => confirmSearch(() => acceptAndSearchPairInvite(invite.id, token))}
-            >
-              <Text style={styles.btnPrimaryText}>Aceptar y buscar</Text>
-            </Pressable>
-          </>
-        ) : (
-          <Pressable
-            style={[styles.btn, styles.btnPrimary]}
-            disabled={busy}
-            onPress={() => confirmSearch(() => startSearchPairInvite(invite.id, token))}
-          >
-            <Text style={styles.btnPrimaryText}>Buscar partido</Text>
-          </Pressable>
-        )}
+        <Pressable
+          style={[styles.btn, styles.btnGhost]}
+          disabled={busy}
+          onPress={() => void run(() => rejectPairInvite(invite.id, token))}
+        >
+          <Text style={styles.btnGhostText}>Rechazar</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.btn, styles.btnPrimary]}
+          disabled={busy}
+          onPress={() => void run(() => acceptPairInvite(invite.id, token))}
+        >
+          <Text style={styles.btnPrimaryText}>Aceptar</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -140,12 +91,10 @@ const styles = StyleSheet.create({
   },
   title: { color: '#fff', fontSize: 15, fontWeight: '700' },
   sub: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' },
-  btn: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10 },
-  btnGhost: { backgroundColor: 'transparent' },
-  btnGhostText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
-  btnSecondary: { backgroundColor: '#262626' },
-  btnSecondaryText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+  actions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10 },
+  btn: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10 },
+  btnGhost: { backgroundColor: '#262626' },
+  btnGhostText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   btnPrimary: { backgroundColor: ACCENT },
-  btnPrimaryText: { color: '#fff', fontSize: 13, fontWeight: '700' },
+  btnPrimaryText: { color: '#fff', fontSize: 14, fontWeight: '700' },
 });

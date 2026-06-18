@@ -300,13 +300,9 @@ export async function rejectMatchmakingProposal(
 
 // ---- Invitaciones de pareja (premade duo) ----
 
-/** Payload para invitar: mismas prefs de cola que join + el jugador invitado. */
-export type PairInvitePayload = MatchmakingJoinPayload & {
-  invitee_player_id: string;
-};
-
+/** Crear invitación: solo el jugador invitado. Las preferencias se fijan al buscar. */
 export async function createPairInvite(
-  body: PairInvitePayload,
+  inviteeId: string,
   token: string | null | undefined
 ): Promise<{ ok: true; invite_id: string } | { ok: false; error: string }> {
   if (!token) return { ok: false, error: 'Token requerido' };
@@ -320,7 +316,7 @@ export async function createPairInvite(
         Pragma: 'no-cache',
       },
       cache: 'no-store' as RequestCache,
-      body: JSON.stringify(body),
+      body: JSON.stringify({ invitee_player_id: inviteeId }),
     });
     const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; invite_id?: string };
     if (res.ok && json.invite_id) return { ok: true, invite_id: json.invite_id };
@@ -330,10 +326,11 @@ export async function createPairInvite(
   }
 }
 
-async function postPairInviteAction(
+async function postPairInvite(
   inviteId: string,
   action: 'accept' | 'accept-and-search' | 'start-search' | 'reject' | 'cancel',
-  token: string | null | undefined
+  token: string | null | undefined,
+  body?: MatchmakingJoinPayload
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!token) return { ok: false, error: 'Token requerido' };
   try {
@@ -341,10 +338,12 @@ async function postPairInviteAction(
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
       },
       cache: 'no-store' as RequestCache,
+      body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) return { ok: false, error: await parseErrorMessage(res) };
     return { ok: true };
@@ -354,15 +353,23 @@ async function postPairInviteAction(
 }
 
 export const acceptPairInvite = (id: string, token: string | null | undefined) =>
-  postPairInviteAction(id, 'accept', token);
-export const acceptAndSearchPairInvite = (id: string, token: string | null | undefined) =>
-  postPairInviteAction(id, 'accept-and-search', token);
-export const startSearchPairInvite = (id: string, token: string | null | undefined) =>
-  postPairInviteAction(id, 'start-search', token);
+  postPairInvite(id, 'accept', token);
 export const rejectPairInvite = (id: string, token: string | null | undefined) =>
-  postPairInviteAction(id, 'reject', token);
+  postPairInvite(id, 'reject', token);
 export const cancelPairInvite = (id: string, token: string | null | undefined) =>
-  postPairInviteAction(id, 'cancel', token);
+  postPairInvite(id, 'cancel', token);
+/** Buscar con una pareja ya aceptada, con las prefs actuales (cualquiera de los dos). */
+export const startSearchPairInvite = (
+  id: string,
+  prefs: MatchmakingJoinPayload,
+  token: string | null | undefined
+) => postPairInvite(id, 'start-search', token, prefs);
+/** Aceptar y buscar a la vez (invitado), con las prefs actuales. */
+export const acceptAndSearchPairInvite = (
+  id: string,
+  prefs: MatchmakingJoinPayload,
+  token: string | null | undefined
+) => postPairInvite(id, 'accept-and-search', token, prefs);
 
 export async function respondMatchmakingExpansion(
   accept: boolean,

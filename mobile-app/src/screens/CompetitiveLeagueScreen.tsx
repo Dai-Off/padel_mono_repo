@@ -27,8 +27,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
-import { PlayerSelectModal, playerDisplayName } from '../components/matchmaking/PlayerSelectModal';
-import type { PlayerSearchHit } from '../api/players';
+import { PlayerSelectModal } from '../components/matchmaking/PlayerSelectModal';
 import { useClubCatalog } from '../hooks/useClubCatalog';
 import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
 import { computeMatchAvailabilityWindow } from '../lib/matchAvailabilityWindow';
@@ -43,7 +42,6 @@ import {
   fetchMatchmakingStatus,
   isMatchmakingFlowPending,
   joinMatchmaking,
-  createPairInvite,
   startSearchPairInvite,
   leaveMatchmaking,
   rejectMatchmakingProposal,
@@ -57,7 +55,7 @@ import {
 import { useHomeData } from '../contexts/HomeDataContext';
 import { getMatchBooking } from '../domain/matchLifecycle';
 
-type Step = 'home' | 'prefs' | 'queue' | 'found';
+type Step = 'home' | 'mode' | 'prefs' | 'queue' | 'found';
 type MainTab = 'liga' | 'ranking';
 type SearchArea = 'club' | 'km5' | 'km10' | 'km25';
 type SearchForm = {
@@ -132,7 +130,7 @@ export function CompetitiveLeagueScreen({
   const [preferredClubIds, setPreferredClubIds] = useState<string[]>([]);
   const [clubPickerVisible, setClubPickerVisible] = useState(false);
   const [partnerPickerVisible, setPartnerPickerVisible] = useState(false);
-  const [selectedPartner, setSelectedPartner] = useState<PlayerSearchHit | null>(null);
+  const [searchPartner, setSearchPartner] = useState<PairInvite | null>(null);
   const [preferredClubsHydrated, setPreferredClubsHydrated] = useState(false);
   const preferredClubsSeedDoneRef = useRef(false);
   const { clubs: clubCatalog } = useClubCatalog();
@@ -327,6 +325,7 @@ export function CompetitiveLeagueScreen({
   useEffect(() => {
     if (lastAppliedEntryIntentRef.current === entryIntent) return;
     if (entryIntent === 'prefs') {
+      setSearchPartner(null);
       setStep('prefs');
       if (matchmakingBannerState === 'timed_out') {
         setErrorText('No se encontraron jugadores. Ajusta los parámetros y vuelve a intentar.');
@@ -608,19 +607,38 @@ export function CompetitiveLeagueScreen({
       payload.search_lat = loc.coords.lat;
       payload.search_lng = loc.coords.lng;
     }
-    // Con compañero elegido: en vez de entrar a la cola, enviamos invitación.
-    // A queda a la espera; cuando el otro acepte podrán buscar partido juntos.
-    if (selectedPartner) {
-      setLoading(true);
-      const inv = await createPairInvite({ ...payload, invitee_player_id: selectedPartner.id }, token);
-      setLoading(false);
-      if (!inv.ok) {
-        setErrorText(inv.error);
+    // Con una pareja ya aceptada: buscar juntos usando ESTAS preferencias (start-search).
+    if (searchPartner) {
+      const proceed = async () => {
+        setLoading(true);
+        const res = await startSearchPairInvite(searchPartner.id, payload, token);
+        setLoading(false);
+        if (!res.ok) {
+          setErrorText(res.error);
+          return;
+        }
+        setQueueStartedAtMs(Date.now());
+        setQueueElapsedSec(0);
+        onMatchmakingBannerStateChange?.('searching', { force: true });
+        setStep('queue');
+        await pollStatus();
+      };
+      // Aviso antes de buscar si hay >1 de diferencia de nivel.
+      if ((searchPartner.level_gap ?? 0) > 1) {
+        const liga = searchPartner.target_liga
+          ? searchPartner.target_liga.charAt(0).toUpperCase() + searchPartner.target_liga.slice(1)
+          : 'el jugador superior';
+        Alert.alert(
+          'Partido exigente',
+          `Tú y ${searchPartner.other_player_name} tenéis más de un nivel de diferencia. El partido se buscará al nivel de ${liga}.`,
+          [
+            { text: 'Cancelar', style: 'cancel' },
+            { text: 'Buscar igualmente', onPress: () => void proceed() },
+          ],
+        );
         return;
       }
-      const name = playerDisplayName(selectedPartner);
-      setSelectedPartner(null);
-      Alert.alert('Invitación enviada', `Avisamos a ${name}. Cuando acepte, buscaréis partido juntos.`);
+      await proceed();
       return;
     }
     setLoading(true);
@@ -645,60 +663,11 @@ export function CompetitiveLeagueScreen({
     preferredClubIds,
     searchCoords,
     clubCatalog,
-    selectedPartner,
+    searchPartner,
     session?.access_token,
     setQueueElapsedSec,
     setQueueStartedAtMs,
   ]);
-
-  // Compañero que ya aceptó: encola a ambos y entra a la cola (las prefs se fijaron al invitar).
-  const handleSearchWithAccepted = useCallback(
-    async (invite: PairInvite) => {
-      const token = session?.access_token ?? null;
-      if (!token) return;
-      const proceed = async () => {
-        setErrorText(null);
-        clearPollTimer();
-        setLoading(true);
-        const res = await startSearchPairInvite(invite.id, token);
-        setLoading(false);
-        if (!res.ok) {
-          setErrorText(res.error);
-          return;
-        }
-        setSelectedPartner(null);
-        setQueueStartedAtMs(Date.now());
-        setQueueElapsedSec(0);
-        onMatchmakingBannerStateChange?.('searching', { force: true });
-        setStep('queue');
-        await pollStatus();
-      };
-      // Aviso antes de buscar si hay >1 de diferencia de nivel.
-      if ((invite.level_gap ?? 0) > 1) {
-        const liga = invite.target_liga
-          ? invite.target_liga.charAt(0).toUpperCase() + invite.target_liga.slice(1)
-          : 'el jugador superior';
-        Alert.alert(
-          'Partido exigente',
-          `Tú y ${invite.other_player_name} tenéis más de un nivel de diferencia. El partido se buscará al nivel de ${liga}.`,
-          [
-            { text: 'Cancelar', style: 'cancel' },
-            { text: 'Buscar igualmente', onPress: () => void proceed() },
-          ],
-        );
-        return;
-      }
-      await proceed();
-    },
-    [
-      clearPollTimer,
-      onMatchmakingBannerStateChange,
-      pollStatus,
-      session?.access_token,
-      setQueueElapsedSec,
-      setQueueStartedAtMs,
-    ],
-  );
 
   const handleLeaveQueue = useCallback(async () => {
     const token = session?.access_token ?? null;
@@ -899,6 +868,7 @@ export function CompetitiveLeagueScreen({
   useEffect(() => {
     if (matchmakingBannerState !== 'timed_out') return;
     setErrorText('No se encontraron jugadores. Ajusta los parámetros y vuelve a intentar.');
+    setSearchPartner(null);
     setStep('prefs');
   }, [matchmakingBannerState]);
 
@@ -1007,7 +977,13 @@ export function CompetitiveLeagueScreen({
           {mainTab === 'liga' ? (
             <>
               <LinearGradient colors={['#4B2403', '#A56611']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.searchCard}>
-                <Pressable style={styles.searchCardPress} onPress={() => setStep('prefs')}>
+                <Pressable
+                  style={styles.searchCardPress}
+                  onPress={() => {
+                    setSearchPartner(null);
+                    setStep('mode');
+                  }}
+                >
                   <View style={styles.searchIconWrap}>
                     <Ionicons name="flash-outline" size={22} color="#fff" />
                   </View>
@@ -1149,10 +1125,48 @@ export function CompetitiveLeagueScreen({
         )
       )}
 
+      {step === 'mode' && (
+        <View style={[styles.content, { paddingTop: FLOW_TOP_PADDING, paddingBottom: insets.bottom + 20 }]}>
+          <View style={styles.stepHeader}>
+            <Pressable style={styles.stepBackBtn} onPress={() => setStep('home')}>
+              <Ionicons name="arrow-back" size={16} color="#fff" />
+            </Pressable>
+            <View>
+              <Text style={styles.sectionTitle}>¿Cómo quieres jugar?</Text>
+              <Text style={styles.stepSubtitle}>Busca tú solo o invita a un compañero</Text>
+            </View>
+          </View>
+
+          <Pressable
+            style={[styles.clubPickerBtn, { marginBottom: 12 }]}
+            onPress={() => {
+              setSearchPartner(null);
+              setStep('prefs');
+            }}
+          >
+            <Ionicons name="person" size={20} color="#F59E0B" style={{ marginRight: 10 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.clubPickerBtnTitle}>Jugar solo</Text>
+              <Text style={styles.clubPickerBtnSub}>Te buscamos compañero y pareja rival</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+          </Pressable>
+
+          <Pressable style={styles.clubPickerBtn} onPress={() => setPartnerPickerVisible(true)}>
+            <Ionicons name="people" size={20} color="#F59E0B" style={{ marginRight: 10 }} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.clubPickerBtnTitle}>Jugar con un amigo</Text>
+              <Text style={styles.clubPickerBtnSub}>Invita a un compañero o elige una pareja ya aceptada</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+          </Pressable>
+        </View>
+      )}
+
       {step === 'prefs' && (
         <ScrollView contentContainerStyle={[styles.content, { paddingTop: FLOW_TOP_PADDING, paddingBottom: insets.bottom + 32 }]}>
           <View style={styles.stepHeader}>
-            <Pressable style={styles.stepBackBtn} onPress={() => setStep('home')}>
+            <Pressable style={styles.stepBackBtn} onPress={() => setStep('mode')}>
               <Ionicons name="arrow-back" size={16} color="#fff" />
             </Pressable>
             <View>
@@ -1162,6 +1176,13 @@ export function CompetitiveLeagueScreen({
               </Text>
             </View>
           </View>
+
+          {searchPartner ? (
+            <View style={styles.partnerLockRow}>
+              <Ionicons name="people" size={16} color="#F59E0B" />
+              <Text style={styles.partnerLockText}>Buscas partido con {searchPartner.other_player_name}</Text>
+            </View>
+          ) : null}
 
           {!MATCHMAKING_DEMO && preferredClubIds.length === 0 && locationIssue ? (
             <View style={styles.locationBanner}>
@@ -1339,40 +1360,13 @@ export function CompetitiveLeagueScreen({
             </Pressable>
           </View>
 
-          <View style={styles.optionSection}>
-            <View style={styles.optionTitleRow}>
-              <Ionicons name="person-add-outline" size={14} color="#F59E0B" />
-              <Text style={styles.optionTitle}>Compañero (opcional)</Text>
-            </View>
-            <Pressable style={styles.clubPickerBtn} onPress={() => setPartnerPickerVisible(true)}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.clubPickerBtnTitle}>
-                  {selectedPartner ? playerDisplayName(selectedPartner) : 'Invitar compañero'}
-                </Text>
-                <Text style={styles.clubPickerBtnSub} numberOfLines={2}>
-                  {selectedPartner
-                    ? 'Le enviaremos una invitación para jugar juntos'
-                    : 'Juega con quien quieras (máx. 1.5 de diferencia de nivel)'}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
-            </Pressable>
-            {selectedPartner ? (
-              <Pressable onPress={() => setSelectedPartner(null)} hitSlop={8} style={{ marginTop: 6 }}>
-                <Text style={{ color: '#F59E0B', fontSize: 12, fontWeight: '600' }}>Quitar compañero</Text>
-              </Pressable>
-            ) : null}
-          </View>
-
           <Pressable style={styles.primaryBtn} onPress={() => void handleJoinQueue()} disabled={loading}>
-            <Ionicons name={selectedPartner ? 'person-add' : 'flash'} size={16} color="#fff" />
+            <Ionicons name={searchPartner ? 'people' : 'flash'} size={16} color="#fff" />
             <Text style={styles.primaryBtnText}>
               {loading
-                ? selectedPartner
-                  ? 'Enviando...'
-                  : 'Buscando...'
-                : selectedPartner
-                  ? `Invitar a ${playerDisplayName(selectedPartner)}`
+                ? 'Buscando...'
+                : searchPartner
+                  ? `Buscar con ${searchPartner.other_player_name}`
                   : 'Buscar partido competitivo'}
             </Text>
           </Pressable>
@@ -1519,8 +1513,11 @@ export function CompetitiveLeagueScreen({
       <PlayerSelectModal
         visible={partnerPickerVisible}
         onClose={() => setPartnerPickerVisible(false)}
-        onSelect={setSelectedPartner}
-        onSelectAccepted={(inv) => void handleSearchWithAccepted(inv)}
+        onSelectAccepted={(inv) => {
+          setPartnerPickerVisible(false);
+          setSearchPartner(inv);
+          setStep('prefs');
+        }}
         excludeIds={profile?.id ? [profile.id] : undefined}
       />
     </View>
@@ -1938,6 +1935,19 @@ const styles = StyleSheet.create({
   },
   clubPickerBtnTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
   clubPickerBtnSub: { color: '#9ca3af', fontSize: 12, marginTop: 4 },
+  partnerLockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(241,143,52,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(241,143,52,0.45)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 4,
+  },
+  partnerLockText: { color: '#fff', fontSize: 13, fontWeight: '600', flexShrink: 1 },
   clubRow: {
     borderRadius: 12,
     borderWidth: 1,
