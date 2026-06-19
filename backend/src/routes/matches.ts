@@ -52,7 +52,7 @@ function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_proposer_id,
           ${bookingRel} (
-            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type,
+            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type, deleted_at,
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type, sport,
@@ -389,8 +389,9 @@ router.get('/mine', async (req: Request, res: Response) => {
 
     const filtered = (data ?? []).filter((row: any) => {
       const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
-      // Si no tiene booking usamos sólo el estado para determinar la fase.
-      const listPhase = getMatchListPhase(nowMs, row.status, b?.start_at, b?.end_at);
+      if (!b?.start_at || !b?.end_at) return false;
+      if (b.deleted_at != null) return false;
+      const listPhase = getMatchListPhase(nowMs, row.status, b.start_at, b.end_at);
       if (phase === 'past') return listPhase === 'past';
       if (phase === 'upcoming') return listPhase !== 'past';
       return true;
