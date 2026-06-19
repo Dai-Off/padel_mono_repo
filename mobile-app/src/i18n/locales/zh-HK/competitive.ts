@@ -102,10 +102,11 @@ export const competitive: CompetitiveTranslationKeys = {
       },
       how: {
         title: '聯賽玩法',
-        line1: '⚔️ 所有比賽皆為 2v2 雙打',
-        line2: '↗ 勝利：依對手等級獲得 +20 至 +25 LP',
-        line3: '↘ 落敗：依等級差距扣 -15 至 -20 LP',
-        line5: '🔁 排行榜將於每個賽季通行證結束時重置',
+        line1: '⚔️ 2v2 雙打，按你的水平配對。',
+        line2: '📈 獲勝可累積 LP 並升級組別：Bronce → Plata → Oro → Élite。',
+        line3: '📉 落敗可能會降級。',
+        line5: '🛡️ 升級後，你的前 3 場比賽受保護：即使落敗也不會降級。',
+        season: '🏆 賽季結束時，你會根據所達到的組別和排名獲得獎勵。',
       },
       ranking: {
         loading: '正在載入排行榜…',

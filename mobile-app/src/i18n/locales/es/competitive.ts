@@ -104,10 +104,11 @@ export const competitive: CompetitiveTranslationKeys = {
       },
       how: {
         title: 'Cómo funciona la liga',
-        line1: '⚔️ Todos los partidos son 2v2 por parejas',
-        line2: '↗ Victoria: +20 a +25 LP según el nivel del rival',
-        line3: '↘ Derrota: -15 a -20 LP según la diferencia de nivel',
-        line5: '🔁 Los rankings se reinician al final de cada Pase de Temporada',
+        line1: '⚔️ 2v2 por parejas, emparejados a tu nivel.',
+        line2: '📈 Gana para subir y ascender de división: Bronce → Plata → Oro → Élite.',
+        line3: '📉 Si pierdes, puedes descender de división.',
+        line5: '🛡️ Tras ascender, tus 3 primeros partidos están protegidos: no desciendes aunque pierdas.',
+        season: '🏆 Al terminar la temporada recibes recompensas según tu división y ranking.',
       },
       ranking: {
         loading: 'Cargando ranking…',

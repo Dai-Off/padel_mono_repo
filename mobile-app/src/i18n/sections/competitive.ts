@@ -58,7 +58,7 @@ export interface CompetitiveTranslationKeys {
       rivalsPending: string;
       recent: string;
     };
-    how: { title: string; line1: string; line2: string; line3: string; line5: string };
+    how: { title: string; line1: string; line2: string; line3: string; line5: string; season: string };
     ranking: {
       loading: string;
       showing: string;

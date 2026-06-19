@@ -960,8 +960,11 @@ export function CompetitiveLeagueScreen({
   const rankingLoadedCount = rankingRows.length;
   const rankingPlayerCount = rankingTotal > 0 ? rankingTotal : rankingLoadedCount;
 
-  // Invitaciones aceptadas pendientes de buscar partido (cualquiera de los dos puede iniciar).
-  const acceptedInvitesCount = (status?.pair_invites ?? []).filter((i) => i.status === 'accepted').length;
+  // Pompa de "Con un amigo": invitaciones que requieren tu atención = recibidas pendientes
+  // (responder) + aceptadas pendientes de buscar. Las enviadas pendientes no cuentan.
+  const pairInviteBadgeCount = (status?.pair_invites ?? []).filter(
+    (i) => i.status === 'accepted' || (i.role === 'invitee' && i.status === 'pending'),
+  ).length;
 
   return (
     <View style={styles.container}>
@@ -1077,9 +1080,9 @@ export function CompetitiveLeagueScreen({
                     <Text style={styles.searchTitle}>{t('competitive.screen.search.title')}</Text>
                     <Text style={styles.searchSubtitle}>{t('competitive.screen.search.subtitle')}</Text>
                   </View>
-                  {acceptedInvitesCount > 0 ? (
+                  {pairInviteBadgeCount > 0 ? (
                     <View style={styles.notifBadge}>
-                      <Text style={styles.notifBadgeText}>{acceptedInvitesCount}</Text>
+                      <Text style={styles.notifBadgeText}>{pairInviteBadgeCount}</Text>
                     </View>
                   ) : null}
                   <Ionicons name="chevron-forward" size={20} color="#f6ddbf" />
@@ -1126,6 +1129,7 @@ export function CompetitiveLeagueScreen({
                     : t('competitive.lp.maxDivision')}
                 </Text>
                 <Text style={styles.howLine}>{t('competitive.screen.how.line5')}</Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.season')}</Text>
               </View>
             </>
           ) : (
@@ -1630,9 +1634,9 @@ export function CompetitiveLeagueScreen({
               <Text style={styles.modeOptionTitle}>{t('competitive.mode.friend')}</Text>
               <Text style={styles.modeOptionSub}>{t('competitive.mode.friendSub')}</Text>
             </View>
-            {acceptedInvitesCount > 0 ? (
+            {pairInviteBadgeCount > 0 ? (
               <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{acceptedInvitesCount}</Text>
+                <Text style={styles.notifBadgeText}>{pairInviteBadgeCount}</Text>
               </View>
             ) : null}
             <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
