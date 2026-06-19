@@ -607,7 +607,7 @@ router.post('/run-debt-settlement', async (req: Request, res: Response) => {
     if (h !== secret) return res.status(403).json({ ok: false, error: 'No autorizado' });
   }
   try {
-    const { finished, cancelled } = await finalizePastMatches();
+    const { finished, cancelled } = await finalizePastMatches({ cancelIncomplete: true });
     const result = await settleOverdueMatchPayments();
     return res.json({ ok: true, finished, cancelled, ...result });
   } catch (e) {
