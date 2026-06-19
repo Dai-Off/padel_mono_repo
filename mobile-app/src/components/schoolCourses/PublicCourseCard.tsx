@@ -3,6 +3,17 @@ import { View, Text, TouchableOpacity, StyleSheet, Image, Dimensions } from 'rea
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { PublicCourse } from '../../api/schoolCourses';
+import { useTranslation } from '../../i18n';
+
+const WEEKDAY_KEYS: Record<string, string> = {
+  mon: 'common.weekdayMon',
+  tue: 'common.weekdayTue',
+  wed: 'common.weekdayWed',
+  thu: 'common.weekdayThu',
+  fri: 'common.weekdayFri',
+  sat: 'common.weekdaySat',
+  sun: 'common.weekdaySun',
+};
 
 const { width } = Dimensions.get('window');
 
@@ -13,21 +24,14 @@ interface PublicCourseCardProps {
 }
 
 export const PublicCourseCard: React.FC<PublicCourseCardProps> = ({ course, onPress, isReserved }) => {
+  const { t } = useTranslation();
   const price = (course.price_cents / 100).toFixed(0);
   const imageUrl = course.club_logo_url || "https://images.unsplash.com/photo-1658491830143-72808ca237e3?w=400&h=300&fit=crop";
 
-  // Formateo de fecha
   const firstDay = course.days[0];
-  const weekdayNames: Record<string, string> = {
-    mon: "jueves", // Mocked as per snippet or dynamic if needed
-    tue: "martes",
-    wed: "miércoles",
-    thu: "jueves",
-    fri: "viernes",
-    sat: "sábado",
-    sun: "domingo",
-  };
-  const dateStr = firstDay ? `${weekdayNames[firstDay.weekday]}, 29 de enero` : "Fecha a confirmar";
+  const dateStr = firstDay
+    ? t(WEEKDAY_KEYS[firstDay.weekday] ?? firstDay.weekday)
+    : t('learning.schoolDateTbc');
   const timeStr = firstDay ? firstDay.start_time : "11:30";
 
   return (
@@ -45,7 +49,7 @@ export const PublicCourseCard: React.FC<PublicCourseCardProps> = ({ course, onPr
         {isReserved && (
           <View style={styles.reservedBadge}>
             <Text style={styles.reservedBadgeCheck}>✓</Text>
-            <Text style={styles.reservedBadgeLabel}>Reservada</Text>
+            <Text style={styles.reservedBadgeLabel}>{t('learning.schoolReserved')}</Text>
           </View>
         )}
 
@@ -61,7 +65,7 @@ export const PublicCourseCard: React.FC<PublicCourseCardProps> = ({ course, onPr
             />
             {/* Price Badge Overlay */}
             <View style={styles.priceOverlay}>
-              <Text style={styles.priceValue}>{price}€<Text style={styles.priceUnit}>/clase</Text></Text>
+              <Text style={styles.priceValue}>{price}€<Text style={styles.priceUnit}>{t('learning.schoolPerClass')}</Text></Text>
             </View>
           </View>
 
@@ -87,7 +91,7 @@ export const PublicCourseCard: React.FC<PublicCourseCardProps> = ({ course, onPr
                 <Text style={styles.badgeText}>📊 {course.level}</Text>
               </View>
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>⚥ Mixto</Text>
+                <Text style={styles.badgeText}>⚥ {t('learning.schoolMixed')}</Text>
               </View>
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>👥 {course.enrolled_count}/{course.capacity}</Text>

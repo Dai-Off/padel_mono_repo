@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useTranslation } from '../../i18n';
 
 const ACCENT = '#F18F34';
 
@@ -20,6 +21,7 @@ type Props = {
  * `value`; si `onChange` devuelve `false`, revierte.
  */
 export function AffinityVisibilityToggle({ value, onChange, disabled }: Props) {
+  const { t } = useTranslation();
   const [optimistic, setOptimistic] = useState(value);
   useEffect(() => {
     setOptimistic(value);
@@ -40,11 +42,8 @@ export function AffinityVisibilityToggle({ value, onChange, disabled }: Props) {
       disabled={disabled}
     >
       <View style={styles.textWrap}>
-        <Text style={styles.title}>Visible en búsquedas de afinidad</Text>
-        <Text style={styles.subtitle}>
-          Otros jugadores pueden encontrarte al buscar compañero con la IA. Es
-          necesario para poder buscar tú también.
-        </Text>
+        <Text style={styles.title}>{t('profile.affinityVisibleTitle')}</Text>
+        <Text style={styles.subtitle}>{t('profile.affinityVisibleSubtitle')}</Text>
       </View>
       <View style={[styles.track, optimistic && styles.trackOn]}>
         <View style={[styles.thumb, optimistic && styles.thumbOn]} />

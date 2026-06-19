@@ -8,8 +8,10 @@ import { useAuth } from '../../contexts/AuthContext';
 import { sendDirectMessage } from '../../api/messages';
 import { searchPlayers } from '../../api/players';
 import type { MatchmakingProposalResponse, MatchmakingStatusResponse } from '../../api/matchmaking';
+import { formatLocale, useTranslation } from '../../i18n';
 
 type Option = { id: string; label: string };
+type TFn = (key: string, params?: Record<string, string | number>) => string;
 type OptionGroupId = 'day' | 'time' | 'preferred_side' | 'gender' | 'search_area';
 type OptionGroup = {
   id: OptionGroupId;
@@ -19,61 +21,67 @@ type OptionGroup = {
 };
 
 /** Criterios alineados con `POST /matchmaking/join` (doc 06_matchmaking.md). */
-const GROUPS: OptionGroup[] = [
-  {
-    id: 'day',
-    title: '¿Cuándo podés jugar?',
-    icon: 'calendar-outline',
-    options: [
-      { id: 'hoy', label: 'Hoy' },
-      { id: 'manana', label: 'Mañana' },
-      { id: 'esta-semana', label: 'Esta semana' },
-      { id: 'fin-semana', label: 'Este fin de semana' },
-    ],
-  },
-  {
-    id: 'time',
-    title: '¿Franja horaria?',
-    icon: 'time-outline',
-    options: [
-      { id: 'manana', label: 'Mañana' },
-      { id: 'tarde', label: 'Tarde' },
-      { id: 'noche', label: 'Noche' },
-    ],
-  },
-  {
-    id: 'preferred_side',
-    title: '¿Lado preferido en la pista?',
-    icon: 'swap-horizontal-outline',
-    options: [
-      { id: 'drive', label: 'Drive' },
-      { id: 'backhand', label: 'Revés' },
-      { id: 'any', label: 'Cualquiera' },
-    ],
-  },
-  {
-    id: 'gender',
-    title: '¿Tipo de partido (género)?',
-    icon: 'people-outline',
-    options: [
-      { id: 'male', label: 'Solo hombres' },
-      { id: 'female', label: 'Solo mujeres' },
-      { id: 'mixed', label: 'Mixto' },
-      { id: 'any', label: 'Sin preferencia' },
-    ],
-  },
-  {
-    id: 'search_area',
-    title: '¿Dónde buscar partido?',
-    icon: 'navigate-outline',
-    options: [
-      { id: 'club', label: 'Club WeMatch (asignado)' },
-      { id: 'km5', label: 'Radio 5 km desde mi ubicación' },
-      { id: 'km10', label: 'Radio 10 km desde mi ubicación' },
-      { id: 'km25', label: 'Radio 25 km desde mi ubicación' },
-    ],
-  },
-];
+function buildGroups(t: TFn, numberLocale: string): OptionGroup[] {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowLabel = tomorrow.toLocaleDateString(numberLocale, { day: 'numeric', month: 'short' });
+
+  return [
+    {
+      id: 'day',
+      title: t('preferences.scheduleAvailableSub'),
+      icon: 'calendar-outline',
+      options: [
+        { id: 'hoy', label: t('common.today') },
+        { id: 'manana', label: tomorrowLabel },
+        { id: 'esta-semana', label: t('preferences.preferredDays') },
+        { id: 'fin-semana', label: `${t('common.weekdaySat')}-${t('common.weekdaySun')}` },
+      ],
+    },
+    {
+      id: 'time',
+      title: t('preferences.scheduleAvailableSub'),
+      icon: 'time-outline',
+      options: [
+        { id: 'manana', label: t('preferences.slotMorning') },
+        { id: 'tarde', label: t('preferences.slotAfternoon') },
+        { id: 'noche', label: t('preferences.slotEvening') },
+      ],
+    },
+    {
+      id: 'preferred_side',
+      title: t('preferences.sidePreferredSub'),
+      icon: 'swap-horizontal-outline',
+      options: [
+        { id: 'drive', label: t('preferences.sideRight') },
+        { id: 'backhand', label: t('preferences.sideLeft') },
+        { id: 'any', label: t('preferences.partnerAny') },
+      ],
+    },
+    {
+      id: 'gender',
+      title: t('preferences.playStyleSub'),
+      icon: 'people-outline',
+      options: [
+        { id: 'male', label: t('common.male') },
+        { id: 'female', label: t('common.female') },
+        { id: 'mixed', label: t('common.friendly') },
+        { id: 'any', label: t('preferences.partnerAny') },
+      ],
+    },
+    {
+      id: 'search_area',
+      title: t('preferences.favoriteClubsSub'),
+      icon: 'navigate-outline',
+      options: [
+        { id: 'club', label: t('preferences.clubsPickerTitle') },
+        { id: 'km5', label: t('common.nearest') },
+        { id: 'km10', label: t('common.sortByDistance') },
+        { id: 'km25', label: t('common.noLimit') },
+      ],
+    },
+  ];
+}
 
 type Selections = Record<OptionGroupId, string>;
 const DEFAULT_SELECTIONS: Selections = {
@@ -104,7 +112,7 @@ export type MatchCandidate = {
   reason: string;
 };
 
-const AI_AUTO_DM_TEXT = '¡Hola! Me gustaría jugar Pádel contigo. ¿Tienes disponibilidad?';
+const AI_AUTO_DM_TEXT_KEY = 'messages.threadEmpty';
 
 function normalizeText(value: string): string {
   return value
@@ -114,7 +122,7 @@ function normalizeText(value: string): string {
     .toLowerCase();
 }
 
-function parseCandidatesFromResponse(text: string): MatchCandidate[] {
+function parseCandidatesFromResponse(text: string, t: TFn): MatchCandidate[] {
   const tryParseJsonLike = (raw: string): unknown | null => {
     const trimmed = raw.trim();
     if (!trimmed) return null;
@@ -158,14 +166,14 @@ function parseCandidatesFromResponse(text: string): MatchCandidate[] {
           id: String(index + 1),
           name,
           matchPercent: Number(p.matchPercent ?? p.compatibility ?? 90),
-          level: String(p.level ?? p.nivel ?? 'Nivel compatible'),
+          level: String(p.level ?? p.nivel ?? t('preferences.partnerSimilar')),
           stats: {
             matches: Number(p.matches ?? p.partidos ?? 0),
             wins: String(p.wins ?? p.victorias ?? '-'),
             distance: String(p.distance ?? p.distancia ?? '-'),
           },
-          tags: Array.isArray(p.tags) ? (p.tags as string[]) : ['Pádel'],
-          reason: String(p.reason ?? p.razon ?? 'Recomendado por la IA.'),
+          tags: Array.isArray(p.tags) ? (p.tags as string[]) : [t('common.sportPadel')],
+          reason: String(p.reason ?? p.razon ?? t('messages.iaMatchReason')),
         } satisfies MatchCandidate;
       })
       .filter((x): x is MatchCandidate => x != null)
@@ -220,10 +228,10 @@ function parseCandidatesFromResponse(text: string): MatchCandidate[] {
     id: `${index + 1}`,
     name,
     matchPercent: Math.max(80, 98 - index * 3),
-    level: 'Nivel compatible',
+    level: t('preferences.partnerSimilar'),
     stats: { matches: 0, wins: '-', distance: '-' },
-    tags: ['Pádel'],
-    reason: 'Recomendado por la IA según afinidad de nivel y disponibilidad.',
+    tags: [t('common.sportPadel')],
+    reason: t('messages.iaMatchReason'),
   }));
 }
 
@@ -288,13 +296,14 @@ function CandidateCard({
   onMessagePress: (candidate: MatchCandidate) => void;
   sending: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <View style={styles.candidateCard}>
       <View style={styles.candidateHeader}>
         <View style={styles.avatarWrap}>
           <View style={styles.avatarGlow} />
           <View style={styles.avatar}>
-            <Text style={styles.avatarInitial}>M</Text>
+            <Text style={styles.avatarInitial}>{candidate.name.charAt(0).toUpperCase()}</Text>
           </View>
           <View style={styles.onlineDot}>
             <View style={styles.onlineInnerDot} />
@@ -302,7 +311,7 @@ function CandidateCard({
         </View>
         <View style={styles.candidateHeaderContent}>
           <View style={styles.candidateTitleRow}>
-            <Text style={styles.candidateName} numberOfLines={1}>Partido encontrado</Text>
+            <Text style={styles.candidateName} numberOfLines={1}>{candidate.name}</Text>
             <View style={styles.percentPill}>
               <Ionicons name="sparkles" size={12} color="#F18F34" />
               <Text style={styles.percentText}>
@@ -316,32 +325,32 @@ function CandidateCard({
 
       <View style={styles.statGrid}>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>PARTIDOS</Text>
+          <Text style={styles.statLabel}>{t('messages.iaStatsMatches')}</Text>
           <Text style={styles.statValue}>{candidate.stats.matches || '-'}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>VICTORIAS</Text>
+          <Text style={styles.statLabel}>{t('messages.iaStatsWins')}</Text>
           <Text style={styles.statValue}>{candidate.stats.wins}</Text>
         </View>
         <View style={styles.statCard}>
-          <Text style={styles.statLabel}>DISTANCIA</Text>
+          <Text style={styles.statLabel}>{t('messages.iaStatsDistance')}</Text>
           <Text style={styles.statValue}>{candidate.stats.distance}</Text>
         </View>
       </View>
 
       <View style={styles.tagsWrap}>
         <View style={styles.tagPill}>
-          <Text style={styles.tagText}>Matchmaking</Text>
+          <Text style={styles.tagText}>{t('common.competitive')}</Text>
         </View>
         <View style={styles.tagPill}>
-          <Text style={styles.tagText}>Pádel</Text>
+          <Text style={styles.tagText}>{t('common.sportPadel')}</Text>
         </View>
       </View>
 
       <View style={styles.reasonBox}>
         <Ionicons name="star" size={14} color="#F18F34" style={{ marginTop: 1 }} />
           <Text style={styles.reasonText}>
-            <Text style={styles.reasonStrong}>Siguiente paso:</Text> abrí el detalle y completá el pago de tu plaza.
+            <Text style={styles.reasonStrong}>{t('messages.iaMatchReason')}</Text> {candidate.reason}
           </Text>
       </View>
 
@@ -363,7 +372,7 @@ function CandidateCard({
           ) : (
             <Ionicons name="chatbubble-ellipses-outline" size={16} color="#fff" />
           )}
-          <Text style={styles.messageBtnText}>{sending ? 'Enviando...' : 'Enviar mensaje'}</Text>
+          <Text style={styles.messageBtnText}>{sending ? t('common.saving') : t('messages.title')}</Text>
         </LinearGradient>
       </Pressable>
     </View>
@@ -383,8 +392,11 @@ export function AiMatchModal({
   onRespondExpansion,
   onDirectMessageSent,
 }: AiMatchModalProps) {
+  const { t, locale } = useTranslation();
+  const numberLocale = formatLocale(locale);
+  const groups = useMemo(() => buildGroups(t, numberLocale), [t, numberLocale]);
   const insets = useSafeAreaInsets();
-  const sheetTitle = 'Liga competitiva 2v2';
+  const sheetTitle = t('onboarding.hardBlockLeagueTitle');
   const { session } = useAuth();
   const token = session?.access_token;
   const [selections, setSelections] = useState<Selections>(DEFAULT_SELECTIONS);
@@ -394,8 +406,8 @@ export function AiMatchModal({
     () => Object.values(selections).filter((value) => value.length > 0).length,
     [selections]
   );
-  const progressPercent = Math.round((completedSteps / GROUPS.length) * 100);
-  const isFormComplete = completedSteps === GROUPS.length;
+  const progressPercent = Math.round((completedSteps / groups.length) * 100);
+  const isFormComplete = completedSteps === groups.length;
   const [showResults, setShowResults] = useState(false);
   const hasProposal = proposal?.has_proposal === true;
   const isSearching = status?.status === 'searching';
@@ -504,19 +516,19 @@ export function AiMatchModal({
     return [
       {
         id: String(proposal.match_id ?? '1'),
-        name: 'Partido encontrado',
+        name: t('messages.iaSearchPartners'),
         matchPercent: proposal.pre_match_win_prob != null ? Math.round(proposal.pre_match_win_prob * 100) : 90,
-        level: 'Compatibilidad detectada',
+        level: t('messages.iaMatchReason'),
         stats: { matches: 0, wins: '-', distance: '-' },
-        tags: ['Matchmaking'],
-        reason: 'Propuesta activa de matchmaking',
+        tags: [t('common.competitive')],
+        reason: t('messages.iaGenerating'),
       },
     ];
-  }, [proposal]);
+  }, [proposal, t]);
 
   const handleCandidateMessage = async (candidate: MatchCandidate) => {
     if (!token) {
-      Alert.alert('Mensajes', 'Inicia sesión para enviar mensajes.');
+      Alert.alert(t('alerts.messages.title'), t('messages.iaLoginMessages'));
       return;
     }
 
@@ -524,7 +536,7 @@ export function AiMatchModal({
     try {
       const search = await searchPlayers(candidate.name, token);
       if (!search.ok || search.players.length === 0) {
-        Alert.alert('Mensajes', `No se encontró a "${candidate.name}" para enviarle mensaje.`);
+        Alert.alert(t('alerts.messages.title'), t('messages.iaPlayerNotFoundMessage', { name: candidate.name }));
         return;
       }
 
@@ -540,9 +552,13 @@ export function AiMatchModal({
         }) ??
         search.players[0];
 
-      const sent = await sendDirectMessage(exact.id, AI_AUTO_DM_TEXT, token);
+      const sent = await sendDirectMessage(
+        exact.id,
+        t(AI_AUTO_DM_TEXT_KEY, { name: candidate.name }),
+        token,
+      );
       if (!sent.ok) {
-        Alert.alert('Mensajes', sent.error);
+        Alert.alert(t('alerts.messages.title'), sent.error);
         return;
       }
 
@@ -588,12 +604,12 @@ export function AiMatchModal({
                   <Text style={styles.headerTitle}>{sheetTitle}</Text>
                   <Text style={styles.headerSubtitle}>
                     {loading || isSearching
-                      ? 'Buscando...'
+                      ? t('common.loadingEllipsis')
                       : isFormView
-                        ? `${completedSteps}/${GROUPS.length} seleccionados`
+                        ? t('common.itemsCount', { count: completedSteps })
                         : hasProposal
-                          ? 'Propuesta encontrada'
-                          : 'Estado'}
+                          ? t('messages.iaGenerating')
+                          : t('profile.publicProfileFallback')}
                   </Text>
                 </View>
               </View>
@@ -684,10 +700,8 @@ export function AiMatchModal({
                     </Animated.View>
                   </View>
                 </View>
-                <Text style={styles.loaderTitle}>Buscando partido 2v2…</Text>
-                <Text style={styles.loaderSubtitle}>
-                  Buscamos rivales compatibles según tu disponibilidad, género, lado y club o distancia.
-                </Text>
+                <Text style={styles.loaderTitle}>{t('messages.iaSearching')}</Text>
+                <Text style={styles.loaderSubtitle}>{t('onboarding.hardBlockLeagueSub')}</Text>
                 <View style={styles.loaderDots}>
                   {[dotA, dotB, dotC].map((dot, idx) => (
                     <Animated.View
@@ -717,27 +731,20 @@ export function AiMatchModal({
               </View>
             ) : isSearching ? (
               <View style={styles.emptyCandidatesCard}>
-                <Text style={styles.emptyCandidatesText}>
-                  Seguimos buscando jugadores compatibles. Te avisamos acá cuando haya propuesta.
-                  {'\n\n'}
-                  Para cambiar criterios, salí de la cola y volvé a buscar. El motor necesita 4 jugadores con
-                  ventana de tiempo compatible y los filtros de nivel, género y club o distancia que definiste.
-                </Text>
+                <Text style={styles.emptyCandidatesText}>{t('messages.iaSearching')}</Text>
                 <Pressable style={styles.searchAgainBtn} onPress={onLeaveQueue}>
                   <Ionicons name="exit-outline" size={18} color="#d1d5db" />
-                  <Text style={styles.searchAgainText}>Salir de la cola</Text>
+                  <Text style={styles.searchAgainText}>{t('common.close')}</Text>
                 </Pressable>
                 {!!status?.expansion_offer && (
                   <View style={styles.errorCard}>
-                    <Text style={styles.errorText}>
-                      Hay una ampliación sugerida para encontrar partido más rápido.
-                    </Text>
+                    <Text style={styles.errorText}>{t('preferences.clubsPickerHint')}</Text>
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                       <Pressable style={styles.submitBtn} onPress={() => onRespondExpansion(true)}>
-                        <Text style={styles.submitText}>Aceptar</Text>
+                        <Text style={styles.submitText}>{t('common.ok')}</Text>
                       </Pressable>
                       <Pressable style={styles.submitBtnDisabled} onPress={() => onRespondExpansion(false)}>
-                        <Text style={styles.submitTextDisabled}>Rechazar</Text>
+                        <Text style={styles.submitTextDisabled}>{t('common.cancel')}</Text>
                       </Pressable>
                     </View>
                   </View>
@@ -750,10 +757,10 @@ export function AiMatchModal({
                     <Ionicons name="checkmark" size={42} color="#fff" />
                   </View>
                   <Text style={styles.resultTitle}>
-                    {hasProposal ? 'Partido encontrado!' : 'No se encontraron partidos'}
+                    {hasProposal ? t('messages.iaSearchPartners') : t('messages.noSearchResults')}
                   </Text>
                   <Text style={styles.resultSubtitle}>
-                    {hasProposal ? 'Ya tienes una propuesta lista para confirmar.' : 'Prueba ajustando filtros para ampliar opciones.'}
+                    {hasProposal ? t('messages.iaGenerating') : t('preferences.clubsPickerHint')}
                   </Text>
                 </View>
 
@@ -769,9 +776,7 @@ export function AiMatchModal({
                     ))
                   ) : (
                     <View style={styles.emptyCandidatesCard}>
-                      <Text style={styles.emptyCandidatesText}>
-                        No se encontraron partidos.
-                      </Text>
+                      <Text style={styles.emptyCandidatesText}>{t('messages.noSearchResults')}</Text>
                     </View>
                   )}
                 </View>
@@ -784,12 +789,12 @@ export function AiMatchModal({
                   }}
                 >
                   <Ionicons name="sparkles" size={18} color="#d1d5db" />
-                  <Text style={styles.searchAgainText}>Buscar Nuevamente</Text>
+                  <Text style={styles.searchAgainText}>{t('messages.iaEditPreferences')}</Text>
                 </Pressable>
               </>
             ) : (
               <>
-                {GROUPS.map((group) => (
+                {groups.map((group) => (
                   <OptionSection
                     key={group.id}
                     group={group}
@@ -825,7 +830,7 @@ export function AiMatchModal({
                       (loading || !isFormComplete) && styles.submitTextDisabled,
                     ]}
                   >
-                    Unirme a la cola
+                    {t('messages.iaSearchPlayers')}
                   </Text>
                 </Pressable>
 
@@ -836,9 +841,7 @@ export function AiMatchModal({
                 )}
                 {isBlocked && (
                   <View style={styles.errorCard}>
-                    <Text style={styles.errorText}>
-                      Tu usuario está bloqueado temporalmente para matchmaking. Revisa más tarde.
-                    </Text>
+                    <Text style={styles.errorText}>{t('onboarding.softBlockDefault')}</Text>
                   </View>
                 )}
               </>

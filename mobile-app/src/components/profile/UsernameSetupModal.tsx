@@ -12,6 +12,14 @@ import { fetchMyPlayerProfile, updateMyPlayerProfile } from '../../api/players';
 import { AuthInput, AuthButton, ErrorBanner } from '../auth';
 import { validateUsernameLocal } from '../../lib/username';
 import { theme } from '../../theme';
+import { useTranslation } from '../../i18n';
+
+function mapUsernameError(err: string, t: (key: string) => string): string {
+  if (err === 'El usuario es obligatorio') return t('common.usernameRequired');
+  if (err === 'No puede contener @') return t('common.usernameNoAt');
+  if (err.startsWith('3–30')) return t('common.usernameFormat');
+  return err;
+}
 
 type UsernameSetupModalProps = {
   visible: boolean;
@@ -19,6 +27,7 @@ type UsernameSetupModalProps = {
 };
 
 export function UsernameSetupModal({ visible, onComplete }: UsernameSetupModalProps) {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const token = session?.access_token;
   const [username, setUsername] = useState('');
@@ -28,7 +37,7 @@ export function UsernameSetupModal({ visible, onComplete }: UsernameSetupModalPr
   const handleSubmit = async () => {
     const err = validateUsernameLocal(username);
     if (err) {
-      setError(err);
+      setError(mapUsernameError(err, t));
       return;
     }
     const normalized = username.trim().toLowerCase();
@@ -42,7 +51,7 @@ export function UsernameSetupModal({ visible, onComplete }: UsernameSetupModalPr
         return;
       }
       if (!check.available) {
-        setError('Este usuario ya está en uso');
+        setError(t('profile.usernameInUse'));
         return;
       }
       const res = await updateMyPlayerProfile(token, { username: normalized });
@@ -52,7 +61,7 @@ export function UsernameSetupModal({ visible, onComplete }: UsernameSetupModalPr
       }
       onComplete();
     } catch {
-      setError('Error de conexión');
+      setError(t('common.connectionError'));
     } finally {
       setLoading(false);
     }
@@ -61,13 +70,11 @@ export function UsernameSetupModal({ visible, onComplete }: UsernameSetupModalPr
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
       <View style={styles.root}>
-        <Text style={styles.title}>Elige tu usuario</Text>
-        <Text style={styles.subtitle}>
-          Es tu identificador público en la app. Solo puedes usar letras minúsculas, números y _.
-        </Text>
+        <Text style={styles.title}>{t('profile.fieldUsername')}</Text>
+        <Text style={styles.subtitle}>{t('common.usernameFormat')}</Text>
         {error ? <ErrorBanner message={error} /> : null}
         <AuthInput
-          label="Usuario"
+          label={t('profile.fieldUsername')}
           icon="at-outline"
           placeholder="tu_usuario"
           autoCapitalize="none"
@@ -80,7 +87,7 @@ export function UsernameSetupModal({ visible, onComplete }: UsernameSetupModalPr
           editable={!loading}
         />
         <AuthButton onPress={() => void handleSubmit()} loading={loading} disabled={loading}>
-          Continuar
+          {t('onboarding.levelModalNext')}
         </AuthButton>
         {loading ? (
           <ActivityIndicator color={theme.auth.accent} style={styles.spinner} />

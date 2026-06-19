@@ -48,6 +48,20 @@ export async function fetchPlayerWalletBalances(
   }
 }
 
+export async function fetchPlayerRecentTransactions(
+  playerId: string,
+  clubIds: string[],
+  token: string | null | undefined,
+  limit = 10,
+): Promise<WalletTransaction[]> {
+  if (!token || clubIds.length === 0) return [];
+  const results = await Promise.all(clubIds.map((clubId) => fetchWalletBalance(playerId, clubId, token)));
+  const merged = results.flatMap((r) => (r.ok ? r.transactions ?? [] : []));
+  return merged
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    .slice(0, limit);
+}
+
 export async function fetchWalletBalance(
   playerId: string,
   clubId: string,

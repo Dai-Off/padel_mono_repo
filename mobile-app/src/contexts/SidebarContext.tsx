@@ -3,7 +3,6 @@ import type { InfoScreenId } from '../content/infoContent';
 
 type SidebarContextValue = {
   close: () => void;
-  onNavigateToTusPagos?: () => void;
   onNavigateToMonedero?: () => void;
   onNavigateToTuActividad?: () => void;
   onNavigateToAjustes?: () => void;
@@ -17,7 +16,6 @@ const SidebarContext = createContext<SidebarContextValue | null>(null);
 
 export function SidebarProvider({
   close,
-  onNavigateToTusPagos,
   onNavigateToMonedero,
   onNavigateToTuActividad,
   onNavigateToAjustes,
@@ -28,7 +26,6 @@ export function SidebarProvider({
   children,
 }: {
   close: () => void;
-  onNavigateToTusPagos?: () => void;
   onNavigateToMonedero?: () => void;
   onNavigateToTuActividad?: () => void;
   onNavigateToAjustes?: () => void;
@@ -42,7 +39,6 @@ export function SidebarProvider({
     <SidebarContext.Provider
       value={{
         close,
-        onNavigateToTusPagos,
         onNavigateToMonedero,
         onNavigateToTuActividad,
         onNavigateToAjustes,

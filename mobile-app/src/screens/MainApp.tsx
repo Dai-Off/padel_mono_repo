@@ -4,6 +4,7 @@ import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTranslation } from '../i18n';
 import type { SearchCourtResult } from '../api/search';
 import { BackHeader } from '../components/layout/BackHeader';
 import { BottomNavbar, type MainTabId } from '../components/layout/BottomNavbar';
@@ -28,8 +29,9 @@ import { PartidoDetailScreen } from './PartidoDetailScreen';
 import { PartidoPrivadoDetailScreen } from './PartidoPrivadoDetailScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
-import { TusPagosScreen } from './TusPagosScreen';
 import { MonederoScreen } from './MonederoScreen';
+import { PagosPendientesScreen } from './PagosPendientesScreen';
+import { MovimientosMonederoScreen } from './MovimientosMonederoScreen';
 import { TuActividadFlow } from './TuActividadFlow';
 import type { TuActividadDestination } from './TuActividadScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
@@ -99,14 +101,16 @@ const SEASON_TRANSITION_PREVIEW_DATA: SeasonTransition = {
 };
 
 export function MainApp() {
+  const { t } = useTranslation();
   const sidebar = useSidebar(false);
   const { session } = useAuth();
   const { profile, refreshMatches, syncMisPartidoFromMatchId } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
-  const [showTusPagos, setShowTusPagos] = useState(false);
   const [showMonedero, setShowMonedero] = useState(false);
+  const [showPagosPendientes, setShowPagosPendientes] = useState(false);
+  const [showMovimientosMonedero, setShowMovimientosMonedero] = useState(false);
   const [showTuActividad, setShowTuActividad] = useState(false);
   const [tuActividadSubView, setTuActividadSubView] = useState<TuActividadDestination | null>(null);
   const [showTransacciones, setShowTransacciones] = useState(false);
@@ -329,14 +333,14 @@ export function MainApp() {
       if (!accessToken) return;
       const result = await acceptTournamentInvite(accessToken, inviteToken, tournamentId);
       if (result.ok) {
-        Alert.alert('Invitación aceptada', 'Ya estás inscrito en el torneo.');
+        Alert.alert(t('alerts.tournamentInvite.accepted'), t('alerts.tournamentInvite.acceptedBody'));
         setActiveTab('torneos');
         setOpenTournamentId(tournamentId);
       } else {
-        Alert.alert('Invitación al torneo', result.error);
+        Alert.alert(t('alerts.tournamentInvite.title'), result.error);
       }
     },
-    [session?.access_token],
+    [session?.access_token, t],
   );
 
   const consumeInviteUrl = useCallback(
@@ -417,17 +421,19 @@ export function MainApp() {
     setShowTuActividad(false);
     setTuActividadSubView(null);
     setShowMonedero(false);
-    setShowTusPagos(false);
+    setShowPagosPendientes(false);
+    setShowMovimientosMonedero(false);
     setShowTransacciones(false);
     registerOverlayNestedBack(null);
   }, []);
 
   const fullscreenOverlayOpen =
     bookingSuccessData != null ||
-    showTusPagos ||
     showMonedero ||
-    showTuActividad ||
+    showPagosPendientes ||
+    showMovimientosMonedero ||
     showTransacciones ||
+    showTuActividad ||
     showEditProfile ||
     showChangePassword ||
     showPreferences ||
@@ -608,9 +614,17 @@ export function MainApp() {
         setShowSeasonPass(false);
         return true;
       }
-      // Transacciones (sale antes que TusPagos en renderContent)
+      // Transacciones (sale antes que Wallet en renderContent)
       if (showTransacciones) {
         setShowTransacciones(false);
+        return true;
+      }
+      if (showPagosPendientes) {
+        setShowPagosPendientes(false);
+        return true;
+      }
+      if (showMovimientosMonedero) {
+        setShowMovimientosMonedero(false);
         return true;
       }
       // Detalle de partido (prioridad sobre flujos padre, p. ej. Tu actividad)
@@ -630,11 +644,6 @@ export function MainApp() {
       // Monedero
       if (showMonedero) {
         setShowMonedero(false);
-        return true;
-      }
-      // Tus Pagos
-      if (showTusPagos) {
-        setShowTusPagos(false);
         return true;
       }
       // Detalle de club en pestaña Pistas
@@ -678,10 +687,11 @@ export function MainApp() {
     showCompetitiveLeague,
     showSeasonPass,
     showTransacciones,
+    showPagosPendientes,
+    showMovimientosMonedero,
     showTuActividad,
     tuActividadSubView,
     showMonedero,
-    showTusPagos,
     selectedPartido,
     clubDetailCourt,
     activeTab,
@@ -912,8 +922,21 @@ export function MainApp() {
         <TransaccionesScreen onBack={() => setShowTransacciones(false)} />
       );
     }
+    if (showPagosPendientes) {
+      return <PagosPendientesScreen onBack={() => setShowPagosPendientes(false)} />;
+    }
+    if (showMovimientosMonedero) {
+      return <MovimientosMonederoScreen onBack={() => setShowMovimientosMonedero(false)} />;
+    }
     if (showMonedero) {
-      return <MonederoScreen onBack={() => setShowMonedero(false)} />;
+      return (
+        <MonederoScreen
+          onBack={() => setShowMonedero(false)}
+          onPagosPendientesPress={() => setShowPagosPendientes(true)}
+          onMovimientosPress={() => setShowMovimientosMonedero(true)}
+          onTransaccionesPress={() => setShowTransacciones(true)}
+        />
+      );
     }
     if (showPartidoDetail && selectedPartido) {
       if (selectedPartido.visibility === 'private') {
@@ -969,18 +992,6 @@ export function MainApp() {
             setTuActividadSubView(destination);
           }}
           onPartidoPress={(p) => setSelectedPartido(p)}
-        />
-      );
-    }
-    if (showTusPagos) {
-      return (
-        <TusPagosScreen
-          onBack={() => setShowTusPagos(false)}
-          onTransaccionesPress={() => setShowTransacciones(true)}
-          onMonederoPress={() => {
-            setShowTusPagos(false);
-            setShowMonedero(true);
-          }}
         />
       );
     }
@@ -1103,14 +1114,14 @@ export function MainApp() {
       : activeTab === 'tienda'
           ? (
               <BackHeader
-                title="Tienda"
+                title={t('nav.tabTienda')}
                 tone="dark"
                 onBack={() => setActiveTab('inicio')}
                 rightSlot={(
                   <View style={styles.tiendaHeaderRight}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Asistente de compras"
+                      accessibilityLabel={t('nav.tiendaShoppingAssistant')}
                       hitSlop={8}
                       style={({ pressed }) => [
                         styles.tiendaHeaderIconBase,
@@ -1127,7 +1138,7 @@ export function MainApp() {
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Carrito"
+                      accessibilityLabel={t('nav.tiendaCart')}
                       hitSlop={8}
                       style={({ pressed }) => [
                         styles.tiendaHeaderCart,
@@ -1143,7 +1154,7 @@ export function MainApp() {
           : activeTab === 'partidos'
               ? (
                   <BackHeader
-                    title="Partidos"
+                    title={t('nav.tabPartidos')}
                     tone="dark"
                     onBack={() => setActiveTab('inicio')}
                   />
@@ -1206,10 +1217,6 @@ export function MainApp() {
     <View style={styles.container}>
       <SidebarProvider
         close={sidebar.close}
-        onNavigateToTusPagos={() => {
-          resetSidebarOverlays();
-          setShowTusPagos(true);
-        }}
         onNavigateToMonedero={() => {
           resetSidebarOverlays();
           setShowMonedero(true);

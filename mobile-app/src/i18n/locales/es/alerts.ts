@@ -1,0 +1,189 @@
+import type { AlertsTranslationKeys } from '../../sections/alerts';
+
+export const alerts: AlertsTranslationKeys = {
+  session: {
+    title: 'Sesión',
+    loginRequired: 'Inicia sesión para…',
+  },
+  login: {
+    title: 'Iniciar sesión',
+    titleAlt: 'Inicia sesión',
+  },
+  permissionDenied: {
+    title: 'Permiso denegado',
+  },
+  error: {
+    title: 'Error',
+  },
+  ready: {
+    title: 'Listo',
+  },
+  canceled: {
+    title: 'Cancelado',
+  },
+  paymentRegistered: {
+    title: 'Pago registrado',
+  },
+  slotPending: {
+    title: 'Plaza pendiente',
+  },
+  slotTaken: {
+    title: 'Plaza ocupada',
+    body: 'Esa plaza ya no está disponible. Elige otra.',
+  },
+  matchFull: {
+    title: 'Partido completo',
+    body: 'Ya no quedan plazas libires. Elige otro partido.',
+  },
+  scheduleConflict: {
+    title: 'Horario no disponible',
+    body: 'Ya tienes un partido a esa hora. Elige otro partido.',
+  },
+  alreadyInMatch: {
+    title: 'Ya estás dentro',
+    body: 'Ya formas parte de este partido.',
+  },
+  matchCompletedWhilePaying: 'El partido se completó mientras pagabas.',
+  slotAssigned: {
+    title: 'Plaza asignada',
+    body: 'Tu pago se completó en otra plaza porque la que elegiste ya estaba ocupada.',
+  },
+  paymentPending: {
+    body: 'Tu pago se registró pero aún no apareces en el partido…',
+  },
+  declineMatch: {
+    title: 'Declinar partido',
+    body: 'Se cancelará la reserva y el partido para los cuatro jugadores…',
+    yes: 'Sí, declinar',
+    done: 'Has declinado el partido.',
+  },
+  leaveMatch: {
+    titleCancel: '¿Cancelar el partido?',
+    titleLeave: '¿Salir del partido?',
+    bodySolo: 'Eres el único jugador: se anulará la reserva…',
+    bodyMulti: 'Dejarás tu plaza; los demás siguen en el partido…',
+    yesCancel: 'Sí, cancelar todo',
+    yesLeave: 'Sí, salir',
+    doneCancel: 'El partido y la reserva quedaron cancelados.',
+    doneLeave: 'Saliste del partido. Si pagaste con tarjeta, el reembolso se procesará en breve.',
+    fail: 'No se pudo completar',
+  },
+  privateCancel: {
+    title: 'Cancelar reserva',
+    done: 'La reserva quedó cancelada.',
+    fail: 'No se pudo cancelar',
+  },
+  tournamentInvite: {
+    accepted: 'Invitación aceptada',
+    acceptedBody: 'Ya estás inscrito en el torneo.',
+    title: 'Invitación al torneo',
+  },
+  tournament: {
+    sportAlert: 'Por ahora todos los torneos son de pádel.',
+    registrationClosed: 'Las inscripciones no están abiertas.',
+    requestSent: 'Solicitud enviada',
+    registrationCanceled: 'Tu inscripción ha sido cancelada.',
+    registerResult: 'Registrar resultado',
+  },
+  favorites: {
+    title: 'Favoritos',
+    body: 'Próximamente podrás guardar «{club}» en favoritos.',
+  },
+  web: {
+    title: 'Web',
+    body: 'Enlace del club disponible próximamente.',
+  },
+  phone: {
+    title: 'Teléfono',
+    body: 'Contacto del club disponible próximamente.',
+  },
+  review: {
+    title: 'Reseña',
+    ratingTitle: 'Valoración',
+    selectStars: 'Selecciona de 1 a 5 estrellas.',
+    deleteTitle: 'Eliminar reseña',
+    deleteBody: '¿Quieres quitar tu valoración de este club?',
+  },
+  profile: {
+    coverPhoto: 'Foto de portada',
+    profilePhoto: 'Foto de perfil',
+    unsaved: 'Cambios sin guardar',
+    saved: 'Datos guardados correctamente.',
+    comingSoon: 'Próximamente',
+  },
+  genderPicker: {
+    title: 'Género',
+  },
+  messages: {
+    title: 'Mensajes',
+  },
+  preferences: {
+    title: 'Preferencias',
+    saved: 'Cambios guardados.',
+  },
+  location: {
+    title: 'Ubicación',
+  },
+  createMatch: {
+    profileNotFound: 'No encontramos tu perfil. Espera un momento e inténtalo de nuevo.',
+    calculatingPrice: 'Espera un momento a que terminemos de calcular el precio exacto.',
+    login: 'Necesitas iniciar sesión para crear un partido.',
+    noSlots: {
+      title: 'Sin pistas disponibles',
+      body: 'No hay pistas disponibles para la fecha y hora seleccionadas.',
+    },
+  },
+  matchEval: {
+    saveScoreFail: 'No se pudo guardar el marcador',
+    voteFail: 'No se pudo registrar el voto',
+    saveFail: 'No se pudo guardar',
+    retryLater: 'Intenta de nuevo en unos segundos.',
+  },
+  onboarding: {
+    order: 'Orden',
+    selection: 'Selección',
+    selectOne: 'Elige una opción para continuar.',
+    selectMany: 'Elige al menos una opción.',
+    phase2: 'Fase 2',
+  },
+  seasonPass: {
+    login: 'Necesitas una cuenta para comprar el Pase Elite.',
+    activated: 'Pase Elite activado ({plan}).',
+    loginRequiredLoad: 'Inicia sesión para ver tu progreso en el pase.',
+    loadFail: 'No se pudo cargar el pase. ¿Backend y migraciones 049 + 050 activas?',
+    loading: 'Cargando pase…',
+    displayFail: 'No se pudo mostrar el pase.',
+    daysRemaining: '{count} días restantes',
+    currentLevel: 'Tu nivel actual',
+    totalSp: 'SP totales',
+    levelShort: 'Nivel {level}',
+    spRemaining: 'Faltan {sp} SP',
+    spInLevel: '{into} / {total} SP en este nivel',
+    elitePass: 'Pase Elite',
+    eliteActive: 'Pase Elite Activo',
+    tabRewards: '🏆 Recompensas',
+    tabMissions: '⚡ Misiones',
+    legendElite: 'Pase Elite',
+    legendFree: 'Pase Libre',
+    howEarnSp: 'Cómo ganar SP',
+    noMissionsConfigured: 'No hay misiones configuradas para esta temporada.',
+    spAvailable: 'SP disponibles',
+    completed: 'Completadas',
+    missionCompleted: '¡Completada!',
+    missionCloses: 'Cierra · {label}',
+    noMissionsInTab: 'No hay misiones en esta pestaña.',
+    modalBenefitsDefault: 'Beneficios según la configuración de tu temporada.',
+    getEliteCta: 'Obtener Pase Elite (pago con tarjeta)',
+    continueFree: 'Continuar con Pase Libre',
+    confirmFail: 'No se pudo confirmar el Pase Elite. Inténtalo de nuevo.',
+  },
+  clubReviews: {
+    login: 'Debes iniciar sesión para valorar un club.',
+    notYet: {
+      title: 'Aún no puedes valorar',
+    },
+  },
+  favoriteClubs: {
+    title: 'Clubes favoritos',
+  },
+};

@@ -1,0 +1,29 @@
+export interface MessagesTranslationKeys {
+  title: string;
+  backA11y: string;
+  newConversationA11y: string;
+  searchConversations: string;
+  loginToView: string;
+  emptyConversations: string;
+  newConversationTitle: string;
+  searchPlayersPlaceholder: string;
+  noSearchResults: string;
+  threadEmpty: string;
+  threadInputPlaceholder: string;
+  messageSent: string;
+  iaSearchTitle: string;
+  iaSearching: string;
+  iaGenerating: string;
+  iaActivateVisibility: string;
+  iaSearchPartners: string;
+  iaSearchPlayers: string;
+  iaEditPreferences: string;
+  iaStatsMatches: string;
+  iaStatsWins: string;
+  iaStatsDistance: string;
+  iaMatchReason: string;
+  iaLoginMessages: string;
+  iaLoginProfile: string;
+  iaPlayerNotFoundMessage: string;
+  iaPlayerNotFoundProfile: string;
+}

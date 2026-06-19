@@ -16,6 +16,7 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { StoryGroup } from '../../api/community';
 import { formatTimeAgo } from '../../utils/timeAgo';
 import { formatPlayerLabel } from '../../lib/username';
+import { useTranslation } from '../../i18n';
 import { filterById } from '../../lib/storyOverlays';
 
 const { width, height } = Dimensions.get('window');
@@ -28,6 +29,7 @@ interface StoryViewerProps {
 }
 
 export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, group }) => {
+  const { t } = useTranslation();
   const [currentIndex, setCurrentIndex] = useState(0);
   const progress = useRef(new Animated.Value(0)).current;
   const isPaused = useRef(false);
@@ -261,7 +263,7 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
                   {formatPlayerLabel(group.player)}
                 </Text>
                 <Text style={styles.timeAgo}>
-                  {formatTimeAgo(currentStory.created_at)}
+                  {formatTimeAgo(currentStory.created_at, t)}
                 </Text>
               </View>
             </View>

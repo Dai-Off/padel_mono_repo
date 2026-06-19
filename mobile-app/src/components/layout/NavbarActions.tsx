@@ -1,6 +1,7 @@
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 
 type NavbarActionProps = {
   icon: ComponentProps<typeof Ionicons>['name'];
@@ -43,23 +44,25 @@ export function NavbarActions({
   onNotificationsPress,
   onGroupsPress,
 }: NavbarActionsCallbacks = {}) {
+  const { t } = useTranslation();
+
   return (
     <View style={styles.container}>
       <NavbarActionButton
         icon="chatbubble-outline"
-        accessibilityLabel="Mensajes"
+        accessibilityLabel={t('nav.messages')}
         onPress={onMessagesPress}
       />
       <NavbarActionButton
         icon="notifications-outline"
-        accessibilityLabel="Notificaciones"
+        accessibilityLabel={t('nav.notifications')}
         onPress={onNotificationsPress}
       />
       <NavbarActionButton
         icon="people-outline"
         showBadge
         opacity={0.7}
-        accessibilityLabel="Grupos"
+        accessibilityLabel={t('nav.groups')}
         onPress={onGroupsPress}
       />
     </View>

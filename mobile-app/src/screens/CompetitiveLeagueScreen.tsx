@@ -413,7 +413,7 @@ export function CompetitiveLeagueScreen({
       setSearchCoordsLoading(false);
       return;
     }
-    const issue = await probeDeviceLocationIssue();
+    const issue = await probeDeviceLocationIssue(t);
     if (issue) {
       setLocationIssue(issue);
       setSearchCoords(null);
@@ -422,7 +422,7 @@ export function CompetitiveLeagueScreen({
     }
     setLocationIssue(null);
     setSearchCoordsLoading(true);
-    const res = await resolveDeviceSearchCoordinatesFast(5000);
+    const res = await resolveDeviceSearchCoordinatesFast(5000, t);
     setSearchCoordsLoading(false);
     if (res.ok) {
       setSearchCoords(res.coords);
@@ -444,7 +444,7 @@ export function CompetitiveLeagueScreen({
     }
     let cancelled = false;
     void (async () => {
-      const issue = await probeDeviceLocationIssue();
+      const issue = await probeDeviceLocationIssue(t);
       if (cancelled) return;
       if (issue) {
         setLocationIssue(issue);
@@ -454,7 +454,7 @@ export function CompetitiveLeagueScreen({
       }
       setLocationIssue(null);
       setSearchCoordsLoading(true);
-      const res = await resolveDeviceSearchCoordinatesFast(5000);
+      const res = await resolveDeviceSearchCoordinatesFast(5000, t);
       if (cancelled) return;
       setSearchCoordsLoading(false);
       if (res.ok) {
@@ -615,7 +615,7 @@ export function CompetitiveLeagueScreen({
     } else if (preferredClubIds.length > 0) {
       payload.preferred_club_ids = preferredClubIds.slice(0, 20);
     } else {
-      const issue = await probeDeviceLocationIssue();
+      const issue = await probeDeviceLocationIssue(t);
       if (issue) {
         setLocationIssue(issue);
         return;
@@ -623,7 +623,7 @@ export function CompetitiveLeagueScreen({
       const maxKm = Math.max(1, Math.min(50, Math.round(distanceKm)));
       const loc = searchCoords
         ? { ok: true as const, coords: searchCoords }
-        : await resolveDeviceSearchCoordinatesFast(4000);
+        : await resolveDeviceSearchCoordinatesFast(4000, t);
       if (!loc.ok) {
         setLocationIssue({ message: loc.error, action: 'retry' });
         return;

@@ -18,10 +18,17 @@ import {
 } from '../services/seasonPassService';
 import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import {
-  insertGuestMatchPlayerAfterPayment,
+  assertGuestCanJoinMatch,
+  guestJoinMatchAfterPayment,
+  registerGuestJoinPaymentIntent,
   tryRepairPaidGuestMissingFromMatch,
 } from '../services/matchPlayerSlotService';
 import { sendMatchJoinConfirmationEmail } from '../lib/mailer';
+
+function parsePreferredSlotFromMeta(meta: Record<string, string | undefined>): number | null {
+  const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
+  return Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
+}
 import { zonedTimeToUtc } from './learningTimezone';
 import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
@@ -735,6 +742,7 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       return;
     }
     let amountCents = Math.ceil(Number(booking.total_price_cents ?? 0) / 4);
+    let guestJoinMatchId: string | null = null;
     if (participant_id) {
       const { data: participant, error: errParticipant } = await supabase
         .from('booking_participants')
@@ -788,25 +796,24 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
         res.status(400).json({ ok: false, error: 'El partido no permite nuevas plazas' });
         return;
       }
-      const { data: inMatch } = await supabase
-        .from('match_players')
-        .select('id')
-        .eq('match_id', match.id)
-        .eq('player_id', player.id)
-        .maybeSingle();
-      if (inMatch) {
+      guestJoinMatchId = match.id;
+
+      const capacity = await assertGuestCanJoinMatch(
+        supabase,
+        match.id,
+        booking_id,
+        player.id,
+        slot_index,
+      );
+      if (!capacity.ok) {
+        res.status(409).json({ ok: false, code: capacity.code, error: capacity.error });
+        return;
+      }
+      if (capacity.code === 'already_in_match') {
         res.status(409).json({ ok: false, code: 'already_in_match', error: 'Ya estás en este partido' });
         return;
       }
-      const { data: takenSlots } = await supabase
-        .from('match_players')
-        .select('slot_index')
-        .eq('match_id', match.id);
-      const slotTaken = (takenSlots ?? []).some((row) => Number(row.slot_index) === Number(slot_index));
-      if (slotTaken) {
-        res.status(409).json({ ok: false, code: 'slot_taken', error: 'Esa plaza ya está ocupada' });
-        return;
-      }
+
       const { data: existingBookingParticipant } = await supabase
         .from('booking_participants')
         .select('id, payment_status')
@@ -885,6 +892,28 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       return;
     }
 
+    if (guestJoinMatchId) {
+      const capacityBeforePay = await assertGuestCanJoinMatch(
+        supabase,
+        guestJoinMatchId,
+        booking_id,
+        player.id,
+        typeof slot_index === 'number' ? slot_index : null,
+      );
+      if (!capacityBeforePay.ok) {
+        res.status(409).json({
+          ok: false,
+          code: capacityBeforePay.code,
+          error: capacityBeforePay.error,
+        });
+        return;
+      }
+      if (capacityBeforePay.code === 'already_in_match') {
+        res.status(409).json({ ok: false, code: 'already_in_match', error: 'Ya estás en este partido' });
+        return;
+      }
+    }
+
     const metadata: Record<string, string> = {
       booking_id,
       payer_player_id: player.id,
@@ -916,16 +945,41 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
 
     const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
 
-    const { error: txInsertErr } = await supabase.from('payment_transactions').insert({
-      booking_id,
-      payer_player_id: player.id,
-      amount_cents: amountCents,
-      currency: booking.currency ?? 'EUR',
-      stripe_payment_intent_id: paymentIntent.id,
-      status: 'requires_action',
-    });
-    if (txInsertErr) {
-      console.error('[payments/create-intent] payment_transactions insert:', txInsertErr);
+    if (guestJoinMatchId) {
+      const registered = await registerGuestJoinPaymentIntent(supabase, {
+        bookingId: booking_id,
+        matchId: guestJoinMatchId,
+        playerId: player.id,
+        stripePaymentIntentId: paymentIntent.id,
+        amountCents,
+        currency: booking.currency ?? 'EUR',
+        slotIndex: typeof slot_index === 'number' ? slot_index : null,
+      });
+      if (!registered.ok) {
+        try {
+          await stripe.paymentIntents.cancel(paymentIntent.id);
+        } catch (cancelErr) {
+          console.warn('[payments/create-intent] cancel PI after capacity fail:', cancelErr);
+        }
+        res.status(409).json({
+          ok: false,
+          code: registered.code,
+          error: registered.error,
+        });
+        return;
+      }
+    } else {
+      const { error: txInsertErr } = await supabase.from('payment_transactions').insert({
+        booking_id,
+        payer_player_id: player.id,
+        amount_cents: amountCents,
+        currency: booking.currency ?? 'EUR',
+        stripe_payment_intent_id: paymentIntent.id,
+        status: 'requires_action',
+      });
+      if (txInsertErr) {
+        console.error('[payments/create-intent] payment_transactions insert:', txInsertErr);
+      }
     }
 
     res.json({
@@ -1111,42 +1165,25 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
     }
 
     if (participant?.role === 'guest') {
-      const { data: match } = await supabase
-        .from('matches')
-        .select('id')
-        .eq('booking_id', booking_id)
-        .maybeSingle();
-      if (match) {
-        const { data: existing } = await supabase
-          .from('match_players')
-          .select('id')
-          .eq('match_id', match.id)
-          .eq('player_id', participant.player_id)
-          .maybeSingle();
-        if (!existing) {
-          const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
-          const preferred = Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
-          const ins = await insertGuestMatchPlayerAfterPayment(
-            supabase,
-            match.id,
-            participant.player_id,
-            preferred
-          );
-          if (!ins.ok) {
-            console.error('[payments/webhook] match_players guest insert failed:', ins.error, ins.code, {
-              match_id: match.id,
-              player_id: participant.player_id,
-            });
-          } else {
-            notifyMatchJoinByEmail(supabase, match.id, participant.player_id);
-            if (ins.reassigned) {
-              console.warn('[payments/webhook] slot reassigned (race):', {
-                match_id: match.id,
-                player_id: participant.player_id,
-                used: ins.slot_index,
-              });
-            }
-          }
+      const join = await guestJoinMatchAfterPayment(
+        supabase,
+        booking_id,
+        participant.player_id,
+        parsePreferredSlotFromMeta(meta),
+      );
+      if (!join.ok) {
+        console.error('[payments/webhook] guest join failed after payment:', join.error, join.code, {
+          booking_id,
+          player_id: participant.player_id,
+        });
+      } else {
+        notifyMatchJoinByEmail(supabase, join.match_id, participant.player_id);
+        if (join.reassigned) {
+          console.warn('[payments/webhook] slot reassigned (race):', {
+            match_id: join.match_id,
+            player_id: participant.player_id,
+            used: join.slot_index,
+          });
         }
       }
     }
@@ -3638,47 +3675,50 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
     }
 
     // Si es guest (join): añadir a match_players tras el pago.
-    // Las validaciones de ELO/onboarding ya corrieron en prepare-join; re-chequear aquí
-    // dejaría al jugador como pagado en booking_participants pero sin fila en match_players.
     if (participant?.role === 'guest') {
-      const { data: match } = await supabase
-        .from('matches')
-        .select('id')
-        .eq('booking_id', booking_id)
-        .maybeSingle();
-      if (match) {
-        const { data: existing } = await supabase
-          .from('match_players')
-          .select('id')
-          .eq('match_id', match.id)
-          .eq('player_id', participant.player_id)
-          .maybeSingle();
-        if (!existing) {
-          const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
-          const preferred = Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
-          const ins = await insertGuestMatchPlayerAfterPayment(
-            supabase,
-            match.id,
-            participant.player_id,
-            preferred
-          );
-          if (!ins.ok) {
-            console.error('[payments/confirm-client] match_players guest insert failed:', ins.error, ins.code, {
-              match_id: match.id,
-              player_id: participant.player_id,
-            });
-          } else {
-            notifyMatchJoinByEmail(supabase, match.id, participant.player_id);
-            if (ins.reassigned) {
-              console.warn('[payments/confirm-client] slot reassigned (race):', {
-                match_id: match.id,
-                player_id: participant.player_id,
-                used: ins.slot_index,
-              });
-            }
-          }
-        }
+      const join = await guestJoinMatchAfterPayment(
+        supabase,
+        booking_id,
+        participant.player_id,
+        parsePreferredSlotFromMeta(meta),
+      );
+      if (!join.ok) {
+        console.error('[payments/confirm-client] guest join failed after payment:', join.error, join.code, {
+          booking_id,
+          player_id: participant.player_id,
+        });
+        res.status(409).json({
+          ok: false,
+          code: join.code === 'match_full' ? 'match_full' : 'join_failed',
+          payment_succeeded: true,
+          error:
+            join.code === 'match_full'
+              ? 'El partido se completó mientras pagabas. Tu pago quedó registrado; contacta al club para el reembolso.'
+              : 'Tu pago se registró pero no pudimos asignarte la plaza. Cierra y vuelve a abrir el partido.',
+        });
+        return;
       }
+      notifyMatchJoinByEmail(supabase, join.match_id, participant.player_id);
+      if (join.reassigned) {
+        console.warn('[payments/confirm-client] slot reassigned (race):', {
+          match_id: join.match_id,
+          player_id: participant.player_id,
+          used: join.slot_index,
+        });
+      }
+
+      await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+      try {
+        await resolveCourtContention(supabase, booking_id);
+      } catch (contentionErr) {
+        console.error('[payments/confirm-client] resolveCourtContention:', contentionErr);
+      }
+
+      res.json({
+        ok: true,
+        join: { slot_index: join.slot_index, reassigned: join.reassigned, match_id: join.match_id },
+      });
+      return;
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
@@ -3951,34 +3991,16 @@ export async function simulateTurnPaymentHandler(req: Request, res: Response): P
     }
 
     if (chosenParticipant.role === 'guest') {
-      const { data: match } = await supabase
-        .from('matches')
-        .select('id')
-        .eq('booking_id', booking.id)
-        .maybeSingle();
-
-      if (match) {
-        const { data: existing } = await supabase
-          .from('match_players')
-          .select('id')
-          .eq('match_id', match.id)
-          .eq('player_id', chosenParticipant.player_id)
-          .maybeSingle();
-
-        if (!existing) {
-          const { error: insErr } = await supabase.from('match_players').insert({
-            match_id: match.id,
-            player_id: chosenParticipant.player_id,
-            team: 'A',
-            invite_status: 'accepted',
-            slot_index: null,
-          });
-          if (!insErr) {
-            notifyMatchJoinByEmail(supabase, match.id, chosenParticipant.player_id);
-          }
-        } else {
-          notifyMatchJoinByEmail(supabase, match.id, chosenParticipant.player_id);
-        }
+      const join = await guestJoinMatchAfterPayment(
+        supabase,
+        booking.id,
+        chosenParticipant.player_id,
+        null,
+      );
+      if (join.ok) {
+        notifyMatchJoinByEmail(supabase, join.match_id, chosenParticipant.player_id);
+      } else {
+        console.error('[payments/simulate-turn-payment] guest join failed:', join.error, join.code);
       }
     }
 
@@ -4397,29 +4419,34 @@ export async function simulateJoinPaymentHandler(req: Request, res: Response): P
     }
 
     if (participant?.role === 'guest') {
-      const { data: match } = await supabase
-        .from('matches')
-        .select('id')
-        .eq('booking_id', booking_id)
-        .maybeSingle();
-      if (match) {
-        const { data: existing } = await supabase
-          .from('match_players')
-          .select('id')
-          .eq('match_id', match.id)
-          .eq('player_id', participant.player_id)
-          .maybeSingle();
-        if (!existing) {
-          const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
-          const preferred = Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
-          const ins = await insertGuestMatchPlayerAfterPayment(supabase, match.id, participant.player_id, preferred);
-          if (!ins.ok) {
-            console.error('[payments/simulate-join-payment] match_players insert failed:', ins.error, ins.code);
-          } else {
-            notifyMatchJoinByEmail(supabase, match.id, participant.player_id);
-          }
-        }
+      const join = await guestJoinMatchAfterPayment(
+        supabase,
+        booking_id,
+        participant.player_id,
+        parsePreferredSlotFromMeta(meta),
+      );
+      if (!join.ok) {
+        console.error('[payments/simulate-join-payment] guest join failed:', join.error, join.code);
+        res.status(409).json({
+          ok: false,
+          code: join.code === 'match_full' ? 'match_full' : 'join_failed',
+          payment_succeeded: true,
+          error: join.error,
+        });
+        return;
       }
+      notifyMatchJoinByEmail(supabase, join.match_id, participant.player_id);
+      await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+      try {
+        await resolveCourtContention(supabase, booking_id);
+      } catch (contentionErr) {
+        console.error('[payments/simulate-join-payment] resolveCourtContention:', contentionErr);
+      }
+      res.json({
+        ok: true,
+        join: { slot_index: join.slot_index, reassigned: join.reassigned, match_id: join.match_id },
+      });
+      return;
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);

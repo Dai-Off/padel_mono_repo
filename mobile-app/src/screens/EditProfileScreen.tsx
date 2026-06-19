@@ -38,6 +38,7 @@ import {
   validatePhoneParts,
   type CountryCode,
 } from '../lib/phoneNumber';
+import { useTranslation } from '../i18n';
 const BG = '#0F0F0F';
 const CARD_BG = 'rgba(255,255,255,0.04)';
 const CARD_BORDER = 'rgba(255,255,255,0.08)';
@@ -50,17 +51,11 @@ type EditProfileScreenProps = {
   onChangePasswordPress?: () => void;
 };
 
-const GENDER_OPTIONS: { value: PlayerGender; label: string }[] = [
-  { value: 'male', label: 'Hombre' },
-  { value: 'female', label: 'Mujer' },
-  { value: 'other', label: 'Sin definir' },
+const GENDER_OPTIONS: { value: PlayerGender; labelKey: 'male' | 'female' | 'genderUndefined' }[] = [
+  { value: 'male', labelKey: 'male' },
+  { value: 'female', labelKey: 'female' },
+  { value: 'other', labelKey: 'genderUndefined' },
 ];
-
-const GENDER_LABEL: Record<PlayerGender, string> = {
-  male: 'Hombre',
-  female: 'Mujer',
-  other: 'Sin definir',
-};
 
 type SavedSnapshot = {
   fullName: string;
@@ -220,6 +215,7 @@ export function EditProfileScreen({
   onChangePasswordPress,
 }: EditProfileScreenProps) {
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const { session } = useAuth();
   const { refreshProfile, refreshMatches } = useHomeData();
   const token = session?.access_token;
@@ -294,15 +290,20 @@ export function EditProfileScreen({
     });
   }, [token, session?.user?.email, applySnapshotToForm]);
 
+  const genderLabel = (value: PlayerGender) => {
+    const opt = GENDER_OPTIONS.find((o) => o.value === value);
+    return opt ? t(`common.${opt.labelKey}`) : t('common.genderUndefined');
+  };
+
   const pickImage = async (source: 'library' | 'camera') => {
     if (!session?.user?.id || !token || !session.refresh_token) {
-      Alert.alert('Sesión', 'Inicia sesión para cambiar tu foto.');
+      Alert.alert(t('alerts.session.title'), t('common.loginRequiredToSave'));
       return;
     }
     if (source === 'library') {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería.');
+        Alert.alert(t('alerts.permissionDenied.title'), t('common.permissionGallery'));
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -321,7 +322,7 @@ export function EditProfileScreen({
     }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso denegado', 'Necesitamos acceso a la cámara.');
+      Alert.alert(t('alerts.permissionDenied.title'), t('common.permissionCamera'));
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -355,17 +356,17 @@ export function EditProfileScreen({
     } catch (err) {
       const p = await fetchMyPlayerProfile(token);
       setAvatarUrl(p?.avatarUrl ?? null);
-      Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo subir la foto');
+      Alert.alert(t('common.error'), err instanceof Error ? err.message : t('common.openError'));
     } finally {
       setUploadingAvatar(false);
     }
   };
 
   const handleChangePhoto = () => {
-    Alert.alert('Foto de perfil', 'Elige una opción', [
-      { text: 'Galería', onPress: () => void pickImage('library') },
-      { text: 'Cámara', onPress: () => void pickImage('camera') },
-      { text: 'Cancelar', style: 'cancel' },
+    Alert.alert(t('profile.profilePhotoAlert'), t('common.chooseOption'), [
+      { text: t('common.gallery'), onPress: () => void pickImage('library') },
+      { text: t('common.camera'), onPress: () => void pickImage('camera') },
+      { text: t('common.cancel'), style: 'cancel' },
     ]);
   };
 
@@ -382,7 +383,7 @@ export function EditProfileScreen({
 
     if (nameChanged || phoneChanged) {
       if (!first || !last) {
-        Alert.alert('Datos incompletos', 'El nombre completo es obligatorio.');
+        Alert.alert(t('profile.incompleteData'), t('profile.fullNameRequired'));
         return false;
       }
     }
@@ -392,7 +393,7 @@ export function EditProfileScreen({
       const phoneCheck = validatePhoneParts(phoneCountry, phoneNational);
       if (!phoneCheck.ok) {
         setPhoneError(phoneCheck.error);
-        Alert.alert('Teléfono', phoneCheck.error);
+        Alert.alert(t('alerts.phone.title'), phoneCheck.error);
         return false;
       }
       phoneE164 = phoneCheck.e164;
@@ -403,18 +404,18 @@ export function EditProfileScreen({
     if (usernameChanged) {
       const usernameErr = validateUsernameLocal(username);
       if (usernameErr) {
-        Alert.alert('Usuario', usernameErr);
+        Alert.alert(t('profile.fieldUsername'), usernameErr);
         return false;
       }
       const normalized = username.trim().toLowerCase();
       const profile = await fetchMyPlayerProfile(token);
       const check = await checkUsernameAvailable(normalized, profile?.id);
       if (!check.ok) {
-        Alert.alert('Usuario', check.error);
+        Alert.alert(t('profile.fieldUsername'), check.error);
         return false;
       }
       if (!check.available) {
-        Alert.alert('Usuario', 'Este usuario ya está en uso');
+        Alert.alert(t('profile.fieldUsername'), t('profile.usernameInUse'));
         return false;
       }
     }
@@ -440,7 +441,7 @@ export function EditProfileScreen({
     const result = await updateMyPlayerProfile(token, payload);
     setSaving(false);
     if (!result.ok) {
-      Alert.alert('Error', result.error);
+      Alert.alert(t('common.error'), result.error);
       return false;
     }
     const snap = snapshotFromProfile(result.player, email);
@@ -463,12 +464,13 @@ export function EditProfileScreen({
     refreshProfile,
     onSaved,
     applySnapshotToForm,
+    t,
   ]);
 
   const handleSave = async () => {
     const ok = await saveProfile();
     if (ok) {
-      Alert.alert('Perfil', 'Datos guardados correctamente.');
+      Alert.alert(t('profile.title'), t('profile.profileSaved'));
     }
   };
 
@@ -477,15 +479,15 @@ export function EditProfileScreen({
       onBack();
       return;
     }
-    Alert.alert('Cambios sin guardar', '¿Quieres guardar antes de salir?', [
-      { text: 'Cancelar', style: 'cancel' },
+    Alert.alert(t('profile.unsavedChangesTitle'), t('profile.unsavedChangesBody'), [
+      { text: t('common.cancel'), style: 'cancel' },
       {
-        text: 'Descartar',
+        text: t('common.discard'),
         style: 'destructive',
         onPress: onBack,
       },
       {
-        text: 'Guardar',
+        text: t('common.save'),
         onPress: () => {
           void (async () => {
             const ok = await saveProfile();
@@ -498,10 +500,10 @@ export function EditProfileScreen({
 
   const pickGender = () => {
     Alert.alert(
-      'Género',
+      t('alerts.genderPicker.title'),
       undefined,
       GENDER_OPTIONS.map((opt) => ({
-        text: opt.label,
+        text: t(`common.${opt.labelKey}`),
         onPress: () => setGender(opt.value),
       })),
     );
@@ -523,11 +525,11 @@ export function EditProfileScreen({
         <Pressable
           style={({ pressed }) => [styles.headerBackBtn, pressed && styles.pressed]}
           onPress={handleBack}
-          accessibilityLabel="Volver"
+          accessibilityLabel={t('common.back')}
         >
           <Ionicons name="arrow-back" size={20} color="#fff" />
         </Pressable>
-        <Text style={styles.headerTitle}>Editar perfil</Text>
+        <Text style={styles.headerTitle}>{t('profile.editTitle')}</Text>
         <View style={styles.headerSpacer} />
         {saving ? <ActivityIndicator size="small" color={ACCENT} /> : null}
       </View>
@@ -563,25 +565,25 @@ export function EditProfileScreen({
             </View>
           </View>
           <Pressable onPress={handleChangePhoto} disabled={uploadingAvatar}>
-            <Text style={styles.changePhotoText}>Cambiar foto de perfil</Text>
+            <Text style={styles.changePhotoText}>{t('profile.profilePhotoAlert')}</Text>
           </Pressable>
         </View>
 
-        <SectionHeader title="Información personal" />
+        <SectionHeader title={t('profile.sectionPersonalInfo')} />
 
         <View style={styles.fieldsGap}>
-          <FieldCard label="Nombre y apellidos">
+          <FieldCard label={t('profile.fieldFullName')}>
             <TextInput
               style={styles.fieldInput}
               value={fullName}
               onChangeText={setFullName}
-              placeholder="Tu nombre"
+              placeholder={t('profile.fieldFullName')}
               placeholderTextColor="#4b5563"
               autoCapitalize="words"
             />
           </FieldCard>
 
-          <FieldCard label="Usuario">
+          <FieldCard label={t('profile.fieldUsername')}>
             <TextInput
               style={styles.fieldInput}
               value={username}
@@ -593,7 +595,7 @@ export function EditProfileScreen({
             />
           </FieldCard>
 
-          <FieldCard label="Email">
+          <FieldCard label={t('profile.fieldEmail')}>
             <TextInput
               style={styles.fieldInput}
               value={email}
@@ -615,43 +617,43 @@ export function EditProfileScreen({
           </View>
 
           <Pressable onPress={pickGender}>
-            <FieldCard label="Género">
+            <FieldCard label={t('profile.fieldGender')}>
               <View style={styles.genderRow}>
-                <Text style={styles.fieldInput}>{GENDER_LABEL[gender]}</Text>
+                <Text style={styles.fieldInput}>{genderLabel(gender)}</Text>
                 <Ionicons name="chevron-down" size={16} color="#6b7280" />
               </View>
             </FieldCard>
           </Pressable>
 
-          <FieldCard label="Fecha de nacimiento">
+          <FieldCard label={t('profile.fieldBirthDate')}>
             <BirthDatePickerField value={birthDate} onChange={setBirthDate} />
           </FieldCard>
 
-          <FieldCard label="Descripción">
+          <FieldCard label={t('profile.fieldDescription')}>
             <TextInput
               style={[styles.fieldInput, styles.fieldTextArea]}
               value={description}
               onChangeText={setDescription}
-              placeholder="100 caracteres"
+              placeholder={t('profile.descriptionPlaceholder')}
               placeholderTextColor="#4b5563"
               multiline
               maxLength={100}
             />
           </FieldCard>
 
-          <FieldCard label="¿Dónde juegas?">
+          <FieldCard label={t('profile.fieldWherePlay')}>
             <View style={styles.locationRow}>
               <TextInput
                 style={[styles.fieldInput, { flex: 1 }]}
                 value={playWhere}
                 onChangeText={setPlayWhere}
-                placeholder="Ciudad, club o zona"
+                placeholder={t('profile.wherePlayPlaceholder')}
                 placeholderTextColor="#4b5563"
               />
               <Pressable
                 style={({ pressed }) => [styles.locationGpsBtn, pressed && styles.pressed]}
                 onPress={() => setShowLocationPicker(true)}
-                accessibilityLabel="Elegir en el mapa"
+                accessibilityLabel={t('profile.playLocationTitle')}
               >
                 <Ionicons name="map-outline" size={18} color={ACCENT} />
               </Pressable>
@@ -661,40 +663,40 @@ export function EditProfileScreen({
               onPress={() => setShowLocationPicker(true)}
             >
               <Ionicons name="location-outline" size={14} color={ACCENT} />
-              <Text style={styles.locationMapLinkText}>Elegir en el mapa</Text>
+              <Text style={styles.locationMapLinkText}>{t('profile.playLocationTitle')}</Text>
             </Pressable>
           </FieldCard>
         </View>
 
-        <SectionHeader title="Preferencias de jugador" />
+        <SectionHeader title={t('profile.sectionPlayerPrefs')} />
         <MenuLinkRow
           icon="trophy-outline"
           iconColors={['rgba(241,143,52,0.2)', 'rgba(233,95,50,0.1)']}
-          title="Editar tus preferencias"
-          subtitle="Mejor mano, lado de la pista, tipo de partid..."
+          title={t('profile.editPrefsTitle')}
+          subtitle={t('profile.editPrefsSub')}
           onPress={onPreferencesPress}
         />
 
-        <SectionHeader title="Intereses" />
+        <SectionHeader title={t('profile.sectionInterests')} />
         <MenuLinkRow
           icon="people-outline"
           iconColors={['rgba(168,85,247,0.2)', 'rgba(147,51,234,0.1)']}
           iconColor="#c084fc"
-          title="Editar tus intereses"
-          subtitle="Juega con amigos, competiciones, desafí..."
-          onPress={() => Alert.alert('Próximamente', 'Esta sección estará disponible pronto.')}
+          title={t('profile.editInterestsTitle')}
+          subtitle={t('profile.editInterestsSub')}
+          onPress={() => Alert.alert(t('common.comingSoon'), t('common.comingSoonSection'))}
         />
 
-        <SectionHeader title="Tu contraseña" />
+        <SectionHeader title={t('profile.sectionPassword')} />
         <View style={styles.passwordCard}>
           <View>
-            <Text style={styles.passwordLabel}>Contraseña</Text>
+            <Text style={styles.passwordLabel}>{t('profile.sectionPassword')}</Text>
             <Text style={styles.passwordDots}>••••••••••</Text>
           </View>
           <Pressable
             style={({ pressed }) => [styles.passwordGearBtn, pressed && styles.pressed]}
             onPress={onChangePasswordPress}
-            accessibilityLabel="Cambiar contraseña"
+            accessibilityLabel={t('profile.changePasswordA11y')}
           >
             <Ionicons name="settings-outline" size={16} color={ACCENT} />
           </Pressable>
@@ -718,7 +720,7 @@ export function EditProfileScreen({
             ]}
             onPress={() => void handleSave()}
             disabled={saving}
-            accessibilityLabel="Guardar datos"
+            accessibilityLabel={t('common.save')}
           >
             <LinearGradient
               colors={[ACCENT, '#E95F32']}
@@ -729,7 +731,7 @@ export function EditProfileScreen({
               {saving ? (
                 <ActivityIndicator color="#fff" size="small" />
               ) : (
-                <Text style={styles.saveText}>Guardar datos</Text>
+                <Text style={styles.saveText}>{t('common.save')}</Text>
               )}
             </LinearGradient>
           </Pressable>

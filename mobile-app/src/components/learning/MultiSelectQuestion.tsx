@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ExplanationCard } from './ExplanationCard';
+import { useTranslation } from '../../i18n';
 
 type Props = {
   content: {
@@ -15,6 +16,7 @@ type Props = {
 };
 
 export function MultiSelectQuestion({ content, onAnswered }: Props) {
+  const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [submitted, setSubmitted] = useState(false);
 
@@ -66,7 +68,7 @@ export function MultiSelectQuestion({ content, onAnswered }: Props) {
   return (
     <View>
       <Text style={styles.question}>{content.question}</Text>
-      <Text style={styles.hint}>SELECCIONA TODAS LAS CORRECTAS</Text>
+      <Text style={styles.hint}>{t('learning.multiSelectHint')}</Text>
       <View style={styles.options}>
         {content.options.map((option, i) => (
           <Pressable
@@ -93,7 +95,7 @@ export function MultiSelectQuestion({ content, onAnswered }: Props) {
           >
             <Ionicons name="checkmark" size={16} color="#fff" />
             <Text style={styles.submitText}>
-              Comprobar ({selected.size} seleccionadas)
+              {t('learning.questionCheckMultiSelect', { count: selected.size })}
             </Text>
           </LinearGradient>
         </Pressable>

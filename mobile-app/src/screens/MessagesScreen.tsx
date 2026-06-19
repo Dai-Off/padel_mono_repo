@@ -17,6 +17,7 @@ import { fetchMyPlayerId, searchPlayers, type PlayerSearchHit } from '../api/pla
 import { subscribeMessagesSocket } from '../realtime/messagesSocket';
 import { theme } from '../theme';
 import { formatPlayerLabel } from '../lib/username';
+import { useTranslation } from '../i18n';
 
 const ACCENT = '#F18F34';
 const BG = '#0A0A0A';
@@ -50,6 +51,7 @@ function initials(name: string): string {
 }
 
 export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const token = session?.access_token;
   const [myPlayerId, setMyPlayerId] = useState<string | null>(null);
@@ -72,7 +74,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
 
   const load = useCallback(async () => {
     if (!token) {
-      setError('Inicia sesión para ver tus mensajes');
+      setError(t('messages.loginToView'));
       setLoading(false);
       return;
     }
@@ -85,7 +87,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
     }
     setLoading(false);
     setRefreshing(false);
-  }, [token]);
+  }, [token, t]);
 
   useEffect(() => {
     setLoading(true);
@@ -187,16 +189,16 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
           onPress={onBack}
           style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Volver"
+          accessibilityLabel={t('messages.backA11y')}
         >
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </Pressable>
-        <Text style={styles.title}>Mensajes</Text>
+        <Text style={styles.title}>{t('messages.title')}</Text>
         <Pressable
           onPress={() => setNewChatOpen(true)}
           style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Nueva conversación"
+          accessibilityLabel={t('messages.newConversationA11y')}
         >
           <Ionicons name="create-outline" size={22} color={ACCENT} />
         </Pressable>
@@ -207,7 +209,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
         <TextInput
           value={filter}
           onChangeText={setFilter}
-          placeholder="Buscar conversaciones"
+          placeholder={t('messages.searchConversations')}
           placeholderTextColor="rgba(255,255,255,0.35)"
           style={styles.searchInput}
         />
@@ -221,7 +223,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
         <View style={styles.centered}>
           <Text style={styles.errorText}>{error}</Text>
           <Pressable onPress={() => void load()} style={styles.retryBtn}>
-            <Text style={styles.retryText}>Reintentar</Text>
+            <Text style={styles.retryText}>{t('common.retry')}</Text>
           </Pressable>
         </View>
       ) : (
@@ -242,9 +244,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
             />
           }
           ListEmptyComponent={
-            <Text style={styles.empty}>
-              No hay conversaciones todavía. Pulsa el lápiz para buscar un jugador y empezar a chatear.
-            </Text>
+            <Text style={styles.empty}>{t('messages.emptyConversations')}</Text>
           }
         />
       )}
@@ -253,7 +253,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Nueva conversación</Text>
+              <Text style={styles.modalTitle}>{t('messages.newConversationTitle')}</Text>
               <Pressable onPress={() => setNewChatOpen(false)} hitSlop={12}>
                 <Ionicons name="close" size={24} color="#fff" />
               </Pressable>
@@ -261,7 +261,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
             <TextInput
               value={searchQ}
               onChangeText={setSearchQ}
-              placeholder="Nombre, apellido o @usuario"
+              placeholder={t('messages.searchPlayersPlaceholder')}
               placeholderTextColor="rgba(255,255,255,0.35)"
               style={styles.modalInput}
               autoCorrect={false}
@@ -295,7 +295,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                       </View>
                       <View style={styles.searchRowText}>
                         <Text style={styles.peerName}>
-                          {hasUsername ? `@${item.username}` : fullName || 'Jugador'}
+                          {hasUsername ? `@${item.username}` : fullName || t('common.playerFallback')}
                         </Text>
                         {hasUsername && fullName ? (
                           <Text style={styles.searchRowSub}>{fullName}</Text>
@@ -306,7 +306,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                 }}
                 ListEmptyComponent={
                   searchQ.trim().length >= 2 && !searchLoading ? (
-                    <Text style={styles.empty}>Sin resultados</Text>
+                    <Text style={styles.empty}>{t('messages.noSearchResults')}</Text>
                   ) : null
                 }
               />

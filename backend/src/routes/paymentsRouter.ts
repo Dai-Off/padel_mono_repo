@@ -46,8 +46,8 @@ router.post('/create-intent-for-tournament', createIntentForTournamentHandler);
 router.post('/create-intent-for-season-pass-elite', createIntentForSeasonPassEliteHandler);
 router.post('/confirm-client', confirmClientHandler);
 router.post('/simulate-turn-payment', simulateTurnPaymentHandler);
-router.post('/simulate-booking-payment', simulateBookingPaymentHandler);
-router.post('/simulate-tournament-payment', simulateTournamentPaymentHandler);
-router.post('/simulate-join-payment', simulateJoinPaymentHandler);
+router.post('/miniapp/simulate-booking-payment', simulateBookingPaymentHandler);
+router.post('/miniapp/simulate-tournament-payment', simulateTournamentPaymentHandler);
+router.post('/miniapp/simulate-join-payment', simulateJoinPaymentHandler);
 
 export default router;

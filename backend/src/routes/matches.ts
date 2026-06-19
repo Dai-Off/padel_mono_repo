@@ -14,7 +14,10 @@ import {
 } from '../services/paymentRefundService';
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
 import { enrichMatchRowsWithClubImages } from '../lib/clubLogoUrl';
-import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
+import {
+  assertGuestCanJoinMatch,
+  tryRepairPaidGuestMissingFromMatch,
+} from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
 import {
@@ -921,27 +924,22 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
       }
     }
 
-    const { data: existing } = await supabase
-      .from('match_players')
-      .select('id')
-      .eq('match_id', matchId)
-      .eq('player_id', playerId)
-      .maybeSingle();
-    if (existing) {
-      return res.status(409).json({ ok: false, error: 'Ya estás en este partido' });
+    const capacity = await assertGuestCanJoinMatch(
+      supabase,
+      matchId,
+      match.booking_id,
+      playerId,
+      slotIndex,
+    );
+    if (!capacity.ok) {
+      return res.status(409).json({
+        ok: false,
+        code: capacity.code,
+        error: capacity.error,
+      });
     }
-
-    const { data: matchPlayers } = await supabase
-      .from('match_players')
-      .select('slot_index')
-      .eq('match_id', matchId);
-    const taken = (matchPlayers ?? []).map((p: { slot_index?: number }) => p.slot_index).filter((s): s is number => s != null);
-    if (taken.includes(slotIndex)) {
-      return res.status(400).json({ ok: false, error: 'Esa plaza ya está ocupada' });
-    }
-
-    if ((matchPlayers ?? []).length >= 4) {
-      return res.status(400).json({ ok: false, error: 'El partido está completo' });
+    if (capacity.code === 'already_in_match') {
+      return res.status(409).json({ ok: false, code: 'already_in_match', error: 'Ya estás en este partido' });
     }
 
     const { data: targetBooking } = await supabase

@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { useTranslation } from '../../i18n';
 
 export type CommunityTab = 'feed' | 'reels' | 'noticias';
 
@@ -9,10 +10,11 @@ interface CommunityTabsProps {
 }
 
 export const CommunityTabs: React.FC<CommunityTabsProps> = ({ activeTab, onTabChange }) => {
+  const { t } = useTranslation();
   const tabs: { id: CommunityTab; label: string }[] = [
-    { id: 'feed', label: 'Posts' },
-    { id: 'reels', label: 'Clips' },
-    { id: 'noticias', label: 'Noticias' },
+    { id: 'feed', label: t('community.tabsPosts') },
+    { id: 'reels', label: t('community.tabsClips') },
+    { id: 'noticias', label: t('community.tabsNews') },
   ];
 
   return (

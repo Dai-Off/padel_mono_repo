@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 import type { PartidoItem } from '../../screens/PartidosScreen';
 
@@ -38,6 +39,7 @@ function openInMaps(venue: string, venueAddress?: string, location?: string) {
 }
 
 export function ClubInfoSheet({ visible, onClose, partido }: ClubInfoSheetProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const venueAddress = partido.venueAddress ?? partido.location;
 
@@ -56,7 +58,7 @@ export function ClubInfoSheet({ visible, onClose, partido }: ClubInfoSheetProps)
       statusBarTranslucent
     >
       <View style={styles.overlay}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Cerrar" />
+        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel={t('common.close')} />
         <View style={[styles.sheet, { height: sheetHeight, paddingBottom: Math.max(insets.bottom, 24) }]}>
           <View style={styles.handle} />
           <View style={styles.header}>
@@ -64,11 +66,11 @@ export function ClubInfoSheet({ visible, onClose, partido }: ClubInfoSheetProps)
               onPress={onClose}
               style={({ pressed }) => [styles.backBtn, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel="Cerrar"
+              accessibilityLabel={t('common.close')}
             >
               <Ionicons name="arrow-back" size={20} color={theme.auth.text} />
             </Pressable>
-            <Text style={styles.headerTitle}>Info del Club</Text>
+            <Text style={styles.headerTitle}>{t('partidos.detailClubInfo')}</Text>
           </View>
 
         <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -86,20 +88,20 @@ export function ClubInfoSheet({ visible, onClose, partido }: ClubInfoSheetProps)
               onPress={handleOpenMaps}
               style={({ pressed }) => [styles.mapBtn, pressed && styles.pressed]}
               accessibilityRole="button"
-              accessibilityLabel="Abrir en mapa"
+              accessibilityLabel={t('common.openInMap')}
             >
               <Ionicons name="location" size={20} color="#fff" />
             </Pressable>
           </View>
 
-          <Text style={styles.sectionTitle}>Información</Text>
+          <Text style={styles.sectionTitle}>{t('partidos.detailTabInfo')}</Text>
           <View style={styles.infoList}>
             <View style={styles.infoRow}>
               <View style={styles.infoIcon}>
                 <Ionicons name="information-circle-outline" size={20} color={theme.auth.textSecondary} />
               </View>
               <View style={styles.infoBody}>
-                <Text style={styles.infoLabel}>Nombre de pista</Text>
+                <Text style={styles.infoLabel}>{t('partidos.detailCourt')}</Text>
                 <Text style={styles.infoValue}>{partido.courtName || '—'}</Text>
               </View>
             </View>
@@ -108,7 +110,7 @@ export function ClubInfoSheet({ visible, onClose, partido }: ClubInfoSheetProps)
                 <Text style={styles.infoEmoji}>🎾</Text>
               </View>
               <View style={styles.infoBody}>
-                <Text style={styles.infoLabel}>Tipo de pista</Text>
+                <Text style={styles.infoLabel}>{t('partidos.detailCourtType')}</Text>
                 <Text style={styles.infoValue}>{partido.courtType || '—'}</Text>
               </View>
             </View>
@@ -117,7 +119,7 @@ export function ClubInfoSheet({ visible, onClose, partido }: ClubInfoSheetProps)
                 <Ionicons name="calendar-outline" size={20} color={theme.auth.textSecondary} />
               </View>
               <View style={styles.infoBody}>
-                <Text style={styles.infoLabel}>Fecha y hora</Text>
+                <Text style={styles.infoLabel}>{t('partidos.detailDate')}</Text>
                 <Text style={styles.infoValue}>{partido.dateTime}</Text>
               </View>
             </View>

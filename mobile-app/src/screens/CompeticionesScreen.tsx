@@ -39,6 +39,7 @@ import {
   type TournamentSheetKind,
 } from '../components/competiciones/TournamentFilterSheets';
 import { theme } from '../theme';
+import { useTranslation } from '../i18n';
 
 const BG = '#0F0F0F';
 
@@ -64,6 +65,7 @@ export function CompeticionesScreen({
   onInitialTournamentOpened,
   onOpenProfileForOnboarding,
 }: CompeticionesScreenProps) {
+  const { t } = useTranslation();
   const PAGE_SIZE = 20;
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
@@ -230,8 +232,9 @@ export function CompeticionesScreen({
       searchQuery,
       activeTab,
       canJoin: canJoinTournament,
+      t,
     }),
-    [searchQuery, activeTab, canJoinTournament],
+    [searchQuery, activeTab, canJoinTournament, t],
   );
 
   const filtered = useMemo((): PublicTournamentRow[] => {
@@ -266,7 +269,7 @@ export function CompeticionesScreen({
       {needsOnboarding && activeTab === 'disponibles' && (
         <OnboardingInlineBanner
           icon="trophy-outline"
-          message="Descubre tu nivel para inscribirte en torneos competitivos"
+          message={t('onboarding.inlineTournaments')}
           onPress={() => onOpenProfileForOnboarding?.()}
         />
       )}
@@ -274,21 +277,21 @@ export function CompeticionesScreen({
       <View style={styles.sectionHead}>
         <Text style={styles.sectionTitle}>
           {activeTab === 'disponibles'
-            ? 'Torneos disponibles'
+            ? t('torneos.sectionAvailable')
             : activeTab === 'inscritas'
-              ? 'Mis torneos'
-              : 'Mis solicitudes'}
+              ? t('torneos.sectionRegistered')
+              : t('torneos.sectionRequests')}
         </Text>
         <Text style={styles.sectionSub}>
           {activeTab === 'solicitudes'
             ? requestItems.length === 1
-              ? '1 solicitud'
-              : `${requestItems.length} solicitudes`
+              ? t('torneos.countRequestOne')
+              : t('torneos.countRequestMany', { count: requestItems.length })
             : filtered.length === 1
-              ? '1 torneo'
-              : `${filtered.length} torneos`}
+              ? t('torneos.countTournamentOne')
+              : t('torneos.countTournamentMany', { count: filtered.length })}
           {activeTab === 'inscritas' && !session?.access_token
-            ? ' · inicia sesión para ver inscripciones'
+            ? t('torneos.loginHintRegistered')
             : ''}
         </Text>
       </View>
@@ -311,7 +314,7 @@ export function CompeticionesScreen({
         <FilterSearchHeader
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          placeholder="Buscar torneos..."
+          placeholder={t('torneos.searchPlaceholder')}
           onBack={onBack}
           showFiltersButton={false}
         />
@@ -322,20 +325,20 @@ export function CompeticionesScreen({
           chips={[
             {
               id: 'sport',
-              label: 'Pádel',
+              label: t('common.sportPadel'),
               active: true,
               onPress: () =>
-                Alert.alert('Deporte', 'Por ahora todos los torneos son de pádel.'),
+                Alert.alert(t('torneos.sportAlertTitle'), t('torneos.sportPadelOnlyAlert')),
             },
             {
               id: 'format',
-              label: formatFilterChipLabel(tournamentFilters),
+              label: formatFilterChipLabel(tournamentFilters, t),
               active: tournamentFilters.format !== 'all',
               onPress: () => setFilterSheet('format'),
             },
             {
               id: 'level',
-              label: levelChipLabel(tournamentFilters),
+              label: levelChipLabel(tournamentFilters, t),
               active: tournamentFilters.level !== 'all',
               onPress: () => setFilterSheet('level'),
             },
@@ -343,7 +346,7 @@ export function CompeticionesScreen({
               ? [
                   {
                     id: 'joinable',
-                    label: joinableChipLabel(tournamentFilters.joinableOnly),
+                    label: joinableChipLabel(tournamentFilters.joinableOnly, t),
                     active: tournamentFilters.joinableOnly,
                     showChevron: false,
                     onPress: () =>
@@ -369,7 +372,7 @@ export function CompeticionesScreen({
                 activeTab === 'disponibles' && styles.segmentedTextActive,
               ]}
             >
-              Disponibles
+              {t('torneos.tabAvailable')}
             </Text>
           </Pressable>
           <Pressable
@@ -386,7 +389,7 @@ export function CompeticionesScreen({
                 activeTab === 'inscritas' && styles.segmentedTextActive,
               ]}
             >
-              Inscritas
+              {t('torneos.tabRegistered')}
             </Text>
           </Pressable>
           <Pressable
@@ -404,7 +407,7 @@ export function CompeticionesScreen({
                   activeTab === 'solicitudes' && styles.segmentedTextActive,
                 ]}
               >
-                Solicitudes
+                {t('torneos.tabRequests')}
               </Text>
               {requestUnreadCount > 0 ? (
                 <View style={styles.segmentedBadge}>
@@ -419,7 +422,7 @@ export function CompeticionesScreen({
       {loading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={theme.auth.accent} />
-          <Text style={styles.loadingText}>Cargando torneos…</Text>
+          <Text style={styles.loadingText}>{t('torneos.loadingTournaments')}</Text>
         </View>
       ) : error && items.length === 0 ? (
         <View style={styles.centered}>
@@ -433,7 +436,7 @@ export function CompeticionesScreen({
             }}
             style={styles.retryBtn}
           >
-            <Text style={styles.retryText}>Reintentar</Text>
+            <Text style={styles.retryText}>{t('common.retry')}</Text>
           </Pressable>
         </View>
       ) : (
@@ -486,15 +489,15 @@ export function CompeticionesScreen({
                       if (rm === 'pair' || rm === 'both' || rm === 'individual') return rm;
                       return 'individual';
                     })(),
-                  })}
+                  }, t)}
                 </Text>
                 <Text style={styles.requestStatus}>
-                  Estado: {String(item.req.status ?? '').toUpperCase()}
+                  {t('torneos.requestStatusLabel')} {String(item.req.status ?? '').toUpperCase()}
                 </Text>
                 <Text style={styles.requestMessage} numberOfLines={2}>
                   {item.req.response_message?.trim() ||
                     item.req.message ||
-                    'Sin mensaje'}
+                    t('torneos.noMessage')}
                 </Text>
               </Pressable>
             ) : (
@@ -517,14 +520,14 @@ export function CompeticionesScreen({
             <View style={styles.emptyWrap}>
               <Text style={styles.emptyText}>
                 {activeTab === 'inscritas' && !session?.access_token
-                  ? 'Inicia sesión para ver tus torneos inscritos.'
+                  ? t('torneos.emptyLoginRegistered')
                   : activeTab === 'solicitudes' && !session?.access_token
-                    ? 'Inicia sesión para ver tus solicitudes.'
+                    ? t('torneos.emptyLoginRequests')
                   : error
                     ? error
                     : activeTab === 'solicitudes'
-                      ? 'No tienes solicitudes todavía.'
-                      : 'No hay torneos que coincidan con tu búsqueda.'}
+                      ? t('torneos.emptyNoRequests')
+                      : t('torneos.emptyNoMatch')}
               </Text>
             </View>
           }

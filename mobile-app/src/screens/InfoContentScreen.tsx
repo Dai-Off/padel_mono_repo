@@ -2,7 +2,8 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { MenuScreenHeader } from '../components/menuScreen/MenuScreenHeader';
-import { INFO_SCREENS, type InfoBlock, type InfoScreenId } from '../content/infoContent';
+import { getInfoScreens, type InfoBlock, type InfoScreenId } from '../content/infoContent';
+import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 
 type InfoContentScreenProps = {
@@ -10,7 +11,13 @@ type InfoContentScreenProps = {
   onBack: () => void;
 };
 
-function InfoBlockView({ block }: { block: InfoBlock }) {
+function InfoBlockView({
+  block,
+  contactFallback,
+}: {
+  block: InfoBlock;
+  contactFallback: string;
+}) {
   if (block.type === 'heading') {
     return <Text style={styles.heading}>{block.text}</Text>;
   }
@@ -38,7 +45,7 @@ function InfoBlockView({ block }: { block: InfoBlock }) {
     >
       <Ionicons name="mail-outline" size={18} color={theme.auth.accent} />
       <View style={styles.contactTextWrap}>
-        <Text style={styles.contactLabel}>{block.label ?? 'Contactar'}</Text>
+        <Text style={styles.contactLabel}>{block.label ?? contactFallback}</Text>
         <Text style={styles.contactEmail}>{block.email}</Text>
       </View>
       <Ionicons name="chevron-forward" size={16} color="#6b7280" />
@@ -47,8 +54,9 @@ function InfoBlockView({ block }: { block: InfoBlock }) {
 }
 
 export function InfoContentScreen({ screenId, onBack }: InfoContentScreenProps) {
+  const { t, locale } = useTranslation();
   const insets = useSafeAreaInsets();
-  const content = INFO_SCREENS[screenId];
+  const content = getInfoScreens(locale)[screenId];
 
   return (
     <View style={styles.container}>
@@ -58,9 +66,13 @@ export function InfoContentScreen({ screenId, onBack }: InfoContentScreenProps) 
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 32 + (insets.bottom ?? 0) }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.updated}>Última actualización: {content.lastUpdated}</Text>
+        <Text style={styles.updated}>{t('settings.lastUpdated', { date: content.lastUpdated })}</Text>
         {content.blocks.map((block, index) => (
-          <InfoBlockView key={`${block.type}-${index}`} block={block} />
+          <InfoBlockView
+            key={`${block.type}-${index}`}
+            block={block}
+            contactFallback={t('settings.contactFallback')}
+          />
         ))}
       </ScrollView>
     </View>

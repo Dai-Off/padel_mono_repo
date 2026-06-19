@@ -5,6 +5,7 @@ import {
   SPORT_OPTIONS,
   TIME_RANGE_PRESETS,
 } from '../utils/formatSearch';
+import type { TranslateFn } from './partidosFilters';
 
 export type SearchSortOption = 'distancia' | 'precio';
 export type SearchDurationOption = 60 | 90 | 120;
@@ -39,11 +40,11 @@ export function getInitialSearchFilters(): SearchFiltersState {
   };
 }
 
-export function sportLabelForFilters(sport: string | null): string {
-  if (sport === 'padel') return 'Pádel';
-  if (sport === 'tenis') return 'Tenis';
-  if (sport === 'pickleball') return 'Pickleball';
-  return 'Deporte';
+export function sportLabelForFilters(sport: string | null, t: TranslateFn): string {
+  if (sport === 'padel') return t('common.sportPadel');
+  if (sport === 'tenis') return t('common.sportTenis');
+  if (sport === 'pickleball') return t('common.sportPickleball');
+  return t('search.filterSport');
 }
 
 /** Filtros avanzados distintos del valor por defecto (badge en icono de filtros). */

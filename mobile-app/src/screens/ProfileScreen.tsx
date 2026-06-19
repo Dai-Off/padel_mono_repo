@@ -31,6 +31,7 @@ import {
 } from '../api/playerAvatar';
 
 import type { InfoScreenId } from '../content/infoContent';
+import { useTranslation } from '../i18n';
 
 type ProfileScreenProps = {
   onBack: () => void;
@@ -68,12 +69,18 @@ export function ProfileScreen({
   onOnboardingCompleted,
 }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
+  const { t, locale } = useTranslation();
   const { session } = useAuth();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
-  const [activeSport, setActiveSport] = useState('Pádel');
-  const [activeLogroTab, setActiveLogroTab] = useState('Todos');
+  const sportTabs = [
+    { id: 'padel', label: t('common.sportPadel') },
+    { id: 'tenis', label: t('common.sportTenis') },
+    { id: 'pickleball', label: t('common.sportPickleball') },
+  ] as const;
+  const [activeSport, setActiveSport] = useState<(typeof sportTabs)[number]['id']>(sportTabs[0].id);
+  const [activeLogroTab, setActiveLogroTab] = useState(() => t('profile.logrosTabAll'));
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [uploadingCover, setUploadingCover] = useState(false);
@@ -103,7 +110,7 @@ export function ProfileScreen({
       if (p) {
         setProfile(p);
         setCoverUrl(p.coverUrl);
-        fetchMyPeerFeedbackInsight(token, p.id).then(setPeerInsight).catch(() => {});
+        fetchMyPeerFeedbackInsight(token, p.id, locale).then(setPeerInsight).catch(() => {});
         setProfileLoading(false);
         return;
       }
@@ -111,36 +118,36 @@ export function ProfileScreen({
         await new Promise((r) => setTimeout(r, 1500));
         return loadProfile(token, attempt + 1);
       }
-      setProfileError('No se pudo cargar tu perfil. Comprueba la conexión e inténtalo de nuevo.');
+      setProfileError(t('profile.profileLoadError'));
     } catch {
       if (attempt < 2) {
         await new Promise((r) => setTimeout(r, 1500));
         return loadProfile(token, attempt + 1);
       }
-      setProfileError('Error al cargar el perfil.');
+      setProfileError(t('profile.profileLoadFail'));
     } finally {
       setProfileLoading(false);
     }
-  }, []);
+  }, [locale, t]);
 
   useEffect(() => {
     const token = session?.access_token;
     if (!token) {
       setProfileLoading(false);
-      setProfileError('Inicia sesión para ver tu perfil.');
+      setProfileError(t('common.loginRequiredToView'));
       return;
     }
     void loadProfile(token);
-    fetchMyCoachAssessment(token).then(setAssessment).catch(() => {});
-  }, [session?.access_token, loadProfile]);
+    fetchMyCoachAssessment(token, locale).then(setAssessment).catch(() => {});
+  }, [session?.access_token, loadProfile, locale]);
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
   const displayName = profile
     ? `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() ||
       formatPlayerLabel(profile)
     : profileLoading
-      ? 'Cargando...'
-      : '—';
+      ? t('common.loadingEllipsis')
+      : t('profile.publicProfileFallback');
   const usernameLine = profile?.username ? `@${profile.username}` : null;
 
   const needsLevelOnboarding = profile != null && profile.onboardingCompleted === false;
@@ -148,7 +155,7 @@ export function ProfileScreen({
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
-    fetchMyCoachAssessment(session.access_token).then(setAssessment).catch(() => {});
+    fetchMyCoachAssessment(session.access_token, locale).then(setAssessment).catch(() => {});
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).
@@ -157,7 +164,7 @@ export function ProfileScreen({
 
   const applyCoverImage = async (image: PickedImage) => {
     if (!session?.user?.id || !session.access_token || !session.refresh_token) {
-      Alert.alert('Sesión', 'Inicia sesión para cambiar la portada.');
+      Alert.alert(t('alerts.session.title'), t('common.loginRequiredToSave'));
       return;
     }
     setCoverUrl(image.uri);
@@ -174,7 +181,7 @@ export function ProfileScreen({
       void refreshGlobalProfile({ force: true });
     } catch (err) {
       setCoverUrl(profile?.coverUrl ?? null);
-      Alert.alert('Error', err instanceof Error ? err.message : 'No se pudo subir la portada');
+      Alert.alert(t('common.error'), err instanceof Error ? err.message : t('common.openError'));
     } finally {
       setUploadingCover(false);
     }
@@ -184,7 +191,7 @@ export function ProfileScreen({
     if (source === 'library') {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería.');
+        Alert.alert(t('alerts.permissionDenied.title'), t('common.permissionGallery'));
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -203,7 +210,7 @@ export function ProfileScreen({
     }
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permiso denegado', 'Necesitamos acceso a la cámara.');
+      Alert.alert(t('alerts.permissionDenied.title'), t('common.permissionCamera'));
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -222,10 +229,10 @@ export function ProfileScreen({
 
   const handleChangeCover = () => {
     if (uploadingCover) return;
-    Alert.alert('Foto de portada', 'Elige una opción', [
-      { text: 'Galería', onPress: () => void pickCoverImage('library') },
-      { text: 'Cámara', onPress: () => void pickCoverImage('camera') },
-      { text: 'Cancelar', style: 'cancel' },
+    Alert.alert(t('profile.coverPhotoAlert'), t('common.chooseOption'), [
+      { text: t('common.gallery'), onPress: () => void pickCoverImage('library') },
+      { text: t('common.camera'), onPress: () => void pickCoverImage('camera') },
+      { text: t('common.cancel'), style: 'cancel' },
     ]);
   };
 
@@ -247,11 +254,11 @@ export function ProfileScreen({
             style={[styles.editBtn, { marginTop: 20, paddingHorizontal: 24 }]}
             onPress={() => void loadProfile(session.access_token!)}
           >
-            <Text style={styles.editBtnText}>Reintentar</Text>
+            <Text style={styles.editBtnText}>{t('common.retry')}</Text>
           </Pressable>
         ) : null}
         <Pressable style={{ marginTop: 16 }} onPress={onBack}>
-          <Text style={{ color: '#9CA3AF' }}>Volver</Text>
+          <Text style={{ color: '#9CA3AF' }}>{t('common.back')}</Text>
         </Pressable>
       </View>
     );
@@ -263,10 +270,10 @@ export function ProfileScreen({
       <View style={styles.header}>
         <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
         <View style={styles.headerContent}>
-          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel="Volver">
+          <Pressable onPress={onBack} style={styles.headerIconBtn} accessibilityLabel={t('common.back')}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </Pressable>
-          <Text style={styles.headerTitle}>Perfil</Text>
+          <Text style={styles.headerTitle}>{t('profile.title')}</Text>
           <View style={styles.headerActions}>
             <Pressable style={styles.headerIconBtn}>
               <Ionicons name="chatbubble-outline" size={20} color="#fff" />
@@ -311,7 +318,7 @@ export function ProfileScreen({
             style={styles.cameraBtn}
             onPress={handleChangeCover}
             disabled={uploadingCover}
-            accessibilityLabel="Cambiar foto de portada"
+            accessibilityLabel={t('profile.coverPhotoAlert')}
           >
             <Ionicons name="camera-outline" size={14} color="rgba(255,255,255,0.8)" />
           </Pressable>
@@ -321,7 +328,7 @@ export function ProfileScreen({
         <View style={styles.profileCardWrap}>
           <View style={styles.profileCard}>
             <View style={styles.eloBadge}>
-              <Text style={styles.eloLabel}>NIVEL</Text>
+              <Text style={styles.eloLabel}>{t('profile.levelLabel')}</Text>
               <Text style={styles.eloValue}>
                 {profile?.onboardingCompleted && profile?.eloRating != null && Number.isFinite(profile.eloRating)
                   ? profile.eloRating.toFixed(2)
@@ -356,28 +363,28 @@ export function ProfileScreen({
             <View style={styles.statsRow}>
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>{profile?.matchesPlayedTotal ?? 0}</Text>
-                <Text style={styles.statLabel}>PARTIDOS</Text>
+                <Text style={styles.statLabel}>{t('profile.matchesStat')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>SEGUIDORES</Text>
+                <Text style={styles.statLabel}>{t('profile.followersStat')}</Text>
               </View>
               <View style={styles.statDivider} />
               <View style={styles.statItem}>
                 <Text style={styles.statValue}>--</Text>
-                <Text style={styles.statLabel}>SEGUIDOS</Text>
+                <Text style={styles.statLabel}>{t('profile.followingStat')}</Text>
               </View>
             </View>
 
             {/* Action Buttons */}
             <View style={styles.actionButtonsRow}>
               <Pressable style={styles.editBtn} onPress={() => onEditProfilePress?.()}>
-                <Text style={styles.editBtnText}>Editar perfil</Text>
+                <Text style={styles.editBtnText}>{t('profile.editProfileBtn')}</Text>
               </Pressable>
               <Pressable style={styles.personalizeBtn} onPress={() => onPreferencesPress?.()}>
                 <Ionicons name="options-outline" size={14} color="#F18F34" />
-                <Text style={styles.personalizeBtnText}>Preferencias</Text>
+                <Text style={styles.personalizeBtnText}>{t('profile.preferencesBtn')}</Text>
               </Pressable>
             </View>
           </View>
@@ -386,15 +393,15 @@ export function ProfileScreen({
         {/* Sport Tabs */}
         <View style={styles.sportTabsContainer}>
           <View style={styles.sportTabsBackground}>
-            {['Pádel', 'Tenis', 'Pickleball'].map(sport => (
+            {sportTabs.map((sport) => (
               <Pressable 
-                key={sport} 
-                onPress={() => setActiveSport(sport)}
-                style={[styles.sportTabItem, activeSport === sport && styles.sportTabItemActive]}
+                key={sport.id} 
+                onPress={() => setActiveSport(sport.id)}
+                style={[styles.sportTabItem, activeSport === sport.id && styles.sportTabItemActive]}
               >
-                {activeSport === sport && <View style={styles.sportTabHighlight} />}
-                <Text style={[styles.sportTabText, activeSport === sport ? styles.sportTabTextActive : styles.sportTabTextInactive]}>
-                  {sport}
+                {activeSport === sport.id && <View style={styles.sportTabHighlight} />}
+                <Text style={[styles.sportTabText, activeSport === sport.id ? styles.sportTabTextActive : styles.sportTabTextInactive]}>
+                  {sport.label}
                 </Text>
               </Pressable>
             ))}
@@ -416,16 +423,16 @@ export function ProfileScreen({
                   </LinearGradient>
                 </View>
                 <Text style={styles.coachTitle}>
-                  {needsLevelOnboarding ? 'Nivelación inicial' : 'Coach Virtual IA'}
+                  {needsLevelOnboarding ? t('onboarding.profileInitialLevel') : t('profile.coachVirtualIa')}
                 </Text>
                 <Text style={styles.coachDesc}>
                   {needsLevelOnboarding
-                    ? 'Responde al cuestionario oficial para calcular tu nivel inicial (0–7) y desbloquear matchmaking y el resto de funciones.'
-                    : 'Mide tu nivel de Pádel para desbloquear análisis personalizados y recomendaciones del Coach IA'}
+                    ? t('onboarding.profileLevelCoachDesc')
+                    : t('profile.coachSubtitle')}
                 </Text>
                 <Pressable style={styles.coachCtaBtn} onPress={() => setShowOnboardingModal(true)}>
                   <Ionicons name="locate-outline" size={16} color="#fff" />
-                  <Text style={styles.coachCtaText}>Comenzar nivelación</Text>
+                  <Text style={styles.coachCtaText}>{t('onboarding.profileStartLeveling')}</Text>
                 </Pressable>
               </View>
             </View>
@@ -438,7 +445,7 @@ export function ProfileScreen({
               <View style={styles.coachGlow} />
               <View style={styles.coachContent}>
                 <ActivityIndicator color="#F18F34" />
-                <Text style={styles.coachDesc}>Cargando status de nivelación…</Text>
+                <Text style={styles.coachDesc}>{t('onboarding.profileLevelingLoading')}</Text>
               </View>
             </View>
           </View>
@@ -459,16 +466,14 @@ export function ProfileScreen({
                     <Ionicons name="trophy-outline" size={16} color="#fff" />
                   </LinearGradient>
                   <View>
-                    <Text style={styles.achievementsTitle}>Vitrina de Logros</Text>
-                    <Text style={styles.achievementsCount}>Sin logros disponibles todavía</Text>
+                    <Text style={styles.achievementsTitle}>{t('profile.achievementsTitle')}</Text>
+                    <Text style={styles.achievementsCount}>{t('profile.achievementsEmpty')}</Text>
                   </View>
                 </View>
               </View>
               <View style={styles.emptyAchievementsBox}>
                 <Ionicons name="trophy-outline" size={24} color="#6B7280" />
-                <Text style={styles.emptyAchievementsText}>
-                  Aun no hay datos reales de logros para mostrar.
-                </Text>
+                <Text style={styles.emptyAchievementsText}>{t('profile.achievementsEmptySub')}</Text>
               </View>
             </View>
           </View>
@@ -478,28 +483,28 @@ export function ProfileScreen({
         <View style={styles.menuContainer}>
           <View style={styles.menuCard}>
             {[
-              { title: 'Preferencias', icon: 'locate-outline' },
-              { title: 'Configuración', icon: 'settings-outline' },
-              { title: 'Ayuda y soporte', icon: 'people-outline' },
-              { title: 'Términos y condiciones', icon: 'document-text-outline' },
+              { id: 'preferences', title: t('profile.menuPreferences'), icon: 'locate-outline' },
+              { id: 'settings', title: t('profile.menuSettings'), icon: 'settings-outline' },
+              { id: 'help', title: t('profile.menuHelpSupport'), icon: 'people-outline' },
+              { id: 'terms', title: t('profile.menuTerms'), icon: 'document-text-outline' },
             ].map((item, idx, arr) => (
               <Pressable
-                key={item.title}
+                key={item.id}
                 style={[styles.menuItem, idx === arr.length - 1 && styles.menuItemLast]}
                 onPress={() => {
-                  if (item.title === 'Preferencias') {
+                  if (item.id === 'preferences') {
                     onPreferencesPress?.();
                     return;
                   }
-                  if (item.title === 'Ayuda y soporte') {
+                  if (item.id === 'help') {
                     onNavigateToInfo?.('help');
                     return;
                   }
-                  if (item.title === 'Términos y condiciones') {
+                  if (item.id === 'terms') {
                     onNavigateToInfo?.('terms');
                     return;
                   }
-                  Alert.alert(item.title, `Navegando a ${item.title}`);
+                  Alert.alert(item.title, t('alerts.profile.comingSoon'));
                 }}
               >
                 <View style={styles.menuIconBox}>

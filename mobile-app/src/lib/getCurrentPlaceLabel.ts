@@ -1,5 +1,7 @@
 import * as Location from 'expo-location';
 
+export type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
+
 export type CurrentPlaceResult =
   | { ok: true; label: string }
   | { ok: false; error: string };
@@ -12,11 +14,12 @@ const DEFAULT_COORDS: MapCoords = { latitude: 40.4168, longitude: -3.7038 };
 export async function placeLabelFromCoords(
   latitude: number,
   longitude: number,
+  t: TranslateFn,
 ): Promise<CurrentPlaceResult> {
   try {
     const results = await Location.reverseGeocodeAsync({ latitude, longitude });
     if (!results.length) {
-      return { ok: false, error: 'No se pudo determinar el lugar en el mapa.' };
+      return { ok: false, error: t('common.locationCouldNotDetermine') };
     }
 
     const r = results[0];
@@ -30,11 +33,11 @@ export async function placeLabelFromCoords(
       .filter(Boolean);
     const label = [...new Set(parts)].join(', ');
     if (!label) {
-      return { ok: false, error: 'No hay nombre para este punto del mapa.' };
+      return { ok: false, error: t('common.locationNoName') };
     }
     return { ok: true, label: label.slice(0, 200) };
   } catch {
-    return { ok: false, error: 'No se pudo leer la dirección del mapa.' };
+    return { ok: false, error: t('common.locationCouldNotReadAddress') };
   }
 }
 
@@ -42,17 +45,17 @@ function coordsFromPosition(pos: Location.LocationObject): MapCoords {
   return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
 }
 
-export async function getCurrentMapCoords(): Promise<
+export async function getCurrentMapCoords(t: TranslateFn): Promise<
   { ok: true; coords: MapCoords } | { ok: false; error: string }
 > {
   const perm = await Location.requestForegroundPermissionsAsync();
   if (perm.status !== 'granted') {
-    return { ok: false, error: 'Activa el permiso de ubicación.' };
+    return { ok: false, error: t('common.locationPermission') };
   }
 
   const servicesOn = await Location.hasServicesEnabledAsync();
   if (!servicesOn) {
-    return { ok: false, error: 'Activa la ubicación (GPS) en los ajustes del dispositivo.' };
+    return { ok: false, error: t('common.locationGpsDisabled') };
   }
 
   try {
@@ -82,16 +85,15 @@ export async function getCurrentMapCoords(): Promise<
 
   return {
     ok: false,
-    error:
-      'No se pudo obtener tu ubicación. Probá de nuevo en unos segundos o elegí clubes preferidos.',
+    error: t('common.locationCouldNotGet'),
   };
 }
 
 /** Ciudad/región a partir de GPS (atajo sin mapa). */
-export async function getCurrentPlaceLabel(): Promise<CurrentPlaceResult> {
-  const coords = await getCurrentMapCoords();
+export async function getCurrentPlaceLabel(t: TranslateFn): Promise<CurrentPlaceResult> {
+  const coords = await getCurrentMapCoords(t);
   if (!coords.ok) return coords;
-  return placeLabelFromCoords(coords.coords.latitude, coords.coords.longitude);
+  return placeLabelFromCoords(coords.coords.latitude, coords.coords.longitude, t);
 }
 
 export { DEFAULT_COORDS };
