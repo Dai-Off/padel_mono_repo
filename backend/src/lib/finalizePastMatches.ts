@@ -61,12 +61,19 @@ async function autoConfirmExpiredVotes(): Promise<void> {
   }
 }
 
+type FinalizePastMatchesOpts = {
+  /** Reembolsos Stripe + cancelación masiva: solo cron (`run-debt-settlement`), no listados. */
+  cancelIncomplete?: boolean;
+};
+
 /**
  * Marca como finished los partidos completos (4 jugadores) cuya reserva ya terminó.
- * Antes cancela partidos incompletos que ya pasaron su hora de inicio (con reembolso).
+ * Opcionalmente cancela incompletos vencidos (solo vía cron; ver `cancelIncomplete`).
  * Idempotente: volver a llamar no cambia filas ya finished/cancelled.
  */
-export async function finalizePastMatches(): Promise<{ finished: number; cancelled: number }> {
+export async function finalizePastMatches(
+  opts?: FinalizePastMatchesOpts,
+): Promise<{ finished: number; cancelled: number }> {
   const supabase = getSupabaseServiceRoleClient();
   const nowIso = new Date().toISOString();
 
@@ -78,10 +85,12 @@ export async function finalizePastMatches(): Promise<{ finished: number; cancell
   }
 
   let cancelled = 0;
-  try {
-    cancelled = await cancelIncompletePastMatches();
-  } catch (err) {
-    console.error('[finalizePastMatches] cancelIncompletePastMatches failed:', err);
+  if (opts?.cancelIncomplete) {
+    try {
+      cancelled = await cancelIncompletePastMatches();
+    } catch (err) {
+      console.error('[finalizePastMatches] cancelIncompletePastMatches failed:', err);
+    }
   }
 
   // Solo partidos con 4 jugadores pasan a finished al cerrar el turno.
@@ -121,10 +130,10 @@ export async function finalizePastMatches(): Promise<{ finished: number; cancell
 let lastThrottledRun = 0;
 const THROTTLE_MS = 60_000;
 
-/** Listados: como mucho una pasada de cierre al minuto para no multiplicar lecturas/escrituras. */
+/** Listados: cierre rápido al minuto; sin cancelaciones masivas ni Stripe en el hot path. */
 export async function finalizePastMatchesThrottled(): Promise<void> {
   const now = Date.now();
   if (now - lastThrottledRun < THROTTLE_MS) return;
   lastThrottledRun = now;
-  await finalizePastMatches();
+  await finalizePastMatches({ cancelIncomplete: false });
 }
