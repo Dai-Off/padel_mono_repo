@@ -274,7 +274,7 @@ export function CompetitiveLeagueScreen({
           setRankingRows([]);
           setRankingTotal(0);
           setRankingHasMore(false);
-          setRankingError('No se pudo cargar el ranking.');
+          setRankingError(t('competitive.screen.errors.rankingLoadFailed'));
         }
         setRankingLoading(false);
         setRankingLoadingMore(false);
@@ -287,7 +287,7 @@ export function CompetitiveLeagueScreen({
       setRankingLoading(false);
       setRankingLoadingMore(false);
     },
-    [profile?.liga, session?.access_token],
+    [profile?.liga, session?.access_token, t],
   );
 
   useEffect(() => {
@@ -337,7 +337,7 @@ export function CompetitiveLeagueScreen({
       setSearchPartner(null);
       setStep('prefs');
       if (matchmakingBannerState === 'timed_out') {
-        setErrorText('No se encontraron jugadores. Ajusta los parámetros y vuelve a intentar.');
+        setErrorText(t('competitive.screen.errors.timedOut'));
         // Limpiamos la búsqueda anterior: revierte la invitación de pareja a 'accepted' y nos
         // saca del pool, para que el reintento parta de cero (y la pareja siga en "Listos para jugar").
         const token = session?.access_token ?? null;
@@ -403,7 +403,7 @@ export function CompetitiveLeagueScreen({
 
   const preferredClubLabels = useMemo(() => {
     const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
-    return preferredClubIds.map((id) => byId.get(id) ?? 'Club');
+    return preferredClubIds.map((id) => byId.get(id) ?? t('competitive.screen.fallback.club'));
   }, [clubCatalog, preferredClubIds]);
 
   const refreshSearchCoords = useCallback(async () => {
@@ -476,8 +476,7 @@ export function CompetitiveLeagueScreen({
       const req = await Location.requestForegroundPermissionsAsync();
       if (req.status !== 'granted') {
         setLocationIssue({
-          message:
-            'Activa el permiso de ubicación para buscar por distancia, o elige uno o más clubes preferidos.',
+          message: t('competitive.screen.prefs.locationPermission'),
           action: 'open_settings',
         });
         return;
@@ -514,8 +513,8 @@ export function CompetitiveLeagueScreen({
   const division = useMemo(() => {
     if (!profile) return null;
     const row = leagueRows?.find((r) => r.code === profile.liga);
-    return row?.label ?? profile.liga ?? 'Sin división';
-  }, [profile, leagueRows]);
+    return row?.label ?? profile.liga ?? t('competitive.screen.fallback.noDivision');
+  }, [profile, leagueRows, t]);
 
   // LP necesarios para ascender desde la liga actual (null en elite, que no asciende).
   const lpTarget = useMemo(() => {
@@ -538,12 +537,12 @@ export function CompetitiveLeagueScreen({
   const formatRelativeDate = (iso: string): string => {
     const diffMs = Date.now() - new Date(iso).getTime();
     const days = Math.max(0, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
-    if (days === 0) return 'Hoy';
-    if (days === 1) return 'Hace 1 día';
-    if (days < 7) return `Hace ${days} días`;
+    if (days === 0) return t('competitive.screen.relative.today');
+    if (days === 1) return t('competitive.screen.relative.oneDayAgo');
+    if (days < 7) return t('competitive.screen.relative.daysAgo', { n: days });
     const weeks = Math.floor(days / 7);
-    if (weeks <= 1) return 'Hace 1 semana';
-    return `Hace ${weeks} semanas`;
+    if (weeks <= 1) return t('competitive.screen.relative.oneWeekAgo');
+    return t('competitive.screen.relative.weeksAgo', { n: weeks });
   };
 
   function toRecentRows(matches: MatchEnriched[], myPlayerId: string) {
@@ -573,14 +572,16 @@ export function CompetitiveLeagueScreen({
           .map((p) => `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim())
           .filter(Boolean)
           .join(' & ');
-        const subtitle = rivals[0]?.liga ? `Rivales · ${rivals[0].liga}` : 'Rivales';
+        const subtitle = rivals[0]?.liga
+          ? t('competitive.screen.recent.rivalsWithLiga', { liga: rivals[0].liga })
+          : t('competitive.screen.recent.rivals');
         return {
           id: m.id,
-          title: title || 'Rivales pendientes',
+          title: title || t('competitive.screen.recent.rivalsPending'),
           subtitle,
           when: (() => {
             const startAt = getMatchBooking(m)?.start_at;
-            return startAt ? formatRelativeDate(startAt) : 'Reciente';
+            return startAt ? formatRelativeDate(startAt) : t('competitive.screen.recent.recent');
           })(),
         };
       });
@@ -589,7 +590,7 @@ export function CompetitiveLeagueScreen({
   const handleJoinQueue = useCallback(async () => {
     const token = session?.access_token ?? null;
     if (!token) {
-      setErrorText('Necesitas iniciar sesión para buscar partido.');
+      setErrorText(t('competitive.screen.errors.needLogin'));
       return;
     }
     setErrorText(null);
@@ -604,14 +605,12 @@ export function CompetitiveLeagueScreen({
     if (MATCHMAKING_DEMO) {
       const allClubIds = clubCatalog.map((c) => c.id).slice(0, 20);
       if (allClubIds.length === 0) {
-        setErrorText('No hay clubes cargados para buscar partido.');
+        setErrorText(t('competitive.screen.errors.noClubsLoaded'));
         return;
       }
       payload.preferred_club_ids = allClubIds;
     } else if (preferredClubIds.length === 0 && clubsInRange.length === 0) {
-      setErrorText(
-        `No hay clubes dentro de ${distanceKm} km. Amplía la distancia o elige clubes preferidos.`,
-      );
+      setErrorText(t('competitive.screen.errors.noClubsInDistance', { km: distanceKm }));
       return;
     } else if (preferredClubIds.length > 0) {
       payload.preferred_club_ids = preferredClubIds.slice(0, 20);
@@ -655,7 +654,7 @@ export function CompetitiveLeagueScreen({
       if ((searchPartner.level_gap ?? 0) > 1) {
         const liga = searchPartner.target_liga
           ? searchPartner.target_liga.charAt(0).toUpperCase() + searchPartner.target_liga.slice(1)
-          : 'el jugador superior';
+          : t('competitive.screen.fallback.superiorPlayer');
         Alert.alert(
           t('competitive.demanding.title'),
           t('competitive.demanding.message', { name: searchPartner.other_player_name, liga }),
@@ -695,6 +694,7 @@ export function CompetitiveLeagueScreen({
     session?.access_token,
     setQueueElapsedSec,
     setQueueStartedAtMs,
+    t,
   ]);
 
   const handleLeaveQueue = useCallback(async () => {
@@ -755,12 +755,12 @@ export function CompetitiveLeagueScreen({
       if (!token || !matchId || !onPartidoPress) return;
       const match = await fetchMatchById(matchId, token);
       if (!match) {
-        Alert.alert('Error', 'No se pudo cargar el partido.');
+        Alert.alert(t('competitive.screen.errors.genericError'), t('competitive.screen.errors.matchLoadFailed'));
         return;
       }
       const mapped = mapMatchToPartido(match, { viewerPlayerId: profile?.id ?? null });
       if (!mapped) {
-        Alert.alert('Error', 'No se pudo mostrar el partido.');
+        Alert.alert(t('competitive.screen.errors.genericError'), t('competitive.screen.errors.matchShowFailed'));
         return;
       }
       if (matchmakingPayment) mapped.matchmakingPayment = matchmakingPayment;
@@ -860,7 +860,7 @@ export function CompetitiveLeagueScreen({
     const startDate = startAt ? new Date(startAt) : null;
     const weekday = startDate
       ? startDate.toLocaleDateString('es-ES', { weekday: 'long' })
-      : 'Sin fecha';
+      : t('competitive.screen.proposal.noDate');
     const hour = startDate
       ? startDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
       : '--:--';
@@ -868,19 +868,22 @@ export function CompetitiveLeagueScreen({
     return {
       teammateName: teammate
         ? `${teammate.first_name ?? ''} ${teammate.last_name ?? ''}`.trim()
-        : 'Compañero pendiente',
-      teammateLevel: teammate?.elo_rating != null ? `Nivel ${Number(teammate.elo_rating).toFixed(2)}` : 'Nivel —',
-      rivals: rivalLabel || 'Pareja rival pendiente',
+        : t('competitive.screen.proposal.teammatePending'),
+      teammateLevel:
+        teammate?.elo_rating != null
+          ? t('competitive.screen.proposal.levelValue', { value: Number(teammate.elo_rating).toFixed(2) })
+          : t('competitive.screen.proposal.levelUnknown'),
+      rivals: rivalLabel || t('competitive.screen.proposal.rivalPairPending'),
       rivalsMeta:
         proposal?.pre_match_win_prob != null
-          ? `Win prob: ${Math.round(proposal.pre_match_win_prob * 100)}%`
-          : 'Win prob: —',
-      clubName: club?.name ?? 'Club pendiente',
+          ? t('competitive.screen.proposal.winProb', { value: Math.round(proposal.pre_match_win_prob * 100) })
+          : t('competitive.screen.proposal.winProbUnknown'),
+      clubName: club?.name ?? t('competitive.screen.proposal.clubPending'),
       clubDistance: '2.3 km',
       dateTime: timeLabel,
-      duration: 'Duración: 1.5 - 2 horas',
+      duration: t('competitive.screen.proposal.duration'),
     };
-  }, [profile?.id, proposal?.pre_match_win_prob, proposalMatch]);
+  }, [profile?.id, proposal?.pre_match_win_prob, proposalMatch, t]);
 
   useEffect(() => {
     if (status?.status !== 'searching' || queueStartedAtMs == null) return;
@@ -895,7 +898,7 @@ export function CompetitiveLeagueScreen({
 
   useEffect(() => {
     if (matchmakingBannerState !== 'timed_out') return;
-    setErrorText('No se encontraron jugadores. Ajusta los parámetros y vuelve a intentar.');
+    setErrorText(t('competitive.screen.errors.timedOut'));
     if (searchPartner) {
       // Era búsqueda en pareja: salimos de la cola (revierte la invitación a 'accepted' y nos
       // saca a ambos del pool) pero CONSERVAMOS al compañero para poder re-buscar juntos.
@@ -921,15 +924,17 @@ export function CompetitiveLeagueScreen({
   const myRankingRow = useMemo(() => {
     if (!profile) return null;
     const fromList = rankingRows?.find((r) => r.player_id === profile.id);
-    const meName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || 'Tú';
+    const meName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || t('competitive.screen.ranking.me');
     return {
       rank: fromList?.rank ?? null,
       name: meName,
-      level: profile.eloRating ? `Nivel ${Number(profile.eloRating).toFixed(2)}` : 'Nivel —',
-      wl: `${profile.mmWins ?? 0}V / ${profile.mmLosses ?? 0}D`,
+      level: profile.eloRating
+        ? t('competitive.screen.proposal.levelValue', { value: Number(profile.eloRating).toFixed(2) })
+        : t('competitive.screen.proposal.levelUnknown'),
+      wl: t('competitive.screen.ranking.wl', { wins: profile.mmWins ?? 0, losses: profile.mmLosses ?? 0 }),
       lp: profile.lps ?? 0,
     };
-  }, [profile, rankingRows]);
+  }, [profile, rankingRows, t]);
 
   const rankingLoadedCount = rankingRows.length;
   const rankingPlayerCount = rankingTotal > 0 ? rankingTotal : rankingLoadedCount;
@@ -965,8 +970,8 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="radio-outline" size={16} color="#F59E0B" />
               <Text style={styles.resumeBannerText}>
                 {status?.status === 'matched'
-                  ? 'Tienes partido encontrado'
-                  : 'Búsqueda en curso en segundo plano'}
+                  ? t('competitive.screen.resume.matched')
+                  : t('competitive.screen.resume.searching')}
               </Text>
             </Pressable>
           )}
@@ -974,9 +979,9 @@ export function CompetitiveLeagueScreen({
           <LinearGradient colors={['#3C1E00', '#15100A', '#0F0F0F']} locations={[0, 0.55, 1]} style={styles.hero}>
             <View style={styles.badge}>
               <View style={styles.badgeDot} />
-              <Text style={styles.badgeText}>LIGA COMPETITIVA</Text>
+              <Text style={styles.badgeText}>{t('competitive.screen.hero.badge')}</Text>
             </View>
-            <Text style={styles.heroCap}>TU DIVISIÓN ACTUAL</Text>
+            <Text style={styles.heroCap}>{t('competitive.screen.hero.currentDivision')}</Text>
             <View style={styles.heroMainRow}>
               <View style={styles.medalBox}>
                 <Text style={styles.medalEmoji}>🏅</Text>
@@ -984,17 +989,19 @@ export function CompetitiveLeagueScreen({
               <View style={{ flex: 1 }}>
                 <Text style={styles.division}>{division ?? '—'}</Text>
                 <Text style={styles.divisionRank}>
-                  {profile?.mmPeakLiga ? `Pico: ${profile.mmPeakLiga}` : 'Sin histórico'}
+                  {profile?.mmPeakLiga
+                    ? t('competitive.screen.hero.peak', { liga: profile.mmPeakLiga })
+                    : t('competitive.screen.hero.noHistory')}
                 </Text>
                 <View style={styles.statsLine}>
-                  <Text style={styles.statUp}>↗ {winCount}V</Text>
-                  <Text style={styles.statDown}>↘ {lossCount}D</Text>
-                  <Text style={styles.statWr}>WR {wr}%</Text>
+                  <Text style={styles.statUp}>↗ {t('competitive.screen.hero.winsShort', { n: winCount })}</Text>
+                  <Text style={styles.statDown}>↘ {t('competitive.screen.hero.lossesShort', { n: lossCount })}</Text>
+                  <Text style={styles.statWr}>{t('competitive.screen.hero.wr', { wr })}</Text>
                 </View>
               </View>
             </View>
             <View style={styles.lpRow}>
-              <Text style={styles.lpCap}>LEAGUE POINTS (LP)</Text>
+              <Text style={styles.lpCap}>{t('competitive.screen.hero.leaguePointsCap')}</Text>
               <Text style={styles.lp}>
                 {lpTarget != null
                   ? t('competitive.lp.progress', { lps: profile?.lps ?? 0, target: lpTarget })
@@ -1017,18 +1024,18 @@ export function CompetitiveLeagueScreen({
                 </Text>
               </View>
             ) : null}
-            <Text style={styles.heroFoot}>Ranking reiniciado al final del Pase Temporada 1</Text>
+            <Text style={styles.heroFoot}>{t('competitive.screen.hero.seasonResetFoot')}</Text>
           </LinearGradient>
 
           <View style={styles.tabRow}>
             <Pressable style={[styles.tabBtn, mainTab === 'liga' && styles.tabBtnActive]} onPress={() => setMainTab('liga')}>
-              <Text style={styles.tabText}>Mi liga</Text>
+              <Text style={styles.tabText}>{t('competitive.screen.tabs.myLeague')}</Text>
             </Pressable>
             <Pressable
               style={[styles.tabBtn, mainTab === 'ranking' && styles.tabBtnActive]}
               onPress={() => setMainTab('ranking')}
             >
-              <Text style={styles.tabText}>Ranking</Text>
+              <Text style={styles.tabText}>{t('competitive.screen.tabs.ranking')}</Text>
             </Pressable>
           </View>
 
@@ -1046,8 +1053,8 @@ export function CompetitiveLeagueScreen({
                     <Ionicons name="flash-outline" size={22} color="#fff" />
                   </View>
                   <View style={styles.searchTextWrap}>
-                    <Text style={styles.searchTitle}>Buscar partido</Text>
-                    <Text style={styles.searchSubtitle}>Matchmaking competitivo 2v2</Text>
+                    <Text style={styles.searchTitle}>{t('competitive.screen.search.title')}</Text>
+                    <Text style={styles.searchSubtitle}>{t('competitive.screen.search.subtitle')}</Text>
                   </View>
                   {acceptedInvitesCount > 0 ? (
                     <View style={styles.notifBadge}>
@@ -1059,8 +1066,8 @@ export function CompetitiveLeagueScreen({
               </LinearGradient>
 
               <View style={styles.recentHeader}>
-                <Text style={styles.recentHeaderLeft}>Partidos recientes</Text>
-                <Text style={styles.recentHeaderRight}>Temporada actual</Text>
+                <Text style={styles.recentHeaderLeft}>{t('competitive.screen.recent.header')}</Text>
+                <Text style={styles.recentHeaderRight}>{t('competitive.screen.recent.currentSeason')}</Text>
               </View>
               <View style={styles.recentWrap}>
                 {recentMatchRows.map((row) => (
@@ -1081,23 +1088,23 @@ export function CompetitiveLeagueScreen({
                 ))}
                 {recentMatchRows.length === 0 && (
                   <View style={styles.recentCard}>
-                    <Text style={styles.recentSub}>Aún no hay partidos competitivos recientes.</Text>
+                    <Text style={styles.recentSub}>{t('competitive.screen.recent.empty')}</Text>
                   </View>
                 )}
               </View>
 
               <View style={styles.howCard}>
-                <Text style={styles.howTitle}>Cómo funciona la liga</Text>
-                <Text style={styles.howLine}>⚔️ Todos los partidos son 2v2 por parejas</Text>
-                <Text style={styles.howLine}>↗ Victoria: +20 a +25 LP según el nivel del rival</Text>
-                <Text style={styles.howLine}>↘ Derrota: -15 a -20 LP según la diferencia de nivel</Text>
+                <Text style={styles.howTitle}>{t('competitive.screen.how.title')}</Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.line1')}</Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.line2')}</Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.line3')}</Text>
                 <Text style={styles.howLine}>
                   ★{' '}
                   {lpTarget != null
                     ? t('competitive.lp.promoteLine', { n: lpTarget })
                     : t('competitive.lp.maxDivision')}
                 </Text>
-                <Text style={styles.howLine}>🔁 Los rankings se reinician al final de cada Pase de Temporada</Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.line5')}</Text>
               </View>
             </>
           ) : (
@@ -1107,17 +1114,25 @@ export function CompetitiveLeagueScreen({
                   <Text style={styles.rankingDivision}>{division ?? '—'}</Text>
                   <Text style={styles.rankingSub}>
                     {rankingLoading
-                      ? 'Cargando ranking…'
+                      ? t('competitive.screen.ranking.loading')
                       : rankingPlayerCount > 0
                         ? rankingHasMore
-                          ? `Mostrando ${rankingLoadedCount} de ${rankingPlayerCount} jugadores`
-                          : `${rankingPlayerCount} jugador${rankingPlayerCount === 1 ? '' : 'es'} en tu división`
-                        : 'Sin jugadores en tu división'}
+                          ? t('competitive.screen.ranking.showing', {
+                              loaded: rankingLoadedCount,
+                              total: rankingPlayerCount,
+                            })
+                          : t(
+                              rankingPlayerCount === 1
+                                ? 'competitive.screen.ranking.playersInDivisionOne'
+                                : 'competitive.screen.ranking.playersInDivisionMany',
+                              { total: rankingPlayerCount },
+                            )
+                        : t('competitive.screen.ranking.noPlayers')}
                   </Text>
                 </View>
                 {rankingPlayerCount > 0 ? (
                   <View style={styles.topPill}>
-                    <Text style={styles.topPillText}>Top {rankingPlayerCount}</Text>
+                    <Text style={styles.topPillText}>{t('competitive.screen.ranking.top', { total: rankingPlayerCount })}</Text>
                   </View>
                 ) : null}
               </View>
@@ -1129,12 +1144,12 @@ export function CompetitiveLeagueScreen({
                 </>
               ) : rankingError ? (
                 <View style={styles.rankingNoticeCard}>
-                  <Text style={styles.rankingNoticeTitle}>Ranking no disponible</Text>
+                  <Text style={styles.rankingNoticeTitle}>{t('competitive.screen.ranking.notAvailable')}</Text>
                   <Text style={styles.rankingNoticeSub}>{rankingError}</Text>
                 </View>
               ) : rankingPlayerCount === 0 ? (
                 <View style={styles.rankingNoticeCard}>
-                  <Text style={styles.rankingNoticeSub}>Aún no hay jugadores clasificados en esta división.</Text>
+                  <Text style={styles.rankingNoticeSub}>{t('competitive.screen.ranking.noneClassified')}</Text>
                 </View>
               ) : (
                 rankingRows.map((row) => {
@@ -1142,10 +1157,12 @@ export function CompetitiveLeagueScreen({
                   const name =
                     `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim() ||
                     row.username?.trim() ||
-                    'Jugador';
+                    t('competitive.screen.fallback.player');
                   const level =
-                    row.elo_rating != null ? `Nivel ${Number(row.elo_rating).toFixed(2)}` : 'Nivel —';
-                  const wl = `${row.mm_wins}V / ${row.mm_losses}D`;
+                    row.elo_rating != null
+                      ? t('competitive.screen.proposal.levelValue', { value: Number(row.elo_rating).toFixed(2) })
+                      : t('competitive.screen.proposal.levelUnknown');
+                  const wl = t('competitive.screen.ranking.wl', { wins: row.mm_wins, losses: row.mm_losses });
                   return (
                     <View
                       key={row.player_id}
@@ -1157,7 +1174,7 @@ export function CompetitiveLeagueScreen({
                         </Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.rankName}>{isMe ? `${name} (Tú)` : name}</Text>
+                        <Text style={styles.rankName}>{isMe ? t('competitive.screen.ranking.meSelf', { name }) : name}</Text>
                         <Text style={styles.rankMeta}>
                           {level} · {wl}
                         </Text>
@@ -1170,7 +1187,7 @@ export function CompetitiveLeagueScreen({
               {rankingLoadingMore ? (
                 <View style={styles.rankingLoadMore}>
                   <ActivityIndicator size="small" color="#F59E0B" />
-                  <Text style={styles.rankingLoadMoreText}>Cargando más jugadores…</Text>
+                  <Text style={styles.rankingLoadMoreText}>{t('competitive.screen.ranking.loadingMore')}</Text>
                 </View>
               ) : null}
               {!rankingLoading && rankingPlayerCount > 0 && myRankingRow && myRankingRow.rank == null ? (
@@ -1200,9 +1217,9 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="arrow-back" size={16} color="#fff" />
             </Pressable>
             <View>
-              <Text style={styles.sectionTitle}>Preferencias de partido</Text>
+              <Text style={styles.sectionTitle}>{t('competitive.screen.prefs.title')}</Text>
               <Text style={styles.stepSubtitle}>
-                Ajusta los parámetros para encontrar tu partido ideal
+                {t('competitive.screen.prefs.subtitle')}
               </Text>
             </View>
           </View>
@@ -1228,39 +1245,39 @@ export function CompetitiveLeagueScreen({
                   onPress={() => void handleActivateLocation()}
                 >
                   <Ionicons name="navigate-outline" size={14} color="#fff" />
-                  <Text style={styles.locationBannerBtnText}>Activar ubicación</Text>
+                  <Text style={styles.locationBannerBtnText}>{t('competitive.screen.prefs.locationBannerActivate')}</Text>
                 </Pressable>
                 <Pressable
                   style={styles.locationBannerBtnSecondary}
                   onPress={() => setClubPickerVisible(true)}
                 >
-                  <Text style={styles.locationBannerBtnSecondaryText}>Elegir clubes</Text>
+                  <Text style={styles.locationBannerBtnSecondaryText}>{t('competitive.screen.prefs.locationBannerChooseClubs')}</Text>
                 </Pressable>
               </View>
             </View>
           ) : null}
 
           <View style={styles.prefsCard}>
-            <Text style={styles.prefsSectionTitle}>Formato de partido</Text>
+            <Text style={styles.prefsSectionTitle}>{t('competitive.screen.prefs.formatTitle')}</Text>
             <View style={styles.fixedModeRow}>
               <View style={styles.fixedModeIcon}>
                 <Ionicons name="people" size={18} color="#F18F34" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.fixedModeTitle}>2v2 - Por parejas</Text>
-                <Text style={styles.fixedModeSub}>Todos los partidos competitivos son por parejas</Text>
+                <Text style={styles.fixedModeTitle}>{t('competitive.screen.prefs.pairFormatTitle')}</Text>
+                <Text style={styles.fixedModeSub}>{t('competitive.screen.prefs.pairFormatSub')}</Text>
               </View>
               <Ionicons name="checkmark-circle" size={20} color="#F18F34" />
             </View>
           </View>
 
           <OptionRow
-            title="Horario preferido"
+            title={t('competitive.screen.prefs.scheduleTitle')}
             sectionIcon="time-outline"
             options={[
-              { id: 'manana', label: 'Mañana', subtitle: '6:00 - 12:00', iconName: 'sunny-outline' },
-              { id: 'tarde', label: 'Tarde', subtitle: '12:00 - 18:00', iconName: 'sunny' },
-              { id: 'noche', label: 'Noche', subtitle: '18:00 - 23:00', iconName: 'moon-outline' },
+              { id: 'manana', label: t('competitive.screen.prefs.morning'), subtitle: t('competitive.screen.prefs.morningHours'), iconName: 'sunny-outline' },
+              { id: 'tarde', label: t('competitive.screen.prefs.afternoon'), subtitle: t('competitive.screen.prefs.afternoonHours'), iconName: 'sunny' },
+              { id: 'noche', label: t('competitive.screen.prefs.night'), subtitle: t('competitive.screen.prefs.nightHours'), iconName: 'moon-outline' },
             ]}
             value={form.time}
             onChange={(v) => setForm((p) => ({ ...p, time: v as SearchForm['time'] }))}
@@ -1272,22 +1289,26 @@ export function CompetitiveLeagueScreen({
               <View style={styles.demoModeBanner}>
                 <Ionicons name="flash" size={16} color="#F59E0B" />
                 <Text style={styles.demoModeText}>
-                  Modo demo: buscás en todos los clubes sin ubicación ni distancia.
+                  {t('competitive.screen.prefs.demoMode')}
                 </Text>
               </View>
             ) : preferredClubIds.length > 0 ? (
               <Text style={styles.distanceByClubsHint}>
-                Buscas en {preferredClubIds.length} club{preferredClubIds.length === 1 ? '' : 'es'} elegido
-                {preferredClubIds.length === 1 ? '' : 's'}. Quitá la selección de clubes para buscar por distancia.
+                {t(
+                  preferredClubIds.length === 1
+                    ? 'competitive.screen.prefs.searchingInClubsOne'
+                    : 'competitive.screen.prefs.searchingInClubsMany',
+                  { n: preferredClubIds.length },
+                )}
               </Text>
             ) : (
               <>
                 <View style={styles.distanceTitleRow}>
                   <View style={styles.optionTitleRow}>
                     <Ionicons name="location-outline" size={14} color="#F59E0B" />
-                    <Text style={styles.optionTitleStrong}>Distancia máxima</Text>
+                    <Text style={styles.optionTitleStrong}>{t('competitive.screen.prefs.maxDistance')}</Text>
                   </View>
-                  <Text style={styles.distanceValue}>{distanceKm} km</Text>
+                  <Text style={styles.distanceValue}>{t('competitive.screen.prefs.distanceKm', { km: distanceKm })}</Text>
                 </View>
                 <Slider
                   style={styles.distanceSlider}
@@ -1301,27 +1322,29 @@ export function CompetitiveLeagueScreen({
                   thumbTintColor="#1f8dff"
                 />
                 <View style={styles.sliderLabels}>
-                  <Text style={styles.sliderLabel}>1 km</Text>
-                  <Text style={styles.sliderLabel}>50 km</Text>
+                  <Text style={styles.sliderLabel}>{t('competitive.screen.prefs.kmShort', { km: 1 })}</Text>
+                  <Text style={styles.sliderLabel}>{t('competitive.screen.prefs.kmShort', { km: 50 })}</Text>
                 </View>
               </>
             )}
             {preferredClubIds.length === 0 ? (
               <View style={styles.clubsInRangeBox}>
                 <Text style={styles.clubsInRangeTitle}>
-                  {MATCHMAKING_DEMO ? 'Clubes disponibles (demo)' : 'Clubes en tu rango'}
+                  {MATCHMAKING_DEMO
+                    ? t('competitive.screen.prefs.clubsInRangeDemo')
+                    : t('competitive.screen.prefs.clubsInRange')}
                 </Text>
                 {!MATCHMAKING_DEMO && searchCoordsLoading ? (
-                  <Text style={styles.clubsInRangeSub}>Calculando distancias…</Text>
+                  <Text style={styles.clubsInRangeSub}>{t('competitive.screen.prefs.calculatingDistances')}</Text>
                 ) : clubsInRange.length === 0 ? (
                   <Text style={styles.clubsInRangeEmpty}>
                     {MATCHMAKING_DEMO
-                      ? 'Cargando clubes…'
+                      ? t('competitive.screen.prefs.loadingClubs')
                       : searchCoords
-                        ? `Ningún club dentro de ${distanceKm} km. Amplía la distancia o elige clubes preferidos.`
+                        ? t('competitive.screen.prefs.noneInDistance', { km: distanceKm })
                         : locationIssue
-                          ? 'Sin ubicación activa. Activa el GPS o elige clubes preferidos arriba.'
-                          : 'Activa ubicación para ver clubes disponibles.'}
+                          ? t('competitive.screen.prefs.noLocationPickClubs')
+                          : t('competitive.screen.prefs.activateLocationToSee')}
                   </Text>
                 ) : (
                   clubsInRange.slice(0, 8).map((club) => (
@@ -1331,37 +1354,37 @@ export function CompetitiveLeagueScreen({
                         {club.name}
                       </Text>
                       {club.distance != null ? (
-                        <Text style={styles.clubsInRangeKm}>{Math.round(club.distance)} km</Text>
+                        <Text style={styles.clubsInRangeKm}>{t('competitive.screen.prefs.kmShort', { km: Math.round(club.distance) })}</Text>
                       ) : null}
                     </View>
                   ))
                 )}
                 {clubsInRange.length > 8 ? (
-                  <Text style={styles.clubsInRangeMore}>+{clubsInRange.length - 8} más</Text>
+                  <Text style={styles.clubsInRangeMore}>{t('competitive.screen.prefs.moreClubs', { n: clubsInRange.length - 8 })}</Text>
                 ) : null}
               </View>
             ) : null}
           </View>
 
           <OptionRow
-            title="Modalidad"
+            title={t('competitive.screen.prefs.modality')}
             sectionIcon="shield-outline"
             options={[
-              { id: 'any', label: 'Cualquiera', iconName: 'ellipse-outline' },
-              { id: 'male', label: 'Masculino', iconName: 'person-outline' },
-              { id: 'female', label: 'Femenino', iconName: 'woman-outline' },
-              { id: 'mixed', label: 'Mixto', iconName: 'people-outline' },
+              { id: 'any', label: t('competitive.screen.prefs.any'), iconName: 'ellipse-outline' },
+              { id: 'male', label: t('competitive.screen.prefs.male'), iconName: 'person-outline' },
+              { id: 'female', label: t('competitive.screen.prefs.female'), iconName: 'woman-outline' },
+              { id: 'mixed', label: t('competitive.screen.prefs.mixed'), iconName: 'people-outline' },
             ]}
             value={form.gender}
             onChange={(v) => setForm((p) => ({ ...p, gender: v as SearchForm['gender'] }))}
           />
           <OptionRow
-            title="Lado preferido"
+            title={t('competitive.screen.prefs.preferredSide')}
             sectionIcon="compass-outline"
             options={[
-              { id: 'backhand', label: 'Izquierda', iconName: 'arrow-back-circle-outline' },
-              { id: 'drive', label: 'Derecha', iconName: 'arrow-forward-circle-outline' },
-              { id: 'any', label: 'Ambos', iconName: 'swap-horizontal-outline' },
+              { id: 'backhand', label: t('competitive.screen.prefs.left'), iconName: 'arrow-back-circle-outline' },
+              { id: 'drive', label: t('competitive.screen.prefs.right'), iconName: 'arrow-forward-circle-outline' },
+              { id: 'any', label: t('competitive.screen.prefs.both'), iconName: 'swap-horizontal-outline' },
             ]}
             value={form.preferred_side}
             onChange={(v) => setForm((p) => ({ ...p, preferred_side: v as SearchForm['preferred_side'] }))}
@@ -1370,7 +1393,7 @@ export function CompetitiveLeagueScreen({
           <View style={styles.optionSection}>
             <View style={styles.optionTitleRow}>
               <Ionicons name="location-outline" size={14} color="#F59E0B" />
-              <Text style={styles.optionTitle}>Clubes preferidos (opcional)</Text>
+              <Text style={styles.optionTitle}>{t('competitive.screen.prefs.preferredClubsTitle')}</Text>
             </View>
             <Pressable
               style={styles.clubPickerBtn}
@@ -1379,12 +1402,17 @@ export function CompetitiveLeagueScreen({
               <View style={{ flex: 1 }}>
                 <Text style={styles.clubPickerBtnTitle}>
                   {preferredClubIds.length === 0
-                    ? 'Elegir clubes'
-                    : `${preferredClubIds.length} club${preferredClubIds.length === 1 ? '' : 'es'} seleccionado${preferredClubIds.length === 1 ? '' : 's'}`}
+                    ? t('competitive.screen.prefs.choosePreferredClubs')
+                    : t(
+                        preferredClubIds.length === 1
+                          ? 'competitive.screen.prefs.clubsSelectedOne'
+                          : 'competitive.screen.prefs.clubsSelectedMany',
+                        { n: preferredClubIds.length },
+                      )}
                 </Text>
                 <Text style={styles.clubPickerBtnSub} numberOfLines={2}>
                   {preferredClubIds.length === 0
-                    ? 'Si no eliges ninguno, buscamos por distancia máxima'
+                    ? t('competitive.screen.prefs.noClubsHint')
                     : preferredClubLabels.join(' · ')}
                 </Text>
               </View>
@@ -1413,11 +1441,11 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="arrow-back" size={16} color="#fff" />
             </Pressable>
             <View style={{ flex: 1 }}>
-              <Text style={styles.sectionTitle}>Buscando partido...</Text>
-              <Text style={styles.stepSubtitle}>Tiempo en cola: {queueElapsedLabel}</Text>
+              <Text style={styles.sectionTitle}>{t('competitive.screen.queue.searchingTitle')}</Text>
+              <Text style={styles.stepSubtitle}>{t('competitive.screen.queue.timeInQueue', { time: queueElapsedLabel })}</Text>
             </View>
             <View style={styles.queuePlayersBox}>
-              <Text style={styles.queuePlayersCaption}>Jugadores en cola</Text>
+              <Text style={styles.queuePlayersCaption}>{t('competitive.screen.queue.playersInQueue')}</Text>
               <Text style={styles.queuePlayersValue}>
                 {status?.searching_in_club_count != null
                   ? String(status.searching_in_club_count)
@@ -1437,40 +1465,40 @@ export function CompetitiveLeagueScreen({
           </View>
 
           <View style={styles.queueCenter}>
-            <Text style={styles.queueTitle}>Buscando partido...</Text>
-            <Text style={styles.queueCaption}>Buscando compañero y pareja de rivales</Text>
+            <Text style={styles.queueTitle}>{t('competitive.screen.queue.searchingTitle')}</Text>
+            <Text style={styles.queueCaption}>{t('competitive.screen.queue.searchingPartner')}</Text>
           </View>
 
           <View style={styles.queueSummaryBox}>
-            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>Formato</Text><Text style={styles.queueVal}>2v2 (Por parejas)</Text></View>
-            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>Horario</Text><Text style={styles.queueVal}>{form.time === 'manana' ? 'Mañana' : form.time === 'tarde' ? 'Tarde' : 'Noche'}</Text></View>
+            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.format')}</Text><Text style={styles.queueVal}>{t('competitive.screen.queue.formatValue')}</Text></View>
+            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.schedule')}</Text><Text style={styles.queueVal}>{form.time === 'manana' ? t('competitive.screen.prefs.morning') : form.time === 'tarde' ? t('competitive.screen.prefs.afternoon') : t('competitive.screen.prefs.night')}</Text></View>
             <View style={styles.queueSummaryRow}>
-              <Text style={styles.queueKey}>Ubicación</Text>
+              <Text style={styles.queueKey}>{t('competitive.screen.queue.location')}</Text>
               <Text style={styles.queueVal} numberOfLines={2}>
                 {preferredClubIds.length > 0
                   ? preferredClubLabels.join(', ')
-                  : `Hasta ${distanceKm} km`}
+                  : t('competitive.screen.queue.upToKm', { km: distanceKm })}
               </Text>
             </View>
-            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>Modalidad</Text><Text style={styles.queueVal}>{form.gender === 'male' ? 'Masculino' : form.gender === 'female' ? 'Femenino' : form.gender === 'mixed' ? 'Mixto' : 'Sin pref.'}</Text></View>
-            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>Lado</Text><Text style={styles.queueVal}>{form.preferred_side === 'drive' ? 'Derecha' : form.preferred_side === 'backhand' ? 'Izquierda' : 'Ambos'}</Text></View>
+            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.modality')}</Text><Text style={styles.queueVal}>{form.gender === 'male' ? t('competitive.screen.prefs.male') : form.gender === 'female' ? t('competitive.screen.prefs.female') : form.gender === 'mixed' ? t('competitive.screen.prefs.mixed') : t('competitive.screen.queue.noPref')}</Text></View>
+            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.side')}</Text><Text style={styles.queueVal}>{form.preferred_side === 'drive' ? t('competitive.screen.prefs.right') : form.preferred_side === 'backhand' ? t('competitive.screen.prefs.left') : t('competitive.screen.prefs.both')}</Text></View>
           </View>
 
           <View style={styles.queueBgCard}>
             <View style={styles.queueBgHead}>
               <Ionicons name="information-circle-outline" size={16} color="#F59E0B" />
-              <Text style={styles.queueBgTitle}>Búsqueda en segundo plano</Text>
+              <Text style={styles.queueBgTitle}>{t('competitive.screen.queue.backgroundTitle')}</Text>
             </View>
             <Text style={styles.queueBgText}>
-              puedes volver atrás y seguir usando la app. Te avisaremos cuando encontremos tu partido.
+              {t('competitive.screen.queue.backgroundText')}
             </Text>
           </View>
 
           <Pressable style={styles.primaryBtn} onPress={() => setStep('home')}>
-            <Text style={styles.primaryBtnText}>Minimizar búsqueda</Text>
+            <Text style={styles.primaryBtnText}>{t('competitive.screen.queue.minimize')}</Text>
           </Pressable>
           <Pressable style={styles.secondaryBtn} onPress={() => void handleLeaveQueue()}>
-            <Text style={styles.secondaryBtnText}>Cancelar búsqueda</Text>
+            <Text style={styles.secondaryBtnText}>{t('competitive.screen.queue.cancel')}</Text>
           </Pressable>
           {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
         </View>
@@ -1483,19 +1511,19 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="checkmark" size={14} color="#34d399" />
             </View>
             <View>
-              <Text style={styles.foundTopTitle}>¡Partido encontrado!</Text>
-              <Text style={styles.foundTopSub}>Confirma para reservar tu lugar</Text>
+              <Text style={styles.foundTopTitle}>{t('competitive.screen.found.title')}</Text>
+              <Text style={styles.foundTopSub}>{t('competitive.screen.found.subtitle')}</Text>
             </View>
           </View>
 
           <View style={styles.foundCardTeammate}>
-            <Text style={styles.foundLabel}>TU COMPAÑERO</Text>
+            <Text style={styles.foundLabel}>{t('competitive.screen.found.yourTeammate')}</Text>
             <Text style={styles.foundName}>{proposalUi.teammateName}</Text>
             <Text style={styles.foundMeta}>{proposalUi.teammateLevel}</Text>
           </View>
 
           <View style={styles.foundCardRivals}>
-            <Text style={styles.foundLabel}>PAREJA RIVAL</Text>
+            <Text style={styles.foundLabel}>{t('competitive.screen.found.rivalPair')}</Text>
             <Text style={styles.foundName}>{proposalUi.rivals}</Text>
             <Text style={styles.foundMeta}>{proposalUi.rivalsMeta}</Text>
           </View>
@@ -1508,26 +1536,26 @@ export function CompetitiveLeagueScreen({
           </View>
 
           <View style={styles.foundLpCard}>
-            <Text style={styles.foundLpText}>Victoria = +20-25 LP · Derrota = -15-20 LP</Text>
+            <Text style={styles.foundLpText}>{t('competitive.screen.found.lpInfo')}</Text>
           </View>
 
           <View style={styles.foundCountdownCard}>
-            <Text style={styles.foundCountdownHint}>Tienes 3 horas para confirmar</Text>
+            <Text style={styles.foundCountdownHint}>{t('competitive.screen.found.confirmHint')}</Text>
             <Text style={styles.foundCountdown}>{countdownText}</Text>
           </View>
 
           <View style={styles.foundWarning}>
             <Text style={styles.foundWarningText}>
-              Si rechazas, volverás a la cola y perderás este partido.
+              {t('competitive.screen.found.rejectWarning')}
             </Text>
           </View>
 
           <Pressable style={styles.primaryBtn} onPress={() => void handleOpenProposal()} disabled={openingProposal}>
             <Ionicons name="checkmark" size={16} color="#fff" />
-            <Text style={styles.primaryBtnText}>{openingProposal ? 'Abriendo...' : '¡Confirmar partido!'}</Text>
+            <Text style={styles.primaryBtnText}>{openingProposal ? t('competitive.screen.found.opening') : t('competitive.screen.found.confirm')}</Text>
           </Pressable>
           <Pressable style={styles.secondaryBtn} onPress={() => void handleRejectProposal()}>
-            <Text style={styles.secondaryBtnText}>Rechazar</Text>
+            <Text style={styles.secondaryBtnText}>{t('competitive.screen.found.reject')}</Text>
           </Pressable>
           {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
         </View>
@@ -1538,8 +1566,8 @@ export function CompetitiveLeagueScreen({
         selectedIds={preferredClubIds}
         onChange={setPreferredClubIds}
         onClose={() => setClubPickerVisible(false)}
-        title="Clubes para matchmaking"
-        subtitle="Podés elegir varios. Sin selección, usamos la distancia máxima."
+        title={t('competitive.screen.picker.title')}
+        subtitle={t('competitive.screen.picker.subtitle')}
       />
 
       <FilterBottomSheet
