@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
+import { assertMatchEligibleForScore } from '../lib/incompleteMatchCancel';
 import { matchAffectsElo } from '../lib/openMatchRules';
 import { applyFriendlyPlayCounts, runLevelingPipeline, type ScoreSet } from '../services/levelingService';
 import { runFraudCheck } from '../services/fraudService';
@@ -182,6 +183,9 @@ router.post('/:id/score', async (req: Request, res: Response) => {
 
   const supabase = getSupabaseServiceRoleClient();
 
+  const eligible = await assertMatchEligibleForScore(supabase, matchId);
+  if (!eligible.ok) return res.status(eligible.status).json({ ok: false, error: eligible.error });
+
   const { data: mp, error: e1 } = await supabase
     .from('match_players')
     .select('team')
@@ -283,6 +287,9 @@ router.post('/:id/score/vote', async (req: Request, res: Response) => {
 
   const matchId = req.params.id;
   const supabase = getSupabaseServiceRoleClient();
+
+  const eligible = await assertMatchEligibleForScore(supabase, matchId);
+  if (!eligible.ok) return res.status(eligible.status).json({ ok: false, error: eligible.error });
 
   const { data: mp, error: e1 } = await supabase
     .from('match_players')
@@ -415,6 +422,9 @@ router.post('/:id/score/confirm', async (req: Request, res: Response) => {
   const matchId = req.params.id;
   const supabase = getSupabaseServiceRoleClient();
 
+  const eligible = await assertMatchEligibleForScore(supabase, matchId);
+  if (!eligible.ok) return res.status(eligible.status).json({ ok: false, error: eligible.error });
+
   const { data: mp, error: e1 } = await supabase
     .from('match_players')
     .select('team')
@@ -511,6 +521,10 @@ router.post('/:id/score/dispute', async (req: Request, res: Response) => {
   }
 
   const supabase = getSupabaseServiceRoleClient();
+
+  const eligible = await assertMatchEligibleForScore(supabase, matchId);
+  if (!eligible.ok) return res.status(eligible.status).json({ ok: false, error: eligible.error });
+
   const { data: mp } = await supabase
     .from('match_players')
     .select('team')
@@ -585,6 +599,9 @@ router.post('/:id/score/resolve', async (req: Request, res: Response) => {
 
   const matchId = req.params.id;
   const supabase = getSupabaseServiceRoleClient();
+
+  const eligible = await assertMatchEligibleForScore(supabase, matchId);
+  if (!eligible.ok) return res.status(eligible.status).json({ ok: false, error: eligible.error });
 
   const { data: match } = await supabase
     .from('matches')

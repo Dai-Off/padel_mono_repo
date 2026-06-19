@@ -33,6 +33,16 @@ export function isMatchActiveForDiscovery(phase: MatchListPhase): boolean {
   return phase === 'upcoming' || phase === 'live';
 }
 
+/** Solo partidos con 4 jugadores y no cancelados pueden registrar resultado. */
+export function canRecordMatchScore(
+  matchStatus: string | null | undefined,
+  filledPlayerCount: number,
+): boolean {
+  const s = String(matchStatus ?? '').toLowerCase();
+  if (s === 'cancelled') return false;
+  return filledPlayerCount >= 4;
+}
+
 /** bookings puede venir como objeto o array (Supabase expand). */
 export function getMatchBooking<T extends { start_at?: string | null; end_at?: string | null }>(
   m: { bookings?: T | T[] | null },
