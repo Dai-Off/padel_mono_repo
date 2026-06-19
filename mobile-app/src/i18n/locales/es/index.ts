@@ -17,6 +17,7 @@ import { community } from './community';
 import { learning } from './learning';
 import { activity } from './activity';
 import { alerts } from './alerts';
+import { competitive } from './competitive';
 
 export const es: TranslationKeys = {
   common,
@@ -37,4 +38,5 @@ export const es: TranslationKeys = {
   learning,
   activity,
   alerts,
+  competitive,
 };

@@ -282,8 +282,44 @@ router.get('/stories', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /community/miniapp/upload-thumbnail
+ * Sube solo la miniatura (portada) de un clip. Devuelve su URL pública.
+ * Necesario porque WeChat solo permite un archivo por Taro.uploadFile.
+ */
+router.post('/miniapp/upload-thumbnail', upload.single('thumbnail'), async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  const file = req.file;
+  if (!file) return res.status(400).json({ ok: false, error: 'Archivo requerido' });
+
+  if (!ALLOWED_IMAGE_TYPES.includes(file.mimetype)) {
+    return res.status(400).json({ ok: false, error: 'Solo se permiten imágenes como portada' });
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const ext = file.originalname.split('.').pop() || 'jpg';
+    const path = `${playerId}/thumbs/${Date.now()}.${ext}`;
+
+    const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file.buffer, {
+      contentType: file.mimetype,
+    });
+    if (upErr) return res.status(500).json({ ok: false, error: upErr.message });
+
+    const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
+    return res.json({ ok: true, url: publicUrl });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
  * POST /community/posts
  * Crea una publicación o historia.
+ * Para clips (post_type=reel): acepta thumbnail_url en el body (portada pre-subida)
+ * o el archivo thumbnail como campo multipart. El body thumbnail_url tiene prioridad
+ * si no viene el archivo.
  */
 router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 'thumbnail', maxCount: 1 }, { name: 'moderation_frames', maxCount: 5 }]), async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
@@ -298,7 +334,7 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
     return res.status(400).json({ ok: false, error: 'Se requiere al menos un archivo' });
   }
 
-  const { caption, location, post_type, overlays: overlaysRaw } = req.body ?? {};
+  const { caption, location, post_type, overlays: overlaysRaw, thumbnail_url: thumbnailUrlFromBody } = req.body ?? {};
   const type = post_type === 'story' ? 'story' : post_type === 'reel' ? 'reel' : 'post';
   const expiresAt = type === 'story' ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null;
 
@@ -309,15 +345,13 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
   }
 
   const hasVideo = files.some(f => f.mimetype.startsWith('video/'));
-  // Para vídeo exigimos miniatura: la portada del Clip la genera/sube el cliente.
-  if (hasVideo && !thumbFile) {
-    return res.status(400).json({ ok: false, error: 'Falta la miniatura (portada) del vídeo' });
-  }
+  // Thumbnail is optional — clip can be published without a cover image.
 
   const storagePaths: string[] = [];
   // Media subido, en el mismo orden que `files`.
   const uploaded: { url: string; mediaType: 'image' | 'video' }[] = [];
-  let thumbnailUrl: string | null = null;
+  // URL pública de la miniatura (puede venir del body o del archivo subido aquí).
+  let thumbnailUrl: string | null = (thumbnailUrlFromBody as string) || null;
   const moderationFrameUrls: string[] = [];
   const moderationPaths: string[] = []; // frames de moderación = temporales
   let createdPostId: string | null = null;
@@ -344,7 +378,7 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
       uploaded.push({ url, mediaType: files[i].mimetype.startsWith('video/') ? 'video' : 'image' });
     }
 
-    // 1b. Subir miniatura (solo en vídeos)
+    // 1b. Subir miniatura como archivo (tiene prioridad sobre thumbnail_url del body)
     if (thumbFile) {
       thumbnailUrl = (await uploadBuffer(supabase, thumbFile, 'thumb')).url;
     }
@@ -432,7 +466,7 @@ router.post('/posts', upload.fields([{ name: 'files', maxCount: 10 }, { name: 't
 
   } catch (err) {
     const supabase = getSupabaseServiceRoleClient();
-    
+
     // Cleanup storage
     if (storagePaths.length > 0) {
       await supabase.storage.from(BUCKET).remove(storagePaths);
@@ -630,7 +664,7 @@ router.delete('/posts/:id', async (req: Request, res: Response) => {
 
   try {
     const supabase = getSupabaseServiceRoleClient();
-    
+
     // Check ownership
     const { data: post } = await supabase.from('community_posts').select('player_id').eq('id', id).single();
     if (!post) return res.status(404).json({ ok: false, error: 'Post no encontrado' });

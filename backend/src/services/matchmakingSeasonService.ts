@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { leagueIndex } from './matchmakingLeague';
+import { leagueIndex, prevLiga } from './matchmakingLeague';
 
 /** Asigna la temporada MM activa si el jugador aún no tiene una (registro / migraciones). */
 export async function assignActiveMatchmakingSeasonIfNull(
@@ -30,6 +30,60 @@ export async function getActiveMatchmakingSeasonId(supabase: SupabaseClient): Pr
 }
 
 export type CloseSeasonResult = { closed_season_id: string; new_season_id: string; players_archived: number };
+
+export type SeasonTransition = {
+  /** Temporada NUEVA (activa). Sirve de clave para "ya visto" en el cliente. */
+  season_id: string;
+  previous_liga: string;
+  previous_season_name: string;
+  new_liga: string;
+  new_season_name: string;
+};
+
+/**
+ * Devuelve la última transición de temporada del jugador (para el modal de fin de temporada):
+ * liga con la que cerró la temporada anterior + liga actual tras el soft reset. `null` si nunca
+ * se le ha cerrado una temporada (no hay nada que mostrar).
+ */
+export async function getSeasonTransitionForPlayer(
+  supabase: SupabaseClient,
+  playerId: string,
+): Promise<SeasonTransition | null> {
+  const { data: player } = await supabase
+    .from('players')
+    .select('liga, league_season_id')
+    .eq('id', playerId)
+    .maybeSingle();
+  const p = player as { liga: string | null; league_season_id: string | null } | null;
+  if (!p || !p.liga || !p.league_season_id) return null;
+
+  // Snapshot de la última temporada cerrada para este jugador.
+  const { data: hist } = await supabase
+    .from('player_league_history')
+    .select('season_id, liga, created_at')
+    .eq('player_id', playerId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const h = hist as { season_id: string; liga: string } | null;
+  if (!h || h.season_id === p.league_season_id) return null;
+
+  const { data: seasons } = await supabase
+    .from('matchmaking_seasons')
+    .select('id, name')
+    .in('id', [h.season_id, p.league_season_id]);
+  const nameById = new Map(
+    (seasons ?? []).map((s) => [(s as { id: string }).id, (s as { name: string }).name]),
+  );
+
+  return {
+    season_id: p.league_season_id,
+    previous_liga: h.liga,
+    previous_season_name: nameById.get(h.season_id) ?? 'Temporada anterior',
+    new_liga: p.liga,
+    new_season_name: nameById.get(p.league_season_id) ?? 'Nueva temporada',
+  };
+}
 
 function highestLigaSnapshot(peak: string | null, liga: string): string {
   if (!peak) return liga;
@@ -94,13 +148,17 @@ export async function closeActiveMatchmakingSeason(
     if (e3) throw new Error(e3.message);
 
     for (const p of list) {
+      // Soft reset: la liga visible baja un tramo (suelo bronce) para reavivar la
+      // escalada. El mu/sigma no se tocan; el acelerador de LP recolocará rápido.
+      const nuevaLiga = prevLiga(p.liga);
       const { error: e4 } = await supabase
         .from('players')
         .update({
+          liga: nuevaLiga,
           lps: 0,
           league_season_id: newId,
           mm_shield_matches: 0,
-          mm_peak_liga: p.liga,
+          mm_peak_liga: nuevaLiga,
           updated_at: nowIso,
         })
         .eq('id', p.id);
