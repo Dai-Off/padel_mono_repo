@@ -1,4 +1,4 @@
-import type { CompetitiveTranslationKeys } from '../../translations';
+import type { CompetitiveTranslationKeys } from '../../sections/competitive';
 
 export const competitive: CompetitiveTranslationKeys = {
     mode: {
