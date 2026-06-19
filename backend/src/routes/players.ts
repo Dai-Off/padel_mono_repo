@@ -4,9 +4,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
 import { calcEloRating } from '../services/levelingService';
-import { ligaFromEloWithBands } from '../services/matchmakingLeague';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
-import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
 import { localizeCoachAssessmentText } from '../lib/coachAssessmentLanguage';
 import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
@@ -177,7 +175,7 @@ const SELECT_PUBLIC_INTERNAL = `
   affinity_visible,
   play_location, birth_date, profile_description,
   onboarding_completed,
-  liga, lps, mm_peak_liga
+  liga, lps, mm_peak_liga, mm_shield_matches
 `;
 
 const AVATAR_URL_MAX = 2048;
@@ -1089,8 +1087,9 @@ router.post('/onboarding', async (req: Request, res: Response) => {
 
   const muToSave = eloToMu(finalElo);
   const now = new Date().toISOString();
-  const leagueBands = await getMatchmakingLeagueConfigRows(supabase);
-  const assignedLiga = ligaFromEloWithBands(finalElo, leagueBands);
+  // Todos arrancan en bronce; la liga se gana jugando. El mu del cuestionario
+  // alimenta el matchmaking y el acelerador de LP, no la liga inicial visible.
+  const assignedLiga = 'bronce';
   let leagueSeasonId: string | null = null;
   try {
     leagueSeasonId = await getActiveMatchmakingSeasonId(supabase);
@@ -1353,7 +1352,7 @@ router.get('/', async (req: Request, res: Response) => {
     let q = supabase
       .from('players')
       .select(
-        `id, created_at, first_name, last_name, email, phone, username, status, auth_user_id,
+        `id, created_at, first_name, last_name, email, phone, username, status, auth_user_id, onboarding_completed, avatar_url,
          mu, sigma, elo_rating, sp, matches_played_competitive, matches_played_friendly, matches_played_matchmaking`
       )
       .order('created_at', { ascending: false })

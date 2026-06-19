@@ -16,6 +16,7 @@ import type { CommunityTranslationKeys } from './sections/community';
 import type { LearningTranslationKeys } from './sections/learning';
 import type { ActivityTranslationKeys } from './sections/activity';
 import type { AlertsTranslationKeys } from './sections/alerts';
+import type { CompetitiveTranslationKeys } from './sections/competitive';
 
 export type { AppLocale } from './constants';
 
@@ -38,6 +39,7 @@ export type {
   LearningTranslationKeys,
   ActivityTranslationKeys,
   AlertsTranslationKeys,
+  CompetitiveTranslationKeys,
 };
 
 export interface TranslationKeys {
@@ -45,6 +47,7 @@ export interface TranslationKeys {
   nav: NavTranslationKeys;
   auth: AuthTranslationKeys;
   home: HomeTranslationKeys;
+  competitive: CompetitiveTranslationKeys;
   onboarding: OnboardingTranslationKeys;
   settings: SettingsTranslationKeys;
   profile: ProfileTranslationKeys;

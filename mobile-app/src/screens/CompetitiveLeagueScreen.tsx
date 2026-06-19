@@ -27,6 +27,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { Skeleton } from '../components/ui/Skeleton';
 import { ClubMultiSelectPicker } from '../components/clubs/ClubMultiSelectPicker';
+import { PlayerSelectModal } from '../components/matchmaking/PlayerSelectModal';
+import { FilterBottomSheet } from '../components/filters/FilterBottomSheet';
 import { useClubCatalog } from '../hooks/useClubCatalog';
 import { resolveSavedFavoriteClubIds } from '../lib/favoriteClubIds';
 import { computeMatchAvailabilityWindow } from '../lib/matchAvailabilityWindow';
@@ -41,6 +43,7 @@ import {
   fetchMatchmakingStatus,
   isMatchmakingFlowPending,
   joinMatchmaking,
+  startSearchPairInvite,
   leaveMatchmaking,
   rejectMatchmakingProposal,
   type MatchmakingJoinPayload,
@@ -48,10 +51,11 @@ import {
   type MatchmakingLeaderboardRow,
   type MatchmakingProposalResponse,
   type MatchmakingStatusResponse,
+  type PairInvite,
 } from '../api/matchmaking';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { getMatchBooking } from '../domain/matchLifecycle';
 import { useTranslation } from '../i18n';
+import { getMatchBooking } from '../domain/matchLifecycle';
 
 type Step = 'home' | 'prefs' | 'queue' | 'found';
 type MainTab = 'liga' | 'ranking';
@@ -87,6 +91,9 @@ type Props = {
     state: 'hidden' | 'searching' | 'matched' | 'timed_out',
     options?: { force?: boolean },
   ) => void;
+  /** Compañero (invitación aceptada) con quien ir directo a buscar al abrir la pantalla. */
+  pendingPartnerInvite?: PairInvite | null;
+  onPartnerApplied?: () => void;
 };
 
 export function CompetitiveLeagueScreen({
@@ -99,8 +106,9 @@ export function CompetitiveLeagueScreen({
   setQueueStartedAtMs,
   matchmakingBannerState = 'hidden',
   onMatchmakingBannerStateChange,
+  pendingPartnerInvite,
+  onPartnerApplied,
 }: Props) {
-  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [mainTab, setMainTab] = useState<MainTab>('liga');
@@ -112,6 +120,7 @@ export function CompetitiveLeagueScreen({
   const [isHomeBootstrapping, setIsHomeBootstrapping] = useState(true);
   // Profile compartido del HomeDataContext (evita un GET /players/me al montar).
   const { profile } = useHomeData();
+  const { t } = useTranslation();
   const [leagueRows, setLeagueRows] = useState<MatchmakingLeagueConfigRow[] | null>(null);
   const [rankingRows, setRankingRows] = useState<MatchmakingLeaderboardRow[]>([]);
   const [rankingTotal, setRankingTotal] = useState(0);
@@ -128,6 +137,9 @@ export function CompetitiveLeagueScreen({
   >([]);
   const [preferredClubIds, setPreferredClubIds] = useState<string[]>([]);
   const [clubPickerVisible, setClubPickerVisible] = useState(false);
+  const [partnerPickerVisible, setPartnerPickerVisible] = useState(false);
+  const [modeSheetVisible, setModeSheetVisible] = useState(false);
+  const [searchPartner, setSearchPartner] = useState<PairInvite | null>(null);
   const [preferredClubsHydrated, setPreferredClubsHydrated] = useState(false);
   const preferredClubsSeedDoneRef = useRef(false);
   const { clubs: clubCatalog } = useClubCatalog();
@@ -262,7 +274,7 @@ export function CompetitiveLeagueScreen({
           setRankingRows([]);
           setRankingTotal(0);
           setRankingHasMore(false);
-        setRankingError(t('torneos.competitiveLeagueRankingLoadFail'));
+          setRankingError(t('competitive.screen.errors.rankingLoadFailed'));
         }
         setRankingLoading(false);
         setRankingLoadingMore(false);
@@ -322,9 +334,14 @@ export function CompetitiveLeagueScreen({
   useEffect(() => {
     if (lastAppliedEntryIntentRef.current === entryIntent) return;
     if (entryIntent === 'prefs') {
+      setSearchPartner(null);
       setStep('prefs');
       if (matchmakingBannerState === 'timed_out') {
-        setErrorText(t('torneos.competitiveLeagueNoPlayers'));
+        setErrorText(t('competitive.screen.errors.timedOut'));
+        // Limpiamos la búsqueda anterior: revierte la invitación de pareja a 'accepted' y nos
+        // saca del pool, para que el reintento parta de cero (y la pareja siga en "Listos para jugar").
+        const token = session?.access_token ?? null;
+        if (token) void leaveMatchmaking(token);
       }
       lastAppliedEntryIntentRef.current = entryIntent;
       return;
@@ -338,6 +355,14 @@ export function CompetitiveLeagueScreen({
       lastAppliedEntryIntentRef.current = entryIntent;
     }
   }, [entryIntent, matchmakingBannerState, status?.status]);
+
+  // Llegada desde "Aceptar y buscar" del banner: ir a preferencias con ese compañero fijado.
+  useEffect(() => {
+    if (!pendingPartnerInvite) return;
+    setSearchPartner(pendingPartnerInvite);
+    setStep('prefs');
+    onPartnerApplied?.();
+  }, [pendingPartnerInvite, onPartnerApplied]);
 
   useEffect(() => {
     const token = session?.access_token ?? null;
@@ -378,8 +403,8 @@ export function CompetitiveLeagueScreen({
 
   const preferredClubLabels = useMemo(() => {
     const byId = new Map(clubCatalog.map((c) => [c.id, c.name]));
-    return preferredClubIds.map((id) => byId.get(id) ?? t('common.clubFallback'));
-  }, [clubCatalog, preferredClubIds, t]);
+    return preferredClubIds.map((id) => byId.get(id) ?? t('competitive.screen.fallback.club'));
+  }, [clubCatalog, preferredClubIds]);
 
   const refreshSearchCoords = useCallback(async () => {
     if (MATCHMAKING_DEMO || preferredClubIds.length > 0) {
@@ -451,7 +476,7 @@ export function CompetitiveLeagueScreen({
       const req = await Location.requestForegroundPermissionsAsync();
       if (req.status !== 'granted') {
         setLocationIssue({
-          message: t('torneos.competitiveLeagueGps'),
+          message: t('competitive.screen.prefs.locationPermission'),
           action: 'open_settings',
         });
         return;
@@ -467,7 +492,7 @@ export function CompetitiveLeagueScreen({
       }
     }
     await refreshSearchCoords();
-  }, [refreshSearchCoords, t]);
+  }, [refreshSearchCoords]);
 
   const clubsInRange = useMemo(() => {
     if (preferredClubIds.length > 0) return [];
@@ -488,16 +513,23 @@ export function CompetitiveLeagueScreen({
   const division = useMemo(() => {
     if (!profile) return null;
     const row = leagueRows?.find((r) => r.code === profile.liga);
-    return row?.label ?? profile.liga ?? t('torneos.competitiveLeagueNoDivision');
+    return row?.label ?? profile.liga ?? t('competitive.screen.fallback.noDivision');
+  }, [profile, leagueRows, t]);
+
+  // LP necesarios para ascender desde la liga actual (null en elite, que no asciende).
+  const lpTarget = useMemo(() => {
+    if (!profile) return null;
+    const row = leagueRows?.find((r) => r.code === profile.liga);
+    if (!row) return null;
+    return row.lps_to_promote && row.lps_to_promote > 0 ? row.lps_to_promote : null;
   }, [profile, leagueRows]);
 
   const progressPct = useMemo(() => {
     if (!profile) return 0;
-    const row = leagueRows?.find((r) => r.code === profile.liga);
-    const target = row?.lps_to_promote && row.lps_to_promote > 0 ? row.lps_to_promote : 100;
+    const target = lpTarget ?? 100;
     const lps = profile.lps ?? 0;
     return Math.max(0, Math.min(100, Math.round((lps / target) * 100)));
-  }, [profile, leagueRows]);
+  }, [profile, lpTarget]);
   const winCount = profile?.mmWins ?? 0;
   const lossCount = profile?.mmLosses ?? 0;
   const wr = winCount + lossCount > 0 ? Math.round((winCount / (winCount + lossCount)) * 100) : 0;
@@ -505,12 +537,12 @@ export function CompetitiveLeagueScreen({
   const formatRelativeDate = (iso: string): string => {
     const diffMs = Date.now() - new Date(iso).getTime();
     const days = Math.max(0, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
-    if (days === 0) return t('common.today');
-    if (days === 1) return t('torneos.competitiveLeagueDaysAgo1');
-    if (days < 7) return t('torneos.competitiveLeagueDaysAgoMany', { count: days });
+    if (days === 0) return t('competitive.screen.relative.today');
+    if (days === 1) return t('competitive.screen.relative.oneDayAgo');
+    if (days < 7) return t('competitive.screen.relative.daysAgo', { n: days });
     const weeks = Math.floor(days / 7);
-    if (weeks <= 1) return t('torneos.competitiveLeagueWeekAgo1');
-    return t('torneos.competitiveLeagueWeeksAgoMany', { count: weeks });
+    if (weeks <= 1) return t('competitive.screen.relative.oneWeekAgo');
+    return t('competitive.screen.relative.weeksAgo', { n: weeks });
   };
 
   function toRecentRows(matches: MatchEnriched[], myPlayerId: string) {
@@ -541,15 +573,15 @@ export function CompetitiveLeagueScreen({
           .filter(Boolean)
           .join(' & ');
         const subtitle = rivals[0]?.liga
-          ? t('torneos.competitiveLeagueRivalsWithLiga', { liga: rivals[0].liga })
-          : t('torneos.competitiveLeagueRivals');
+          ? t('competitive.screen.recent.rivalsWithLiga', { liga: rivals[0].liga })
+          : t('competitive.screen.recent.rivals');
         return {
           id: m.id,
-          title: title || t('torneos.competitiveLeagueRivalsPending'),
+          title: title || t('competitive.screen.recent.rivalsPending'),
           subtitle,
           when: (() => {
             const startAt = getMatchBooking(m)?.start_at;
-            return startAt ? formatRelativeDate(startAt) : t('torneos.competitiveLeagueRecent');
+            return startAt ? formatRelativeDate(startAt) : t('competitive.screen.recent.recent');
           })(),
         };
       });
@@ -558,7 +590,7 @@ export function CompetitiveLeagueScreen({
   const handleJoinQueue = useCallback(async () => {
     const token = session?.access_token ?? null;
     if (!token) {
-      setErrorText(t('torneos.competitiveLeagueLogin'));
+      setErrorText(t('competitive.screen.errors.needLogin'));
       return;
     }
     setErrorText(null);
@@ -573,14 +605,12 @@ export function CompetitiveLeagueScreen({
     if (MATCHMAKING_DEMO) {
       const allClubIds = clubCatalog.map((c) => c.id).slice(0, 20);
       if (allClubIds.length === 0) {
-        setErrorText(t('torneos.competitiveLeagueNoClubsLoaded'));
+        setErrorText(t('competitive.screen.errors.noClubsLoaded'));
         return;
       }
       payload.preferred_club_ids = allClubIds;
     } else if (preferredClubIds.length === 0 && clubsInRange.length === 0) {
-      setErrorText(
-        t('torneos.competitiveLeagueNoClubsKm', { km: distanceKm }),
-      );
+      setErrorText(t('competitive.screen.errors.noClubsInDistance', { km: distanceKm }));
       return;
     } else if (preferredClubIds.length > 0) {
       payload.preferred_club_ids = preferredClubIds.slice(0, 20);
@@ -604,6 +634,40 @@ export function CompetitiveLeagueScreen({
       payload.search_lat = loc.coords.lat;
       payload.search_lng = loc.coords.lng;
     }
+    // Con una pareja ya aceptada: buscar juntos usando ESTAS preferencias (start-search).
+    if (searchPartner) {
+      const proceed = async () => {
+        setLoading(true);
+        const res = await startSearchPairInvite(searchPartner.id, payload, token);
+        setLoading(false);
+        if (!res.ok) {
+          setErrorText(res.error);
+          return;
+        }
+        setQueueStartedAtMs(Date.now());
+        setQueueElapsedSec(0);
+        onMatchmakingBannerStateChange?.('searching', { force: true });
+        setStep('queue');
+        await pollStatus();
+      };
+      // Aviso antes de buscar si hay >1 de diferencia de nivel.
+      if ((searchPartner.level_gap ?? 0) > 1) {
+        const liga = searchPartner.target_liga
+          ? searchPartner.target_liga.charAt(0).toUpperCase() + searchPartner.target_liga.slice(1)
+          : t('competitive.screen.fallback.superiorPlayer');
+        Alert.alert(
+          t('competitive.demanding.title'),
+          t('competitive.demanding.message', { name: searchPartner.other_player_name, liga }),
+          [
+            { text: t('competitive.common.cancel'), style: 'cancel' },
+            { text: t('competitive.demanding.searchAnyway'), onPress: () => void proceed() },
+          ],
+        );
+        return;
+      }
+      await proceed();
+      return;
+    }
     setLoading(true);
     const result = await joinMatchmaking(payload, token);
     if (!result.ok && !result.alreadyInQueue) {
@@ -626,6 +690,7 @@ export function CompetitiveLeagueScreen({
     preferredClubIds,
     searchCoords,
     clubCatalog,
+    searchPartner,
     session?.access_token,
     setQueueElapsedSec,
     setQueueStartedAtMs,
@@ -690,18 +755,18 @@ export function CompetitiveLeagueScreen({
       if (!token || !matchId || !onPartidoPress) return;
       const match = await fetchMatchById(matchId, token);
       if (!match) {
-        Alert.alert(t('alerts.error.title'), t('torneos.competitiveLeagueMatchLoadFail'));
+        Alert.alert(t('competitive.screen.errors.genericError'), t('competitive.screen.errors.matchLoadFailed'));
         return;
       }
       const mapped = mapMatchToPartido(match, { viewerPlayerId: profile?.id ?? null });
       if (!mapped) {
-        Alert.alert(t('alerts.error.title'), t('torneos.competitiveLeagueMatchShowFail'));
+        Alert.alert(t('competitive.screen.errors.genericError'), t('competitive.screen.errors.matchShowFailed'));
         return;
       }
       if (matchmakingPayment) mapped.matchmakingPayment = matchmakingPayment;
       onPartidoPress(mapped);
     },
-    [onPartidoPress, session?.access_token, profile?.id, t],
+    [onPartidoPress, session?.access_token],
   );
 
   const handleOpenProposal = useCallback(async () => {
@@ -795,32 +860,51 @@ export function CompetitiveLeagueScreen({
     const startDate = startAt ? new Date(startAt) : null;
     const weekday = startDate
       ? startDate.toLocaleDateString('es-ES', { weekday: 'long' })
-      : t('torneos.competitiveLeagueNoDate');
+      : t('competitive.screen.proposal.noDate');
     const hour = startDate
       ? startDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
       : '--:--';
     const timeLabel = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${hour}`;
+    // Duración real a partir de start_at/end_at de la reserva (no un valor fijo).
+    const endAt = proposalBooking?.end_at;
+    const endDate = endAt ? new Date(endAt) : null;
+    let durationLabel = '';
+    if (startDate && endDate) {
+      const mins = Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      const value = h > 0 ? (m > 0 ? `${h}h ${m}min` : `${h}h`) : `${m}min`;
+      durationLabel = t('competitive.screen.proposal.duration', { value });
+    }
+    // Distancia real al club (si tenemos la ubicación de búsqueda y el club tiene coordenadas);
+    // si no, caemos a la ciudad. Los clubes sí tienen lat/lng en BBDD.
+    const clubKm =
+      searchCoords && club?.lat != null && club?.lng != null
+        ? haversineKm(searchCoords, { lat: club.lat, lng: club.lng })
+        : null;
+    const clubLocation =
+      clubKm != null
+        ? t('competitive.screen.proposal.distanceKm', { value: clubKm.toFixed(1) })
+        : (club?.city ?? '');
     return {
       teammateName: teammate
         ? `${teammate.first_name ?? ''} ${teammate.last_name ?? ''}`.trim()
-        : t('torneos.competitiveLeaguePartnerPending'),
+        : t('competitive.screen.proposal.teammatePending'),
       teammateLevel:
         teammate?.elo_rating != null
-          ? t('torneos.competitiveLeagueLevel', { level: Number(teammate.elo_rating).toFixed(2) })
-          : t('torneos.competitiveLeagueLevelDash'),
-      rivals: rivalLabel || t('torneos.competitiveLeagueRivalPairPending'),
+          ? t('competitive.screen.proposal.levelValue', { value: Number(teammate.elo_rating).toFixed(2) })
+          : t('competitive.screen.proposal.levelUnknown'),
+      rivals: rivalLabel || t('competitive.screen.proposal.rivalPairPending'),
       rivalsMeta:
         proposal?.pre_match_win_prob != null
-          ? t('torneos.competitiveLeagueWinProb', {
-              pct: `${Math.round(proposal.pre_match_win_prob * 100)}%`,
-            })
-          : t('torneos.competitiveLeagueWinProb', { pct: '—' }),
-      clubName: club?.name ?? t('torneos.competitiveLeagueClubPending'),
-      clubDistance: '2.3 km',
+          ? t('competitive.screen.proposal.winProb', { value: Math.round(proposal.pre_match_win_prob * 100) })
+          : t('competitive.screen.proposal.winProbUnknown'),
+      clubName: club?.name ?? t('competitive.screen.proposal.clubPending'),
+      clubLocation,
       dateTime: timeLabel,
-      duration: t('torneos.competitiveLeagueDuration'),
+      duration: durationLabel,
     };
-  }, [profile?.id, proposal?.pre_match_win_prob, proposalMatch, t]);
+  }, [profile?.id, proposal?.pre_match_win_prob, proposalMatch, searchCoords, t]);
 
   useEffect(() => {
     if (status?.status !== 'searching' || queueStartedAtMs == null) return;
@@ -835,9 +919,20 @@ export function CompetitiveLeagueScreen({
 
   useEffect(() => {
     if (matchmakingBannerState !== 'timed_out') return;
-        setErrorText(t('torneos.competitiveLeagueNoPlayers'));
+    setErrorText(t('competitive.screen.errors.timedOut'));
+    if (searchPartner) {
+      // Era búsqueda en pareja: salimos de la cola (revierte la invitación a 'accepted' y nos
+      // saca a ambos del pool) pero CONSERVAMOS al compañero para poder re-buscar juntos.
+      const token = session?.access_token ?? null;
+      if (token) void leaveMatchmaking(token);
+      setStatus(null);
+      setQueueStartedAtMs(null);
+      setQueueElapsedSec(0);
+    } else {
+      setSearchPartner(null);
+    }
     setStep('prefs');
-  }, [matchmakingBannerState, t]);
+  }, [matchmakingBannerState]);
 
   const queueElapsedLabel = useMemo(() => {
     const mm = Math.floor(queueElapsedSec / 60)
@@ -850,16 +945,14 @@ export function CompetitiveLeagueScreen({
   const myRankingRow = useMemo(() => {
     if (!profile) return null;
     const fromList = rankingRows?.find((r) => r.player_id === profile.id);
-    const meName =
-      `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() ||
-      t('torneos.competitiveLeagueYouSuffix').replace(/[()（）]/g, '').trim();
+    const meName = `${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim() || t('competitive.screen.ranking.me');
     return {
       rank: fromList?.rank ?? null,
       name: meName,
       level: profile.eloRating
-        ? t('torneos.competitiveLeagueLevel', { level: Number(profile.eloRating).toFixed(2) })
-        : t('torneos.competitiveLeagueLevelDash'),
-      wl: `${profile.mmWins ?? 0}V / ${profile.mmLosses ?? 0}D`,
+        ? t('competitive.screen.proposal.levelValue', { value: Number(profile.eloRating).toFixed(2) })
+        : t('competitive.screen.proposal.levelUnknown'),
+      wl: t('competitive.screen.ranking.wl', { wins: profile.mmWins ?? 0, losses: profile.mmLosses ?? 0 }),
       lp: profile.lps ?? 0,
     };
   }, [profile, rankingRows, t]);
@@ -867,22 +960,11 @@ export function CompetitiveLeagueScreen({
   const rankingLoadedCount = rankingRows.length;
   const rankingPlayerCount = rankingTotal > 0 ? rankingTotal : rankingLoadedCount;
 
-  const timeLabelById = (id: SearchForm['time']) => {
-    if (id === 'manana') return t('torneos.competitiveLeagueTimeMorning');
-    if (id === 'tarde') return t('torneos.competitiveLeagueTimeAfternoon');
-    return t('torneos.competitiveLeagueTimeNight');
-  };
-  const genderLabelById = (id: SearchForm['gender']) => {
-    if (id === 'male') return t('torneos.competitiveLeagueGenderMale');
-    if (id === 'female') return t('torneos.competitiveLeagueGenderFemale');
-    if (id === 'mixed') return t('torneos.competitiveLeagueGenderMixed');
-    return t('torneos.competitiveLeagueGenderPref');
-  };
-  const sideLabelById = (id: SearchForm['preferred_side']) => {
-    if (id === 'drive') return t('torneos.competitiveLeagueSideDrive');
-    if (id === 'backhand') return t('torneos.competitiveLeagueSideBackhand');
-    return t('torneos.competitiveLeagueSideBoth');
-  };
+  // Pompa de "Con un amigo": invitaciones que requieren tu atención = recibidas pendientes
+  // (responder) + aceptadas pendientes de buscar. Las enviadas pendientes no cuentan.
+  const pairInviteBadgeCount = (status?.pair_invites ?? []).filter(
+    (i) => i.status === 'accepted' || (i.role === 'invitee' && i.status === 'pending'),
+  ).length;
 
   return (
     <View style={styles.container}>
@@ -912,8 +994,8 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="radio-outline" size={16} color="#F59E0B" />
               <Text style={styles.resumeBannerText}>
                 {status?.status === 'matched'
-                  ? t('torneos.competitiveLeagueMatchFound')
-                  : t('torneos.competitiveLeagueQueue')}
+                  ? t('competitive.screen.resume.matched')
+                  : t('competitive.screen.resume.searching')}
               </Text>
             </Pressable>
           )}
@@ -921,9 +1003,9 @@ export function CompetitiveLeagueScreen({
           <LinearGradient colors={['#3C1E00', '#15100A', '#0F0F0F']} locations={[0, 0.55, 1]} style={styles.hero}>
             <View style={styles.badge}>
               <View style={styles.badgeDot} />
-              <Text style={styles.badgeText}>{t('torneos.competitiveLeagueBadge')}</Text>
+              <Text style={styles.badgeText}>{t('competitive.screen.hero.badge')}</Text>
             </View>
-            <Text style={styles.heroCap}>{t('torneos.competitiveLeagueYourDivision')}</Text>
+            <Text style={styles.heroCap}>{t('competitive.screen.hero.currentDivision')}</Text>
             <View style={styles.heroMainRow}>
               <View style={styles.medalBox}>
                 <Text style={styles.medalEmoji}>🏅</Text>
@@ -932,56 +1014,84 @@ export function CompetitiveLeagueScreen({
                 <Text style={styles.division}>{division ?? '—'}</Text>
                 <Text style={styles.divisionRank}>
                   {profile?.mmPeakLiga
-                    ? t('torneos.competitiveLeaguePeak', { liga: profile.mmPeakLiga })
-                    : t('torneos.competitiveLeagueNoHistory')}
+                    ? t('competitive.screen.hero.peak', { liga: profile.mmPeakLiga })
+                    : t('competitive.screen.hero.noHistory')}
                 </Text>
                 <View style={styles.statsLine}>
-                  <Text style={styles.statUp}>↗ {winCount}V</Text>
-                  <Text style={styles.statDown}>↘ {lossCount}D</Text>
-                  <Text style={styles.statWr}>WR {wr}%</Text>
+                  <Text style={styles.statUp}>↗ {t('competitive.screen.hero.winsShort', { n: winCount })}</Text>
+                  <Text style={styles.statDown}>↘ {t('competitive.screen.hero.lossesShort', { n: lossCount })}</Text>
+                  <Text style={styles.statWr}>{t('competitive.screen.hero.wr', { wr })}</Text>
                 </View>
               </View>
             </View>
             <View style={styles.lpRow}>
-              <Text style={styles.lpCap}>{t('torneos.competitiveLeagueLpLabel')}</Text>
-              <Text style={styles.lp}>{profile?.lps ?? 0} / 100 LP</Text>
+              <Text style={styles.lpCap}>{t('competitive.screen.hero.leaguePointsCap')}</Text>
+              <Text style={styles.lp}>
+                {lpTarget != null
+                  ? t('competitive.lp.progress', { lps: profile?.lps ?? 0, target: lpTarget })
+                  : t('competitive.lp.only', { lps: profile?.lps ?? 0 })}
+              </Text>
             </View>
             <View style={styles.track}>
               <View style={[styles.fill, { width: `${progressPct}%` }]} />
             </View>
-            <Text style={styles.heroFoot}>{t('torneos.competitiveLeagueRankingReset')}</Text>
+            {(profile?.mmShieldMatches ?? 0) > 0 ? (
+              <View style={styles.shieldBadge}>
+                <Ionicons name="shield-checkmark" size={13} color="#60A5FA" />
+                <Text style={styles.shieldBadgeText}>
+                  {t(
+                    profile?.mmShieldMatches === 1
+                      ? 'competitive.shield.activeOne'
+                      : 'competitive.shield.activeMany',
+                    { n: profile?.mmShieldMatches ?? 0 },
+                  )}
+                </Text>
+              </View>
+            ) : null}
+            <Text style={styles.heroFoot}>{t('competitive.screen.hero.seasonResetFoot')}</Text>
           </LinearGradient>
 
           <View style={styles.tabRow}>
             <Pressable style={[styles.tabBtn, mainTab === 'liga' && styles.tabBtnActive]} onPress={() => setMainTab('liga')}>
-              <Text style={styles.tabText}>{t('torneos.competitiveLeagueTabMyLeague')}</Text>
+              <Text style={styles.tabText}>{t('competitive.screen.tabs.myLeague')}</Text>
             </Pressable>
             <Pressable
               style={[styles.tabBtn, mainTab === 'ranking' && styles.tabBtnActive]}
               onPress={() => setMainTab('ranking')}
             >
-              <Text style={styles.tabText}>{t('torneos.competitiveLeagueTabRanking')}</Text>
+              <Text style={styles.tabText}>{t('competitive.screen.tabs.ranking')}</Text>
             </Pressable>
           </View>
 
           {mainTab === 'liga' ? (
             <>
               <LinearGradient colors={['#4B2403', '#A56611']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.searchCard}>
-                <Pressable style={styles.searchCardPress} onPress={() => setStep('prefs')}>
+                <Pressable
+                  style={styles.searchCardPress}
+                  onPress={() => {
+                    setSearchPartner(null);
+                    setModeSheetVisible(true);
+                  }}
+                >
                   <View style={styles.searchIconWrap}>
                     <Ionicons name="flash-outline" size={22} color="#fff" />
                   </View>
                   <View style={styles.searchTextWrap}>
-                    <Text style={styles.searchTitle}>{t('torneos.competitiveLeagueSearchMatch')}</Text>
-                    <Text style={styles.searchSubtitle}>{t('torneos.competitiveLeagueSearchSubtitle')}</Text>
+                    <Text style={styles.searchTitle}>{t('competitive.screen.search.title')}</Text>
+                    <Text style={styles.searchSubtitle}>{t('competitive.screen.search.subtitle')}</Text>
                   </View>
+                  {pairInviteBadgeCount > 0 ? (
+                    <View style={styles.notifBadge}>
+                      <Text style={styles.notifBadgeText}>{pairInviteBadgeCount}</Text>
+                    </View>
+                  ) : null}
                   <Ionicons name="chevron-forward" size={20} color="#f6ddbf" />
                 </Pressable>
               </LinearGradient>
 
               <View style={styles.recentHeader}>
-                <Text style={styles.recentHeaderLeft}>{t('torneos.competitiveLeagueRecentMatches')}</Text>
-                <Text style={styles.recentHeaderRight}>{t('torneos.competitiveLeagueCurrentSeason')}</Text>
+                <Text style={styles.recentHeaderLeft}>{t('competitive.screen.recent.header')}</Text>
+                <Text style={styles.recentHeaderRight}>{t('competitive.screen.recent.currentSeason')}</Text>
               </View>
               <View style={styles.recentWrap}>
                 {recentMatchRows.map((row) => (
@@ -1002,18 +1112,24 @@ export function CompetitiveLeagueScreen({
                 ))}
                 {recentMatchRows.length === 0 && (
                   <View style={styles.recentCard}>
-                    <Text style={styles.recentSub}>{t('torneos.competitiveLeagueNoRecentMatches')}</Text>
+                    <Text style={styles.recentSub}>{t('competitive.screen.recent.empty')}</Text>
                   </View>
                 )}
               </View>
 
               <View style={styles.howCard}>
-                <Text style={styles.howTitle}>{t('torneos.competitiveLeagueHowItWorks')}</Text>
-                <Text style={styles.howLine}>{t('torneos.competitiveLeagueHowLine1')}</Text>
-                <Text style={styles.howLine}>{t('torneos.competitiveLeagueHowLine2')}</Text>
-                <Text style={styles.howLine}>{t('torneos.competitiveLeagueHowLine3')}</Text>
-                <Text style={styles.howLine}>{t('torneos.competitiveLeagueHowLine4')}</Text>
-                <Text style={styles.howLine}>{t('torneos.competitiveLeagueHowLine5')}</Text>
+                <Text style={styles.howTitle}>{t('competitive.screen.how.title')}</Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.line1')}</Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.line2')}</Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.line3')}</Text>
+                <Text style={styles.howLine}>
+                  ★{' '}
+                  {lpTarget != null
+                    ? t('competitive.lp.promoteLine', { n: lpTarget })
+                    : t('competitive.lp.maxDivision')}
+                </Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.line5')}</Text>
+                <Text style={styles.howLine}>{t('competitive.screen.how.season')}</Text>
               </View>
             </>
           ) : (
@@ -1023,22 +1139,25 @@ export function CompetitiveLeagueScreen({
                   <Text style={styles.rankingDivision}>{division ?? '—'}</Text>
                   <Text style={styles.rankingSub}>
                     {rankingLoading
-                      ? t('torneos.competitiveLeagueLoadingRanking')
+                      ? t('competitive.screen.ranking.loading')
                       : rankingPlayerCount > 0
                         ? rankingHasMore
-                          ? t('torneos.competitiveLeagueShowingPlayers', {
-                              shown: rankingLoadedCount,
+                          ? t('competitive.screen.ranking.showing', {
+                              loaded: rankingLoadedCount,
                               total: rankingPlayerCount,
                             })
-                          : rankingPlayerCount === 1
-                            ? t('torneos.competitiveLeaguePlayersInDivisionOne', { count: rankingPlayerCount })
-                            : t('torneos.competitiveLeaguePlayersInDivisionMany', { count: rankingPlayerCount })
-                        : t('torneos.competitiveLeagueNoPlayersDivision')}
+                          : t(
+                              rankingPlayerCount === 1
+                                ? 'competitive.screen.ranking.playersInDivisionOne'
+                                : 'competitive.screen.ranking.playersInDivisionMany',
+                              { total: rankingPlayerCount },
+                            )
+                        : t('competitive.screen.ranking.noPlayers')}
                   </Text>
                 </View>
                 {rankingPlayerCount > 0 ? (
                   <View style={styles.topPill}>
-                    <Text style={styles.topPillText}>{t('torneos.competitiveLeagueTop', { count: rankingPlayerCount })}</Text>
+                    <Text style={styles.topPillText}>{t('competitive.screen.ranking.top', { total: rankingPlayerCount })}</Text>
                   </View>
                 ) : null}
               </View>
@@ -1050,12 +1169,12 @@ export function CompetitiveLeagueScreen({
                 </>
               ) : rankingError ? (
                 <View style={styles.rankingNoticeCard}>
-                  <Text style={styles.rankingNoticeTitle}>{t('torneos.competitiveLeagueRankingUnavailable')}</Text>
+                  <Text style={styles.rankingNoticeTitle}>{t('competitive.screen.ranking.notAvailable')}</Text>
                   <Text style={styles.rankingNoticeSub}>{rankingError}</Text>
                 </View>
               ) : rankingPlayerCount === 0 ? (
                 <View style={styles.rankingNoticeCard}>
-                  <Text style={styles.rankingNoticeSub}>{t('torneos.competitiveLeagueNoRankedPlayers')}</Text>
+                  <Text style={styles.rankingNoticeSub}>{t('competitive.screen.ranking.noneClassified')}</Text>
                 </View>
               ) : (
                 rankingRows.map((row) => {
@@ -1063,12 +1182,12 @@ export function CompetitiveLeagueScreen({
                   const name =
                     `${row.first_name ?? ''} ${row.last_name ?? ''}`.trim() ||
                     row.username?.trim() ||
-                    t('common.playerFallback');
+                    t('competitive.screen.fallback.player');
                   const level =
                     row.elo_rating != null
-                      ? t('torneos.competitiveLeagueLevel', { level: Number(row.elo_rating).toFixed(2) })
-                      : t('torneos.competitiveLeagueLevelDash');
-                  const wl = `${row.mm_wins}V / ${row.mm_losses}D`;
+                      ? t('competitive.screen.proposal.levelValue', { value: Number(row.elo_rating).toFixed(2) })
+                      : t('competitive.screen.proposal.levelUnknown');
+                  const wl = t('competitive.screen.ranking.wl', { wins: row.mm_wins, losses: row.mm_losses });
                   return (
                     <View
                       key={row.player_id}
@@ -1080,9 +1199,7 @@ export function CompetitiveLeagueScreen({
                         </Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.rankName}>
-                          {isMe ? `${name} ${t('torneos.competitiveLeagueYouSuffix')}` : name}
-                        </Text>
+                        <Text style={styles.rankName}>{isMe ? t('competitive.screen.ranking.meSelf', { name }) : name}</Text>
                         <Text style={styles.rankMeta}>
                           {level} · {wl}
                         </Text>
@@ -1095,7 +1212,7 @@ export function CompetitiveLeagueScreen({
               {rankingLoadingMore ? (
                 <View style={styles.rankingLoadMore}>
                   <ActivityIndicator size="small" color="#F59E0B" />
-                  <Text style={styles.rankingLoadMoreText}>{t('torneos.competitiveLeagueLoadingMore')}</Text>
+                  <Text style={styles.rankingLoadMoreText}>{t('competitive.screen.ranking.loadingMore')}</Text>
                 </View>
               ) : null}
               {!rankingLoading && rankingPlayerCount > 0 && myRankingRow && myRankingRow.rank == null ? (
@@ -1125,10 +1242,21 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="arrow-back" size={16} color="#fff" />
             </Pressable>
             <View>
-              <Text style={styles.sectionTitle}>{t('torneos.competitiveLeaguePrefsTitle')}</Text>
-              <Text style={styles.stepSubtitle}>{t('torneos.competitiveLeaguePrefsSubtitle')}</Text>
+              <Text style={styles.sectionTitle}>{t('competitive.screen.prefs.title')}</Text>
+              <Text style={styles.stepSubtitle}>
+                {t('competitive.screen.prefs.subtitle')}
+              </Text>
             </View>
           </View>
+
+          {searchPartner ? (
+            <View style={styles.partnerLockRow}>
+              <Ionicons name="people" size={16} color="#F59E0B" />
+              <Text style={styles.partnerLockText}>
+                {t('competitive.search.searchingWith', { name: searchPartner.other_player_name })}
+              </Text>
+            </View>
+          ) : null}
 
           {!MATCHMAKING_DEMO && preferredClubIds.length === 0 && locationIssue ? (
             <View style={styles.locationBanner}>
@@ -1142,39 +1270,39 @@ export function CompetitiveLeagueScreen({
                   onPress={() => void handleActivateLocation()}
                 >
                   <Ionicons name="navigate-outline" size={14} color="#fff" />
-                  <Text style={styles.locationBannerBtnText}>{t('torneos.competitiveLeagueActivateLocation')}</Text>
+                  <Text style={styles.locationBannerBtnText}>{t('competitive.screen.prefs.locationBannerActivate')}</Text>
                 </Pressable>
                 <Pressable
                   style={styles.locationBannerBtnSecondary}
                   onPress={() => setClubPickerVisible(true)}
                 >
-                  <Text style={styles.locationBannerBtnSecondaryText}>{t('torneos.competitiveLeagueChooseClubs')}</Text>
+                  <Text style={styles.locationBannerBtnSecondaryText}>{t('competitive.screen.prefs.locationBannerChooseClubs')}</Text>
                 </Pressable>
               </View>
             </View>
           ) : null}
 
           <View style={styles.prefsCard}>
-            <Text style={styles.prefsSectionTitle}>{t('torneos.competitiveLeagueFormatSection')}</Text>
+            <Text style={styles.prefsSectionTitle}>{t('competitive.screen.prefs.formatTitle')}</Text>
             <View style={styles.fixedModeRow}>
               <View style={styles.fixedModeIcon}>
                 <Ionicons name="people" size={18} color="#F18F34" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.fixedModeTitle}>{t('torneos.competitiveLeagueFormat2v2')}</Text>
-                <Text style={styles.fixedModeSub}>{t('torneos.competitiveLeagueFormat2v2Sub')}</Text>
+                <Text style={styles.fixedModeTitle}>{t('competitive.screen.prefs.pairFormatTitle')}</Text>
+                <Text style={styles.fixedModeSub}>{t('competitive.screen.prefs.pairFormatSub')}</Text>
               </View>
               <Ionicons name="checkmark-circle" size={20} color="#F18F34" />
             </View>
           </View>
 
           <OptionRow
-            title={t('torneos.competitiveLeaguePreferredTime')}
+            title={t('competitive.screen.prefs.scheduleTitle')}
             sectionIcon="time-outline"
             options={[
-              { id: 'manana', label: t('torneos.competitiveLeagueTimeMorning'), subtitle: t('torneos.competitiveLeagueTimeMorningSub'), iconName: 'sunny-outline' },
-              { id: 'tarde', label: t('torneos.competitiveLeagueTimeAfternoon'), subtitle: t('torneos.competitiveLeagueTimeAfternoonSub'), iconName: 'sunny' },
-              { id: 'noche', label: t('torneos.competitiveLeagueTimeNight'), subtitle: t('torneos.competitiveLeagueTimeNightSub'), iconName: 'moon-outline' },
+              { id: 'manana', label: t('competitive.screen.prefs.morning'), subtitle: t('competitive.screen.prefs.morningHours'), iconName: 'sunny-outline' },
+              { id: 'tarde', label: t('competitive.screen.prefs.afternoon'), subtitle: t('competitive.screen.prefs.afternoonHours'), iconName: 'sunny' },
+              { id: 'noche', label: t('competitive.screen.prefs.night'), subtitle: t('competitive.screen.prefs.nightHours'), iconName: 'moon-outline' },
             ]}
             value={form.time}
             onChange={(v) => setForm((p) => ({ ...p, time: v as SearchForm['time'] }))}
@@ -1185,22 +1313,27 @@ export function CompetitiveLeagueScreen({
             {MATCHMAKING_DEMO ? (
               <View style={styles.demoModeBanner}>
                 <Ionicons name="flash" size={16} color="#F59E0B" />
-                <Text style={styles.demoModeText}>{t('torneos.competitiveLeagueDemoMode')}</Text>
+                <Text style={styles.demoModeText}>
+                  {t('competitive.screen.prefs.demoMode')}
+                </Text>
               </View>
             ) : preferredClubIds.length > 0 ? (
               <Text style={styles.distanceByClubsHint}>
-                {preferredClubIds.length === 1
-                  ? t('torneos.competitiveLeagueSearchInClubsOne', { count: preferredClubIds.length })
-                  : t('torneos.competitiveLeagueSearchInClubsMany', { count: preferredClubIds.length })}
+                {t(
+                  preferredClubIds.length === 1
+                    ? 'competitive.screen.prefs.searchingInClubsOne'
+                    : 'competitive.screen.prefs.searchingInClubsMany',
+                  { n: preferredClubIds.length },
+                )}
               </Text>
             ) : (
               <>
                 <View style={styles.distanceTitleRow}>
                   <View style={styles.optionTitleRow}>
                     <Ionicons name="location-outline" size={14} color="#F59E0B" />
-                    <Text style={styles.optionTitleStrong}>{t('torneos.competitiveLeagueDistanceMax')}</Text>
+                    <Text style={styles.optionTitleStrong}>{t('competitive.screen.prefs.maxDistance')}</Text>
                   </View>
-                  <Text style={styles.distanceValue}>{distanceKm} km</Text>
+                  <Text style={styles.distanceValue}>{t('competitive.screen.prefs.distanceKm', { km: distanceKm })}</Text>
                 </View>
                 <Slider
                   style={styles.distanceSlider}
@@ -1214,27 +1347,29 @@ export function CompetitiveLeagueScreen({
                   thumbTintColor="#1f8dff"
                 />
                 <View style={styles.sliderLabels}>
-                  <Text style={styles.sliderLabel}>1 km</Text>
-                  <Text style={styles.sliderLabel}>50 km</Text>
+                  <Text style={styles.sliderLabel}>{t('competitive.screen.prefs.kmShort', { km: 1 })}</Text>
+                  <Text style={styles.sliderLabel}>{t('competitive.screen.prefs.kmShort', { km: 50 })}</Text>
                 </View>
               </>
             )}
             {preferredClubIds.length === 0 ? (
               <View style={styles.clubsInRangeBox}>
                 <Text style={styles.clubsInRangeTitle}>
-                  {MATCHMAKING_DEMO ? t('torneos.competitiveLeagueClubsDemo') : t('torneos.competitiveLeagueClubsInRange')}
+                  {MATCHMAKING_DEMO
+                    ? t('competitive.screen.prefs.clubsInRangeDemo')
+                    : t('competitive.screen.prefs.clubsInRange')}
                 </Text>
                 {!MATCHMAKING_DEMO && searchCoordsLoading ? (
-                  <Text style={styles.clubsInRangeSub}>{t('torneos.competitiveLeagueCalculatingDistances')}</Text>
+                  <Text style={styles.clubsInRangeSub}>{t('competitive.screen.prefs.calculatingDistances')}</Text>
                 ) : clubsInRange.length === 0 ? (
                   <Text style={styles.clubsInRangeEmpty}>
                     {MATCHMAKING_DEMO
-                      ? t('torneos.competitiveLeagueLoadingClubs')
+                      ? t('competitive.screen.prefs.loadingClubs')
                       : searchCoords
-                        ? t('torneos.competitiveLeagueNoClubsHint', { km: distanceKm })
+                        ? t('competitive.screen.prefs.noneInDistance', { km: distanceKm })
                         : locationIssue
-                          ? t('torneos.competitiveLeagueNoGps')
-                          : t('torneos.competitiveLeagueActivateGps')}
+                          ? t('competitive.screen.prefs.noLocationPickClubs')
+                          : t('competitive.screen.prefs.activateLocationToSee')}
                   </Text>
                 ) : (
                   clubsInRange.slice(0, 8).map((club) => (
@@ -1244,37 +1379,37 @@ export function CompetitiveLeagueScreen({
                         {club.name}
                       </Text>
                       {club.distance != null ? (
-                        <Text style={styles.clubsInRangeKm}>{Math.round(club.distance)} km</Text>
+                        <Text style={styles.clubsInRangeKm}>{t('competitive.screen.prefs.kmShort', { km: Math.round(club.distance) })}</Text>
                       ) : null}
                     </View>
                   ))
                 )}
                 {clubsInRange.length > 8 ? (
-                  <Text style={styles.clubsInRangeMore}>{t('torneos.competitiveLeagueMoreClubs', { count: clubsInRange.length - 8 })}</Text>
+                  <Text style={styles.clubsInRangeMore}>{t('competitive.screen.prefs.moreClubs', { n: clubsInRange.length - 8 })}</Text>
                 ) : null}
               </View>
             ) : null}
           </View>
 
           <OptionRow
-            title={t('torneos.competitiveLeagueModality')}
+            title={t('competitive.screen.prefs.modality')}
             sectionIcon="shield-outline"
             options={[
-              { id: 'any', label: t('torneos.competitiveLeagueGenderAny'), iconName: 'ellipse-outline' },
-              { id: 'male', label: t('torneos.competitiveLeagueGenderMale'), iconName: 'person-outline' },
-              { id: 'female', label: t('torneos.competitiveLeagueGenderFemale'), iconName: 'woman-outline' },
-              { id: 'mixed', label: t('torneos.competitiveLeagueGenderMixed'), iconName: 'people-outline' },
+              { id: 'any', label: t('competitive.screen.prefs.any'), iconName: 'ellipse-outline' },
+              { id: 'male', label: t('competitive.screen.prefs.male'), iconName: 'person-outline' },
+              { id: 'female', label: t('competitive.screen.prefs.female'), iconName: 'woman-outline' },
+              { id: 'mixed', label: t('competitive.screen.prefs.mixed'), iconName: 'people-outline' },
             ]}
             value={form.gender}
             onChange={(v) => setForm((p) => ({ ...p, gender: v as SearchForm['gender'] }))}
           />
           <OptionRow
-            title={t('torneos.competitiveLeaguePreferredSide')}
+            title={t('competitive.screen.prefs.preferredSide')}
             sectionIcon="compass-outline"
             options={[
-              { id: 'backhand', label: t('torneos.competitiveLeagueSideBackhand'), iconName: 'arrow-back-circle-outline' },
-              { id: 'drive', label: t('torneos.competitiveLeagueSideDrive'), iconName: 'arrow-forward-circle-outline' },
-              { id: 'any', label: t('torneos.competitiveLeagueSideBoth'), iconName: 'swap-horizontal-outline' },
+              { id: 'backhand', label: t('competitive.screen.prefs.left'), iconName: 'arrow-back-circle-outline' },
+              { id: 'drive', label: t('competitive.screen.prefs.right'), iconName: 'arrow-forward-circle-outline' },
+              { id: 'any', label: t('competitive.screen.prefs.both'), iconName: 'swap-horizontal-outline' },
             ]}
             value={form.preferred_side}
             onChange={(v) => setForm((p) => ({ ...p, preferred_side: v as SearchForm['preferred_side'] }))}
@@ -1283,7 +1418,7 @@ export function CompetitiveLeagueScreen({
           <View style={styles.optionSection}>
             <View style={styles.optionTitleRow}>
               <Ionicons name="location-outline" size={14} color="#F59E0B" />
-              <Text style={styles.optionTitle}>{t('torneos.competitiveLeaguePreferredClubs')}</Text>
+              <Text style={styles.optionTitle}>{t('competitive.screen.prefs.preferredClubsTitle')}</Text>
             </View>
             <Pressable
               style={styles.clubPickerBtn}
@@ -1292,14 +1427,17 @@ export function CompetitiveLeagueScreen({
               <View style={{ flex: 1 }}>
                 <Text style={styles.clubPickerBtnTitle}>
                   {preferredClubIds.length === 0
-                    ? t('torneos.competitiveLeagueChooseClubsBtn')
-                    : preferredClubIds.length === 1
-                      ? t('torneos.competitiveLeagueClubsSelectedOne', { count: preferredClubIds.length })
-                      : t('torneos.competitiveLeagueClubsSelectedMany', { count: preferredClubIds.length })}
+                    ? t('competitive.screen.prefs.choosePreferredClubs')
+                    : t(
+                        preferredClubIds.length === 1
+                          ? 'competitive.screen.prefs.clubsSelectedOne'
+                          : 'competitive.screen.prefs.clubsSelectedMany',
+                        { n: preferredClubIds.length },
+                      )}
                 </Text>
                 <Text style={styles.clubPickerBtnSub} numberOfLines={2}>
                   {preferredClubIds.length === 0
-                    ? t('torneos.competitiveLeagueClubsDefault')
+                    ? t('competitive.screen.prefs.noClubsHint')
                     : preferredClubLabels.join(' · ')}
                 </Text>
               </View>
@@ -1308,9 +1446,13 @@ export function CompetitiveLeagueScreen({
           </View>
 
           <Pressable style={styles.primaryBtn} onPress={() => void handleJoinQueue()} disabled={loading}>
-            <Ionicons name="flash" size={16} color="#fff" />
+            <Ionicons name={searchPartner ? 'people' : 'flash'} size={16} color="#fff" />
             <Text style={styles.primaryBtnText}>
-              {loading ? t('torneos.competitiveLeagueSearching') : t('torneos.competitiveLeagueSearchCompetitive')}
+              {loading
+                ? t('competitive.search.searching')
+                : searchPartner
+                  ? t('competitive.search.ctaWith', { name: searchPartner.other_player_name })
+                  : t('competitive.search.cta')}
             </Text>
           </Pressable>
           {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
@@ -1324,13 +1466,11 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="arrow-back" size={16} color="#fff" />
             </Pressable>
             <View style={{ flex: 1 }}>
-              <Text style={styles.sectionTitle}>{t('torneos.competitiveLeagueQueueTitle')}</Text>
-              <Text style={styles.stepSubtitle}>
-                {t('torneos.competitiveLeagueQueueElapsed', { time: queueElapsedLabel })}
-              </Text>
+              <Text style={styles.sectionTitle}>{t('competitive.screen.queue.searchingTitle')}</Text>
+              <Text style={styles.stepSubtitle}>{t('competitive.screen.queue.timeInQueue', { time: queueElapsedLabel })}</Text>
             </View>
             <View style={styles.queuePlayersBox}>
-              <Text style={styles.queuePlayersCaption}>{t('torneos.competitiveLeaguePlayersInQueue')}</Text>
+              <Text style={styles.queuePlayersCaption}>{t('competitive.screen.queue.playersInQueue')}</Text>
               <Text style={styles.queuePlayersValue}>
                 {status?.searching_in_club_count != null
                   ? String(status.searching_in_club_count)
@@ -1350,50 +1490,40 @@ export function CompetitiveLeagueScreen({
           </View>
 
           <View style={styles.queueCenter}>
-            <Text style={styles.queueTitle}>{t('torneos.competitiveLeagueQueueTitle')}</Text>
-            <Text style={styles.queueCaption}>{t('torneos.competitiveLeagueSearchingPartner')}</Text>
+            <Text style={styles.queueTitle}>{t('competitive.screen.queue.searchingTitle')}</Text>
+            <Text style={styles.queueCaption}>{t('competitive.screen.queue.searchingPartner')}</Text>
           </View>
 
           <View style={styles.queueSummaryBox}>
+            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.format')}</Text><Text style={styles.queueVal}>{t('competitive.screen.queue.formatValue')}</Text></View>
+            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.schedule')}</Text><Text style={styles.queueVal}>{form.time === 'manana' ? t('competitive.screen.prefs.morning') : form.time === 'tarde' ? t('competitive.screen.prefs.afternoon') : t('competitive.screen.prefs.night')}</Text></View>
             <View style={styles.queueSummaryRow}>
-              <Text style={styles.queueKey}>{t('torneos.competitiveLeagueFormatLabel')}</Text>
-              <Text style={styles.queueVal}>{t('torneos.competitiveLeagueFormat2v2Short')}</Text>
-            </View>
-            <View style={styles.queueSummaryRow}>
-              <Text style={styles.queueKey}>{t('torneos.competitiveLeagueScheduleLabel')}</Text>
-              <Text style={styles.queueVal}>{timeLabelById(form.time)}</Text>
-            </View>
-            <View style={styles.queueSummaryRow}>
-              <Text style={styles.queueKey}>{t('torneos.competitiveLeagueLocationLabel')}</Text>
+              <Text style={styles.queueKey}>{t('competitive.screen.queue.location')}</Text>
               <Text style={styles.queueVal} numberOfLines={2}>
                 {preferredClubIds.length > 0
                   ? preferredClubLabels.join(', ')
-                  : t('torneos.competitiveLeagueUpToKm', { km: distanceKm })}
+                  : t('competitive.screen.queue.upToKm', { km: distanceKm })}
               </Text>
             </View>
-            <View style={styles.queueSummaryRow}>
-              <Text style={styles.queueKey}>{t('torneos.competitiveLeagueModality')}</Text>
-              <Text style={styles.queueVal}>{genderLabelById(form.gender)}</Text>
-            </View>
-            <View style={styles.queueSummaryRow}>
-              <Text style={styles.queueKey}>{t('torneos.competitiveLeagueSideLabel')}</Text>
-              <Text style={styles.queueVal}>{sideLabelById(form.preferred_side)}</Text>
-            </View>
+            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.modality')}</Text><Text style={styles.queueVal}>{form.gender === 'male' ? t('competitive.screen.prefs.male') : form.gender === 'female' ? t('competitive.screen.prefs.female') : form.gender === 'mixed' ? t('competitive.screen.prefs.mixed') : t('competitive.screen.queue.noPref')}</Text></View>
+            <View style={styles.queueSummaryRow}><Text style={styles.queueKey}>{t('competitive.screen.queue.side')}</Text><Text style={styles.queueVal}>{form.preferred_side === 'drive' ? t('competitive.screen.prefs.right') : form.preferred_side === 'backhand' ? t('competitive.screen.prefs.left') : t('competitive.screen.prefs.both')}</Text></View>
           </View>
 
           <View style={styles.queueBgCard}>
             <View style={styles.queueBgHead}>
               <Ionicons name="information-circle-outline" size={16} color="#F59E0B" />
-              <Text style={styles.queueBgTitle}>{t('torneos.competitiveLeagueBgSearchTitle')}</Text>
+              <Text style={styles.queueBgTitle}>{t('competitive.screen.queue.backgroundTitle')}</Text>
             </View>
-            <Text style={styles.queueBgText}>{t('torneos.competitiveLeagueBgSearchBody')}</Text>
+            <Text style={styles.queueBgText}>
+              {t('competitive.screen.queue.backgroundText')}
+            </Text>
           </View>
 
           <Pressable style={styles.primaryBtn} onPress={() => setStep('home')}>
-            <Text style={styles.primaryBtnText}>{t('torneos.competitiveLeagueMinimizeSearch')}</Text>
+            <Text style={styles.primaryBtnText}>{t('competitive.screen.queue.minimize')}</Text>
           </Pressable>
           <Pressable style={styles.secondaryBtn} onPress={() => void handleLeaveQueue()}>
-            <Text style={styles.secondaryBtnText}>{t('torneos.competitiveLeagueCancelSearch')}</Text>
+            <Text style={styles.secondaryBtnText}>{t('competitive.screen.queue.cancel')}</Text>
           </Pressable>
           {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
         </View>
@@ -1406,51 +1536,53 @@ export function CompetitiveLeagueScreen({
               <Ionicons name="checkmark" size={14} color="#34d399" />
             </View>
             <View>
-              <Text style={styles.foundTopTitle}>{t('torneos.competitiveLeagueFoundTitle')}</Text>
-              <Text style={styles.foundTopSub}>{t('torneos.competitiveLeagueFoundSub')}</Text>
+              <Text style={styles.foundTopTitle}>{t('competitive.screen.found.title')}</Text>
+              <Text style={styles.foundTopSub}>{t('competitive.screen.found.subtitle')}</Text>
             </View>
           </View>
 
           <View style={styles.foundCardTeammate}>
-            <Text style={styles.foundLabel}>{t('torneos.competitiveLeagueYourTeammate')}</Text>
+            <Text style={styles.foundLabel}>{t('competitive.screen.found.yourTeammate')}</Text>
             <Text style={styles.foundName}>{proposalUi.teammateName}</Text>
             <Text style={styles.foundMeta}>{proposalUi.teammateLevel}</Text>
           </View>
 
           <View style={styles.foundCardRivals}>
-            <Text style={styles.foundLabel}>{t('torneos.competitiveLeagueRivalPair')}</Text>
+            <Text style={styles.foundLabel}>{t('competitive.screen.found.rivalPair')}</Text>
             <Text style={styles.foundName}>{proposalUi.rivals}</Text>
             <Text style={styles.foundMeta}>{proposalUi.rivalsMeta}</Text>
           </View>
 
           <View style={styles.foundInfoCard}>
-            <Text style={styles.foundInfoMain}>{proposalUi.clubName}</Text>
-            <Text style={styles.foundInfoSub}>{proposalUi.clubDistance}</Text>
+            <Text style={styles.foundInfoMain} numberOfLines={1}>{proposalUi.clubName}</Text>
+            {proposalUi.clubLocation ? (
+              <Text style={styles.foundInfoSub} numberOfLines={1}>{proposalUi.clubLocation}</Text>
+            ) : null}
             <Text style={[styles.foundInfoMain, { marginTop: 10 }]}>{proposalUi.dateTime}</Text>
-            <Text style={styles.foundInfoSub}>{proposalUi.duration}</Text>
+            {proposalUi.duration ? <Text style={styles.foundInfoSub}>{proposalUi.duration}</Text> : null}
           </View>
 
           <View style={styles.foundLpCard}>
-            <Text style={styles.foundLpText}>{t('torneos.competitiveLeagueLpWinLoss')}</Text>
+            <Text style={styles.foundLpText}>{t('competitive.screen.found.lpInfo')}</Text>
           </View>
 
           <View style={styles.foundCountdownCard}>
-            <Text style={styles.foundCountdownHint}>{t('torneos.competitiveLeagueConfirmDeadline')}</Text>
+            <Text style={styles.foundCountdownHint}>{t('competitive.screen.found.confirmHint')}</Text>
             <Text style={styles.foundCountdown}>{countdownText}</Text>
           </View>
 
           <View style={styles.foundWarning}>
-            <Text style={styles.foundWarningText}>{t('torneos.competitiveLeagueRejectWarning')}</Text>
+            <Text style={styles.foundWarningText}>
+              {t('competitive.screen.found.rejectWarning')}
+            </Text>
           </View>
 
           <Pressable style={styles.primaryBtn} onPress={() => void handleOpenProposal()} disabled={openingProposal}>
             <Ionicons name="checkmark" size={16} color="#fff" />
-            <Text style={styles.primaryBtnText}>
-              {openingProposal ? t('torneos.competitiveLeagueOpening') : t('torneos.competitiveLeagueConfirm')}
-            </Text>
+            <Text style={styles.primaryBtnText}>{openingProposal ? t('competitive.screen.found.opening') : t('competitive.screen.found.confirm')}</Text>
           </Pressable>
           <Pressable style={styles.secondaryBtn} onPress={() => void handleRejectProposal()}>
-            <Text style={styles.secondaryBtnText}>{t('torneos.competitiveLeagueReject')}</Text>
+            <Text style={styles.secondaryBtnText}>{t('competitive.screen.found.reject')}</Text>
           </Pressable>
           {!!errorText && <Text style={styles.errorText}>{errorText}</Text>}
         </View>
@@ -1461,8 +1593,66 @@ export function CompetitiveLeagueScreen({
         selectedIds={preferredClubIds}
         onChange={setPreferredClubIds}
         onClose={() => setClubPickerVisible(false)}
-        title={t('torneos.competitiveLeagueClubsPickerTitle')}
-        subtitle={t('torneos.competitiveLeagueClubsPickerSub')}
+        title={t('competitive.screen.picker.title')}
+        subtitle={t('competitive.screen.picker.subtitle')}
+      />
+
+      <FilterBottomSheet
+        visible={modeSheetVisible}
+        title={t('competitive.mode.title')}
+        onClose={() => setModeSheetVisible(false)}
+      >
+        <View style={styles.modeSheetCol}>
+          <Pressable
+            style={({ pressed }) => [styles.modeOption, pressed && { opacity: 0.85 }]}
+            onPress={() => {
+              setModeSheetVisible(false);
+              setSearchPartner(null);
+              setStep('prefs');
+            }}
+          >
+            <LinearGradient colors={['#8A4A0B', '#D4861F']} style={styles.modeOptionIcon}>
+              <Ionicons name="person" size={24} color="#fff" />
+            </LinearGradient>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.modeOptionTitle}>{t('competitive.mode.solo')}</Text>
+              <Text style={styles.modeOptionSub}>{t('competitive.mode.soloSub')}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [styles.modeOption, pressed && { opacity: 0.85 }]}
+            onPress={() => {
+              setModeSheetVisible(false);
+              setPartnerPickerVisible(true);
+            }}
+          >
+            <LinearGradient colors={['#1E40AF', '#3B82F6']} style={styles.modeOptionIcon}>
+              <Ionicons name="people" size={24} color="#fff" />
+            </LinearGradient>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.modeOptionTitle}>{t('competitive.mode.friend')}</Text>
+              <Text style={styles.modeOptionSub}>{t('competitive.mode.friendSub')}</Text>
+            </View>
+            {pairInviteBadgeCount > 0 ? (
+              <View style={styles.notifBadge}>
+                <Text style={styles.notifBadgeText}>{pairInviteBadgeCount}</Text>
+              </View>
+            ) : null}
+            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+          </Pressable>
+        </View>
+      </FilterBottomSheet>
+
+      <PlayerSelectModal
+        visible={partnerPickerVisible}
+        onClose={() => setPartnerPickerVisible(false)}
+        onSelectAccepted={(inv) => {
+          setPartnerPickerVisible(false);
+          setSearchPartner(inv);
+          setStep('prefs');
+        }}
+        excludeIds={profile?.id ? [profile.id] : undefined}
       />
     </View>
   );
@@ -1658,6 +1848,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,158,11,0.35)',
     overflow: 'hidden',
   },
+  notifBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  notifBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   searchCardPress: {
     paddingHorizontal: 11,
     paddingVertical: 9,
@@ -1879,6 +2079,54 @@ const styles = StyleSheet.create({
   },
   clubPickerBtnTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
   clubPickerBtnSub: { color: '#9ca3af', fontSize: 12, marginTop: 4 },
+  partnerLockRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(241,143,52,0.10)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(241,143,52,0.45)',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 4,
+  },
+  partnerLockText: { color: '#fff', fontSize: 13, fontWeight: '600', flexShrink: 1 },
+  shieldBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 10,
+    backgroundColor: 'rgba(59,130,246,0.12)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(59,130,246,0.45)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  shieldBadgeText: { color: '#60A5FA', fontSize: 12, fontWeight: '700' },
+  modeSheetCol: { gap: 12, paddingBottom: 8 },
+  modeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    backgroundColor: '#141414',
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  modeOptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeOptionTitle: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  modeOptionSub: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
   clubRow: {
     borderRadius: 12,
     borderWidth: 1,

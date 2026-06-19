@@ -45,7 +45,14 @@ import { EditProfileScreen } from './EditProfileScreen';
 import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile } from '../api/players';
-import { fetchMatchmakingStatus, leaveMatchmaking } from '../api/matchmaking';
+import {
+  fetchMatchmakingStatus,
+  fetchSeasonTransition,
+  leaveMatchmaking,
+  type PairInvite,
+  type SeasonTransition,
+} from '../api/matchmaking';
+import { SeasonTransitionModal } from '../components/matchmaking/SeasonTransitionModal';
 import { UsernameSetupModal } from '../components/profile/UsernameSetupModal';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
 import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
@@ -82,6 +89,16 @@ type PostOnboardingReturn =
 
 type MatchmakingHomeBannerState = 'hidden' | 'searching' | 'matched' | 'timed_out';
 const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
+const SEASON_TRANSITION_SEEN_KEY = 'season_transition_seen';
+/** Dev: poner a `true` para forzar el modal de fin de temporada con datos de prueba. */
+const SEASON_TRANSITION_PREVIEW = false;
+const SEASON_TRANSITION_PREVIEW_DATA: SeasonTransition = {
+  season_id: 'preview',
+  previous_liga: 'oro',
+  previous_season_name: 'Temporada 1',
+  new_liga: 'plata',
+  new_season_name: 'Temporada 2',
+};
 
 export function MainApp() {
   const { t } = useTranslation();
@@ -136,6 +153,10 @@ export function MainApp() {
   const [competitiveQueueStartedAtMs, setCompetitiveQueueStartedAtMs] = useState<number | null>(null);
   const [matchmakingHomeBannerState, setMatchmakingHomeBannerState] =
     useState<MatchmakingHomeBannerState>('hidden');
+  const [pairInvites, setPairInvites] = useState<PairInvite[]>([]);
+  const [pairInviteNonce, setPairInviteNonce] = useState(0);
+  const [competitivePartnerInvite, setCompetitivePartnerInvite] = useState<PairInvite | null>(null);
+  const [seasonTransition, setSeasonTransition] = useState<SeasonTransition | null>(null);
   const [matchmakingTimeoutNoticePending, setMatchmakingTimeoutNoticePending] = useState(false);
   const matchmakingTimeoutInFlightRef = useRef(false);
   const [showSeasonPass, setShowSeasonPass] = useState(false);
@@ -187,6 +208,7 @@ export function MainApp() {
     const pollStatus = async () => {
       const status = await fetchMatchmakingStatus(token);
       if (cancelled) return;
+      setPairInvites(status?.pair_invites ?? []);
       if (status?.status === 'matched') {
         setMatchmakingHomeBannerState('matched');
         setMatchmakingTimeoutNoticePending(false);
@@ -229,7 +251,37 @@ export function MainApp() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [competitiveQueueStartedAtMs, matchmakingTimeoutNoticePending, session?.access_token]);
+  }, [competitiveQueueStartedAtMs, matchmakingTimeoutNoticePending, pairInviteNonce, session?.access_token]);
+
+  // Modal de fin de temporada: una vez al abrir la app, si hay transición sin ver (por dispositivo).
+  useEffect(() => {
+    if (SEASON_TRANSITION_PREVIEW) {
+      setSeasonTransition(SEASON_TRANSITION_PREVIEW_DATA);
+      return;
+    }
+    const token = session?.access_token ?? null;
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      const tr = await fetchSeasonTransition(token);
+      if (cancelled || !tr) return;
+      const seen = await AsyncStorage.getItem(SEASON_TRANSITION_SEEN_KEY);
+      if (cancelled || seen === tr.season_id) return;
+      setSeasonTransition(tr);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token]);
+
+  const handleSeasonTransitionClose = useCallback(() => {
+    setSeasonTransition((current) => {
+      if (current && current.season_id !== 'preview') {
+        void AsyncStorage.setItem(SEASON_TRANSITION_SEEN_KEY, current.season_id);
+      }
+      return null;
+    });
+  }, []);
 
   const handleMatchmakingBannerStateChange = useCallback(
     (state: MatchmakingHomeBannerState, options?: { force?: boolean }) => {
@@ -409,6 +461,14 @@ export function MainApp() {
       setActiveTab('perfil');
     }
   }, [infoReturnToProfile]);
+
+  // Tras aceptar una invitación desde el banner: abrir Liga competitiva en preferencias
+  // con ese compañero ya fijado para buscar.
+  const openCompetitiveWithPartner = useCallback((invite: PairInvite) => {
+    setCompetitivePartnerInvite(invite);
+    setCompetitiveLeagueEntryIntent('default');
+    setShowCompetitiveLeague(true);
+  }, []);
 
   const openCompetitiveLeagueFromHome = useCallback(() => {
     if (matchmakingHomeBannerState === 'timed_out') {
@@ -845,6 +905,8 @@ export function MainApp() {
           setQueueStartedAtMs={setCompetitiveQueueStartedAtMs}
           matchmakingBannerState={matchmakingHomeBannerState}
           onMatchmakingBannerStateChange={handleCompetitiveLeagueBannerStateChange}
+          pendingPartnerInvite={competitivePartnerInvite}
+          onPartnerApplied={() => setCompetitivePartnerInvite(null)}
           onPartidoPress={(p) => {
             setShowCompetitiveLeague(false);
             setSelectedPartido(p);
@@ -953,6 +1015,9 @@ export function MainApp() {
             onCoursesPress={() => setShowCourses(true)}
             onOpenCompetitiveLeague={openCompetitiveLeagueFromHome}
             matchmakingBannerState={matchmakingHomeBannerState}
+            pairInvites={pairInvites}
+            onPairInvitesChanged={() => setPairInviteNonce((n) => n + 1)}
+            onAcceptInviteAndSearch={openCompetitiveWithPartner}
             onOpenSeasonPass={() => setShowSeasonPass(true)}
             onOpenMessageThread={(peer) => {
               setMessagesPeer(peer);
@@ -1209,6 +1274,12 @@ export function MainApp() {
           <SidebarContent />
         </MobileSidebar>
       </SidebarProvider>
+
+      <SeasonTransitionModal
+        visible={!!seasonTransition}
+        transition={seasonTransition}
+        onClose={handleSeasonTransitionClose}
+      />
 
       {bookingSuccessData != null && bookingSuccessData.matchVisibility === 'private' ? (
         <PrivateReservationModal
