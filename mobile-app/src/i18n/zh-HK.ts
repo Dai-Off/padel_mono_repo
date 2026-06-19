@@ -204,7 +204,7 @@ export const zhHK: TranslationKeys = {
       next: '下一步',
       cta: '迎接新賽季！',
     },
-    common: { cancel: '取消', couldNot: '無法完成' },
+    common: { cancel: '取消', couldNot: '無法完成', close: '關閉' },
     screen: {
       errors: {
         needLogin: '你需要先登入才能尋找比賽。',
@@ -332,7 +332,7 @@ export const zhHK: TranslationKeys = {
         yourTeammate: '你的隊友',
         rivalPair: '對手組合',
         lpInfo: '勝利 = +20-25 LP · 落敗 = -15-20 LP',
-        confirmHint: '你有 3 小時可確認',
+        confirmHint: '剩餘確認時間',
         rejectWarning: '若拒絕，你會回到排隊並失去此比賽。',
         opening: '開啟中...',
         confirm: '確認比賽！',
@@ -346,8 +346,9 @@ export const zhHK: TranslationKeys = {
         winProb: '勝率：{value}%',
         winProbUnknown: '勝率：—',
         clubPending: '球會待定',
+        distanceKm: '{value} 公里',
         noDate: '無日期',
-        duration: '時長：1.5 - 2 小時',
+        duration: '時長：{value}',
       },
       picker: {
         title: '配對球會',

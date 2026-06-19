@@ -53,7 +53,7 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city, logo_url, photo_urls)
+              clubs (id, name, address, city, lat, lng, logo_url, photo_urls)
             )
           ),
           match_players (
@@ -69,7 +69,7 @@ function expandSelectDiscovery(): string {
             id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city, logo_url, photo_urls)
+              clubs (id, name, address, city, lat, lng, logo_url, photo_urls)
             )
           ),
           match_players (

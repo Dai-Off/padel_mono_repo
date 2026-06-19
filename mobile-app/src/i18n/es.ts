@@ -209,7 +209,7 @@ export const es: TranslationKeys = {
       next: 'Siguiente',
       cta: '¡A por la nueva temporada!',
     },
-    common: { cancel: 'Cancelar', couldNot: 'No se pudo' },
+    common: { cancel: 'Cancelar', couldNot: 'No se pudo', close: 'Cerrar' },
     screen: {
       errors: {
         needLogin: 'Necesitas iniciar sesión para buscar partido.',
@@ -343,7 +343,7 @@ export const es: TranslationKeys = {
         yourTeammate: 'TU COMPAÑERO',
         rivalPair: 'PAREJA RIVAL',
         lpInfo: 'Victoria = +20-25 LP · Derrota = -15-20 LP',
-        confirmHint: 'Tienes 3 horas para confirmar',
+        confirmHint: 'Tiempo restante para confirmar',
         rejectWarning: 'Si rechazas, volverás a la cola y perderás este partido.',
         opening: 'Abriendo...',
         confirm: '¡Confirmar partido!',
@@ -357,8 +357,9 @@ export const es: TranslationKeys = {
         winProb: 'Win prob: {value}%',
         winProbUnknown: 'Win prob: —',
         clubPending: 'Club pendiente',
+        distanceKm: 'A {value} km',
         noDate: 'Sin fecha',
-        duration: 'Duración: 1.5 - 2 horas',
+        duration: 'Duración: {value}',
       },
       picker: {
         title: 'Clubes para matchmaking',

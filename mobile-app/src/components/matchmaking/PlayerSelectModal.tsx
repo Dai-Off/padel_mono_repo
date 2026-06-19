@@ -32,9 +32,9 @@ const ACCENT = theme.auth.accent;
 /** Mínimo de caracteres para lanzar la búsqueda de jugadores. */
 const MIN_SEARCH_CHARS = 2;
 
-export function playerDisplayName(p: PlayerSearchHit): string {
+export function playerDisplayName(p: PlayerSearchHit, fallback = 'Jugador'): string {
   const name = [p.first_name, p.last_name].filter(Boolean).join(' ').trim();
-  return name || p.username || 'Jugador';
+  return name || p.username || fallback;
 }
 
 type Props = {
@@ -161,7 +161,10 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
       showToast(res.error, 'error');
       return;
     }
-    showToast(t('competitive.partner.inviteSent', { name: playerDisplayName(player) }), 'success');
+    showToast(
+      t('competitive.partner.inviteSent', { name: playerDisplayName(player, t('competitive.screen.fallback.player')) }),
+      'success',
+    );
     setRefreshKey((k) => k + 1);
   };
 
@@ -272,7 +275,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={[styles.root, { paddingTop: Math.max(insets.top, 8) }]}>
         <View style={styles.header}>
-          <Pressable onPress={onClose} style={styles.iconBtn} accessibilityLabel="Cerrar">
+          <Pressable onPress={onClose} style={styles.iconBtn} accessibilityLabel={t('competitive.common.close')}>
             <Ionicons name="close" size={20} color="#fff" />
           </Pressable>
           <View style={{ flex: 1, minWidth: 0 }}>
@@ -325,7 +328,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
               >
                 {renderAvatar(item.avatar_url)}
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.name}>{playerDisplayName(item)}</Text>
+                  <Text style={styles.name}>{playerDisplayName(item, t('competitive.screen.fallback.player'))}</Text>
                   {item.username ? <Text style={styles.meta}>@{item.username}</Text> : null}
                 </View>
                 <Ionicons name="person-add-outline" size={18} color={ACCENT} />

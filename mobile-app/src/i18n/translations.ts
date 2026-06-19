@@ -155,7 +155,7 @@ export interface CompetitiveTranslationKeys {
   };
   banner: { invitesYou: string; sub: string; reject: string; accept: string; acceptSearch: string; count: string };
   season: { endKicker: string; endedIn: string; newKicker: string; newLiga: string; next: string; cta: string };
-  common: { cancel: string; couldNot: string };
+  common: { cancel: string; couldNot: string; close: string };
   screen: {
     errors: {
       needLogin: string;
@@ -288,6 +288,7 @@ export interface CompetitiveTranslationKeys {
       winProb: string;
       winProbUnknown: string;
       clubPending: string;
+      distanceKm: string;
       noDate: string;
       duration: string;
     };

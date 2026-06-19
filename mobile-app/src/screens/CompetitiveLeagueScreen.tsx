@@ -865,6 +865,27 @@ export function CompetitiveLeagueScreen({
       ? startDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
       : '--:--';
     const timeLabel = `${weekday.charAt(0).toUpperCase()}${weekday.slice(1)} ${hour}`;
+    // Duración real a partir de start_at/end_at de la reserva (no un valor fijo).
+    const endAt = proposalBooking?.end_at;
+    const endDate = endAt ? new Date(endAt) : null;
+    let durationLabel = '';
+    if (startDate && endDate) {
+      const mins = Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 60000));
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      const value = h > 0 ? (m > 0 ? `${h}h ${m}min` : `${h}h`) : `${m}min`;
+      durationLabel = t('competitive.screen.proposal.duration', { value });
+    }
+    // Distancia real al club (si tenemos la ubicación de búsqueda y el club tiene coordenadas);
+    // si no, caemos a la ciudad. Los clubes sí tienen lat/lng en BBDD.
+    const clubKm =
+      searchCoords && club?.lat != null && club?.lng != null
+        ? haversineKm(searchCoords, { lat: club.lat, lng: club.lng })
+        : null;
+    const clubLocation =
+      clubKm != null
+        ? t('competitive.screen.proposal.distanceKm', { value: clubKm.toFixed(1) })
+        : (club?.city ?? '');
     return {
       teammateName: teammate
         ? `${teammate.first_name ?? ''} ${teammate.last_name ?? ''}`.trim()
@@ -879,11 +900,11 @@ export function CompetitiveLeagueScreen({
           ? t('competitive.screen.proposal.winProb', { value: Math.round(proposal.pre_match_win_prob * 100) })
           : t('competitive.screen.proposal.winProbUnknown'),
       clubName: club?.name ?? t('competitive.screen.proposal.clubPending'),
-      clubDistance: '2.3 km',
+      clubLocation,
       dateTime: timeLabel,
-      duration: t('competitive.screen.proposal.duration'),
+      duration: durationLabel,
     };
-  }, [profile?.id, proposal?.pre_match_win_prob, proposalMatch, t]);
+  }, [profile?.id, proposal?.pre_match_win_prob, proposalMatch, searchCoords, t]);
 
   useEffect(() => {
     if (status?.status !== 'searching' || queueStartedAtMs == null) return;
@@ -1529,10 +1550,12 @@ export function CompetitiveLeagueScreen({
           </View>
 
           <View style={styles.foundInfoCard}>
-            <Text style={styles.foundInfoMain}>{proposalUi.clubName}</Text>
-            <Text style={styles.foundInfoSub}>{proposalUi.clubDistance}</Text>
+            <Text style={styles.foundInfoMain} numberOfLines={1}>{proposalUi.clubName}</Text>
+            {proposalUi.clubLocation ? (
+              <Text style={styles.foundInfoSub} numberOfLines={1}>{proposalUi.clubLocation}</Text>
+            ) : null}
             <Text style={[styles.foundInfoMain, { marginTop: 10 }]}>{proposalUi.dateTime}</Text>
-            <Text style={styles.foundInfoSub}>{proposalUi.duration}</Text>
+            {proposalUi.duration ? <Text style={styles.foundInfoSub}>{proposalUi.duration}</Text> : null}
           </View>
 
           <View style={styles.foundLpCard}>

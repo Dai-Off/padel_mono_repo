@@ -62,6 +62,8 @@ export type MatchBookingExpanded = {
       name: string;
       address: string;
       city: string;
+      lat?: number | null;
+      lng?: number | null;
       logo_url?: string | null;
       photo_urls?: unknown;
       display_image_url?: string | null;
