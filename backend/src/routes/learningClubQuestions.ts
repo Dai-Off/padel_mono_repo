@@ -3,6 +3,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { canAccessClub } from '../lib/clubAccess';
 import { validatePuzzleContent, buildPuzzleRow } from '../lib/puzzleValidator';
+import { validateQuestionContentI18n, isValidLocaleTag, DEFAULT_CONTENT_LOCALE } from '../lib/learningQuestionI18n';
 
 const router = Router();
 
@@ -84,8 +85,11 @@ type QuestionStatus = QuestionStatusValue;
 
 router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   try {
-    const { club_id, type, level, video_url, content } = req.body ?? {};
+    const { club_id, type, level, video_url, content, content_i18n } = req.body ?? {};
     let { area } = req.body ?? {};
+    // Idioma del content base. Default 'es'. Determina contra qué locale se
+    // valida content_i18n (no puede repetir el locale base).
+    const contentLocale: string = req.body?.content_locale ?? DEFAULT_CONTENT_LOCALE;
     // status: 'draft' (sin validar content) o 'published' (validación full).
     // Default 'published' para no romper a callers viejos. 'inactive' al crear
     // no tiene sentido (se llega vía toggle posterior).
@@ -117,6 +121,15 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
       if (contentError) return res.status(400).json({ ok: false, error: contentError });
     }
 
+    if (!isValidLocaleTag(contentLocale)) {
+      return res.status(400).json({ ok: false, error: 'content_locale debe ser una etiqueta de idioma válida (ej. es, en, zh-HK)' });
+    }
+
+    // Traducciones (opcional). Solo campos de texto; nunca la clave de
+    // respuesta. La paridad de arrays se valida contra el content base.
+    const i18nError = validateQuestionContentI18n(type, content, content_i18n, contentLocale);
+    if (i18nError) return res.status(400).json({ ok: false, error: i18nError });
+
     const isPuzzle = type === 'puzzle';
     // Vídeo opcional para todos los tipos, incluido puzzle (intro previa al
     // puzzle reproducida por el mobile antes del intro_frame).
@@ -133,6 +146,8 @@ router.post('/questions', requireClubOwnerOrAdminOrPortalStaff, async (req: Requ
         has_video: hasVideo,
         video_url: hasVideo ? video_url : null,
         content: isPuzzle ? {} : (content ?? {}),
+        content_locale: contentLocale,
+        content_i18n: content_i18n ?? {},
         created_by_club: club_id,
         status,
       })
@@ -178,7 +193,7 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
 
     const { data: existing, error: fetchErr } = await supabase
       .from('learning_questions')
-      .select('id, created_by_club, type, status')
+      .select('id, created_by_club, type, status, content_locale')
       .eq('id', questionId)
       .maybeSingle();
 
@@ -188,8 +203,19 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
       return res.status(403).json({ ok: false, error: 'No tienes acceso a este club' });
     }
 
-    const { type, level, area, video_url, content } = req.body ?? {};
+    const { type, level, area, video_url, content, content_i18n, content_locale } = req.body ?? {};
     const updates: Record<string, unknown> = {};
+
+    // Idioma del content base (efectivo tras la edición). Solo se actualiza si
+    // viene en el body y es válido; si no, conserva el existente.
+    let effectiveContentLocale: string = existing.content_locale ?? DEFAULT_CONTENT_LOCALE;
+    if (content_locale !== undefined) {
+      if (!isValidLocaleTag(content_locale)) {
+        return res.status(400).json({ ok: false, error: 'content_locale debe ser una etiqueta de idioma válida (ej. es, en, zh-HK)' });
+      }
+      effectiveContentLocale = content_locale;
+      updates.content_locale = content_locale;
+    }
 
     const effectiveType = type ?? existing.type;
     // status post-update: si el body lo trae y es válido lo aplicamos.
@@ -251,6 +277,15 @@ router.put('/questions/:id', requireClubOwnerOrAdminOrPortalStaff, async (req: R
       // anteriores a esta fecha para que la distribución refleje la versión
       // actual y no opciones que ya no existen.
       updates.content_updated_at = new Date().toISOString();
+    }
+
+    // Traducciones (opcional). Si llega `content` en el body, se valida la
+    // paridad de arrays contra él; si no, solo se validan forma y claves
+    // prohibidas (el merge al servir ya hace fallback si la longitud no cuadra).
+    if (content_i18n !== undefined) {
+      const i18nError = validateQuestionContentI18n(effectiveType, content, content_i18n, effectiveContentLocale);
+      if (i18nError) return res.status(400).json({ ok: false, error: i18nError });
+      updates.content_i18n = content_i18n ?? {};
     }
 
     if (Object.keys(updates).length === 0) {
