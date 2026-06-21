@@ -12,7 +12,6 @@ export type TuActividadDestination =
   | 'partidos'
   | 'clases'
   | 'competiciones'
-  | 'grupos'
   | 'clubes-favoritos';
 
 type TuActividadScreenProps = {
@@ -97,14 +96,6 @@ export function TuActividadScreen({ onBack, onNavigate }: TuActividadScreenProps
       icon: 'shield-outline',
       iconColors: [theme.sidebar.iconVariants.sky.from, theme.sidebar.iconVariants.sky.to],
       iconColor: theme.sidebar.iconVariants.sky.color,
-    },
-    {
-      id: 'grupos',
-      title: t('activity.rowGroups'),
-      subtitle: t('activity.rowGroupsSub'),
-      icon: 'people-outline',
-      iconColors: ['rgba(16,185,129,0.2)', 'rgba(5,150,105,0.1)'],
-      iconColor: '#34d399',
     },
     {
       id: 'clubes-favoritos',

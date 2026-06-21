@@ -18,7 +18,7 @@ export const nav: NavTranslationKeys = {
   editProfile: '編輯個人檔案',
   editProfileSub: '編輯姓名、電郵、電話、位置…',
   yourActivity: '你的活動',
-  yourActivitySub: '球局、課程、競賽、群組',
+  yourActivitySub: '球局、課程、競賽、球會',
   wallet: '錢包',
   walletSub: '球會餘額、待付款項及付款方式',
   settings: '設定',
