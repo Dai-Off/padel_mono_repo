@@ -106,22 +106,81 @@ function mergeStandard(type: string, base: LocalizedContent, ov: LocalizedConten
 }
 
 function mergePuzzle(base: LocalizedContent, ov: LocalizedContent): LocalizedContent {
-  const out: LocalizedContent = { ...base };
+  // Deep clone: vamos a reescribir texto anidado dentro de los frames, así que
+  // no podemos compartir referencias con el content base. El árbol del puzzle es
+  // JSON puro (sin funciones/fechas), así que clonar por JSON es seguro.
+  const out: LocalizedContent = JSON.parse(JSON.stringify(base ?? {}));
+
   if (isNonEmptyString(ov.statement)) out.statement = ov.statement;
 
   // options[{ text, explanation }]: merge texto a texto, preservando id,
-  // is_correct, frames y badge_position intactos. NOTA: el texto dentro de los
-  // frames (speech bubbles, anotaciones) no se traduce todavía.
-  if (Array.isArray(ov.options) && Array.isArray(base.options) && ov.options.length === base.options.length) {
-    out.options = (base.options as Array<Record<string, unknown>>).map((o, i) => {
+  // is_correct, frames y badge_position intactos.
+  if (Array.isArray(ov.options) && Array.isArray(out.options) && ov.options.length === out.options.length) {
+    (out.options as Array<Record<string, unknown>>).forEach((o, i) => {
       const oo = (ov.options as Array<Record<string, unknown>>)[i] ?? {};
-      const merged = { ...o };
-      if (isNonEmptyString(oo.text)) merged.text = oo.text;
-      if (isNonEmptyString(oo.explanation)) merged.explanation = oo.explanation;
-      return merged;
+      if (isNonEmptyString(oo.text)) o.text = oo.text;
+      if (isNonEmptyString(oo.explanation)) o.explanation = oo.explanation;
     });
   }
 
+  // frame_text: texto DENTRO de los frames (bocadillos de jugadores y shapes de
+  // texto), indexado por una ruta estable. Solo se reemplaza si hay traducción.
+  if (ov.frame_text && typeof ov.frame_text === 'object' && !Array.isArray(ov.frame_text)) {
+    const map = ov.frame_text as Record<string, unknown>;
+    walkPuzzleFrameTexts(out, (path, _current, set) => {
+      const tr = map[path];
+      if (isNonEmptyString(tr)) set(tr);
+    });
+  }
+
+  return out;
+}
+
+// Recorre los nodos de texto traducibles dentro de los frames de un puzzle
+// (bocadillos `speech_label` de jugadores y shapes de tipo texto/bocadillo/
+// tagText de flecha). `visit(path, text, set)` permite leer y reemplazar in
+// place. La ruta es estable mientras lo sean los ids de jugador/shape (el
+// importador genera ids deterministas), así extracción y merge coinciden.
+function walkPuzzleFrameTexts(
+  content: LocalizedContent,
+  visit: (path: string, text: string, set: (v: string) => void) => void,
+): void {
+  const c = content as Record<string, any>;
+  const frames: Array<[string, any]> = [];
+  if (c.initial_frame) frames.push(['initial', c.initial_frame]);
+  if (c.intro_frame) frames.push(['intro', c.intro_frame]);
+  for (const o of Array.isArray(c.options) ? c.options : []) {
+    if (o && (o.id === 1 || o.id === 2 || o.id === 3)) {
+      if (o.select_frame) frames.push([`opt.${o.id}.select`, o.select_frame]);
+      if (o.confirmation_frame) frames.push([`opt.${o.id}.confirm`, o.confirmation_frame]);
+    }
+  }
+  for (const [fk, f] of frames) {
+    const players = Array.isArray(f.players) ? f.players : [];
+    for (const p of players) {
+      if (p && isNonEmptyString(p.speech_label)) {
+        visit(`${fk}.player.${p.id}.speech_label`, p.speech_label, (v) => { p.speech_label = v; });
+      }
+    }
+    const shapes = Array.isArray(f.shapes) ? f.shapes : [];
+    shapes.forEach((s: any, i: number) => {
+      if (!s) return;
+      const sid = isNonEmptyString(s.id) ? s.id : `idx${i}`;
+      if ((s.type === 'text' || s.type === 'speechbubble') && isNonEmptyString(s.text)) {
+        visit(`${fk}.shape.${sid}.text`, s.text, (v) => { s.text = v; });
+      }
+      if (s.type === 'arrow' && isNonEmptyString(s.tagText)) {
+        visit(`${fk}.shape.${sid}.tagText`, s.tagText, (v) => { s.tagText = v; });
+      }
+    });
+  }
+}
+
+// Extrae las cadenas de texto traducibles de los frames de un puzzle, como
+// mapa ruta -> texto original. Lo usa el importador para preparar la traducción.
+export function extractPuzzleFrameTexts(content: LocalizedContent): Record<string, string> {
+  const out: Record<string, string> = {};
+  walkPuzzleFrameTexts(content, (path, text) => { out[path] = text; });
   return out;
 }
 
@@ -206,6 +265,14 @@ function validateOverrideShape(type: string, base: LocalizedContent, ov: Localiz
       return null;
     }
     case 'puzzle': {
+      if (ov.frame_text !== undefined) {
+        if (typeof ov.frame_text !== 'object' || Array.isArray(ov.frame_text)) {
+          return `content_i18n['${locale}'].frame_text debe ser un objeto { ruta: texto }`;
+        }
+        for (const [k, v] of Object.entries(ov.frame_text as Record<string, unknown>)) {
+          if (typeof v !== 'string') return `content_i18n['${locale}'].frame_text['${k}'] debe ser un string`;
+        }
+      }
       if (ov.options === undefined) return null;
       if (!Array.isArray(ov.options)) return `content_i18n['${locale}'].options debe ser un array`;
       if (Array.isArray(base.options) && (ov.options as unknown[]).length !== (base.options as unknown[]).length) {

@@ -136,17 +136,32 @@ console.log('\n[localizeQuestionContent] puzzle');
       { id: 1, is_correct: false, text: 'op1', explanation: 'e1', select_frame: { players: [], ball: { x: 1, y: 1 } } },
       { id: 2, is_correct: true, text: 'op2', explanation: 'e2' },
     ],
-    initial_frame: { players: [{ id: 1, team: 1, x: 5, y: 15 }], ball: { x: 5, y: 14 } },
+    initial_frame: {
+      players: [{ id: 1, team: 1, x: 5, y: 15, speech_label: 'Me' }],
+      ball: { x: 5, y: 14 },
+      shapes: [{ id: 's1', type: 'text', x: 5, y: 5, text: '20 meters' }],
+    },
   };
-  const i18n = { 'zh-HK': { statement: '移動', options: [{ text: '選1', explanation: '解1' }, { text: '選2', explanation: '解2' }] } };
+  const i18n = {
+    'zh-HK': {
+      statement: '移動',
+      options: [{ text: '選1', explanation: '解1' }, { text: '選2', explanation: '解2' }],
+      frame_text: { 'initial.player.1.speech_label': '我', 'initial.shape.s1.text': '20 米' },
+    },
+  };
   const zh = localizeQuestionContent('puzzle', content, 'es', i18n, 'zh-HK') as any;
   check('traduce statement', zh.statement === '移動');
   check('traduce options[].text', zh.options[0].text === '選1' && zh.options[1].text === '選2');
   check('traduce options[].explanation', zh.options[0].explanation === '解1');
   check('preserva is_correct', zh.options[0].is_correct === false && zh.options[1].is_correct === true);
   check('preserva id de opción', zh.options[0].id === 1 && zh.options[1].id === 2);
-  check('preserva select_frame intacto', eq(zh.options[0].select_frame, content.options[0].select_frame));
-  check('preserva initial_frame intacto', eq(zh.initial_frame, content.initial_frame));
+  check('traduce speech_label en frame', zh.initial_frame.players[0].speech_label === '我');
+  check('traduce text de shape en frame', zh.initial_frame.shapes[0].text === '20 米');
+  check('preserva coords de la shape', zh.initial_frame.shapes[0].x === 5 && zh.initial_frame.shapes[0].y === 5);
+  // es (base) no debe llevar las traducciones de frame
+  const esP = localizeQuestionContent('puzzle', content, 'es', i18n, 'es') as any;
+  check('base es: speech_label intacto', esP.initial_frame.players[0].speech_label === 'Me');
+  check('base no mutado tras merge zh', content.initial_frame.players[0].speech_label === 'Me');
 }
 
 // ===========================================================================
