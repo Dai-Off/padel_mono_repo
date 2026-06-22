@@ -11,8 +11,6 @@ export const activity: ActivityTranslationKeys = {
   rowEnrollmentMany: '{count} 個報名',
   rowCompetitions: '競賽',
   rowCompetitionsSub: '你參加的錦標賽及聯賽',
-  rowGroups: '群組',
-  rowGroupsSub: '社群及訊息',
   rowFavoriteClubs: '收藏球會',
   rowClubSavedOne: '已收藏 1 個球會',
   rowClubSavedMany: '已收藏 {count} 個球會',

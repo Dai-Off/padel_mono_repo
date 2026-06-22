@@ -11,7 +11,8 @@
     "seed:matchmaking-demo": "ts-node -r dotenv/config scripts/seed-matchmaking-demo-pool.ts",
     "seed:matchmaking-demo:clean": "ts-node -r dotenv/config scripts/seed-matchmaking-demo-pool.ts --clean",
     "jobs:leveling": "ts-node -r dotenv/config scripts/leveling-jobs.ts",
-    "smoke:match-join": "ts-node -r dotenv/config scripts/smoke-match-join.ts"
+    "smoke:match-join": "ts-node -r dotenv/config scripts/smoke-match-join.ts",
+    "test:i18n": "ts-node scripts/test-learning-i18n.ts"
   },
   "keywords": [
     "node",
