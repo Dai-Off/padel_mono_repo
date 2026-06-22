@@ -148,6 +148,8 @@ router.get('/', async (req: Request, res: Response) => {
   const rawVisibility = String(req.query.visibility ?? '').trim().toLowerCase();
   const visibility = rawVisibility === 'public' || rawVisibility === 'private' ? rawVisibility : undefined;
   const discovery = req.query.discovery === '1' || req.query.discovery === 'true';
+  const rawPlayerElo = parseFloat(String(req.query.player_elo ?? ''));
+  const player_elo = !isNaN(rawPlayerElo) && rawPlayerElo >= 0 ? rawPlayerElo : undefined;
   try {
     await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
@@ -236,6 +238,9 @@ router.get('/', async (req: Request, res: Response) => {
         .order('start_at', { ascending: true, foreignTable: 'bookings' })
         .limit(limit);
       if (booking_id) q = q.eq('booking_id', booking_id);
+      if (player_elo !== undefined) {
+        q = q.or(`elo_min.is.null,elo_max.is.null,and(elo_min.lte.${player_elo},elo_max.gte.${player_elo})`);
+      }
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
       const rows = (data ?? []).filter((row: any) => {
@@ -271,6 +276,9 @@ router.get('/', async (req: Request, res: Response) => {
       if (date_to) q = q.lte('bookings.start_at', date_to);
       if (booking_id) q = q.eq('booking_id', booking_id);
       if (visibility) q = q.eq('visibility', visibility);
+      if (player_elo !== undefined) {
+        q = q.or(`elo_min.is.null,elo_max.is.null,and(elo_min.lte.${player_elo},elo_max.gte.${player_elo})`);
+      }
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
       const rows = data ?? [];
