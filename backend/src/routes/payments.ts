@@ -34,9 +34,11 @@ import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import {
   assertCourtSlotAvailableForNewContentionMatch,
+  cancelDisplacedBookingsForOccupyingReservation,
   contentionStatusForNewMatchBooking,
   resolveCourtContention,
 } from '../lib/courtContentionService';
+import { evictDemoPlayersWhenRealJoins } from '../lib/demoPlayerEvict';
 import { parseEloLevel, parseEloRange } from '../lib/openMatchRules';
 
 /**
@@ -1189,6 +1191,13 @@ export async function webhookHandler(req: Request, res: Response): Promise<void>
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
+    if (participant?.player_id) {
+      try {
+        await evictDemoPlayersWhenRealJoins(supabase, booking_id, participant.player_id);
+      } catch (evictErr) {
+        console.error('[payments/webhook] evictDemoPlayers:', (evictErr as Error).message);
+      }
+    }
     try {
       await resolveCourtContention(supabase, booking_id);
     } catch (contentionErr) {
@@ -3342,6 +3351,20 @@ async function processNewMatchPayment(
     stripe_payment_intent_id: pi.id,
     status: 'succeeded',
   });
+
+  if (isPayFull) {
+    try {
+      await cancelDisplacedBookingsForOccupyingReservation(
+        supabase,
+        booking.id,
+        court_id,
+        start_at,
+        end_at,
+      );
+    } catch (displaceErr) {
+      console.error('[payments/webhook] cancelDisplacedBookings:', displaceErr);
+    }
+  }
 }
 
 /**
@@ -3550,6 +3573,20 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         stripe_payment_intent_id: pi.id,
         status: 'succeeded',
       });
+
+      if (isPayFull) {
+        try {
+          await cancelDisplacedBookingsForOccupyingReservation(
+            supabase,
+            booking.id,
+            court_id,
+            start_at,
+            end_at,
+          );
+        } catch (displaceErr) {
+          console.error('[payments/confirm-client] cancelDisplacedBookings:', displaceErr);
+        }
+      }
 
       res.json({ ok: true, match, booking: { id: booking.id } });
       return;
@@ -4231,6 +4268,20 @@ export async function simulateBookingPaymentHandler(req: Request, res: Response)
       stripe_payment_intent_id: pi.id,
       status: 'succeeded',
     });
+
+    if (isPayFull) {
+      try {
+        await cancelDisplacedBookingsForOccupyingReservation(
+          supabase,
+          booking.id,
+          court_id,
+          start_at,
+          end_at,
+        );
+      } catch (displaceErr) {
+        console.error('[payments/simulate-booking-payment] cancelDisplacedBookings:', displaceErr);
+      }
+    }
 
     res.json({ ok: true, match, booking: { id: booking.id } });
   } catch (err) {

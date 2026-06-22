@@ -65,6 +65,31 @@ export function addDaysToClubKey(baseKey: string, days: number): string {
 }
 
 /** Hora civil del club (HH:mm) como minutos desde medianoche. */
+/** Etiqueta de fecha/hora para tarjetas de partido (siempre hora del club, no del dispositivo). */
+export function formatPartidoDateTimeLabel(startAtIso: string): string {
+  const start = new Date(startAtIso);
+  if (Number.isNaN(start.getTime())) return '—';
+  const weekday = new Intl.DateTimeFormat('es-ES', {
+    timeZone: CLUB_IANA_TIMEZONE,
+    weekday: 'long',
+  }).format(start);
+  const day = new Intl.DateTimeFormat('es-ES', {
+    timeZone: CLUB_IANA_TIMEZONE,
+    day: 'numeric',
+  }).format(start);
+  const month = new Intl.DateTimeFormat('es-ES', {
+    timeZone: CLUB_IANA_TIMEZONE,
+    month: 'long',
+  }).format(start);
+  const time = new Intl.DateTimeFormat('es-ES', {
+    timeZone: CLUB_IANA_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(start);
+  return `${weekday}, ${day} de ${month} · ${time}`;
+}
+
 export function clubLocalMinutesFromIso(iso: string): number | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;

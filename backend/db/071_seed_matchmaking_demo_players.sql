@@ -5,6 +5,8 @@
 -- Ajustá el club si hace falta (por defecto: primer club de la tabla).
 -- Emails: *@padel-demo.local  |  Usernames: mm_<banda>_<n>
 -- Sin club preferido: favorite_clubs vacío (aceptan cualquier sede en matchmaking).
+-- ELO: spread ≤0.30 dentro de cada banda (3 bots no alcanzan cuarteto solos) y hueco >1.0
+-- entre bandas adyacentes (4 bots demo no pueden mezclarse entre sí; sí con un jugador real).
 -- =============================================================================
 
 BEGIN;
@@ -27,20 +29,20 @@ active_mm_season AS (
 ),
 demo_rows AS (
   SELECT * FROM (VALUES
-    ('mm_demo_bronce_1@padel-demo.local',  'mm_bronce_1',  'DemoBronce',  'M1', 1.20::double precision, 'male'),
-    ('mm_demo_bronce_2@padel-demo.local',  'mm_bronce_2',  'DemoBronce',  'M2', 1.35,                 'female'),
-    ('mm_demo_bronce_3@padel-demo.local',  'mm_bronce_3',  'DemoBronce',  'M3', 1.50,                 'male'),
-    ('mm_demo_plata_b_1@padel-demo.local', 'mm_plata_b_1', 'DemoPlataB',  'M1', 2.40,                 'male'),
-    ('mm_demo_plata_b_2@padel-demo.local', 'mm_plata_b_2', 'DemoPlataB',  'M2', 2.65,                 'female'),
-    ('mm_demo_plata_b_3@padel-demo.local', 'mm_plata_b_3', 'DemoPlataB',  'M3', 2.85,                 'male'),
-    ('mm_demo_plata_1@padel-demo.local',   'mm_plata_1',   'DemoPlata',   'M1', 3.20,                 'male'),
-    ('mm_demo_plata_2@padel-demo.local',   'mm_plata_2',   'DemoPlata',   'M2', 3.45,                 'female'),
-    ('mm_demo_plata_3@padel-demo.local',   'mm_plata_3',   'DemoPlata',   'M3', 3.65,                 'male'),
-    ('mm_demo_oro_1@padel-demo.local',     'mm_oro_1',     'DemoOro',     'M1', 4.20,                 'male'),
-    ('mm_demo_oro_2@padel-demo.local',     'mm_oro_2',     'DemoOro',     'M2', 4.45,                 'female'),
-    ('mm_demo_oro_3@padel-demo.local',     'mm_oro_3',     'DemoOro',     'M3', 4.70,                 'male'),
-    ('mm_demo_elite_1@padel-demo.local',   'mm_elite_1',   'DemoElite',   'M1', 5.60,                 'male'),
-    ('mm_demo_elite_2@padel-demo.local',   'mm_elite_2',   'DemoElite',   'M2', 5.85,                 'female'),
+    ('mm_demo_bronce_1@padel-demo.local',  'mm_bronce_1',  'DemoBronce',  'M1', 1.00::double precision, 'male'),
+    ('mm_demo_bronce_2@padel-demo.local',  'mm_bronce_2',  'DemoBronce',  'M2', 1.15,                 'female'),
+    ('mm_demo_bronce_3@padel-demo.local',  'mm_bronce_3',  'DemoBronce',  'M3', 1.30,                 'male'),
+    ('mm_demo_plata_b_1@padel-demo.local', 'mm_plata_b_1', 'DemoPlataB',  'M1', 2.35,                 'male'),
+    ('mm_demo_plata_b_2@padel-demo.local', 'mm_plata_b_2', 'DemoPlataB',  'M2', 2.50,                 'female'),
+    ('mm_demo_plata_b_3@padel-demo.local', 'mm_plata_b_3', 'DemoPlataB',  'M3', 2.65,                 'male'),
+    ('mm_demo_plata_1@padel-demo.local',   'mm_plata_1',   'DemoPlata',   'M1', 3.70,                 'male'),
+    ('mm_demo_plata_2@padel-demo.local',   'mm_plata_2',   'DemoPlata',   'M2', 3.85,                 'female'),
+    ('mm_demo_plata_3@padel-demo.local',   'mm_plata_3',   'DemoPlata',   'M3', 4.00,                 'male'),
+    ('mm_demo_oro_1@padel-demo.local',     'mm_oro_1',     'DemoOro',     'M1', 4.75,                 'male'),
+    ('mm_demo_oro_2@padel-demo.local',     'mm_oro_2',     'DemoOro',     'M2', 4.90,                 'female'),
+    ('mm_demo_oro_3@padel-demo.local',     'mm_oro_3',     'DemoOro',     'M3', 5.05,                 'male'),
+    ('mm_demo_elite_1@padel-demo.local',   'mm_elite_1',   'DemoElite',   'M1', 5.80,                 'male'),
+    ('mm_demo_elite_2@padel-demo.local',   'mm_elite_2',   'DemoElite',   'M2', 5.95,                 'female'),
     ('mm_demo_elite_3@padel-demo.local',   'mm_elite_3',   'DemoElite',   'M3', 6.10,                 'male')
   ) AS t(email, username, first_name, last_name, elo_rating, sex)
 ),

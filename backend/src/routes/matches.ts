@@ -19,7 +19,8 @@ import {
   tryRepairPaidGuestMissingFromMatch,
 } from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
-import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
+import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
+import { repairOpenMatchPlayersIfNeeded, syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
 import {
   matchAffectsElo,
   normalizeMatchType,
@@ -85,12 +86,51 @@ const DISCOVERY_DEFAULT_DAYS = 14;
 const DISCOVERY_DEFAULT_LIMIT = 100;
 const DISCOVERY_MAX_LIMIT = 150;
 
-function countFilledSlots(row: { match_players?: Array<{ players?: { id?: string } | null }> | null }): number {
-  return (row.match_players ?? []).filter((mp) => Boolean(mp?.players?.id)).length;
+function countFilledSlots(row: { match_players?: Array<{ players?: { id?: string } | Array<{ id?: string }> | null }> | null }): number {
+  return (row.match_players ?? []).filter((mp) => {
+    const raw = mp?.players;
+    if (!raw) return false;
+    const p = Array.isArray(raw) ? raw[0] : raw;
+    return Boolean(p?.id);
+  }).length;
 }
 
+/** Al menos 1 plaza libre (1–3 huecos); no exige exactamente 1. */
 function isJoinableDiscoveryRow(row: { match_players?: Array<{ players?: { id?: string } | null }> | null }): boolean {
   return countFilledSlots(row) < 4;
+}
+
+const DISCOVERY_MATCH_PLAYERS_SELECT =
+  'id, team, slot_index, players (id, first_name, last_name, elo_rating, avatar_url)';
+
+async function repairDiscoveryMatchPlayers(supabase: ReturnType<typeof getSupabaseServiceRoleClient>, rows: any[]): Promise<any[]> {
+  const out: any[] = [];
+  for (const row of rows) {
+    let current = row;
+    const b = Array.isArray(current.bookings) ? current.bookings[0] : current.bookings;
+    const bookingId = b?.id as string | undefined;
+    const matchId = current.id as string | undefined;
+    if (bookingId && matchId && countFilledSlots(current) === 0) {
+      const repaired = await repairOpenMatchPlayersIfNeeded(supabase, matchId, bookingId);
+      if (repaired) {
+        const { data: mps, error: mpErr } = await supabase
+          .from('match_players')
+          .select(DISCOVERY_MATCH_PLAYERS_SELECT)
+          .eq('match_id', matchId);
+        if (mpErr) {
+          console.error('[GET /matches discovery] repair refetch:', mpErr.message);
+        } else {
+          current = flattenMatchRowForClient({ ...current, match_players: mps ?? [] });
+        }
+      }
+    }
+    out.push(current);
+  }
+  return out;
+}
+
+function flattenMatchRows(rows: any[]): any[] {
+  return rows.map((row) => flattenMatchRowForClient(row));
 }
 
 /**
@@ -195,7 +235,7 @@ router.get('/', async (req: Request, res: Response) => {
       if (visibility) mq = mq.eq('visibility', visibility);
       const { data, error } = await mq;
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      const rows = data ?? [];
+      const rows = flattenMatchRows(data ?? []);
       if (active_only) {
         const filtered = rows.filter((row: any) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
@@ -238,7 +278,9 @@ router.get('/', async (req: Request, res: Response) => {
       if (booking_id) q = q.eq('booking_id', booking_id);
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      const rows = (data ?? []).filter((row: any) => {
+      const normalized = flattenMatchRows(data ?? []);
+      const repaired = await repairDiscoveryMatchPlayers(supabase, normalized);
+      const rows = repaired.filter((row: any) => {
         const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
         if (getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) === 'past') return false;
         if (joinable_only && !isJoinableDiscoveryRow(row)) return false;
@@ -273,7 +315,7 @@ router.get('/', async (req: Request, res: Response) => {
       if (visibility) q = q.eq('visibility', visibility);
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      const rows = data ?? [];
+      const rows = flattenMatchRows(data ?? []);
       if (active_only) {
         const filtered = rows.filter((row: any) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
@@ -651,6 +693,15 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     }
 
     const supabase = getSupabaseServiceRoleClient();
+    const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+      courtId: String(court_id),
+      startAt: String(start_at),
+      endAt: String(end_at),
+      reservationType: 'open_match',
+    });
+    if (!hoursCheck.ok) {
+      return res.status(400).json({ ok: false, error: hoursCheck.error });
+    }
     const { data: courtClubRow } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
     const clubForOnline = (courtClubRow as { club_id?: string } | null)?.club_id;
     const sch = ['mobile', 'web', 'manual', 'system'].includes(source_channel) ? source_channel : 'web';

@@ -118,12 +118,23 @@ function weekdayCodeForDateStr(dateStr: string): string {
   return map[short] ?? 'mon';
 }
 
+function scheduleEntryForWeekday(ws: Record<string, unknown>, weekday: string): unknown {
+  if (weekday in ws) return ws[weekday];
+  const idxMap: Record<string, string> = { sun: '0', mon: '1', tue: '2', wed: '3', thu: '4', fri: '5', sat: '6' };
+  const idxKey = idxMap[weekday];
+  if (idxKey && idxKey in ws) return ws[idxKey];
+  // ISO 1=lun … 7=dom (ClubSettings)
+  const isoKey = weekday === 'sun' ? '7' : idxKey && idxKey !== '0' ? idxKey : null;
+  if (isoKey && isoKey in ws) return ws[isoKey];
+  return undefined;
+}
+
 export function gridBoundsForClubDay(weeklySchedule: unknown, dateStr: string): DayOperatingHours {
   const weekday = weekdayCodeForDateStr(dateStr);
   const ws = weeklySchedule && typeof weeklySchedule === 'object'
     ? (weeklySchedule as Record<string, unknown>)
     : {};
-  const entry = ws[weekday] ?? ws[{ sun: '0', mon: '1', tue: '2', wed: '3', thu: '4', fri: '5', sat: '6' }[weekday] as string];
+  const entry = scheduleEntryForWeekday(ws, weekday);
 
   let openMin = 7 * 60;
   let closeMin = 23 * 60;
@@ -156,4 +167,44 @@ export function gridBoundsForClubDay(weeklySchedule: unknown, dateStr: string): 
     startHour: Math.floor(openMin / 60),
     endHour: Math.ceil(closeMin / 60),
   };
+}
+
+function formatMinutesAsClock(totalMin: number): string {
+  return `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`;
+}
+
+/** Valida inicio + duración contra el horario semanal del club (Europe/Madrid). */
+export function validateBookingSlotWithinClubHours(params: {
+  dateStr: string;
+  startHour: string;
+  startMinute: string;
+  durationMinutes: number;
+  weeklySchedule: unknown;
+  skipForBlocked?: boolean;
+}): { ok: true } | { ok: false; error: string } {
+  if (params.skipForBlocked) return { ok: true };
+  const bounds = gridBoundsForClubDay(params.weeklySchedule, params.dateStr);
+  if (bounds.closed) {
+    return { ok: false, error: 'El club está cerrado este día' };
+  }
+  const sh = Number(params.startHour);
+  const sm = Number(params.startMinute);
+  if (!Number.isFinite(sh) || !Number.isFinite(sm)) {
+    return { ok: false, error: 'Hora de inicio inválida' };
+  }
+  const startMin = sh * 60 + sm;
+  const endMin = startMin + params.durationMinutes;
+  if (startMin < bounds.openMin) {
+    return {
+      ok: false,
+      error: `La reserva no puede empezar antes de la apertura del club (${formatMinutesAsClock(bounds.openMin)})`,
+    };
+  }
+  if (endMin > bounds.closeMin) {
+    return {
+      ok: false,
+      error: `La reserva no puede terminar después del cierre del club (${formatMinutesAsClock(bounds.closeMin)})`,
+    };
+  }
+  return { ok: true };
 }

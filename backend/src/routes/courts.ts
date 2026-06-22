@@ -167,7 +167,10 @@ router.get('/available', async (req: Request, res: Response) => {
       .order('display_order', { ascending: true })
       .order('created_at', { ascending: true });
     if (error) return res.status(500).json({ ok: false, error: error.message });
-    const avail = await getAvailableCourtIds(club_id, start_at, end_at);
+    const avail = await getAvailableCourtIds(club_id, start_at, end_at, undefined, true, {
+      reservationType: 'open_match',
+      occupiesCourtImmediately: false,
+    });
     if (!avail.ok) return res.status(500).json({ ok: false, error: avail.error });
     const freeSet = new Set(avail.courtIds);
     const courts = (clubCourts ?? []).filter((c: { id: string }) => freeSet.has(c.id));

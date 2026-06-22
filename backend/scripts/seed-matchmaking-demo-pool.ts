@@ -65,17 +65,11 @@ type Band = {
 
 
 const BANDS: Band[] = [
-
-  { key: 'bronce', label: 'Bronce', elos: [1.2, 1.35, 1.5] },
-
-  { key: 'plata_b', label: 'Plata B', elos: [2.4, 2.65, 2.85] },
-
-  { key: 'plata', label: 'Plata', elos: [3.2, 3.45, 3.65] },
-
-  { key: 'oro', label: 'Oro', elos: [4.2, 4.45, 4.7] },
-
-  { key: 'elite', label: 'Elite', elos: [5.6, 5.85, 6.1] },
-
+  { key: 'bronce', label: 'Bronce', elos: [1.0, 1.15, 1.3] },
+  { key: 'plata_b', label: 'Plata B', elos: [2.35, 2.5, 2.65] },
+  { key: 'plata', label: 'Plata', elos: [3.7, 3.85, 4.0] },
+  { key: 'oro', label: 'Oro', elos: [4.75, 4.9, 5.05] },
+  { key: 'elite', label: 'Elite', elos: [5.8, 5.95, 6.1] },
 ];
 
 
