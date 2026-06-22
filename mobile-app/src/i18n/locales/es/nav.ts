@@ -18,7 +18,7 @@ export const nav: NavTranslationKeys = {
   editProfile: 'Editar perfil',
   editProfileSub: 'Edita nombre, correo, teléfono, ubicación, ...',
   yourActivity: 'Tu actividad',
-  yourActivitySub: 'Partidos, clases, competiciones, grupos',
+  yourActivitySub: 'Partidos, clases, competiciones, clubes',
   wallet: 'Monedero',
   walletSub: 'Saldo del club, pagos pendientes y métodos',
   settings: 'Ajustes',

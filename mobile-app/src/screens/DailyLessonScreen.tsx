@@ -16,7 +16,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
 import { useVideoPreloader } from '../hooks/useVideoPreloader';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { submitDailyLesson, submitLessonFeedback, fetchTodayResults, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
+import { submitDailyLesson, submitLessonFeedback, fetchTodayResults, fetchLocalizedDailyQuestions, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
 import { loadProgress, saveProgress, clearProgress, type DailyLessonProgress } from '../lib/dailyLessonStorage';
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
 import { QuestionCard } from '../components/learning/QuestionCard';
@@ -105,7 +105,7 @@ function getQuestionPreview(q: DailyLessonQuestion, t: (key: string, params?: Re
 }
 
 export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Props) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { questions: hookQuestions, alreadyCompleted, loading, error, requiresOnboarding, notEnoughQuestions } = useDailyLesson(TIMEZONE);
@@ -142,6 +142,42 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   const [pendingStart, setPendingStart] = useState(false);
   const [baseSkills, setBaseSkills] = useState<SkillValues>(DEFAULT_SKILLS);
   const [questionVotes, setQuestionVotes] = useState<Record<string, 'up' | 'down' | null>>({});
+
+  // Cambio de idioma: re-entregamos LAS MISMAS preguntas ya traducidas (por id),
+  // conservando orden, ids y progreso. No rebaraja ni reinicia la lección y
+  // funciona en cualquier fase. El backend localiza por ids, así que la
+  // respuesta correcta (índices/booleans) y el orden no cambian.
+  // Secuencia para descartar respuestas obsoletas: si el idioma cambia varias
+  // veces seguidas, solo se aplica la última petición lanzada (evita carreras).
+  const relocalizeSeqRef = useRef(0);
+  // Idioma con el que se cargó la lección del hook (hookQuestions). El hook NO se
+  // recarga al cambiar de idioma (para no rebarajar), así que guardamos su idioma
+  // para saber si hay que re-localizar al arrancar/repetir una lección.
+  const hookLocaleRef = useRef(locale);
+
+  const relocalizeByIds = useCallback(
+    async (ids: string[]) => {
+      const token = session?.access_token;
+      if (!token || ids.length === 0) return;
+      const seq = ++relocalizeSeqRef.current;
+      const res = await fetchLocalizedDailyQuestions(token, ids, locale);
+      // Si entretanto se lanzó otra re-localización (idioma cambiado de nuevo),
+      // descartamos esta respuesta para no pisar la más reciente.
+      if (seq !== relocalizeSeqRef.current) return;
+      if (res.ok && res.questions.length === ids.length) {
+        setHistoricQuestions(res.questions);
+      }
+    },
+    [session?.access_token, locale],
+  );
+
+  const prevLocaleRef = useRef(locale);
+  useEffect(() => {
+    if (prevLocaleRef.current === locale) return;
+    prevLocaleRef.current = locale;
+    const ids = questions.map((q) => q.id);
+    if (ids.length > 0) void relocalizeByIds(ids);
+  }, [locale, questions, relocalizeByIds]);
 
   // Precarga de vídeos: bufferiza el vídeo actual y el siguiente por adelantado
   // (incluido el primero durante la intro, ya que activeQIndex=0) para eliminar
@@ -562,7 +598,13 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setShowingVideo(false);
       questionStartTime.current = Date.now();
     }
-  }, [animateProgressTo, session?.user?.id, hookQuestions, alreadyCompleted, questions]);
+    // Si el idioma cambió desde que se cargó la lección del hook, re-entregamos
+    // las MISMAS preguntas (mismos ids) ya traducidas al idioma actual. Sin esto,
+    // arrancar/repetir tras cambiar idioma en la intro jugaría en el idioma viejo.
+    if (hookLocaleRef.current !== locale && hookQuestions.length > 0) {
+      void relocalizeByIds(hookQuestions.map((q) => q.id));
+    }
+  }, [animateProgressTo, session?.user?.id, hookQuestions, alreadyCompleted, questions, locale, relocalizeByIds]);
 
   // UI optimista: si el usuario pulsa "Empezar" antes de que llegue el fetch,
   // marcamos la intención y mostramos spinner; el efecto de abajo arranca en
@@ -606,6 +648,11 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setShowingVideo(false);
       questionStartTime.current = Date.now();
     }
+    // El progreso guardado conserva las preguntas en el idioma con que se inició.
+    // Si el idioma cambió mientras estaba guardada, re-entregamos las MISMAS
+    // preguntas (mismo orden/ids) ya traducidas al idioma actual.
+    prevLocaleRef.current = locale;
+    void relocalizeByIds(pendingResume.questions.map((rq) => rq.id));
   };
 
   // Nota: no hay gate de loading a pantalla completa. El intro se renderiza al

@@ -9,8 +9,6 @@ export interface ActivityTranslationKeys {
   rowEnrollmentMany: string;
   rowCompetitions: string;
   rowCompetitionsSub: string;
-  rowGroups: string;
-  rowGroupsSub: string;
   rowFavoriteClubs: string;
   rowClubSavedOne: string;
   rowClubSavedMany: string;
