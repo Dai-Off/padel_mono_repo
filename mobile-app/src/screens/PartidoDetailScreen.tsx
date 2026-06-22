@@ -858,10 +858,12 @@ export function PartidoDetailScreen({
   }, [partido.id, session?.access_token]);
   /** Usuario apuntado y partido aún no cerrado: barra inferior con finalizar + papelera. */
   const playersFilledCount = partido.players.filter((p) => !p.isFree).length;
+  const canRecordScore = partido.matchStatus !== 'cancelled' && playersFilledCount >= 4;
   const showFinishBar =
     playerContextResolved &&
     isInMatch &&
     !pendingMmPay &&
+    canRecordScore &&
     partido.hasMyFeedback !== true;
   const bottomBarNeedsStack = pendingMmPay || canDeclineMmProposal;
   const bottomReserve = insets.bottom + (showFinishBar ? 100 : bottomBarNeedsStack ? 148 : 88);

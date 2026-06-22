@@ -218,6 +218,15 @@ Sub-rutas de **scores** y **feedback** se registran en el mismo stack bajo `/mat
 | GET    | `/matchmaking/status`    | Estado actual del jugador en matchmaking.                      |
 | POST   | `/matchmaking/reject`    | Rechazar propuesta de partido.                                 |
 | POST   | `/matchmaking/run-cycle` | Ejecutar ciclo de emparejamiento (según política del backend). |
+| POST   | `/matchmaking/pair-invite` | Invitar a un compañero a competitiva (pareja premade). |
+| POST   | `/matchmaking/pair-invite/:id/accept` | Aceptar invitación de pareja. |
+| POST   | `/matchmaking/pair-invite/:id/accept-and-search` | Aceptar y encolar a ambos. |
+| POST   | `/matchmaking/pair-invite/:id/start-search` | Buscar con una pareja ya aceptada. |
+| POST   | `/matchmaking/pair-invite/:id/reject` | Rechazar invitación de pareja. |
+| POST   | `/matchmaking/pair-invite/:id/cancel` | Cancelar invitación enviada. |
+| GET    | `/matchmaking/pair-invites` | Invitaciones de pareja accionables. |
+| GET    | `/matchmaking/season-transition` | Última transición de temporada (modal fin de temporada). |
+| POST   | `/matchmaking/close-season` | Cerrar temporada (cron/admin). |
 
 ---
 

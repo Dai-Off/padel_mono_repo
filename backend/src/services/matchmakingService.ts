@@ -11,6 +11,7 @@ import {
   BASE_WIN_PROB_MIN,
   BASE_WIN_PROB_MAX,
   STREAK_THRESHOLD,
+  PREMADE_FLOOR_GAP,
   buildUnits,
   iterUnitCombos,
   resolveCandidateClubIds,
@@ -18,12 +19,16 @@ import {
   intersectRange,
   exceedsLevelSpread,
   bestTeamSplitSync,
+  fixedPairsFromRows,
 } from './matchmakingShared';
 
 export { exceedsLevelSpread, bestTeamSplitSync, MAX_LEVEL_SPREAD, BASE_WIN_PROB_MIN, BASE_WIN_PROB_MAX, STREAK_THRESHOLD };
 export type { PoolRow, SkillRow } from './matchmakingShared';
 
 const MAX_UNIT_COMBINATIONS = 12000;
+/** Penalización de score por cada escalón de diferencia de liga: prefiere misma
+ *  liga y solo acepta ligas cercanas (hasta MAX_LEAGUE_SPREAD) si el balance lo compensa. */
+const LEAGUE_SPREAD_PENALTY = 0.08;
 
 export type MatchmakingCycleResult = {
   formed: number;
@@ -251,6 +256,28 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
     ligaById.set(row.id, row.liga ?? 'bronce');
   }
 
+  // Pareja premade: inflar el nivel efectivo del miembro débil SOLO para emparejar
+  // (gravedad hacia `fuerte − PREMADE_FLOOR_GAP`). NO se persiste: el pipeline de
+  // nivelación lee de `players` fresco, así que el LP/mu post-partido usa el nivel real.
+  const premadeIds = new Set<string>();
+  for (const [p1, p2] of fixedPairsFromRows(rows)) {
+    const e1 = eloById.get(p1);
+    const e2 = eloById.get(p2);
+    if (e1 == null || e2 == null) continue;
+    const strongId = e1 >= e2 ? p1 : p2;
+    const weakId = e1 >= e2 ? p2 : p1;
+    const realEloWeak = eloById.get(weakId)!;
+    const effEloWeak = Math.max(realEloWeak, eloById.get(strongId)! - PREMADE_FLOOR_GAP);
+    if (effEloWeak > realEloWeak) {
+      eloById.set(weakId, effEloWeak);
+      const sk = skillsById.get(weakId);
+      if (sk) skillsById.set(weakId, { ...sk, mu: sk.mu + (effEloWeak - realEloWeak) * (50 / 7) });
+    }
+    ligaById.set(weakId, ligaById.get(strongId) ?? ligaById.get(weakId) ?? 'bronce');
+    premadeIds.add(strongId);
+    premadeIds.add(weakId);
+  }
+
   const synergyMap = await buildSynergyMap(supabase, poolIds);
 
   const ctx: QuartetPreCourtContext = {
@@ -261,6 +288,7 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
     skillsById,
     synergyMap,
     ligaById,
+    premadeIds,
   };
 
   type QuartetPick = {
@@ -346,10 +374,13 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
 
       const ls = maxLeagueSpread(ids, ligaById);
       const split = q.split;
+      // Score efectivo = balance OpenSkill penalizado por la diferencia de liga.
+      const effScore = split.score - LEAGUE_SPREAD_PENALTY * ls;
+      const comboBestEff = comboBest ? comboBest.split.score - LEAGUE_SPREAD_PENALTY * comboBest.leagueSpread : -Infinity;
       const betterCombo =
         !comboBest ||
-        split.score > comboBest.split.score + 1e-9 ||
-        (Math.abs(split.score - comboBest.split.score) < 1e-9 && ls < comboBest.leagueSpread);
+        effScore > comboBestEff + 1e-9 ||
+        (Math.abs(effScore - comboBestEff) < 1e-9 && ls < comboBest.leagueSpread);
       if (betterCombo) {
         comboBest = { flatRows, ids, split, clubId, slot, courtId, leagueSpread: ls };
       }
@@ -364,10 +395,12 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
       continue;
     }
 
+    const comboEff = comboBest.split.score - LEAGUE_SPREAD_PENALTY * comboBest.leagueSpread;
+    const bestEff = best ? best.split.score - LEAGUE_SPREAD_PENALTY * best.leagueSpread : -Infinity;
     const better =
       !best ||
-      comboBest.split.score > best.split.score + 1e-9 ||
-      (Math.abs(comboBest.split.score - best.split.score) < 1e-9 && comboBest.leagueSpread < best.leagueSpread);
+      comboEff > bestEff + 1e-9 ||
+      (Math.abs(comboEff - bestEff) < 1e-9 && comboBest.leagueSpread < best.leagueSpread);
 
     if (better) {
       best = comboBest;
@@ -507,6 +540,22 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
       .from('matchmaking_pool')
       .update({ status: 'matched', proposed_match_id: matchId, updated_at: nowIso })
       .eq('player_id', q.player_id);
+  }
+
+  // Parejas premade: tras emparejar, la invitación vuelve a 'accepted' (no queda colgada en
+  // 'searching'). Así la pareja sigue en "Listos para jugar" y puede repetir partido con un
+  // toque, sin tener que re-invitar. Vigencia renovada (7 días, igual que computeDefaultInviteExpiry).
+  const pairExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  for (const q of best.flatRows) {
+    if (!q.paired_with_id) continue;
+    await supabase
+      .from('matchmaking_pair_invites')
+      .update({ status: 'accepted', resolved_at: null, updated_at: nowIso, expires_at: pairExpiry })
+      .or(
+        `and(inviter_player_id.eq.${q.player_id},invitee_player_id.eq.${q.paired_with_id}),` +
+          `and(inviter_player_id.eq.${q.paired_with_id},invitee_player_id.eq.${q.player_id})`,
+      )
+      .eq('status', 'searching');
   }
 
   return { formed: 1, expired, expansion_prompts };

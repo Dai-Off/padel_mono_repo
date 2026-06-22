@@ -52,11 +52,11 @@ function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_proposer_id,
           ${bookingRel} (
-            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type,
+            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type, deleted_at,
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city, logo_url, photo_urls)
+              clubs (id, name, address, city, lat, lng, logo_url, photo_urls)
             )
           ),
           match_players (
@@ -72,7 +72,7 @@ function expandSelectDiscovery(): string {
             id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city, logo_url, photo_urls)
+              clubs (id, name, address, city, lat, lng, logo_url, photo_urls)
             )
           ),
           match_players (
@@ -397,8 +397,9 @@ router.get('/mine', async (req: Request, res: Response) => {
 
     const filtered = (data ?? []).filter((row: any) => {
       const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
-      // Si no tiene booking usamos sólo el estado para determinar la fase.
-      const listPhase = getMatchListPhase(nowMs, row.status, b?.start_at, b?.end_at);
+      if (!b?.start_at || !b?.end_at) return false;
+      if (b.deleted_at != null) return false;
+      const listPhase = getMatchListPhase(nowMs, row.status, b.start_at, b.end_at);
       if (phase === 'past') return listPhase === 'past';
       if (phase === 'upcoming') return listPhase !== 'past';
       return true;
@@ -615,9 +616,9 @@ router.post('/run-debt-settlement', async (req: Request, res: Response) => {
     if (h !== secret) return res.status(403).json({ ok: false, error: 'No autorizado' });
   }
   try {
-    const finished = await finalizePastMatches();
+    const { finished, cancelled } = await finalizePastMatches({ cancelIncomplete: true });
     const result = await settleOverdueMatchPayments();
-    return res.json({ ok: true, finished, ...result });
+    return res.json({ ok: true, finished, cancelled, ...result });
   } catch (e) {
     return res.status(500).json({ ok: false, error: (e as Error).message });
   }

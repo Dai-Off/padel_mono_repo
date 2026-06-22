@@ -11,6 +11,7 @@ export type {
   AuthTranslationKeys,
   CommonTranslationKeys,
   CommunityTranslationKeys,
+  CompetitiveTranslationKeys,
   HomeTranslationKeys,
   LearningTranslationKeys,
   MessagesTranslationKeys,

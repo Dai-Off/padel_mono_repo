@@ -19,8 +19,6 @@ export interface NavTranslationKeys {
   yourActivitySub: string;
   wallet: string;
   walletSub: string;
-  yourPayments: string;
-  yourPaymentsSub: string;
   settings: string;
   settingsSub: string;
   rateClubs: string;

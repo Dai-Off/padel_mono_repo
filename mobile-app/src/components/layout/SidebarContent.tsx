@@ -195,23 +195,13 @@ export function SidebarContent() {
             }}
           />
           <SidebarRowItem
-            icon="cash-outline"
+            icon="wallet-outline"
             title={t('nav.wallet')}
             subtitle={t('nav.walletSub')}
             iconVariant="emerald"
             onPress={() => {
               close?.();
               ctx?.onNavigateToMonedero?.();
-            }}
-          />
-          <SidebarRowItem
-            icon="wallet-outline"
-            title={t('nav.yourPayments')}
-            subtitle={t('nav.yourPaymentsSub')}
-            iconVariant="sky"
-            onPress={() => {
-              close?.();
-              ctx?.onNavigateToTusPagos?.();
             }}
           />
           <SidebarRowItem

@@ -11,9 +11,17 @@ import {
   releaseMatchmakingProposal,
   runMatchmakingCycle,
 } from '../services/matchmakingService';
-import { closeActiveMatchmakingSeason } from '../services/matchmakingSeasonService';
+import { closeActiveMatchmakingSeason, getSeasonTransitionForPlayer } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { clearMatchmakingPoolIfPlayerPaid } from '../services/matchmakingPoolCleanup';
+import {
+  assertPairEligible,
+  computeDefaultInviteExpiry,
+  enqueueBothPaired,
+  getActionablePairInvites,
+  normalizePairPrefs,
+  recentRejectionExists,
+} from '../services/matchmakingPairInviteService';
 
 type MmWl = { mm_wins: number; mm_losses: number; mm_draws: number };
 const ZERO_MM_WL: MmWl = { mm_wins: 0, mm_losses: 0, mm_draws: 0 };
@@ -306,7 +314,6 @@ router.get('/leaderboard', async (req: Request, res: Response) => {
  *               gender: { type: string, default: any }
  *               available_from: { type: string, format: date-time }
  *               available_until: { type: string, format: date-time }
- *               paired_with_id: { type: string, format: uuid }
  *               search_lat: { type: number, description: Obligatorio si max_distance_km }
  *               search_lng: { type: number }
  *     responses:
@@ -326,7 +333,6 @@ router.post('/join', async (req: Request, res: Response) => {
     gender,
     available_from,
     available_until,
-    paired_with_id,
     search_lat,
     search_lng,
   } = req.body ?? {};
@@ -367,7 +373,7 @@ router.post('/join', async (req: Request, res: Response) => {
     if (lat == null || lng == null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
       return res.status(400).json({
         ok: false,
-        error: 'search_lat y search_lng son obligatorios cuando indicás max_distance_km',
+        error: 'search_lat y search_lng son obligatorios cuando indicas max_distance_km',
       });
     }
   }
@@ -377,7 +383,7 @@ router.post('/join', async (req: Request, res: Response) => {
   if (blockedUntil) {
     return res.status(403).json({
       ok: false,
-      error: 'Tenés matchmaking bloqueado temporalmente por rechazos recientes',
+      error: 'Tienes matchmaking bloqueado temporalmente por rechazos recientes',
       blocked_until: blockedUntil,
     });
   }
@@ -394,10 +400,9 @@ router.post('/join', async (req: Request, res: Response) => {
   const { data: existing } = await supabase.from('matchmaking_pool').select('id').eq('player_id', playerId).maybeSingle();
   if (existing) return res.status(409).json({ ok: false, error: 'Ya estás en la cola de matchmaking' });
 
-  if (paired_with_id) {
-    const { data: buddy } = await supabase.from('players').select('id').eq('id', paired_with_id).maybeSingle();
-    if (!buddy) return res.status(400).json({ ok: false, error: 'paired_with_id no existe' });
-  }
+  // El emparejamiento en pareja va exclusivamente por el flujo de invitaciones
+  // (POST /matchmaking/pair-invite), que valida nivel (gap <= 1.5) y consentimiento.
+  // /join es siempre individual: ignoramos cualquier paired_with_id del body.
 
   const side =
     preferred_side && ['drive', 'backhand', 'any'].includes(preferred_side) ? preferred_side : null;
@@ -421,7 +426,7 @@ router.post('/join', async (req: Request, res: Response) => {
 
   const { error: insErr } = await supabase.from('matchmaking_pool').insert({
     player_id: playerId,
-    paired_with_id: paired_with_id ?? null,
+    paired_with_id: null,
     club_id: resolvedClubId,
     preferred_club_ids: poolPreferredClubIds,
     max_distance_km: maxKm,
@@ -457,7 +462,29 @@ router.delete('/leave', async (req: Request, res: Response) => {
   const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
   const supabase = getSupabaseServiceRoleClient();
+  const { data: myRow } = await supabase
+    .from('matchmaking_pool')
+    .select('paired_with_id')
+    .eq('player_id', playerId)
+    .maybeSingle();
+  const partnerId = (myRow as { paired_with_id?: string | null } | null)?.paired_with_id ?? null;
   await supabase.from('matchmaking_pool').delete().eq('player_id', playerId);
+  // Si estaba emparejado, sacar también al compañero: la búsqueda de pareja se cancela
+  // (si no, quedaría en cola sin poder emparejarse, ya que buildUnits salta a un pareja sin compañero).
+  if (partnerId) {
+    await supabase.from('matchmaking_pool').delete().eq('player_id', partnerId).eq('paired_with_id', playerId);
+    // La invitación vuelve a 'accepted' (no queda atascada en 'searching'): la pareja sigue
+    // lista en "Listos para jugar" y puede volver a buscar sin tener que re-invitar.
+    const nowIso = new Date().toISOString();
+    await supabase
+      .from('matchmaking_pair_invites')
+      .update({ status: 'accepted', updated_at: nowIso, resolved_at: null, expires_at: computeDefaultInviteExpiry() })
+      .or(
+        `and(inviter_player_id.eq.${playerId},invitee_player_id.eq.${partnerId}),` +
+          `and(inviter_player_id.eq.${partnerId},invitee_player_id.eq.${playerId})`,
+      )
+      .eq('status', 'searching');
+  }
   return res.json({ ok: true });
 });
 
@@ -493,6 +520,8 @@ router.get('/status', async (req: Request, res: Response) => {
     .maybeSingle();
   const myClubId = (row as { club_id?: string | null } | null)?.club_id ?? null;
   const counts = await countActiveSearching(supabase, myClubId);
+  // Invitaciones de pareja accionables (banners en Home, vía polling de /status).
+  const pairInvites = await getActionablePairInvites(supabase, playerId);
 
   if (blockedUntil) {
     return res.json({
@@ -503,6 +532,7 @@ router.get('/status', async (req: Request, res: Response) => {
       blocked_until: blockedUntil,
       searching_count: counts.total,
       searching_in_club_count: counts.in_club,
+      pair_invites: pairInvites,
     });
   }
 
@@ -514,6 +544,7 @@ router.get('/status', async (req: Request, res: Response) => {
       expansion_offer: null,
       searching_count: counts.total,
       searching_in_club_count: counts.in_club,
+      pair_invites: pairInvites,
     });
   }
 
@@ -528,6 +559,7 @@ router.get('/status', async (req: Request, res: Response) => {
         expansion_offer: null,
         searching_count: counts.total,
         searching_in_club_count: counts.in_club,
+        pair_invites: pairInvites,
       });
     }
   }
@@ -550,7 +582,40 @@ router.get('/status', async (req: Request, res: Response) => {
     expansion_offer: (row as { expansion_offer?: unknown }).expansion_offer ?? null,
     searching_count: counts.total,
     searching_in_club_count: counts.in_club,
+    pair_invites: pairInvites,
   });
+});
+
+/**
+ * @openapi
+ * /matchmaking/pair-invites:
+ *   get:
+ *     tags: [Matchmaking]
+ *     summary: Invitaciones de pareja accionables del jugador
+ *     description: Versión ligera (solo invitaciones) para el selector de compañero, sin contar el pool ni disparar ciclos.
+ */
+router.get('/pair-invites', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const pairInvites = await getActionablePairInvites(supabase, playerId);
+  return res.json({ ok: true, pair_invites: pairInvites });
+});
+
+/**
+ * @openapi
+ * /matchmaking/season-transition:
+ *   get:
+ *     tags: [Matchmaking]
+ *     summary: Última transición de temporada del jugador (modal de fin de temporada)
+ *     description: Devuelve la liga con la que cerró la temporada anterior y la liga actual tras el soft reset, o null si no aplica.
+ */
+router.get('/season-transition', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const transition = await getSeasonTransitionForPlayer(supabase, playerId);
+  return res.json({ ok: true, transition });
 });
 
 /**
@@ -886,6 +951,203 @@ router.post('/close-season', async (req: Request, res: Response) => {
   } catch (e) {
     return res.status(500).json({ ok: false, error: (e as Error).message });
   }
+});
+
+type PairInviteRow = {
+  id: string;
+  inviter_player_id: string;
+  invitee_player_id: string;
+  status: string;
+  expires_at: string;
+};
+
+async function loadPairInvite(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  id: string,
+): Promise<PairInviteRow | null> {
+  const { data } = await supabase
+    .from('matchmaking_pair_invites')
+    .select('id, inviter_player_id, invitee_player_id, status, expires_at')
+    .eq('id', id)
+    .maybeSingle();
+  return (data as PairInviteRow | null) ?? null;
+}
+
+function inviteExpired(invite: PairInviteRow): boolean {
+  return new Date(invite.expires_at).getTime() <= Date.now();
+}
+
+// Crear invitación de pareja (invitador). Body: invitee_player_id. Las preferencias
+// NO se fijan aquí: se eligen al buscar (start-search / accept-and-search).
+router.post('/pair-invite', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+
+  const inviteeId = typeof req.body?.invitee_player_id === 'string' ? req.body.invitee_player_id.trim() : '';
+  if (!inviteeId) return res.status(400).json({ ok: false, error: 'invitee_player_id es obligatorio' });
+
+  const supabase = getSupabaseServiceRoleClient();
+  const blockedUntil = await getMatchmakingBlockUntil(playerId);
+  if (blockedUntil) {
+    return res.status(403).json({ ok: false, error: 'Tienes matchmaking bloqueado temporalmente', blocked_until: blockedUntil });
+  }
+
+  const elig = await assertPairEligible(supabase, playerId, inviteeId);
+  if (!elig.ok) return res.status(elig.status).json({ ok: false, error: elig.error });
+
+  // Anti-spam: si el invitado rechazó hace poco, no permitir re-invitar todavía.
+  if (await recentRejectionExists(supabase, playerId, inviteeId)) {
+    return res.status(429).json({ ok: false, error: 'Este jugador rechazó tu invitación hace poco. Inténtalo más tarde.' });
+  }
+
+  // Libera el índice único marcando como vencidas las invitaciones activas ya caducadas de este par.
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from('matchmaking_pair_invites')
+    .update({ status: 'expired', resolved_at: nowIso, updated_at: nowIso })
+    .eq('inviter_player_id', playerId)
+    .eq('invitee_player_id', inviteeId)
+    .in('status', ['pending', 'accepted'])
+    .lte('expires_at', nowIso);
+
+  const { data, error } = await supabase
+    .from('matchmaking_pair_invites')
+    .insert({
+      inviter_player_id: playerId,
+      invitee_player_id: inviteeId,
+      status: 'pending',
+      prefs: null,
+      expires_at: computeDefaultInviteExpiry(),
+    })
+    .select('id')
+    .maybeSingle();
+  if (error) {
+    if ((error as { code?: string }).code === '23505') {
+      return res.status(409).json({ ok: false, error: 'Ya tienes una invitación activa con este jugador' });
+    }
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+  return res.json({ ok: true, invite_id: (data as { id: string }).id });
+});
+
+// Aceptar (a secas): el invitador verá el banner para iniciar la búsqueda.
+router.post('/pair-invite/:id/accept', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const invite = await loadPairInvite(supabase, req.params.id);
+  if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
+  if (invite.invitee_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No eres el invitado' });
+  if (invite.status !== 'pending') return res.status(409).json({ ok: false, error: 'La invitación ya no está pendiente' });
+  if (inviteExpired(invite)) return res.status(409).json({ ok: false, error: 'La invitación caducó' });
+
+  // Al aceptar, renovamos la caducidad: la pareja queda lista para buscar y no debe
+  // expirar por el contador original de la invitación.
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from('matchmaking_pair_invites')
+    .update({ status: 'accepted', updated_at: nowIso, expires_at: computeDefaultInviteExpiry() })
+    .eq('id', invite.id);
+  return res.json({ ok: true });
+});
+
+// Aceptar y buscar (invitado): acepta + encola a ambos con LAS prefs del invitado (body).
+router.post('/pair-invite/:id/accept-and-search', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const invite = await loadPairInvite(supabase, req.params.id);
+  if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
+  if (invite.invitee_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No eres el invitado' });
+  if (invite.status !== 'pending') return res.status(409).json({ ok: false, error: 'La invitación ya no está pendiente' });
+  if (inviteExpired(invite)) return res.status(409).json({ ok: false, error: 'La invitación caducó' });
+
+  const norm = normalizePairPrefs((req.body ?? {}) as Record<string, unknown>);
+  if (!norm.ok) return res.status(norm.status).json({ ok: false, error: norm.error });
+  const elig = await assertPairEligible(supabase, invite.inviter_player_id, invite.invitee_player_id);
+  if (!elig.ok) return res.status(elig.status).json({ ok: false, error: elig.error });
+  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, norm.prefs, playerId);
+  if (!enq.ok) return res.status(enq.status).json({ ok: false, error: enq.error });
+
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from('matchmaking_pair_invites')
+    .update({ status: 'searching', resolved_at: nowIso, updated_at: nowIso })
+    .eq('id', invite.id);
+  setImmediate(() => {
+    runMatchmakingCycle().catch((e) => console.warn('[matchmaking] pair accept-and-search run cycle:', (e as Error).message));
+  });
+  return res.json({ ok: true });
+});
+
+// Iniciar búsqueda de una pareja ya aceptada (cualquiera de los dos): encola a ambos
+// con LAS prefs de quien busca (body).
+router.post('/pair-invite/:id/start-search', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const invite = await loadPairInvite(supabase, req.params.id);
+  if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
+  if (invite.inviter_player_id !== playerId && invite.invitee_player_id !== playerId) {
+    return res.status(403).json({ ok: false, error: 'No formas parte de esta invitación' });
+  }
+  if (invite.status !== 'accepted') return res.status(409).json({ ok: false, error: 'La invitación no está aceptada' });
+  if (inviteExpired(invite)) return res.status(409).json({ ok: false, error: 'La invitación caducó' });
+
+  const norm = normalizePairPrefs((req.body ?? {}) as Record<string, unknown>);
+  if (!norm.ok) return res.status(norm.status).json({ ok: false, error: norm.error });
+  const elig = await assertPairEligible(supabase, invite.inviter_player_id, invite.invitee_player_id);
+  if (!elig.ok) return res.status(elig.status).json({ ok: false, error: elig.error });
+  const enq = await enqueueBothPaired(supabase, invite.inviter_player_id, invite.invitee_player_id, norm.prefs, playerId);
+  if (!enq.ok) return res.status(enq.status).json({ ok: false, error: enq.error });
+
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from('matchmaking_pair_invites')
+    .update({ status: 'searching', resolved_at: nowIso, updated_at: nowIso })
+    .eq('id', invite.id);
+  setImmediate(() => {
+    runMatchmakingCycle().catch((e) => console.warn('[matchmaking] pair start-search run cycle:', (e as Error).message));
+  });
+  return res.json({ ok: true });
+});
+
+// Rechazar (invitado).
+router.post('/pair-invite/:id/reject', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const invite = await loadPairInvite(supabase, req.params.id);
+  if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
+  if (invite.invitee_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No eres el invitado' });
+  if (!['pending', 'accepted'].includes(invite.status)) {
+    return res.status(409).json({ ok: false, error: 'La invitación ya no se puede rechazar' });
+  }
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from('matchmaking_pair_invites')
+    .update({ status: 'rejected', resolved_at: nowIso, updated_at: nowIso })
+    .eq('id', invite.id);
+  return res.json({ ok: true });
+});
+
+// Cancelar (invitador).
+router.post('/pair-invite/:id/cancel', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const invite = await loadPairInvite(supabase, req.params.id);
+  if (!invite) return res.status(404).json({ ok: false, error: 'Invitación no encontrada' });
+  if (invite.inviter_player_id !== playerId) return res.status(403).json({ ok: false, error: 'No eres el invitador' });
+  if (!['pending', 'accepted'].includes(invite.status)) {
+    return res.status(409).json({ ok: false, error: 'La invitación ya no se puede cancelar' });
+  }
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from('matchmaking_pair_invites')
+    .update({ status: 'cancelled', resolved_at: nowIso, updated_at: nowIso })
+    .eq('id', invite.id);
+  return res.json({ ok: true });
 });
 
 export default router;
