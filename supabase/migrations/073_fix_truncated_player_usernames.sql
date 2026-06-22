@@ -1,5 +1,5 @@
--- Asigna username por defecto a jugadores sin username (nombre_apellido; sufijo numérico si hay duplicados).
--- No modifica jugadores que ya tienen username.
+-- Corrige usernames generados por un backfill defectuoso que usó substring(nombre, 2)
+-- en lugar del nombre completo (p. ej. Santiago → antiago en vez de santiago).
 
 DO $$
 DECLARE
@@ -7,14 +7,28 @@ DECLARE
   base text;
   candidate text;
   suffix int;
+  buggy text;
 BEGIN
   FOR r IN
-    SELECT id, first_name, last_name, created_at
+    SELECT id, first_name, last_name, username
     FROM public.players
-    WHERE (username IS NULL OR btrim(username) = '')
+    WHERE username IS NOT NULL
+      AND btrim(username) <> ''
       AND status IS DISTINCT FROM 'deleted'
-    ORDER BY created_at ASC, id ASC
   LOOP
+    buggy := lower(
+      trim(both '_' from regexp_replace(
+        btrim(coalesce(substring(btrim(r.first_name), 2), '') || '_' || coalesce(substring(btrim(r.last_name), 2), '')),
+        '[^a-z0-9]+',
+        '_',
+        'g'
+      ))
+    );
+
+    IF lower(r.username) <> buggy THEN
+      CONTINUE;
+    END IF;
+
     base := trim(both '_' from regexp_replace(
       lower(btrim(coalesce(r.first_name, '') || '_' || coalesce(r.last_name, ''))),
       '[^a-z0-9]+',

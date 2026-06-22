@@ -56,6 +56,9 @@ function readDayEntry(weeklySchedule: unknown, weekday: WeekdayCode): unknown {
   if (weekday in ws) return ws[weekday];
   const idx = WEEKDAY_CODES.indexOf(weekday);
   if (idx >= 0 && String(idx) in ws) return ws[String(idx)];
+  // Horario guardado como ISO 1=lun … 7=dom (ClubSettings)
+  const isoKey = weekday === 'sun' ? '7' : idx > 0 ? String(idx) : null;
+  if (isoKey && isoKey in ws) return ws[isoKey];
   return null;
 }
 

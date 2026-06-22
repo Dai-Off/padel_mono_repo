@@ -18,6 +18,13 @@ import { apiFetchWithAuth } from '../../../services/api';
 import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
 import { CreateMatchModal } from './CreateMatchModal';
 import { PlayerSearch } from './ReservationModal';
+import {
+    buildSyntheticMatchPlayer,
+    nextFreeSlotIndex,
+    resolveMatchPlayerSlots,
+    slotIndexFromTeamPosition,
+    usedSlotIndexes,
+} from '../utils/matchPlayerSlots';
 
 interface MatchesManagementPanelProps {
     clubId: string | null;
@@ -132,26 +139,12 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                     });
 
                     if (missing.length > 0) {
-                        let teamACount = existingMps.filter((mp: any) => mp.team === 'A').length;
-                        let teamBCount = existingMps.filter((mp: any) => mp.team === 'B').length;
-                        const extras = missing.map((p: any) => {
-                            const person = Array.isArray(p.players) ? p.players[0] : p.players;
-                            // Prefer filling team A up to 2, then team B up to 2, otherwise whichever is lightest
-                            let team: 'A' | 'B';
-                            if (teamACount < 2) { team = 'A'; teamACount++; }
-                            else if (teamBCount < 2) { team = 'B'; teamBCount++; }
-                            else if (teamACount <= teamBCount) { team = 'A'; teamACount++; }
-                            else { team = 'B'; teamBCount++; }
-                            return {
-                                id: p.id,
-                                team,
-                                players: {
-                                    id: person?.id,
-                                    first_name: person?.first_name,
-                                    last_name: person?.last_name,
-                                    elo_rating: person?.elo_rating
-                                }
-                            };
+                        const usedSlots = usedSlotIndexes(existingMps);
+                        const extras = missing.flatMap((p: any) => {
+                            const slot = nextFreeSlotIndex(usedSlots);
+                            if (slot == null) return [];
+                            usedSlots.add(slot);
+                            return [buildSyntheticMatchPlayer(p, slot)];
                         });
                         m.match_players = [...existingMps, ...extras];
                     } else if (existingMps.length === 0 && fullBooking?.players) {
@@ -159,6 +152,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                         m.match_players = [{
                             id: fullBooking.organizer_player_id,
                             team: 'A',
+                            slot_index: 0,
                             players: { id: org.id, first_name: org.first_name, last_name: org.last_name, elo_rating: org.elo_rating }
                         }];
                     }
@@ -177,19 +171,9 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                     const mockPlayers: any[] = [];
                     const participants = b.booking_participants || [];
                     if (participants.length > 0) {
-                        for (let i = 0; i < participants.length; i++) {
+                        for (let i = 0; i < participants.length && i < 4; i++) {
                              const p = participants[i];
-                             const person = Array.isArray(p.players) ? p.players[0] : p.players;
-                             mockPlayers.push({
-                                 id: p.id,
-                                 team: i % 2 === 0 ? 'A' : 'B',
-                                 players: {
-                                      id: person?.id,
-                                      first_name: person?.first_name,
-                                      last_name: person?.last_name,
-                                      elo_rating: person?.elo_rating
-                                 }
-                             });
+                             mockPlayers.push(buildSyntheticMatchPlayer(p, i));
                         }
                     } else if (b.players) {
                         const org = b.players;
@@ -616,9 +600,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                 const paymentTransactions = booking?.payment_transactions || [];
                                 const totalPaid = paymentTransactions.reduce((acc: number, pt: any) => pt.status === 'succeeded' ? acc + (pt.amount_cents || 0) : acc, 0) / 100;
                                 
-                                const players = match.match_players || [];
-                                const teamA = players.filter((p: any) => p.team === 'A');
-                                const teamB = players.filter((p: any) => p.team === 'B');
+                                const playerSlots = resolveMatchPlayerSlots(match.match_players || []);
 
                                 return (
                                     <tr key={match.id} className="hover:bg-gray-50/50 transition-colors group">
@@ -639,13 +621,13 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                         <td className="px-3 py-2.5 whitespace-nowrap">
                                             <div className="flex items-center gap-3">
                                                 <div className="flex items-center -space-x-2">
-                                                    {renderPlayer(teamA[0], 0, booking?.id, 'A', match.id)}
-                                                    {renderPlayer(teamA[1], 1, booking?.id, 'A', match.id)}
+                                                    {renderPlayer(playerSlots[0], 0, booking?.id, 'A', match.id)}
+                                                    {renderPlayer(playerSlots[1], 1, booking?.id, 'A', match.id)}
                                                 </div>
                                                 <span className="text-[9px] font-bold tracking-wider text-gray-300">VS</span>
                                                 <div className="flex items-center -space-x-2">
-                                                    {renderPlayer(teamB[0], 0, booking?.id, 'B', match.id)}
-                                                    {renderPlayer(teamB[1], 1, booking?.id, 'B', match.id)}
+                                                    {renderPlayer(playerSlots[2], 0, booking?.id, 'B', match.id)}
+                                                    {renderPlayer(playerSlots[3], 1, booking?.id, 'B', match.id)}
                                                 </div>
                                             </div>
                                         </td>
@@ -765,7 +747,10 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                             body: JSON.stringify({
                                                 player_id: player.id,
                                                 team: addingToSlot.team,
-                                                slot_index: addingToSlot.index,
+                                                slot_index: slotIndexFromTeamPosition(
+                                                    addingToSlot.team as 'A' | 'B',
+                                                    addingToSlot.index,
+                                                ),
                                                 booking_id: addingToSlot.bookingId
                                             })
                                         });

@@ -1,17 +1,19 @@
 import type { MatchEnriched } from './matches';
 import { normalizePlayerAvatarUrl } from '../api/playerAvatar';
 import { getMatchBooking, getMatchListPhase } from '../domain/matchLifecycle';
+import { formatPartidoDateTimeLabel } from '../lib/clubTimeZone';
 import type { PartidoItem, PartidoMode, PartidoPlayer } from '../screens/PartidosScreen';
 
-function formatDateTime(startAt: string, endAt: string): string {
-  const start = new Date(startAt);
-  const days = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
-  const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
-  const day = days[start.getDay()];
-  const date = start.getDate();
-  const month = months[start.getMonth()];
-  const time = start.toTimeString().slice(0, 5);
-  return `${day}, ${date} de ${month} · ${time}`;
+type MatchPlayerRef = NonNullable<NonNullable<MatchEnriched['match_players']>[number]['players']>;
+
+function unwrapMatchPlayer(raw: unknown): MatchPlayerRef | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return (raw[0] as MatchPlayerRef | undefined) ?? null;
+  return raw as MatchPlayerRef;
+}
+
+function formatDateTime(startAt: string, _endAt: string): string {
+  return formatPartidoDateTimeLabel(startAt);
 }
 
 function formatPrice(cents: number, currency: string): string {
@@ -58,7 +60,7 @@ export function mapMatchToPartido(
   let myTeam: 'A' | 'B' | null = null;
   let myResult: PartidoItem['myResult'] = null;
   if (viewerPlayerId) {
-    const mine = (m.match_players ?? []).find((mp) => mp.players?.id === viewerPlayerId);
+    const mine = (m.match_players ?? []).find((mp) => unwrapMatchPlayer(mp.players)?.id === viewerPlayerId);
     myTeam = mine?.team ?? null;
     const rawResult = mine?.result;
     if (rawResult === 'win' || rawResult === 'loss' || rawResult === 'draw' || rawResult === 'pending') {
@@ -77,7 +79,7 @@ export function mapMatchToPartido(
     const playerIds: string[] = [];
     const playerIdsBySlot: Array<string | null> = [null, null, null, null];
     (m.match_players ?? []).forEach((mp, i) => {
-      const p = mp.players;
+      const p = unwrapMatchPlayer(mp.players);
       if (!p || i >= 4) return;
       if (p.id) { playerIds.push(p.id); playerIdsBySlot[i] = p.id; }
       const fullName = `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || 'Jugador';
@@ -182,7 +184,7 @@ export function mapMatchToPartido(
       : i;
     const idx = resolveSlotIndex(preferredIdx);
     if (idx >= 4) return;
-    const p = mp.players;
+    const p = unwrapMatchPlayer(mp.players);
     if (!p) return;
     usedSlots.add(idx);
     if (p.id) playerIdsBySlot[idx] = p.id;

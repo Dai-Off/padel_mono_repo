@@ -1,4 +1,5 @@
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { evictDemoPlayersWhenRealJoins } from '../lib/demoPlayerEvict';
 
 type Db = ReturnType<typeof getSupabaseServiceRoleClient>;
 
@@ -393,6 +394,12 @@ export async function guestJoinMatchAfterPayment(
     const s = (existing as { slot_index?: number | null }).slot_index;
     const idx = s != null && s >= 0 && s <= 3 ? s : 0;
     return { ok: true, match_id: match.id, slot_index: idx, reassigned: false };
+  }
+
+  try {
+    await evictDemoPlayersWhenRealJoins(supabase, bookingId, playerId);
+  } catch (evictErr) {
+    console.error('[guestJoinMatchAfterPayment] evictDemoPlayers:', (evictErr as Error).message);
   }
 
   const ins = await insertGuestMatchPlayerAfterPayment(supabase, match.id, playerId, preferredSlot);
