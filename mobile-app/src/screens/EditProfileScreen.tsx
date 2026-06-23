@@ -4,7 +4,6 @@ import {
   Alert,
   Image,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -31,6 +30,7 @@ import {
 import { BirthDatePickerField } from '../components/profile/BirthDatePickerField';
 import { PlayLocationPickerModal } from '../components/profile/PlayLocationPickerModal';
 import { PhoneNumberField } from '../components/profile/PhoneNumberField';
+import { SafeScrollView } from '../components/ui/SafeScrollView';
 import {
   formatNationalInput,
   parseStoredPhone,
@@ -534,7 +534,7 @@ export function EditProfileScreen({
         {saving ? <ActivityIndicator size="small" color={ACCENT} /> : null}
       </View>
 
-      <ScrollView
+      <SafeScrollView
         style={styles.scroll}
         contentContainerStyle={[
           styles.scrollContent,
@@ -542,6 +542,7 @@ export function EditProfileScreen({
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        bottomOffset={isDirty ? 88 : 24}
       >
         <View style={styles.avatarBlock}>
           <View style={styles.avatarOuter}>
@@ -703,7 +704,7 @@ export function EditProfileScreen({
         </View>
 
         <Text style={styles.versionText}>Version {appVersion}</Text>
-      </ScrollView>
+      </SafeScrollView>
 
       {isDirty ? (
         <View

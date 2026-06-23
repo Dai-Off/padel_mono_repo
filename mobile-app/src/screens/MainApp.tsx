@@ -983,12 +983,6 @@ export function MainApp() {
           }}
           onBackToMenu={() => setTuActividadSubView(null)}
           onNavigate={(destination: TuActividadDestination) => {
-            if (destination === 'grupos') {
-              setShowTuActividad(false);
-              setTuActividadSubView(null);
-              setShowCommunity(true);
-              return;
-            }
             setTuActividadSubView(destination);
           }}
           onPartidoPress={(p) => setSelectedPartido(p)}

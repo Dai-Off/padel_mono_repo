@@ -53,7 +53,7 @@
         "foregroundImage": "./assets/images/wematch-logo.png",
         "backgroundColor": "#000000"
       },
-      "softwareKeyboardLayoutMode": "pan",
+      "softwareKeyboardLayoutMode": "resize",
       "package": "com.wematch.padel",
       "runtimeVersion": "1.0.0",
       "permissions": [

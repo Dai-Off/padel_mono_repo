@@ -1,4 +1,5 @@
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
 import { hasCourtConflict } from './bookingService';
 import { estimateBookingPriceCents } from './bookingPricing';
 import { runMatchmakingExpansionScan } from './matchmakingExpansion';
@@ -359,6 +360,13 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
           const cid = (c as { id: string }).id;
           const conflict = await hasCourtConflict(cid, startIso, endIso);
           if (!conflict) {
+            const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+              courtId: cid,
+              startAt: startIso,
+              endAt: endIso,
+              reservationType: 'open_match',
+            });
+            if (!hoursCheck.ok) continue;
             courtId = cid;
             slot = { start: startIso, end: endIso };
             if (wantDiag) firstCourtConflict = null;
@@ -454,6 +462,7 @@ export async function runMatchmakingCycle(): Promise<MatchmakingCycleResult> {
         total_price_cents: totalCents,
         currency: 'EUR',
         status: 'pending_payment',
+        reservation_type: 'open_match',
         source_channel: 'system',
       },
     ])

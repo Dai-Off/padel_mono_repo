@@ -12,6 +12,8 @@ import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { PlayerSearch } from './ReservationModal';
 import { zonedTimeToUtc } from '../../../lib/clubTimeZone';
+import { toast } from 'sonner';
+import { willPublicOpenMatchStayOffGrid } from '../utils/reservationListFilters';
 
 export type PaymentMethod = 'cash' | 'card' | 'wallet' | null;
 
@@ -441,6 +443,16 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
                     await apiFetchWithAuth<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
                 } catch { /* best effort rollback */ }
                 throw new Error(mtRes.error || 'Error al crear el partido asociado');
+            }
+
+            if (
+                matchVisibility === 'public' &&
+                willPublicOpenMatchStayOffGrid(nActivePlayers, computedStatus === 'confirmed')
+            ) {
+                toast.message('Partido guardado', {
+                    description: 'No aparecerá en la grilla hasta tener 3 jugadores. Podés verlo en Lista de reservas.',
+                    duration: 8000,
+                });
             }
 
             onClose();

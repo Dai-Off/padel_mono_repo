@@ -9,6 +9,9 @@
 
 # react-native-reanimated
 -keep class com.swmansion.reanimated.** { *; }
+
+# react-native-worklets
+-keep class com.swmansion.worklets.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:

@@ -3,7 +3,6 @@ import type { Dispatch, SetStateAction } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -14,9 +13,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import type { PartidoItem, PartidoPlayer } from '../../screens/PartidosScreen';
+import { SafeScrollView } from '../ui/SafeScrollView';
 import { useTranslation } from '../../i18n';
 
 const BG = '#0F0F0F';
@@ -473,10 +474,10 @@ export function MatchEvaluationFlow({
 
         <KeyboardAvoidingView
           style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           keyboardVerticalOffset={0}
         >
-          <ScrollView
+          <SafeScrollView
             style={styles.scroll}
             contentContainerStyle={[
               styles.scrollContent,
@@ -487,6 +488,7 @@ export function MatchEvaluationFlow({
             ]}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            bottomOffset={sectionIndex === 2 ? 120 : 24}
           >
             {sectionIndex === 0 && teammates.length === 0 && (
               <EmptyTeammatesSection />
@@ -543,7 +545,7 @@ export function MatchEvaluationFlow({
                 />
               </Pressable>
             )}
-          </ScrollView>
+          </SafeScrollView>
         </KeyboardAvoidingView>
 
         {sectionIndex === 2 && (

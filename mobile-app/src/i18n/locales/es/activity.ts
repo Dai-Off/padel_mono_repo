@@ -11,8 +11,6 @@ export const activity: ActivityTranslationKeys = {
   rowEnrollmentMany: '{count} inscripciones',
   rowCompetitions: 'Competiciones',
   rowCompetitionsSub: 'Torneos y ligas a los que te uniste',
-  rowGroups: 'Grupos',
-  rowGroupsSub: 'Comunidad y mensajes',
   rowFavoriteClubs: 'Clubes favoritos',
   rowClubSavedOne: '1 club guardado',
   rowClubSavedMany: '{count} clubes guardados',

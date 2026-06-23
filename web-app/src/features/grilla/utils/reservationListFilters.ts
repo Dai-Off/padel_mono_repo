@@ -1,4 +1,5 @@
 import type { Reservation } from '../types';
+import { isOpenMatchType, normalizeReservationTypeSlug } from './reservationTypeSlug';
 
 export type ReservationListFilters = {
     reservationType: string;
@@ -68,6 +69,24 @@ function playerCount(res: Reservation): number {
 }
 
 const MATCH_GRID_FILL_TYPES = new Set(['open_match', 'pozo', 'standard']);
+const PUBLIC_OPEN_MATCH_MIN_PLAYERS = 3;
+
+function resolveLinkedMatch(b: { matches?: unknown }): { visibility?: string | null } | null {
+    const raw = b.matches;
+    if (!raw) return null;
+    return (Array.isArray(raw) ? raw[0] : raw) as { visibility?: string | null };
+}
+
+/** Partido abierto visible en app (no privado). Sin fila matches se trata como público. */
+export function isPublicOpenMatchBooking(b: {
+    reservation_type?: string;
+    booking_type?: string;
+    matches?: unknown;
+}): boolean {
+    if (!isOpenMatchType(rawBookingType(b))) return false;
+    const match = resolveLinkedMatch(b);
+    return match?.visibility !== 'private';
+}
 
 function expectedPlayerSlots(res: Reservation): number {
     const t = res.booking_type;
@@ -78,7 +97,7 @@ function expectedPlayerSlots(res: Reservation): number {
 }
 
 function rawBookingType(b: { reservation_type?: string; booking_type?: string }): string {
-    return b.reservation_type ?? b.booking_type ?? 'standard';
+    return normalizeReservationTypeSlug(b.reservation_type ?? b.booking_type ?? 'standard');
 }
 
 function rawPlayerCount(b: {
@@ -141,7 +160,7 @@ function rawBookingFullyPaid(
     return paid >= total;
 }
 
-/** Grid: match bookings need 4 players or 100% payment; list shows all (except court contention). */
+/** Grid: públicos abiertos desde 3 jugadores; otros partidos 4 jugadores o pago completo. Lista muestra todos. */
 export function shouldShowRawBookingInGrid(
     b: RawBookingPaymentInput & {
         court_contention_status?: string | null;
@@ -151,24 +170,45 @@ export function shouldShowRawBookingInGrid(
         players?: unknown;
         total_price_cents?: number | null;
         status?: string | null;
+        source_channel?: string | null;
+        matches?: unknown;
     },
 ): boolean {
     if (b.court_contention_status === 'competing') return false;
+    if (b.court_contention_status === 'lost') return false;
+
+    if (isPublicOpenMatchBooking(b)) {
+        if (b.court_contention_status === 'won') return true;
+        if (rawPlayerCount(b) >= PUBLIC_OPEN_MATCH_MIN_PLAYERS) return true;
+        if (rawBookingFullyPaid(b)) return true;
+        return false;
+    }
+
+    if (b.source_channel === 'manual') return true;
 
     const type = rawBookingType(b);
     if (!MATCH_GRID_FILL_TYPES.has(type)) return true;
 
-    const expected = 4;
-    if (rawPlayerCount(b) >= expected) return true;
+    if (rawPlayerCount(b) >= 4) return true;
     return rawBookingFullyPaid(b);
 }
 
 /** Same rule on mapped reservations (e.g. optimistic grid updates). */
 export function shouldShowReservationInGrid(res: Reservation): boolean {
-    const type = res.booking_type ?? res.reservation_type ?? 'standard';
+    const type = normalizeReservationTypeSlug(res.booking_type ?? res.reservation_type ?? 'standard');
+    if (type === 'open_match') {
+        if (playerCount(res) >= PUBLIC_OPEN_MATCH_MIN_PLAYERS) return true;
+        if (isReservationPaid(res)) return true;
+        return false;
+    }
+    if (res.source_channel === 'manual') return true;
     if (!MATCH_GRID_FILL_TYPES.has(type)) return true;
     if (isReservationPlayersComplete(res)) return true;
     return isReservationPaid(res);
+}
+
+export function willPublicOpenMatchStayOffGrid(playerCount: number, fullyPaid: boolean): boolean {
+    return playerCount < PUBLIC_OPEN_MATCH_MIN_PLAYERS && !fullyPaid;
 }
 
 export function isReservationPlayersComplete(res: Reservation): boolean {

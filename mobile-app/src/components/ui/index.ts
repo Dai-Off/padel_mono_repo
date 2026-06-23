@@ -1,5 +1,6 @@
 export { SafeText } from './SafeText';
 export { SafeScrollView } from './SafeScrollView';
+export { AppKeyboardAvoidingView } from './AppKeyboardAvoidingView';
 export {
   FlexText,
   flexTextRowContainerStyle,

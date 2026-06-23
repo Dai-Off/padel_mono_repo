@@ -7,11 +7,11 @@ import {
   FlatList, 
   TextInput, 
   TouchableOpacity, 
-  KeyboardAvoidingView, 
   Platform,
   Image,
   ActivityIndicator
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { CommunityPost, CommunityComment, fetchComments, addComment } from '../../api/community';
 import { formatTimeAgo } from '../../utils/timeAgo';
@@ -71,7 +71,7 @@ export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, 
     >
       <View style={styles.overlay}>
         <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior="padding"
           style={styles.content}
         >
           <View style={styles.header}>
