@@ -1,11 +1,9 @@
 import type { ReactNode } from 'react';
+import { StyleSheet, View } from 'react-native';
 import {
+  KeyboardAwareScrollView,
   KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
+} from 'react-native-keyboard-controller';
 import { theme } from '../../theme';
 
 type AuthLayoutProps = {
@@ -15,26 +13,23 @@ type AuthLayoutProps = {
 };
 
 export function AuthLayout({ children, scrollable }: AuthLayoutProps) {
-  const content = scrollable ? (
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.scrollContent}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      {children}
-    </ScrollView>
-  ) : (
-    <View style={styles.content}>{children}</View>
-  );
+  if (scrollable) {
+    return (
+      <KeyboardAwareScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        bottomOffset={24}
+      >
+        {children}
+      </KeyboardAwareScrollView>
+    );
+  }
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      enabled
-    >
-      {content}
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
+      <View style={styles.content}>{children}</View>
     </KeyboardAvoidingView>
   );
 }
@@ -53,6 +48,7 @@ const styles = StyleSheet.create({
   },
   scroll: {
     flex: 1,
+    backgroundColor: theme.auth.bg,
   },
   scrollContent: {
     flexGrow: 1,

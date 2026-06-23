@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { changePassword, forgotPassword } from '../api/auth';
 import { MenuScreenHeader } from '../components/menuScreen/MenuScreenHeader';
+import { SafeScrollView } from '../components/ui/SafeScrollView';
 import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 
@@ -103,7 +103,7 @@ export function ChangePasswordScreen({
   return (
     <View style={styles.root}>
       <MenuScreenHeader title={resolvedTitle} onBack={onBack} />
-      <ScrollView
+      <SafeScrollView
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: 24 + insets.bottom, paddingHorizontal: 16 }}
         keyboardShouldPersistTaps="handled"
@@ -200,7 +200,7 @@ export function ChangePasswordScreen({
             )}
           </Pressable>
         </View>
-      </ScrollView>
+      </SafeScrollView>
     </View>
   );
 }

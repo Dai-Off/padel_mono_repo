@@ -10,6 +10,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { checkUsernameAvailable } from '../../api/auth';
 import { fetchMyPlayerProfile, updateMyPlayerProfile } from '../../api/players';
 import { AuthInput, AuthButton, ErrorBanner } from '../auth';
+import { AppKeyboardAvoidingView } from '../ui/AppKeyboardAvoidingView';
 import { validateUsernameLocal } from '../../lib/username';
 import { theme } from '../../theme';
 import { useTranslation } from '../../i18n';
@@ -69,7 +70,7 @@ export function UsernameSetupModal({ visible, onComplete }: UsernameSetupModalPr
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
-      <View style={styles.root}>
+      <AppKeyboardAvoidingView style={styles.root}>
         <Text style={styles.title}>{t('profile.fieldUsername')}</Text>
         <Text style={styles.subtitle}>{t('common.usernameFormat')}</Text>
         {error ? <ErrorBanner message={error} /> : null}
@@ -92,7 +93,7 @@ export function UsernameSetupModal({ visible, onComplete }: UsernameSetupModalPr
         {loading ? (
           <ActivityIndicator color={theme.auth.accent} style={styles.spinner} />
         ) : null}
-      </View>
+      </AppKeyboardAvoidingView>
     </Modal>
   );
 }

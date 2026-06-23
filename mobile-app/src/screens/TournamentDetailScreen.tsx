@@ -22,6 +22,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ExpoLinking from 'expo-linking';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useStripe } from '../stripe';
+import { SafeScrollView } from '../components/ui/SafeScrollView';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type {
@@ -997,7 +998,7 @@ export function TournamentDetailScreen({
 
   return (
     <View style={styles.root}>
-      <ScrollView
+      <SafeScrollView
         style={styles.scroll}
         contentContainerStyle={{
           paddingBottom: 24,
@@ -1600,7 +1601,7 @@ export function TournamentDetailScreen({
             </View>
           </View>
         )}
-      </ScrollView>
+      </SafeScrollView>
 
       <View
         style={[
