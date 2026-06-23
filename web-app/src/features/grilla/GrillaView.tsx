@@ -1563,14 +1563,14 @@ function GrillaViewInner() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
+      activationConstraint: isMobileDevice
+        ? { delay: 500, tolerance: 10 }
+        : { distance: 8 },
     }),
     useSensor(SmartTouchSensor, {
       activationConstraint: {
-        delay: 250,
-        tolerance: 5,
+        delay: 500,
+        tolerance: 10,
       },
     })
   );
