@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { createPost } from '../../api/community';
 import { buildVideoCoverAndFrames } from '../../lib/videoFrames';
 import { useTranslation } from '../../i18n';
@@ -184,6 +185,7 @@ export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onCl
   return (
     <Modal visible={isVisible} animationType="slide" onRequestClose={onClose}>
       <GestureHandlerRootView style={{ flex: 1 }}>
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
       <View style={styles.container} onLayout={(e) => setContainerH(Math.round(e.nativeEvent.layout.height))}>
         {/* Media de fondo, encuadrable con 2 dedos (mover + zoom + rotar) y recortada al marco. */}
         {media && (
@@ -332,6 +334,7 @@ export const StoryEditor: React.FC<StoryEditorProps> = ({ isVisible, token, onCl
           </View>
         )}
       </View>
+      </KeyboardAvoidingView>
       </GestureHandlerRootView>
     </Modal>
   );

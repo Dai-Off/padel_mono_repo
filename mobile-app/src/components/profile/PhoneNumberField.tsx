@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import {
   formatNationalInput,
@@ -105,7 +106,7 @@ export function PhoneNumberField({
       {showValidHint ? <Text style={styles.okText}>{t('common.validNumber')}</Text> : null}
 
       <Modal visible={pickerOpen} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setPickerOpen(false)}>
-        <View style={[styles.modalRoot, { paddingTop: insets.top }]}>
+        <KeyboardAvoidingView behavior="padding" style={[styles.modalRoot, { paddingTop: insets.top }]}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>{t('profile.phoneCountryTitle')}</Text>
             <Pressable onPress={() => setPickerOpen(false)} hitSlop={8}>
@@ -143,7 +144,7 @@ export function PhoneNumberField({
               </Pressable>
             )}
           />
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </>
   );

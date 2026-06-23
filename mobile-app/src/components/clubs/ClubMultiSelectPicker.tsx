@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import type { ClubCatalogItem } from '../../hooks/useClubCatalog';
 import { useClubCatalog } from '../../hooks/useClubCatalog';
@@ -281,18 +282,20 @@ export function ClubMultiSelectPicker({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <ClubMultiSelectBody
-        selectedIds={selectedIds}
-        onChange={onChange}
-        onClose={onClose}
-        title={title}
-        subtitle={subtitle}
-        maxSelection={maxSelection}
-        clubs={clubs}
-        loading={loading}
-        error={error}
-        onRetry={reload}
-      />
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }}>
+        <ClubMultiSelectBody
+          selectedIds={selectedIds}
+          onChange={onChange}
+          onClose={onClose}
+          title={title}
+          subtitle={subtitle}
+          maxSelection={maxSelection}
+          clubs={clubs}
+          loading={loading}
+          error={error}
+          onRetry={reload}
+        />
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAwareScrollView, KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { createPost } from '../../api/community';
 import { useAuth } from '../../contexts/AuthContext';
 import { MediaFile, framesForDuration, sampleTimes, extractFrame } from '../../lib/videoFrames';
@@ -341,7 +342,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
       transparent={true}
       onRequestClose={onClose}
     >
-      <View style={styles.overlay}>
+      <KeyboardAvoidingView behavior="padding" style={styles.overlay}>
         <View style={styles.content}>
           <LinearGradient
             colors={['rgba(241, 143, 52, 0.1)', 'transparent']}
@@ -376,7 +377,12 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
             </View>
           )}
 
-          <View style={styles.scrollContent}>
+          <KeyboardAwareScrollView
+            style={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            bottomOffset={24}
+          >
             <View style={styles.mediaSection}>
               <FlatList
                 // Tipos de una sola pieza (story/reel): ocultamos "Añadir" cuando ya hay una.
@@ -456,7 +462,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
                 />
               </View>
             </View>
-          </View>
+          </KeyboardAwareScrollView>
         </View>
 
         {/* Bottom sheet propio para elegir origen de la media (sustituye al Alert nativo) */}
@@ -561,7 +567,7 @@ export const CreatePostModal: React.FC<CreatePostModalProps> = ({ isVisible, onC
             </View>
           </View>
         )}
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };

@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchDirectConversations, type DirectConversation } from '../api/messages';
 import { fetchMyPlayerId, searchPlayers, type PlayerSearchHit } from '../api/players';
@@ -250,7 +251,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
       )}
 
       <Modal visible={newChatOpen} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior="padding" style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{t('messages.newConversationTitle')}</Text>
@@ -312,7 +313,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
               />
             )}
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

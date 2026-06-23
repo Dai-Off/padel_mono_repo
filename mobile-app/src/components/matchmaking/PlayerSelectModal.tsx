@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../theme';
 import { useAuth } from '../../contexts/AuthContext';
@@ -273,7 +274,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={[styles.root, { paddingTop: Math.max(insets.top, 8) }]}>
+      <KeyboardAvoidingView behavior="padding" style={[styles.root, { paddingTop: Math.max(insets.top, 8) }]}>
         <View style={styles.header}>
           <Pressable onPress={onClose} style={styles.iconBtn} accessibilityLabel={t('competitive.common.close')}>
             <Ionicons name="close" size={20} color="#fff" />
@@ -337,7 +338,7 @@ export function PlayerSelectModal({ visible, onClose, onSelectAccepted, excludeI
           />
         )}
         <Toast message={toastMsg} variant={toastVariant} onHide={() => setToastMsg(null)} />
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

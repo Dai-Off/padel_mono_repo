@@ -13,6 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
 import { LinearGradient } from "expo-linear-gradient";
+import { SafeScrollView } from "../components/ui/SafeScrollView";
 import { lineHeightFor, theme } from "../theme";
 import { useTranslation } from "../i18n";
 
@@ -295,7 +296,7 @@ export function TiendaScreen() {
 
   return (
     <View style={styles.root}>
-      <ScrollView
+      <SafeScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -550,7 +551,7 @@ export function TiendaScreen() {
             ))}
           </View>
         </View>
-      </ScrollView>
+      </SafeScrollView>
     </View>
   );
 }

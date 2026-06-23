@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeScrollView } from "../components/ui/SafeScrollView";
 import { LinearGradient } from "expo-linear-gradient";
 import {
   fetchPublicCourses,
@@ -223,7 +224,7 @@ export function CoursesScreen({
         </View>
       </View>
 
-      <ScrollView
+      <SafeScrollView
         style={styles.content}
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         refreshControl={
@@ -467,7 +468,7 @@ export function CoursesScreen({
             </View>
           )}
         </View>
-      </ScrollView>
+      </SafeScrollView>
     </View>
   );
 }
