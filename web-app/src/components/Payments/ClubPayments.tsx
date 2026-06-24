@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useInView } from 'framer-motion';
 import {
   CreditCard,
@@ -7,19 +7,25 @@ import {
   Filter,
   Search,
   Smartphone,
-  TrendingUp,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Calendar,
   Banknote,
   Wallet,
   HelpCircle,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { paymentsService, type PaymentTransaction, type PaymentParticipant } from '../../services/payments';
 import { useTranslation } from 'react-i18next';
 import { PageSpinner } from '../Layout/PageSpinner';
+import { localDateYmd, shiftDateYmd } from '../CashClosing/cashRegisterUi';
 
-type PaymentMethod = 'TPV' | 'App';
+type PaymentMethod = 'cash' | 'card' | 'wallet' | 'app';
 type PaymentStatus = 'completed' | 'pending' | 'failed' | 'refunded';
+type DateFilterMode = 'day' | 'range' | 'all';
+type PaymentSource = 'booking' | 'store';
 
 type Payment = {
   id: string;
@@ -29,11 +35,33 @@ type Payment = {
   client: string;
   concept: string;
   method: PaymentMethod;
+  source: 'booking' | 'store';
   amount: number;
   status: PaymentStatus;
   courtName?: string;
   participants: PaymentParticipant[];
 };
+
+function paymentMethodLabel(method: PaymentMethod): string {
+  if (method === 'cash') return 'Efectivo';
+  if (method === 'card') return 'Tarjeta';
+  if (method === 'wallet') return 'Monedero';
+  return 'App';
+}
+
+function PaymentMethodIcon({ method }: { method: PaymentMethod }) {
+  if (method === 'cash') return <Banknote className="w-4 h-4 text-green-600" />;
+  if (method === 'card') return <CreditCard className="w-4 h-4 text-[#E31E24]" />;
+  if (method === 'wallet') return <Wallet className="w-4 h-4 text-blue-600" />;
+  return <Smartphone className="w-4 h-4 text-blue-600" />;
+}
+
+function paymentMethodBadgeClass(method: PaymentMethod): string {
+  if (method === 'cash') return 'bg-green-50 text-green-700 border-green-100';
+  if (method === 'card') return 'bg-red-50 text-[#E31E24] border-red-100';
+  if (method === 'wallet') return 'bg-blue-50 text-blue-700 border-blue-100';
+  return 'bg-indigo-50 text-indigo-700 border-indigo-100';
+}
 
 function participantName(p: PaymentParticipant): string {
   const full = [p.first_name, p.last_name].filter(Boolean).join(' ').trim();
@@ -98,19 +126,65 @@ function mapStatus(status: string): PaymentStatus {
   return 'pending';
 }
 
+function paymentLocalYmd(dateIso: string): string {
+  const dt = new Date(dateIso);
+  if (Number.isNaN(dt.getTime())) return '';
+  return localDateYmd(dt);
+}
+
+function formatNavigatorDateLabel(ymd: string): string {
+  const d = new Date(`${ymd}T12:00:00`);
+  return d.toLocaleDateString('es-ES', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function shiftDateRange(from: string, to: string, days: number): { from: string; to: string } {
+  return { from: shiftDateYmd(from, days), to: shiftDateYmd(to, days) };
+}
+
+function paymentMatchesDateFilter(
+  payment: Payment,
+  mode: DateFilterMode,
+  selectedDate: string,
+  dateFrom: string,
+  dateTo: string,
+): boolean {
+  if (mode === 'all') return true;
+  const payYmd = paymentLocalYmd(payment.dateIso);
+  if (!payYmd) return false;
+  if (mode === 'day') return payYmd === selectedDate;
+  const from = dateFrom <= dateTo ? dateFrom : dateTo;
+  const to = dateFrom <= dateTo ? dateTo : dateFrom;
+  return payYmd >= from && payYmd <= to;
+}
+
 function toPayment(tx: PaymentTransaction): Payment {
   const dt = new Date(tx.created_at);
-  const bookingLabel = tx.booking_id ? `Reserva ${tx.booking_id.slice(0, 8)}` : 'Pago';
   const payerName = [tx.payer_first_name, tx.payer_last_name].filter(Boolean).join(' ').trim();
   const clientLabel = payerName || tx.payer_email || tx.club_name || 'Cliente';
+  const method = tx.payment_method ?? 'app';
+  const concept =
+    tx.concept
+    ?? (tx.source === 'store'
+      ? 'Tienda'
+      : tx.court_name
+        ? `Turno · ${tx.court_name}`
+        : tx.booking_id
+          ? `Reserva ${tx.booking_id.slice(0, 8)}`
+          : 'Pago');
   return {
     id: tx.id,
     dateIso: tx.created_at,
     dateLabel: Number.isNaN(dt.getTime()) ? '-' : dt.toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' }),
     time: Number.isNaN(dt.getTime()) ? '-' : dt.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }),
     client: clientLabel,
-    concept: bookingLabel,
-    method: tx.booking_id ? 'App' : 'TPV',
+    concept,
+    method,
+    source: tx.source ?? (tx.booking_id ? 'booking' : 'store'),
     amount: Math.round((tx.amount_cents ?? 0) / 100),
     status: mapStatus(tx.status),
     courtName: tx.court_name ?? undefined,
@@ -142,11 +216,19 @@ export function ClubPaymentsTab({
   clubResolved?: boolean;
 }) {
   const { t } = useTranslation();
+  const dateInputRef = useRef<HTMLInputElement>(null);
+  const todayYmd = localDateYmd();
   const [allPayments, setAllPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [clientFilter, setClientFilter] = useState('');
   const [filterMethod, setFilterMethod] = useState<'all' | PaymentMethod>('all');
-  const [filterDate, setFilterDate] = useState<'today' | 'all'>('today');
+  const [filterSource, setFilterSource] = useState<'all' | PaymentSource>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | PaymentStatus>('all');
+  const [dateMode, setDateMode] = useState<DateFilterMode>('day');
+  const [selectedDate, setSelectedDate] = useState(todayYmd);
+  const [dateFrom, setDateFrom] = useState(todayYmd);
+  const [dateTo, setDateTo] = useState(todayYmd);
   const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
@@ -155,7 +237,7 @@ export function ClubPaymentsTab({
     (async () => {
       setLoading(true);
       try {
-        const rows = await paymentsService.listClubTransactions(clubId, 100);
+        const rows = await paymentsService.listClubTransactions(clubId, 300);
         if (!mounted) return;
         setAllPayments(rows.map(toPayment));
       } catch (e) {
@@ -169,27 +251,120 @@ export function ClubPaymentsTab({
     return () => {
       mounted = false;
     };
-  }, [clubId]);
-  const todayKey = new Date().toDateString();
+  }, [clubId, t]);
 
-  const filteredPayments = allPayments.filter((payment) => {
-    const matchSearch =
-      payment.client.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      payment.concept.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      payment.id.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchMethod = filterMethod === 'all' || payment.method === filterMethod;
-    const matchDate = filterDate === 'all' || new Date(payment.dateIso).toDateString() === todayKey;
-    return matchSearch && matchMethod && matchDate;
-  });
+  const clientOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const p of allPayments) {
+      if (p.client.trim()) names.add(p.client.trim());
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  }, [allPayments]);
 
-  const todayPayments = allPayments.filter((p) => new Date(p.dateIso).toDateString() === todayKey);
-  const tpvTodayTotal = todayPayments.filter((p) => p.method === 'TPV' && p.status === 'completed').reduce((sum, p) => sum + p.amount, 0);
-  const appTodayTotal = todayPayments.filter((p) => p.method === 'App' && p.status === 'completed').reduce((sum, p) => sum + p.amount, 0);
-  const tpvMonthTotal = allPayments.filter((p) => p.method === 'TPV' && p.status === 'completed').reduce((sum, p) => sum + p.amount, 0);
-  const appMonthTotal = allPayments.filter((p) => p.method === 'App' && p.status === 'completed').reduce((sum, p) => sum + p.amount, 0);
-  const denominator = tpvMonthTotal + appMonthTotal || 1;
-  const tpvPct = Math.round((tpvMonthTotal / denominator) * 100);
-  const appPct = 100 - tpvPct;
+  const periodPayments = useMemo(
+    () => allPayments.filter((p) => paymentMatchesDateFilter(p, dateMode, selectedDate, dateFrom, dateTo)),
+    [allPayments, dateMode, selectedDate, dateFrom, dateTo],
+  );
+
+  const filteredPayments = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return periodPayments.filter((payment) => {
+      const matchSearch =
+        !q
+        || payment.client.toLowerCase().includes(q)
+        || payment.concept.toLowerCase().includes(q)
+        || payment.id.toLowerCase().includes(q)
+        || (payment.courtName?.toLowerCase().includes(q) ?? false);
+      const matchClient = !clientFilter || payment.client === clientFilter;
+      const matchMethod = filterMethod === 'all' || payment.method === filterMethod;
+      const matchSource = filterSource === 'all' || payment.source === filterSource;
+      const matchStatus = filterStatus === 'all' || payment.status === filterStatus;
+      return matchSearch && matchClient && matchMethod && matchSource && matchStatus;
+    });
+  }, [periodPayments, searchQuery, clientFilter, filterMethod, filterSource, filterStatus]);
+
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (filterMethod !== 'all') n += 1;
+    if (filterSource !== 'all') n += 1;
+    if (filterStatus !== 'all') n += 1;
+    if (clientFilter) n += 1;
+    if (dateMode === 'range' && (dateFrom !== todayYmd || dateTo !== todayYmd)) n += 1;
+    return n;
+  }, [filterMethod, filterSource, filterStatus, clientFilter, dateMode, dateFrom, dateTo, todayYmd]);
+
+  const completed = (p: Payment) => p.status === 'completed';
+  const cashPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'cash').reduce((sum, p) => sum + p.amount, 0);
+  const cardPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'card').reduce((sum, p) => sum + p.amount, 0);
+  const appPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'app').reduce((sum, p) => sum + p.amount, 0);
+  const walletPeriodTotal = periodPayments.filter((p) => completed(p) && p.method === 'wallet').reduce((sum, p) => sum + p.amount, 0);
+  const storePeriodTotal = periodPayments.filter((p) => completed(p) && p.source === 'store').reduce((sum, p) => sum + p.amount, 0);
+  const distributionTotal = cashPeriodTotal + cardPeriodTotal + appPeriodTotal + walletPeriodTotal || 1;
+  const cashPct = Math.round((cashPeriodTotal / distributionTotal) * 100);
+  const cardPct = Math.round((cardPeriodTotal / distributionTotal) * 100);
+  const appPct = Math.round((appPeriodTotal / distributionTotal) * 100);
+  const walletPct = Math.max(0, 100 - cashPct - cardPct - appPct);
+
+  const periodLabel = useMemo(() => {
+    if (dateMode === 'all') return 'Todos los registros';
+    if (dateMode === 'range') {
+      const from = dateFrom <= dateTo ? dateFrom : dateTo;
+      const to = dateFrom <= dateTo ? dateTo : dateFrom;
+      if (from === to) return formatNavigatorDateLabel(from);
+      return `${formatNavigatorDateLabel(from)} – ${formatNavigatorDateLabel(to)}`;
+    }
+    return formatNavigatorDateLabel(selectedDate);
+  }, [dateMode, selectedDate, dateFrom, dateTo]);
+
+  const isTodaySelected = dateMode === 'day' && selectedDate === todayYmd;
+  const isRangeSingleDay = dateMode === 'range' && dateFrom === dateTo;
+  const navigatorDateLabel =
+    dateMode === 'range' && !isRangeSingleDay
+      ? `${formatNavigatorDateLabel(dateFrom <= dateTo ? dateFrom : dateTo)} – ${formatNavigatorDateLabel(dateFrom <= dateTo ? dateTo : dateFrom)}`
+      : dateMode === 'day'
+        ? formatNavigatorDateLabel(selectedDate)
+        : dateMode === 'range'
+          ? formatNavigatorDateLabel(dateFrom)
+          : '—';
+
+  const clearFilters = () => {
+    setFilterMethod('all');
+    setFilterSource('all');
+    setFilterStatus('all');
+    setClientFilter('');
+    setSearchQuery('');
+  };
+
+  const handlePrevDay = () => {
+    if (dateMode === 'day') {
+      setSelectedDate((d) => shiftDateYmd(d, -1));
+      return;
+    }
+    if (dateMode === 'range') {
+      const next = shiftDateRange(dateFrom, dateTo, -1);
+      setDateFrom(next.from);
+      setDateTo(next.to);
+    }
+  };
+
+  const handleNextDay = () => {
+    if (dateMode === 'day') {
+      setSelectedDate((d) => shiftDateYmd(d, 1));
+      return;
+    }
+    if (dateMode === 'range') {
+      const next = shiftDateRange(dateFrom, dateTo, 1);
+      setDateFrom(next.from);
+      setDateTo(next.to);
+    }
+  };
+
+  const goToToday = () => {
+    setDateMode('day');
+    setSelectedDate(todayYmd);
+    setDateFrom(todayYmd);
+    setDateTo(todayYmd);
+  };
 
   const exportCsv = () => {
     if (!filteredPayments.length) {
@@ -227,17 +402,103 @@ export function ClubPaymentsTab({
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-bold text-[#1A1A1A]">{t('payments_title')}</h2>
-        <motion.button
-          whileTap={{ scale: 0.95 }}
-          onClick={exportCsv}
-          disabled={!filteredPayments.length}
-          className="flex items-center gap-1.5 px-3 py-2 border border-gray-100 rounded-xl text-[10px] font-bold text-[#1A1A1A] bg-white disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <Download className="w-3 h-3" />
-          {t('export')}
-        </motion.button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-bold text-[#1A1A1A]">{t('payments_title')}</h2>
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            {filteredPayments.length} / {periodPayments.length} · {periodLabel}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+            <button
+              type="button"
+              onClick={handlePrevDay}
+              disabled={dateMode === 'all'}
+              className="px-2.5 py-2 text-gray-400 hover:bg-gray-50 border-r border-gray-200 disabled:opacity-30"
+              aria-label="Día anterior"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (dateMode === 'all') {
+                  setDateMode('day');
+                  setSelectedDate(todayYmd);
+                }
+                try {
+                  dateInputRef.current?.showPicker();
+                } catch {
+                  dateInputRef.current?.focus();
+                }
+              }}
+              className="px-3 py-2 flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-[120px] justify-center hover:bg-gray-50"
+            >
+              {navigatorDateLabel}
+              <Calendar className="w-3.5 h-3.5 text-gray-400" />
+            </button>
+            <input
+              ref={dateInputRef}
+              type="date"
+              className="sr-only"
+              value={dateMode === 'day' ? selectedDate : dateFrom}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (!value) return;
+                if (dateMode === 'range') {
+                  setDateFrom(value);
+                  setDateTo(value);
+                  return;
+                }
+                setDateMode('day');
+                setSelectedDate(value);
+                setDateFrom(value);
+                setDateTo(value);
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleNextDay}
+              disabled={dateMode === 'all'}
+              className="px-2.5 py-2 text-gray-400 hover:bg-gray-50 border-l border-gray-200 disabled:opacity-30"
+              aria-label="Día siguiente"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={goToToday}
+            className={`px-3 py-2 rounded-xl text-[10px] font-bold border transition-all ${
+              isTodaySelected
+                ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
+                : 'bg-white text-[#1A1A1A] border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            {t('today')}
+          </button>
+          <button
+            type="button"
+            onClick={() => setDateMode((m) => (m === 'all' ? 'day' : 'all'))}
+            className={`px-3 py-2 rounded-xl text-[10px] font-bold border transition-all ${
+              dateMode === 'all'
+                ? 'bg-[#1A1A1A] text-white border-[#1A1A1A]'
+                : 'bg-white text-[#1A1A1A] border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            {t('all')}
+          </button>
+          <motion.button
+            whileTap={{ scale: 0.95 }}
+            onClick={exportCsv}
+            disabled={!filteredPayments.length}
+            className="flex items-center gap-1.5 px-3 py-2 border border-gray-100 rounded-xl text-[10px] font-bold text-[#1A1A1A] bg-white disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3 h-3" />
+            {t('export')}
+          </motion.button>
+        </div>
       </div>
 
       <AnimSection>
@@ -245,14 +506,16 @@ export function ClubPaymentsTab({
           <div className="relative z-10 p-5">
             <div className="flex items-center gap-2 mb-4">
               <PulseDot color="#22C55E" />
-              <span className="text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">{t('payments_financial_summary')}</span>
+              <span className="text-[10px] font-bold text-white/30 uppercase tracking-[0.2em]">
+                {dateMode === 'all' ? t('payments_financial_summary') : `Resumen · ${periodLabel}`}
+              </span>
             </div>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: t('payments_tpv_today'), value: `EUR ${tpvTodayTotal}`, icon: <CreditCard className="w-4 h-4" />, color: '#E31E24', sub: t('payments_physical') },
-                { label: t('payments_app_today'), value: `EUR ${appTodayTotal}`, icon: <Smartphone className="w-4 h-4" />, color: '#5B8DEE', sub: t('payments_digital') },
-                { label: t('payments_tpv_month'), value: `EUR ${tpvMonthTotal}`, icon: <TrendingUp className="w-4 h-4" />, color: '#22C55E', sub: '+12%' },
-                { label: t('payments_app_month'), value: `EUR ${appMonthTotal}`, icon: <TrendingUp className="w-4 h-4" />, color: '#8B5CF6', sub: '+18%' },
+                { label: 'Efectivo', value: `EUR ${cashPeriodTotal}`, icon: <Banknote className="w-4 h-4" />, color: '#22C55E', sub: 'Mostrador' },
+                { label: 'Tarjeta', value: `EUR ${cardPeriodTotal}`, icon: <CreditCard className="w-4 h-4" />, color: '#E31E24', sub: 'Mostrador' },
+                { label: 'App', value: `EUR ${appPeriodTotal}`, icon: <Smartphone className="w-4 h-4" />, color: '#5B8DEE', sub: t('payments_digital') },
+                { label: 'Tienda', value: `EUR ${storePeriodTotal}`, icon: <DollarSign className="w-4 h-4" />, color: '#8B5CF6', sub: 'Carrito' },
               ].map((stat, i) => (
                 <motion.div
                   key={stat.label}
@@ -278,11 +541,14 @@ export function ClubPaymentsTab({
 
       <AnimSection delay={0.05}>
         <div className="bg-white rounded-2xl border border-gray-100 p-5">
-          <h3 className="text-xs font-bold text-[#1A1A1A] mb-4">{t('payments_distribution')}</h3>
+          <h3 className="text-xs font-bold text-[#1A1A1A] mb-1">{t('payments_distribution')}</h3>
+          <p className="text-[10px] text-gray-400 mb-4">{periodLabel}</p>
           <div className="space-y-3">
             {[
-              { label: t('payments_tpv_physical'), icon: <CreditCard className="w-4 h-4 text-[#E31E24]" />, total: tpvMonthTotal, pct: tpvPct, color: '#E31E24' },
-              { label: t('payments_from_app'), icon: <Smartphone className="w-4 h-4 text-blue-600" />, total: appMonthTotal, pct: appPct, color: '#5B8DEE' },
+              { label: 'Efectivo', icon: <Banknote className="w-4 h-4 text-green-600" />, total: cashPeriodTotal, pct: cashPct, color: '#22C55E' },
+              { label: 'Tarjeta (mostrador)', icon: <CreditCard className="w-4 h-4 text-[#E31E24]" />, total: cardPeriodTotal, pct: cardPct, color: '#E31E24' },
+              { label: t('payments_from_app'), icon: <Smartphone className="w-4 h-4 text-blue-600" />, total: appPeriodTotal, pct: appPct, color: '#5B8DEE' },
+              { label: 'Monedero', icon: <Wallet className="w-4 h-4 text-blue-600" />, total: walletPeriodTotal, pct: walletPct, color: '#8B5CF6' },
             ].map((method) => (
               <div key={method.label}>
                 <div className="flex items-center justify-between mb-1.5">
@@ -310,7 +576,7 @@ export function ClubPaymentsTab({
       </AnimSection>
 
       <AnimSection delay={0.1}>
-        <div className="bg-white rounded-2xl border border-gray-100 p-4">
+        <div className="bg-white rounded-2xl border border-gray-100 p-4 space-y-3">
           <div className="flex gap-2">
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-300" />
@@ -322,40 +588,127 @@ export function ClubPaymentsTab({
                 className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-100 rounded-2xl text-xs text-[#1A1A1A] placeholder-gray-300 focus:ring-2 focus:ring-[#E31E24]/30"
               />
             </div>
-            <button onClick={() => setShowFilters((v) => !v)} className="flex items-center gap-1.5 px-3 py-2.5 border border-gray-100 rounded-2xl text-xs font-bold text-[#1A1A1A]">
+            <button
+              type="button"
+              onClick={() => setShowFilters((v) => !v)}
+              className={`relative flex items-center gap-1.5 px-3 py-2.5 border rounded-2xl text-xs font-bold ${
+                showFilters || activeFilterCount > 0
+                  ? 'border-[#1A1A1A] text-[#1A1A1A] bg-gray-50'
+                  : 'border-gray-100 text-[#1A1A1A]'
+              }`}
+            >
               <Filter className="w-3.5 h-3.5" />
               <ChevronDown className={`w-3 h-3 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+              {activeFilterCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-[#1A1A1A] text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                  {activeFilterCount}
+                </span>
+              )}
             </button>
           </div>
           {showFilters && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mt-3 pt-3 border-t border-gray-50">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="pt-3 border-t border-gray-50 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
-                  <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">{t('payments_method')}</label>
-                  <div className="flex gap-1.5">
-                    {(['all', 'TPV', 'App'] as const).map((method) => (
-                      <button
-                        key={method}
-                        onClick={() => setFilterMethod(method)}
-                        className={`flex-1 px-3 py-2 rounded-xl text-[10px] font-bold transition-all ${filterMethod === method ? 'bg-[#1A1A1A] text-white' : 'bg-gray-50 text-[#1A1A1A]'}`}
-                      >
-                        {method === 'all' ? t('all') : method}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">{t('date')}</label>
+                  <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Cliente</label>
                   <select
-                    value={filterDate}
-                    onChange={(e) => setFilterDate(e.target.value as 'today' | 'all')}
+                    value={clientFilter}
+                    onChange={(e) => setClientFilter(e.target.value)}
                     className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs text-[#1A1A1A]"
                   >
-                    <option value="today">{t('today')}</option>
+                    <option value="">Todos los clientes</option>
+                    {clientOptions.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Origen</label>
+                  <select
+                    value={filterSource}
+                    onChange={(e) => setFilterSource(e.target.value as 'all' | PaymentSource)}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs text-[#1A1A1A]"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="booking">Turnos / reservas</option>
+                    <option value="store">Tienda / carrito</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Estado</label>
+                  <select
+                    value={filterStatus}
+                    onChange={(e) => setFilterStatus(e.target.value as 'all' | PaymentStatus)}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs text-[#1A1A1A]"
+                  >
+                    <option value="all">Todos</option>
+                    <option value="completed">Completado</option>
+                    <option value="pending">Pendiente</option>
+                    <option value="refunded">Reembolso</option>
+                    <option value="failed">Fallido</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">{t('payments_method')}</label>
+                  <select
+                    value={filterMethod}
+                    onChange={(e) => setFilterMethod(e.target.value as 'all' | PaymentMethod)}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs text-[#1A1A1A]"
+                  >
                     <option value="all">{t('all')}</option>
+                    <option value="cash">Efectivo</option>
+                    <option value="card">Tarjeta</option>
+                    <option value="wallet">Monedero</option>
+                    <option value="app">App</option>
                   </select>
                 </div>
               </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Periodo</label>
+                  <select
+                    value={dateMode}
+                    onChange={(e) => setDateMode(e.target.value as DateFilterMode)}
+                    className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs text-[#1A1A1A]"
+                  >
+                    <option value="day">Un día</option>
+                    <option value="range">Rango de fechas</option>
+                    <option value="all">Todo el historial cargado</option>
+                  </select>
+                </div>
+                {dateMode === 'range' && (
+                  <>
+                    <div>
+                      <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Desde</label>
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => e.target.value && setDateFrom(e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs text-[#1A1A1A]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5 block">Hasta</label>
+                      <input
+                        type="date"
+                        value={dateTo}
+                        onChange={(e) => e.target.value && setDateTo(e.target.value)}
+                        className="w-full px-3 py-2 bg-gray-50 border border-gray-100 rounded-xl text-xs text-[#1A1A1A]"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+              {activeFilterCount > 0 && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="inline-flex items-center gap-1 text-[10px] font-bold text-gray-500 hover:text-[#1A1A1A]"
+                >
+                  <X className="w-3 h-3" />
+                  Limpiar filtros
+                </button>
+              )}
             </motion.div>
           )}
         </div>
@@ -371,16 +724,22 @@ export function ClubPaymentsTab({
             filteredPayments.map((payment) => (
               <div key={payment.id} className="bg-white rounded-2xl border border-gray-100 px-4 py-3.5">
                 <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${payment.method === 'TPV' ? 'bg-[#E31E24]/10' : 'bg-blue-50'}`}>
-                    {payment.method === 'TPV' ? <CreditCard className="w-4 h-4 text-[#E31E24]" /> : <Smartphone className="w-4 h-4 text-blue-600" />}
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${paymentMethodBadgeClass(payment.method)}`}>
+                    <PaymentMethodIcon method={payment.method} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-0.5">
                       <p className="text-xs font-bold text-[#1A1A1A] truncate">{payment.client}</p>
                       <p className="text-xs font-black text-[#1A1A1A]">EUR {payment.amount}</p>
                     </div>
-                    <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                    <div className="flex items-center gap-2 text-[10px] text-gray-400 flex-wrap">
                       <span>{payment.concept}</span>
+                      <span className={`px-1.5 py-0.5 rounded-md border text-[9px] font-bold ${paymentMethodBadgeClass(payment.method)}`}>
+                        {paymentMethodLabel(payment.method)}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded-md border border-gray-100 bg-gray-50 text-[9px] font-bold text-gray-500">
+                        {payment.source === 'store' ? 'Tienda' : 'Turno'}
+                      </span>
                       {payment.courtName && <span>• {payment.courtName}</span>}
                       <span>• {payment.time}</span>
                     </div>
