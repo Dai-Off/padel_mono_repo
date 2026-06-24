@@ -30,6 +30,7 @@ function parsePreferredSlotFromMeta(meta: Record<string, string | undefined>): n
   return Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
 }
 import { zonedTimeToUtc } from './learningTimezone';
+import { buildStoreSalesForCashClosing, listClubStorePaymentEntries, paymentMethodFromStripeRef, type ClubPaymentLedgerEntry } from '../lib/inventorySale';
 import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import {
@@ -1700,7 +1701,12 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
       }
     }
 
-    const transactions = (rows ?? []).map((t: Record<string, unknown>) => {
+    const transactions = (rows ?? [])
+      .filter((t: Record<string, unknown>) => {
+        const stripeRef = String(t.stripe_payment_intent_id ?? '');
+        return !stripeRef.startsWith('STORE_SALE_');
+      })
+      .map((t: Record<string, unknown>) => {
       const rawB = t.bookings;
       const b = (Array.isArray(rawB) ? rawB[0] : rawB) as Record<string, unknown> | null;
       const rawCourt = b?.courts;
@@ -1710,6 +1716,15 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
       const rawPayer = t.players;
       const payer = (Array.isArray(rawPayer) ? rawPayer[0] : rawPayer) as Record<string, unknown> | null;
       const bid = typeof t.booking_id === 'string' ? t.booking_id : null;
+      const stripeRef = String(t.stripe_payment_intent_id ?? '');
+      const paymentMethod = paymentMethodFromStripeRef(stripeRef);
+      const courtName = court?.name ? String(court.name) : null;
+      const startAt = (b?.start_at as string | null) ?? null;
+      const concept = courtName && startAt
+        ? `Turno · ${courtName}`
+        : bid
+          ? `Reserva ${bid.slice(0, 8)}`
+          : 'Pago';
       return {
         id: t.id,
         amount_cents: t.amount_cents,
@@ -1717,19 +1732,28 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
         status: t.status,
         created_at: t.created_at,
         booking_id: t.booking_id,
-        start_at: b?.start_at ?? null,
+        start_at: startAt,
         end_at: b?.end_at ?? null,
-        court_name: court?.name ?? null,
+        court_name: courtName,
         club_name: club?.name ?? null,
         city: club?.city ?? null,
         payer_first_name: payer?.first_name ?? null,
         payer_last_name: payer?.last_name ?? null,
         payer_email: payer?.email ?? null,
+        payer_player_id: t.payer_player_id ?? null,
+        concept,
+        source: 'booking' as const,
+        payment_method: paymentMethod,
         participants: bid ? participantsByBooking.get(bid) ?? [] : [],
       };
     });
 
-    res.json({ ok: true, transactions });
+    const storeEntries = await listClubStorePaymentEntries(supabase, clubId, limit);
+    const merged: ClubPaymentLedgerEntry[] = [...transactions, ...storeEntries]
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+      .slice(0, limit);
+
+    res.json({ ok: true, transactions: merged });
   } catch (err) {
     console.error('[payments/club-transactions]', err);
     res.status(500).json({ ok: false, error: (err as Error).message });
@@ -1934,8 +1958,6 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
     const byBooking = new Map<string, BookingExpected>();
     let systemCashTotalCents = 0;
     let systemCardTotalCents = 0;
-    let storeSalesCashCents = 0;
-    let storeSalesCardCents = 0;
 
     const closingCutoffMs = lastClosedAtIso ? new Date(lastClosedAtIso).getTime() : null;
     const filteredRows = ((rows ?? []) as Record<string, unknown>[]).filter((row) => {
@@ -1959,21 +1981,15 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       const court = (Array.isArray(rawCourts) ? rawCourts[0] : rawCourts) as Record<string, unknown> | null;
 
       const stripeRef = r.stripe_payment_intent_id as string | null;
-      const txStatus = String((r as { status?: string }).status ?? '');
       const isStoreSaleTx = typeof stripeRef === 'string' && stripeRef.startsWith('STORE_SALE_');
-      if (isStoreSaleTx && txStatus === 'refunded') continue;
+      if (isStoreSaleTx) continue;
+
       const sourceChannel = (b.source_channel as string | null) ?? null;
       const isCash =
         (typeof stripeRef === 'string' && stripeRef.startsWith('CASH_')) ||
-        (typeof stripeRef === 'string' && stripeRef.startsWith('STORE_SALE_cash_')) ||
         sourceChannel === 'manual';
 
       const amount = typeof r.amount_cents === 'number' ? r.amount_cents : 0;
-      if (isStoreSaleTx) {
-        if (isCash) storeSalesCashCents += amount;
-        else storeSalesCardCents += amount;
-        continue;
-      }
 
       const cur = byBooking.get(bookingId) ?? {
         booking_id: bookingId,
@@ -1996,61 +2012,15 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       systemCardTotalCents += b.card_paid_cents;
     }
 
-    const storeSaleLines: Array<{
-      movement_id: string;
-      sale_id: string;
-      name: string;
-      payment_method: string;
-      amount_cents: number;
-      movement_at: string | null;
-      booking_id: string | null;
-      player_id: string | null;
-    }> = [];
-
-    const { data: inventorySaleMovements, error: saleMovementsErr } = await supabase
-      .from('inventory_movements')
-      .select('id, reason, movement_at, created_at')
-      .eq('club_id', clubId)
-      .eq('movement_type', 'out')
-      .gte('movement_at', startUtc.toISOString())
-      .lt('movement_at', endUtc.toISOString())
-      .limit(2000);
-    if (!saleMovementsErr && Array.isArray(inventorySaleMovements)) {
-      for (const movement of inventorySaleMovements) {
-        const reason = typeof (movement as any).reason === 'string' ? (movement as any).reason : '';
-        if (!reason.startsWith('SALE|') || reason.startsWith('VOID|')) continue;
-        const movementAtSource = (movement as any).movement_at ?? (movement as any).created_at;
-        if (closingCutoffMs != null && typeof movementAtSource === 'string') {
-          const movementMs = new Date(movementAtSource).getTime();
-          if (Number.isFinite(movementMs) && movementMs <= closingCutoffMs) continue;
-        }
-        const parts = reason.split('|');
-        const saleId = String(parts[1] ?? '');
-        const method = String(parts[2] ?? '');
-        const amountCents = Number(parts[3] ?? 0);
-        if (!Number.isFinite(amountCents) || amountCents <= 0) continue;
-        const name = String(parts[4] ?? 'Producto').replace(/\|/g, ' ');
-        let bookingId: string | null = null;
-        let playerId: string | null = null;
-        for (const extra of parts.slice(5)) {
-          if (extra.startsWith('booking:')) bookingId = extra.slice('booking:'.length) || null;
-          if (extra.startsWith('player:')) playerId = extra.slice('player:'.length) || null;
-        }
-        const normalizedMethod = method.includes('cash') ? 'cash' : method.includes('card') ? 'card' : method.includes('wallet') ? 'wallet' : method;
-        if (normalizedMethod === 'cash') storeSalesCashCents += Math.trunc(amountCents);
-        if (normalizedMethod === 'card') storeSalesCardCents += Math.trunc(amountCents);
-        storeSaleLines.push({
-          movement_id: String((movement as any).id ?? ''),
-          sale_id: saleId,
-          name,
-          payment_method: normalizedMethod,
-          amount_cents: Math.trunc(amountCents),
-          movement_at: typeof movementAtSource === 'string' ? movementAtSource : null,
-          booking_id: bookingId && bookingId !== 'none' ? bookingId : null,
-          player_id: playerId || null,
-        });
-      }
-    }
+    const storeSales = await buildStoreSalesForCashClosing(supabase, {
+      clubId,
+      startUtc,
+      endUtc,
+      closingCutoffMs,
+    });
+    const storeSalesCashCents = storeSales.cashCents;
+    const storeSalesCardCents = storeSales.cardCents;
+    const storeSaleLines = storeSales.lines;
 
     systemCashTotalCents += storeSalesCashCents;
     systemCardTotalCents += storeSalesCardCents;
@@ -2141,7 +2111,7 @@ export async function cashClosingExpectedHandler(req: Request, res: Response): P
       openings: openingsForDay,
       cash_movements: cashMovements,
       bookings: Array.from(byBooking.values()).sort((a, b) => (a.start_at ?? '').localeCompare(b.start_at ?? '')),
-      store_sale_lines: storeSaleLines.sort((a, b) => (a.movement_at ?? '').localeCompare(b.movement_at ?? '')),
+      store_sale_lines: storeSaleLines,
     });
   } catch (err) {
     console.error('[payments/cash-closing/expected]', err);
