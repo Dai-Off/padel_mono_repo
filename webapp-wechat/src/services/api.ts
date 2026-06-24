@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '../lib/supabase';
+import { SESSION_EXPIRED_KEY, SESSION_STORAGE_KEY } from '../lib/session';
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE || 'http://localhost:3000').replace(/\/$/, '');
 
@@ -26,7 +27,7 @@ type StoredSession = {
 
 function getStoredSession(): StoredSession | null {
     try {
-        const raw = localStorage.getItem('padel_session');
+        const raw = localStorage.getItem(SESSION_STORAGE_KEY);
         if (!raw) return null;
         const session = JSON.parse(raw);
         if (!session || typeof session.access_token !== 'string') return null;
@@ -37,7 +38,7 @@ function getStoredSession(): StoredSession | null {
 }
 
 function saveStoredSession(session: StoredSession): void {
-    localStorage.setItem('padel_session', JSON.stringify(session));
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
 }
 
 function isTokenExpiringSoon(expiresAt?: number): boolean {
@@ -109,8 +110,8 @@ export async function apiFetchWithAuth<T>(path: string, options: RequestInit = {
 
     if (!response.ok) {
         if (response.status === 401 && session?.access_token) {
-            try { localStorage.removeItem('padel_session'); } catch { /* ignore */ }
-            sessionStorage.setItem('padel_session_expired', '1');
+            try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
+            sessionStorage.setItem(SESSION_EXPIRED_KEY, '1');
             window.location.assign('/login');
         }
         const errorData = await response.json().catch(() => ({ message: response.statusText }));

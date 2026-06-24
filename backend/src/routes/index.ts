@@ -49,6 +49,7 @@ import clubPortalRouter from "./clubPortal";
 import classBonosRouter from "./classBonos";
 import clubPlayerSegmentsRouter from "./clubPlayerSegments";
 import clubSportsRouter from "./clubSports";
+import mobileAdminRouter from "./mobileAdmin";
 
 
 const router = Router();
@@ -110,6 +111,7 @@ router.use("/club-portal", clubPortalRouter);
 router.use("/class-bonos", classBonosRouter);
 router.use("/club-player-segments", clubPlayerSegmentsRouter);
 router.use("/club-sports", clubSportsRouter);
+router.use("/mobile-admin", mobileAdminRouter);
 
 
 export default router;

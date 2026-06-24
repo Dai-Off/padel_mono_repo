@@ -20,9 +20,10 @@ export interface AuthResponse {
     error?: string;
 }
 
-export interface MeResponse {
+/** Respuesta de verificación de sesión del panel de administración. */
+export interface MobileAdminMeResponse {
     ok: boolean;
     user: User;
-    roles: { player_id?: string; club_owner_id?: string; admin_id?: string };
+    roles: { mobile_admin_id?: string };
     error?: string;
 }

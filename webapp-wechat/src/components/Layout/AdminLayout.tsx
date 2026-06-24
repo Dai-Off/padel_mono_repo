@@ -1,14 +1,22 @@
-import { useEffect, useState } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
-import { LogOut, Smartphone } from 'lucide-react';
+import { useEffect, useState, useCallback } from 'react';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { authService } from '../../services/auth';
 import { HttpError } from '../../services/api';
-import { getApiBase } from '../../services/api';
+import { isFixedListPath, pageMainY } from '../../lib/layout';
+import { PageLoader } from '../ui/PageLoader';
+import { Sidebar } from './Sidebar';
+import { AdminHeader } from './AdminHeader';
 
 export function AdminLayout() {
     const navigate = useNavigate();
+    const { pathname } = useLocation();
+    const fixedListPage = isFixedListPath(pathname);
     const [userEmail, setUserEmail] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+
+    const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+    const openSidebar = useCallback(() => setSidebarOpen(true), []);
 
     useEffect(() => {
         let cancelled = false;
@@ -20,7 +28,7 @@ export function AdminLayout() {
             }
             try {
                 const me = await authService.getMe();
-                if (!me.ok || !me.roles?.admin_id) {
+                if (!me.ok || !me.roles?.mobile_admin_id) {
                     authService.logout();
                     navigate('/login', { replace: true });
                     return;
@@ -39,6 +47,21 @@ export function AdminLayout() {
         return () => { cancelled = true; };
     }, [navigate]);
 
+    useEffect(() => {
+        if (!sidebarOpen) return;
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => { document.body.style.overflow = prev; };
+    }, [sidebarOpen]);
+
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') closeSidebar();
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [closeSidebar]);
+
     const handleLogout = () => {
         authService.logout();
         navigate('/login', { replace: true });
@@ -46,38 +69,41 @@ export function AdminLayout() {
 
     if (loading) {
         return (
-            <div className="flex min-h-screen items-center justify-center">
-                <div className="h-8 w-8 animate-spin rounded-full border-2 border-portal-header border-t-transparent" />
+            <div className="flex h-[100dvh] min-h-[100dvh] items-center justify-center overflow-hidden bg-auth-bg">
+                <PageLoader />
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-background">
-            <header className="border-b border-border-subtle bg-portal-header text-white">
-                <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-                    <div className="flex items-center gap-2">
-                        <Smartphone className="h-5 w-5" />
-                        <span className="font-semibold">
-                            {import.meta.env.VITE_APP_NAME || 'WeMatch Admin Mobile'}
-                        </span>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <span className="hidden text-sm opacity-90 sm:inline">{userEmail}</span>
-                        <button
-                            type="button"
-                            onClick={handleLogout}
-                            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm hover:bg-white/10"
-                        >
-                            <LogOut className="h-4 w-4" />
-                            Salir
-                        </button>
-                    </div>
-                </div>
-            </header>
-            <main className="mx-auto max-w-6xl px-4 py-8">
-                <Outlet context={{ apiBase: getApiBase() }} />
-            </main>
+        <div
+            className={`flex bg-auth-bg text-auth-text ${
+                fixedListPage ? 'h-[100dvh] min-h-[100dvh] overflow-hidden' : 'min-h-screen-safe'
+            }`}
+        >
+            <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
+
+            <div className={`flex min-w-0 flex-1 flex-col ${fixedListPage ? 'min-h-0 overflow-hidden' : ''}`}>
+                <AdminHeader
+                    userEmail={userEmail}
+                    onMenuOpen={openSidebar}
+                    onLogout={handleLogout}
+                />
+
+                <main
+                    className={`w-full flex-1 px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:px-6 lg:px-8 xl:px-10 2xl:px-12 pb-safe ${
+                        fixedListPage ? 'flex min-h-0 flex-col overflow-hidden pt-4 sm:pt-5' : pageMainY
+                    }`}
+                >
+                    {fixedListPage ? (
+                        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                            <Outlet context={{ userEmail }} />
+                        </div>
+                    ) : (
+                        <Outlet context={{ userEmail }} />
+                    )}
+                </main>
+            </div>
         </div>
     );
 }
