@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader } from './AppHeader';
 import { HamburgerButton } from './HamburgerButton';
 import { NavbarActions, type NavbarActionsCallbacks } from './NavbarActions';
+import { useTranslation } from '../../i18n';
 
 /** Control del menú lateral (estado vive en MainApp para cubrir también la navbar inferior). */
 export type ScreenLayoutSidebar = {
@@ -30,11 +31,19 @@ export function ScreenLayout({
   layoutBackgroundColor = '#fff',
   navbarActions,
 }: ScreenLayoutProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
   const header = customHeader ?? (
     <AppHeader
-      leftSlot={<HamburgerButton onPress={sidebar.toggle} color="#fff" size={22} />}
+      leftSlot={
+        <HamburgerButton
+          onPress={sidebar.toggle}
+          color="#fff"
+          size={22}
+          accessibilityLabel={t('nav.openMenu')}
+        />
+      }
       rightSlot={<NavbarActions {...navbarActions} />}
     />
   );

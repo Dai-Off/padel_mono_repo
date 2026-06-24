@@ -18,6 +18,17 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { PublicCourse, enrollInCourse } from "../../api/schoolCourses";
 import { useAuth } from "../../contexts/AuthContext";
+import { useTranslation } from "../../i18n";
+
+const WEEKDAY_KEYS: Record<string, string> = {
+  mon: "common.weekdayMon",
+  tue: "common.weekdayTue",
+  wed: "common.weekdayWed",
+  thu: "common.weekdayThu",
+  fri: "common.weekdayFri",
+  sat: "common.weekdaySat",
+  sun: "common.weekdaySun",
+};
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -36,6 +47,7 @@ export function PublicCourseBookingSuccessModal({
   onEnrollSuccess,
   course,
 }: Props) {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const [shouldRender, setShouldRender] = useState(visible);
   const [step, setStep] = useState<ModalState>("loading");
@@ -46,7 +58,7 @@ export function PublicCourseBookingSuccessModal({
 
   const handleEnroll = async () => {
     if (!session?.access_token) {
-      setErrorMsg("Debes iniciar sesión para inscribirte");
+      setErrorMsg(t("learning.schoolEnrollLogin"));
       setStep("error");
       return;
     }
@@ -57,11 +69,11 @@ export function PublicCourseBookingSuccessModal({
         setStep("success");
         Vibration.vibrate(Platform.OS === "ios" ? [0, 10, 10, 10] : 100);
       } else {
-        setErrorMsg(res.error || "No se pudo completar la reserva");
+        setErrorMsg(res.error || t("learning.schoolEnrollError"));
         setStep("error");
       }
     } catch (err: any) {
-      setErrorMsg(err.message || "Error de conexión");
+      setErrorMsg(err.message || t("learning.schoolEnrollConnectionError"));
       setStep("error");
     }
   };
@@ -90,23 +102,14 @@ export function PublicCourseBookingSuccessModal({
 
   // Formateo básico de fecha tomando el primer día disponible
   const firstDay = course.days[0];
-  const weekdayNames: Record<string, string> = {
-    mon: "LUNES",
-    tue: "MARTES",
-    wed: "MIÉRCOLES",
-    thu: "JUEVES",
-    fri: "VIERNES",
-    sat: "SÁBADO",
-    sun: "DOMINGO",
-  };
 
   const dateTimeStr = firstDay
-    ? `${weekdayNames[firstDay.weekday]} · ${firstDay.start_time}`
-    : "Próximamente";
+    ? `${t(WEEKDAY_KEYS[firstDay.weekday] ?? firstDay.weekday).toUpperCase()} · ${firstDay.start_time}`
+    : t("learning.schoolComingSoon");
 
   const durationStr = firstDay
-    ? calculateDuration(firstDay.start_time, firstDay.end_time)
-    : "60 min";
+    ? calculateDuration(firstDay.start_time, firstDay.end_time, t)
+    : t("common.durationMin", { minutes: 60 });
 
   useEffect(() => {
     if (visible) {
@@ -220,21 +223,21 @@ export function PublicCourseBookingSuccessModal({
 
               <Text style={styles.title}>
                 {step === "loading"
-                  ? "Procesando..."
+                  ? t("learning.schoolProcessing")
                   : step === "success"
-                  ? "¡Reserva Confirmada!"
+                  ? t("learning.schoolBookingConfirmed")
                   : step === "error"
-                  ? "Hubo un problema"
-                  : "¿Confirmar Reserva?"}
+                  ? t("learning.schoolProblem")
+                  : t("learning.schoolConfirmBooking")}
               </Text>
               <Text style={styles.subtitle}>
                 {step === "loading"
-                  ? "Estamos asegurando tu plaza en la clase"
+                  ? t("learning.schoolProcessingSub")
                   : step === "success"
-                  ? "Tu plaza ha sido reservada con éxito"
+                  ? t("learning.schoolBookingSuccessSub")
                   : step === "error"
-                  ? errorMsg || "No pudimos completar la operación"
-                  : "Revisa los detalles antes de apuntarte"}
+                  ? errorMsg || t("learning.schoolOperationFailed")
+                  : t("learning.schoolConfirmReviewSub")}
               </Text>
             </View>
 
@@ -243,7 +246,7 @@ export function PublicCourseBookingSuccessModal({
               <View style={styles.badgeContainer}>
                 <View style={styles.badge}>
                   <Text style={styles.badgeEmoji}>🎯</Text>
-                  <Text style={styles.badgeText}>Clase suelta</Text>
+                  <Text style={styles.badgeText}>{t("learning.schoolSingleClass")}</Text>
                 </View>
               </View>
 
@@ -252,27 +255,27 @@ export function PublicCourseBookingSuccessModal({
               <View style={styles.detailsGrid}>
                 <DetailRow
                   icon="calendar-outline"
-                  label="Fecha y hora"
+                  label={t("learning.schoolDateTimeLabel")}
                   value={dateTimeStr}
                 />
                 <DetailRow
                   icon="time-outline"
-                  label="Duración"
+                  label={t("learning.schoolDurationLabel")}
                   value={durationStr}
                 />
                 <DetailRow
                   icon="location-outline"
-                  label="Club"
+                  label={t("learning.schoolClubLabel")}
                   value={course.club_name}
                 />
                 <DetailRow
                   icon="people-outline"
-                  label="Asistentes"
+                  label={t("learning.schoolAttendeesLabel")}
                   value={`${course.enrolled_count}/${course.capacity}`}
                 />
                 <DetailRow
                   icon="cash-outline"
-                  label="Precio"
+                  label={t("learning.schoolPriceLabel")}
                   value={priceFormatted}
                 />
               </View>
@@ -280,7 +283,7 @@ export function PublicCourseBookingSuccessModal({
               {step === "success" && (
                 <View style={styles.emailNote}>
                   <Text style={styles.emailNoteText}>
-                    📧 Recibirás un email de confirmación en breve
+                    {t("learning.schoolEmailNote")}
                   </Text>
                 </View>
               )}
@@ -291,7 +294,7 @@ export function PublicCourseBookingSuccessModal({
           <View style={styles.footer}>
             {step === "loading" ? (
               <View style={[styles.doneButton, { opacity: 0.7 }]}>
-                <Text style={styles.doneButtonText}>Inscribiendo...</Text>
+                <Text style={styles.doneButtonText}>{t("learning.schoolEnrolling")}</Text>
               </View>
             ) : (
               <TouchableOpacity
@@ -299,7 +302,7 @@ export function PublicCourseBookingSuccessModal({
                 onPress={handleDone}
               >
                 <Text style={styles.doneButtonText}>
-                  {step === "error" ? "Cerrar" : "Entendido"}
+                  {step === "error" ? t("common.close") : t("common.understood")}
                 </Text>
               </TouchableOpacity>
             )}
@@ -332,14 +335,18 @@ function DetailRow({
   );
 }
 
-function calculateDuration(start: string, end: string): string {
+function calculateDuration(
+  start: string,
+  end: string,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
   try {
     const [sH, sM] = start.split(":").map(Number);
     const [eH, eM] = end.split(":").map(Number);
     const totalMin = eH * 60 + eM - (sH * 60 + sM);
-    return `${totalMin} min`;
+    return t("common.durationMin", { minutes: totalMin });
   } catch {
-    return "60 min";
+    return t("common.durationMin", { minutes: 60 });
   }
 }
 

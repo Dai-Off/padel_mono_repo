@@ -51,11 +51,20 @@ export async function syncMatchPlayersFromBooking(
   }
 }
 
+export type OpenMatchSyncOpts = {
+  elo_min?: number | null;
+  elo_max?: number | null;
+};
+
 /**
  * Reservas `open_match` creadas solo con POST /bookings necesitan fila en `matches` + jugadores para la app.
  * Idempotente: si ya existe `matches` para el booking, solo sincroniza `match_players`.
  */
-export async function ensureOpenMatchRecordForBooking(supabase: SupabaseClient, bookingId: string): Promise<void> {
+export async function ensureOpenMatchRecordForBooking(
+  supabase: SupabaseClient,
+  bookingId: string,
+  opts?: OpenMatchSyncOpts,
+): Promise<void> {
   const { data: b, error: bErr } = await supabase
     .from('bookings')
     .select('id, reservation_type, organizer_player_id, total_price_cents')
@@ -80,8 +89,8 @@ export async function ensureOpenMatchRecordForBooking(supabase: SupabaseClient, 
         {
           booking_id: bookingId,
           visibility: 'public',
-          elo_min: null,
-          elo_max: null,
+          elo_min: opts?.elo_min ?? null,
+          elo_max: opts?.elo_max ?? null,
           gender: 'any',
           competitive: false,
           type: 'open',
@@ -94,6 +103,11 @@ export async function ensureOpenMatchRecordForBooking(supabase: SupabaseClient, 
       return;
     }
     matchId = (inserted as { id?: string } | null)?.id;
+  } else if (opts && (opts.elo_min !== undefined || opts.elo_max !== undefined)) {
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (opts.elo_min !== undefined) patch.elo_min = opts.elo_min;
+    if (opts.elo_max !== undefined) patch.elo_max = opts.elo_max;
+    await supabase.from('matches').update(patch).eq('id', matchId);
   }
 
   if (!matchId) return;
@@ -107,4 +121,47 @@ export async function ensureOpenMatchRecordForBooking(supabase: SupabaseClient, 
     .eq('player_id', row.organizer_player_id);
 
   await syncMatchPlayersFromBooking(supabase, matchId, bookingId);
+}
+
+/** Repara partidos abiertos cuyo listado quedó sin jugadores pese a tener organizador/participantes en la reserva. */
+export async function repairOpenMatchPlayersIfNeeded(
+  supabase: SupabaseClient,
+  matchId: string,
+  bookingId: string,
+): Promise<boolean> {
+  const { data: mps, error: mpErr } = await supabase
+    .from('match_players')
+    .select('players (id)')
+    .eq('match_id', matchId);
+  if (mpErr) {
+    console.error('[repairOpenMatchPlayersIfNeeded] match_players:', mpErr.message);
+    return false;
+  }
+  const filled = (mps ?? []).filter((row) => {
+    const raw = (row as { players?: { id?: string } | { id?: string }[] | null }).players;
+    const p = Array.isArray(raw) ? raw[0] : raw;
+    return Boolean(p?.id);
+  }).length;
+  if (filled > 0) return false;
+
+  const { data: booking, error: bErr } = await supabase
+    .from('bookings')
+    .select('organizer_player_id, reservation_type')
+    .eq('id', bookingId)
+    .maybeSingle();
+  if (bErr || !booking) return false;
+
+  const row = booking as { organizer_player_id?: string | null; reservation_type?: string | null };
+  if (row.reservation_type !== 'open_match') return false;
+
+  if (!row.organizer_player_id) {
+    const { count: partCount, error: pErr } = await supabase
+      .from('booking_participants')
+      .select('id', { count: 'exact', head: true })
+      .eq('booking_id', bookingId);
+    if (pErr || (partCount ?? 0) === 0) return false;
+  }
+
+  await syncMatchPlayersFromBooking(supabase, matchId, bookingId);
+  return true;
 }

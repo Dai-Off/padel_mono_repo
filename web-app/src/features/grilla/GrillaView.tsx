@@ -48,6 +48,7 @@ import {
   resolveOrganizerFromBooking,
 } from './utils/bookingDisplay';
 import { shouldShowRawBookingInGrid } from './utils/reservationListFilters';
+import { normalizeReservationTypeSlug } from './utils/reservationTypeSlug';
 import {
   pixelsToTime,
   timeToPixels,
@@ -637,7 +638,7 @@ function mapBookings(
     return visible.map((b: any) => {
         const start = new Date(b.start_at);
         const organizer = resolveOrganizerFromBooking(b);
-        const bookingType = b.reservation_type ?? b.booking_type ?? 'standard';
+        const bookingType = normalizeReservationTypeSlug(b.reservation_type ?? b.booking_type ?? 'standard');
         const tournName = linkedTournamentDisplayName(b);
         const tournamentId = linkedTournamentId(b);
         const playerName = resolveBookingGridLabel(b, tournName);
@@ -657,7 +658,7 @@ function mapBookings(
             id: b.id,
             courtId: b.court_id,
             courtName: courtMap.get(b.court_id) || b.court_id,
-            bookingDate: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`,
+            bookingDate: dayKeyInClubTz(start),
             startTime: formatLocalTimeHHmm(start),
             durationMinutes: (new Date(b.end_at).getTime() - start.getTime()) / 60000,
             playerName,
@@ -1337,20 +1338,21 @@ function GrillaViewInner() {
           const court = courts.find((c) => c.id === b.court_id);
           const start = new Date(b.start_at);
           const end = new Date(b.end_at);
-          const bookingType = b.reservation_type ?? b.booking_type ?? 'standard';
+          const bookingType = normalizeReservationTypeSlug(b.reservation_type ?? b.booking_type ?? 'standard');
           const mapped: Reservation = {
               id: bookingId,
               courtId: b.court_id,
               courtName: court?.name ?? '',
-              startTime: `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`,
+              startTime: formatTimeHHmmInClubTz(start),
               durationMinutes: Math.round((end.getTime() - start.getTime()) / 60000),
               status: b.status,
               booking_type: bookingType,
               reservation_type: bookingType,
+              source_channel: b.source_channel ?? 'manual',
               playerName: '',
               isPaidIcon: b.status === 'confirmed',
           };
-          setSelectedDate(start);
+          setSelectedDate(new Date(`${dayKeyInClubTz(start)}T12:00:00Z`));
           setReservations((prev) => (prev.some((r) => r.id === bookingId) ? prev : [...prev, mapped]));
           setEditingBookingData(b);
           setSelectedModalReservationId(bookingId);
@@ -1408,7 +1410,10 @@ function GrillaViewInner() {
                   }
               }
               for (const courtId of courtIds) {
-                  const startAt = new Date(`${dateText}T${bookingData.start_at}`).toISOString();
+                  const [slotHour, slotMinute] = String(bookingData.start_at).split(':');
+                  const startAt = zonedTimeToUtc(
+                      `${dateText}T${String(slotHour ?? '00').padStart(2, '0')}:${String(slotMinute ?? '00').padStart(2, '0')}:00`,
+                  ).toISOString();
                   const endAt = new Date(new Date(startAt).getTime() + bookingData.duration_minutes * 60000).toISOString();
                   let totalPriceCents = bookingData.total_price_cents;
                   if (clubId && courtId) {
@@ -1558,14 +1563,14 @@ function GrillaViewInner() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
+      activationConstraint: isMobileDevice
+        ? { delay: 500, tolerance: 10 }
+        : { distance: 8 },
     }),
     useSensor(SmartTouchSensor, {
       activationConstraint: {
-        delay: 250,
-        tolerance: 5,
+        delay: 500,
+        tolerance: 10,
       },
     })
   );
@@ -2814,6 +2819,7 @@ function GrillaViewInner() {
                     style={{
                       height: `${nativeGridHeight}px`,
                       zoom: scale,
+                      width: '100%',
                       // Fallback para navs muy antiguos (transform rompe position: sticky)
                       ...(typeof CSS !== 'undefined' && CSS.supports && !CSS.supports('zoom', '1') ? {
                         transform: `scale(${scale})`,
@@ -2822,7 +2828,7 @@ function GrillaViewInner() {
                       } : {})
                     }}
                     className={clsx(
-                      "flex relative pl-4 md:pl-8 overflow-hidden",
+                      "flex relative w-full min-w-0 pl-4 md:pl-8",
                       focusedCourtId && !activeId && "touch-pan-y"
                     )}
                     onTouchStart={focusedCourtId && !activeId ? onTouchStart : undefined}
@@ -2831,7 +2837,7 @@ function GrillaViewInner() {
                   >
                     <TimeAxis position="left" isCompact={false} />
 
-                    <div className="flex relative z-10 mb-0 overflow-hidden">
+                    <div className="flex flex-1 w-full min-w-0 relative z-10 mb-0">
                       <GridBackground />
                       {visibleCourts.map(court => (
                         <CourtColumn
@@ -2894,6 +2900,7 @@ function GrillaViewInner() {
         <ReservationModal
           clubId={clubId}
           gridDate={formatDateForInput(selectedDate)}
+          weeklySchedule={weeklySchedule}
           isOpen={selectedModalReservationId !== null}
           onGridRefresh={refresh}
           onClose={() => {

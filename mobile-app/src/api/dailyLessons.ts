@@ -1,4 +1,6 @@
 import { API_URL } from '../config';
+import { withLangQuery } from './backendLang';
+import type { AppLocale } from '../i18n/constants';
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -103,7 +105,7 @@ export async function fetchDailyLesson(
   if (!token) return { ok: false, error: 'Token requerido' };
   try {
     const res = await fetch(
-      `${API_URL}/learning/daily-lesson?timezone=${encodeURIComponent(timezone)}`,
+      withLangQuery(`${API_URL}/learning/daily-lesson?timezone=${encodeURIComponent(timezone)}`),
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -145,7 +147,7 @@ export async function fetchTodayResults(
   if (!token) return { ok: false, error: 'Token requerido' };
   try {
     const res = await fetch(
-      `${API_URL}/learning/daily-lesson/today-results?timezone=${encodeURIComponent(timezone)}`,
+      withLangQuery(`${API_URL}/learning/daily-lesson/today-results?timezone=${encodeURIComponent(timezone)}`),
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -156,6 +158,32 @@ export async function fetchTodayResults(
     const json = await res.json();
     if (!res.ok) return { ok: false, error: json.error ?? 'Error al obtener resultados' };
     return json as TodayResultsResponse;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+// Re-entrega EXACTAMENTE las preguntas indicadas (mismo orden), localizadas al
+// idioma actual. Se usa al cambiar de idioma a media lección: las mismas
+// preguntas pero traducidas, sin rebarajar ni perder el progreso.
+export async function fetchLocalizedDailyQuestions(
+  token: string | null | undefined,
+  questionIds: string[],
+  locale?: AppLocale,
+): Promise<{ ok: true; questions: DailyLessonQuestion[] } | { ok: false; error: string }> {
+  if (!token || questionIds.length === 0) return { ok: false, error: 'Sin datos' };
+  try {
+    const res = await fetch(withLangQuery(`${API_URL}/learning/daily-lesson/localize`, locale), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ question_ids: questionIds }),
+    });
+    const json = await res.json();
+    if (!res.ok) return { ok: false, error: json.error ?? 'Error al localizar preguntas' };
+    return json as { ok: true; questions: DailyLessonQuestion[] };
   } catch {
     return { ok: false, error: 'Error de conexión' };
   }

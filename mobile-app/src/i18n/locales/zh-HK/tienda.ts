@@ -1,0 +1,31 @@
+import type { TiendaTranslationKeys } from '../../sections/tienda';
+
+export const tienda: TiendaTranslationKeys = {
+  searchPlaceholder: '搜尋球拍、球鞋、服裝...',
+  categories: {
+    all: '全部',
+    palas: '球拍',
+    pelotas: '網球',
+    calzado: '鞋類',
+    ropa: '服裝',
+    accesorios: '配件',
+  },
+  filters: '篩選',
+  sortFeatured: '精選',
+  bannerTitle: '全新系列',
+  bannerSub: '2026 春季',
+  bannerCta: '立即探索',
+  aiShoppingTitle: '你的 AI 購物助手',
+  aiShoppingSub: '根據你的水平及風格推薦',
+  gridTitle: '目錄',
+  gridTitleCount: '目錄 ({count})',
+  gridTitleAll: '所有產品',
+  mockProduct1Name: 'Nox AT10 Luxury 球拍',
+  mockProduct2Name: 'Bullpadel Hack 03 球拍',
+  mockProduct3Name: 'Adidas Padel Tour 背包',
+  mockProduct4Name: 'Asics Gel Padel Pro 球鞋',
+  mockProduct5Name: 'Hesacore Tour 握把膠',
+  mockProduct6Name: 'Head Padel Pro 網球',
+  mockProduct7Name: 'Adidas Club 運動褲',
+  mockProduct8Name: 'Wilson 機能運動衫',
+};

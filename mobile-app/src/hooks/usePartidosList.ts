@@ -12,6 +12,7 @@ import {
   whenChipLabel,
   type PartidosFiltersState,
 } from '../domain/partidosFilters';
+import { useTranslation } from '../i18n';
 import { enrichPartidosWithClubImages, isPartidoOpenForDiscovery } from '../lib/partidoPlayerUtils';
 import { loadStoredPreferredClubIds } from '../lib/preferredClubsStorage';
 import type { PartidoItem } from '../screens/PartidosScreen';
@@ -33,6 +34,7 @@ function myUpcomingFromHome(misPartidos: PartidoItem[]): PartidoItem[] {
 }
 
 export function usePartidosList(token: string | null | undefined, refreshNonce: number) {
+  const { t, locale } = useTranslation();
   const { profile, misPartidos, refreshMatches, matchesLoading } = useHomeData();
   const openLoadGenRef = useRef(0);
   const [filters, setFilters] = useState<PartidosFiltersState>(getInitialPartidosFilters);
@@ -148,9 +150,9 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
 
   const labels = useMemo(
     () => ({
-      sport: sportChipLabel(filters.sport),
-      clubs: clubsChipLabel(filters.selectedClubIds.length, clubs.length),
-      when: whenChipLabel(filters.selectedDateKeys, filters.timeRange),
+      sport: sportChipLabel(filters.sport, t),
+      clubs: clubsChipLabel(filters.selectedClubIds.length, clubs.length, t),
+      when: whenChipLabel(filters.selectedDateKeys, filters.timeRange, t, locale),
       sportActive: filters.sport !== 'all',
       clubsActive:
         filters.selectedClubIds.length > 0 ||
@@ -159,7 +161,7 @@ export function usePartidosList(token: string | null | undefined, refreshNonce: 
       whenActive: filters.selectedDateKeys.length > 0 || filters.timeRange != null,
       advancedCount: countPartidosAdvancedFilters(filters),
     }),
-    [filters, clubs.length],
+    [filters, clubs.length, t, locale],
   );
 
   return {

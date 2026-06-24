@@ -15,9 +15,13 @@ export function maxLeagueSpread(ids: string[], ligaById: Map<string, string>): n
   return Math.max(...idx) - Math.min(...idx);
 }
 
-/** Máximo 1 salto de liga (bronce↔plata OK, bronce↔oro no). */
+/** Tope de diferencia de liga permitido al emparejar. La preferencia por misma
+ *  liga se aplica como penalización ponderada del score en matchmakingService. */
+export const MAX_LEAGUE_SPREAD = 2;
+
+/** Compatible si los 4 jugadores están dentro de MAX_LEAGUE_SPREAD escalones. */
 export function leaguesMatchmakingCompatible(ids: string[], ligaById: Map<string, string>): boolean {
-  return maxLeagueSpread(ids, ligaById) <= 1;
+  return maxLeagueSpread(ids, ligaById) <= MAX_LEAGUE_SPREAD;
 }
 
 /** Asignación inicial por elo 0–7 (valores provisionales doc 10). */
@@ -33,6 +37,8 @@ export type LeagueEloBand = {
   sort_order: number;
   elo_min: number;
   elo_max: number;
+  /** LP a descontar al ascender DESDE esta liga; null/ausente = constante de código. */
+  lps_to_promote?: number | null;
 };
 
 /** Liga según filas de `matchmaking_leagues` (orden por sort_order). */
@@ -51,11 +57,14 @@ export function higherLigaRank(a: string, b: string): string {
   return leagueIndex(a) >= leagueIndex(b) ? a : b;
 }
 
-/**
- * Doc 10 §3.2: si la liga MM y la banda de elo divergen en 2+ escalones, alinear con el elo tras el partido.
- */
-export function reconcileLigaWithElo(currentLiga: string, newElo: number, bands: LeagueEloBand[] | null): string {
-  const eloLiga = bands?.length ? ligaFromEloWithBands(newElo, bands) : ligaFromElo(newElo);
-  if (Math.abs(leagueIndex(eloLiga) - leagueIndex(currentLiga)) >= 2) return eloLiga;
-  return currentLiga;
+/** Sube un escalón de liga (tope elite). */
+export function nextLiga(l: string): LeagueName {
+  const i = leagueIndex(l);
+  return i >= LEAGUE_ORDER.length - 1 ? LEAGUE_ORDER[LEAGUE_ORDER.length - 1] : LEAGUE_ORDER[i + 1];
+}
+
+/** Baja un escalón de liga (suelo bronce). */
+export function prevLiga(l: string): LeagueName {
+  const i = leagueIndex(l);
+  return i <= 0 ? LEAGUE_ORDER[0] : LEAGUE_ORDER[i - 1];
 }

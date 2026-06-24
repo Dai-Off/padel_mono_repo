@@ -14,9 +14,13 @@ import {
 } from '../services/paymentRefundService';
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
 import { enrichMatchRowsWithClubImages } from '../lib/clubLogoUrl';
-import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
+import {
+  assertGuestCanJoinMatch,
+  tryRepairPaidGuestMissingFromMatch,
+} from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
-import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
+import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
+import { repairOpenMatchPlayersIfNeeded, syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
 import {
   matchAffectsElo,
   normalizeMatchType,
@@ -49,11 +53,11 @@ function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_proposer_id,
           ${bookingRel} (
-            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type,
+            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type, deleted_at,
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city, logo_url, photo_urls)
+              clubs (id, name, address, city, lat, lng, logo_url, photo_urls)
             )
           ),
           match_players (
@@ -69,7 +73,7 @@ function expandSelectDiscovery(): string {
             id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city, logo_url, photo_urls)
+              clubs (id, name, address, city, lat, lng, logo_url, photo_urls)
             )
           ),
           match_players (
@@ -82,12 +86,51 @@ const DISCOVERY_DEFAULT_DAYS = 14;
 const DISCOVERY_DEFAULT_LIMIT = 100;
 const DISCOVERY_MAX_LIMIT = 150;
 
-function countFilledSlots(row: { match_players?: Array<{ players?: { id?: string } | null }> | null }): number {
-  return (row.match_players ?? []).filter((mp) => Boolean(mp?.players?.id)).length;
+function countFilledSlots(row: { match_players?: Array<{ players?: { id?: string } | Array<{ id?: string }> | null }> | null }): number {
+  return (row.match_players ?? []).filter((mp) => {
+    const raw = mp?.players;
+    if (!raw) return false;
+    const p = Array.isArray(raw) ? raw[0] : raw;
+    return Boolean(p?.id);
+  }).length;
 }
 
+/** Al menos 1 plaza libre (1–3 huecos); no exige exactamente 1. */
 function isJoinableDiscoveryRow(row: { match_players?: Array<{ players?: { id?: string } | null }> | null }): boolean {
   return countFilledSlots(row) < 4;
+}
+
+const DISCOVERY_MATCH_PLAYERS_SELECT =
+  'id, team, slot_index, players (id, first_name, last_name, elo_rating, avatar_url)';
+
+async function repairDiscoveryMatchPlayers(supabase: ReturnType<typeof getSupabaseServiceRoleClient>, rows: any[]): Promise<any[]> {
+  const out: any[] = [];
+  for (const row of rows) {
+    let current = row;
+    const b = Array.isArray(current.bookings) ? current.bookings[0] : current.bookings;
+    const bookingId = b?.id as string | undefined;
+    const matchId = current.id as string | undefined;
+    if (bookingId && matchId && countFilledSlots(current) === 0) {
+      const repaired = await repairOpenMatchPlayersIfNeeded(supabase, matchId, bookingId);
+      if (repaired) {
+        const { data: mps, error: mpErr } = await supabase
+          .from('match_players')
+          .select(DISCOVERY_MATCH_PLAYERS_SELECT)
+          .eq('match_id', matchId);
+        if (mpErr) {
+          console.error('[GET /matches discovery] repair refetch:', mpErr.message);
+        } else {
+          current = flattenMatchRowForClient({ ...current, match_players: mps ?? [] });
+        }
+      }
+    }
+    out.push(current);
+  }
+  return out;
+}
+
+function flattenMatchRows(rows: any[]): any[] {
+  return rows.map((row) => flattenMatchRowForClient(row));
 }
 
 /**
@@ -145,6 +188,8 @@ router.get('/', async (req: Request, res: Response) => {
   const rawVisibility = String(req.query.visibility ?? '').trim().toLowerCase();
   const visibility = rawVisibility === 'public' || rawVisibility === 'private' ? rawVisibility : undefined;
   const discovery = req.query.discovery === '1' || req.query.discovery === 'true';
+  const rawPlayerElo = parseFloat(String(req.query.player_elo ?? ''));
+  const player_elo = !isNaN(rawPlayerElo) && rawPlayerElo >= 0 ? rawPlayerElo : undefined;
   try {
     await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
@@ -192,7 +237,7 @@ router.get('/', async (req: Request, res: Response) => {
       if (visibility) mq = mq.eq('visibility', visibility);
       const { data, error } = await mq;
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      const rows = data ?? [];
+      const rows = flattenMatchRows(data ?? []);
       if (active_only) {
         const filtered = rows.filter((row: any) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
@@ -233,9 +278,14 @@ router.get('/', async (req: Request, res: Response) => {
         .order('start_at', { ascending: true, foreignTable: 'bookings' })
         .limit(limit);
       if (booking_id) q = q.eq('booking_id', booking_id);
+      if (player_elo !== undefined) {
+        q = q.or(`elo_min.is.null,elo_max.is.null,and(elo_min.lte.${player_elo},elo_max.gte.${player_elo})`);
+      }
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      const rows = (data ?? []).filter((row: any) => {
+      const normalized = flattenMatchRows(data ?? []);
+      const repaired = await repairDiscoveryMatchPlayers(supabase, normalized);
+      const rows = repaired.filter((row: any) => {
         const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
         if (getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) === 'past') return false;
         if (joinable_only && !isJoinableDiscoveryRow(row)) return false;
@@ -268,9 +318,12 @@ router.get('/', async (req: Request, res: Response) => {
       if (date_to) q = q.lte('bookings.start_at', date_to);
       if (booking_id) q = q.eq('booking_id', booking_id);
       if (visibility) q = q.eq('visibility', visibility);
+      if (player_elo !== undefined) {
+        q = q.or(`elo_min.is.null,elo_max.is.null,and(elo_min.lte.${player_elo},elo_max.gte.${player_elo})`);
+      }
       const { data, error } = await q;
       if (error) return res.status(500).json({ ok: false, error: error.message });
-      const rows = data ?? [];
+      const rows = flattenMatchRows(data ?? []);
       if (active_only) {
         const filtered = rows.filter((row: any) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
@@ -386,8 +439,9 @@ router.get('/mine', async (req: Request, res: Response) => {
 
     const filtered = (data ?? []).filter((row: any) => {
       const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
-      // Si no tiene booking usamos sólo el estado para determinar la fase.
-      const listPhase = getMatchListPhase(nowMs, row.status, b?.start_at, b?.end_at);
+      if (!b?.start_at || !b?.end_at) return false;
+      if (b.deleted_at != null) return false;
+      const listPhase = getMatchListPhase(nowMs, row.status, b.start_at, b.end_at);
       if (phase === 'past') return listPhase === 'past';
       if (phase === 'upcoming') return listPhase !== 'past';
       return true;
@@ -604,9 +658,9 @@ router.post('/run-debt-settlement', async (req: Request, res: Response) => {
     if (h !== secret) return res.status(403).json({ ok: false, error: 'No autorizado' });
   }
   try {
-    const finished = await finalizePastMatches();
+    const { finished, cancelled } = await finalizePastMatches({ cancelIncomplete: true });
     const result = await settleOverdueMatchPayments();
-    return res.json({ ok: true, finished, ...result });
+    return res.json({ ok: true, finished, cancelled, ...result });
   } catch (e) {
     return res.status(500).json({ ok: false, error: (e as Error).message });
   }
@@ -647,6 +701,15 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     }
 
     const supabase = getSupabaseServiceRoleClient();
+    const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+      courtId: String(court_id),
+      startAt: String(start_at),
+      endAt: String(end_at),
+      reservationType: 'open_match',
+    });
+    if (!hoursCheck.ok) {
+      return res.status(400).json({ ok: false, error: hoursCheck.error });
+    }
     const { data: courtClubRow } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
     const clubForOnline = (courtClubRow as { club_id?: string } | null)?.club_id;
     const sch = ['mobile', 'web', 'manual', 'system'].includes(source_channel) ? source_channel : 'web';
@@ -921,27 +984,22 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
       }
     }
 
-    const { data: existing } = await supabase
-      .from('match_players')
-      .select('id')
-      .eq('match_id', matchId)
-      .eq('player_id', playerId)
-      .maybeSingle();
-    if (existing) {
-      return res.status(409).json({ ok: false, error: 'Ya estás en este partido' });
+    const capacity = await assertGuestCanJoinMatch(
+      supabase,
+      matchId,
+      match.booking_id,
+      playerId,
+      slotIndex,
+    );
+    if (!capacity.ok) {
+      return res.status(409).json({
+        ok: false,
+        code: capacity.code,
+        error: capacity.error,
+      });
     }
-
-    const { data: matchPlayers } = await supabase
-      .from('match_players')
-      .select('slot_index')
-      .eq('match_id', matchId);
-    const taken = (matchPlayers ?? []).map((p: { slot_index?: number }) => p.slot_index).filter((s): s is number => s != null);
-    if (taken.includes(slotIndex)) {
-      return res.status(400).json({ ok: false, error: 'Esa plaza ya está ocupada' });
-    }
-
-    if ((matchPlayers ?? []).length >= 4) {
-      return res.status(400).json({ ok: false, error: 'El partido está completo' });
+    if (capacity.code === 'already_in_match') {
+      return res.status(409).json({ ok: false, code: 'already_in_match', error: 'Ya estás en este partido' });
     }
 
     const { data: targetBooking } = await supabase

@@ -4,10 +4,9 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
 import { calcEloRating } from '../services/levelingService';
-import { ligaFromEloWithBands } from '../services/matchmakingLeague';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
-import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
+import { localizeCoachAssessmentText } from '../lib/coachAssessmentLanguage';
 import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
 import { syncPlayerVector } from '../lib/mailer';
 import {
@@ -176,7 +175,7 @@ const SELECT_PUBLIC_INTERNAL = `
   affinity_visible,
   play_location, birth_date, profile_description,
   onboarding_completed,
-  liga, lps, mm_peak_liga
+  liga, lps, mm_peak_liga, mm_shield_matches
 `;
 
 const AVATAR_URL_MAX = 2048;
@@ -1088,8 +1087,9 @@ router.post('/onboarding', async (req: Request, res: Response) => {
 
   const muToSave = eloToMu(finalElo);
   const now = new Date().toISOString();
-  const leagueBands = await getMatchmakingLeagueConfigRows(supabase);
-  const assignedLiga = ligaFromEloWithBands(finalElo, leagueBands);
+  // Todos arrancan en bronce; la liga se gana jugando. El mu del cuestionario
+  // alimenta el matchmaking y el acelerador de LP, no la liga inicial visible.
+  const assignedLiga = 'bronce';
   let leagueSeasonId: string | null = null;
   try {
     leagueSeasonId = await getActiveMatchmakingSeasonId(supabase);
@@ -1352,7 +1352,7 @@ router.get('/', async (req: Request, res: Response) => {
     let q = supabase
       .from('players')
       .select(
-        `id, created_at, first_name, last_name, email, phone, username, status, auth_user_id,
+        `id, created_at, first_name, last_name, email, phone, username, status, auth_user_id, onboarding_completed, avatar_url,
          mu, sigma, elo_rating, sp, matches_played_competitive, matches_played_friendly, matches_played_matchmaking`
       )
       .order('created_at', { ascending: false })
@@ -1409,12 +1409,23 @@ router.get('/', async (req: Request, res: Response) => {
  *     tags: [Players]
  *     summary: Perfil público de otro jugador (MVP)
  *     description: Retorna solo datos públicos (nombre, avatar, elo, radar, liga mm, record) para visualización social.
+ *       Idioma opcional para `coach_assessment`: query `lang` (ej. `es`, `en`, `zh-HK`) o cabecera `Accept-Language`; por defecto `es`.
+ *     parameters:
+ *       - in: query
+ *         name: lang
+ *         schema:
+ *           type: string
+ *         description: Locale BCP-47 para textos del coach (default `es`)
  *     responses:
  *       200: { description: Perfil público cargado }
  *       404: { description: Jugador no encontrado }
  */
 router.get('/:id/public-profile', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const locale = parsePeerFeedbackLocale(
+    req.query.lang as string | string[] | undefined,
+    req.headers['accept-language'] as string | undefined
+  );
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: player, error: pErr } = await supabase
@@ -1444,14 +1455,17 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
       .order('created_at', { ascending: false })
       .limit(10);
 
+    const coachLocalized = coach ? localizeCoachAssessmentText(coach, locale) : null;
+
     return res.json({
       ok: true,
       player: {
         ...publicData,
         ...wl,
-        coach_assessment: coach || null,
-        recent_matches: recentMatches || []
-      }
+        coach_assessment: coachLocalized,
+        recent_matches: recentMatches || [],
+      },
+      locale,
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });

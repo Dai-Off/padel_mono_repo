@@ -8,7 +8,6 @@ export const PORTAL_MENU_ITEM_PERMS: Record<string, string[]> = {
     'lista-reservas': ['grilla'],
     checkIn: ['grilla'],
     pistas: ['grilla'],
-    horarios: ['grilla'],
     'fechas-especiales': ['grilla'],
     jugadores: ['clientes'],
     /** Chats del club (turnos / torneos): clientes o configuración. */

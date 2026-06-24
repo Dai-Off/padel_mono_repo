@@ -3,6 +3,7 @@ import { Image, StyleSheet, Text, View, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { normalizePlayerAvatarUrl } from '../../api/playerAvatar';
 import { theme } from '../../theme';
+import { useTranslation } from '../../i18n';
 
 type PlayerAvatarCircleProps = {
   avatarUrl?: string | null;
@@ -20,6 +21,7 @@ export function PlayerAvatarCircle({
   borderRadius,
   style,
 }: PlayerAvatarCircleProps) {
+  const { t } = useTranslation();
   const radius = borderRadius ?? size / 2;
   const fontSize = Math.round(size * (borderRadius != null && borderRadius < size / 2 ? 0.25 : 0.32));
   const uri = normalizePlayerAvatarUrl(avatarUrl);
@@ -61,7 +63,7 @@ export function PlayerAvatarCircle({
               setPhotoFailed(true);
             }
           }}
-          accessibilityLabel="Foto de perfil"
+          accessibilityLabel={t('profile.profilePhotoAlert')}
         />
       ) : null}
     </View>

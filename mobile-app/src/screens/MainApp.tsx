@@ -4,6 +4,7 @@ import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useTranslation } from '../i18n';
 import type { SearchCourtResult } from '../api/search';
 import { BackHeader } from '../components/layout/BackHeader';
 import { BottomNavbar, type MainTabId } from '../components/layout/BottomNavbar';
@@ -28,8 +29,9 @@ import { PartidoDetailScreen } from './PartidoDetailScreen';
 import { PartidoPrivadoDetailScreen } from './PartidoPrivadoDetailScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
-import { TusPagosScreen } from './TusPagosScreen';
 import { MonederoScreen } from './MonederoScreen';
+import { PagosPendientesScreen } from './PagosPendientesScreen';
+import { MovimientosMonederoScreen } from './MovimientosMonederoScreen';
 import { TuActividadFlow } from './TuActividadFlow';
 import type { TuActividadDestination } from './TuActividadScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
@@ -43,7 +45,14 @@ import { EditProfileScreen } from './EditProfileScreen';
 import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile } from '../api/players';
-import { fetchMatchmakingStatus, leaveMatchmaking } from '../api/matchmaking';
+import {
+  fetchMatchmakingStatus,
+  fetchSeasonTransition,
+  leaveMatchmaking,
+  type PairInvite,
+  type SeasonTransition,
+} from '../api/matchmaking';
+import { SeasonTransitionModal } from '../components/matchmaking/SeasonTransitionModal';
 import { UsernameSetupModal } from '../components/profile/UsernameSetupModal';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
 import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
@@ -80,16 +89,28 @@ type PostOnboardingReturn =
 
 type MatchmakingHomeBannerState = 'hidden' | 'searching' | 'matched' | 'timed_out';
 const MATCHMAKING_TIMEOUT_SECONDS = 3 * 60;
+const SEASON_TRANSITION_SEEN_KEY = 'season_transition_seen';
+/** Dev: poner a `true` para forzar el modal de fin de temporada con datos de prueba. */
+const SEASON_TRANSITION_PREVIEW = false;
+const SEASON_TRANSITION_PREVIEW_DATA: SeasonTransition = {
+  season_id: 'preview',
+  previous_liga: 'oro',
+  previous_season_name: 'Temporada 1',
+  new_liga: 'plata',
+  new_season_name: 'Temporada 2',
+};
 
 export function MainApp() {
+  const { t } = useTranslation();
   const sidebar = useSidebar(false);
   const { session } = useAuth();
   const { profile, refreshMatches, syncMisPartidoFromMatchId } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
-  const [showTusPagos, setShowTusPagos] = useState(false);
   const [showMonedero, setShowMonedero] = useState(false);
+  const [showPagosPendientes, setShowPagosPendientes] = useState(false);
+  const [showMovimientosMonedero, setShowMovimientosMonedero] = useState(false);
   const [showTuActividad, setShowTuActividad] = useState(false);
   const [tuActividadSubView, setTuActividadSubView] = useState<TuActividadDestination | null>(null);
   const [showTransacciones, setShowTransacciones] = useState(false);
@@ -132,6 +153,10 @@ export function MainApp() {
   const [competitiveQueueStartedAtMs, setCompetitiveQueueStartedAtMs] = useState<number | null>(null);
   const [matchmakingHomeBannerState, setMatchmakingHomeBannerState] =
     useState<MatchmakingHomeBannerState>('hidden');
+  const [pairInvites, setPairInvites] = useState<PairInvite[]>([]);
+  const [pairInviteNonce, setPairInviteNonce] = useState(0);
+  const [competitivePartnerInvite, setCompetitivePartnerInvite] = useState<PairInvite | null>(null);
+  const [seasonTransition, setSeasonTransition] = useState<SeasonTransition | null>(null);
   const [matchmakingTimeoutNoticePending, setMatchmakingTimeoutNoticePending] = useState(false);
   const matchmakingTimeoutInFlightRef = useRef(false);
   const [showSeasonPass, setShowSeasonPass] = useState(false);
@@ -183,6 +208,7 @@ export function MainApp() {
     const pollStatus = async () => {
       const status = await fetchMatchmakingStatus(token);
       if (cancelled) return;
+      setPairInvites(status?.pair_invites ?? []);
       if (status?.status === 'matched') {
         setMatchmakingHomeBannerState('matched');
         setMatchmakingTimeoutNoticePending(false);
@@ -225,7 +251,37 @@ export function MainApp() {
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [competitiveQueueStartedAtMs, matchmakingTimeoutNoticePending, session?.access_token]);
+  }, [competitiveQueueStartedAtMs, matchmakingTimeoutNoticePending, pairInviteNonce, session?.access_token]);
+
+  // Modal de fin de temporada: una vez al abrir la app, si hay transición sin ver (por dispositivo).
+  useEffect(() => {
+    if (SEASON_TRANSITION_PREVIEW) {
+      setSeasonTransition(SEASON_TRANSITION_PREVIEW_DATA);
+      return;
+    }
+    const token = session?.access_token ?? null;
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      const tr = await fetchSeasonTransition(token);
+      if (cancelled || !tr) return;
+      const seen = await AsyncStorage.getItem(SEASON_TRANSITION_SEEN_KEY);
+      if (cancelled || seen === tr.season_id) return;
+      setSeasonTransition(tr);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token]);
+
+  const handleSeasonTransitionClose = useCallback(() => {
+    setSeasonTransition((current) => {
+      if (current && current.season_id !== 'preview') {
+        void AsyncStorage.setItem(SEASON_TRANSITION_SEEN_KEY, current.season_id);
+      }
+      return null;
+    });
+  }, []);
 
   const handleMatchmakingBannerStateChange = useCallback(
     (state: MatchmakingHomeBannerState, options?: { force?: boolean }) => {
@@ -277,14 +333,14 @@ export function MainApp() {
       if (!accessToken) return;
       const result = await acceptTournamentInvite(accessToken, inviteToken, tournamentId);
       if (result.ok) {
-        Alert.alert('Invitación aceptada', 'Ya estás inscrito en el torneo.');
+        Alert.alert(t('alerts.tournamentInvite.accepted'), t('alerts.tournamentInvite.acceptedBody'));
         setActiveTab('torneos');
         setOpenTournamentId(tournamentId);
       } else {
-        Alert.alert('Invitación al torneo', result.error);
+        Alert.alert(t('alerts.tournamentInvite.title'), result.error);
       }
     },
-    [session?.access_token],
+    [session?.access_token, t],
   );
 
   const consumeInviteUrl = useCallback(
@@ -365,17 +421,19 @@ export function MainApp() {
     setShowTuActividad(false);
     setTuActividadSubView(null);
     setShowMonedero(false);
-    setShowTusPagos(false);
+    setShowPagosPendientes(false);
+    setShowMovimientosMonedero(false);
     setShowTransacciones(false);
     registerOverlayNestedBack(null);
   }, []);
 
   const fullscreenOverlayOpen =
     bookingSuccessData != null ||
-    showTusPagos ||
     showMonedero ||
-    showTuActividad ||
+    showPagosPendientes ||
+    showMovimientosMonedero ||
     showTransacciones ||
+    showTuActividad ||
     showEditProfile ||
     showChangePassword ||
     showPreferences ||
@@ -403,6 +461,14 @@ export function MainApp() {
       setActiveTab('perfil');
     }
   }, [infoReturnToProfile]);
+
+  // Tras aceptar una invitación desde el banner: abrir Liga competitiva en preferencias
+  // con ese compañero ya fijado para buscar.
+  const openCompetitiveWithPartner = useCallback((invite: PairInvite) => {
+    setCompetitivePartnerInvite(invite);
+    setCompetitiveLeagueEntryIntent('default');
+    setShowCompetitiveLeague(true);
+  }, []);
 
   const openCompetitiveLeagueFromHome = useCallback(() => {
     if (matchmakingHomeBannerState === 'timed_out') {
@@ -548,9 +614,17 @@ export function MainApp() {
         setShowSeasonPass(false);
         return true;
       }
-      // Transacciones (sale antes que TusPagos en renderContent)
+      // Transacciones (sale antes que Wallet en renderContent)
       if (showTransacciones) {
         setShowTransacciones(false);
+        return true;
+      }
+      if (showPagosPendientes) {
+        setShowPagosPendientes(false);
+        return true;
+      }
+      if (showMovimientosMonedero) {
+        setShowMovimientosMonedero(false);
         return true;
       }
       // Detalle de partido (prioridad sobre flujos padre, p. ej. Tu actividad)
@@ -570,11 +644,6 @@ export function MainApp() {
       // Monedero
       if (showMonedero) {
         setShowMonedero(false);
-        return true;
-      }
-      // Tus Pagos
-      if (showTusPagos) {
-        setShowTusPagos(false);
         return true;
       }
       // Detalle de club en pestaña Pistas
@@ -618,10 +687,11 @@ export function MainApp() {
     showCompetitiveLeague,
     showSeasonPass,
     showTransacciones,
+    showPagosPendientes,
+    showMovimientosMonedero,
     showTuActividad,
     tuActividadSubView,
     showMonedero,
-    showTusPagos,
     selectedPartido,
     clubDetailCourt,
     activeTab,
@@ -835,6 +905,8 @@ export function MainApp() {
           setQueueStartedAtMs={setCompetitiveQueueStartedAtMs}
           matchmakingBannerState={matchmakingHomeBannerState}
           onMatchmakingBannerStateChange={handleCompetitiveLeagueBannerStateChange}
+          pendingPartnerInvite={competitivePartnerInvite}
+          onPartnerApplied={() => setCompetitivePartnerInvite(null)}
           onPartidoPress={(p) => {
             setShowCompetitiveLeague(false);
             setSelectedPartido(p);
@@ -850,8 +922,21 @@ export function MainApp() {
         <TransaccionesScreen onBack={() => setShowTransacciones(false)} />
       );
     }
+    if (showPagosPendientes) {
+      return <PagosPendientesScreen onBack={() => setShowPagosPendientes(false)} />;
+    }
+    if (showMovimientosMonedero) {
+      return <MovimientosMonederoScreen onBack={() => setShowMovimientosMonedero(false)} />;
+    }
     if (showMonedero) {
-      return <MonederoScreen onBack={() => setShowMonedero(false)} />;
+      return (
+        <MonederoScreen
+          onBack={() => setShowMonedero(false)}
+          onPagosPendientesPress={() => setShowPagosPendientes(true)}
+          onMovimientosPress={() => setShowMovimientosMonedero(true)}
+          onTransaccionesPress={() => setShowTransacciones(true)}
+        />
+      );
     }
     if (showPartidoDetail && selectedPartido) {
       if (selectedPartido.visibility === 'private') {
@@ -898,27 +983,9 @@ export function MainApp() {
           }}
           onBackToMenu={() => setTuActividadSubView(null)}
           onNavigate={(destination: TuActividadDestination) => {
-            if (destination === 'grupos') {
-              setShowTuActividad(false);
-              setTuActividadSubView(null);
-              setShowCommunity(true);
-              return;
-            }
             setTuActividadSubView(destination);
           }}
           onPartidoPress={(p) => setSelectedPartido(p)}
-        />
-      );
-    }
-    if (showTusPagos) {
-      return (
-        <TusPagosScreen
-          onBack={() => setShowTusPagos(false)}
-          onTransaccionesPress={() => setShowTransacciones(true)}
-          onMonederoPress={() => {
-            setShowTusPagos(false);
-            setShowMonedero(true);
-          }}
         />
       );
     }
@@ -942,6 +1009,9 @@ export function MainApp() {
             onCoursesPress={() => setShowCourses(true)}
             onOpenCompetitiveLeague={openCompetitiveLeagueFromHome}
             matchmakingBannerState={matchmakingHomeBannerState}
+            pairInvites={pairInvites}
+            onPairInvitesChanged={() => setPairInviteNonce((n) => n + 1)}
+            onAcceptInviteAndSearch={openCompetitiveWithPartner}
             onOpenSeasonPass={() => setShowSeasonPass(true)}
             onOpenMessageThread={(peer) => {
               setMessagesPeer(peer);
@@ -1038,14 +1108,14 @@ export function MainApp() {
       : activeTab === 'tienda'
           ? (
               <BackHeader
-                title="Tienda"
+                title={t('nav.tabTienda')}
                 tone="dark"
                 onBack={() => setActiveTab('inicio')}
                 rightSlot={(
                   <View style={styles.tiendaHeaderRight}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Asistente de compras"
+                      accessibilityLabel={t('nav.tiendaShoppingAssistant')}
                       hitSlop={8}
                       style={({ pressed }) => [
                         styles.tiendaHeaderIconBase,
@@ -1062,7 +1132,7 @@ export function MainApp() {
                     </Pressable>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Carrito"
+                      accessibilityLabel={t('nav.tiendaCart')}
                       hitSlop={8}
                       style={({ pressed }) => [
                         styles.tiendaHeaderCart,
@@ -1078,7 +1148,7 @@ export function MainApp() {
           : activeTab === 'partidos'
               ? (
                   <BackHeader
-                    title="Partidos"
+                    title={t('nav.tabPartidos')}
                     tone="dark"
                     onBack={() => setActiveTab('inicio')}
                   />
@@ -1141,10 +1211,6 @@ export function MainApp() {
     <View style={styles.container}>
       <SidebarProvider
         close={sidebar.close}
-        onNavigateToTusPagos={() => {
-          resetSidebarOverlays();
-          setShowTusPagos(true);
-        }}
         onNavigateToMonedero={() => {
           resetSidebarOverlays();
           setShowMonedero(true);
@@ -1202,6 +1268,12 @@ export function MainApp() {
           <SidebarContent />
         </MobileSidebar>
       </SidebarProvider>
+
+      <SeasonTransitionModal
+        visible={!!seasonTransition}
+        transition={seasonTransition}
+        onClose={handleSeasonTransitionClose}
+      />
 
       {bookingSuccessData != null && bookingSuccessData.matchVisibility === 'private' ? (
         <PrivateReservationModal

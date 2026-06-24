@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeScrollView } from "../components/ui/SafeScrollView";
 import { LinearGradient } from "expo-linear-gradient";
 import {
   fetchPublicCourses,
@@ -25,6 +26,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { PublicCourseCard } from "../components/schoolCourses/PublicCourseCard";
 import { BookedCourseCard } from "../components/schoolCourses/BookedCourseCard";
 import { OnboardingInlineBanner } from "../components/onboarding/OnboardingInlineBanner";
+import { useTranslation } from "../i18n";
 
 const { width } = Dimensions.get("window");
 
@@ -48,6 +50,7 @@ export function CoursesScreen({
   initialTab = "apuntate",
   onOpenProfileForOnboarding,
 }: CoursesScreenProps) {
+  const { t } = useTranslation();
   const { session } = useAuth();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabId>(initialTab);
@@ -166,7 +169,7 @@ export function CoursesScreen({
             />
             <TextInput
               style={styles.searchInput}
-              placeholder="Buscar clases..."
+              placeholder={t("learning.coursesSearchPlaceholder")}
               placeholderTextColor="rgba(255,255,255,0.4)"
               value={searchQuery}
               onChangeText={setSearchQuery}
@@ -189,7 +192,7 @@ export function CoursesScreen({
                 activeTab === "apuntate" && styles.activeTabText,
               ]}
             >
-              Apúntate
+              {t("learning.coursesTabSignUp")}
             </Text>
           </Pressable>
           <Pressable
@@ -202,7 +205,7 @@ export function CoursesScreen({
                 activeTab === "cursos" && styles.activeTabText,
               ]}
             >
-              Cursos
+              {t("learning.coursesTabCourses")}
             </Text>
           </Pressable>
           <Pressable
@@ -215,13 +218,13 @@ export function CoursesScreen({
                 activeTab === "tusclases" && styles.activeTabText,
               ]}
             >
-              Tus clases
+              {t("learning.coursesTabYourClasses")}
             </Text>
           </Pressable>
         </View>
       </View>
 
-      <ScrollView
+      <SafeScrollView
         style={styles.content}
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
         refreshControl={
@@ -258,7 +261,7 @@ export function CoursesScreen({
                     filterPublic && styles.activeFilterText,
                   ]}
                 >
-                  Clases públicas
+                  {t("learning.coursesFilterPublic")}
                 </Text>
               </Pressable>
 
@@ -282,13 +285,13 @@ export function CoursesScreen({
                     selectedSport === "padel" && styles.activeFilterText,
                   ]}
                 >
-                  Pádel
+                  {t("common.sportPadel")}
                 </Text>
               </Pressable>
 
               <Pressable style={styles.filterPill}>
                 <Ionicons name="location-outline" size={16} color="#fff" />
-                <Text style={styles.filterText}>Cerca de mí</Text>
+                <Text style={styles.filterText}>{t("learning.coursesFilterNearMe")}</Text>
               </Pressable>
             </ScrollView>
           </View>
@@ -298,7 +301,7 @@ export function CoursesScreen({
         <View style={styles.mainContent}>
           {activeTab === "apuntate" ? (
             <>
-              <Text style={styles.sectionTitle}>Hoy</Text>
+              <Text style={styles.sectionTitle}>{t("learning.coursesToday")}</Text>
 
               {loading && !refreshing ? (
                 <View style={styles.loadingCenter}>
@@ -312,7 +315,7 @@ export function CoursesScreen({
                     color="rgba(255,255,255,0.1)"
                   />
                   <Text style={styles.emptyText}>
-                    No hay clases disponibles en este momento
+                    {t("learning.coursesNoClasses")}
                   </Text>
                 </View>
               ) : (
@@ -342,7 +345,7 @@ export function CoursesScreen({
                   {needsOnboarding && (
                     <OnboardingInlineBanner
                       icon="school-outline"
-                      message="Descubre tu nivel para desbloquear cursos"
+                      message={t("onboarding.inlineCourses")}
                       onPress={() => onOpenProfileForOnboarding?.()}
                     />
                   )}
@@ -365,7 +368,7 @@ export function CoursesScreen({
                   ) : (
                     <>
                       {/* Para tu nivel */}
-                      <EducationalSectionHeader title="Para tu nivel" />
+                      <EducationalSectionHeader title={t("learning.coursesForYourLevel")} />
                       <View style={styles.eduGrid}>
                         {(eduCourses || [])
                           .filter((c) => !c.locked)
@@ -379,7 +382,7 @@ export function CoursesScreen({
                       </View>
 
                       {/* Explora niveles superiores */}
-                      <EducationalSectionHeader title="Explora niveles superiores" />
+                      <EducationalSectionHeader title={t("learning.coursesExploreHigher")} />
                       <View style={styles.eduGrid}>
                         {(eduCourses || [])
                           .filter((c) => c.locked)
@@ -402,7 +405,7 @@ export function CoursesScreen({
                         color="rgba(255,255,255,0.1)"
                       />
                       <Text style={styles.emptyText}>
-                        No hay cursos educativos disponibles
+                        {t("learning.coursesNoEduCourses")}
                       </Text>
                     </View>
                   )}
@@ -413,7 +416,7 @@ export function CoursesScreen({
             <View style={styles.tusClasesContent}>
               <View style={styles.tusClasesHeader}>
                 <Text style={styles.sectionTitle}>
-                  Tus clases reservadas ({(enrollments || []).length})
+                  {t("learning.coursesYourReserved", { count: (enrollments || []).length })}
                 </Text>
               </View>
 
@@ -428,10 +431,9 @@ export function CoursesScreen({
                       <Text style={styles.tusClasesEmoji}>🎾</Text>
                     </View>
                   </View>
-                  <Text style={styles.tusClasesTitle}>No hay clases</Text>
+                  <Text style={styles.tusClasesTitle}>{t("learning.coursesEmptyTitle")}</Text>
                   <Text style={styles.tusClasesDescription}>
-                    No tienes historial de clases planificadas pero siempre
-                    puedes buscar una a la que apuntarte.
+                    {t("learning.coursesEmptyDesc")}
                   </Text>
                   <Pressable
                     onPress={() => setActiveTab("apuntate")}
@@ -442,7 +444,7 @@ export function CoursesScreen({
                       style={styles.tusClasesButton}
                     >
                       <Text style={styles.tusClasesButtonText}>
-                        Buscar clases disponibles
+                        {t("learning.coursesSearchAvailable")}
                       </Text>
                     </LinearGradient>
                   </Pressable>
@@ -466,7 +468,7 @@ export function CoursesScreen({
             </View>
           )}
         </View>
-      </ScrollView>
+      </SafeScrollView>
     </View>
   );
 }
@@ -493,11 +495,15 @@ function EducationalCourseCard({
   /** Aplica overlay de candado sobre todas las cards cuando falta onboarding. */
   lockedByOnboarding?: boolean;
 }) {
+  const { t } = useTranslation();
   const imageUrl =
     course.banner_url ||
     "https://images.unsplash.com/photo-1658491830143-72808ca237e3?w=400&h=300&fit=crop";
   const fmtLevel = (n: number) => n % 1 === 0 ? n.toFixed(0) : n.toFixed(1);
-  const levelText = `Nivel ${fmtLevel(course.elo_min ?? 0)}-${fmtLevel(course.elo_max ?? 7)}`;
+  const levelText = t('learning.coursesLevelRange', {
+    min: fmtLevel(course.elo_min ?? 0),
+    max: fmtLevel(course.elo_max ?? 7),
+  });
 
   return (
     <Pressable style={styles.eduCardWrapper} onPress={onPress}>
@@ -515,7 +521,7 @@ function EducationalCourseCard({
                 style={styles.eduCertGradient}
               >
                 <Ionicons name="checkmark-circle" size={10} color="#fff" />
-                <Text style={styles.eduCertText}>Certificación</Text>
+                <Text style={styles.eduCertText}>{t('learning.coursesCertification')}</Text>
               </LinearGradient>
             </View>
           )}
@@ -539,13 +545,13 @@ function EducationalCourseCard({
                 style={styles.eduCoachAvatar}
               />
               <Text style={styles.eduCoachName} numberOfLines={1}>
-                {course.coach_name || "Coach"}
+                {course.coach_name || t('common.coachFallback')}
               </Text>
             </View>
             <View style={styles.eduRating}>
               <Ionicons name="play-circle" size={10} color="#F18F34" />
               <Text style={styles.eduRatingText}>
-                {course.total_lessons} lecciones
+                {t('learning.coursesLessonsCount', { count: course.total_lessons })}
               </Text>
             </View>
           </View>
@@ -554,13 +560,13 @@ function EducationalCourseCard({
             <View style={styles.eduDetailItem}>
               <Ionicons name="play-circle-outline" size={12} color="#6B7280" />
               <Text style={styles.eduDetailText}>
-                {course.total_lessons} lecciones
+                {t('learning.coursesLessonsCount', { count: course.total_lessons })}
               </Text>
             </View>
             <View style={styles.eduDetailItem}>
               <Ionicons name="location-outline" size={12} color="#6B7280" />
               <Text style={styles.eduDetailText} numberOfLines={1}>
-                {course.club_name || "Club"}
+                {course.club_name || t('common.clubFallback')}
               </Text>
             </View>
           </View>
@@ -585,11 +591,12 @@ function ClassCard({
   course: PublicCourse;
   onPress: () => void;
 }) {
+  const { t } = useTranslation();
   const imageUrl =
     course.club_logo_url ||
     "https://images.unsplash.com/photo-1658491830143-72808ca237e3?w=400&h=300&fit=crop";
   const firstDay = course.days[0];
-  const timeText = firstDay ? `${firstDay.start_time}` : "Horario a confirmar";
+  const timeText = firstDay ? `${firstDay.start_time}` : t('learning.coursesScheduleTbc');
 
   return (
     <Pressable
@@ -607,7 +614,7 @@ function ClassCard({
             <View style={styles.priceOverlay}>
               <Text style={styles.priceText}>
                 {Math.round(course.price_cents / 100)}€
-                <Text style={styles.priceUnitText}>/clase</Text>
+                <Text style={styles.priceUnitText}>{t('learning.coursesPerClass')}</Text>
               </Text>
             </View>
           </View>

@@ -1,69 +1,81 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { formatLocale, useTranslation } from '../../i18n';
+
+type AchievementTier = 'legendary' | 'epic' | 'normal';
 
 interface Achievement {
   id: string;
   title: string;
   description: string;
-  tier: 'LEGENDARIO' | 'ÉPICO' | 'NORMAL';
+  tier: AchievementTier;
   icon: keyof typeof Ionicons.glyphMap;
   date: string;
-  sport?: string;
+  sport?: 'padel';
   color: string;
   isPublic: boolean;
 }
 
-const ACHIEVEMENTS: Achievement[] = [
-  {
-    id: '1',
-    title: 'Campeón Torneo Verano',
-    description: '1er puesto en el Torneo de Verano 2025',
-    tier: 'LEGENDARIO',
-    icon: 'trophy-outline',
-    date: 'Ago 2025',
-    sport: 'Pádel',
-    color: '#F18F34',
-    isPublic: true,
-  },
-  {
-    id: '2',
-    title: 'Imparable',
-    description: 'Completaste la lección diaria 7 días seguidos',
-    tier: 'ÉPICO',
-    icon: 'flame-outline',
-    date: 'Jul 2025',
-    sport: 'Pádel',
-    color: '#A855F7',
-    isPublic: true,
-  },
-  {
-    id: '3',
-    title: 'Muro de la Red',
-    description: 'Completaste tu primer curso de volea',
-    tier: 'NORMAL',
-    icon: 'ribbon-outline',
-    date: 'Jun 2025',
-    color: '#6B7280',
-    isPublic: true,
-  },
-];
-
 export const TrophyShowcaseSection: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('Todos');
+  const { t, locale } = useTranslation();
+  const numberLocale = formatLocale(locale);
+  const tabAll = t('profile.logrosTabAll');
+  const tabTrophies = t('profile.achievementsTitle');
+  const tabBadges = t('profile.coachStrengths');
+  const tabCourses = t('profile.coachProgCoursesCompleted');
+  const [activeTab, setActiveTab] = useState(tabAll);
+
+  const achievements = useMemo<Achievement[]>(
+    () => [
+      {
+        id: '1',
+        title: t('profile.achievementsTitle'),
+        description: t('profile.achievementsEmptySub'),
+        tier: 'legendary',
+        icon: 'trophy-outline',
+        date: new Date(2025, 7, 1).toLocaleDateString(numberLocale, { month: 'short', year: 'numeric' }),
+        sport: 'padel',
+        color: '#F18F34',
+        isPublic: true,
+      },
+      {
+        id: '2',
+        title: t('profile.coachProgDailyLesson'),
+        description: t('onboarding.profileLevelCoachDesc'),
+        tier: 'epic',
+        icon: 'flame-outline',
+        date: new Date(2025, 6, 1).toLocaleDateString(numberLocale, { month: 'short', year: 'numeric' }),
+        sport: 'padel',
+        color: '#A855F7',
+        isPublic: true,
+      },
+      {
+        id: '3',
+        title: t('profile.coachProgCoursesCompleted'),
+        description: t('profile.achievementsEmptySub'),
+        tier: 'normal',
+        icon: 'ribbon-outline',
+        date: new Date(2025, 5, 1).toLocaleDateString(numberLocale, { month: 'short', year: 'numeric' }),
+        color: '#6B7280',
+        isPublic: true,
+      },
+    ],
+    [t, numberLocale],
+  );
 
   const renderAchievement = (item: Achievement) => {
-    const isLegendary = item.tier === 'LEGENDARIO';
-    const isEpic = item.tier === 'ÉPICO';
+    const isLegendary = item.tier === 'legendary';
+    const isEpic = item.tier === 'epic';
 
     return (
-      <View 
-        key={item.id} 
+      <View
+        key={item.id}
         style={[
-          styles.achItem, 
+          styles.achItem,
           isLegendary && styles.achItemLegendary,
-          isEpic && styles.achItemEpic
+          isEpic && styles.achItemEpic,
         ]}
       >
         <View style={[styles.achIconBox, { backgroundColor: `${item.color}15`, borderColor: `${item.color}30` }]}>
@@ -74,12 +86,12 @@ export const TrophyShowcaseSection: React.FC = () => {
             <Text style={styles.achTitle} numberOfLines={1}>{item.title}</Text>
             {isLegendary && (
               <View style={styles.tierBadgeLegendary}>
-                <Text style={styles.tierBadgeTextLegendary}>✦ LEGENDARIO</Text>
+                <Text style={styles.tierBadgeTextLegendary}>{t('profile.coachDistHigh').toUpperCase()}</Text>
               </View>
             )}
             {isEpic && (
               <View style={styles.tierBadgeEpic}>
-                <Text style={styles.tierBadgeTextEpic}>ÉPICO</Text>
+                <Text style={styles.tierBadgeTextEpic}>{t('profile.coachDistNormal').toUpperCase()}</Text>
               </View>
             )}
           </View>
@@ -88,7 +100,7 @@ export const TrophyShowcaseSection: React.FC = () => {
             <Text style={styles.achDate}>{item.date}</Text>
             {item.sport && (
               <View style={styles.sportBadge}>
-                <Text style={styles.sportBadgeText}>{item.sport}</Text>
+                <Text style={styles.sportBadgeText}>{t('common.sportPadel')}</Text>
               </View>
             )}
           </View>
@@ -109,75 +121,73 @@ export const TrophyShowcaseSection: React.FC = () => {
               <Ionicons name="trophy-outline" size={16} color="#fff" />
             </LinearGradient>
             <View>
-              <Text style={styles.title}>Vitrina de Logros</Text>
-              <Text style={styles.count}>10 logros conseguidos</Text>
+              <Text style={styles.title}>{t('profile.achievementsTitle')}</Text>
+              <Text style={styles.count}>{t('profile.achievementsEmptySub')}</Text>
             </View>
           </View>
           <View style={styles.publicBadge}>
             <Ionicons name="eye-outline" size={12} color="#F18F34" />
-            <Text style={styles.publicBadgeText}>8 públicos</Text>
+            <Text style={styles.publicBadgeText}>{t('common.itemsCount', { count: 8 })}</Text>
           </View>
         </View>
 
-        {/* Categories Grid */}
         <View style={styles.grid}>
           <View style={styles.gridItem}>
             <Text style={styles.gridEmoji}>🏆</Text>
             <Text style={styles.gridVal}>5</Text>
-            <Text style={styles.gridLab}>Trofeos</Text>
+            <Text style={styles.gridLab}>{tabTrophies}</Text>
           </View>
           <View style={styles.gridItem}>
             <Text style={styles.gridEmoji}>🎖️</Text>
             <Text style={styles.gridVal}>2</Text>
-            <Text style={styles.gridLab}>Insignias</Text>
+            <Text style={styles.gridLab}>{tabBadges}</Text>
           </View>
           <View style={styles.gridItem}>
             <Text style={styles.gridEmoji}>📚</Text>
             <Text style={styles.gridVal}>3</Text>
-            <Text style={styles.gridLab}>Cursos</Text>
+            <Text style={styles.gridLab}>{tabCourses}</Text>
           </View>
         </View>
 
-        {/* Filter Tabs */}
         <View style={styles.tabsRow}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
-            {['Todos', 'Trofeos', 'Insignias', 'Cursos'].map(tab => (
-              <Pressable 
-                key={tab} 
-                onPress={() => setActiveTab(tab)}
-                style={[styles.tabBtn, activeTab === tab && styles.tabBtnActive]}
+            {[
+              { id: tabAll, icon: 'star-outline' as const },
+              { id: tabTrophies, icon: 'trophy-outline' as const },
+              { id: tabBadges, icon: 'medal-outline' as const },
+              { id: tabCourses, icon: 'school-outline' as const },
+            ].map((tab) => (
+              <Pressable
+                key={tab.id}
+                onPress={() => setActiveTab(tab.id)}
+                style={[styles.tabBtn, activeTab === tab.id && styles.tabBtnActive]}
               >
-                <Ionicons 
-                  name={
-                    tab === 'Todos' ? 'star-outline' : 
-                    tab === 'Trofeos' ? 'trophy-outline' : 
-                    tab === 'Insignias' ? 'medal-outline' : 'school-outline'
-                  } 
-                  size={14} 
-                  color={activeTab === tab ? '#F18F34' : '#6B7280'} 
+                <Ionicons
+                  name={tab.icon}
+                  size={14}
+                  color={activeTab === tab.id ? '#F18F34' : '#6B7280'}
                 />
-                <Text style={[styles.tabText, activeTab === tab ? styles.tabTextActive : styles.tabTextInactive]}>
-                  {tab}
+                <Text style={[styles.tabText, activeTab === tab.id ? styles.tabTextActive : styles.tabTextInactive]}>
+                  {tab.id}
                 </Text>
               </Pressable>
             ))}
           </ScrollView>
         </View>
 
-        {/* List */}
         <View style={styles.list}>
-          {ACHIEVEMENTS.map(renderAchievement)}
+          {achievements.map(renderAchievement)}
         </View>
 
         <Pressable style={styles.viewAllBtn}>
-          <Text style={styles.viewAllText}>Ver todos (10)</Text>
+          <Text style={styles.viewAllText}>{t('common.seeAll')}</Text>
           <Ionicons name="chevron-down" size={14} color="#9CA3AF" />
         </Pressable>
 
         <View style={styles.disclaimer}>
           <Ionicons name="lock-closed" size={12} color="#4B5563" />
           <Text style={styles.disclaimerText}>
-            Los logros marcados como <Text style={styles.disclaimerBold}>públicos</Text> serán visibles para otros jugadores.
+            {t('profile.achievementsEmpty')}
           </Text>
         </View>
       </View>

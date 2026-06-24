@@ -3,6 +3,7 @@ import { fetchSearchCourts, type SearchCourtResult } from '../api/search';
 import type { SearchFiltersState } from '../domain/searchFilters';
 import { SEARCH_DISTANCE_MAX_KM } from '../domain/searchFilters';
 import { decorateSearchCourtSlots } from '../domain/searchCourtFilters';
+import { useTranslation } from '../i18n';
 import { toDateStringLocal } from '../utils/dateLocal';
 
 function filterByMaxDistance(
@@ -18,6 +19,7 @@ function filterByMaxDistance(
 }
 
 export function useSearchCourts(filters: SearchFiltersState) {
+  const { t } = useTranslation();
   const [rawResults, setRawResults] = useState<SearchCourtResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -65,13 +67,13 @@ export function useSearchCourts(filters: SearchFiltersState) {
       setRawResults(data);
     } catch (err) {
       if (seq !== requestSeq.current) return;
-      setFetchError(err instanceof Error ? err.message : 'Error al cargar clubes');
+      setFetchError(err instanceof Error ? err.message : t('common.clubsSearchLoadError'));
     } finally {
       if (seq === requestSeq.current) {
         setLoading(false);
       }
     }
-  }, [filters.date, filters.cerramiento, filters.paredes, filters.sport]);
+  }, [filters.date, filters.cerramiento, filters.paredes, filters.sport, t]);
 
   useEffect(() => {
     search();

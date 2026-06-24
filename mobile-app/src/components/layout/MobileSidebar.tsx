@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { BlurView } from 'expo-blur';
+import { useTranslation } from '../../i18n';
 import { theme } from '../../theme';
 
 type MobileSidebarProps = {
@@ -11,6 +12,7 @@ type MobileSidebarProps = {
 };
 
 export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps) {
+  const { t } = useTranslation();
   const { width: windowWidth } = useWindowDimensions();
   /** Evita ancho 0 en el primer frame (Android) y animaciones con valor inválido. */
   const width = Math.max(windowWidth, 1);
@@ -54,7 +56,7 @@ export function MobileSidebar({ visible, onClose, children }: MobileSidebarProps
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={onClose}
-          accessibilityLabel="Cerrar menú"
+          accessibilityLabel={t('nav.closeMenu')}
         />
       </Animated.View>
       <Animated.View

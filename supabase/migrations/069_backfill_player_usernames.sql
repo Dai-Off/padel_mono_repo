@@ -15,15 +15,12 @@ BEGIN
       AND status IS DISTINCT FROM 'deleted'
     ORDER BY created_at ASC, id ASC
   LOOP
-    base := lower(
-      regexp_replace(
-        btrim(coalesce(r.first_name, '') || '_' || coalesce(r.last_name, '')),
-        '[^a-z0-9]+',
-        '_',
-        'g'
-      )
-    );
-    base := trim(both '_' from base);
+    base := trim(both '_' from regexp_replace(
+      lower(btrim(coalesce(r.first_name, '') || '_' || coalesce(r.last_name, ''))),
+      '[^a-z0-9]+',
+      '_',
+      'g'
+    ));
 
     IF length(base) < 3 THEN
       base := 'player_' || left(replace(r.id::text, '-', ''), 8);

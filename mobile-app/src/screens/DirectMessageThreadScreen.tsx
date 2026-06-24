@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -23,14 +23,15 @@ import {
 import { subscribeMessagesSocket } from '../realtime/messagesSocket';
 import type { MessagePeerNav } from './MessagesScreen';
 import { theme } from '../theme';
+import { formatLocale, useTranslation } from '../i18n';
 
 const ACCENT = '#F18F34';
 const BG = '#0A0A0A';
 
-function formatShortTime(iso: string): string {
+function formatShortTime(iso: string, numberLocale: string): string {
   try {
     const d = new Date(iso);
-    return d.toLocaleString('es-ES', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString(numberLocale, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
   } catch {
     return '';
   }
@@ -49,6 +50,8 @@ export function DirectMessageThreadScreen({
   standalone = false,
 }: DirectMessageThreadScreenProps) {
   const insets = useSafeAreaInsets();
+  const { locale, t } = useTranslation();
+  const numberLocale = formatLocale(locale);
   const { session } = useAuth();
   const token = session?.access_token;
 
@@ -62,7 +65,7 @@ export function DirectMessageThreadScreen({
     setLoading(true);
     const res = await fetchDirectThread(peer.id, token);
     if (!res.ok) {
-      Alert.alert('Mensajes', res.error);
+      Alert.alert(t('messages.title'), res.error);
       setLoading(false);
       return;
     }
@@ -122,7 +125,7 @@ export function DirectMessageThreadScreen({
     setSending(true);
     const res = await sendDirectMessage(peer.id, text, token);
     if (!res.ok) {
-      Alert.alert('Mensajes', res.error);
+      Alert.alert(t('messages.title'), res.error);
       setSending(false);
       return;
     }
@@ -140,7 +143,7 @@ export function DirectMessageThreadScreen({
   return (
     <KeyboardAvoidingView
       style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior="padding"
       keyboardVerticalOffset={standalone ? headerBlockHeight : theme.headerHeight}
     >
       <View style={[styles.toolbar, { paddingTop: toolbarTopPad }]}>
@@ -149,7 +152,7 @@ export function DirectMessageThreadScreen({
           hitSlop={12}
           style={({ pressed }) => [styles.iconBtn, pressed && styles.pressed]}
           accessibilityRole="button"
-          accessibilityLabel="Volver"
+          accessibilityLabel={t('messages.backA11y')}
         >
           <Ionicons name="arrow-back" size={22} color="#fff" />
         </Pressable>
@@ -175,13 +178,13 @@ export function DirectMessageThreadScreen({
               <View style={[styles.bubble, item.mine ? styles.bubbleMine : styles.bubbleTheirs]}>
                 <Text style={[styles.bubbleText, item.mine && styles.bubbleTextMine]}>{item.body}</Text>
                 <Text style={[styles.time, item.mine && styles.timeMine]}>
-                  {formatShortTime(item.created_at)}
+                  {formatShortTime(item.created_at, numberLocale)}
                 </Text>
               </View>
             </View>
           )}
           ListEmptyComponent={
-            <Text style={styles.empty}>Escribe el primer mensaje para {peer.displayName}.</Text>
+            <Text style={styles.empty}>{t('messages.threadEmpty', { name: peer.displayName })}</Text>
           }
         />
       )}
@@ -190,7 +193,7 @@ export function DirectMessageThreadScreen({
         <TextInput
           value={draft}
           onChangeText={setDraft}
-          placeholder="Escribe un mensaje…"
+          placeholder={t('messages.threadInputPlaceholder')}
           placeholderTextColor="rgba(255,255,255,0.45)"
           style={styles.input}
           editable={!sending && !!token}

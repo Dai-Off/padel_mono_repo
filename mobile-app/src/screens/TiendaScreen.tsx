@@ -13,7 +13,9 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
 import { LinearGradient } from "expo-linear-gradient";
+import { SafeScrollView } from "../components/ui/SafeScrollView";
 import { lineHeightFor, theme } from "../theme";
+import { useTranslation } from "../i18n";
 
 /** Mismo ritmo horizontal que `PartidosScreen` y el resto de listas (`theme.spacing.lg`). */
 const TIENDA_PAD_H = theme.spacing.lg;
@@ -106,19 +108,19 @@ type CategoryId =
 type IoniconName = ComponentProps<typeof Ionicons>["name"];
 
 /** Icono + texto en fila: en Android, emoji + string en un mismo `Text` suele ocultar el texto. */
-const CATEGORIES: { id: CategoryId; label: string; icon: IoniconName }[] = [
-  { id: "all", label: "Todo", icon: "flame-outline" },
-  { id: "palas", label: "Palas", icon: "tennisball-outline" },
-  { id: "pelotas", label: "Pelotas", icon: "football-outline" },
-  { id: "calzado", label: "Calzado", icon: "footsteps-outline" },
-  { id: "ropa", label: "Ropa", icon: "shirt-outline" },
-  { id: "accesorios", label: "Accesorios", icon: "bag-handle-outline" },
+const CATEGORY_META: { id: CategoryId; icon: IoniconName }[] = [
+  { id: "all", icon: "flame-outline" },
+  { id: "palas", icon: "tennisball-outline" },
+  { id: "pelotas", icon: "football-outline" },
+  { id: "calzado", icon: "footsteps-outline" },
+  { id: "ropa", icon: "shirt-outline" },
+  { id: "accesorios", icon: "bag-handle-outline" },
 ];
 
 type Product = {
   id: string;
   brand: string;
-  name: string;
+  nameKey: `tienda.mockProduct${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}Name`;
   price: string;
   oldPrice?: string;
   image: string;
@@ -126,7 +128,7 @@ type Product = {
   reviews: string;
   badgeHot?: boolean;
   badgePct?: string;
-  stockNote?: string;
+  stockCount?: number;
   category: CategoryId;
 };
 
@@ -134,7 +136,7 @@ const PRODUCTS: Product[] = [
   {
     id: "1",
     brand: "Nox",
-    name: "Pala Nox AT10 Luxury",
+    nameKey: "tienda.mockProduct1Name",
     price: "349€",
     oldPrice: "399€",
     image:
@@ -143,13 +145,13 @@ const PRODUCTS: Product[] = [
     reviews: "156",
     badgeHot: true,
     badgePct: "-13%",
-    stockNote: "Quedan 5",
+    stockCount: 5,
     category: "palas",
   },
   {
     id: "2",
     brand: "Bullpadel",
-    name: "Pala Bullpadel Hack 03",
+    nameKey: "tienda.mockProduct2Name",
     price: "289€",
     oldPrice: "349€",
     image:
@@ -163,7 +165,7 @@ const PRODUCTS: Product[] = [
   {
     id: "3",
     brand: "Adidas",
-    name: "Mochila Adidas Padel Tour",
+    nameKey: "tienda.mockProduct3Name",
     price: "79€",
     oldPrice: "99€",
     image:
@@ -177,7 +179,7 @@ const PRODUCTS: Product[] = [
   {
     id: "4",
     brand: "Asics",
-    name: "Zapatillas Asics Gel Padel Pro",
+    nameKey: "tienda.mockProduct4Name",
     price: "129€",
     oldPrice: "159€",
     image:
@@ -191,7 +193,7 @@ const PRODUCTS: Product[] = [
   {
     id: "5",
     brand: "Hesacore",
-    name: "Grip Hesacore Tour",
+    nameKey: "tienda.mockProduct5Name",
     price: "14.99€",
     image:
       "https://images.unsplash.com/photo-1569597773059-6d747e5f8ed5?w=800&fit=crop",
@@ -202,7 +204,7 @@ const PRODUCTS: Product[] = [
   {
     id: "6",
     brand: "Head",
-    name: "Pelotas Head Padel Pro",
+    nameKey: "tienda.mockProduct6Name",
     price: "5.99€",
     image:
       "https://images.unsplash.com/photo-1599409091912-88526846d833?w=800&fit=crop",
@@ -213,7 +215,7 @@ const PRODUCTS: Product[] = [
   {
     id: "7",
     brand: "Adidas",
-    name: "Pantalón Adidas Club",
+    nameKey: "tienda.mockProduct7Name",
     price: "44.99€",
     image:
       "https://images.unsplash.com/photo-1661474973381-130596c650c4?w=800&fit=crop",
@@ -224,7 +226,7 @@ const PRODUCTS: Product[] = [
   {
     id: "8",
     brand: "Wilson",
-    name: "Camiseta técnica Wilson",
+    nameKey: "tienda.mockProduct8Name",
     price: "34.99€",
     image:
       "https://images.unsplash.com/photo-1659081469066-c88ca2dec240?w=800&fit=crop",
@@ -271,8 +273,18 @@ function textBase(size: number, weight: "400" | "500" | "600" | "700" | "800") {
 }
 
 export function TiendaScreen() {
+  const { t } = useTranslation();
   const [category, setCategory] = useState<CategoryId>("all");
   const [search, setSearch] = useState("");
+
+  const categories = useMemo(
+    () =>
+      CATEGORY_META.map((c) => ({
+        ...c,
+        label: t(`tienda.categories.${c.id}`),
+      })),
+    [t],
+  );
 
   const filtered = useMemo(() => {
     if (category === "all") return PRODUCTS;
@@ -284,7 +296,7 @@ export function TiendaScreen() {
 
   return (
     <View style={styles.root}>
-      <ScrollView
+      <SafeScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -292,7 +304,7 @@ export function TiendaScreen() {
         bounces
       >
         <View style={styles.heroTop}>
-          <Text style={[styles.proShop, textBase(11, "700")]}>PRO SHOP</Text>
+          <Text style={[styles.proShop, textBase(11, "700")]}>{t("common.proShop")}</Text>
           <View style={styles.searchWrap}>
             <Ionicons
               name="search"
@@ -303,7 +315,7 @@ export function TiendaScreen() {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Buscar palas, zapatillas, ropa..."
+              placeholder={t("tienda.searchPlaceholder")}
               placeholderTextColor="#6b7280"
               style={styles.searchInput}
               underlineColorAndroid="transparent"
@@ -317,7 +329,7 @@ export function TiendaScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.chipsRow}
         >
-          {CATEGORIES.map((c) => {
+          {categories.map((c) => {
             const active = category === c.id;
             return (
               <Pressable
@@ -367,15 +379,15 @@ export function TiendaScreen() {
                 style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
               >
                 <Ionicons name="options-outline" size={16} color="#9ca3af" />
-                <Text style={[styles.filterBtnText, textBase(12, "600")]}>Filtros</Text>
+                <Text style={[styles.filterBtnText, textBase(12, "600")]}>{t("tienda.filters")}</Text>
               </Pressable>
               <Text style={[styles.count, textBase(11, "500")]}>
-                {count} items
+                {t("common.itemsCount", { count })}
               </Text>
             </View>
             <View style={styles.sortWrapAndroid}>
               <View style={styles.sortLabelWrap}>
-                <Text style={[styles.sortLabel, textBase(12, "600")]}>Destacados</Text>
+                <Text style={[styles.sortLabel, textBase(12, "600")]}>{t("tienda.sortFeatured")}</Text>
               </View>
               <Ionicons name="chevron-down" size={14} color="#6b7280" />
             </View>
@@ -386,16 +398,16 @@ export function TiendaScreen() {
               style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
             >
               <Ionicons name="options-outline" size={16} color="#9ca3af" />
-              <Text style={[styles.filterBtnText, textBase(12, "600")]}>Filtros</Text>
+              <Text style={[styles.filterBtnText, textBase(12, "600")]}>{t("tienda.filters")}</Text>
             </Pressable>
             <View style={styles.sortWrap}>
               <View style={styles.sortLabelWrap}>
-                <Text style={[styles.sortLabel, textBase(12, "600")]}>Destacados</Text>
+                <Text style={[styles.sortLabel, textBase(12, "600")]}>{t("tienda.sortFeatured")}</Text>
               </View>
               <Ionicons name="chevron-down" size={14} color="#6b7280" />
             </View>
             <Text style={[styles.count, textBase(11, "500")]}>
-              {count} items
+              {t("common.itemsCount", { count })}
             </Text>
           </View>
         )}
@@ -416,10 +428,10 @@ export function TiendaScreen() {
           />
           <View style={styles.bannerTextBlock}>
             <Text style={[styles.bannerTitle, textBase(26, "800")]}>
-              Nueva Colección
+              {t("tienda.bannerTitle")}
             </Text>
             <Text style={[styles.bannerSub, textBase(14, "500")]}>
-              Primavera 2026
+              {t("tienda.bannerSub")}
             </Text>
             <Pressable
               style={({ pressed }) => [
@@ -428,7 +440,7 @@ export function TiendaScreen() {
               ]}
             >
               <Text style={[styles.bannerCtaText, textBase(12, "700")]}>
-                Explorar ahora
+                {t("tienda.bannerCta")}
               </Text>
               <Ionicons name="arrow-forward" size={16} color={BG} />
             </Pressable>
@@ -464,10 +476,10 @@ export function TiendaScreen() {
           </View>
           <View style={styles.aiTextCol}>
             <Text style={[styles.aiTitle, textBase(15, "700")]}>
-              Tu IA personal de compras
+              {t("tienda.aiShoppingTitle")}
             </Text>
             <Text style={[styles.aiSub, textBase(12, "400")]}>
-              Recomendaciones según tu nivel y estilo
+              {t("tienda.aiShoppingSub")}
             </Text>
           </View>
           <View style={styles.aiChevronWrap}>
@@ -480,7 +492,7 @@ export function TiendaScreen() {
             <View style={styles.sectionTitleRow}>
               <Ionicons name="flash" size={20} color={ACCENT} />
               <Text style={[styles.sectionTitle, textBase(16, "700")]}>
-                Flash Deals
+                {t("common.flashDeals")}
               </Text>
             </View>
             <View style={styles.timerRow}>
@@ -507,12 +519,12 @@ export function TiendaScreen() {
             <View style={styles.sectionTitleRow}>
               <Ionicons name="star" size={18} color="#eab308" />
               <Text style={[styles.sectionTitle, textBase(16, "700")]}>
-                Destacados
+                {t("common.featured")}
               </Text>
             </View>
             <Pressable style={({ pressed }) => pressed && styles.pressed}>
               <View style={styles.seeAllRow}>
-                <Text style={[styles.seeAll, textBase(11, "600")]}>Ver todo</Text>
+                <Text style={[styles.seeAll, textBase(11, "600")]}>{t("common.seeAll")}</Text>
                 <Ionicons name="chevron-forward" size={14} color={ACCENT} />
               </View>
             </Pressable>
@@ -530,16 +542,16 @@ export function TiendaScreen() {
 
         <View style={styles.gridSection}>
           <Text style={[styles.gridTitle, textBase(16, "700")]}>
-            Todos los productos
+            {t("tienda.gridTitleAll")}
             <Text style={styles.gridTitleMuted}> ({count})</Text>
           </Text>
           <View style={styles.grid}>
             {filtered.map((p) => (
-              <GridProduct key={p.id} product={p} cardWidth={gridCardWidth} />
+              <GridProduct key={p.id} product={p} cardWidth={gridCardWidth} t={t} />
             ))}
           </View>
         </View>
-      </ScrollView>
+      </SafeScrollView>
     </View>
   );
 }
@@ -561,6 +573,7 @@ function FlashCard({
   product: Product;
   cardWidth: number;
 }) {
+  const { t } = useTranslation();
   return (
     <Pressable
       style={({ pressed }) => [
@@ -585,7 +598,7 @@ function FlashCard({
       </View>
       <View style={styles.flashBody}>
         <Text style={[styles.flashBrand, textBase(10, "600")]}>{product.brand}</Text>
-        <Text style={[styles.flashName, textBase(12, "700")]}>{product.name}</Text>
+        <Text style={[styles.flashName, textBase(12, "700")]}>{t(product.nameKey)}</Text>
         <View style={styles.flashPriceRow}>
           <PriceWithEuro
             raw={product.price}
@@ -610,6 +623,7 @@ function FeaturedCard({
   product: Product;
   cardWidth: number;
 }) {
+  const { t } = useTranslation();
   return (
     <Pressable
       style={({ pressed }) => [
@@ -639,7 +653,7 @@ function FeaturedCard({
         </View>
         <View style={styles.featBody}>
           <Text style={[styles.featBrand, textBase(9, "700")]}>{product.brand}</Text>
-          <Text style={[styles.featName, textBase(14, "700")]}>{product.name}</Text>
+          <Text style={[styles.featName, textBase(14, "700")]}>{t(product.nameKey)}</Text>
           <View style={styles.featFooter}>
             <View style={styles.featPriceBlock}>
               <PriceWithEuro
@@ -666,9 +680,11 @@ function FeaturedCard({
 function GridProduct({
   product,
   cardWidth,
+  t,
 }: {
   product: Product;
   cardWidth: number;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }) {
   const fullStars = Math.min(5, Math.round(parseFloat(product.rating) || 0));
   return (
@@ -690,7 +706,7 @@ function GridProduct({
           {product.badgeHot ? (
             <View style={styles.hotBadge}>
               <Ionicons name="flame" size={10} color="#fff" />
-              <Text style={[styles.hotBadgeText, textBase(9, "800")]}>HOT</Text>
+              <Text style={[styles.hotBadgeText, textBase(9, "800")]}>{t("common.hotBadge")}</Text>
             </View>
           ) : null}
           {product.badgePct ? (
@@ -701,11 +717,11 @@ function GridProduct({
             </View>
           ) : null}
         </View>
-        {product.stockNote ? (
+        {product.stockCount != null ? (
           <View style={styles.stockPill}>
             <Ionicons name="time-outline" size={11} color="#fff" />
             <Text style={[styles.stockPillText, textBase(9, "600")]}>
-              {product.stockNote}
+              {t("common.stockRemaining", { count: product.stockCount })}
             </Text>
           </View>
         ) : null}
@@ -715,7 +731,7 @@ function GridProduct({
       </View>
       <View style={styles.gridBody}>
         <Text style={[styles.gridBrand, textBase(9, "700")]}>{product.brand}</Text>
-        <Text style={[styles.gridName, textBase(13, "600")]}>{product.name}</Text>
+        <Text style={[styles.gridName, textBase(13, "600")]}>{t(product.nameKey)}</Text>
         <View style={styles.starsRow}>
           {[1, 2, 3, 4, 5].map((i) => (
             <Ionicons

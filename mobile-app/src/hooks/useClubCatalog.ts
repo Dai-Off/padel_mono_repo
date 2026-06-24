@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchSearchCourts, type SearchCourtResult } from '../api/search';
+import { useTranslation } from '../i18n';
 import { toDateStringLocal } from '../utils/dateLocal';
 
 export type ClubCatalogItem = {
@@ -56,6 +57,7 @@ function buildCatalog(results: SearchCourtResult[]): ClubCatalogItem[] {
 }
 
 export function useClubCatalog() {
+  const { t } = useTranslation();
   const [clubs, setClubs] = useState<ClubCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,12 +77,12 @@ export function useClubCatalog() {
       ]);
       setClubs(buildCatalog([...todayRows, ...tomorrowRows]));
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudieron cargar los clubes');
+      setError(e instanceof Error ? e.message : t('common.clubsLoadError'));
       setClubs([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void reload();

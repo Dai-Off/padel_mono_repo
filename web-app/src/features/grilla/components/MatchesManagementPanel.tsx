@@ -18,6 +18,13 @@ import { apiFetchWithAuth } from '../../../services/api';
 import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
 import { CreateMatchModal } from './CreateMatchModal';
 import { PlayerSearch } from './ReservationModal';
+import {
+    buildSyntheticMatchPlayer,
+    nextFreeSlotIndex,
+    resolveMatchPlayerSlots,
+    slotIndexFromTeamPosition,
+    usedSlotIndexes,
+} from '../utils/matchPlayerSlots';
 
 interface MatchesManagementPanelProps {
     clubId: string | null;
@@ -132,26 +139,12 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                     });
 
                     if (missing.length > 0) {
-                        let teamACount = existingMps.filter((mp: any) => mp.team === 'A').length;
-                        let teamBCount = existingMps.filter((mp: any) => mp.team === 'B').length;
-                        const extras = missing.map((p: any) => {
-                            const person = Array.isArray(p.players) ? p.players[0] : p.players;
-                            // Prefer filling team A up to 2, then team B up to 2, otherwise whichever is lightest
-                            let team: 'A' | 'B';
-                            if (teamACount < 2) { team = 'A'; teamACount++; }
-                            else if (teamBCount < 2) { team = 'B'; teamBCount++; }
-                            else if (teamACount <= teamBCount) { team = 'A'; teamACount++; }
-                            else { team = 'B'; teamBCount++; }
-                            return {
-                                id: p.id,
-                                team,
-                                players: {
-                                    id: person?.id,
-                                    first_name: person?.first_name,
-                                    last_name: person?.last_name,
-                                    elo_rating: person?.elo_rating
-                                }
-                            };
+                        const usedSlots = usedSlotIndexes(existingMps);
+                        const extras = missing.flatMap((p: any) => {
+                            const slot = nextFreeSlotIndex(usedSlots);
+                            if (slot == null) return [];
+                            usedSlots.add(slot);
+                            return [buildSyntheticMatchPlayer(p, slot)];
                         });
                         m.match_players = [...existingMps, ...extras];
                     } else if (existingMps.length === 0 && fullBooking?.players) {
@@ -159,6 +152,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                         m.match_players = [{
                             id: fullBooking.organizer_player_id,
                             team: 'A',
+                            slot_index: 0,
                             players: { id: org.id, first_name: org.first_name, last_name: org.last_name, elo_rating: org.elo_rating }
                         }];
                     }
@@ -177,19 +171,9 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                     const mockPlayers: any[] = [];
                     const participants = b.booking_participants || [];
                     if (participants.length > 0) {
-                        for (let i = 0; i < participants.length; i++) {
+                        for (let i = 0; i < participants.length && i < 4; i++) {
                              const p = participants[i];
-                             const person = Array.isArray(p.players) ? p.players[0] : p.players;
-                             mockPlayers.push({
-                                 id: p.id,
-                                 team: i % 2 === 0 ? 'A' : 'B',
-                                 players: {
-                                      id: person?.id,
-                                      first_name: person?.first_name,
-                                      last_name: person?.last_name,
-                                      elo_rating: person?.elo_rating
-                                 }
-                             });
+                             mockPlayers.push(buildSyntheticMatchPlayer(p, i));
                         }
                     } else if (b.players) {
                         const org = b.players;
@@ -349,7 +333,10 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
             return (
                 <div key={`empty-${matchId}-${team}-${index}`} className="flex flex-col items-center">
                     <div
-                        onClick={() => setAddingToSlot({ matchId, team, index, bookingId: matchBookingId })}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setAddingToSlot({ matchId, team, index, bookingId: matchBookingId });
+                        }}
                         className="w-8 h-8 rounded-full bg-gray-50 border border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:bg-gray-100 hover:text-blue-500 hover:border-blue-300 transition-colors"
                     >
                         <Plus className="w-3.5 h-3.5" />
@@ -362,7 +349,11 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
         const elo = p.elo_rating ? p.elo_rating.toFixed(2) : '0.00';
         
         return (
-            <div key={`player-${matchId}-${team}-${mp.id || index}`} className="relative flex flex-col items-center group cursor-pointer hover:-translate-y-0.5 transition-transform hover:z-50">
+            <div
+                key={`player-${matchId}-${team}-${mp.id || index}`}
+                onClick={(e) => e.stopPropagation()}
+                className="relative flex flex-col items-center group cursor-pointer hover:-translate-y-0.5 transition-transform hover:z-50"
+            >
                 <div className="w-8 h-8 rounded-full bg-blue-100 border-2 border-white shadow-sm flex items-center justify-center text-blue-700 text-[11px] font-bold overflow-hidden">
                     {initials || <Users className="w-4 h-4 opacity-50" />}
                 </div>
@@ -380,11 +371,11 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
     return (
         <div className="flex flex-col h-full bg-white max-w-6xl">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 bg-white border-b z-20 shrink-0">
-                <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-4 px-4 py-3 bg-white border-b z-20 shrink-0">
+                <div className="flex items-center gap-2 shrink-0">
                     <h2 className="text-lg font-extrabold text-gray-900 tracking-tight">Partidos</h2>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
 
                     <div className="hidden sm:flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
                         <button onClick={handlePrevDay} className="px-2 py-1.5 text-gray-400 hover:bg-gray-50 border-r border-gray-200 transition-colors">
@@ -400,10 +391,11 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
 
                     <button
                         onClick={() => onBackToGrid ? onBackToGrid() : navigate(`/grilla?date=${currentDateStr}`)}
-                        title="Ver en la grilla"
-                        className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-[#006A6A]/5 hover:border-[#006A6A] hover:text-[#006A6A] transition-colors"
+                        className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-[#006A6A]/5 hover:border-[#006A6A] hover:text-[#006A6A] transition-colors shrink-0"
                     >
-                        <LayoutGrid className="w-4 h-4" />
+                        <LayoutGrid className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Grilla</span>
+                        <span className="sm:hidden">Grilla</span>
                     </button>
                     <div className="relative">
                         <button
@@ -427,7 +419,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                         {showFilters && (
                             <div
                                 ref={filterPanelRef}
-                                className="absolute right-0 top-full mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 p-4 w-[280px] sm:w-[450px] md:w-[580px] animate-fade-in text-left"
+                                className="fixed left-4 right-4 top-20 sm:absolute sm:left-auto sm:right-0 sm:top-full sm:w-[450px] md:w-[580px] mt-2 z-50 bg-white rounded-xl shadow-xl border border-gray-200 p-4 animate-fade-in text-left"
                             >
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                                     <div className="flex flex-col gap-0.5">
@@ -563,9 +555,10 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                     <button
                         type="button"
                         onClick={() => setIsCreateMatchOpen(true)}
-                        className="px-3 py-1.5 bg-[#006A6A] hover:bg-[#005151] text-white text-xs font-semibold rounded-lg shadow-sm transition-colors border border-transparent whitespace-nowrap"
+                        className="px-3 py-1.5 bg-[#006A6A] hover:bg-[#005151] text-white text-xs font-semibold rounded-lg shadow-sm transition-colors border border-transparent whitespace-nowrap shrink-0"
                     >
-                        Crear Partido
+                        <span className="hidden sm:inline">Crear Partido</span>
+                        <span className="sm:hidden">Crear</span>
                     </button>
                     <button className="p-1.5 border border-gray-200 text-[#005bc5] bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
                         <Settings className="w-4 h-4" />
@@ -573,20 +566,35 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                 </div>
             </div>
 
+            {/* Sub-header row for mobile date selector */}
+            <div className="flex sm:hidden items-center justify-center py-2 px-4 border-b bg-gray-50/50 gap-2 shrink-0">
+                <div className="flex items-center border border-gray-200 rounded-lg overflow-hidden bg-white shadow-sm">
+                    <button onClick={handlePrevDay} className="px-2.5 py-1.5 text-gray-400 hover:bg-gray-50 border-r border-gray-200 transition-colors">
+                        <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <div className="px-5 py-1.5 flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-[110px] justify-center">
+                        {getDisplayDate()} <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                    </div>
+                    <button onClick={handleNextDay} className="px-2.5 py-1.5 text-gray-400 hover:bg-gray-50 border-l border-gray-200 transition-colors">
+                        <ChevronRight className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+
             {/* Content Table */}
-            <div className="flex-1 overflow-auto bg-white">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden w-full bg-white">
                 <table className="w-full text-left border-collapse">
                     <thead className="sticky top-0 bg-white z-10 whitespace-nowrap shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
                         <tr>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Hora</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden xl:table-cell">Deporte</th>
-                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Duración</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden sm:table-cell">Duración</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden lg:table-cell">Nivel</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Jugadores</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Tipo</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Recaudado</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden xl:table-cell">Club</th>
-                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Pista</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden sm:table-cell">Pista</th>
                             <th className="px-3 py-2.5 border-b"></th>
                         </tr>
                     </thead>
@@ -616,19 +624,33 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                 const paymentTransactions = booking?.payment_transactions || [];
                                 const totalPaid = paymentTransactions.reduce((acc: number, pt: any) => pt.status === 'succeeded' ? acc + (pt.amount_cents || 0) : acc, 0) / 100;
                                 
-                                const players = match.match_players || [];
-                                const teamA = players.filter((p: any) => p.team === 'A');
-                                const teamB = players.filter((p: any) => p.team === 'B');
+                                const playerSlots = resolveMatchPlayerSlots(match.match_players || []);
 
                                 return (
-                                    <tr key={match.id} className="hover:bg-gray-50/50 transition-colors group">
+                                    <tr 
+                                        key={match.id} 
+                                        onClick={() => {
+                                            if (booking?.id && onEditBooking) {
+                                                onEditBooking(booking.id);
+                                            }
+                                        }}
+                                        className="hover:bg-gray-50/50 transition-colors group cursor-pointer"
+                                    >
                                         <td className="px-3 py-3 whitespace-nowrap">
-                                            <span className="text-xs font-bold text-gray-800">{formatTime(startAt)}</span>
+                                            <div className="flex flex-col">
+                                                <span className="text-xs font-bold text-gray-800">{formatTime(startAt)}</span>
+                                                <span className="text-[10px] text-gray-500 sm:hidden font-medium">
+                                                    {getDurationMin(startAt, endAt)} min
+                                                </span>
+                                                <span className="text-[9px] font-semibold text-[#006A6A] uppercase tracking-wider sm:hidden">
+                                                    {court?.name || 'Pista'}
+                                                </span>
+                                            </div>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap hidden xl:table-cell">
                                             <span className="text-[11px] font-medium text-gray-600">Pádel</span>
                                         </td>
-                                        <td className="px-3 py-3 whitespace-nowrap">
+                                        <td className="px-3 py-3 whitespace-nowrap hidden sm:table-cell">
                                             <span className="text-[11px] font-medium text-gray-600">{getDurationMin(startAt, endAt)} min</span>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap hidden lg:table-cell">
@@ -639,20 +661,26 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                         <td className="px-3 py-2.5 whitespace-nowrap">
                                             <div className="flex items-center gap-3">
                                                 <div className="flex items-center -space-x-2">
-                                                    {renderPlayer(teamA[0], 0, booking?.id, 'A', match.id)}
-                                                    {renderPlayer(teamA[1], 1, booking?.id, 'A', match.id)}
+                                                    {renderPlayer(playerSlots[0], 0, booking?.id, 'A', match.id)}
+                                                    {renderPlayer(playerSlots[1], 1, booking?.id, 'A', match.id)}
                                                 </div>
                                                 <span className="text-[9px] font-bold tracking-wider text-gray-300">VS</span>
                                                 <div className="flex items-center -space-x-2">
-                                                    {renderPlayer(teamB[0], 0, booking?.id, 'B', match.id)}
-                                                    {renderPlayer(teamB[1], 1, booking?.id, 'B', match.id)}
+                                                    {renderPlayer(playerSlots[2], 0, booking?.id, 'B', match.id)}
+                                                    {renderPlayer(playerSlots[3], 1, booking?.id, 'B', match.id)}
                                                 </div>
                                             </div>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap">
-                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold leading-tight bg-blue-100/60 text-blue-700 border border-blue-200/50">
-                                                {match.type === 'tournament_division' ? 'Americano' : (match.competitive ? 'Competitivo' : 'Amistoso')}
-                                            </span>
+                                            <div className="flex flex-col gap-1">
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold leading-tight bg-blue-100/60 text-blue-700 border border-blue-200/50 w-fit">
+                                                    {match.type === 'tournament_division' ? 'Americano' : (match.competitive ? 'Competitivo' : 'Amistoso')}
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 lg:hidden font-medium flex items-center gap-1">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-[#006A6A]" />
+                                                    Nivel: {match.elo_min?.toFixed(2) || '0.00'} - {match.elo_max?.toFixed(2) || '10.00'}
+                                                </span>
+                                            </div>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap">
                                             <div className="flex flex-col">
@@ -669,7 +697,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                         <td className="px-3 py-3 whitespace-nowrap hidden xl:table-cell">
                                             <span className="text-[11px] font-medium text-gray-600">{club?.name || 'Sede Central'}</span>
                                         </td>
-                                        <td className="px-3 py-3 whitespace-nowrap">
+                                        <td className="px-3 py-3 whitespace-nowrap hidden sm:table-cell">
                                             <span className="text-[11px] font-medium text-gray-600 uppercase tracking-wide">{court?.name || 'Pista'}</span>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap text-right text-[11px] font-medium">
@@ -765,7 +793,10 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                             body: JSON.stringify({
                                                 player_id: player.id,
                                                 team: addingToSlot.team,
-                                                slot_index: addingToSlot.index,
+                                                slot_index: slotIndexFromTeamPosition(
+                                                    addingToSlot.team as 'A' | 'B',
+                                                    addingToSlot.index,
+                                                ),
                                                 booking_id: addingToSlot.bookingId
                                             })
                                         });

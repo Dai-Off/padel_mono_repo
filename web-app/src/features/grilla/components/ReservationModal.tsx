@@ -14,11 +14,15 @@ import {
     AlertCircle,
     EyeOff,
     Eye,
+    MessageSquare,
+    Send,
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
 import { apiFetchWithAuth } from '../../../services/api';
-import { clubIanaTimeZone, zonedTimeToUtc, formatTimeHHmmInClubTz } from '../../../lib/clubTimeZone';
+import { clubIanaTimeZone, zonedTimeToUtc, formatTimeHHmmInClubTz, dayKeyInClubTz, validateBookingSlotWithinClubHours } from '../../../lib/clubTimeZone';
+import { clubChatsService } from '../../../services/clubChats';
+import { authService } from '../../../services/auth';
 
 function clubSlotToUtcIso(dateBase: string, hour: string, minute: string): string {
     return zonedTimeToUtc(`${dateBase}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`).toISOString();
@@ -31,6 +35,10 @@ import { TournamentGridBookingEditor } from './TournamentGridBookingEditor';
 import { WEEKDAY_CHIPS } from '../utils/recurrenceDates';
 import { resolveJoinedPlayer } from '../utils/bookingDisplay';
 import { formatPlayerLabel, formatPlayerSubline } from '../../../lib/playerLabel';
+import { formatLevelSelectValue, LEVEL_OPTIONS } from '../utils/openMatchLevel';
+import { willPublicOpenMatchStayOffGrid } from '../utils/reservationListFilters';
+import { isOpenMatchType, normalizeReservationTypeSlug } from '../utils/reservationTypeSlug';
+import { existingBookingBlocksOverlapEdit, hasBookingScheduleChanged, timeRangesOverlap } from '../utils/bookingOverlap';
 
 const PLAY_MODE_MARKER = '__PLAY_MODE__';
 
@@ -60,6 +68,19 @@ function composeNotesWithPlayMode(rawNotes: string, mode: 'single' | 'double'): 
     return [clean, `${PLAY_MODE_MARKER}:${mode}`].filter(Boolean).join('\n');
 }
 
+function normalizePlayerElo(raw: unknown): number | null {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0 || n > 7) return null;
+    return Math.round(n * 10) / 10;
+}
+
+function collectAssignedElos(organizer: Player | null, additional: (Player | null)[]): number[] {
+    return [organizer, ...additional]
+        .filter((p): p is Player => !!p)
+        .map((p) => normalizePlayerElo(p.elo_rating))
+        .filter((n): n is number => n != null);
+}
+
 interface ReservationModalProps {
     clubId?: string | null;
     isOpen: boolean;
@@ -77,6 +98,7 @@ interface ReservationModalProps {
     isLoadingBookingData?: boolean;
     /** Fecha visible en la grilla (YYYY-MM-DD), para reservas múltiples y etiqueta en alta. */
     gridDate?: string;
+    weeklySchedule?: unknown;
 }
 
 // Helper: Player Search Component
@@ -177,10 +199,14 @@ export const PlayerSearch: React.FC<{
                             <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold">
                                 {selectedPlayer.first_name[0]}{selectedPlayer.last_name[0]}
                             </div>
-                            <div>
-                                <p className="text-sm font-bold text-gray-900">{formatPlayerLabel(selectedPlayer)}</p>
-                                <p className="text-[10px] text-gray-500">
-                                    {formatPlayerSubline(selectedPlayer) || t('playerSearch.noContactLine')}
+                            <div className="min-w-0">
+                                <p className="text-sm font-bold text-gray-900 truncate">
+                                    {`${selectedPlayer.first_name ?? ''} ${selectedPlayer.last_name ?? ''}`.trim() || formatPlayerLabel(selectedPlayer)}
+                                </p>
+                                <p className="text-[10px] text-gray-500 truncate">
+                                    {selectedPlayer.username?.trim()
+                                        ? `@${selectedPlayer.username.trim()}`
+                                        : (formatPlayerSubline(selectedPlayer) || t('playerSearch.noContactLine'))}
                                 </p>
                             </div>
                         </div>
@@ -245,10 +271,14 @@ export const PlayerSearch: React.FC<{
                                         <div className="w-8 h-8 rounded-full bg-gray-100 text-gray-600 flex items-center justify-center text-xs font-bold shrink-0">
                                             {p.first_name[0]}{p.last_name[0]}
                                         </div>
-                                        <div className="truncate">
-                                            <p className="text-sm font-bold text-gray-900 truncate">{formatPlayerLabel(p)}</p>
+                                        <div className="min-w-0 flex-1 truncate">
+                                            <p className="text-sm font-bold text-gray-900 truncate">
+                                                {`${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || formatPlayerLabel(p)}
+                                            </p>
                                             <p className="text-[11px] text-gray-500 truncate">
-                                                {formatPlayerSubline(p) || t('playerSearch.noContactLine')}
+                                                {p.username?.trim()
+                                                    ? `@${p.username.trim()}`
+                                                    : (formatPlayerSubline(p) || t('playerSearch.noContactLine'))}
                                             </p>
                                         </div>
                                     </button>
@@ -472,7 +502,7 @@ const PaymentSlot: React.FC<{
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const ReservationModal: React.FC<ReservationModalProps> = ({
-    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate,
+    clubId, isOpen, onClose, reservation, onSave, editingBookingData, onUpdate, onDelete, onMarkPaid, onMoveToHidden, onMoveToVisible, isOnHiddenCourt, onGridRefresh, isLoadingBookingData, gridDate, weeklySchedule,
 }) => {
     const vvStyle = useVisualViewportFix(isOpen);
     const { t, i18n } = useGrillaTranslation();
@@ -489,6 +519,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [additionalPlayers, setAdditionalPlayers] = useState<(Player | null)[]>([null, null, null]);
     const [duration, setDuration] = useState(90);
     const [resType, setResType] = useState<string>('standard');
+    const [eloMinFilter, setEloMinFilter] = useState('');
+    const [eloMaxFilter, setEloMaxFilter] = useState('');
     const [notes, setNotes] = useState('');
     const [confirmEmail, setConfirmEmail] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
@@ -500,6 +532,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [sendDeleteEmail, setSendDeleteEmail] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [overlapError, setOverlapError] = useState<string | null>(null);
+    const [hoursError, setHoursError] = useState<string | null>(null);
     const [paymentError, setPaymentError] = useState<string | null>(null);
     const [pricesByType, setPricesByType] = useState<Record<string, ReservationTypeConfig>>({});
     const [isMarkingPaid, setIsMarkingPaid] = useState(false);
@@ -519,6 +552,69 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [availableCourtsForSlot, setAvailableCourtsForSlot] = useState<Array<{ id: string; name: string }>>([]);
     const navigate = useNavigate();
     const [courtToAdd, setCourtToAdd] = useState('');
+
+    const [activeTab, setActiveTab] = useState<'details' | 'chat'>('details');
+    const [chatMessages, setChatMessages] = useState<any[]>([]);
+    const [loadingChat, setLoadingChat] = useState(false);
+    const [chatDraft, setChatDraft] = useState('');
+    const [sendingChat, setSendingChat] = useState(false);
+    const chatContainerRef = useRef<HTMLDivElement>(null);
+    const [me, setMe] = useState<{ authUserId: string | null; playerId: string | null }>({ authUserId: null, playerId: null });
+
+    useEffect(() => {
+        if (!isOpen) {
+            setActiveTab('details');
+            setChatMessages([]);
+            setChatDraft('');
+        } else {
+            authService.getMe().then((res) => {
+                setMe({
+                    authUserId: res.user?.id ?? null,
+                    playerId: res.roles?.player_id ?? null,
+                });
+            }).catch(() => {});
+        }
+    }, [isOpen]);
+
+    const loadBookingChat = useCallback(async () => {
+        if (!editingBookingData?.id) return;
+        setLoadingChat(true);
+        try {
+            const messages = await clubChatsService.listBookingChat(editingBookingData.id);
+            setChatMessages(messages);
+        } catch (err) {
+            console.error('Error loading chat:', err);
+        } finally {
+            setLoadingChat(false);
+        }
+    }, [editingBookingData?.id]);
+
+    useEffect(() => {
+        if (activeTab === 'chat' && editingBookingData?.id) {
+            void loadBookingChat();
+        }
+    }, [activeTab, editingBookingData?.id, loadBookingChat]);
+
+    useEffect(() => {
+        if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
+    }, [chatMessages]);
+
+    const handleSendChatMessage = async () => {
+        if (!editingBookingData?.id || !chatDraft.trim()) return;
+        setSendingChat(true);
+        try {
+            const newMessage = await clubChatsService.sendBookingChat(editingBookingData.id, chatDraft.trim());
+            setChatMessages(prev => [...prev, newMessage]);
+            setChatDraft('');
+        } catch (err) {
+            console.error('Error sending message:', err);
+            toast.error('No se pudo enviar el mensaje.');
+        } finally {
+            setSendingChat(false);
+        }
+    };
 
     // ─── Helpers de pago ─────────────────────────────────────────────────────
     const fetchWalletBalance = useCallback(async (playerId: string, slotIndex: number) => {
@@ -546,6 +642,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         document.body.style.overflow = 'hidden';
         setOrganizerError(false);
         setOverlapError(null);
+        setHoursError(null);
         setShowDeleteConfirm(false);
         setSendDeleteEmail(false);
 
@@ -553,13 +650,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             // Edit mode: pre-populate from existing booking
             const bd = editingBookingData;
             const start = new Date(bd.start_at);
-            const sh = start.getHours().toString().padStart(2, '0');
-            const sm = start.getMinutes().toString().padStart(2, '0');
-            const dateVal = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+            const [sh, sm] = formatTimeHHmmInClubTz(start).split(':');
+            const dateVal = dayKeyInClubTz(start);
             const durMin = (new Date(bd.end_at).getTime() - start.getTime()) / 60000;
             const dur = Math.min(90, Math.max(30, Math.round(durMin / 30) * 30)) || 90;
             const parsedNotes = extractPlayMode(bd.notes || '');
-            const resTypeVal = bd.reservation_type || '';
+            const resTypeVal = normalizeReservationTypeSlug(bd.reservation_type || bd.booking_type || 'standard');
             setStartHour(sh);
             setStartMinute(sm);
             setBookingDate(dateVal);
@@ -567,6 +663,10 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             setNotes(parsedNotes.cleanNotes);
             setResType(resTypeVal);
             setConfirmEmail(false);
+
+            const matchRow = Array.isArray(bd.matches) ? bd.matches[0] : bd.matches;
+            setEloMinFilter(formatLevelSelectValue(matchRow?.elo_min));
+            setEloMaxFilter(formatLevelSelectValue(matchRow?.elo_max));
 
             // Set organizer from joined players data
             const orgPlayer = resolveJoinedPlayer(bd.players);
@@ -577,7 +677,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     last_name: orgPlayer.last_name ?? '',
                     email: (orgPlayer as { email?: string }).email || '',
                     phone: null,
-                    elo_rating: 1200,
+                    elo_rating: normalizePlayerElo(orgPlayer.elo_rating) ?? 0,
                     status: 'active',
                     created_at: '',
                 });
@@ -595,18 +695,14 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     last_name: p.players.last_name,
                     email: p.players.email || '',
                     phone: null,
-                    elo_rating: 1200,
+                    elo_rating: normalizePlayerElo(p.players.elo_rating) ?? 0,
                     status: 'active' as const,
                     created_at: '',
                 }));
             const slots: (Player | null)[] = [null, null, null];
             guests.forEach((g: Player, i: number) => { slots[i] = g; });
             setAdditionalPlayers(slots);
-            if (parsedNotes.mode === 'single' || guests.length <= 1) {
-                setPlayMode('single');
-            } else {
-                setPlayMode('double');
-            }
+            setPlayMode(isOpenMatchType(resTypeVal) ? 'double' : parsedNotes.mode);
 
             // Inicializar pagos desde payment_transactions (manual_cash / manual_card)
             const initPayments: SlotPayment[] = [defaultSlot(), defaultSlot(), defaultSlot(), defaultSlot()];
@@ -658,6 +754,8 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             setPlayMode('double');
             setDuration(reservation?.durationMinutes || 90);
             setResType('standard');
+            setEloMinFilter('');
+            setEloMaxFilter('');
             setNotes('');
             setConfirmEmail(false);
             setIsMultipleReservation(false);
@@ -722,6 +820,31 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const nActivePlayers = useMemo(() =>
         (organizer ? 1 : 0) + additionalPlayers.filter(Boolean).length,
     [organizer, additionalPlayers]);
+
+    const assignedElos = useMemo(
+        () => collectAssignedElos(organizer, additionalPlayers),
+        [organizer, additionalPlayers],
+    );
+
+    const assignedLevelLabel = assignedElos.length
+        ? assignedElos.map((e) => e.toFixed(1)).join(', ')
+        : null;
+
+    const suggestLevelRangeFromPlayers = () => {
+        if (!assignedElos.length) return;
+        const avg = assignedElos.reduce((sum, n) => sum + n, 0) / assignedElos.length;
+        const min = Math.max(0, Math.round((avg - 1) * 2) / 2);
+        const max = Math.min(7, Math.round((avg + 1) * 2) / 2);
+        setEloMinFilter(min.toFixed(1));
+        setEloMaxFilter(max.toFixed(1));
+    };
+
+    const openMatchEloPayload = isOpenMatchType(resType)
+        ? {
+            elo_min: eloMinFilter === '' ? null : Number(eloMinFilter),
+            elo_max: eloMaxFilter === '' ? null : Number(eloMaxFilter),
+        }
+        : {};
 
     const sharePerSlotCents = useMemo(() =>
         nActivePlayers > 0 && totalPriceCents ? Math.ceil(totalPriceCents / nActivePlayers) : 0,
@@ -831,7 +954,39 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         }
         setOrganizerError(false);
         setOverlapError(null);
+        setHoursError(null);
         setPaymentError(null);
+
+        const skipHoursCheck = resType === 'blocked';
+        const validateHoursForDate = (dateStr: string): boolean => {
+            const check = validateBookingSlotWithinClubHours({
+                dateStr,
+                startHour,
+                startMinute,
+                durationMinutes: duration,
+                weeklySchedule: weeklySchedule ?? {},
+                skipForBlocked: skipHoursCheck,
+            });
+            if (!check.ok) {
+                setHoursError(check.error);
+                return false;
+            }
+            return true;
+        };
+
+        if (isEditMode && editingBookingData) {
+            const dateBase = bookingDate || gridDate || new Date().toISOString().split('T')[0];
+            if (!validateHoursForDate(dateBase)) return;
+        } else if (isMultipleReservation) {
+            if (!multipleStartDate || !multipleEndDate) {
+                toast.error('Indica fecha de inicio y fecha de fin para la reserva múltiple.');
+                return;
+            }
+            if (!validateHoursForDate(multipleStartDate)) return;
+        } else {
+            const dateBase = gridDate || bookingDate || new Date().toISOString().split('T')[0];
+            if (!validateHoursForDate(dateBase)) return;
+        }
 
         // Validate payment method is selected when amount > 0
         const activePlayers = [
@@ -844,33 +999,40 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
             return;
         }
 
-        // Validate no overlap with other bookings on the same court
+        // Validate overlap only when schedule changes (adding players on competing open matches is allowed)
         if (isEditMode && editingBookingData) {
             const dateBase = bookingDate || new Date().toISOString().split('T')[0];
             const startAtCheck = clubSlotToUtcIso(dateBase, startHour, startMinute);
             const newStart = new Date(startAtCheck);
             const newEnd = new Date(newStart.getTime() + duration * 60000);
-            try {
-                const courtId = editingBookingData.court_id;
-                const tz = encodeURIComponent(clubIanaTimeZone());
-                const bRes = await apiFetchWithAuth<any>(
-                    `/bookings?court_id=${encodeURIComponent(courtId)}&date=${encodeURIComponent(dateBase)}&time_zone=${tz}`,
-                );
-                const conflicts = (bRes.bookings || []).filter((b: any) => {
-                    if (b.id === editingBookingData.id) return false;
-                    const bStart = new Date(b.start_at);
-                    const bEnd = new Date(b.end_at);
-                    return newStart < bEnd && newEnd > bStart;
-                });
-                if (conflicts.length > 0) {
-                    const c = conflicts[0];
-                    const cTime = formatTimeHHmmInClubTz(c.start_at);
-                    const cName = c.players ? `${c.players.first_name} ${c.players.last_name}` : t('reservation.otherBookingName');
-                    setOverlapError(t('reservation.overlapConflict', { name: cName, time: cTime }));
-                    return;
+            const endAtCheck = newEnd.toISOString();
+            const scheduleChanged = hasBookingScheduleChanged(editingBookingData, {
+                startAtIso: startAtCheck,
+                endAtIso: endAtCheck,
+                courtId: editingBookingData.court_id,
+            });
+            if (scheduleChanged) {
+                try {
+                    const courtId = editingBookingData.court_id;
+                    const tz = encodeURIComponent(clubIanaTimeZone());
+                    const bRes = await apiFetchWithAuth<any>(
+                        `/bookings?court_id=${encodeURIComponent(courtId)}&date=${encodeURIComponent(dateBase)}&time_zone=${tz}`,
+                    );
+                    const conflicts = (bRes.bookings || []).filter((b: any) => {
+                        if (b.id === editingBookingData.id) return false;
+                        if (!timeRangesOverlap(newStart, newEnd, b.start_at, b.end_at)) return false;
+                        return existingBookingBlocksOverlapEdit(b);
+                    });
+                    if (conflicts.length > 0) {
+                        const c = conflicts[0];
+                        const cTime = formatTimeHHmmInClubTz(c.start_at);
+                        const cName = c.players ? `${c.players.first_name} ${c.players.last_name}` : t('reservation.otherBookingName');
+                        setOverlapError(t('reservation.overlapConflict', { name: cName, time: cTime }));
+                        return;
+                    }
+                } catch {
+                    // If validation fetch fails, allow save to proceed
                 }
-            } catch {
-                // If validation fetch fails, allow save to proceed
             }
         }
 
@@ -904,6 +1066,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     end_at: endAt,
                     total_price_cents: totalPriceCents,
                     participants: buildParticipants(),
+                    ...openMatchEloPayload,
                 });
             } else if (onSave) {
                 const courtIdsForSave = isMultipleReservation && selectedCourtIds.length > 0
@@ -927,11 +1090,14 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     recurrence_end_date: isMultipleReservation ? multipleEndDate : undefined,
                     recurrence_weekdays: isMultipleReservation ? multipleWeekdays : undefined,
                     include_holidays: includeHolidaysInRecurrence,
+                    ...openMatchEloPayload,
                 };
                 const result = await onSave(data);
                 if (result && (result.failed.length > 0 || result.skippedHolidays.length > 0)) {
                     setBatchResult(result);
-                    if (result.created > 0) return;
+                    if (result.created > 0) {
+                        return;
+                    }
                 }
             }
             onClose();
@@ -1062,6 +1228,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                 {overlapError}
                             </div>
                         )}
+                        {hoursError && (
+                            <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium mt-1">
+                                <AlertTriangle size={13} className="shrink-0" />
+                                {hoursError}
+                            </div>
+                        )}
                         {paymentError && (
                             <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-md text-xs text-red-700 font-medium mt-1">
                                 <AlertCircle size={13} className="shrink-0" />
@@ -1094,20 +1266,22 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             </div>
                         )}
                         <div className="flex gap-2 flex-wrap">
-                            <button
-                                onClick={() => handleSave()}
-                                disabled={!organizer || isSaving}
-                                className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
-                            >
-                                {isSaving ? t('reservation.processing') : t('reservation.save')}
-                            </button>
+                            {activeTab !== 'chat' && (
+                                <button
+                                    onClick={() => handleSave()}
+                                    disabled={!organizer || isSaving}
+                                    className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
+                                >
+                                    {isSaving ? t('reservation.processing') : t('reservation.save')}
+                                </button>
+                            )}
                             <button
                                 onClick={onClose}
                                 className="px-4 py-1.5 bg-gray-200 text-gray-700 text-xs font-bold rounded-md hover:bg-gray-300 transition-colors"
                             >
-                                {t('reservation.cancel')}
+                                {activeTab === 'chat' ? 'Cerrar' : t('reservation.cancel')}
                             </button>
-                            {isEditMode && editingBookingData && (
+                            {activeTab !== 'chat' && isEditMode && editingBookingData && (
                                 <button
                                     type="button"
                                     onClick={goToCart}
@@ -1116,7 +1290,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     Carrito
                                 </button>
                             )}
-                            {isEditMode && editingBookingData && isOnHiddenCourt && onMoveToVisible && (
+                            {activeTab !== 'chat' && isEditMode && editingBookingData && isOnHiddenCourt && onMoveToVisible && (
                                 <button
                                     onClick={async () => {
                                         setMoveToHiddenError(null);
@@ -1138,7 +1312,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     {isMovingToHidden ? 'Moviendo...' : 'Desocultar'}
                                 </button>
                             )}
-                            {isEditMode && editingBookingData && !isOnHiddenCourt && onMoveToHidden && (
+                            {activeTab !== 'chat' && isEditMode && editingBookingData && !isOnHiddenCourt && onMoveToHidden && (
                                 <button
                                     onClick={async () => {
                                         setMoveToHiddenError(null);
@@ -1170,10 +1344,106 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     </button>
                 </div>
 
-                {/* Scrollable Content */}
-                <div className="flex-1 p-6 overflow-y-auto hidden-scrollbar">
+                {/* Tab selector for Edit mode */}
+                {isEditMode && editingBookingData && (
+                    <div className="flex border-b border-gray-100 bg-white px-6 shrink-0">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('details')}
+                            className={`py-3 px-4 text-sm font-bold border-b-2 -mb-[2px] transition-colors flex items-center gap-1.5 ${
+                                activeTab === 'details'
+                                    ? "border-[#006A6A] text-[#006A6A]"
+                                    : "border-transparent text-gray-500 hover:text-gray-900"
+                            }`}
+                        >
+                            Detalles
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('chat')}
+                            className={`py-3 px-4 text-sm font-bold border-b-2 -mb-[2px] transition-colors flex items-center gap-1.5 ${
+                                activeTab === 'chat'
+                                    ? "border-[#006A6A] text-[#006A6A]"
+                                    : "border-transparent text-gray-500 hover:text-gray-900"
+                            }`}
+                        >
+                            <MessageSquare className="w-4 h-4" />
+                            Chat del Partido
+                        </button>
+                    </div>
+                )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Scrollable Content */}
+                <div className="flex-1 p-6 overflow-y-auto hidden-scrollbar flex flex-col">
+
+                    {isEditMode && editingBookingData && activeTab === 'chat' ? (
+                        <div className="flex-1 flex flex-col min-h-[300px] sm:min-h-[400px]">
+                            {/* Messages area */}
+                            <div ref={chatContainerRef} className="flex-1 overflow-y-auto space-y-3 pr-2 mb-4 max-h-[350px] sm:max-h-[450px]">
+                                {loadingChat ? (
+                                    <div className="flex items-center justify-center h-full text-xs text-gray-500 gap-2">
+                                        <div className="w-4 h-4 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
+                                        Cargando mensajes...
+                                    </div>
+                                ) : chatMessages.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-full text-xs text-gray-400 py-12">
+                                        <MessageSquare className="w-8 h-8 opacity-30 mb-2" />
+                                        Aún no hay mensajes en este partido.
+                                    </div>
+                                ) : (
+                                    chatMessages.map((m) => {
+                                        const isMyMessage = me.authUserId && m.author_user_id === me.authUserId;
+                                        return (
+                                            <div
+                                                key={m.id}
+                                                className={`max-w-[75%] rounded-xl px-3 py-2 text-xs ${
+                                                    isMyMessage
+                                                        ? "ml-auto bg-[#1A1A1A] text-white"
+                                                        : "bg-gray-100 text-[#1A1A1A]"
+                                                }`}
+                                            >
+                                                <p className="mb-0.5 text-[9px] opacity-75 font-bold">{m.author_name}</p>
+                                                <p className="wrap-break-word">{m.message}</p>
+                                                <span className="block text-[8px] opacity-60 text-right mt-1">
+                                                    {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </span>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                            
+                            {/* Send input */}
+                            <div className="border-t border-gray-200 pt-3 mt-auto shrink-0">
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={chatDraft}
+                                        onChange={(e) => setChatDraft(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                void handleSendChatMessage();
+                                            }
+                                        }}
+                                        placeholder="Escribe un mensaje..."
+                                        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#006A6A]/20"
+                                    />
+                                    <button
+                                        type="button"
+                                        disabled={sendingChat || !chatDraft.trim()}
+                                        onClick={() => {
+                                            void handleSendChatMessage();
+                                        }}
+                                        className="rounded-xl bg-[#006A6A] hover:bg-[#005555] px-3 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+                                    >
+                                        <Send className="h-3.5 w-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <React.Fragment>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         {/* Left Column */}
                         <div className="space-y-5">
                             {/* Fecha */}
@@ -1486,25 +1756,27 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     onChange={(e) => setResType(e.target.value)}
                                 >
                                     {(Object.keys(pricesByType).length > 0
-                                        ? Object.values(pricesByType).sort((a, b) => {
+                                        ? Object.entries(pricesByType)
+                                            .map(([reservation_type, cfg]) => ({ ...cfg, reservation_type }))
+                                            .sort((a, b) => {
                                             if (a.is_system !== b.is_system) return a.is_system ? -1 : 1;
                                             return (a.sort_order ?? 100) - (b.sort_order ?? 100);
                                           })
                                         : [
-                                            { reservation_type: 'standard', display_name: 'Pista privada', is_system: true },
-                                            { reservation_type: 'open_match', display_name: 'Partido abierto', is_system: true },
-                                            { reservation_type: 'pozo', display_name: 'Americanas', is_system: true },
-                                            { reservation_type: 'fixed_recurring', display_name: 'Turno fijo', is_system: true },
-                                            { reservation_type: 'school_group', display_name: 'Escuela grupo', is_system: true },
-                                            { reservation_type: 'school_individual', display_name: 'Clase particular', is_system: true },
-                                            { reservation_type: 'flat_rate', display_name: 'Tarifa plana', is_system: true },
-                                            { reservation_type: 'tournament', display_name: 'Torneo', is_system: true },
-                                            { reservation_type: 'blocked', display_name: 'Bloqueado', is_system: true },
+                                            { reservation_type: 'standard', display_name: 'Pista privada', is_system: true, sort_order: 10 },
+                                            { reservation_type: 'open_match', display_name: 'Partido abierto', is_system: true, sort_order: 20 },
+                                            { reservation_type: 'pozo', display_name: 'Americanas', is_system: true, sort_order: 30 },
+                                            { reservation_type: 'fixed_recurring', display_name: 'Turno fijo', is_system: true, sort_order: 40 },
+                                            { reservation_type: 'school_group', display_name: 'Escuela grupo', is_system: true, sort_order: 50 },
+                                            { reservation_type: 'school_individual', display_name: 'Clase particular', is_system: true, sort_order: 60 },
+                                            { reservation_type: 'flat_rate', display_name: 'Tarifa plana', is_system: true, sort_order: 70 },
+                                            { reservation_type: 'tournament', display_name: 'Torneo', is_system: true, sort_order: 80 },
+                                            { reservation_type: 'blocked', display_name: 'Bloqueado', is_system: true, sort_order: 90 },
                                           ]
                                     ).map((opt) => {
                                         const i18nKey = `reservation.type_${opt.reservation_type}`;
                                         const translated = t(i18nKey);
-                                        const label = translated !== i18nKey
+                                        const label = translated !== i18nKey && translated !== `grilla.${i18nKey}`
                                             ? translated
                                             : opt.display_name || opt.reservation_type;
                                         return (
@@ -1532,8 +1804,77 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     <option value="single">Singles</option>
                                 </select>
                             </div>
-                            {resType === 'open_match' && (
-                                <p className="text-[11px] text-gray-500 leading-snug">{t('reservation.openMatchPlayersHint')}</p>
+                            {isOpenMatchType(resType) && (
+                                <div className="space-y-2">
+                                    <p className="text-[11px] text-gray-500 leading-snug">{t('reservation.openMatchPlayersHint')}</p>
+                                    {willPublicOpenMatchStayOffGrid(nActivePlayers, computedStatus === 'confirmed') && (
+                                        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-2 leading-snug">
+                                            Con menos de 3 jugadores no aparecerá en la grilla. Podés verlo en Lista de reservas.
+                                        </p>
+                                    )}
+                                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+                                        <div className="flex items-center justify-between gap-2">
+                                            <label className="text-sm font-bold text-gray-700">Rango de nivel</label>
+                                            {assignedElos.length > 0 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={suggestLevelRangeFromPlayers}
+                                                    className="text-[11px] font-semibold text-[#006A6A] hover:underline shrink-0"
+                                                >
+                                                    Sugerir ±1
+                                                </button>
+                                            )}
+                                        </div>
+                                        {assignedLevelLabel && (
+                                            <p className="text-[11px] text-gray-500">
+                                                Niveles asignados: {assignedLevelLabel}
+                                            </p>
+                                        )}
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <span className="block text-xs text-gray-500 mb-1">Mínimo</span>
+                                                <select
+                                                    className="w-full p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
+                                                    value={eloMinFilter}
+                                                    onChange={(e) => {
+                                                        const next = e.target.value;
+                                                        setEloMinFilter(next);
+                                                        if (eloMaxFilter !== '' && next !== '' && Number(next) > Number(eloMaxFilter)) {
+                                                            setEloMaxFilter(next);
+                                                        }
+                                                    }}
+                                                >
+                                                    <option value="">Sin mínimo</option>
+                                                    {LEVEL_OPTIONS.map((lvl) => (
+                                                        <option key={`elo-min-${lvl}`} value={lvl}>{lvl}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <span className="block text-xs text-gray-500 mb-1">Máximo</span>
+                                                <select
+                                                    className="w-full p-2 border border-gray-300 rounded-md text-sm bg-white outline-none focus:ring-2 focus:ring-[#006A6A]"
+                                                    value={eloMaxFilter}
+                                                    onChange={(e) => {
+                                                        const next = e.target.value;
+                                                        setEloMaxFilter(next);
+                                                        if (eloMinFilter !== '' && next !== '' && Number(next) < Number(eloMinFilter)) {
+                                                            setEloMinFilter(next);
+                                                        }
+                                                    }}
+                                                >
+                                                    <option value="">Sin máximo</option>
+                                                    {LEVEL_OPTIONS.map((lvl) => (
+                                                        <option key={`elo-max-${lvl}`} value={lvl}>{lvl}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <p className="text-[11px] text-gray-500 leading-snug">
+                                            Solo podrán unirse desde la app jugadores dentro de este rango.
+                                        </p>
+                                    </div>
+                                </div>
                             )}
 
                             {/* Precio calculado */}
@@ -1602,10 +1943,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             </div>
                         )}
                     </div>
+                </React.Fragment>
+                )}
                 </div>
 
                 {/* Delete section — only in edit mode */}
-                {isEditMode && (
+                {isEditMode && activeTab !== 'chat' && (
                     <div className="shrink-0 px-6 py-4 border-t border-gray-200 bg-white space-y-3">
                         {onMarkPaid && editingBookingData?.status === 'pending_payment' && (
                             <button

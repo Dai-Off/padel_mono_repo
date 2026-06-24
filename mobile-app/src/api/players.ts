@@ -1,4 +1,6 @@
 import { API_URL } from "../config";
+import { withLangQuery } from "./backendLang";
+import type { AppLocale } from "../i18n/constants";
 
 type PlayersResponse = {
   ok?: boolean;
@@ -27,6 +29,7 @@ type MeResponse = {
     mm_wins?: number | null;
     mm_losses?: number | null;
     mm_draws?: number | null;
+    mm_shield_matches?: number | null;
     preferred_side?: string | null;
     preferred_schedule_slots?: string[] | null;
     preferred_days?: string[] | null;
@@ -87,6 +90,8 @@ export type MyPlayerProfile = {
   mmWins: number;
   mmLosses: number;
   mmDraws: number;
+  /** Partidos restantes de escudo anti-descenso tras ascender (0 = sin escudo). */
+  mmShieldMatches: number;
   preferences: PlayerPreferences;
   /**
    * Visibilidad en las búsquedas de la IA de afinidad. Desactivada por defecto;
@@ -237,6 +242,7 @@ export async function fetchMyPlayerProfile(
       mmWins: parseInt0(json.player.mm_wins),
       mmLosses: parseInt0(json.player.mm_losses),
       mmDraws: parseInt0(json.player.mm_draws),
+      mmShieldMatches: parseInt0(json.player.mm_shield_matches),
       preferences: {
         preferredSide: prefSide,
         preferredScheduleSlots: prefSlots,
@@ -427,6 +433,8 @@ export type PlayerSearchHit = {
   first_name?: string | null;
   last_name?: string | null;
   username?: string | null;
+  avatar_url?: string | null;
+  onboarding_completed?: boolean;
 };
 
 /** Lista jugadores; con `q` filtra por nombre o teléfono (misma API que el panel). */
@@ -481,9 +489,10 @@ export type PublicPlayerProfile = {
 export async function fetchPublicPlayerProfile(
   playerId: string,
   token?: string | null,
+  locale?: AppLocale,
 ): Promise<PublicPlayerProfile | null> {
   try {
-    const res = await fetch(`${API_URL}/players/${playerId}/public-profile`, {
+    const res = await fetch(withLangQuery(`${API_URL}/players/${playerId}/public-profile`, locale), {
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

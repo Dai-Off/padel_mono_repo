@@ -16,13 +16,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { useDailyLesson, useStreak } from '../hooks/useDailyLesson';
 import { useVideoPreloader } from '../hooks/useVideoPreloader';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { submitDailyLesson, submitLessonFeedback, fetchTodayResults, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
+import { submitDailyLesson, submitLessonFeedback, fetchTodayResults, fetchLocalizedDailyQuestions, type AnswerPayload, type SubmitLessonResponse, type QuestionArea, type DailyLessonQuestion } from '../api/dailyLessons';
 import { loadProgress, saveProgress, clearProgress, type DailyLessonProgress } from '../lib/dailyLessonStorage';
 import { fetchMyCoachAssessment } from '../api/coachAssessment';
 import { QuestionCard } from '../components/learning/QuestionCard';
 import { VideoPlayer } from '../components/learning/VideoPlayer';
 import { IconGlow } from '../components/ui/IconGlow';
 import { LessonImpactRadar, type SkillValues } from '../components/learning/LessonImpactRadar';
+import { useTranslation } from '../i18n';
 
 type Props = {
   onBack: () => void;
@@ -62,11 +63,11 @@ function isLessonCompletedToday(lastLessonIso: string | null, timeZone: string):
   return keyDone === calendarDayKeyInTimeZone(new Date(), timeZone);
 }
 
-const AREA_LABELS: Record<string, { label: string; color: string; bg: string; border: string }> = {
-  technique: { label: 'Tecnica', color: '#3B82F6', bg: 'rgba(59,130,246,0.1)', border: 'rgba(59,130,246,0.2)' },
-  tactics: { label: 'Tactica', color: '#A855F7', bg: 'rgba(168,85,247,0.1)', border: 'rgba(168,85,247,0.2)' },
-  physical: { label: 'Fisico', color: '#22C55E', bg: 'rgba(34,197,94,0.1)', border: 'rgba(34,197,94,0.2)' },
-  mental_vocabulary: { label: 'Vocabulario', color: '#F59E0B', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.2)' },
+const AREA_LABEL_KEYS: Record<string, { labelKey: 'areaTechnique' | 'areaTactics' | 'areaPhysical' | 'areaVocabulary'; color: string; bg: string; border: string }> = {
+  technique: { labelKey: 'areaTechnique', color: '#3B82F6', bg: 'rgba(59,130,246,0.1)', border: 'rgba(59,130,246,0.2)' },
+  tactics: { labelKey: 'areaTactics', color: '#A855F7', bg: 'rgba(168,85,247,0.1)', border: 'rgba(168,85,247,0.2)' },
+  physical: { labelKey: 'areaPhysical', color: '#22C55E', bg: 'rgba(34,197,94,0.1)', border: 'rgba(34,197,94,0.2)' },
+  mental_vocabulary: { labelKey: 'areaVocabulary', color: '#F59E0B', bg: 'rgba(245,158,11,0.1)', border: 'rgba(245,158,11,0.2)' },
 };
 
 // Mapeo areas del modulo learning -> skills del coachAssessment
@@ -90,22 +91,21 @@ function getNextStreakMilestone(current: number): number | null {
   return null; // ya en el maximo
 }
 
-function getQuestionPreview(q: DailyLessonQuestion): string {
+function getQuestionPreview(q: DailyLessonQuestion, t: (key: string, params?: Record<string, string | number>) => string): string {
   const c = q.content as Record<string, unknown>;
-  if (q.type === 'match_columns') return 'Empareja los elementos';
+  if (q.type === 'match_columns') return t('learning.questionPreviewMatch');
   if (q.type === 'order_sequence') {
     return typeof c.instruction === 'string' && c.instruction
       ? c.instruction
-      : 'Ordena la secuencia';
+      : t('learning.questionPreviewOrder');
   }
-  // test_classic / multi_select usan `question`.
-  // true_false y puzzle usan `statement`.
   if (typeof c.question === 'string' && c.question.trim()) return c.question;
   if (typeof c.statement === 'string' && c.statement.trim()) return c.statement;
-  return 'Pregunta';
+  return t('learning.questionPreviewDefault');
 }
 
 export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Props) {
+  const { t, locale } = useTranslation();
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const { questions: hookQuestions, alreadyCompleted, loading, error, requiresOnboarding, notEnoughQuestions } = useDailyLesson(TIMEZONE);
@@ -142,6 +142,42 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
   const [pendingStart, setPendingStart] = useState(false);
   const [baseSkills, setBaseSkills] = useState<SkillValues>(DEFAULT_SKILLS);
   const [questionVotes, setQuestionVotes] = useState<Record<string, 'up' | 'down' | null>>({});
+
+  // Cambio de idioma: re-entregamos LAS MISMAS preguntas ya traducidas (por id),
+  // conservando orden, ids y progreso. No rebaraja ni reinicia la lección y
+  // funciona en cualquier fase. El backend localiza por ids, así que la
+  // respuesta correcta (índices/booleans) y el orden no cambian.
+  // Secuencia para descartar respuestas obsoletas: si el idioma cambia varias
+  // veces seguidas, solo se aplica la última petición lanzada (evita carreras).
+  const relocalizeSeqRef = useRef(0);
+  // Idioma con el que se cargó la lección del hook (hookQuestions). El hook NO se
+  // recarga al cambiar de idioma (para no rebarajar), así que guardamos su idioma
+  // para saber si hay que re-localizar al arrancar/repetir una lección.
+  const hookLocaleRef = useRef(locale);
+
+  const relocalizeByIds = useCallback(
+    async (ids: string[]) => {
+      const token = session?.access_token;
+      if (!token || ids.length === 0) return;
+      const seq = ++relocalizeSeqRef.current;
+      const res = await fetchLocalizedDailyQuestions(token, ids, locale);
+      // Si entretanto se lanzó otra re-localización (idioma cambiado de nuevo),
+      // descartamos esta respuesta para no pisar la más reciente.
+      if (seq !== relocalizeSeqRef.current) return;
+      if (res.ok && res.questions.length === ids.length) {
+        setHistoricQuestions(res.questions);
+      }
+    },
+    [session?.access_token, locale],
+  );
+
+  const prevLocaleRef = useRef(locale);
+  useEffect(() => {
+    if (prevLocaleRef.current === locale) return;
+    prevLocaleRef.current = locale;
+    const ids = questions.map((q) => q.id);
+    if (ids.length > 0) void relocalizeByIds(ids);
+  }, [locale, questions, relocalizeByIds]);
 
   // Precarga de vídeos: bufferiza el vídeo actual y el siguiente por adelantado
   // (incluido el primero durante la intro, ya que activeQIndex=0) para eliminar
@@ -362,11 +398,11 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setResults(res as SubmitLessonResponse);
       setPhase('results');
     } else {
-      setSubmitError(('error' in res && res.error) ? res.error : 'Error al enviar');
+      setSubmitError(('error' in res && res.error) ? res.error : t('learning.dailyLessonSubmitError'));
       setPhase('results');
     }
     setSubmitting(false);
-  }, [session?.access_token, session?.user?.id, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, streak.multiplier]);
+  }, [session?.access_token, session?.user?.id, alreadyCompleted, failedIndices, streak.currentStreak, streak.longestStreak, streak.multiplier, t]);
 
   const startQuestionOrVideo = useCallback((index: number) => {
     const q = questions[index];
@@ -505,7 +541,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     try {
       const res = await fetchTodayResults(session?.access_token, TIMEZONE);
       if (!res.ok) {
-        setSubmitError(('error' in res && res.error) ? res.error : 'No se pudieron cargar los resultados');
+        setSubmitError(('error' in res && res.error) ? res.error : t('learning.dailyLessonResultsLoadError'));
         setSubmitting(false);
         return;
       }
@@ -520,11 +556,11 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setResults(res);
       setPhase('results');
     } catch {
-      setSubmitError('Error al cargar resultados');
+      setSubmitError(t('learning.dailyLessonResultsLoadError'));
     } finally {
       setSubmitting(false);
     }
-  }, [session?.access_token]);
+  }, [session?.access_token, t]);
 
   // Arranque real de la lección (asume preguntas ya cargadas).
   const startLessonNow = useCallback(() => {
@@ -562,7 +598,13 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setShowingVideo(false);
       questionStartTime.current = Date.now();
     }
-  }, [animateProgressTo, session?.user?.id, hookQuestions, alreadyCompleted, questions]);
+    // Si el idioma cambió desde que se cargó la lección del hook, re-entregamos
+    // las MISMAS preguntas (mismos ids) ya traducidas al idioma actual. Sin esto,
+    // arrancar/repetir tras cambiar idioma en la intro jugaría en el idioma viejo.
+    if (hookLocaleRef.current !== locale && hookQuestions.length > 0) {
+      void relocalizeByIds(hookQuestions.map((q) => q.id));
+    }
+  }, [animateProgressTo, session?.user?.id, hookQuestions, alreadyCompleted, questions, locale, relocalizeByIds]);
 
   // UI optimista: si el usuario pulsa "Empezar" antes de que llegue el fetch,
   // marcamos la intención y mostramos spinner; el efecto de abajo arranca en
@@ -606,6 +648,11 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       setShowingVideo(false);
       questionStartTime.current = Date.now();
     }
+    // El progreso guardado conserva las preguntas en el idioma con que se inició.
+    // Si el idioma cambió mientras estaba guardada, re-entregamos las MISMAS
+    // preguntas (mismo orden/ids) ya traducidas al idioma actual.
+    prevLocaleRef.current = locale;
+    void relocalizeByIds(pendingResume.questions.map((rq) => rq.id));
   };
 
   // Nota: no hay gate de loading a pantalla completa. El intro se renderiza al
@@ -635,24 +682,20 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             <Ionicons name="flame" size={14} color="#F18F34" />
           </View>
 
-          <Text style={styles.lockedTitle}>Desbloquea la Lección diaria</Text>
+          <Text style={styles.lockedTitle}>{t('onboarding.hardBlockDailyLessonTitle')}</Text>
           <Text style={styles.lockedSubtitle}>
-            Completa el cuestionario de nivelación para acceder a tu entrenamiento diario personalizado.
+            {t('onboarding.hardBlockDailyLessonSub')}
           </Text>
 
           <View style={styles.lockedBullets}>
-            <View style={styles.lockedBullet}>
-              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-              <Text style={styles.lockedBulletText}>Preguntas adaptadas a tu nivel real</Text>
-            </View>
-            <View style={styles.lockedBullet}>
-              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-              <Text style={styles.lockedBulletText}>Racha diaria con bonus de SP</Text>
-            </View>
-            <View style={styles.lockedBullet}>
-              <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-              <Text style={styles.lockedBulletText}>Progreso que evoluciona contigo</Text>
-            </View>
+            {(['0', '1', '2'] as const).map((idx) => (
+              <View key={idx} style={styles.lockedBullet}>
+                <Ionicons name="checkmark-circle" size={16} color="#10B981" />
+                <Text style={styles.lockedBulletText}>
+                  {t(`onboarding.hardBlockDailyLessonBullets.${idx}`)}
+                </Text>
+              </View>
+            ))}
           </View>
 
           <Pressable
@@ -667,12 +710,12 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               style={styles.lockedCtaGradient}
             >
               <Ionicons name="compass" size={18} color="#fff" />
-              <Text style={styles.lockedCtaText}>Descubrir mi nivel</Text>
+              <Text style={styles.lockedCtaText}>{t('onboarding.discoverLevel')}</Text>
             </LinearGradient>
           </Pressable>
 
           <Pressable onPress={onBack} hitSlop={8} style={styles.cancelButton}>
-            <Text style={styles.cancelText}>Ahora no</Text>
+            <Text style={styles.cancelText}>{t('onboarding.notNow')}</Text>
           </Pressable>
         </View>
       </View>
@@ -695,9 +738,9 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             </LinearGradient>
           </View>
 
-          <Text style={styles.lockedTitle}>Lección no disponible</Text>
+          <Text style={styles.lockedTitle}>{t('learning.dailyLessonNotAvailableTitle')}</Text>
           <Text style={styles.lockedSubtitle}>
-            Aún no hay suficientes preguntas para tu lección de hoy. Estamos preparando contenido — vuelve pronto.
+            {t('learning.dailyLessonNotAvailableSub')}
           </Text>
 
           <Pressable onPress={onBack} style={styles.lockedCta}>
@@ -708,7 +751,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               style={styles.lockedCtaGradient}
             >
               <Ionicons name="arrow-back" size={18} color="#fff" />
-              <Text style={styles.lockedCtaText}>Volver</Text>
+              <Text style={styles.lockedCtaText}>{t('common.back')}</Text>
             </LinearGradient>
           </Pressable>
         </View>
@@ -721,9 +764,9 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
       <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.loadingContainer}>
           <Ionicons name="alert-circle-outline" size={48} color="#6B7280" />
-          <Text style={styles.errorText}>{error ?? 'No hay preguntas disponibles'}</Text>
+          <Text style={styles.errorText}>{error ?? t('learning.dailyLessonNoQuestions')}</Text>
           <Pressable onPress={onBack} hitSlop={8} style={styles.cancelButton}>
-            <Text style={styles.cancelText}>Volver</Text>
+            <Text style={styles.cancelText}>{t('common.back')}</Text>
           </Pressable>
         </View>
       </View>
@@ -764,15 +807,15 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
           {showCompleted && (
             <View style={styles.completedBadge}>
               <Ionicons name="checkmark" size={12} color="#10B981" />
-              <Text style={styles.completedBadgeText}>Completada hoy</Text>
+              <Text style={styles.completedBadgeText}>{t('learning.dailyLessonCompletedToday')}</Text>
             </View>
           )}
 
           <Text style={styles.introTitle}>
-            {showCompleted ? 'Repetir leccion' : 'Leccion del dia'}
+            {showCompleted ? t('learning.dailyLessonRepeatTitle') : t('learning.dailyLessonTodayTitle')}
           </Text>
           <Text style={styles.introSubtitle}>
-            {showCompleted ? 'Las mismas 5 preguntas sin recompensas' : '5 preguntas ~ 3 minutos'}
+            {showCompleted ? t('learning.dailyLessonRepeatSub') : t('learning.dailyLessonTodaySub')}
           </Text>
 
           {/* Zona de metadatos (racha + temas). Reserva una altura estable para
@@ -783,7 +826,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             {streak.currentStreak > 0 && (
               <View style={styles.streakBadge}>
                 <Ionicons name="flame" size={16} color="#F97316" />
-                <Text style={styles.streakText}>{streak.currentStreak} dias de racha</Text>
+                <Text style={styles.streakText}>{t('learning.dailyLessonStreakDays', { count: streak.currentStreak })}</Text>
                 {multiplierText && <Text style={styles.multiplierText}>{multiplierText}</Text>}
               </View>
             )}
@@ -791,11 +834,11 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             {areas.length > 0 && (
               <View style={styles.topicBadges}>
                 {areas.map((area) => {
-                  const info = AREA_LABELS[area];
+                  const info = AREA_LABEL_KEYS[area];
                   if (!info) return null;
                   return (
                     <View key={area} style={[styles.topicBadge, { backgroundColor: info.bg, borderColor: info.border }]}>
-                      <Text style={[styles.topicBadgeText, { color: info.color }]}>{info.label}</Text>
+                      <Text style={[styles.topicBadgeText, { color: info.color }]}>{t(`learning.${info.labelKey}`)}</Text>
                     </View>
                   );
                 })}
@@ -816,7 +859,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               <View style={styles.viewResultsButton}>
                 <Ionicons name="stats-chart" size={20} color="#10B981" />
                 <Text style={styles.viewResultsText}>
-                  {submitting ? 'Cargando...' : 'Ver resultados'}
+                  {submitting ? t('common.loadingEllipsis') : t('learning.dailyLessonViewResults')}
                 </Text>
               </View>
             </Pressable>
@@ -835,7 +878,10 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               >
                 <Ionicons name="play-forward" size={20} color="#fff" />
                 <Text style={styles.startText}>
-                  Continuar lección ({pendingResume.answers.length}/{pendingResume.questions.length})
+                  {t('learning.dailyLessonContinue', {
+                    current: pendingResume.answers.length,
+                    total: pendingResume.questions.length,
+                  })}
                 </Text>
               </LinearGradient>
             </Pressable>
@@ -850,13 +896,13 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
                 {pendingStart ? (
                   <>
                     <ActivityIndicator color="#fff" />
-                    <Text style={styles.startText}>Empezando...</Text>
+                    <Text style={styles.startText}>{t('learning.dailyLessonStarting')}</Text>
                   </>
                 ) : (
                   <>
                     <Ionicons name={showCompleted ? 'reload' : 'play'} size={20} color="#fff" />
                     <Text style={styles.startText}>
-                      {showCompleted ? 'Repetir lección' : 'Empezar'}
+                      {showCompleted ? t('learning.dailyLessonRepeat') : t('learning.dailyLessonStart')}
                     </Text>
                   </>
                 )}
@@ -865,7 +911,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
           )}
 
           <Pressable onPress={onBack} hitSlop={8} style={styles.cancelButton}>
-            <Text style={styles.cancelText}>Cancelar</Text>
+            <Text style={styles.cancelText}>{t('common.cancel')}</Text>
           </Pressable>
         </Animated.ScrollView>
       </View>
@@ -933,7 +979,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             {isReview && (
               <View style={styles.reviewBadge}>
                 <Ionicons name="reload" size={12} color="#F18F34" />
-                <Text style={styles.reviewBadgeText}>Repaso</Text>
+                <Text style={styles.reviewBadgeText}>{t('learning.dailyLessonReviewBadge')}</Text>
               </View>
             )}
             <Text style={styles.counterText}>{counter}</Text>
@@ -990,7 +1036,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
             <Text style={styles.errorText}>{submitError}</Text>
             <Pressable onPress={onBack} hitSlop={8} style={styles.cancelButton}>
-              <Text style={styles.cancelText}>Volver</Text>
+              <Text style={styles.cancelText}>{t('common.back')}</Text>
             </Pressable>
           </View>
         </View>
@@ -1000,7 +1046,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
     if (!results) return null;
 
     const pct = Math.round((results.session.correct_count / results.session.total_count) * 100);
-    const title = pct >= 80 ? '¡Excelente!' : pct >= 60 ? '¡Bien hecho!' : '¡Sigue practicando!';
+    const title = pct >= 80 ? t('learning.dailyLessonResultExcellent') : pct >= 60 ? t('learning.dailyLessonResultGood') : t('learning.dailyLessonResultKeepGoing');
 
     // Delta por area de esta sesion (1 pto por acierto en la skill correspondiente)
     const deltas: SkillValues = { technical: 0, physical: 0, mental: 0, tactical: 0 };
@@ -1037,22 +1083,22 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
           </View>
 
           <Text style={styles.resultsTitle}>{title}</Text>
-          <Text style={styles.resultsSubtitle}>Lección completada</Text>
+          <Text style={styles.resultsSubtitle}>{t('learning.dailyLessonCompleted')}</Text>
 
           <View style={styles.metricsCard}>
             <View style={styles.metricItem}>
               <Text style={styles.metricValue}>{pct}%</Text>
-              <Text style={styles.metricLabel}>PUNTUACIÓN</Text>
+              <Text style={styles.metricLabel}>{t('learning.dailyLessonScore')}</Text>
             </View>
             <View style={[styles.metricItem, styles.metricXp]}>
               <Text style={styles.metricValueXp}>+{results.session.xp_earned}</Text>
-              <Text style={styles.metricLabel}>PTS. HABILIDAD</Text>
+              <Text style={styles.metricLabel}>{t('learning.dailyLessonSkillPoints')}</Text>
             </View>
             <View style={[styles.metricItem, styles.metricCorrect]}>
               <Text style={styles.metricValueCorrect}>
                 {results.session.correct_count}/{results.session.total_count}
               </Text>
-              <Text style={styles.metricLabel}>CORRECTAS</Text>
+              <Text style={styles.metricLabel}>{t('learning.dailyLessonCorrect')}</Text>
             </View>
           </View>
 
@@ -1063,12 +1109,12 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               <View style={styles.streakResultTop}>
                 <Ionicons name="flame" size={20} color="#F97316" />
                 <View style={styles.streakResultInfo}>
-                  <Text style={styles.streakResultValue}>{results.streak.current} días</Text>
-                  <Text style={styles.streakResultLabel}>Racha actual</Text>
+                  <Text style={styles.streakResultValue}>{t('learning.dailyLessonStreakDaysLabel', { count: results.streak.current })}</Text>
+                  <Text style={styles.streakResultLabel}>{t('learning.dailyLessonStreakCurrent')}</Text>
                 </View>
                 {results.streak.xp_bonus > 0 && (
                   <View style={styles.bonusBadge}>
-                    <Text style={styles.bonusText}>+{results.streak.xp_bonus} XP bonus</Text>
+                    <Text style={styles.bonusText}>{t('learning.dailyLessonXpBonus', { xp: results.streak.xp_bonus })}</Text>
                   </View>
                 )}
               </View>
@@ -1076,7 +1122,10 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
                 <View style={styles.nextBonusRow}>
                   <Ionicons name="trending-up-outline" size={12} color="#F18F34" />
                   <Text style={styles.nextBonusText}>
-                    Siguiente bonus con {nextMilestone} {nextMilestone === 1 ? 'día' : 'días'} más de racha
+                    {t('learning.dailyLessonNextBonus', {
+                      count: nextMilestone,
+                      daysLabel: nextMilestone === 1 ? t('learning.dailyLessonDayOne') : t('learning.dailyLessonDayMany'),
+                    })}
                   </Text>
                 </View>
               )}
@@ -1084,10 +1133,10 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
           )}
 
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryTitle}>Resumen de respuestas</Text>
+            <Text style={styles.summaryTitle}>{t('learning.dailyLessonSummaryTitle')}</Text>
             {results.results.map((r, i) => {
               const q = questions[i];
-              const preview = q ? getQuestionPreview(q) : 'Pregunta';
+              const preview = q ? getQuestionPreview(q, t) : t('learning.questionPreviewDefault');
               const vote = questionVotes[r.question_id] ?? null;
               return (
                 // Key con índice como sufijo para no crashear si hubiese
@@ -1146,7 +1195,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
             >
               <View style={styles.reviewButton}>
                 <Ionicons name="reload" size={18} color="#F18F34" />
-                <Text style={styles.reviewButtonText}>Repasar fallos ({failedIndices.length})</Text>
+                <Text style={styles.reviewButtonText}>{t('learning.dailyLessonReviewFailures', { count: failedIndices.length })}</Text>
               </View>
             </Pressable>
           )}
@@ -1158,7 +1207,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
               end={{ x: 1, y: 0 }}
               style={styles.continueGradient}
             >
-              <Text style={styles.continueText}>Continuar</Text>
+              <Text style={styles.continueText}>{t('learning.dailyLessonContinueBtn')}</Text>
               <Ionicons name="arrow-forward" size={20} color="#fff" />
             </LinearGradient>
           </Pressable>
@@ -1179,6 +1228,7 @@ export function DailyLessonScreen({ onBack, onComplete, onOpenOnboarding }: Prop
 // ---------------------------------------------------------------------------
 
 function SubmittingOverlay() {
+  const { t } = useTranslation();
   // Anillo exterior pulsante (scale + opacity sinusoidal).
   const pulse = useRef(new Animated.Value(0)).current;
   // Rotación continua del icono interior.
@@ -1242,8 +1292,8 @@ function SubmittingOverlay() {
           </LinearGradient>
         </View>
 
-        <Text style={styles.submittingTitle}>Calculando tus resultados</Text>
-        <Text style={styles.submittingSubtitle}>Un segundo mientras lo preparamos…</Text>
+        <Text style={styles.submittingTitle}>{t('learning.dailyLessonSubmittingTitle')}</Text>
+        <Text style={styles.submittingSubtitle}>{t('learning.dailyLessonSubmittingSub')}</Text>
       </View>
     </View>
   );

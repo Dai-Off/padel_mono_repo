@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useTranslation } from '../../i18n';
 
 type Props = {
   /** Mensaje del banner. Ej: "Descubre tu nivel para desbloquear cursos". */
@@ -24,14 +25,17 @@ export function OnboardingInlineBanner({
   message,
   icon,
   onPress,
-  ctaLabel = 'Completar',
+  ctaLabel,
 }: Props) {
+  const { t } = useTranslation();
+  const resolvedCtaLabel = ctaLabel ?? t('onboarding.inlineBannerCta');
+
   return (
     <View style={styles.banner}>
       <Ionicons name={icon} size={20} color="#F18F34" />
       <Text style={styles.text}>{message}</Text>
       <Pressable onPress={onPress} hitSlop={6} style={styles.cta}>
-        <Text style={styles.ctaText}>{ctaLabel}</Text>
+        <Text style={styles.ctaText}>{resolvedCtaLabel}</Text>
         <Ionicons name="arrow-forward" size={12} color="#F18F34" />
       </Pressable>
     </View>

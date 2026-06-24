@@ -4,19 +4,11 @@ import Svg, {
   Polygon, 
   Line, 
   Circle, 
-  G, 
-  Text as SvgText, 
-  Defs, 
-  RadialGradient, 
-  Stop, 
-  Filter, 
-  FeGaussianBlur, 
-  FeMerge, 
-  FeMergeNode 
+  Text as SvgText,
 } from 'react-native-svg';
+import { useTranslation } from '../../i18n';
 
 const AnimatedPolygon = Animated.createAnimatedComponent(Polygon);
-const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 interface SkillPolarChartProps {
   skills?: {
@@ -30,28 +22,34 @@ interface SkillPolarChartProps {
 export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({ 
   skills = { technical: 25, physical: 25, mental: 25, tactical: 25 } 
 }) => {
+  const { t } = useTranslation();
   const animatedValue = useRef(new Animated.Value(0)).current;
+
+  const skillLabels = {
+    technical: t('learning.skillTechnical'),
+    physical: t('learning.skillPhysical'),
+    mental: t('learning.skillMental'),
+    tactical: t('learning.skillTactical'),
+  };
 
   useEffect(() => {
     Animated.timing(animatedValue, {
       toValue: 1,
       duration: 1200,
-      useNativeDriver: false, // SVG props often don't support native driver well for points
+      useNativeDriver: false,
     }).start();
-  }, []);
+  }, [animatedValue]);
 
   const size = 300;
   const center = size / 2;
   const maxRadius = 90;
 
-  // Convert points for the polygon based on animation
   const getPoints = (val: number) => {
     const tech = (skills.technical / 100) * maxRadius * val;
     const phys = (skills.physical / 100) * maxRadius * val;
     const ment = (skills.mental / 100) * maxRadius * val;
     const tact = (skills.tactical / 100) * maxRadius * val;
 
-    // North, East, South, West
     const p1 = `${center},${center - tech}`;
     const p2 = `${center + phys},${center}`;
     const p3 = `${center},${center + ment}`;
@@ -80,7 +78,6 @@ export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({
     <View style={styles.container}>
       <View style={styles.chartWrapper}>
         <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          {/* Background Grids */}
           {[1, 0.75, 0.5, 0.25].map((scale, idx) => (
             <Polygon
               key={idx}
@@ -92,13 +89,11 @@ export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({
             />
           ))}
 
-          {/* Axes */}
           <Line x1={center} y1={center} x2={center} y2={center - maxRadius} stroke="#F18F34" strokeOpacity="0.2" strokeWidth="1.5" />
           <Line x1={center} y1={center} x2={center + maxRadius} y2={center} stroke="#34D399" strokeOpacity="0.2" strokeWidth="1.5" />
           <Line x1={center} y1={center} x2={center} y2={center + maxRadius} stroke="#F472B6" strokeOpacity="0.2" strokeWidth="1.5" />
           <Line x1={center} y1={center} x2={center - maxRadius} y2={center} stroke="#818CF8" strokeOpacity="0.2" strokeWidth="1.5" />
 
-          {/* Main Polygon */}
           <AnimatedPolygon
             points={polygonPoints}
             fill="rgba(241, 143, 52, 0.18)"
@@ -107,22 +102,20 @@ export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({
             strokeLinejoin="round"
           />
 
-          {/* Labels */}
-          <SvgText x={center} y={center - maxRadius - 15} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#F18F34">Técnico</SvgText>
-          <SvgText x={center + maxRadius + 10} y={center + 4} textAnchor="start" fontSize="11" fontWeight="bold" fill="#34D399">Físico</SvgText>
-          <SvgText x={center} y={center + maxRadius + 22} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#F472B6">Mental</SvgText>
-          <SvgText x={center - maxRadius - 10} y={center + 4} textAnchor="end" fontSize="11" fontWeight="bold" fill="#818CF8">Táctico</SvgText>
+          <SvgText x={center} y={center - maxRadius - 15} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#F18F34">{skillLabels.technical}</SvgText>
+          <SvgText x={center + maxRadius + 10} y={center + 4} textAnchor="start" fontSize="11" fontWeight="bold" fill="#34D399">{skillLabels.physical}</SvgText>
+          <SvgText x={center} y={center + maxRadius + 22} textAnchor="middle" fontSize="11" fontWeight="bold" fill="#F472B6">{skillLabels.mental}</SvgText>
+          <SvgText x={center - maxRadius - 10} y={center + 4} textAnchor="end" fontSize="11" fontWeight="bold" fill="#818CF8">{skillLabels.tactical}</SvgText>
 
-          {/* Center point */}
           <Circle cx={center} cy={center} r="4" fill="#F18F34" />
         </Svg>
       </View>
 
       <View style={styles.skillsContainer}>
-        {renderSkillBar('Técnico', skills.technical, '#F18F34')}
-        {renderSkillBar('Físico', skills.physical, '#34D399')}
-        {renderSkillBar('Mental', skills.mental, '#F472B6')}
-        {renderSkillBar('Táctico', skills.tactical, '#818CF8')}
+        {renderSkillBar(skillLabels.technical, skills.technical, '#F18F34')}
+        {renderSkillBar(skillLabels.physical, skills.physical, '#34D399')}
+        {renderSkillBar(skillLabels.mental, skills.mental, '#F472B6')}
+        {renderSkillBar(skillLabels.tactical, skills.tactical, '#818CF8')}
       </View>
     </View>
   );

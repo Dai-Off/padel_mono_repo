@@ -42,6 +42,14 @@ export async function confirmPaymentFromClient(
       body: JSON.stringify({ payment_intent_id: paymentIntentId }),
     });
     const json = (await res.json()) as ConfirmClientResponse;
+    if (!res.ok) {
+      return {
+        ok: false,
+        error: json.error ?? 'No se pudo confirmar el pago',
+        code: json.code,
+        payment_succeeded: json.payment_succeeded,
+      };
+    }
     return json;
   } catch {
     return { ok: false, error: 'Error de conexión' };
@@ -205,6 +213,9 @@ export type ConfirmClientResponse = {
   tournament_id?: string;
   season_pass?: { has_elite: boolean };
   error?: string;
+  code?: string;
+  payment_succeeded?: boolean;
+  join?: { slot_index: number; reassigned?: boolean; match_id?: string };
 };
 
 export async function createIntentForNewMatch(
