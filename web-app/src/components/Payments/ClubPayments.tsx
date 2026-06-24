@@ -406,7 +406,7 @@ export function ClubPaymentsTab({
         <div>
           <h2 className="text-sm font-bold text-[#1A1A1A]">{t('payments_title')}</h2>
           <p className="text-[10px] text-gray-400 mt-0.5">
-            {filteredPayments.length} / {periodPayments.length} · {periodLabel}
+            {filteredPayments.length} / {periodPayments.length}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -741,7 +741,7 @@ export function ClubPaymentsTab({
                         {payment.source === 'store' ? 'Tienda' : 'Turno'}
                       </span>
                       {payment.courtName && <span>• {payment.courtName}</span>}
-                      <span>• {payment.time}</span>
+                      <span>• {payment.dateLabel} · {payment.time}</span>
                     </div>
                   </div>
                   <PaymentStatusBadge status={payment.status} />
