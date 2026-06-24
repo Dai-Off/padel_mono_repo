@@ -14,11 +14,15 @@ import {
     AlertCircle,
     EyeOff,
     Eye,
+    MessageSquare,
+    Send,
 } from 'lucide-react';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { playerService } from '../../../services/player';
 import { apiFetchWithAuth } from '../../../services/api';
 import { clubIanaTimeZone, zonedTimeToUtc, formatTimeHHmmInClubTz, dayKeyInClubTz, validateBookingSlotWithinClubHours } from '../../../lib/clubTimeZone';
+import { clubChatsService } from '../../../services/clubChats';
+import { authService } from '../../../services/auth';
 
 function clubSlotToUtcIso(dateBase: string, hour: string, minute: string): string {
     return zonedTimeToUtc(`${dateBase}T${hour.padStart(2, '0')}:${minute.padStart(2, '0')}:00`).toISOString();
@@ -548,6 +552,69 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [availableCourtsForSlot, setAvailableCourtsForSlot] = useState<Array<{ id: string; name: string }>>([]);
     const navigate = useNavigate();
     const [courtToAdd, setCourtToAdd] = useState('');
+
+    const [activeTab, setActiveTab] = useState<'details' | 'chat'>('details');
+    const [chatMessages, setChatMessages] = useState<any[]>([]);
+    const [loadingChat, setLoadingChat] = useState(false);
+    const [chatDraft, setChatDraft] = useState('');
+    const [sendingChat, setSendingChat] = useState(false);
+    const chatContainerRef = useRef<HTMLDivElement>(null);
+    const [me, setMe] = useState<{ authUserId: string | null; playerId: string | null }>({ authUserId: null, playerId: null });
+
+    useEffect(() => {
+        if (!isOpen) {
+            setActiveTab('details');
+            setChatMessages([]);
+            setChatDraft('');
+        } else {
+            authService.getMe().then((res) => {
+                setMe({
+                    authUserId: res.user?.id ?? null,
+                    playerId: res.roles?.player_id ?? null,
+                });
+            }).catch(() => {});
+        }
+    }, [isOpen]);
+
+    const loadBookingChat = useCallback(async () => {
+        if (!editingBookingData?.id) return;
+        setLoadingChat(true);
+        try {
+            const messages = await clubChatsService.listBookingChat(editingBookingData.id);
+            setChatMessages(messages);
+        } catch (err) {
+            console.error('Error loading chat:', err);
+        } finally {
+            setLoadingChat(false);
+        }
+    }, [editingBookingData?.id]);
+
+    useEffect(() => {
+        if (activeTab === 'chat' && editingBookingData?.id) {
+            void loadBookingChat();
+        }
+    }, [activeTab, editingBookingData?.id, loadBookingChat]);
+
+    useEffect(() => {
+        if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
+    }, [chatMessages]);
+
+    const handleSendChatMessage = async () => {
+        if (!editingBookingData?.id || !chatDraft.trim()) return;
+        setSendingChat(true);
+        try {
+            const newMessage = await clubChatsService.sendBookingChat(editingBookingData.id, chatDraft.trim());
+            setChatMessages(prev => [...prev, newMessage]);
+            setChatDraft('');
+        } catch (err) {
+            console.error('Error sending message:', err);
+            toast.error('No se pudo enviar el mensaje.');
+        } finally {
+            setSendingChat(false);
+        }
+    };
 
     // ─── Helpers de pago ─────────────────────────────────────────────────────
     const fetchWalletBalance = useCallback(async (playerId: string, slotIndex: number) => {
@@ -1199,20 +1266,22 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             </div>
                         )}
                         <div className="flex gap-2 flex-wrap">
-                            <button
-                                onClick={() => handleSave()}
-                                disabled={!organizer || isSaving}
-                                className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
-                            >
-                                {isSaving ? t('reservation.processing') : t('reservation.save')}
-                            </button>
+                            {activeTab !== 'chat' && (
+                                <button
+                                    onClick={() => handleSave()}
+                                    disabled={!organizer || isSaving}
+                                    className="px-4 py-1.5 bg-[#006A6A] text-white text-xs font-bold rounded-md hover:bg-[#005151] disabled:opacity-50 transition-colors"
+                                >
+                                    {isSaving ? t('reservation.processing') : t('reservation.save')}
+                                </button>
+                            )}
                             <button
                                 onClick={onClose}
                                 className="px-4 py-1.5 bg-gray-200 text-gray-700 text-xs font-bold rounded-md hover:bg-gray-300 transition-colors"
                             >
-                                {t('reservation.cancel')}
+                                {activeTab === 'chat' ? 'Cerrar' : t('reservation.cancel')}
                             </button>
-                            {isEditMode && editingBookingData && (
+                            {activeTab !== 'chat' && isEditMode && editingBookingData && (
                                 <button
                                     type="button"
                                     onClick={goToCart}
@@ -1221,7 +1290,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     Carrito
                                 </button>
                             )}
-                            {isEditMode && editingBookingData && isOnHiddenCourt && onMoveToVisible && (
+                            {activeTab !== 'chat' && isEditMode && editingBookingData && isOnHiddenCourt && onMoveToVisible && (
                                 <button
                                     onClick={async () => {
                                         setMoveToHiddenError(null);
@@ -1243,7 +1312,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                     {isMovingToHidden ? 'Moviendo...' : 'Desocultar'}
                                 </button>
                             )}
-                            {isEditMode && editingBookingData && !isOnHiddenCourt && onMoveToHidden && (
+                            {activeTab !== 'chat' && isEditMode && editingBookingData && !isOnHiddenCourt && onMoveToHidden && (
                                 <button
                                     onClick={async () => {
                                         setMoveToHiddenError(null);
@@ -1275,10 +1344,106 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                     </button>
                 </div>
 
-                {/* Scrollable Content */}
-                <div className="flex-1 p-6 overflow-y-auto hidden-scrollbar">
+                {/* Tab selector for Edit mode */}
+                {isEditMode && editingBookingData && (
+                    <div className="flex border-b border-gray-100 bg-white px-6 shrink-0">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('details')}
+                            className={`py-3 px-4 text-sm font-bold border-b-2 -mb-[2px] transition-colors flex items-center gap-1.5 ${
+                                activeTab === 'details'
+                                    ? "border-[#006A6A] text-[#006A6A]"
+                                    : "border-transparent text-gray-500 hover:text-gray-900"
+                            }`}
+                        >
+                            Detalles
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('chat')}
+                            className={`py-3 px-4 text-sm font-bold border-b-2 -mb-[2px] transition-colors flex items-center gap-1.5 ${
+                                activeTab === 'chat'
+                                    ? "border-[#006A6A] text-[#006A6A]"
+                                    : "border-transparent text-gray-500 hover:text-gray-900"
+                            }`}
+                        >
+                            <MessageSquare className="w-4 h-4" />
+                            Chat del Partido
+                        </button>
+                    </div>
+                )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Scrollable Content */}
+                <div className="flex-1 p-6 overflow-y-auto hidden-scrollbar flex flex-col">
+
+                    {isEditMode && editingBookingData && activeTab === 'chat' ? (
+                        <div className="flex-1 flex flex-col min-h-[300px] sm:min-h-[400px]">
+                            {/* Messages area */}
+                            <div ref={chatContainerRef} className="flex-1 overflow-y-auto space-y-3 pr-2 mb-4 max-h-[350px] sm:max-h-[450px]">
+                                {loadingChat ? (
+                                    <div className="flex items-center justify-center h-full text-xs text-gray-500 gap-2">
+                                        <div className="w-4 h-4 border-2 border-[#006A6A] border-t-transparent rounded-full animate-spin" />
+                                        Cargando mensajes...
+                                    </div>
+                                ) : chatMessages.length === 0 ? (
+                                    <div className="flex flex-col items-center justify-center h-full text-xs text-gray-400 py-12">
+                                        <MessageSquare className="w-8 h-8 opacity-30 mb-2" />
+                                        Aún no hay mensajes en este partido.
+                                    </div>
+                                ) : (
+                                    chatMessages.map((m) => {
+                                        const isMyMessage = me.authUserId && m.author_user_id === me.authUserId;
+                                        return (
+                                            <div
+                                                key={m.id}
+                                                className={`max-w-[75%] rounded-xl px-3 py-2 text-xs ${
+                                                    isMyMessage
+                                                        ? "ml-auto bg-[#1A1A1A] text-white"
+                                                        : "bg-gray-100 text-[#1A1A1A]"
+                                                }`}
+                                            >
+                                                <p className="mb-0.5 text-[9px] opacity-75 font-bold">{m.author_name}</p>
+                                                <p className="wrap-break-word">{m.message}</p>
+                                                <span className="block text-[8px] opacity-60 text-right mt-1">
+                                                    {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                </span>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                            
+                            {/* Send input */}
+                            <div className="border-t border-gray-200 pt-3 mt-auto shrink-0">
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={chatDraft}
+                                        onChange={(e) => setChatDraft(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                void handleSendChatMessage();
+                                            }
+                                        }}
+                                        placeholder="Escribe un mensaje..."
+                                        className="w-full rounded-xl border border-gray-300 px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:ring-2 focus:ring-[#006A6A]/20"
+                                    />
+                                    <button
+                                        type="button"
+                                        disabled={sendingChat || !chatDraft.trim()}
+                                        onClick={() => {
+                                            void handleSendChatMessage();
+                                        }}
+                                        className="rounded-xl bg-[#006A6A] hover:bg-[#005555] px-3 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60 transition-colors"
+                                    >
+                                        <Send className="h-3.5 w-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <React.Fragment>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                         {/* Left Column */}
                         <div className="space-y-5">
                             {/* Fecha */}
@@ -1778,10 +1943,12 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                             </div>
                         )}
                     </div>
+                </React.Fragment>
+                )}
                 </div>
 
                 {/* Delete section — only in edit mode */}
-                {isEditMode && (
+                {isEditMode && activeTab !== 'chat' && (
                     <div className="shrink-0 px-6 py-4 border-t border-gray-200 bg-white space-y-3">
                         {onMarkPaid && editingBookingData?.status === 'pending_payment' && (
                             <button

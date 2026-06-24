@@ -118,3 +118,10 @@
   min-width: 0;
   min-height: 0;
 }
+
+/* Prevent elastic bounce scrolling and pull-to-refresh on mobile */
+.grilla-shell,
+.grilla-mobile-viewport,
+.mobile-full-view-scroll {
+  overscroll-behavior: none;
+}
