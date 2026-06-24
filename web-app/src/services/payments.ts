@@ -19,7 +19,7 @@ export type PaymentTransaction = {
   currency: string;
   status: string;
   created_at: string;
-  booking_id: string;
+  booking_id?: string | null;
   start_at: string | null;
   end_at: string | null;
   court_name: string | null;
@@ -28,6 +28,10 @@ export type PaymentTransaction = {
   payer_first_name?: string | null;
   payer_last_name?: string | null;
   payer_email?: string | null;
+  payer_player_id?: string | null;
+  concept?: string;
+  source?: 'booking' | 'store';
+  payment_method?: 'cash' | 'card' | 'wallet' | 'app';
   participants?: PaymentParticipant[];
 };
 

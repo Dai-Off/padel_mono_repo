@@ -90,6 +90,7 @@ export function parseSaleReason(reason: string): {
   name: string;
   bookingId: string | null;
   playerId: string | null;
+  walletCents: number;
   voided: boolean;
 } | null {
   const raw = reason.startsWith('VOID|') ? reason.slice(5) : reason;
@@ -99,9 +100,14 @@ export function parseSaleReason(reason: string): {
   if (!saleId) return null;
   let bookingId: string | null = null;
   let playerId: string | null = null;
+  let walletCents = 0;
   for (const extra of parts.slice(5)) {
     if (extra.startsWith('booking:')) bookingId = extra.slice('booking:'.length) || null;
     if (extra.startsWith('player:')) playerId = extra.slice('player:'.length) || null;
+    if (extra.startsWith('wallet:')) {
+      const parsed = Math.trunc(Number(extra.slice('wallet:'.length)));
+      if (Number.isFinite(parsed) && parsed > 0) walletCents = parsed;
+    }
   }
   return {
     saleId,
@@ -110,8 +116,529 @@ export function parseSaleReason(reason: string): {
     name: String(parts[4] ?? 'Producto').replace(/\|/g, ' '),
     bookingId: bookingId && bookingId !== 'none' ? bookingId : null,
     playerId,
+    walletCents,
     voided: reason.startsWith('VOID|'),
   };
+}
+
+export function splitStoreSaleAmounts(
+  method: string,
+  amountCents: number,
+  walletCents: number,
+): { cashCents: number; cardCents: number; walletCents: number; paymentMethod: string } {
+  const total = Math.max(0, Math.trunc(amountCents));
+  const wallet = Math.min(Math.max(0, Math.trunc(walletCents)), total);
+  const cashCard = total - wallet;
+  const isCash = method.includes('cash');
+  const isCard = method.includes('card');
+  const isWalletOnly = method.includes('wallet') && !isCash && !isCard;
+
+  if (isWalletOnly || (wallet >= total && total > 0)) {
+    return { cashCents: 0, cardCents: 0, walletCents: total, paymentMethod: 'wallet' };
+  }
+  if (isCash && wallet > 0) {
+    return { cashCents: cashCard, cardCents: 0, walletCents: wallet, paymentMethod: 'cash+wallet' };
+  }
+  if (isCard && wallet > 0) {
+    return { cashCents: 0, cardCents: cashCard, walletCents: wallet, paymentMethod: 'card+wallet' };
+  }
+  if (isCash) return { cashCents: total, cardCents: 0, walletCents: 0, paymentMethod: 'cash' };
+  if (isCard) return { cashCents: 0, cardCents: total, walletCents: 0, paymentMethod: 'card' };
+  return { cashCents: 0, cardCents: 0, walletCents: total, paymentMethod: 'wallet' };
+}
+
+export function parseStoreSaleStripeRef(stripeRef: string): { method: string; saleId: string } | null {
+  if (!stripeRef.startsWith('STORE_SALE_')) return null;
+  const rest = stripeRef.slice('STORE_SALE_'.length);
+  const idx = rest.lastIndexOf('_');
+  if (idx <= 0) return null;
+  const saleId = rest.slice(idx + 1);
+  if (!saleId) return null;
+  return { method: rest.slice(0, idx), saleId };
+}
+
+export type CashClosingStoreSaleLine = {
+  movement_id: string;
+  sale_id: string;
+  name: string;
+  payment_method: string;
+  amount_cents: number;
+  movement_at: string | null;
+  booking_id: string | null;
+  player_id: string | null;
+};
+
+export type StoreSalesCashClosingTotals = {
+  cashCents: number;
+  cardCents: number;
+  lines: CashClosingStoreSaleLine[];
+};
+
+function customLinesLabel(customLines: SaleMeta['custom_lines']): string {
+  if (!customLines?.length) return 'Venta excepcional';
+  return customLines.map((line) => `${line.name}${line.quantity > 1 ? ` x${line.quantity}` : ''}`).join(', ');
+}
+
+function customLinesTotalCents(customLines: SaleMeta['custom_lines']): number {
+  return (customLines ?? []).reduce((sum, line) => sum + line.unit_price_cents * line.quantity, 0);
+}
+
+function isAfterClosingCutoff(iso: string | null | undefined, closingCutoffMs: number | null): boolean {
+  if (closingCutoffMs == null || typeof iso !== 'string') return true;
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return true;
+  return ms > closingCutoffMs;
+}
+
+export async function loadSaleMetasForDateRange(
+  supabase: SupabaseClient,
+  clubId: string,
+  startUtc: Date,
+  endUtc: Date,
+): Promise<Map<string, { meta: SaleMeta; created_at: string }>> {
+  const { data, error } = await supabase
+    .from('wallet_transactions')
+    .select('notes, created_at')
+    .eq('club_id', clubId)
+    .like('notes', `${META_PREFIX}%`)
+    .gte('created_at', startUtc.toISOString())
+    .lt('created_at', endUtc.toISOString())
+    .limit(5000);
+  const map = new Map<string, { meta: SaleMeta; created_at: string }>();
+  if (error || !data) return map;
+  for (const row of data) {
+    const notes = String((row as { notes?: string }).notes ?? '');
+    if (!notes.startsWith(META_PREFIX) || notes.startsWith(`VOID|${META_PREFIX}`)) continue;
+    const jsonStart = notes.indexOf('|', META_PREFIX.length);
+    if (jsonStart < 0) continue;
+    const saleId = notes.slice(META_PREFIX.length, jsonStart);
+    if (!saleId) continue;
+    try {
+      const meta = JSON.parse(notes.slice(jsonStart + 1)) as SaleMeta;
+      map.set(saleId, { meta, created_at: String((row as { created_at?: string }).created_at ?? '') });
+    } catch {
+      // ignore malformed meta
+    }
+  }
+  return map;
+}
+
+export async function buildStoreSalesForCashClosing(
+  supabase: SupabaseClient,
+  params: {
+    clubId: string;
+    startUtc: Date;
+    endUtc: Date;
+    closingCutoffMs: number | null;
+  },
+): Promise<StoreSalesCashClosingTotals> {
+  const { clubId, startUtc, endUtc, closingCutoffMs } = params;
+  const lines: CashClosingStoreSaleLine[] = [];
+  let cashCents = 0;
+  let cardCents = 0;
+
+  const saleMetas = await loadSaleMetasForDateRange(supabase, clubId, startUtc, endUtc);
+
+  const { data: inventorySaleMovements, error: saleMovementsErr } = await supabase
+    .from('inventory_movements')
+    .select('id, reason, movement_at, created_at')
+    .eq('club_id', clubId)
+    .eq('movement_type', 'out')
+    .gte('movement_at', startUtc.toISOString())
+    .lt('movement_at', endUtc.toISOString())
+    .limit(2000);
+
+  if (!saleMovementsErr && Array.isArray(inventorySaleMovements)) {
+    for (const movement of inventorySaleMovements) {
+      const reason = typeof (movement as { reason?: string }).reason === 'string' ? (movement as { reason?: string }).reason! : '';
+      if (!reason.startsWith('SALE|') || reason.startsWith('VOID|')) continue;
+      const movementAtSource = (movement as { movement_at?: string; created_at?: string }).movement_at
+        ?? (movement as { created_at?: string }).created_at;
+      if (!isAfterClosingCutoff(typeof movementAtSource === 'string' ? movementAtSource : null, closingCutoffMs)) continue;
+
+      const parsed = parseSaleReason(reason);
+      if (!parsed || parsed.amountCents <= 0) continue;
+
+      const split = splitStoreSaleAmounts(parsed.method, parsed.amountCents, parsed.walletCents);
+      cashCents += split.cashCents;
+      cardCents += split.cardCents;
+
+      lines.push({
+        movement_id: String((movement as { id?: string }).id ?? ''),
+        sale_id: parsed.saleId,
+        name: parsed.name,
+        payment_method: split.paymentMethod,
+        amount_cents: parsed.amountCents,
+        movement_at: typeof movementAtSource === 'string' ? movementAtSource : null,
+        booking_id: parsed.bookingId,
+        player_id: parsed.playerId,
+      });
+    }
+  }
+
+  const { data: storeSaleTxs } = await supabase
+    .from('payment_transactions')
+    .select('id, created_at, amount_cents, stripe_payment_intent_id, booking_id, payer_player_id, status')
+    .eq('status', 'succeeded')
+    .like('stripe_payment_intent_id', 'STORE_SALE_%')
+    .gte('created_at', startUtc.toISOString())
+    .lt('created_at', endUtc.toISOString())
+    .limit(2000);
+
+  const ptxAmountBySaleId = new Map<string, number>();
+  for (const row of storeSaleTxs ?? []) {
+    const stripeRef = String((row as { stripe_payment_intent_id?: string }).stripe_payment_intent_id ?? '');
+    const parsedRef = parseStoreSaleStripeRef(stripeRef);
+    if (!parsedRef) continue;
+    if (!saleMetas.has(parsedRef.saleId)) continue;
+
+    const createdAt = (row as { created_at?: string }).created_at;
+    if (!isAfterClosingCutoff(typeof createdAt === 'string' ? createdAt : null, closingCutoffMs)) continue;
+
+    const amount = Math.trunc(Number((row as { amount_cents?: number }).amount_cents ?? 0));
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+
+    const metaEntry = saleMetas.get(parsedRef.saleId)!;
+    const method = parsedRef.method.includes('cash') ? 'cash' : parsedRef.method.includes('card') ? 'card' : parsedRef.method;
+    if (method === 'cash') cashCents += amount;
+    else if (method === 'card') cardCents += amount;
+
+    ptxAmountBySaleId.set(parsedRef.saleId, (ptxAmountBySaleId.get(parsedRef.saleId) ?? 0) + amount);
+
+    lines.push({
+      movement_id: `ptx-${String((row as { id?: string }).id ?? '')}`,
+      sale_id: parsedRef.saleId,
+      name: customLinesLabel(metaEntry.meta.custom_lines),
+      payment_method: method,
+      amount_cents: amount,
+      movement_at: typeof createdAt === 'string' ? createdAt : null,
+      booking_id: (row as { booking_id?: string | null }).booking_id ?? metaEntry.meta.link_booking_id,
+      player_id: String((row as { payer_player_id?: string }).payer_player_id ?? metaEntry.meta.player_id ?? '') || null,
+    });
+  }
+
+  for (const [saleId, entry] of saleMetas) {
+    if (!isAfterClosingCutoff(entry.created_at, closingCutoffMs)) continue;
+    const customTotal = customLinesTotalCents(entry.meta.custom_lines);
+    if (customTotal <= 0) continue;
+
+    const ptxAmount = ptxAmountBySaleId.get(saleId) ?? 0;
+    const walletCustomCents = customTotal - ptxAmount;
+    if (walletCustomCents <= 0) continue;
+
+    lines.push({
+      movement_id: `meta-${saleId}-custom`,
+      sale_id: saleId,
+      name: customLinesLabel(entry.meta.custom_lines),
+      payment_method: 'wallet',
+      amount_cents: walletCustomCents,
+      movement_at: entry.created_at || null,
+      booking_id: entry.meta.link_booking_id,
+      player_id: entry.meta.player_id || null,
+    });
+  }
+
+  lines.sort((a, b) => (a.movement_at ?? '').localeCompare(b.movement_at ?? ''));
+
+  return { cashCents, cardCents, lines };
+}
+
+export type ClubPaymentLedgerEntry = {
+  id: string;
+  amount_cents: number;
+  currency: string;
+  status: string;
+  created_at: string;
+  booking_id: string | null;
+  start_at: string | null;
+  end_at: string | null;
+  court_name: string | null;
+  club_name: string | null;
+  city: string | null;
+  payer_first_name: string | null;
+  payer_last_name: string | null;
+  payer_email: string | null;
+  payer_player_id: string | null;
+  concept: string;
+  source: 'booking' | 'store';
+  payment_method: 'cash' | 'card' | 'wallet' | 'app';
+  participants: Array<{
+    player_id: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    email: string | null;
+    role: string | null;
+    share_amount_cents: number;
+    payment_status: string | null;
+    payment_method: string | null;
+    paid_amount_cents: number;
+    wallet_amount_cents: number;
+  }>;
+};
+
+export function paymentMethodFromStripeRef(stripeRef: string): 'cash' | 'card' | 'wallet' | 'app' {
+  const ref = String(stripeRef ?? '');
+  if (ref.startsWith('manual_cash_') || ref.startsWith('CASH_')) return 'cash';
+  if (ref.startsWith('manual_card_')) return 'card';
+  if (ref.startsWith('manual_wallet_')) return 'wallet';
+  if (ref.startsWith('STORE_SALE_')) {
+    const parsed = parseStoreSaleStripeRef(ref);
+    if (!parsed) return 'cash';
+    if (parsed.method.includes('cash')) return 'cash';
+    if (parsed.method.includes('card')) return 'card';
+    if (parsed.method.includes('wallet')) return 'wallet';
+    return 'cash';
+  }
+  return 'app';
+}
+
+export async function loadRecentSaleMetasForClub(
+  supabase: SupabaseClient,
+  clubId: string,
+  limit = 2000,
+): Promise<Map<string, { meta: SaleMeta; created_at: string }>> {
+  const { data, error } = await supabase
+    .from('wallet_transactions')
+    .select('notes, created_at')
+    .eq('club_id', clubId)
+    .like('notes', `${META_PREFIX}%`)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  const map = new Map<string, { meta: SaleMeta; created_at: string }>();
+  if (error || !data) return map;
+  for (const row of data) {
+    const notes = String((row as { notes?: string }).notes ?? '');
+    if (!notes.startsWith(META_PREFIX) || notes.startsWith(`VOID|${META_PREFIX}`)) continue;
+    const jsonStart = notes.indexOf('|', META_PREFIX.length);
+    if (jsonStart < 0) continue;
+    const saleId = notes.slice(META_PREFIX.length, jsonStart);
+    if (!saleId || map.has(saleId)) continue;
+    try {
+      const meta = JSON.parse(notes.slice(jsonStart + 1)) as SaleMeta;
+      map.set(saleId, { meta, created_at: String((row as { created_at?: string }).created_at ?? '') });
+    } catch {
+      // ignore malformed meta
+    }
+  }
+  return map;
+}
+
+export async function listClubStorePaymentEntries(
+  supabase: SupabaseClient,
+  clubId: string,
+  limit: number,
+): Promise<ClubPaymentLedgerEntry[]> {
+  const entries: ClubPaymentLedgerEntry[] = [];
+  const playerIds = new Set<string>();
+  const bookingIds = new Set<string>();
+
+  const { data: clubRow } = await supabase.from('clubs').select('name, city').eq('id', clubId).maybeSingle();
+  const clubName = String((clubRow as { name?: string } | null)?.name ?? '');
+  const clubCity = String((clubRow as { city?: string } | null)?.city ?? '');
+
+  const saleMetas = await loadRecentSaleMetasForClub(supabase, clubId);
+
+  const { data: inventorySaleMovements } = await supabase
+    .from('inventory_movements')
+    .select('id, reason, movement_at, created_at')
+    .eq('club_id', clubId)
+    .eq('movement_type', 'out')
+    .order('movement_at', { ascending: false })
+    .limit(Math.max(limit * 3, 300));
+
+  for (const movement of inventorySaleMovements ?? []) {
+    const reason = String((movement as { reason?: string }).reason ?? '');
+    if (!reason.startsWith('SALE|') || reason.startsWith('VOID|')) continue;
+    const parsed = parseSaleReason(reason);
+    if (!parsed || parsed.amountCents <= 0) continue;
+
+    const split = splitStoreSaleAmounts(parsed.method, parsed.amountCents, parsed.walletCents);
+    const movementAt = String(
+      (movement as { movement_at?: string; created_at?: string }).movement_at
+        ?? (movement as { created_at?: string }).created_at
+        ?? '',
+    );
+    if (parsed.playerId) playerIds.add(parsed.playerId);
+    if (parsed.bookingId) bookingIds.add(parsed.bookingId);
+
+    const method = split.paymentMethod.includes('wallet') && split.cashCents === 0 && split.cardCents === 0
+      ? 'wallet'
+      : split.paymentMethod.includes('card')
+        ? 'card'
+        : split.paymentMethod.includes('cash')
+          ? 'cash'
+          : 'wallet';
+
+    entries.push({
+      id: `store-mov-${String((movement as { id?: string }).id ?? '')}`,
+      amount_cents: parsed.amountCents,
+      currency: 'EUR',
+      status: 'succeeded',
+      created_at: movementAt,
+      booking_id: parsed.bookingId,
+      start_at: null,
+      end_at: null,
+      court_name: null,
+      club_name: clubName,
+      city: clubCity,
+      payer_first_name: null,
+      payer_last_name: null,
+      payer_email: null,
+      payer_player_id: parsed.playerId,
+      concept: `Tienda · ${parsed.name}`,
+      source: 'store',
+      payment_method: method,
+      participants: [],
+    });
+  }
+
+  const { data: storeSaleTxs } = await supabase
+    .from('payment_transactions')
+    .select('id, created_at, amount_cents, stripe_payment_intent_id, booking_id, payer_player_id, status, currency')
+    .eq('status', 'succeeded')
+    .like('stripe_payment_intent_id', 'STORE_SALE_%')
+    .order('created_at', { ascending: false })
+    .limit(Math.max(limit * 3, 300));
+
+  const ptxAmountBySaleId = new Map<string, number>();
+  for (const row of storeSaleTxs ?? []) {
+    const stripeRef = String((row as { stripe_payment_intent_id?: string }).stripe_payment_intent_id ?? '');
+    const parsedRef = parseStoreSaleStripeRef(stripeRef);
+    if (!parsedRef || !saleMetas.has(parsedRef.saleId)) continue;
+
+    const amount = Math.trunc(Number((row as { amount_cents?: number }).amount_cents ?? 0));
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+
+    const metaEntry = saleMetas.get(parsedRef.saleId)!;
+    const payerId = String((row as { payer_player_id?: string }).payer_player_id ?? metaEntry.meta.player_id ?? '');
+    if (payerId) playerIds.add(payerId);
+    const bookingId = (row as { booking_id?: string | null }).booking_id ?? metaEntry.meta.link_booking_id;
+    if (bookingId) bookingIds.add(String(bookingId));
+
+    ptxAmountBySaleId.set(parsedRef.saleId, (ptxAmountBySaleId.get(parsedRef.saleId) ?? 0) + amount);
+
+    entries.push({
+      id: `store-ptx-${String((row as { id?: string }).id ?? '')}`,
+      amount_cents: amount,
+      currency: String((row as { currency?: string }).currency ?? 'EUR'),
+      status: 'succeeded',
+      created_at: String((row as { created_at?: string }).created_at ?? ''),
+      booking_id: bookingId,
+      start_at: null,
+      end_at: null,
+      court_name: null,
+      club_name: clubName,
+      city: clubCity,
+      payer_first_name: null,
+      payer_last_name: null,
+      payer_email: null,
+      payer_player_id: payerId || null,
+      concept: `Tienda · ${customLinesLabel(metaEntry.meta.custom_lines)}`,
+      source: 'store',
+      payment_method: paymentMethodFromStripeRef(stripeRef),
+      participants: [],
+    });
+  }
+
+  for (const [saleId, entry] of saleMetas) {
+    const customTotal = customLinesTotalCents(entry.meta.custom_lines);
+    if (customTotal <= 0) continue;
+    const ptxAmount = ptxAmountBySaleId.get(saleId) ?? 0;
+    const walletCustomCents = customTotal - ptxAmount;
+    if (walletCustomCents <= 0) continue;
+    if (entry.meta.player_id) playerIds.add(entry.meta.player_id);
+    if (entry.meta.link_booking_id) bookingIds.add(entry.meta.link_booking_id);
+
+    entries.push({
+      id: `store-meta-${saleId}`,
+      amount_cents: walletCustomCents,
+      currency: 'EUR',
+      status: 'succeeded',
+      created_at: entry.created_at,
+      booking_id: entry.meta.link_booking_id,
+      start_at: null,
+      end_at: null,
+      court_name: null,
+      club_name: clubName,
+      city: clubCity,
+      payer_first_name: null,
+      payer_last_name: null,
+      payer_email: null,
+      payer_player_id: entry.meta.player_id || null,
+      concept: `Tienda · ${customLinesLabel(entry.meta.custom_lines)}`,
+      source: 'store',
+      payment_method: 'wallet',
+      participants: [],
+    });
+  }
+
+  const playersById = new Map<string, { first_name: string | null; last_name: string | null; email: string | null }>();
+  if (playerIds.size > 0) {
+    const { data: players } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, email')
+      .in('id', [...playerIds]);
+    for (const p of players ?? []) {
+      playersById.set(String((p as { id?: string }).id ?? ''), {
+        first_name: (p as { first_name?: string }).first_name ?? null,
+        last_name: (p as { last_name?: string }).last_name ?? null,
+        email: (p as { email?: string }).email ?? null,
+      });
+    }
+  }
+
+  const bookingsById = new Map<string, { start_at: string | null; end_at: string | null; court_name: string | null }>();
+  if (bookingIds.size > 0) {
+    const { data: bookings } = await supabase
+      .from('bookings')
+      .select('id, start_at, end_at, courts(name)')
+      .in('id', [...bookingIds]);
+    for (const b of bookings ?? []) {
+      const rawCourt = (b as { courts?: unknown }).courts;
+      const court = (Array.isArray(rawCourt) ? rawCourt[0] : rawCourt) as { name?: string } | null;
+      bookingsById.set(String((b as { id?: string }).id ?? ''), {
+        start_at: (b as { start_at?: string }).start_at ?? null,
+        end_at: (b as { end_at?: string }).end_at ?? null,
+        court_name: court?.name ?? null,
+      });
+    }
+  }
+
+  for (const entry of entries) {
+    const pid = String(entry.payer_player_id ?? '');
+    const player = pid ? playersById.get(pid) : null;
+    if (player) {
+      entry.payer_first_name = player.first_name;
+      entry.payer_last_name = player.last_name;
+      entry.payer_email = player.email;
+      entry.participants = [{
+        player_id: pid,
+        first_name: player.first_name,
+        last_name: player.last_name,
+        email: player.email,
+        role: null,
+        share_amount_cents: entry.amount_cents,
+        payment_status: 'paid',
+        payment_method: entry.payment_method,
+        paid_amount_cents: entry.payment_method === 'wallet' ? 0 : entry.amount_cents,
+        wallet_amount_cents: entry.payment_method === 'wallet' ? entry.amount_cents : 0,
+      }];
+    }
+
+    if (entry.booking_id) {
+      const booking = bookingsById.get(entry.booking_id);
+      if (booking) {
+        entry.start_at = booking.start_at;
+        entry.end_at = booking.end_at;
+        entry.court_name = booking.court_name;
+      }
+    }
+  }
+
+  return entries
+    .filter((e) => e.created_at)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, limit);
 }
 
 export function saleIdFromReason(reason: string): string | null {
