@@ -394,7 +394,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                         className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs font-semibold text-gray-600 hover:bg-[#006A6A]/5 hover:border-[#006A6A] hover:text-[#006A6A] transition-colors shrink-0"
                     >
                         <LayoutGrid className="w-3.5 h-3.5" />
-                        <span className="hidden sm:inline">Volver a la planilla</span>
+                        <span className="hidden sm:inline">Grilla</span>
                         <span className="sm:hidden">Grilla</span>
                     </button>
                     <div className="relative">
@@ -582,19 +582,19 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
             </div>
 
             {/* Content Table */}
-            <div className="flex-1 overflow-auto bg-white">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden w-full bg-white">
                 <table className="w-full text-left border-collapse">
                     <thead className="sticky top-0 bg-white z-10 whitespace-nowrap shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
                         <tr>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Hora</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden xl:table-cell">Deporte</th>
-                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Duración</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden sm:table-cell">Duración</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden lg:table-cell">Nivel</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Jugadores</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Tipo</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Recaudado</th>
                             <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden xl:table-cell">Club</th>
-                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b">Pista</th>
+                            <th className="px-3 py-2.5 text-[10px] font-semibold text-gray-500 tracking-wide border-b hidden sm:table-cell">Pista</th>
                             <th className="px-3 py-2.5 border-b"></th>
                         </tr>
                     </thead>
@@ -637,12 +637,20 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                         className="hover:bg-gray-50/50 transition-colors group cursor-pointer"
                                     >
                                         <td className="px-3 py-3 whitespace-nowrap">
-                                            <span className="text-xs font-bold text-gray-800">{formatTime(startAt)}</span>
+                                            <div className="flex flex-col">
+                                                <span className="text-xs font-bold text-gray-800">{formatTime(startAt)}</span>
+                                                <span className="text-[10px] text-gray-500 sm:hidden font-medium">
+                                                    {getDurationMin(startAt, endAt)} min
+                                                </span>
+                                                <span className="text-[9px] font-semibold text-[#006A6A] uppercase tracking-wider sm:hidden">
+                                                    {court?.name || 'Pista'}
+                                                </span>
+                                            </div>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap hidden xl:table-cell">
                                             <span className="text-[11px] font-medium text-gray-600">Pádel</span>
                                         </td>
-                                        <td className="px-3 py-3 whitespace-nowrap">
+                                        <td className="px-3 py-3 whitespace-nowrap hidden sm:table-cell">
                                             <span className="text-[11px] font-medium text-gray-600">{getDurationMin(startAt, endAt)} min</span>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap hidden lg:table-cell">
@@ -664,9 +672,15 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                             </div>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap">
-                                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold leading-tight bg-blue-100/60 text-blue-700 border border-blue-200/50">
-                                                {match.type === 'tournament_division' ? 'Americano' : (match.competitive ? 'Competitivo' : 'Amistoso')}
-                                            </span>
+                                            <div className="flex flex-col gap-1">
+                                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold leading-tight bg-blue-100/60 text-blue-700 border border-blue-200/50 w-fit">
+                                                    {match.type === 'tournament_division' ? 'Americano' : (match.competitive ? 'Competitivo' : 'Amistoso')}
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 lg:hidden font-medium flex items-center gap-1">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-[#006A6A]" />
+                                                    Nivel: {match.elo_min?.toFixed(2) || '0.00'} - {match.elo_max?.toFixed(2) || '10.00'}
+                                                </span>
+                                            </div>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap">
                                             <div className="flex flex-col">
@@ -683,7 +697,7 @@ export const MatchesManagementPanel: React.FC<MatchesManagementPanelProps> = ({ 
                                         <td className="px-3 py-3 whitespace-nowrap hidden xl:table-cell">
                                             <span className="text-[11px] font-medium text-gray-600">{club?.name || 'Sede Central'}</span>
                                         </td>
-                                        <td className="px-3 py-3 whitespace-nowrap">
+                                        <td className="px-3 py-3 whitespace-nowrap hidden sm:table-cell">
                                             <span className="text-[11px] font-medium text-gray-600 uppercase tracking-wide">{court?.name || 'Pista'}</span>
                                         </td>
                                         <td className="px-3 py-3 whitespace-nowrap text-right text-[11px] font-medium">

@@ -1403,7 +1403,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                                                 }`}
                                             >
                                                 <p className="mb-0.5 text-[9px] opacity-75 font-bold">{m.author_name}</p>
-                                                <p className="break-words">{m.message}</p>
+                                                <p className="wrap-break-word">{m.message}</p>
                                                 <span className="block text-[8px] opacity-60 text-right mt-1">
                                                     {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                                 </span>

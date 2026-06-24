@@ -18,7 +18,7 @@ export const TimeAxis: React.FC<{ position: 'left' | 'right'; isCompact?: boolea
     return (
         <div
             className={clsx(
-                'flex-shrink-0 bg-white z-20',
+                'shrink-0 bg-white z-20',
                 isCompact ? 'w-8' : 'w-[34px]',
                 position === 'left'
                     ? 'border-r-2 border-r-white pl-1.5'

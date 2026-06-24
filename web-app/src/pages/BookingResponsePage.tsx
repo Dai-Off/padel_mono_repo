@@ -109,7 +109,7 @@ export const BookingResponsePage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#0A0A0A] flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md bg-[#121212] border border-white/[0.06] rounded-3xl p-8 md:p-10 shadow-2xl relative overflow-hidden">
+      <div className="w-full max-w-md bg-[#121212] border border-white/6 rounded-3xl p-8 md:p-10 shadow-2xl relative overflow-hidden">
         {/* Glow effect */}
         <div className="absolute -top-40 -left-40 w-80 h-80 bg-[#F18F34]/10 rounded-full blur-[100px] pointer-events-none" />
         <div className="absolute -bottom-40 -right-40 w-80 h-80 bg-emerald-500/5 rounded-full blur-[100px] pointer-events-none" />
@@ -126,7 +126,7 @@ export const BookingResponsePage: React.FC = () => {
           {renderContent()}
         </div>
 
-        <div className="mt-10 pt-6 border-t border-white/[0.06] text-center relative z-10">
+        <div className="mt-10 pt-6 border-t border-white/6 text-center relative z-10">
           <p className="text-xs text-gray-600">
             © {new Date().getFullYear()} WeMatch Padel. Todos los derechos reservados.
           </p>

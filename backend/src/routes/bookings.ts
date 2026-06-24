@@ -1350,13 +1350,15 @@ router.put('/:id', async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
 
-    let existingBooking: {
+    interface ExistingBooking {
       court_id: string;
       start_at: string;
       end_at: string;
       reservation_type?: string | null;
       status?: string | null;
-    } | null = null;
+    }
+
+    let existingBooking: ExistingBooking | null = null;
 
     if (court_id !== undefined || start_at !== undefined || end_at !== undefined) {
       const { data: ex, error: exErr } = await supabase
@@ -1366,7 +1368,7 @@ router.put('/:id', async (req: Request, res: Response) => {
         .maybeSingle();
       if (exErr) return res.status(500).json({ ok: false, error: exErr.message });
       if (!ex) return res.status(404).json({ ok: false, error: 'Booking not found' });
-      existingBooking = ex as typeof existingBooking;
+      existingBooking = ex as ExistingBooking;
     }
 
     const scheduleTouched =
