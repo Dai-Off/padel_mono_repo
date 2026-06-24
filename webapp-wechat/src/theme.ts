@@ -1,0 +1,35 @@
+/** Colores alineados con mobile-app/src/theme.ts */
+export const theme = {
+  auth: {
+    bg: '#0F0F0F',
+    inputBg: '#1A1A1A',
+    inputBorder: 'rgba(255,255,255,0.1)',
+    accent: '#F18F34',
+    accentShadow: 'rgba(241, 143, 52, 0.4)',
+    text: '#ffffff',
+    textMuted: '#9ca3af',
+    textSecondary: '#6b7280',
+    label: '#9ca3af',
+    error: '#E31E24',
+    errorBg: 'rgba(227, 30, 36, 0.1)',
+    info: '#2563eb',
+    infoBg: 'rgba(37, 99, 235, 0.1)',
+  },
+  sidebar: {
+    bg: '#0F0F0F',
+    cardBg: '#1A1A1A',
+    cardBorder: 'rgba(255,255,255,0.08)',
+    buttonBg: 'rgba(255,255,255,0.06)',
+    buttonBorder: 'rgba(255,255,255,0.08)',
+    avatarGradientFrom: '#F18F34',
+    avatarGradientTo: '#E95F32',
+  },
+  spacing: {
+    xs: 8,
+    sm: 12,
+    md: 16,
+    lg: 20,
+    xl: 24,
+    xxl: 32,
+  },
+} as const;
