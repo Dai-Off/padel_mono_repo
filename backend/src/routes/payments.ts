@@ -1645,7 +1645,7 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
       txByBookingPlayer.set(bid, bookingMap);
     }
 
-    const participantsByBooking = new Map<string, Array<Record<string, unknown>>>();
+    const participantsByBooking = new Map<string, Array<ClubPaymentLedgerEntry['participants'][number]>>();
     if (bookingIds.length > 0) {
       const { data: bpRows, error: bpError } = await supabase
         .from('booking_participants')
@@ -1682,14 +1682,14 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
           const resolvedWalletCents = bpPaidCents > 0 ? Number(bp.wallet_amount_cents ?? 0) : 0;
           // For app (Stripe) payments, method is null in BP but it's always 'card'
           const resolvedMethod = (bp.payment_method as string | null) ?? txInfo?.method ?? (bp.payment_status === 'paid' ? 'card' : null);
-          const item = {
-            player_id: bp.player_id ?? null,
-            first_name: player?.first_name ?? null,
-            last_name: player?.last_name ?? null,
-            email: player?.email ?? null,
-            role: bp.role ?? null,
-            share_amount_cents: bp.share_amount_cents ?? 0,
-            payment_status: bp.payment_status ?? null,
+          const item: ClubPaymentLedgerEntry['participants'][number] = {
+            player_id: bp.player_id != null ? String(bp.player_id) : null,
+            first_name: player?.first_name != null ? String(player.first_name) : null,
+            last_name: player?.last_name != null ? String(player.last_name) : null,
+            email: player?.email != null ? String(player.email) : null,
+            role: bp.role != null ? String(bp.role) : null,
+            share_amount_cents: Number(bp.share_amount_cents ?? 0),
+            payment_status: bp.payment_status != null ? String(bp.payment_status) : null,
             payment_method: resolvedMethod,
             paid_amount_cents: resolvedPaidCents,
             wallet_amount_cents: resolvedWalletCents,
@@ -1706,7 +1706,7 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
         const stripeRef = String(t.stripe_payment_intent_id ?? '');
         return !stripeRef.startsWith('STORE_SALE_');
       })
-      .map((t: Record<string, unknown>) => {
+      .map((t: Record<string, unknown>): ClubPaymentLedgerEntry => {
       const rawB = t.bookings;
       const b = (Array.isArray(rawB) ? rawB[0] : rawB) as Record<string, unknown> | null;
       const rawCourt = b?.courts;
@@ -1726,21 +1726,21 @@ export async function listClubTransactionsHandler(req: Request, res: Response): 
           ? `Reserva ${bid.slice(0, 8)}`
           : 'Pago';
       return {
-        id: t.id,
-        amount_cents: t.amount_cents,
-        currency: t.currency,
-        status: t.status,
-        created_at: t.created_at,
-        booking_id: t.booking_id,
+        id: String(t.id ?? ''),
+        amount_cents: Number(t.amount_cents ?? 0),
+        currency: String(t.currency ?? ''),
+        status: String(t.status ?? ''),
+        created_at: String(t.created_at ?? ''),
+        booking_id: bid,
         start_at: startAt,
-        end_at: b?.end_at ?? null,
+        end_at: (b?.end_at as string | null) ?? null,
         court_name: courtName,
-        club_name: club?.name ?? null,
-        city: club?.city ?? null,
-        payer_first_name: payer?.first_name ?? null,
-        payer_last_name: payer?.last_name ?? null,
-        payer_email: payer?.email ?? null,
-        payer_player_id: t.payer_player_id ?? null,
+        club_name: club?.name != null ? String(club.name) : null,
+        city: club?.city != null ? String(club.city) : null,
+        payer_first_name: payer?.first_name != null ? String(payer.first_name) : null,
+        payer_last_name: payer?.last_name != null ? String(payer.last_name) : null,
+        payer_email: payer?.email != null ? String(payer.email) : null,
+        payer_player_id: t.payer_player_id != null ? String(t.payer_player_id) : null,
         concept,
         source: 'booking' as const,
         payment_method: paymentMethod,
