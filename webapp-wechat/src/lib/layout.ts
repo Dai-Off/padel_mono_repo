@@ -6,10 +6,14 @@ export const pagePaddingX =
 
 export const pageShell = `mx-auto w-full ${PAGE_MAX_WIDTH} ${pagePaddingX}`;
 
-export const FIXED_LIST_PATHS = new Set(['/usuarios', '/clubes']);
+export const FIXED_LIST_PATHS = new Set(['/usuarios', '/clubes', '/tienda']);
 
 export function isFixedListPath(pathname: string): boolean {
-    return FIXED_LIST_PATHS.has(pathname);
+    if (FIXED_LIST_PATHS.has(pathname)) return true;
+    for (const path of FIXED_LIST_PATHS) {
+        if (pathname.startsWith(`${path}/`)) return true;
+    }
+    return false;
 }
 
 export const pageMainY = 'py-5 sm:py-6 md:py-8 lg:py-10';

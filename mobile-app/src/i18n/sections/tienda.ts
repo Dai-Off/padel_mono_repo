@@ -9,7 +9,17 @@ export interface TiendaTranslationKeys {
     accesorios: string;
   };
   filters: string;
+  filtersTitle: string;
+  filterFeaturedOnly: string;
+  filterFlashOnly: string;
+  filterFavoritesOnly: string;
+  filtersClear: string;
+  filtersApply: string;
   sortFeatured: string;
+  sortPriceLow: string;
+  sortPriceHigh: string;
+  sortName: string;
+  flashEndsIn: string;
   bannerTitle: string;
   bannerSub: string;
   bannerCta: string;
@@ -18,12 +28,8 @@ export interface TiendaTranslationKeys {
   gridTitle: string;
   gridTitleCount: string;
   gridTitleAll: string;
-  mockProduct1Name: string;
-  mockProduct2Name: string;
-  mockProduct3Name: string;
-  mockProduct4Name: string;
-  mockProduct5Name: string;
-  mockProduct6Name: string;
-  mockProduct7Name: string;
-  mockProduct8Name: string;
+  loadError: string;
+  emptyProducts: string;
+  emptySearch: string;
+  emptyFavorites: string;
 }

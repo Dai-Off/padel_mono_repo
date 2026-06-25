@@ -81,7 +81,7 @@ export function UsuariosPage() {
     return (
         <ListPageShell>
             <PageHeader
-                compact
+                dense
                 title="Usuarios"
                 description="Jugadores y cuentas registradas en la aplicación."
                 count={loading ? undefined : players.length}

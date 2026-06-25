@@ -113,6 +113,9 @@ export interface CommonTranslationKeys {
   follow: string;
   originalSound: string;
   hotBadge: string;
+  flashBadge: string;
+  stockLastUnit: string;
+  stockLastUnits: string;
   stockRemaining: string;
   reviewsCount: string;
   flashDeals: string;

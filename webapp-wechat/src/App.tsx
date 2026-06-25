@@ -5,6 +5,10 @@ import { AdminLayout } from './components/Layout/AdminLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { UsuariosPage } from './pages/UsuariosPage';
 import { ClubesPage } from './pages/ClubesPage';
+import { TiendaPage } from './pages/TiendaPage';
+import { ColeccionesPage } from './pages/ColeccionesPage';
+import { VentasPage } from './pages/VentasPage';
+import { CodigosPromocionalesPage } from './pages/CodigosPromocionalesPage';
 import { PlaceholderPage } from './pages/PlaceholderPage';
 import { authService } from './services/auth';
 
@@ -31,15 +35,9 @@ export default function App() {
                     <Route index element={<DashboardPage />} />
                     <Route path="usuarios" element={<UsuariosPage />} />
                     <Route path="clubes" element={<ClubesPage />} />
-                    <Route
-                        path="tienda"
-                        element={
-                            <PlaceholderPage
-                                title="Tienda"
-                                description="Gestioná productos y ofertas de la tienda."
-                            />
-                        }
-                    />
+                    <Route path="tienda" element={<TiendaPage />} />
+                    <Route path="tienda/colecciones" element={<ColeccionesPage />} />
+                    <Route path="ventas" element={<VentasPage />} />
                     <Route
                         path="cursos"
                         element={
@@ -49,15 +47,7 @@ export default function App() {
                             />
                         }
                     />
-                    <Route
-                        path="codigo-promocional"
-                        element={
-                            <PlaceholderPage
-                                title="Códigos promocionales"
-                                description="Gestioná cupones, descuentos y campañas."
-                            />
-                        }
-                    />
+                    <Route path="codigo-promocional" element={<CodigosPromocionalesPage />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

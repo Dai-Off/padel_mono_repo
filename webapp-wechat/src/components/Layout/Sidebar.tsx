@@ -33,7 +33,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
 
             <aside
                 className={[
-                    'fixed inset-y-0 left-0 z-50 flex w-[min(85vw,280px)] flex-col border-r border-auth-border bg-auth-bg pt-safe pb-safe transition-transform duration-300 ease-out lg:static lg:z-auto lg:w-64 lg:shrink-0 lg:translate-x-0 xl:w-72',
+                    'fixed inset-y-0 left-0 z-50 flex h-[100dvh] w-[min(85vw,280px)] flex-col overflow-hidden border-r border-auth-border bg-auth-bg pt-safe pb-safe transition-transform duration-300 ease-out lg:static lg:z-auto lg:h-full lg:w-64 lg:shrink-0 lg:translate-x-0 xl:w-72',
                     isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
                 ].join(' ')}
             >
@@ -56,7 +56,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 </div>
 
                 {/* Links */}
-                <nav className="flex-1 overflow-y-auto px-3 py-4 sm:px-4">
+                <nav className="flex-1 overflow-hidden px-3 py-4 sm:px-4">
                     <ul className="space-y-1">
                         {NAV_ITEMS.map((item) => (
                             <li key={item.id}>
