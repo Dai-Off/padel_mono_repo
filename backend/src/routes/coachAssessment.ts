@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
-import { 
-  calculateAssessment, 
-  saveAssessment, 
+import {
+  calculateAssessment,
+  saveAssessment,
   getPlayerAssessment,
+  recomputeAndGetAssessment,
   CoachAnswer
 } from '../services/coachAssessmentService';
 
@@ -22,7 +23,9 @@ router.get('/me', async (req: Request, res: Response) => {
   if (authErr) return res.status(401).json({ ok: false, error: authErr });
 
   try {
-    const assessment = await getPlayerAssessment(playerId!);
+    // Recalcula el radar desde señales reales (ELO + learning) y lo persiste,
+    // de modo que se mantiene fresco y se crea si no existía.
+    const assessment = await recomputeAndGetAssessment(playerId!);
     return res.json({ ok: true, assessment });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';

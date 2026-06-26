@@ -34,9 +34,8 @@ const ICON_MAP: Record<string, string> = {
 };
 
 export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peerInsight }) => {
-  const [activeTab, setActiveTab] = useState<'today' | 'plan'>(
-    peerInsight && !peerInsight.empty ? 'today' : 'plan'
-  );
+  // Por defecto siempre "Resumen de Hoy" al abrir el perfil.
+  const [activeTab, setActiveTab] = useState<'today' | 'plan'>('today');
 
   const isToday = activeTab === 'today';
   

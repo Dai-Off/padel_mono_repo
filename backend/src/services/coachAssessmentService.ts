@@ -142,6 +142,72 @@ const SKILL_NAMES = {
   tactical: 'Táctico',
 };
 
+type SkillSet = CoachAssessmentResult['skills'];
+
+/**
+ * Deriva nivel + fortalezas + áreas de mejora + recomendación a partir de las
+ * 4 skills (0-100). Reutilizado por el cálculo del cuestionario y por el radar
+ * dinámico (ELO + learning).
+ */
+function resultMetaFromSkills(skills: SkillSet): Omit<CoachAssessmentResult, 'skills' | 'stats'> {
+  const avg = (skills.technical + skills.physical + skills.mental + skills.tactical) / 4;
+
+  let level_number = 1;
+  let level_name = 'Principiante';
+  if (avg > 80) {
+    level_number = 5;
+    level_name = 'Élite';
+  } else if (avg > 60) {
+    level_number = 4;
+    level_name = 'Profesional';
+  } else if (avg > 40) {
+    level_number = 3;
+    level_name = 'Avanzado';
+  } else if (avg > 20) {
+    level_number = 2;
+    level_name = 'Intermedio';
+  }
+
+  const sortedSkills = (Object.entries(skills) as Array<[keyof SkillSet, number]>).sort((a, b) => b[1] - a[1]);
+
+  const strengths = sortedSkills.slice(0, 2).map(([key]) => {
+    if (key === 'mental') return 'Control mental y enfoque';
+    if (key === 'technical') return 'Consistencia técnica';
+    if (key === 'physical') return 'Condición física y resistencia';
+    if (key === 'tactical') return 'Lectura táctica del juego';
+    return SKILL_NAMES[key];
+  });
+
+  const improvements = sortedSkills.slice(2, 4).map(([key]) => {
+    if (key === 'mental') return 'Gestión de la presión';
+    if (key === 'technical') return 'Refinamiento de golpes complejos';
+    if (key === 'physical') return 'Velocidad y explosividad';
+    if (key === 'tactical') return 'Estrategia ante diferentes rivales';
+    return SKILL_NAMES[key];
+  });
+
+  const lowestSkill = sortedSkills[3][0];
+  let recommendation = '';
+  switch (lowestSkill) {
+    case 'technical':
+      recommendation = 'Tu fuerte es el aspecto mental y táctico. Enfócate en perfeccionar tu técnica de golpes específicos como la víbora o el rulo para subir de nivel.';
+      break;
+    case 'physical':
+      recommendation = 'Tienes una gran base técnica y táctica. Trabajar en tu explosividad y resistencia física te permitirá mantener el ritmo en partidos largos.';
+      break;
+    case 'mental':
+      recommendation = 'Técnicamente eres muy sólido. Trabajar en la gestión de puntos clave y mantener la concentración te ayudará a cerrar partidos difíciles.';
+      break;
+    case 'tactical':
+      recommendation = 'Posees buenas condiciones físicas y técnicas. Aprender a leer mejor el posicionamiento de los rivales te permitirá ganar más puntos con menos esfuerzo.';
+      break;
+    default:
+      recommendation = 'Sigue entrenando de forma regular para equilibrar todas tus dimensiones de juego.';
+  }
+
+  return { level_number, level_name, strengths, improvements, recommendation };
+}
+
 export function calculateAssessment(answers: CoachAnswer[]): CoachAssessmentResult {
   const scores = {
     technical: 0,
@@ -178,76 +244,7 @@ export function calculateAssessment(answers: CoachAnswer[]): CoachAssessmentResu
     tactical: Math.round((scores.tactical / totalWeights.tactical) * 100) || 25,
   };
 
-  // Overall average
-  const avg = (skills.technical + skills.physical + skills.mental + skills.tactical) / 4;
-
-  let level_number = 1;
-  let level_name = 'Principiante';
-
-  if (avg > 80) {
-    level_number = 5;
-    level_name = 'Élite';
-  } else if (avg > 60) {
-    level_number = 4;
-    level_name = 'Profesional';
-  } else if (avg > 40) {
-    level_number = 3;
-    level_name = 'Avanzado';
-  } else if (avg > 20) {
-    level_number = 2;
-    level_name = 'Intermedio';
-  }
-
-  // Identify strengths and improvements
-  const sortedSkills = (Object.entries(skills) as Array<[keyof typeof skills, number]>)
-    .sort((a, b) => b[1] - a[1]);
-
-  const strengths = sortedSkills.slice(0, 2).map(([key]) => {
-    const name = SKILL_NAMES[key];
-    if (key === 'mental') return 'Control mental y enfoque';
-    if (key === 'technical') return 'Consistencia técnica';
-    if (key === 'physical') return 'Condición física y resistencia';
-    if (key === 'tactical') return 'Lectura táctica del juego';
-    return name;
-  });
-
-  const improvements = sortedSkills.slice(2, 4).map(([key]) => {
-    const name = SKILL_NAMES[key];
-    if (key === 'mental') return 'Gestión de la presión';
-    if (key === 'technical') return 'Refinamiento de golpes complejos';
-    if (key === 'physical') return 'Velocidad y explosividad';
-    if (key === 'tactical') return 'Estrategia ante diferentes rivales';
-    return name;
-  });
-
-  // Recommendation text based on lowest skill
-  const lowestSkill = sortedSkills[3][0];
-  let recommendation = '';
-  switch (lowestSkill) {
-    case 'technical':
-      recommendation = 'Tu fuerte es el aspecto mental y táctico. Enfócate en perfeccionar tu técnica de golpes específicos como la víbora o el rulo para subir de nivel.';
-      break;
-    case 'physical':
-      recommendation = 'Tienes una gran base técnica y táctica. Trabajar en tu explosividad y resistencia física te permitirá mantener el ritmo en partidos largos.';
-      break;
-    case 'mental':
-      recommendation = 'Técnicamente eres muy sólido. Trabajar en la gestión de puntos clave y mantener la concentración te ayudará a cerrar partidos difíciles.';
-      break;
-    case 'tactical':
-      recommendation = 'Posees buenas condiciones físicas y técnicas. Aprender a leer mejor el posicionamiento de los rivales te permitirá ganar más puntos con menos esfuerzo.';
-      break;
-    default:
-      recommendation = 'Sigue entrenando de forma regular para equilibrar todas tus dimensiones de juego.';
-  }
-
-  return {
-    level_number,
-    level_name,
-    skills,
-    strengths,
-    improvements,
-    recommendation,
-  };
+  return { skills, ...resultMetaFromSkills(skills) };
 }
 
 /**
@@ -332,6 +329,123 @@ export async function saveAssessment(playerId: string, answers: CoachAnswer[], r
 
   if (error) throw error;
   
+  const stats = await getPlayerStats(playerId);
+  return { ...data, stats };
+}
+
+// ─── Radar dinámico (ELO base + learning por área) ───
+const DYNAMIC_SPREAD = 40; // S: separación máx por learning (±SPREAD/2 por área)
+const DYNAMIC_MIN_SAMPLES = 8; // N_MIN: preguntas por área para fiarnos del dato
+// Pequeño "shape" base para que un radar sin datos de learning no sea un cuadrado plano
+const BASE_OFFSETS: SkillSet = { technical: 4, physical: -2, mental: 1, tactical: -3 };
+// Área de learning (BD) -> skill del radar; 'rules' se ignora (no es una dimensión)
+const LEARNING_AREA_TO_SKILL: Record<string, keyof SkillSet> = {
+  technique: 'technical',
+  tactics: 'tactical',
+  physical: 'physical',
+  mental: 'mental',
+};
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n));
+}
+
+/**
+ * Calcula las 4 skills del radar a partir de señales reales:
+ *  - Base: ELO normalizado a 0-100 (lo que de verdad importa).
+ *  - Forma: rendimiento por área en learning (technique/tactics/physical/mental).
+ * 50% de aciertos en un área = neutro; dominarla la sube, fallarla la baja
+ * (ponderado por confianza según nº de preguntas). El feedback post-partido se
+ * incorporará en el futuro como otra señal (ver plan).
+ */
+async function computeDynamicSkills(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string,
+): Promise<SkillSet> {
+  const { data: pl } = await supabase
+    .from('players')
+    .select('elo_rating')
+    .eq('id', playerId)
+    .maybeSingle();
+  const elo = Number((pl as { elo_rating?: number } | null)?.elo_rating ?? 0);
+  const base = clamp((elo / 7) * 100, 0, 100);
+
+  const { data: logRows } = await supabase
+    .from('learning_question_log')
+    .select('answered_correctly, learning_questions!inner(area)')
+    .eq('player_id', playerId);
+
+  const agg: Record<keyof SkillSet, { correct: number; total: number }> = {
+    technical: { correct: 0, total: 0 },
+    physical: { correct: 0, total: 0 },
+    mental: { correct: 0, total: 0 },
+    tactical: { correct: 0, total: 0 },
+  };
+  for (const row of logRows ?? []) {
+    const r = row as {
+      answered_correctly: boolean;
+      learning_questions?: { area?: string } | { area?: string }[] | null;
+    };
+    const lq = Array.isArray(r.learning_questions) ? r.learning_questions[0] : r.learning_questions;
+    const skill = lq?.area ? LEARNING_AREA_TO_SKILL[lq.area] : undefined;
+    if (!skill) continue;
+    agg[skill].total += 1;
+    if (r.answered_correctly) agg[skill].correct += 1;
+  }
+
+  const skills = {} as SkillSet;
+  (Object.keys(agg) as Array<keyof SkillSet>).forEach((skill) => {
+    let value = base + BASE_OFFSETS[skill];
+    const { correct, total } = agg[skill];
+    if (total > 0) {
+      const acc = correct / total;
+      const confidence = Math.min(1, total / DYNAMIC_MIN_SAMPLES);
+      value += (acc - 0.5) * DYNAMIC_SPREAD * confidence;
+    }
+    skills[skill] = Math.round(clamp(value, 10, 100));
+  });
+
+  return skills;
+}
+
+/**
+ * Recalcula el assessment del jugador desde señales reales (ELO + learning),
+ * lo persiste (upsert) y lo devuelve con stats. Mantiene el radar fresco al
+ * cambiar el ELO (partidos) o el rendimiento en learning, y crea la fila si no
+ * existía (p.ej. usuarios sembrados a mano sin pasar por el onboarding).
+ */
+export async function recomputeAndGetAssessment(playerId: string) {
+  const supabase = getSupabaseServiceRoleClient();
+
+  const skills = await computeDynamicSkills(supabase, playerId);
+  const meta = resultMetaFromSkills(skills);
+
+  // Preservar answers existentes (si las hubiera) para no perder datos.
+  const { data: existing } = await supabase
+    .from('coach_assessments')
+    .select('answers')
+    .eq('player_id', playerId)
+    .maybeSingle();
+
+  const { data, error } = await supabase
+    .from('coach_assessments')
+    .upsert(
+      {
+        player_id: playerId,
+        answers: (existing as { answers?: unknown } | null)?.answers ?? [],
+        level_number: meta.level_number,
+        level_name: meta.level_name,
+        skills,
+        strengths: meta.strengths,
+        improvements: meta.improvements,
+        recommendation: meta.recommendation,
+      },
+      { onConflict: 'player_id' },
+    )
+    .select()
+    .single();
+  if (error) throw error;
+
   const stats = await getPlayerStats(playerId);
   return { ...data, stats };
 }
