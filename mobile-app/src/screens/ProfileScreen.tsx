@@ -22,9 +22,18 @@ import { PlayerAvatarCircle } from '../components/profile/PlayerAvatarCircle';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
+import { LevelEvolutionCard } from '../components/profile/LevelEvolutionCard';
+import { StatsCard } from '../components/profile/StatsCard';
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
 import { fetchMyCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
 import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
+import {
+  fetchLevelHistory,
+  fetchPlayerStats,
+  type LevelHistory,
+  type LevelHistoryLimit,
+  type PlayerStats,
+} from '../api/profileStats';
 import {
   uploadPlayerCoverToStorage,
   type PickedImage,
@@ -49,6 +58,8 @@ type ProfileScreenProps = {
   // MainApp para devolverlo a la sección desde la que llegó (lección diaria,
   // ia afinidad, etc.) en lugar de dejarlo en el perfil.
   onOnboardingCompleted?: () => void;
+  /** Abre el detalle de un partido (desde el gráfico de evolución). */
+  onOpenMatch?: (matchId: string) => void;
 };
 
 function getInitials(firstName?: string | null, lastName?: string | null): string {
@@ -66,15 +77,19 @@ export function ProfileScreen({
   autoOpenOnboarding = false,
   onOnboardingAutoOpened,
   onOnboardingCompleted,
+  onOpenMatch,
 }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
   const { session } = useAuth();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
-  const [activeSport, setActiveSport] = useState('Pádel');
-  const [activeLogroTab, setActiveLogroTab] = useState('Todos');
   const [showOnboardingModal, setShowOnboardingModal] = useState(false);
+  // Evolución del nivel + estadísticas
+  const [levelHistory, setLevelHistory] = useState<LevelHistory | null>(null);
+  const [levelLoading, setLevelLoading] = useState(true);
+  const [levelLimit, setLevelLimit] = useState<LevelHistoryLimit>('5');
+  const [stats, setStats] = useState<PlayerStats | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [uploadingCover, setUploadingCover] = useState(false);
 
@@ -89,6 +104,8 @@ export function ProfileScreen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenOnboarding]);
   const [assessment, setAssessment] = useState<CoachAssessment | null>(null);
+  // Distingue "cargando" de "cargado pero vacío" para no quedarse en el spinner.
+  const [assessmentLoaded, setAssessmentLoaded] = useState(false);
   const [peerInsight, setPeerInsight] = useState<PeerFeedbackInsight | null>(null);
   // Invalidar el cache global del HomeDataContext tras completar onboarding /
   // editar el profile, para que el resto de pantallas (DailyLessonCard,
@@ -131,8 +148,46 @@ export function ProfileScreen({
       return;
     }
     void loadProfile(token);
-    fetchMyCoachAssessment(token).then(setAssessment).catch(() => {});
+    fetchMyCoachAssessment(token)
+      .then(setAssessment)
+      .catch(() => {})
+      .finally(() => setAssessmentLoaded(true));
   }, [session?.access_token, loadProfile]);
+
+  // Evolución del nivel (refetch al cambiar el filtro 5/10/Todos)
+  useEffect(() => {
+    const token = session?.access_token;
+    if (!token) return;
+    let cancelled = false;
+    setLevelLoading(true);
+    fetchLevelHistory(token, levelLimit)
+      .then((h) => {
+        if (!cancelled) setLevelHistory(h);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLevelLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, levelLimit]);
+
+  // Estadísticas (depende del id del jugador)
+  useEffect(() => {
+    const token = session?.access_token;
+    const playerId = profile?.id;
+    if (!token || !playerId) return;
+    let cancelled = false;
+    fetchPlayerStats(token, playerId)
+      .then((s) => {
+        if (!cancelled) setStats(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, profile?.id]);
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
   const displayName = profile
@@ -148,7 +203,11 @@ export function ProfileScreen({
   const refreshProfileAndCoach = () => {
     if (!session?.access_token) return;
     void loadProfile(session.access_token);
-    fetchMyCoachAssessment(session.access_token).then(setAssessment).catch(() => {});
+    setAssessmentLoaded(false);
+    fetchMyCoachAssessment(session.access_token)
+      .then(setAssessment)
+      .catch(() => {})
+      .finally(() => setAssessmentLoaded(true));
     // Invalidamos también la cache global para que el resto de pantallas se
     // entere del cambio (ej. tras completar onboarding la card de Daily
     // Lesson en Home deja de salir bloqueada).
@@ -383,24 +442,6 @@ export function ProfileScreen({
           </View>
         </View>
 
-        {/* Sport Tabs */}
-        <View style={styles.sportTabsContainer}>
-          <View style={styles.sportTabsBackground}>
-            {['Pádel', 'Tenis', 'Pickleball'].map(sport => (
-              <Pressable 
-                key={sport} 
-                onPress={() => setActiveSport(sport)}
-                style={[styles.sportTabItem, activeSport === sport && styles.sportTabItemActive]}
-              >
-                {activeSport === sport && <View style={styles.sportTabHighlight} />}
-                <Text style={[styles.sportTabText, activeSport === sport ? styles.sportTabTextActive : styles.sportTabTextInactive]}>
-                  {sport}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </View>
-
         {/* Virtual Coach Card / Analysis */}
         {needsLevelOnboarding ? (
           <View style={styles.coachCardContainer}>
@@ -432,6 +473,32 @@ export function ProfileScreen({
           </View>
         ) : assessment ? (
           <AICoachSection assessment={assessment} peerInsight={peerInsight} />
+        ) : assessmentLoaded ? (
+          <View style={styles.coachCardContainer}>
+            <View style={styles.coachCard}>
+              <View style={styles.coachGlow} />
+              <View style={styles.coachContent}>
+                <Ionicons name="cloud-offline-outline" size={28} color="#6B7280" />
+                <Text style={[styles.coachDesc, { marginTop: 12 }]}>
+                  No se pudo cargar el análisis del Coach IA.
+                </Text>
+                <Pressable
+                  style={styles.coachCtaBtn}
+                  onPress={() => {
+                    if (!session?.access_token) return;
+                    setAssessmentLoaded(false);
+                    fetchMyCoachAssessment(session.access_token)
+                      .then(setAssessment)
+                      .catch(() => {})
+                      .finally(() => setAssessmentLoaded(true));
+                  }}
+                >
+                  <Ionicons name="refresh-outline" size={16} color="#fff" />
+                  <Text style={styles.coachCtaText}>Reintentar</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
         ) : (
           <View style={styles.coachCardContainer}>
             <View style={styles.coachCard}>
@@ -443,6 +510,21 @@ export function ProfileScreen({
             </View>
           </View>
         )}
+
+        {/* Evolución del nivel + Estadísticas (solo si ya está nivelado) */}
+        {!needsLevelOnboarding ? (
+          <>
+            <LevelEvolutionCard
+              matches={levelHistory?.matches ?? []}
+              currentElo={levelHistory?.currentElo ?? profile?.eloRating ?? 0}
+              limit={levelLimit}
+              onChangeLimit={setLevelLimit}
+              loading={levelLoading}
+              onOpenMatch={onOpenMatch}
+            />
+            <StatsCard stats={stats} loading={stats == null} />
+          </>
+        ) : null}
 
         {/* Achievements Section */}
         {assessment ? (
@@ -752,44 +834,6 @@ const styles = StyleSheet.create({
     color: '#F18F34',
     fontSize: 14,
     fontWeight: '600',
-  },
-  sportTabsContainer: {
-    paddingHorizontal: 16,
-    marginTop: 16,
-  },
-  sportTabsBackground: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 16,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  sportTabItem: {
-    flex: 1,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  sportTabItemActive: {
-    // background handled by highlight view; keep for layout/state styling if needed
-  },
-  sportTabHighlight: {
-    position: 'absolute',
-    inset: 0,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 12,
-  },
-  sportTabText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  sportTabTextActive: {
-    color: '#fff',
-  },
-  sportTabTextInactive: {
-    color: '#6B7280',
   },
   coachCardContainer: {
     paddingHorizontal: 16,

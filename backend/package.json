@@ -10,6 +10,7 @@
     "seed:tournament-test-players": "ts-node -r dotenv/config scripts/seed-tournament-test-players.ts",
     "seed:matchmaking-demo": "ts-node -r dotenv/config scripts/seed-matchmaking-demo-pool.ts",
     "seed:matchmaking-demo:clean": "ts-node -r dotenv/config scripts/seed-matchmaking-demo-pool.ts --clean",
+    "seed:profile-evolution": "ts-node -r dotenv/config scripts/seed-profile-evolution-demo.ts",
     "jobs:leveling": "ts-node -r dotenv/config scripts/leveling-jobs.ts"
   },
   "keywords": [

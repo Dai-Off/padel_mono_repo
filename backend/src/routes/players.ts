@@ -1172,6 +1172,25 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
   const last20 = results.slice(0, 20);
   const wins = last20.filter((r) => r === 'win').length;
   const winRateLast20 = last20.length ? wins / last20.length : 0;
+
+  // Métricas de "últimos N" (la tarjeta de Estadísticas muestra los últimos 8)
+  const RECENT_N = 8;
+  const recent = results.slice(0, RECENT_N);
+  const recentWins = recent.filter((r) => r === 'win').length;
+  const winRateLastN = recent.length ? recentWins / recent.length : 0;
+
+  // Totales históricos (todos los partidos con resultado decidido)
+  const { count: totalWins } = await supabase
+    .from('match_players')
+    .select('id', { count: 'exact', head: true })
+    .eq('player_id', id)
+    .eq('result', 'win');
+  const { count: totalLosses } = await supabase
+    .from('match_players')
+    .select('id', { count: 'exact', head: true })
+    .eq('player_id', id)
+    .eq('result', 'loss');
+
   const sigma = Number((pl as { sigma?: number }).sigma ?? 8.333);
   const fiabilidad = Math.max(0, Math.round((1 - sigma / 8.333) * 100));
 
@@ -1180,12 +1199,142 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
     win_streak: winStreak,
     loss_streak: lossStreak,
     win_rate_last_20: Math.round(winRateLast20 * 100) / 100,
+    total_wins: totalWins ?? 0,
+    total_losses: totalLosses ?? 0,
+    recent_n: recent.length,
+    recent_wins: recentWins,
+    win_rate_last_8: Math.round(winRateLastN * 100) / 100,
     matches_played_competitive: Number((pl as { matches_played_competitive?: number }).matches_played_competitive ?? 0),
     matches_played_friendly: Number((pl as { matches_played_friendly?: number }).matches_played_friendly ?? 0),
     matches_played_matchmaking: Number((pl as { matches_played_matchmaking?: number }).matches_played_matchmaking ?? 0),
     elo_rating: (pl as { elo_rating?: number }).elo_rating,
     fiabilidad,
   });
+});
+
+/**
+ * @openapi
+ * /players/me/level-history:
+ *   get:
+ *     tags: [Players]
+ *     summary: Historial de evolución del ELO del jugador autenticado (partidos de matchmaking)
+ */
+router.get('/me/level-history', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+
+  // Límite: 5 | 10 | all (por defecto 5)
+  const limitParam = String(req.query.limit ?? '5');
+  let limit: number | null;
+  if (limitParam === 'all') limit = null;
+  else {
+    const n = parseInt(limitParam, 10);
+    limit = Number.isFinite(n) && n > 0 ? n : 5;
+  }
+
+  // ELO actual: base para reconstruir el ELO tras cada partido hacia atrás
+  const { data: pl, error: ep } = await supabase
+    .from('players')
+    .select('elo_rating')
+    .eq('id', playerId)
+    .maybeSingle();
+  if (ep) return res.status(500).json({ ok: false, error: ep.message });
+  if (!pl) return res.status(404).json({ ok: false, error: 'Player not found' });
+  const currentElo = Number((pl as { elo_rating?: number }).elo_rating ?? 0);
+
+  // Partidos del jugador (equipo, resultado y delta de ELO)
+  const { data: myRows, error: e1 } = await supabase
+    .from('match_players')
+    .select('match_id, team, result, rating_change')
+    .eq('player_id', playerId);
+  if (e1) return res.status(500).json({ ok: false, error: e1.message });
+
+  const myByMatch = new Map<string, { team: 'A' | 'B'; result: string; rating_change: number }>();
+  for (const r of myRows ?? []) {
+    const o = r as { match_id: string; team: 'A' | 'B'; result: string; rating_change: number };
+    myByMatch.set(o.match_id, { team: o.team, result: o.result, rating_change: Number(o.rating_change ?? 0) });
+  }
+  const matchIds = [...myByMatch.keys()];
+  if (!matchIds.length) return res.json({ ok: true, current_elo: currentElo, matches: [] });
+
+  // Solo partidos de matchmaking confirmados (los que mueven ELO), con sets, fecha y equipos
+  const { data: matches, error: e2 } = await supabase
+    .from('matches')
+    .select(
+      `id, sets, type, score_status,
+       bookings ( start_at ),
+       match_players ( team, slot_index, player_id, players ( id, first_name, last_name, avatar_url ) )`,
+    )
+    .in('id', matchIds)
+    .eq('type', 'matchmaking')
+    .eq('score_status', 'confirmed');
+  if (e2) return res.status(500).json({ ok: false, error: e2.message });
+
+  type DbPlayerLite = { id?: string; first_name?: string | null; last_name?: string | null; avatar_url?: string | null };
+  type DbMp = { team: 'A' | 'B'; slot_index?: number; player_id: string; players: DbPlayerLite | DbPlayerLite[] | null };
+  type MatchRow = {
+    id: string;
+    sets: unknown;
+    bookings: { start_at?: string | null } | { start_at?: string | null }[] | null;
+    match_players: DbMp[] | null;
+  };
+  const rows = (matches ?? []) as unknown as MatchRow[];
+
+  const getStart = (r: MatchRow): string | null => {
+    const b = Array.isArray(r.bookings) ? r.bookings[0] : r.bookings;
+    return b?.start_at ?? null;
+  };
+
+  // Orden cronológico ascendente (oldest → newest) para el gráfico
+  rows.sort((a, b) => String(getStart(a) ?? '').localeCompare(String(getStart(b) ?? '')));
+
+  // Reconstrucción de elo_after: el más reciente = ELO actual; hacia atrás se resta cada delta
+  const eloAfter = new Array<number>(rows.length);
+  let running = currentElo;
+  for (let i = rows.length - 1; i >= 0; i--) {
+    eloAfter[i] = Math.round(running * 10) / 10;
+    running -= myByMatch.get(rows[i].id)?.rating_change ?? 0;
+  }
+
+  const initialsOf = (fn?: string | null, ln?: string | null): string => {
+    const a = (fn ?? '').trim();
+    const b = (ln ?? '').trim();
+    return ((a[0] ?? '') + (b[0] ?? '')).toUpperCase() || '?';
+  };
+  const parseSets = (raw: unknown): { a: number; b: number }[] =>
+    Array.isArray(raw)
+      ? raw
+          .map((x) => ({ a: Number((x as { a?: unknown })?.a), b: Number((x as { b?: unknown })?.b) }))
+          .filter((s) => Number.isFinite(s.a) && Number.isFinite(s.b))
+      : [];
+  const mapPlayer = (m: DbMp) => {
+    const p = Array.isArray(m.players) ? m.players[0] : m.players;
+    return { id: p?.id ?? null, initials: initialsOf(p?.first_name, p?.last_name), avatarUrl: p?.avatar_url ?? null };
+  };
+
+  let result = rows.map((r, i) => {
+    const mine = myByMatch.get(r.id)!;
+    const sets = parseSets(r.sets);
+    const mps = r.match_players ?? [];
+    return {
+      match_id: r.id,
+      played_at: getStart(r),
+      result: mine.result,
+      rating_change: Math.round((mine.rating_change ?? 0) * 100) / 100,
+      elo_after: eloAfter[i],
+      my_team: mine.team,
+      score_a: sets.map((s) => s.a),
+      score_b: sets.map((s) => s.b),
+      team_a: mps.filter((m) => m.team === 'A').map(mapPlayer),
+      team_b: mps.filter((m) => m.team === 'B').map(mapPlayer),
+    };
+  });
+
+  // Aplicar límite: los N más recientes, manteniendo orden ascendente
+  if (limit != null && result.length > limit) result = result.slice(result.length - limit);
+
+  return res.json({ ok: true, current_elo: currentElo, matches: result });
 });
 
 /**

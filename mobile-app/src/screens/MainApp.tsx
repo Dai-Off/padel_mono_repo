@@ -43,6 +43,8 @@ import { EditProfileScreen } from './EditProfileScreen';
 import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile } from '../api/players';
+import { fetchMatchById } from '../api/matches';
+import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMatchmakingStatus, leaveMatchmaking } from '../api/matchmaking';
 import { UsernameSetupModal } from '../components/profile/UsernameSetupModal';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
@@ -351,6 +353,18 @@ export function MainApp() {
 
   const showClubDetail = activeTab === 'pistas' && clubDetailCourt != null;
   const showPartidoDetail = selectedPartido != null;
+
+  // Abre el detalle de un partido a partir de su id (desde el gráfico de
+  // evolución del perfil). Carga el partido y lo normaliza a PartidoItem.
+  const openMatchById = useCallback(
+    async (matchId: string) => {
+      const m = await fetchMatchById(matchId, session?.access_token ?? null);
+      if (!m) return;
+      const item = mapMatchToPartido(m, { viewerPlayerId: profile?.id ?? null });
+      if (item) setSelectedPartido(item);
+    },
+    [session?.access_token, profile?.id],
+  );
 
   /** Cierra overlays del menú lateral antes de abrir otro destino (evita flags superpuestos). */
   const resetSidebarOverlays = useCallback(() => {
@@ -1017,6 +1031,7 @@ export function MainApp() {
             autoOpenOnboarding={profileAutoOpenOnboarding}
             onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
             onOnboardingCompleted={handleOnboardingCompleted}
+            onOpenMatch={openMatchById}
           />
         );
       default:
