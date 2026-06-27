@@ -1,108 +1,80 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useAuth } from '../../contexts/AuthContext';
+import { AchievementCard } from './AchievementCard';
+import type { Achievement, AchievementType } from '../../design/achievements';
+import { fetchAchievements, toggleAchievementVisibility } from '../../api/unlockables';
 
-interface Achievement {
-  id: string;
-  title: string;
-  description: string;
-  tier: 'LEGENDARIO' | 'ÉPICO' | 'NORMAL';
-  icon: keyof typeof Ionicons.glyphMap;
-  date: string;
-  sport?: string;
-  color: string;
-  isPublic: boolean;
-}
-
-const ACHIEVEMENTS: Achievement[] = [
-  {
-    id: '1',
-    title: 'Campeón Torneo Verano',
-    description: '1er puesto en el Torneo de Verano 2025',
-    tier: 'LEGENDARIO',
-    icon: 'trophy-outline',
-    date: 'Ago 2025',
-    sport: 'Pádel',
-    color: '#F18F34',
-    isPublic: true,
-  },
-  {
-    id: '2',
-    title: 'Imparable',
-    description: 'Completaste la lección diaria 7 días seguidos',
-    tier: 'ÉPICO',
-    icon: 'flame-outline',
-    date: 'Jul 2025',
-    sport: 'Pádel',
-    color: '#A855F7',
-    isPublic: true,
-  },
-  {
-    id: '3',
-    title: 'Muro de la Red',
-    description: 'Completaste tu primer curso de volea',
-    tier: 'NORMAL',
-    icon: 'ribbon-outline',
-    date: 'Jun 2025',
-    color: '#6B7280',
-    isPublic: true,
-  },
+type TabKey = 'all' | 'trophy' | 'badge' | 'course';
+const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: 'all', label: 'Todos', icon: 'star-outline' },
+  { key: 'trophy', label: 'Trofeos', icon: 'trophy-outline' },
+  { key: 'badge', label: 'Insignias', icon: 'medal-outline' },
+  { key: 'course', label: 'Cursos', icon: 'school-outline' },
 ];
 
+const PREVIEW_COUNT = 4;
+
 export const TrophyShowcaseSection: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('Todos');
+  const { session } = useAuth();
+  const token = session?.access_token ?? null;
 
-  const renderAchievement = (item: Achievement) => {
-    const isLegendary = item.tier === 'LEGENDARIO';
-    const isEpic = item.tier === 'ÉPICO';
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabKey>('all');
+  const [expanded, setExpanded] = useState(false);
 
-    return (
-      <View 
-        key={item.id} 
-        style={[
-          styles.achItem, 
-          isLegendary && styles.achItemLegendary,
-          isEpic && styles.achItemEpic
-        ]}
-      >
-        <View style={[styles.achIconBox, { backgroundColor: `${item.color}15`, borderColor: `${item.color}30` }]}>
-          <Ionicons name={item.icon} size={20} color={item.color} />
-        </View>
-        <View style={styles.achContent}>
-          <View style={styles.achTitleRow}>
-            <Text style={styles.achTitle} numberOfLines={1}>{item.title}</Text>
-            {isLegendary && (
-              <View style={styles.tierBadgeLegendary}>
-                <Text style={styles.tierBadgeTextLegendary}>✦ LEGENDARIO</Text>
-              </View>
-            )}
-            {isEpic && (
-              <View style={styles.tierBadgeEpic}>
-                <Text style={styles.tierBadgeTextEpic}>ÉPICO</Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.achDesc} numberOfLines={1}>{item.description}</Text>
-          <View style={styles.achFooter}>
-            <Text style={styles.achDate}>{item.date}</Text>
-            {item.sport && (
-              <View style={styles.sportBadge}>
-                <Text style={styles.sportBadgeText}>{item.sport}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-        <Pressable style={styles.eyeBtn}>
-          <Ionicons name="eye-outline" size={14} color="#F18F34" />
-        </Pressable>
-      </View>
-    );
+  useEffect(() => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    fetchAchievements(token)
+      .then((list) => {
+        if (!cancelled) setAchievements(list);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const counts = useMemo(() => {
+    const by = (t: AchievementType) => achievements.filter((a) => a.type === t).length;
+    return { trophy: by('trophy'), badge: by('badge'), course: by('course') };
+  }, [achievements]);
+
+  const publicCount = useMemo(() => achievements.filter((a) => a.isPublic ?? true).length, [achievements]);
+
+  const filtered = useMemo(
+    () => (activeTab === 'all' ? achievements : achievements.filter((a) => a.type === activeTab)),
+    [achievements, activeTab],
+  );
+  const displayed = expanded ? filtered : filtered.slice(0, PREVIEW_COUNT);
+
+  const handleToggleVisibility = async (id: string) => {
+    // Cursos derivados no tienen estado de visibilidad (siempre públicos).
+    if (id.startsWith('course_')) return;
+    const current = achievements.find((a) => a.id === id);
+    if (!current) return;
+    const optimistic = !(current.isPublic ?? true);
+    setAchievements((prev) => prev.map((a) => (a.id === id ? { ...a, isPublic: optimistic } : a)));
+    const result = await toggleAchievementVisibility(token, id);
+    if (result != null && result !== optimistic) {
+      setAchievements((prev) => prev.map((a) => (a.id === id ? { ...a, isPublic: result } : a)));
+    }
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.card}>
+        {/* Header */}
         <View style={styles.header}>
           <View style={styles.titleGroup}>
             <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.trophyIconBox}>
@@ -110,69 +82,79 @@ export const TrophyShowcaseSection: React.FC = () => {
             </LinearGradient>
             <View>
               <Text style={styles.title}>Vitrina de Logros</Text>
-              <Text style={styles.count}>10 logros conseguidos</Text>
+              <Text style={styles.count}>{achievements.length} logros conseguidos</Text>
             </View>
           </View>
-          <View style={styles.publicBadge}>
-            <Ionicons name="eye-outline" size={12} color="#F18F34" />
-            <Text style={styles.publicBadgeText}>8 públicos</Text>
-          </View>
+          {achievements.length > 0 ? (
+            <View style={styles.publicBadge}>
+              <Ionicons name="eye-outline" size={12} color="#F18F34" />
+              <Text style={styles.publicBadgeText}>{publicCount} públicos</Text>
+            </View>
+          ) : null}
         </View>
 
-        {/* Categories Grid */}
+        {/* Resumen por categoría */}
         <View style={styles.grid}>
-          <View style={styles.gridItem}>
-            <Text style={styles.gridEmoji}>🏆</Text>
-            <Text style={styles.gridVal}>5</Text>
-            <Text style={styles.gridLab}>Trofeos</Text>
-          </View>
-          <View style={styles.gridItem}>
-            <Text style={styles.gridEmoji}>🎖️</Text>
-            <Text style={styles.gridVal}>2</Text>
-            <Text style={styles.gridLab}>Insignias</Text>
-          </View>
-          <View style={styles.gridItem}>
-            <Text style={styles.gridEmoji}>📚</Text>
-            <Text style={styles.gridVal}>3</Text>
-            <Text style={styles.gridLab}>Cursos</Text>
-          </View>
+          {[
+            { emoji: '🏆', val: counts.trophy, lab: 'Trofeos' },
+            { emoji: '🎖️', val: counts.badge, lab: 'Insignias' },
+            { emoji: '📚', val: counts.course, lab: 'Cursos' },
+          ].map((g) => (
+            <View key={g.lab} style={styles.gridItem}>
+              <Text style={styles.gridEmoji}>{g.emoji}</Text>
+              <Text style={styles.gridVal}>{g.val}</Text>
+              <Text style={styles.gridLab}>{g.lab}</Text>
+            </View>
+          ))}
         </View>
 
-        {/* Filter Tabs */}
+        {/* Tabs de categoría */}
         <View style={styles.tabsRow}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
-            {['Todos', 'Trofeos', 'Insignias', 'Cursos'].map(tab => (
-              <Pressable 
-                key={tab} 
-                onPress={() => setActiveTab(tab)}
-                style={[styles.tabBtn, activeTab === tab && styles.tabBtnActive]}
-              >
-                <Ionicons 
-                  name={
-                    tab === 'Todos' ? 'star-outline' : 
-                    tab === 'Trofeos' ? 'trophy-outline' : 
-                    tab === 'Insignias' ? 'medal-outline' : 'school-outline'
-                  } 
-                  size={14} 
-                  color={activeTab === tab ? '#F18F34' : '#6B7280'} 
-                />
-                <Text style={[styles.tabText, activeTab === tab ? styles.tabTextActive : styles.tabTextInactive]}>
-                  {tab}
-                </Text>
-              </Pressable>
-            ))}
+            {TABS.map((tab) => {
+              const active = activeTab === tab.key;
+              return (
+                <Pressable
+                  key={tab.key}
+                  onPress={() => {
+                    setActiveTab(tab.key);
+                    setExpanded(false);
+                  }}
+                  style={[styles.tabBtn, active && styles.tabBtnActive]}
+                >
+                  <Ionicons name={tab.icon} size={14} color={active ? '#F18F34' : '#6B7280'} />
+                  <Text style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>{tab.label}</Text>
+                </Pressable>
+              );
+            })}
           </ScrollView>
         </View>
 
-        {/* List */}
-        <View style={styles.list}>
-          {ACHIEVEMENTS.map(renderAchievement)}
-        </View>
-
-        <Pressable style={styles.viewAllBtn}>
-          <Text style={styles.viewAllText}>Ver todos (10)</Text>
-          <Ionicons name="chevron-down" size={14} color="#9CA3AF" />
-        </Pressable>
+        {/* Lista / estados */}
+        {loading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color="#F18F34" />
+          </View>
+        ) : achievements.length === 0 ? (
+          <View style={styles.centered}>
+            <Ionicons name="trophy-outline" size={24} color="#6B7280" />
+            <Text style={styles.emptyText}>Aún no has conseguido logros. ¡Juega partidos y completa lecciones!</Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.list}>
+              {displayed.map((a) => (
+                <AchievementCard key={a.id} achievement={a} editable onToggleVisibility={handleToggleVisibility} />
+              ))}
+            </View>
+            {filtered.length > PREVIEW_COUNT ? (
+              <Pressable style={styles.viewAllBtn} onPress={() => setExpanded((v) => !v)}>
+                <Text style={styles.viewAllText}>{expanded ? 'Ver menos' : `Ver todos (${filtered.length})`}</Text>
+                <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color="#9CA3AF" />
+              </Pressable>
+            ) : null}
+          </>
+        )}
 
         <View style={styles.disclaimer}>
           <Ionicons name="lock-closed" size={12} color="#4B5563" />
@@ -186,10 +168,7 @@ export const TrophyShowcaseSection: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    paddingHorizontal: 16,
-    marginTop: 16,
-  },
+  container: { paddingHorizontal: 16, marginTop: 16 },
   card: {
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: 24,
@@ -197,17 +176,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.08)',
     padding: 16,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  titleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  titleGroup: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   trophyIconBox: {
     width: 34,
     height: 34,
@@ -219,16 +189,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
   },
-  title: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  count: {
-    fontSize: 10,
-    color: '#6B7280',
-    marginTop: 1,
-  },
+  title: { fontSize: 14, fontWeight: 'bold', color: '#fff' },
+  count: { fontSize: 10, color: '#6B7280', marginTop: 1 },
   publicBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -240,16 +202,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(241, 143, 52, 0.2)',
   },
-  publicBadgeText: {
-    fontSize: 9,
-    fontWeight: 'bold',
-    color: '#F18F34',
-  },
-  grid: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
+  publicBadgeText: { fontSize: 9, fontWeight: 'bold', color: '#F18F34' },
+  grid: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   gridItem: {
     flex: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
@@ -259,168 +213,21 @@ const styles = StyleSheet.create({
     padding: 10,
     alignItems: 'center',
   },
-  gridEmoji: {
-    fontSize: 18,
-    marginBottom: 4,
-  },
-  gridVal: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  gridLab: {
-    fontSize: 9,
-    color: '#6B7280',
-    fontWeight: '600',
-  },
-  tabsRow: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 12,
-    marginBottom: 16,
-    padding: 4,
-  },
-  tabsScroll: {
-    gap: 6,
-  },
-  tabBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 8,
-  },
-  tabBtnActive: {
-    backgroundColor: 'rgba(241, 143, 52, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(241, 143, 52, 0.2)',
-  },
-  tabText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  tabTextActive: {
-    color: '#F18F34',
-  },
-  tabTextInactive: {
-    color: '#6B7280',
-  },
-  list: {
-    gap: 10,
-  },
-  achItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-  },
-  achItemLegendary: {
-    backgroundColor: 'rgba(241, 143, 52, 0.08)',
-    borderColor: 'rgba(241, 143, 52, 0.2)',
-  },
-  achItemEpic: {
-    backgroundColor: 'rgba(168, 85, 247, 0.08)',
-    borderColor: 'rgba(168, 85, 247, 0.2)',
-  },
-  achIconBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  achContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  achTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  achTitle: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#fff',
-    maxWidth: '60%',
-  },
-  tierBadgeLegendary: {
-    backgroundColor: 'rgba(241, 143, 52, 0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(241, 143, 52, 0.3)',
-  },
-  tierBadgeTextLegendary: {
-    fontSize: 8,
-    fontWeight: '900',
-    color: '#F18F34',
-  },
-  tierBadgeEpic: {
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.3)',
-  },
-  tierBadgeTextEpic: {
-    fontSize: 8,
-    fontWeight: '900',
-    color: '#A855F7',
-  },
-  achDesc: {
-    fontSize: 10,
-    color: '#9CA3AF',
-  },
-  achFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 6,
-  },
-  achDate: {
-    fontSize: 9,
-    color: '#4B5563',
-  },
-  sportBadge: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  sportBadgeText: {
-    fontSize: 8,
-    color: '#9CA3AF',
-    fontWeight: '600',
-  },
-  eyeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: 'rgba(241, 143, 52, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  viewAllBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 12,
-    paddingVertical: 8,
-  },
-  viewAllText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#9CA3AF',
-  },
+  gridEmoji: { fontSize: 18, marginBottom: 4 },
+  gridVal: { fontSize: 15, fontWeight: 'bold', color: '#fff' },
+  gridLab: { fontSize: 9, color: '#6B7280', fontWeight: '600' },
+  tabsRow: { backgroundColor: 'rgba(255, 255, 255, 0.03)', borderRadius: 12, marginBottom: 16, padding: 4 },
+  tabsScroll: { gap: 6 },
+  tabBtn: { paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 8 },
+  tabBtnActive: { backgroundColor: 'rgba(241, 143, 52, 0.15)', borderWidth: 1, borderColor: 'rgba(241, 143, 52, 0.2)' },
+  tabText: { fontSize: 10, fontWeight: 'bold' },
+  tabTextActive: { color: '#F18F34' },
+  tabTextInactive: { color: '#6B7280' },
+  list: { gap: 10 },
+  centered: { minHeight: 96, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16 },
+  emptyText: { fontSize: 12, color: '#9CA3AF', textAlign: 'center' },
+  viewAllBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 8 },
+  viewAllText: { fontSize: 11, fontWeight: '600', color: '#9CA3AF' },
   disclaimer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -430,13 +237,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.02)',
     borderRadius: 12,
   },
-  disclaimerText: {
-    fontSize: 9,
-    color: '#4B5563',
-    flex: 1,
-  },
-  disclaimerBold: {
-    color: '#F18F34',
-    fontWeight: 'bold',
-  },
+  disclaimerText: { fontSize: 9, color: '#4B5563', flex: 1 },
+  disclaimerBold: { color: '#F18F34', fontWeight: 'bold' },
 });

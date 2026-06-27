@@ -45,6 +45,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile } from '../api/players';
 import { fetchMatchById } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
+import { UnlockModalHost } from '../components/profile/UnlockModalHost';
 import { fetchMatchmakingStatus, leaveMatchmaking } from '../api/matchmaking';
 import { UsernameSetupModal } from '../components/profile/UsernameSetupModal';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
@@ -88,6 +89,8 @@ export function MainApp() {
   const { session } = useAuth();
   const { profile, refreshMatches, syncMisPartidoFromMatchId } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
+  // Cada incremento pide a ProfileScreen hacer scroll a la Vitrina de Logros.
+  const [vitrinaScrollNonce, setVitrinaScrollNonce] = useState(0);
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [showTusPagos, setShowTusPagos] = useState(false);
@@ -1032,6 +1035,7 @@ export function MainApp() {
             onOnboardingAutoOpened={() => setProfileAutoOpenOnboarding(false)}
             onOnboardingCompleted={handleOnboardingCompleted}
             onOpenMatch={openMatchById}
+            scrollToVitrinaNonce={vitrinaScrollNonce}
           />
         );
       default:
@@ -1243,6 +1247,14 @@ export function MainApp() {
           }}
         />
       ) : null}
+
+      {/* Modal global de desbloqueos: aparece esté donde esté el usuario. */}
+      <UnlockModalHost
+        onGoToVitrina={() => {
+          setActiveTab('perfil');
+          setVitrinaScrollNonce((n) => n + 1);
+        }}
+      />
     </View>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -60,6 +60,8 @@ type ProfileScreenProps = {
   onOnboardingCompleted?: () => void;
   /** Abre el detalle de un partido (desde el gráfico de evolución). */
   onOpenMatch?: (matchId: string) => void;
+  /** Cada incremento hace scroll hasta la Vitrina de Logros (desde el modal de desbloqueo). */
+  scrollToVitrinaNonce?: number;
 };
 
 function getInitials(firstName?: string | null, lastName?: string | null): string {
@@ -78,8 +80,12 @@ export function ProfileScreen({
   onOnboardingAutoOpened,
   onOnboardingCompleted,
   onOpenMatch,
+  scrollToVitrinaNonce = 0,
 }: ProfileScreenProps) {
   const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollView>(null);
+  const vitrinaY = useRef(0);
+  const pendingVitrinaScroll = useRef(false);
   const { session } = useAuth();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -188,6 +194,19 @@ export function ProfileScreen({
       cancelled = true;
     };
   }, [session?.access_token, profile?.id]);
+
+  // Scroll a la Vitrina de Logros cuando el modal de desbloqueo pide "Ir a mi vitrina".
+  useEffect(() => {
+    if (!scrollToVitrinaNonce) return;
+    pendingVitrinaScroll.current = true;
+    const t = setTimeout(() => {
+      if (pendingVitrinaScroll.current && vitrinaY.current > 0) {
+        pendingVitrinaScroll.current = false;
+        scrollRef.current?.scrollTo({ y: Math.max(0, vitrinaY.current - 8), animated: true });
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [scrollToVitrinaNonce]);
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
   const displayName = profile
@@ -340,8 +359,9 @@ export function ProfileScreen({
         </View>
       </View>
 
-      <ScrollView 
-        style={styles.scroll} 
+      <ScrollView
+        ref={scrollRef}
+        style={styles.scroll}
         contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
         showsVerticalScrollIndicator={false}
       >
@@ -526,35 +546,20 @@ export function ProfileScreen({
           </>
         ) : null}
 
-        {/* Achievements Section */}
-        {assessment ? (
-          <TrophyShowcaseSection />
-        ) : (
-          <View style={styles.achievementsContainer}>
-            <View style={styles.achievementsCard}>
-              <View style={styles.achievementsHeader}>
-                <View style={styles.achievementsTitleWrap}>
-                  <LinearGradient 
-                    colors={['#F18F34', '#E95F32']} 
-                    style={styles.achievementTrophyIcon}
-                  >
-                    <Ionicons name="trophy-outline" size={16} color="#fff" />
-                  </LinearGradient>
-                  <View>
-                    <Text style={styles.achievementsTitle}>Vitrina de Logros</Text>
-                    <Text style={styles.achievementsCount}>Sin logros disponibles todavía</Text>
-                  </View>
-                </View>
-              </View>
-              <View style={styles.emptyAchievementsBox}>
-                <Ionicons name="trophy-outline" size={24} color="#6B7280" />
-                <Text style={styles.emptyAchievementsText}>
-                  Aun no hay datos reales de logros para mostrar.
-                </Text>
-              </View>
-            </View>
+        {/* Vitrina de Logros (datos reales; gestiona sus propios estados) */}
+        {!needsLevelOnboarding ? (
+          <View
+            onLayout={(e) => {
+              vitrinaY.current = e.nativeEvent.layout.y;
+              if (pendingVitrinaScroll.current) {
+                pendingVitrinaScroll.current = false;
+                scrollRef.current?.scrollTo({ y: Math.max(0, vitrinaY.current - 8), animated: true });
+              }
+            }}
+          >
+            <TrophyShowcaseSection />
           </View>
-        )}
+        ) : null}
 
         {/* Bottom Menu Actions */}
         <View style={styles.menuContainer}>
@@ -931,67 +936,6 @@ const styles = StyleSheet.create({
     color: '#A7F3D0',
     fontSize: 13,
     fontWeight: '600',
-  },
-  achievementsContainer: {
-    paddingHorizontal: 16,
-    marginTop: 16,
-  },
-  achievementsCard: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    padding: 16,
-  },
-  achievementsHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  achievementsTitleWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  achievementTrophyIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#F18F34',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  achievementsTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  achievementsCount: {
-    fontSize: 10,
-    color: '#6B7280',
-    marginTop: 1,
-  },
-  emptyAchievementsBox: {
-    marginTop: 8,
-    minHeight: 88,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  emptyAchievementsText: {
-    fontSize: 12,
-    color: '#9CA3AF',
-    textAlign: 'center',
   },
   menuContainer: {
     paddingHorizontal: 16,
