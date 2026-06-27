@@ -332,7 +332,9 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   centered: {
-    minHeight: 120,
+    // Altura ≈ la del estado cargado (tarjeta de partido + gráfico) para reducir
+    // el salto de layout mientras carga.
+    minHeight: 260,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,

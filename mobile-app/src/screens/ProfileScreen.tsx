@@ -24,6 +24,7 @@ import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
 import { LevelEvolutionCard } from '../components/profile/LevelEvolutionCard';
 import { StatsCard } from '../components/profile/StatsCard';
+import { CoachSkeleton } from '../components/profile/CoachSkeleton';
 import { OnboardingLevelModal } from '../components/profile/OnboardingLevelModal';
 import { fetchMyCoachAssessment, type CoachAssessment } from '../api/coachAssessment';
 import { fetchMyPeerFeedbackInsight, type PeerFeedbackInsight } from '../api/peerFeedbackInsight';
@@ -85,7 +86,16 @@ export function ProfileScreen({
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const vitrinaY = useRef(0);
-  const pendingVitrinaScroll = useRef(false);
+  // Mientras esté "armado", el scroll persigue a la Vitrina (que baja a medida que
+  // el contenido de arriba —coach, evolución, stats— termina de cargar). Se desarma
+  // al arrastrar el usuario o por seguridad a los 8s.
+  const wantVitrina = useRef(false);
+
+  const scrollToVitrina = React.useCallback(() => {
+    if (wantVitrina.current && vitrinaY.current > 0) {
+      scrollRef.current?.scrollTo({ y: Math.max(0, vitrinaY.current - 8), animated: true });
+    }
+  }, []);
   const { session } = useAuth();
   const [profile, setProfile] = useState<MyPlayerProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -195,18 +205,29 @@ export function ProfileScreen({
     };
   }, [session?.access_token, profile?.id]);
 
-  // Scroll a la Vitrina de Logros cuando el modal de desbloqueo pide "Ir a mi vitrina".
+  // Scroll a la Vitrina cuando el modal de desbloqueo pide "Ir a mi vitrina".
+  // Arma el objetivo y reintenta; el onLayout de la Vitrina y el efecto de carga
+  // (de abajo) lo re-ajustan a medida que el contenido de arriba se asienta.
   useEffect(() => {
     if (!scrollToVitrinaNonce) return;
-    pendingVitrinaScroll.current = true;
-    const t = setTimeout(() => {
-      if (pendingVitrinaScroll.current && vitrinaY.current > 0) {
-        pendingVitrinaScroll.current = false;
-        scrollRef.current?.scrollTo({ y: Math.max(0, vitrinaY.current - 8), animated: true });
-      }
-    }, 400);
+    wantVitrina.current = true;
+    const timers = [80, 400, 900].map((ms) => setTimeout(scrollToVitrina, ms));
+    const disarm = setTimeout(() => {
+      wantVitrina.current = false;
+    }, 8000);
+    return () => {
+      timers.forEach(clearTimeout);
+      clearTimeout(disarm);
+    };
+  }, [scrollToVitrinaNonce, scrollToVitrina]);
+
+  // Re-scroll cuando el contenido de arriba termina de cargar (Coach IA tarda):
+  // al crecer, la Vitrina baja y volvemos a centrarla mientras siga armado.
+  useEffect(() => {
+    if (!wantVitrina.current) return;
+    const t = setTimeout(scrollToVitrina, 80);
     return () => clearTimeout(t);
-  }, [scrollToVitrinaNonce]);
+  }, [assessment, assessmentLoaded, levelLoading, levelHistory, stats, scrollToVitrina]);
 
   const initials = getInitials(profile?.firstName, profile?.lastName);
   const displayName = profile
@@ -364,6 +385,9 @@ export function ProfileScreen({
         style={styles.scroll}
         contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={() => {
+          wantVitrina.current = false;
+        }}
       >
         {/* Cover */}
         <View style={styles.coverWrap}>
@@ -520,15 +544,7 @@ export function ProfileScreen({
             </View>
           </View>
         ) : (
-          <View style={styles.coachCardContainer}>
-            <View style={styles.coachCard}>
-              <View style={styles.coachGlow} />
-              <View style={styles.coachContent}>
-                <ActivityIndicator color="#F18F34" />
-                <Text style={styles.coachDesc}>Cargando status de nivelación…</Text>
-              </View>
-            </View>
-          </View>
+          <CoachSkeleton />
         )}
 
         {/* Evolución del nivel + Estadísticas (solo si ya está nivelado) */}
@@ -551,10 +567,7 @@ export function ProfileScreen({
           <View
             onLayout={(e) => {
               vitrinaY.current = e.nativeEvent.layout.y;
-              if (pendingVitrinaScroll.current) {
-                pendingVitrinaScroll.current = false;
-                scrollRef.current?.scrollTo({ y: Math.max(0, vitrinaY.current - 8), animated: true });
-              }
+              scrollToVitrina();
             }}
           >
             <TrophyShowcaseSection />
