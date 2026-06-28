@@ -864,7 +864,7 @@ export function PartidoDetailScreen({
     isInMatch &&
     !pendingMmPay &&
     canRecordScore &&
-    partido.hasMyFeedback !== true;
+    (partido.score_status !== 'confirmed' || !partido.hasMyFeedback);
   const bottomBarNeedsStack = pendingMmPay || canDeclineMmProposal;
   const bottomReserve = insets.bottom + (showFinishBar ? 100 : bottomBarNeedsStack ? 148 : 88);
   const canPressCta =

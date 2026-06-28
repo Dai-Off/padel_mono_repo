@@ -198,7 +198,7 @@ export function MatchEvaluationFlow({
   const [showSuccess, setShowSuccess] = useState(false);
 
   /** 0 = compañeros (sub-pasos internos), 1 = marcador, 2 = comentario final */
-  const [sectionIndex, setSectionIndex] = useState(0);
+  const [sectionIndex, setSectionIndex] = useState(partido.hasMyFeedback ? 1 : 0);
   /** Dentro de la pantalla 1: índice del compañero actual */
   const [teammatePageIndex, setTeammatePageIndex] = useState(0);
   const [ratings, setRatings] = useState<Record<number, { level: TeammateLevelRating | null; note: string }>>(
@@ -223,7 +223,7 @@ export function MatchEvaluationFlow({
 
   const reset = useCallback(() => {
     setShowSuccess(false);
-    setSectionIndex(0);
+    setSectionIndex(partido.hasMyFeedback ? 1 : 0);
     setTeammatePageIndex(0);
     setRatings({});
     setSets([
@@ -233,7 +233,7 @@ export function MatchEvaluationFlow({
     ]);
     setFeedbackText('');
     setSubmitting(false);
-  }, []);
+  }, [partido.hasMyFeedback]);
 
   useEffect(() => {
     if (visible) {
@@ -291,6 +291,10 @@ export function MatchEvaluationFlow({
       return;
     }
     if (sectionIndex === 1) {
+      if (partido.hasMyFeedback) {
+        handleClose();
+        return;
+      }
       if (scoreStatus === 'pending') {
         setSubmitting(true);
         const parsed = visibleSets
@@ -365,7 +369,10 @@ export function MatchEvaluationFlow({
       if (teammatePageIndex < teammates.length - 1) return t('partidos.createNext');
       return t('partidos.createNext');
     }
-    if (sectionIndex === 1) return t('partidos.createNext');
+    if (sectionIndex === 1) {
+      if (partido.hasMyFeedback) return t('partidos.evalFinish');
+      return t('partidos.createNext');
+    }
     return t('partidos.evalFinish');
   };
 
