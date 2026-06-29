@@ -16,33 +16,31 @@ import { type AchievementRarity } from '../../design/rarity';
 import { getFrameStyle, frameGradient } from '../../design/frames';
 import { normalizePlayerAvatarUrl } from '../../api/playerAvatar';
 
-/**
- * Config por tipo de animación (adaptación de las del Figma a reanimated).
- *  spin: ms de giro del degradado | beat: ms de pulso (glow/escala) | flick: parpadeo
- *  shake: ms de jitter | sparks/orbit/rings/warp/morph: efectos extra.
- */
-interface AnimCfg {
+const DARK = '#141414';
+
+// Config por animación (copiada del Figma): spin = ms de giro del degradado,
+// cyc = ms del ciclo del efecto, ring = ms de los anillos expansivos.
+type Effect = 'beat' | 'breathe' | 'flicker' | 'shake' | 'warp' | 'glitch' | 'morph';
+interface Cfg {
   spin?: number;
-  beat?: number;
-  flick?: boolean;
-  shake?: number;
-  sparks?: boolean;
-  orbit?: boolean;
+  cyc?: number;
+  ring?: number;
+  effect?: Effect;
   rings?: number;
-  warp?: boolean;
-  morph?: boolean;
+  orbit?: number;
+  sparks?: number;
 }
-const ANIM: Record<string, AnimCfg> = {
-  rotate: { spin: 2600 },
-  orbit: { spin: 6000, orbit: true },
-  warp: { spin: 2200, warp: true },
-  glitch: { spin: 4200, shake: 1500, flick: true },
-  ripple: { spin: 5200, rings: 2200 },
-  morph: { spin: 3400, morph: true },
-  pulse: { beat: 1400, rings: 1900 },
-  breathe: { spin: 8000, beat: 4200 },
-  flicker: { flick: true },
-  shake: { shake: 520, sparks: true },
+const CFG: Record<string, Cfg> = {
+  rotate: { spin: 2500 },
+  orbit: { spin: 6000, orbit: 3 },
+  warp: { spin: 2000, cyc: 3000, effect: 'warp' },
+  glitch: { spin: 4000, cyc: 4000, effect: 'glitch' },
+  ripple: { spin: 5000, ring: 2200, rings: 3 },
+  morph: { spin: 3000, cyc: 6000, effect: 'morph' },
+  pulse: { cyc: 1500, ring: 2000, rings: 3, effect: 'beat' },
+  breathe: { spin: 8000, cyc: 4000, effect: 'breathe' },
+  flicker: { cyc: 2000, effect: 'flicker' },
+  shake: { cyc: 500, effect: 'shake', sparks: 4 },
 };
 
 export interface FrameAttrs {
@@ -51,8 +49,7 @@ export interface FrameAttrs {
   animationType: string | null;
   colors: string[] | null;
 }
-
-interface AvatarWithFrameProps {
+interface Props {
   initials: string;
   avatarUrl?: string | null;
   size?: number;
@@ -60,126 +57,141 @@ interface AvatarWithFrameProps {
   animate?: boolean;
 }
 
-// ─── Anillo expansivo (ripple / pulse) ───
-function ExpandRing({ progress, index, size, radius, color }: { progress: SharedValue<number>; index: number; size: number; radius: number; color: string }) {
+// Anillo expansivo (wmRippleRing): scale .92→1.5, opacity .8→0
+function ExpandRing({ p, index, size, radius, color, count }: { p: SharedValue<number>; index: number; size: number; radius: number; color: string; count: number }) {
   const style = useAnimatedStyle(() => {
-    const p = (progress.value + index * 0.45) % 1;
-    return { opacity: interpolate(p, [0, 0.15, 1], [0, 0.6, 0], Extrapolation.CLAMP), transform: [{ scale: interpolate(p, [0, 1], [0.85, 1.55]) }] };
+    const t = (p.value + index / count) % 1;
+    return { opacity: interpolate(t, [0, 1], [0.8, 0], Extrapolation.CLAMP), transform: [{ scale: interpolate(t, [0, 1], [0.92, 1.5]) }] };
   });
-  return <Animated.View pointerEvents="none" style={[styles.expandRing, { width: size, height: size, borderRadius: radius, borderColor: color }, style]} />;
+  return <Animated.View pointerEvents="none" style={[styles.ring, { width: size, height: size, borderRadius: radius, borderColor: color }, style]} />;
 }
 
-// ─── Partícula en órbita ───
-function OrbitParticle({ spin, index, radius, color }: { spin: SharedValue<number>; index: number; radius: number; color: string }) {
+// Partícula en órbita
+function Orbit({ spin, index, radius, color, count }: { spin: SharedValue<number>; index: number; radius: number; color: string; count: number }) {
   const style = useAnimatedStyle(() => {
-    const a = (spin.value + index / 3) * Math.PI * 2;
+    const a = (spin.value + index / count) * Math.PI * 2;
     return { transform: [{ translateX: Math.cos(a) * radius }, { translateY: Math.sin(a) * radius }] };
   });
   return <Animated.View pointerEvents="none" style={[styles.particle, { backgroundColor: color, shadowColor: color }, style]} />;
 }
 
-// ─── Chispa (shake) ───
-function Spark({ shake, index, color, dist }: { shake: SharedValue<number>; index: number; color: string; dist: number }) {
-  const angle = (index * Math.PI * 2) / 4 + 0.6;
+// Chispa (shake)
+function Spark({ cyc, index, color, dist, count }: { cyc: SharedValue<number>; index: number; color: string; dist: number; count: number }) {
+  const ang = (index * Math.PI * 2) / count + 0.6;
   const style = useAnimatedStyle(() => {
-    const p = (shake.value * 1.4 + index * 0.25) % 1;
+    const t = (cyc.value * 0.6 + index / count) % 1;
     return {
-      opacity: interpolate(p, [0, 0.2, 1], [0, 1, 0], Extrapolation.CLAMP),
-      transform: [{ translateX: Math.cos(angle) * dist * p }, { translateY: Math.sin(angle) * dist * p }, { scale: interpolate(p, [0, 1], [0.4, 1.4]) }],
+      opacity: interpolate(t, [0, 0.2, 1], [0, 1, 0], Extrapolation.CLAMP),
+      transform: [{ translateX: Math.cos(ang) * dist * t }, { translateY: Math.sin(ang) * dist * t }, { scale: interpolate(t, [0, 1], [0.3, 1.5]) }],
     };
   });
   return <Animated.View pointerEvents="none" style={[styles.particle, { backgroundColor: color, shadowColor: color }, style]} />;
 }
 
-export const AvatarWithFrame: React.FC<AvatarWithFrameProps> = ({ initials, avatarUrl, size = 80, frame, animate = true }) => {
+export const AvatarWithFrame: React.FC<Props> = ({ initials, avatarUrl, size = 80, frame, animate = true }) => {
   const noFrame = !frame || frame.style === 'none' || frame.style == null;
-  const st = getFrameStyle(frame?.style);
+  const stl = getFrameStyle(frame?.style);
   const grad = frameGradient(frame?.colors, frame?.rarity ?? 'common');
   const innerR = Math.round(size * 0.22);
-  const pad = noFrame ? 0 : st.borderWidth + (st.double ? 3 : 0);
-  const outer = size + pad * 2;
-  const outerR = innerR + pad;
+  const bw = noFrame ? 0 : stl.borderWidth + (stl.double ? 3 : 0);
+  const outer = size + bw * 2;
+  const outerR = innerR + bw;
+  const maskR = Math.max(0, outerR - bw);
 
   const animType = frame?.animationType ?? null;
-  const cfg = animate && !noFrame && animType ? ANIM[animType] : undefined;
+  const cfg = animate && !noFrame && animType ? CFG[animType] : undefined;
 
   const spin = useSharedValue(0);
-  const beat = useSharedValue(0);
-  const flick = useSharedValue(0);
-  const shake = useSharedValue(0);
+  const cyc = useSharedValue(0);
   const ring = useSharedValue(0);
-  const morph = useSharedValue(0);
 
   useEffect(() => {
-    cancelAnimation(spin);
-    cancelAnimation(beat);
-    cancelAnimation(flick);
-    cancelAnimation(shake);
-    cancelAnimation(ring);
-    cancelAnimation(morph);
+    cancelAnimation(spin); cancelAnimation(cyc); cancelAnimation(ring);
     if (cfg?.spin) spin.value = withRepeat(withTiming(1, { duration: cfg.spin, easing: Easing.linear }), -1, false);
-    if (cfg?.beat) beat.value = withRepeat(withTiming(1, { duration: cfg.beat, easing: Easing.inOut(Easing.ease) }), -1, true);
-    if (cfg?.flick) flick.value = withRepeat(withTiming(1, { duration: 130, easing: Easing.linear }), -1, true);
-    if (cfg?.shake) shake.value = withRepeat(withTiming(1, { duration: cfg.shake, easing: Easing.linear }), -1, false);
-    if (cfg?.rings) ring.value = withRepeat(withTiming(1, { duration: cfg.rings, easing: Easing.out(Easing.ease) }), -1, false);
-    if (cfg?.morph) morph.value = withRepeat(withTiming(1, { duration: 5200, easing: Easing.inOut(Easing.ease) }), -1, true);
-    return () => {
-      cancelAnimation(spin); cancelAnimation(beat); cancelAnimation(flick);
-      cancelAnimation(shake); cancelAnimation(ring); cancelAnimation(morph);
-    };
-  }, [cfg, spin, beat, flick, shake, ring, morph]);
+    if (cfg?.cyc) cyc.value = withRepeat(withTiming(1, { duration: cfg.cyc, easing: Easing.linear }), -1, false);
+    if (cfg?.ring) ring.value = withRepeat(withTiming(1, { duration: cfg.ring, easing: Easing.linear }), -1, false);
+    return () => { cancelAnimation(spin); cancelAnimation(cyc); cancelAnimation(ring); };
+  }, [cfg, spin, cyc, ring]);
 
-  const isShake = animType === 'shake';
-  const isGlitch = animType === 'glitch';
-  const isWarp = animType === 'warp';
+  const effect = cfg?.effect;
 
-  // Animación del MARCO (warp/shake/glitch/pulse/morph). Se aplica SOLO al anillo,
-  // nunca al tile interior, que permanece quieto.
-  const frameAnimStyle = useAnimatedStyle(() => {
-    const t: { perspective?: number; rotateX?: string; rotateY?: string; translateX?: number; translateY?: number; rotate?: string; scale?: number }[] = [];
-    if (animType === 'pulse' && cfg?.beat) t.push({ scale: interpolate(beat.value, [0, 1], [1, 1.07]) });
-    if (isWarp) {
-      const a = spin.value * Math.PI * 2;
-      t.push({ perspective: 320 }, { rotateY: `${Math.sin(a) * 14}deg` }, { rotateX: `${Math.cos(a) * -7}deg` });
+  // Giro del degradado (conic→linear girando)
+  const gradStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${spin.value * 360}deg` }] }));
+
+  // Movimiento del MARCO (no del avatar): beat/warp/glitch/shake/morph
+  const frameStyle = useAnimatedStyle(() => {
+    const t = cyc.value;
+    const tr: Record<string, unknown>[] = [];
+    if (effect === 'beat') {
+      tr.push({ scale: interpolate(t, [0, 0.15, 0.3, 0.45, 1], [1, 1.08, 0.96, 1.04, 1]) });
+    } else if (effect === 'warp') {
+      tr.push(
+        { perspective: 200 },
+        { rotateY: `${interpolate(t, [0, 0.25, 0.5, 0.75, 1], [0, 10, 0, -10, 0])}deg` },
+        { rotateX: `${interpolate(t, [0, 0.25, 0.5, 0.75, 1], [0, -3, 3, -2, 0])}deg` },
+        { scale: interpolate(t, [0, 0.25, 0.5, 0.75, 1], [1, 1.03, 0.97, 1.02, 1]) },
+      );
+    } else if (effect === 'shake') {
+      const k = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1];
+      tr.push(
+        { translateX: interpolate(t, k, [0, -2, 3, -1, 2, -2, 1, 0, -1, 1, 0]) },
+        { translateY: interpolate(t, k, [0, -1, 1, 2, -1, 1, 0, -2, 1, 1, 0]) },
+        { rotate: `${interpolate(t, k, [0, -1.5, 1.5, -0.5, 1, -1, 0.5, -1, 1, 0, 0])}deg` },
+      );
+    } else if (effect === 'glitch') {
+      const k = [0, 0.84, 0.85, 0.87, 0.89, 0.91, 1];
+      tr.push(
+        { translateX: interpolate(t, k, [0, 0, -4, 4, -2, 0, 0]) },
+        { translateY: interpolate(t, k, [0, 0, 1, -2, 2, 0, 0]) },
+      );
     }
-    if (isShake) {
-      const p = shake.value * Math.PI * 2;
-      t.push({ translateX: Math.sin(p * 4) * 1.8 }, { translateY: Math.cos(p * 5) * 1.8 }, { rotate: `${Math.sin(p * 3) * 1.4}deg` });
-    }
-    if (isGlitch) {
-      const on = shake.value % 1 > 0.86;
-      t.push({ translateX: on ? ((shake.value * 53) % 6) - 3 : 0 });
-    }
-    const out: Record<string, unknown> = { transform: t };
-    if (cfg?.morph) {
-      const m = morph.value;
-      out.borderTopLeftRadius = interpolate(m, [0, 1], [outerR * 0.55, outerR * 1.45]);
-      out.borderTopRightRadius = interpolate(m, [0, 1], [outerR * 1.35, outerR * 0.65]);
-      out.borderBottomRightRadius = interpolate(m, [0, 1], [outerR * 0.65, outerR * 1.35]);
-      out.borderBottomLeftRadius = interpolate(m, [0, 1], [outerR * 1.25, outerR * 0.55]);
-    }
-    return out;
+    return { transform: tr as never };
   });
 
-  // Giro del degradado
-  const gradStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${spin.value * 360}deg` }],
-    opacity: cfg?.flick ? (flick.value > 0.5 ? 1 : 0.5) : 1,
-  }));
+  // Morph (wmMorph): deforma el anillo (clip del degradado) y la máscara.
+  const morphRingStyle = useAnimatedStyle(() => {
+    if (effect !== 'morph') return {};
+    const t = cyc.value;
+    const k = [0, 0.25, 0.5, 0.75, 1];
+    const r = outerR;
+    return {
+      borderTopLeftRadius: interpolate(t, k, [r * 0.5, r * 1.2, r * 1.6, r * 0.5, r * 0.5]),
+      borderTopRightRadius: interpolate(t, k, [r * 1.6, r * 1.2, r * 0.5, r * 1.2, r * 1.6]),
+      borderBottomRightRadius: interpolate(t, k, [r * 1.2, r * 0.5, r * 0.5, r * 1.6, r * 1.2]),
+      borderBottomLeftRadius: interpolate(t, k, [r * 1.2, r * 1.6, r * 1.2, r * 1.2, r * 1.2]),
+    };
+  });
+  const morphMaskStyle = useAnimatedStyle(() => {
+    if (effect !== 'morph') return {};
+    const t = cyc.value;
+    const k = [0, 0.25, 0.5, 0.75, 1];
+    const r = maskR;
+    return {
+      borderTopLeftRadius: interpolate(t, k, [r * 0.5, r * 1.2, r * 1.6, r * 0.5, r * 0.5]),
+      borderTopRightRadius: interpolate(t, k, [r * 1.6, r * 1.2, r * 0.5, r * 1.2, r * 1.6]),
+      borderBottomRightRadius: interpolate(t, k, [r * 1.2, r * 0.5, r * 0.5, r * 1.6, r * 1.2]),
+      borderBottomLeftRadius: interpolate(t, k, [r * 1.2, r * 1.6, r * 1.2, r * 1.2, r * 1.2]),
+    };
+  });
 
-  // Glow / halo
+  // Glow (del marco)
   const glowStyle = useAnimatedStyle(() => {
-    let op = 0.26;
+    const t = cyc.value;
+    let op = 0.3;
     let sc = 1;
-    if (cfg?.beat) { op = interpolate(beat.value, [0, 1], [0.2, 0.5]); sc = interpolate(beat.value, [0, 1], [1, 1.1]); }
-    else if (cfg?.flick) { op = flick.value > 0.5 ? 0.5 : 0.12; }
+    if (effect === 'beat') { op = interpolate(t, [0, 0.5, 1], [0.7, 1, 0.7]) * 0.55; sc = interpolate(t, [0, 0.5, 1], [1, 1.15, 1]); }
+    else if (effect === 'breathe') { op = interpolate(t, [0, 0.5, 1], [0.4, 0.85, 0.4]); sc = interpolate(t, [0, 0.5, 1], [1, 1.12, 1]); }
+    else if (effect === 'flicker') {
+      const k = [0, 0.05, 0.1, 0.15, 0.2, 0.5, 0.52, 0.54, 1];
+      op = interpolate(t, k, [0.7, 0.25, 0.7, 0.4, 0.7, 0.6, 0.18, 0.7, 0.7]);
+    }
     return { opacity: op, transform: [{ scale: sc }] };
   });
 
-  // Tile interior (foto o iniciales)
+  // Tile interior (foto o iniciales) — QUIETO
   const uri = normalizePlayerAvatarUrl(avatarUrl);
   const tile = (
-    <View style={[styles.tile, { width: size, height: size, borderRadius: innerR }, st.double ? { borderWidth: 2, borderColor: '#141414' } : null]}>
+    <View style={[styles.tile, { width: size, height: size, borderRadius: innerR }]}>
       <LinearGradient colors={['#F18F34', '#E95F32']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.tileFill, { borderRadius: innerR }]}>
         <Text style={[styles.initials, { fontSize: Math.round(size * 0.3) }]}>{(initials || '?').slice(0, 2).toUpperCase()}</Text>
       </LinearGradient>
@@ -190,38 +202,43 @@ export const AvatarWithFrame: React.FC<AvatarWithFrameProps> = ({ initials, avat
   if (noFrame) return tile;
 
   const gradSize = outer * 1.8;
-  const hasGlow = !!cfg || st.glow;
+  const hasGlow = !!cfg || stl.glow;
 
   return (
     <View style={{ width: outer, height: outer, alignItems: 'center', justifyContent: 'center' }}>
-      {/* Glow (del marco) */}
+      {/* Glow del marco */}
       {hasGlow ? (
         <Animated.View pointerEvents="none" style={[styles.halo, { width: outer + 8, height: outer + 8, borderRadius: outerR + 4, backgroundColor: grad[0] }, glowStyle]} />
       ) : null}
 
       {/* Anillos expansivos (ripple / pulse) */}
-      {cfg?.rings ? [0, 1, 2].map((i) => (
-        <ExpandRing key={i} progress={ring} index={i} size={outer} radius={outerR} color={grad[0]} />
+      {cfg?.rings ? Array.from({ length: cfg.rings }).map((_, i) => (
+        <ExpandRing key={i} p={ring} index={i} size={outer} radius={outerR} color={grad[0]} count={cfg.rings!} />
       )) : null}
 
       {/* Partículas en órbita */}
-      {cfg?.orbit ? [0, 1, 2].map((i) => (
-        <OrbitParticle key={i} spin={spin} index={i} radius={outer / 2} color={grad[i % grad.length]} />
+      {cfg?.orbit ? Array.from({ length: cfg.orbit }).map((_, i) => (
+        <Orbit key={i} spin={spin} index={i} radius={outer / 2} color={grad[i % grad.length]} count={cfg.orbit!} />
       )) : null}
 
       {/* Chispas (shake) */}
-      {cfg?.sparks ? [0, 1, 2, 3].map((i) => (
-        <Spark key={i} shake={shake} index={i} color={grad[i % grad.length]} dist={outer * 0.7} />
+      {cfg?.sparks ? Array.from({ length: cfg.sparks }).map((_, i) => (
+        <Spark key={i} cyc={cyc} index={i} color={grad[i % grad.length]} dist={outer * 0.7} count={cfg.sparks!} />
       )) : null}
 
-      {/* MARCO animado (anillo), detrás y absoluto — NO contiene el avatar */}
-      <Animated.View style={[styles.ringClip, styles.ringAbs, { width: outer, height: outer, borderRadius: outerR }, frameAnimStyle]}>
-        <Animated.View style={[styles.gradLayer, { width: gradSize, height: gradSize, left: (outer - gradSize) / 2, top: (outer - gradSize) / 2 }, cfg?.spin ? gradStyle : undefined]}>
-          <LinearGradient colors={grad as [string, string, ...string[]]} start={{ x: 0, y: 0 }} end={st.bevel ? { x: 1, y: 0 } : { x: 1, y: 1 }} style={{ width: gradSize, height: gradSize }} />
+      {/* MARCO: borde con degradado + máscara oscura (forma el hueco). Solo esto se anima. */}
+      <Animated.View style={[styles.frameAbs, { width: outer, height: outer, borderRadius: outerR }, frameStyle]}>
+        <Animated.View style={[styles.ringClip, { width: outer, height: outer, borderRadius: outerR }, morphRingStyle]}>
+          <Animated.View style={[styles.gradLayer, { width: gradSize, height: gradSize, left: (outer - gradSize) / 2, top: (outer - gradSize) / 2 }, cfg?.spin ? gradStyle : undefined]}>
+            <LinearGradient colors={grad as [string, string, ...string[]]} start={{ x: 0, y: 0 }} end={stl.bevel ? { x: 1, y: 0 } : { x: 1, y: 1 }} style={{ width: gradSize, height: gradSize }} />
+          </Animated.View>
         </Animated.View>
+        {/* Máscara interior oscura = hueco */}
+        <Animated.View style={[styles.mask, { top: bw, left: bw, right: bw, bottom: bw, borderRadius: maskR, backgroundColor: DARK }, morphMaskStyle]} />
+        {stl.double ? <View style={[styles.mask, { top: bw - 2, left: bw - 2, right: bw - 2, bottom: bw - 2, borderRadius: maskR + 2, borderWidth: 1, borderColor: DARK, backgroundColor: 'transparent' }]} /> : null}
       </Animated.View>
 
-      {/* Avatar QUIETO, encima del marco (zIndex para no quedar tapado por el anillo) */}
+      {/* Avatar QUIETO, encima del marco (en el hueco) */}
       <View style={styles.tileTop}>{tile}</View>
     </View>
   );
@@ -233,19 +250,11 @@ const styles = StyleSheet.create({
   initials: { color: '#fff', fontWeight: '700' },
   photo: { position: 'absolute', top: 0, left: 0 },
   halo: { position: 'absolute' },
-  ringClip: { overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
-  ringAbs: { position: 'absolute', zIndex: 0 },
-  tileTop: { zIndex: 2 },
+  frameAbs: { position: 'absolute', zIndex: 0, overflow: 'visible' },
+  ringClip: { overflow: 'hidden', position: 'absolute' },
   gradLayer: { position: 'absolute' },
-  expandRing: { position: 'absolute', borderWidth: 2 },
-  particle: {
-    position: 'absolute',
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.9,
-    shadowRadius: 4,
-    elevation: 3,
-  },
+  mask: { position: 'absolute' },
+  tileTop: { zIndex: 2 },
+  ring: { position: 'absolute', borderWidth: 2 },
+  particle: { position: 'absolute', width: 5, height: 5, borderRadius: 3, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 4, elevation: 3 },
 });
