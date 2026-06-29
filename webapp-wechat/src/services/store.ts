@@ -135,3 +135,91 @@ export async function setStoreCollectionProducts(
     );
     return data.product_ids ?? [];
 }
+
+export type StoreSalesPeriod = '7d' | '30d' | 'month';
+
+export interface StoreSalesSummary {
+    period: StoreSalesPeriod;
+    stats: {
+        revenue_cents: number;
+        orders: number;
+        avg_ticket_cents: number;
+        units: number;
+        revenue_delta_pct: number | null;
+        orders_delta_pct: number | null;
+    };
+    chart: { label: string; value_cents: number }[];
+    top_products: { name: string; brand: string | null; units: number; revenue_cents: number }[];
+    recent_sales: {
+        id: string;
+        created_at: string;
+        paid_at: string | null;
+        customer: string;
+        items: number;
+        total_cents: number;
+        status: string;
+    }[];
+}
+
+export async function getStoreSales(period: StoreSalesPeriod): Promise<StoreSalesSummary> {
+    const data = await apiFetchWithAuth<{ ok: boolean } & StoreSalesSummary>(
+        `/mobile-admin/store/sales?period=${period}`
+    );
+    return {
+        period: data.period,
+        stats: data.stats,
+        chart: data.chart ?? [],
+        top_products: data.top_products ?? [],
+        recent_sales: data.recent_sales ?? [],
+    };
+}
+
+export type PromoDiscountType = 'percent' | 'fixed';
+
+export interface PromoCode {
+    id: string;
+    created_at: string;
+    code: string;
+    discount_type: PromoDiscountType;
+    discount_value: number;
+    is_active: boolean;
+}
+
+export interface PromoCodeInput {
+    code: string;
+    discount_type: PromoDiscountType;
+    discount_value: number;
+    is_active?: boolean;
+}
+
+export async function listPromoCodes(): Promise<PromoCode[]> {
+    const data = await apiFetchWithAuth<{ ok: boolean; promo_codes: PromoCode[] }>(
+        '/mobile-admin/store/promo-codes'
+    );
+    return data.promo_codes ?? [];
+}
+
+export async function createPromoCode(input: PromoCodeInput): Promise<PromoCode> {
+    const data = await apiFetchWithAuth<{ ok: boolean; promo_code: PromoCode }>(
+        '/mobile-admin/store/promo-codes',
+        { method: 'POST', body: JSON.stringify(input) }
+    );
+    return data.promo_code;
+}
+
+export async function updatePromoCode(
+    id: string,
+    input: Partial<Pick<PromoCode, 'is_active' | 'discount_value'>>
+): Promise<PromoCode> {
+    const data = await apiFetchWithAuth<{ ok: boolean; promo_code: PromoCode }>(
+        `/mobile-admin/store/promo-codes/${id}`,
+        { method: 'PUT', body: JSON.stringify(input) }
+    );
+    return data.promo_code;
+}
+
+export async function deletePromoCode(id: string): Promise<void> {
+    await apiFetchWithAuth<{ ok: boolean }>(`/mobile-admin/store/promo-codes/${id}`, {
+        method: 'DELETE',
+    });
+}

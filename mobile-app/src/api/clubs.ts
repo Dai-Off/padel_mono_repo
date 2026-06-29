@@ -10,6 +10,7 @@ export type ClubDetail = {
   lng?: number | null;
   weekly_schedule?: Record<string, unknown>;
   schedule_exceptions?: unknown[];
+  slot_duration_min?: number | null;
 };
 
 export async function fetchClubById(

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, BackHandler, Pressable, View, StyleSheet } from 'react-native';
+import { Alert, BackHandler, Pressable, Text, View, StyleSheet } from 'react-native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,6 +36,7 @@ import { TuActividadFlow } from './TuActividadFlow';
 import type { TuActividadDestination } from './TuActividadScreen';
 import { TransaccionesScreen } from './TransaccionesScreen';
 import { TiendaScreen } from './TiendaScreen';
+import { CartScreen } from './CartScreen';
 import { DailyLessonScreen } from './DailyLessonScreen';
 import { CoursesScreen } from './CoursesScreen';
 import { EducationalCourseDetailScreen } from './EducationalCourseDetailScreen';
@@ -44,6 +45,7 @@ import { ProfileScreen } from './ProfileScreen';
 import { EditProfileScreen } from './EditProfileScreen';
 import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { useAuth } from '../contexts/AuthContext';
+import { useCart } from '../contexts/CartContext';
 import { fetchMyPlayerProfile } from '../api/players';
 import {
   fetchMatchmakingStatus,
@@ -104,8 +106,10 @@ export function MainApp() {
   const { t } = useTranslation();
   const sidebar = useSidebar(false);
   const { session } = useAuth();
+  const { totalCount: cartCount } = useCart();
   const { profile, refreshMatches, syncMisPartidoFromMatchId } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
+  const [showCart, setShowCart] = useState(false);
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
   const [selectedPartido, setSelectedPartido] = useState<PartidoItem | null>(null);
   const [showMonedero, setShowMonedero] = useState(false);
@@ -506,6 +510,11 @@ export function MainApp() {
         setBookingSuccessData(null);
         return true;
       }
+      // Carrito de la tienda
+      if (showCart) {
+        setShowCart(false);
+        return true;
+      }
       // Detalle de curso educativo
       if (selectedEducationalCourse) {
         setSelectedEducationalCourse(null);
@@ -666,6 +675,7 @@ export function MainApp() {
   }, [
     sidebar,
     bookingSuccessData,
+    showCart,
     selectedEducationalCourse,
     selectedPublicCourse,
     showCourses,
@@ -698,6 +708,17 @@ export function MainApp() {
   ]);
 
   const renderContent = () => {
+    if (showCart) {
+      return (
+        <CartScreen
+          onBack={() => setShowCart(false)}
+          onContinueShopping={() => {
+            setShowCart(false);
+            setActiveTab('tienda');
+          }}
+        />
+      );
+    }
     if (selectedEducationalCourse) {
       return (
         <EducationalCourseDetailScreen
@@ -1103,7 +1124,7 @@ export function MainApp() {
   const showMainTabs = !fullscreenOverlayOpen;
 
   const customHeader =
-    fullscreenOverlayOpen
+    fullscreenOverlayOpen || showCart
       ? undefined
       : activeTab === 'tienda'
           ? (
@@ -1116,12 +1137,20 @@ export function MainApp() {
                     accessibilityRole="button"
                     accessibilityLabel={t('nav.tiendaCart')}
                     hitSlop={8}
+                    onPress={() => setShowCart(true)}
                     style={({ pressed }) => [
                       styles.tiendaHeaderCart,
                       pressed && { opacity: 0.85 },
                     ]}
                   >
                     <Ionicons name="cart-outline" size={18} color="#fff" />
+                    {cartCount > 0 ? (
+                      <View style={styles.tiendaCartBadge}>
+                        <Text style={styles.tiendaCartBadgeText}>
+                          {cartCount > 99 ? '99+' : cartCount}
+                        </Text>
+                      </View>
+                    ) : null}
                   </Pressable>
                 )}
               />
@@ -1147,7 +1176,9 @@ export function MainApp() {
   const layoutBackgroundColor =
     bookingSuccessData != null
       ? '#000000'
-      : showMessages
+      : showCart
+        ? '#0F0F0F'
+        : showMessages
         ? '#0A0A0A'
         : showEditProfile || showChangePassword || showPreferences || showAjustes || showClubReviews || infoScreen || showMonedero || showTuActividad
           ? '#0F0F0F'
@@ -1156,6 +1187,8 @@ export function MainApp() {
           : showCompetitiveLeague || showSeasonPass
             ? '#0F0F0F'
           : showPartidoDetail
+            ? '#0F0F0F'
+            : showClubDetail
             ? '#0F0F0F'
             : crearPartidoFlow.open
               ? '#0F0F0F'
@@ -1171,6 +1204,7 @@ export function MainApp() {
 
   const handleTabChange = (tab: MainTabId) => {
     setActiveTab(tab);
+    setShowCart(false);
     setShowEditProfile(false);
     setShowChangePassword(false);
     setShowPreferences(false);
@@ -1227,6 +1261,7 @@ export function MainApp() {
             customHeader={customHeader}
             hideHeader={
               fullscreenOverlayOpen ||
+              showCart ||
               (showMainTabs && activeTab === 'pistas') ||
               (showMainTabs && activeTab === 'torneos') ||
               (showMainTabs && activeTab === 'perfil')
@@ -1295,6 +1330,25 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.12)',
+  },
+  tiendaCartBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F18F34',
+    borderWidth: 1.5,
+    borderColor: '#0F0F0F',
+  },
+  tiendaCartBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
   },
   container: {
     flex: 1,

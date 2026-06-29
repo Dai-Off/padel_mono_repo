@@ -12,6 +12,7 @@ import { canAccessClub } from '../lib/clubAccess';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { insertClubChatMention } from '../lib/clubChatMentions';
 import { zonedDayRangeUtcIso } from '../lib/zonedDayBounds';
+import { clubTimezoneOrDefault } from '../lib/clubTimezone';
 import { ensureOpenMatchRecordForBooking, type OpenMatchSyncOpts } from '../lib/matchFromBookingSync';
 import { checkWalletBalances, computeBookingStatus, upsertManualPayments } from '../lib/bookingManualPayment';
 import {
@@ -1148,6 +1149,19 @@ router.post('/', async (req: Request, res: Response) => {
 
     const courtContentionStatus = contentionStatusForNewMatchBooking(reservationType, wouldBeFullyPaid);
 
+    // Club de la pista: define el timezone de la reserva (no el dispositivo) y
+    // se reutiliza para las wallet transactions.
+    const { data: courtData } = await supabase
+      .from('courts')
+      .select('club_id, club:clubs(timezone)')
+      .eq('id', court_id)
+      .maybeSingle();
+    const clubIdForWallet = (courtData as { club_id?: string } | null)?.club_id as string | undefined;
+    const bookingTimezone = clubTimezoneOrDefault(
+      (courtData as { club?: { timezone?: string | null } } | null)?.club?.timezone
+        ?? (typeof timezone === 'string' ? timezone : null),
+    );
+
     // 1. Insert Booking (siempre como pending; el middleware de pago lo confirma si aplica)
     const { data: insertedBooking, error: bookingError } = await supabase
       .from('bookings')
@@ -1157,7 +1171,7 @@ router.post('/', async (req: Request, res: Response) => {
           organizer_player_id: organizer_player_id ?? null,
           start_at,
           end_at,
-          timezone: timezone ?? 'Europe/Madrid',
+          timezone: bookingTimezone,
           total_price_cents: Number(total_price_cents),
           currency: currency ?? 'EUR',
           status: 'pending_payment',
@@ -1178,11 +1192,6 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(500).json({ ok: false, error: bookingError.message });
     }
     const booking = insertedBooking as { id: string };
-
-    // 2. Obtener club_id para wallet transactions
-    const { data: courtData } = await supabase
-      .from('courts').select('club_id').eq('id', court_id).maybeSingle();
-    const clubIdForWallet = (courtData as any)?.club_id as string | undefined;
 
     // 3. Construir filas de participantes (incluye organizador si viene en el array)
     const participantRows: any[] = [];

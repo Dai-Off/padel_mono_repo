@@ -18,6 +18,13 @@ import {
   STORE_COLLECTION_FIELDS,
   STORE_TIENDA_SETTINGS_FIELDS,
 } from '../lib/storeTiendaExtras';
+import { getStoreSalesSummary, parseStoreSalesPeriod } from '../lib/storeSales';
+import {
+  isPromoDiscountType,
+  isValidDiscountValue,
+  normalizePromoCode,
+  type PromoDiscountType,
+} from '../lib/promoCodes';
 
 const router = Router();
 router.use(requireMobileAdmin);
@@ -215,6 +222,21 @@ async function recordStockMovement(
     mobile_admin_id: mobileAdminId,
   });
 }
+
+/**
+ * GET /mobile-admin/store/sales?period=7d|30d|month
+ * Resumen de ventas reales de la tienda (pedidos pagados): KPIs, gráfico,
+ * top productos y pedidos recientes.
+ */
+router.get('/sales', async (req: Request, res: Response) => {
+  try {
+    const period = parseStoreSalesPeriod(req.query.period);
+    const summary = await getStoreSalesSummary(period);
+    return res.json({ ok: true, ...summary });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
 
 /**
  * GET /mobile-admin/store/products
@@ -754,6 +776,140 @@ router.put('/collections/:id/products', async (req: Request, res: Response) => {
     }
 
     return res.json({ ok: true, product_ids: productIds });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+const PROMO_CODE_FIELDS = 'id, created_at, code, discount_type, discount_value, is_active';
+
+function buildPromoCodeInsert(
+  body: Record<string, unknown>,
+): { data: { code: string; discount_type: PromoDiscountType; discount_value: number; is_active: boolean } } | { error: string } {
+  const code = normalizePromoCode(body.code);
+  if (!code) return { error: 'El código es obligatorio' };
+  if (code.length > 40) return { error: 'El código es demasiado largo' };
+  if (!/^[A-Z0-9_-]+$/.test(code)) {
+    return { error: 'El código solo puede tener letras, números, guion y guion bajo' };
+  }
+
+  const discountType = body.discount_type;
+  if (!isPromoDiscountType(discountType)) {
+    return { error: 'Tipo de descuento inválido' };
+  }
+
+  const discountValue = Number(body.discount_value);
+  if (!isValidDiscountValue(discountType, discountValue)) {
+    return {
+      error:
+        discountType === 'percent'
+          ? 'El porcentaje debe ser un entero entre 1 y 100'
+          : 'El importe debe ser un entero de céntimos mayor a 0',
+    };
+  }
+
+  const isActive = body.is_active === undefined ? true : Boolean(body.is_active);
+  return { data: { code, discount_type: discountType, discount_value: discountValue, is_active: isActive } };
+}
+
+/**
+ * GET /mobile-admin/store/promo-codes
+ */
+router.get('/promo-codes', async (_req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('promo_codes')
+      .select(PROMO_CODE_FIELDS)
+      .order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, promo_codes: data ?? [] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * POST /mobile-admin/store/promo-codes
+ * body: { code, discount_type: 'percent'|'fixed', discount_value, is_active? }
+ */
+router.post('/promo-codes', async (req: Request, res: Response) => {
+  const built = buildPromoCodeInsert(req.body ?? {});
+  if ('error' in built) return res.status(400).json({ ok: false, error: built.error });
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('promo_codes')
+      .insert(built.data)
+      .select(PROMO_CODE_FIELDS)
+      .single();
+    if (error) {
+      if (isUniqueViolation(error)) {
+        return res.status(409).json({ ok: false, error: 'Ya existe un código con ese nombre' });
+      }
+      return res.status(500).json({ ok: false, error: error.message });
+    }
+    return res.status(201).json({ ok: true, promo_code: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * PUT /mobile-admin/store/promo-codes/:id
+ * body: { is_active?, discount_value? } — edición parcial (básica).
+ */
+router.put('/promo-codes/:id', async (req: Request, res: Response) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const update: Record<string, unknown> = {};
+
+  if ('is_active' in body) update.is_active = Boolean(body.is_active);
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: existing, error: fetchErr } = await supabase
+      .from('promo_codes')
+      .select('id, discount_type')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (fetchErr) return res.status(500).json({ ok: false, error: fetchErr.message });
+    if (!existing) return res.status(404).json({ ok: false, error: 'Código no encontrado' });
+
+    if ('discount_value' in body) {
+      const value = Number(body.discount_value);
+      if (!isValidDiscountValue(existing.discount_type as PromoDiscountType, value)) {
+        return res.status(400).json({ ok: false, error: 'Valor de descuento inválido' });
+      }
+      update.discount_value = value;
+    }
+
+    if (Object.keys(update).length === 0) {
+      return res.status(400).json({ ok: false, error: 'Nada para actualizar' });
+    }
+
+    const { data, error } = await supabase
+      .from('promo_codes')
+      .update(update)
+      .eq('id', req.params.id)
+      .select(PROMO_CODE_FIELDS)
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, promo_code: data });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * DELETE /mobile-admin/store/promo-codes/:id
+ */
+router.delete('/promo-codes/:id', async (req: Request, res: Response) => {
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { error } = await supabase.from('promo_codes').delete().eq('id', req.params.id);
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    return res.json({ ok: true, deleted_id: req.params.id });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

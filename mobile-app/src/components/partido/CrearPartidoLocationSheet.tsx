@@ -62,16 +62,22 @@ type Step = CrearPartidoFlowStep;
 
 type GenderOption = 'any' | 'male' | 'female' | 'mixed';
 
+/** Duración por defecto si el slot no trae la del club. */
 const DURATION_MIN = 90;
 
+function slotDurationMin(slot: SlotForCreate | null | undefined): number {
+  const d = Number(slot?.durationMinutes);
+  return Number.isFinite(d) && d > 0 ? d : DURATION_MIN;
+}
+
 function slotPriceForDuration(slot: SlotForCreate): string {
-  const totalCents = Math.round(slot.minPriceCents * (DURATION_MIN / 60));
+  const totalCents = Math.round(slot.minPriceCents * (slotDurationMin(slot) / 60));
   return totalCents >= 100 ? `${(totalCents / 100).toFixed(2)}€` : slot.minPriceFormatted;
 }
 
-function buildStartEnd(dateStr: string, time: string): { start_at: string; end_at: string } {
+function buildStartEnd(dateStr: string, time: string, durationMin: number): { start_at: string; end_at: string } {
   const start_at = clubLocalDateTimeToUtcIso(dateStr, time);
-  const end_at = new Date(new Date(start_at).getTime() + DURATION_MIN * 60 * 1000).toISOString();
+  const end_at = new Date(new Date(start_at).getTime() + durationMin * 60 * 1000).toISOString();
   return { start_at, end_at };
 }
 
@@ -225,7 +231,7 @@ export function CrearPartidoLocationSheet({
     courtId: selectedSlot?.courtId,
     date: selectedSlot?.dateStr,
     slot: selectedSlot?.time,
-    durationMinutes: DURATION_MIN,
+    durationMinutes: slotDurationMin(selectedSlot),
     reservationType: partidoPrivado ? 'standard' : 'open_match',
   });
 
@@ -320,7 +326,7 @@ export function CrearPartidoLocationSheet({
 
     setCreating(true);
     setCreateError(null);
-    const { start_at, end_at } = buildStartEnd(selectedSlot.dateStr, selectedSlot.time);
+    const { start_at, end_at } = buildStartEnd(selectedSlot.dateStr, selectedSlot.time, slotDurationMin(selectedSlot));
 
     const intentRes = await createIntentForNewMatch(
       {
@@ -401,14 +407,14 @@ export function CrearPartidoLocationSheet({
       courtName: selectedSlot.courtName,
       clubName: selectedClub.clubName,
       dateTimeFormatted: formatDateTimeForBookingConfirm(selectedSlot.dateStr, selectedSlot.time, locale),
-      duration: t('common.durationMin', { minutes: DURATION_MIN }),
+      duration: t('common.durationMin', { minutes: slotDurationMin(selectedSlot) }),
       priceFormatted: currentPriceFormatted,
       matchVisibility: partidoPrivado ? 'private' : 'public',
       clubId: selectedClub.clubId,
       courtId: selectedSlot.courtId,
       date: selectedSlot.dateStr,
       slot: selectedSlot.time,
-      durationMinutes: DURATION_MIN,
+      durationMinutes: slotDurationMin(selectedSlot),
       matchId: createdMatchId,
     };
     /** El padre (p. ej. MainApp) cierra el flujo dentro de `onPartidoCreado`; no llamar `onClose` después para evitar carrera con la pantalla de éxito. */

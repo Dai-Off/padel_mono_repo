@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { bookingBlocksCourtForAvailability } from '../lib/courtContentionService';
-import { CLUB_IANA_TIMEZONE } from '../lib/clubTimezone';
+import { clubTimezoneOrDefault } from '../lib/clubTimezone';
+import { resolveDayOperatingHours } from '../lib/clubOperatingHours';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { zonedTimeToUtc } from '../routes/learningTimezone';
 
@@ -25,7 +26,12 @@ router.get('/slots', async (req: Request, res: Response) => {
   const club_ids_raw = req.query.club_ids as string | undefined;
   const date = req.query.date as string | undefined; 
   const court_id = req.query.court_id as string | undefined;
-  const duration_minutes = Number(req.query.duration_minutes ?? 60);
+  // Si el cliente fuerza una duración, la respetamos; si no, usamos la del club.
+  const requestedDurationRaw = req.query.duration_minutes;
+  const requestedDuration =
+    requestedDurationRaw != null && Number.isFinite(Number(requestedDurationRaw)) && Number(requestedDurationRaw) > 0
+      ? Number(requestedDurationRaw)
+      : null;
 
   const clubIds = club_ids_raw ? club_ids_raw.split(',') : (club_id_raw ? [club_id_raw] : []);
 
@@ -62,20 +68,46 @@ router.get('/slots', async (req: Request, res: Response) => {
     const courtIds = courts.map(c => c.id);
 
     // 2. Fetch everything in parallel to minimize latency
-    const [scheduleRes, bookingsRes, coursesRes, tournamentsRes] = await Promise.all([
+    const [scheduleRes, bookingsRes, coursesRes, tournamentsRes, clubsTzRes] = await Promise.all([
       supabase.from('club_day_schedule').select('court_id, slot').in('court_id', courtIds).eq('date', date),
       supabase.from('bookings').select('court_id, start_at, end_at, status, reservation_type, court_contention_status').in('court_id', courtIds).neq('status', 'cancelled').is('deleted_at', null).gte('start_at', `${date}T00:00:00Z`).lte('start_at', `${date}T23:59:59Z`),
       supabase.from('club_school_courses').select('id, court_id, club_id, starts_on, ends_on').in('club_id', clubIds).eq('is_active', true),
-      supabase.from('tournaments').select('id, club_id, start_at, end_at, status, tournament_courts(court_id)').in('club_id', clubIds).neq('status', 'cancelled')
+      supabase.from('tournaments').select('id, club_id, start_at, end_at, status, tournament_courts(court_id)').in('club_id', clubIds).neq('status', 'cancelled'),
+      supabase.from('clubs').select('id, timezone, weekly_schedule, slot_duration_min').in('id', clubIds)
     ]);
 
     if (scheduleRes.error) throw scheduleRes.error;
     if (bookingsRes.error) throw bookingsRes.error;
     if (coursesRes.error) throw coursesRes.error;
     if (tournamentsRes.error) throw tournamentsRes.error;
+    if (clubsTzRes.error) throw clubsTzRes.error;
+
+    // Zona horaria por club (derivada del país en el alta). Cada slot local se
+    // convierte a UTC usando la zona del club correspondiente.
+    const clubTzMap = new Map<string, string>(
+      (clubsTzRes.data ?? []).map((c) => [c.id, clubTimezoneOrDefault(c.timezone as string | null)])
+    );
 
     // 3. Prepare lookups
     const weekday = dateToWeekday(new Date(`${date}T00:00:00Z`));
+
+    // Horario operativo del club para ese día (mismo `weekly_schedule` que usa la
+    // grilla del panel y la validación de reservas). Acota los slots a apertura/cierre.
+    const clubHoursMap = new Map(
+      (clubsTzRes.data ?? []).map((c) => [
+        c.id,
+        resolveDayOperatingHours((c as { weekly_schedule?: unknown }).weekly_schedule, weekday),
+      ])
+    );
+
+    // Duración de turno por club: la forzada por el cliente o la configurada en el club (def. 90).
+    const clubDurationMap = new Map<string, number>(
+      (clubsTzRes.data ?? []).map((c) => {
+        const clubDur = Number((c as { slot_duration_min?: number | null }).slot_duration_min);
+        const effective = requestedDuration ?? (Number.isFinite(clubDur) && clubDur > 0 ? clubDur : 90);
+        return [c.id, effective];
+      })
+    );
     
     // School Courses
     const activeCourseIds = (coursesRes.data ?? [])
@@ -106,14 +138,36 @@ router.get('/slots', async (req: Request, res: Response) => {
       courts: new Set((t.tournament_courts as any[]).map(tc => tc.court_id))
     }));
 
-    // Fallback schedule
-    const fallbackSlots = [];
-    for (let h = 7; h <= 22; h++) fallbackSlots.push(`${String(h).padStart(2, '0')}:00:00`);
+    // Genera turnos uniformes encadenados desde la apertura, con paso = duración
+    // del turno del club (no 30' fijo), para que no "corten" turnos de 90/120 y
+    // respeten el horario. Totalmente dinámico según openMin/closeMin
+    // (weekly_schedule) y la duración. Ej.: 08:00–21:00, 90' → 08:00, 09:30,
+    // 11:00, 12:30, 14:00, 15:30, 17:00, 18:30 (último termina 20:00).
+    const buildSlotsWithinHours = (openMin: number, closeMin: number, slotMin: number): string[] => {
+      const out: string[] = [];
+      const step = slotMin > 0 ? slotMin : 90;
+      for (let min = openMin; min + slotMin <= closeMin; min += step) {
+        const h = Math.floor(min / 60);
+        const m = min % 60;
+        out.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`);
+      }
+      return out;
+    };
 
     const results = [];
     for (const court of courts) {
+      const courtTz = clubTzMap.get(court.club_id) ?? clubTimezoneOrDefault(null);
+      const hours = clubHoursMap.get(court.club_id);
+      // Club cerrado ese día: sin slots.
+      if (hours?.closed) {
+        results.push({ court_id: court.id, court_name: court.name, club_id: court.club_id, slot_minutes: clubDurationMap.get(court.club_id) ?? requestedDuration ?? 90, free_slots: [] });
+        continue;
+      }
+      const openMin = hours?.openMin ?? 0;
+      const closeMin = hours?.closeMin ?? 24 * 60;
+      const slotMinutes = clubDurationMap.get(court.club_id) ?? requestedDuration ?? 90;
       const candidates = scheduleRes.data?.filter(s => s.court_id === court.id).map(s => s.slot) ?? [];
-      const slots = candidates.length > 0 ? candidates : fallbackSlots;
+      const slots = candidates.length > 0 ? candidates : buildSlotsWithinHours(openMin, closeMin, slotMinutes);
       
       const courtBookings = (bookingsRes.data ?? [])
         .filter((b) => b.court_id === court.id && bookingBlocksCourtForAvailability(b))
@@ -128,11 +182,15 @@ router.get('/slots', async (req: Request, res: Response) => {
       for (const slotTime of slots) {
         const [h, m] = slotTime.split(':').map(Number);
         const sMin = h * 60 + m;
-        const eMin = sMin + duration_minutes;
-        
+        const eMin = sMin + slotMinutes;
+
+        // Dentro del horario del club: el turno debe empezar tras la apertura y
+        // terminar antes (o en) el cierre (consistente con la validación de reservas).
+        if (sMin < openMin || eMin > closeMin) continue;
+
         const slotHms = slotTime.slice(0, 5);
-        const sMs = zonedTimeToUtc(`${date}T${slotHms}:00`, CLUB_IANA_TIMEZONE).getTime();
-        const eMs = sMs + duration_minutes * 60 * 1000;
+        const sMs = zonedTimeToUtc(`${date}T${slotHms}:00`, courtTz).getTime();
+        const eMs = sMs + slotMinutes * 60 * 1000;
 
         if (courtBookings.some(b => overlaps(sMs, eMs, b.s, b.e))) continue;
         if (courtSchool.some(s => overlaps(sMin, eMin, s.startMin, s.endMin))) continue;
@@ -146,7 +204,7 @@ router.get('/slots', async (req: Request, res: Response) => {
         });
       }
       freeSlots.sort((a, b) => a.start.localeCompare(b.start));
-      results.push({ court_id: court.id, court_name: court.name, club_id: court.club_id, free_slots: freeSlots });
+      results.push({ court_id: court.id, court_name: court.name, club_id: court.club_id, slot_minutes: slotMinutes, free_slots: freeSlots });
     }
 
     return res.json({ ok: true, date, results });

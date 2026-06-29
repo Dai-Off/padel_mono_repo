@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { dayKeyInTz, formatInTimeZone } from '../routes/learningTimezone';
-import { CLUB_IANA_TIMEZONE, clubTimezoneOrDefault } from './clubTimezone';
+import { clubTimezoneOrDefault } from './clubTimezone';
 
 export type DayOperatingHours = {
   openMin: number;
@@ -33,6 +33,37 @@ export function parseClockToMinutes(raw: unknown): number | null {
   const min = Number(m[2]);
   if (!Number.isFinite(h) || !Number.isFinite(min) || h < 0 || h > 23 || min < 0 || min > 59) return null;
   return h * 60 + min;
+}
+
+function minutesToClock(totalMin: number): string {
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+export type WeeklyScheduleEntry = { open: string; close: string; closed: boolean };
+
+/**
+ * Construye un horario semanal uniforme (mismos open/close para los 7 días) a
+ * partir de una franja única (ej. alta de club: "08:00"–"20:00"). Las claves
+ * mon..sun coinciden con las que esperan el editor del panel y
+ * resolveDayOperatingHours. Devuelve null si la franja es inválida, para que el
+ * llamador pueda omitir el campo y dejar el default de la columna.
+ */
+export function buildUniformWeeklySchedule(
+  openTime: unknown,
+  closeTime: unknown,
+): Record<string, WeeklyScheduleEntry> | null {
+  const openMin = parseClockToMinutes(openTime);
+  const closeMin = parseClockToMinutes(closeTime);
+  if (openMin == null || closeMin == null || closeMin <= openMin) return null;
+  const open = minutesToClock(openMin);
+  const close = minutesToClock(closeMin);
+  const out: Record<string, WeeklyScheduleEntry> = {};
+  for (const day of ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const) {
+    out[day] = { open, close, closed: false };
+  }
+  return out;
 }
 
 function weekdayCodeInTz(isoUtc: string, timeZone: string): WeekdayCode {
@@ -166,16 +197,17 @@ export async function assertBookingWithinClubOperatingHours(
 
   const { data: club, error: clubErr } = await supabase
     .from('clubs')
-    .select('weekly_schedule')
+    .select('weekly_schedule, timezone')
     .eq('id', court.club_id)
     .maybeSingle();
   if (clubErr) return { ok: false, error: clubErr.message };
 
+  const clubRow = club as { weekly_schedule?: unknown; timezone?: string | null } | null;
   return bookingWithinOperatingHours({
-    weeklySchedule: (club as { weekly_schedule?: unknown } | null)?.weekly_schedule,
+    weeklySchedule: clubRow?.weekly_schedule,
     startAt: params.startAt,
     endAt: params.endAt,
-    timeZone: CLUB_IANA_TIMEZONE,
+    timeZone: clubTimezoneOrDefault(clubRow?.timezone),
     skipForBlocked,
   });
 }

@@ -22,7 +22,7 @@ import type { SearchCourtResult } from "../api/search";
 import { fetchSearchCourts } from "../api/search";
 import { fetchAvailableSlots } from "../api/availability";
 import { fetchClubById } from "../api/clubs";
-import { fetchPublicClubReviews, type PublicClubReview } from "../api/clubReviews";
+import { fetchPublicClubReviews } from "../api/clubReviews";
 import { fetchCourtsByClubId, type Court } from "../api/courts";
 import { fetchMatches, type MatchEnriched } from "../api/matches";
 import { mapMatchToPartido } from "../api/mapMatchToPartido";
@@ -397,7 +397,6 @@ export function ClubDetailScreen({
   const [scheduleText, setScheduleText] = useState<string | null>(null);
   const [clubCourtsLoading, setClubCourtsLoading] = useState(true);
   const [duration, setDuration] = useState(DURATION_MIN);
-  const [clubReviews, setClubReviews] = useState<PublicClubReview[]>([]);
   const [reviewsAverage, setReviewsAverage] = useState<number | null>(null);
   const loadClubData = useCallback(async () => {
     setClubCourtsLoading(true);
@@ -408,6 +407,10 @@ export function ClubDetailScreen({
       fetchPublicClubReviews(court.clubId),
     ]);
     setClubCourts(courts);
+    // La duración del turno la define el club (no un valor fijo): asegura que la
+    // disponibilidad y la reserva respeten el horario (inicio + duración ≤ cierre).
+    const clubDur = Number(club?.slot_duration_min);
+    if (Number.isFinite(clubDur) && clubDur > 0) setDuration(clubDur);
     setScheduleText(
       club?.weekly_schedule
         ? formatWeeklySchedule(
@@ -416,13 +419,7 @@ export function ClubDetailScreen({
           )
         : null,
     );
-    if (reviewsRes) {
-      setClubReviews(reviewsRes.reviews.slice(0, 8));
-      setReviewsAverage(reviewsRes.summary.average);
-    } else {
-      setClubReviews([]);
-      setReviewsAverage(null);
-    }
+    setReviewsAverage(reviewsRes ? reviewsRes.summary.average : null);
     setClubCourtsLoading(false);
   }, [court.clubId, session?.access_token, t]);
 
@@ -1406,79 +1403,6 @@ export function ClubDetailScreen({
               </View>
             </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t("alerts.review.title")}</Text>
-              {clubReviews.length === 0 ? (
-                <Text style={styles.partidosEmptySubtitle}>{t("search.clubReviewsNotYet")}</Text>
-              ) : (
-                clubReviews.map((rev) => {
-                  const playerName = `${rev.player.first_name ?? ""} ${rev.player.last_name ?? ""}`.trim() || t("common.playerFallback");
-                  return (
-                    <View key={rev.id} style={styles.reviewCard}>
-                      <View style={styles.reviewHead}>
-                        <Text style={styles.reviewAuthor}>{playerName}</Text>
-                        <Text style={styles.reviewStars}>{"★".repeat(rev.rating)}</Text>
-                      </View>
-                      {rev.comment ? (
-                        <Text style={styles.reviewComment}>{rev.comment}</Text>
-                      ) : null}
-                      {rev.club_response ? (
-                        <View style={styles.reviewClubReply}>
-                          <Text style={styles.reviewClubReplyLabel}>
-                            {t("common.clubFallback")}
-                          </Text>
-                          <Text style={styles.reviewClubReplyText}>{rev.club_response}</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  );
-                })
-              )}
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t("common.flashDeals")}</Text>
-              <View style={styles.partidosEmptyState}>
-                <Text style={styles.partidosEmptySubtitle}>
-                  {t("common.comingSoonSection")}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t("common.playerCount")}</Text>
-              <View style={styles.partidosEmptyState}>
-                <Text style={styles.partidosEmptySubtitle}>
-                  {t("common.comingSoonSection")}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t("partidos.statusFinished")}</Text>
-              <View style={styles.partidosEmptyState}>
-                <Text style={styles.partidosEmptySubtitle}>
-                  {t("common.comingSoonSection")}
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>
-                {t("common.standardAccount")} · {t("common.clubFallback")}
-              </Text>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.accountCard,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <Text style={styles.accountText}>
-                  {t("common.comingSoonSection")}
-                </Text>
-                <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
-              </Pressable>
-            </View>
           </>
         )}
       </ScrollView>

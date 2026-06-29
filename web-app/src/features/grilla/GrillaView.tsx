@@ -71,10 +71,12 @@ import { authService } from '../../services/auth';
 import { getSupabaseClient } from '../../lib/supabase';
 import {
   clubIanaTimeZone,
+  setClubTimeZone,
   formatTimeHHmmInClubTz,
   dayKeyInClubTz,
   nowMinutesInClubTz,
   clubClockLabel,
+  clubTimeZoneShortLabel,
   gridBoundsForClubDay,
   zonedTimeToUtc,
 } from '../../lib/clubTimeZone';
@@ -129,6 +131,7 @@ const useClubData = (dateOrStr: Date | string) => {
     const [typeColorOverrides, setTypeColorOverrides] = useState<Record<string, string>>({});
     const [typeConfigs, setTypeConfigs] = useState<Record<string, { color: string | null; display_name: string; is_system: boolean }>>({});
     const [weeklySchedule, setWeeklySchedule] = useState<unknown>({});
+    const [slotDurationMin, setSlotDurationMin] = useState<number | undefined>(undefined);
     const courtsRef = useRef<Court[]>([]);
     const dateStr = toDateStr(dateOrStr);
 
@@ -164,11 +167,14 @@ const useClubData = (dateOrStr: Date | string) => {
                         // Fail silently — cards fall back to hardcoded colors
                     }
                     try {
-                        const clubRes = await apiFetchWithAuth<{ ok: boolean; club?: { weekly_schedule?: unknown } }>(
+                        const clubRes = await apiFetchWithAuth<{ ok: boolean; club?: { weekly_schedule?: unknown; timezone?: string | null; slot_duration_min?: number | null } }>(
                             `/clubs/${encodeURIComponent(id)}`,
                         );
                         if (clubRes?.ok && clubRes.club) {
+                            setClubTimeZone(clubRes.club.timezone);
                             setWeeklySchedule(clubRes.club.weekly_schedule ?? {});
+                            const dur = Number(clubRes.club.slot_duration_min);
+                            setSlotDurationMin(Number.isFinite(dur) && dur > 0 ? dur : undefined);
                         }
                     } catch {
                         setWeeklySchedule({});
@@ -587,6 +593,7 @@ const useClubData = (dateOrStr: Date | string) => {
         refresh,
         clubId,
         weeklySchedule,
+        slotDurationMin,
         toggleCourtHidden,
         addHiddenCourt,
         removeCourt,
@@ -812,6 +819,7 @@ function GrillaViewInner() {
     refresh,
     clubId,
     weeklySchedule,
+    slotDurationMin,
     toggleCourtHidden,
     addHiddenCourt,
     removeCourt,
@@ -894,7 +902,9 @@ function GrillaViewInner() {
     tick();
     const id = setInterval(tick, 60000);
     return () => clearInterval(id);
-  }, []);
+    // weeklySchedule cambia al cargar el club (junto con su zona horaria),
+    // así que recalculamos el marcador "ahora" con la zona ya fijada.
+  }, [weeklySchedule]);
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [recentlyDroppedId, setRecentlyDroppedId] = useState<string | null>(null);
@@ -2309,16 +2319,17 @@ function resolveManualBookingTotalCents(
     isDisabled: boolean,
   ) => {
     if (isDisabled || gridBounds.closed) return;
+    const effectiveSlotMin = slotDurationMin && slotDurationMin > 0 ? slotDurationMin : 90;
     const startMin = parseTimeStrInBounds(timeStr, gridBounds);
-    if (startMin < gridBounds.openMin || startMin + 90 > gridBounds.closeMin) return;
+    if (startMin < gridBounds.openMin || startMin + effectiveSlotMin > gridBounds.closeMin) return;
     const newId = `new-${Date.now()}`;
     setReservations(prev => [...prev, {
       id: newId, courtId, courtName,
-      startTime: timeStr, durationMinutes: 90,
+      startTime: timeStr, durationMinutes: effectiveSlotMin,
       playerName: '', status: 'available', booking_type: 'standard',
     }]);
     setSelectedModalReservationId(newId);
-  }, [gridBounds]);
+  }, [gridBounds, slotDurationMin]);
 
   const handleLogout = () => {
     authService.logout();
@@ -2328,7 +2339,7 @@ function resolveManualBookingTotalCents(
   if (loading || !authResolved) return <PageSpinner />;
 
   return (
-    <GridBoundsProvider weeklySchedule={weeklySchedule} dateStr={selectedDateKey}>
+    <GridBoundsProvider weeklySchedule={weeklySchedule} dateStr={selectedDateKey} slotDurationMin={slotDurationMin}>
     <ZoomContext.Provider value={{ zoomLevel, scale, setZoomLevel }}>
       <div className="grilla-shell h-dvh flex flex-col bg-gray-100 font-sans overflow-hidden">
         {!isMobileDevice && (
@@ -2537,10 +2548,10 @@ function resolveManualBookingTotalCents(
                     <div className="flex flex-wrap items-center gap-1 md:gap-2">
                       <span
                         className="flex items-center gap-1 px-2 py-0.5 rounded border border-[#006A6A]/30 bg-[#006A6A]/5 text-[10px] font-mono font-semibold text-[#006A6A] shrink-0"
-                        title="Hora actual del club (España)"
+                        title="Hora actual del club"
                       >
                         {clubClock}
-                        <span className="font-sans font-medium text-gray-500">España</span>
+                        <span className="font-sans font-medium text-gray-500">{clubTimeZoneShortLabel()}</span>
                       </span>
                       <span className="text-gray-300 select-none">|</span>
                       <span className="text-[10px] font-medium text-gray-500 shrink-0 mr-1">{t('toolbar.dateLabel')}</span>

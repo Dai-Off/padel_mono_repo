@@ -20,6 +20,7 @@ import {
 } from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
+import { clubTimezoneOrDefault } from '../lib/clubTimezone';
 import { repairOpenMatchPlayersIfNeeded, syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
 import {
   fetchBookingParticipantsForRefund,
@@ -722,8 +723,16 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     if (!hoursCheck.ok) {
       return res.status(400).json({ ok: false, error: hoursCheck.error });
     }
-    const { data: courtClubRow } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
+    const { data: courtClubRow } = await supabase
+      .from('courts')
+      .select('club_id, club:clubs(timezone)')
+      .eq('id', court_id)
+      .maybeSingle();
     const clubForOnline = (courtClubRow as { club_id?: string } | null)?.club_id;
+    // El timezone de la reserva lo define el club (donde está físicamente la
+    // pista), no el dispositivo. Evita guardar 'Europe/Madrid' por defecto.
+    const clubRawTz = (courtClubRow as { club?: { timezone?: string | null } } | null)?.club?.timezone;
+    const bookingTimezone = clubTimezoneOrDefault(clubRawTz ?? (typeof timezone === 'string' ? timezone : null));
     const sch = ['mobile', 'web', 'manual', 'system'].includes(source_channel) ? source_channel : 'web';
     if (clubForOnline) {
       const allowMap = await fetchAllowOnlineByType(supabase, clubForOnline);
@@ -747,7 +756,7 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
           organizer_player_id,
           start_at,
           end_at,
-          timezone: timezone ?? 'Europe/Madrid',
+          timezone: bookingTimezone,
           total_price_cents: Number(total_price_cents),
           currency: 'EUR',
           status: 'pending_payment',

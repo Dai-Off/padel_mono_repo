@@ -4,9 +4,18 @@ import { fetchSearchCourts } from './search';
 import { fetchAvailableSlots } from './availability';
 import type { SearchCourtResult } from './search';
 
+/** Duración por defecto si el club no reporta su `slot_minutes`. */
+const DEFAULT_SLOT_MIN = 90;
+
+function durationLabel(min: number): string {
+  return `${min}min`;
+}
+
 export type SlotForCreate = {
   time: string;
   duration: string;
+  /** Duración del turno en minutos, según la config del club. */
+  durationMinutes: number;
   courtId: string;
   /** Nombre de pista (SearchCourtResult.courtName) para confirmación post-pago. */
   courtName: string;
@@ -66,7 +75,8 @@ function toSlots(r: SearchCourtResult, dateStr: string, dateLabel: string): Slot
   const times = filterSlotsStartingAfterNow(dateStr, r.timeSlots ?? [], now);
   return times.map((time) => ({
     time,
-    duration: '90min',
+    duration: durationLabel(DEFAULT_SLOT_MIN),
+    durationMinutes: DEFAULT_SLOT_MIN,
     courtId: r.id,
     courtName: r.courtName,
     dateStr,
@@ -178,10 +188,11 @@ export async function fetchClubAvailabilityForCreate(
     }
   });
 
-  // Obtenemos disponibilidad real (requiere token) en BATCH para mejorar performance
+  // Obtenemos disponibilidad real (requiere token) en BATCH para mejorar performance.
+  // Sin forzar duración: el backend usa la duración de turno configurada por cada club.
   const [day1Res, day2Res] = await Promise.all([
-    fetchAvailableSlots({ clubIds, date: today, token, durationMinutes: 90 }),
-    fetchAvailableSlots({ clubIds, date: tomorrow, token, durationMinutes: 90 })
+    fetchAvailableSlots({ clubIds, date: today, token }),
+    fetchAvailableSlots({ clubIds, date: tomorrow, token })
   ]);
 
   const finalResults: ClubDisplay[] = [];
@@ -202,13 +213,15 @@ export async function fetchClubAvailabilityForCreate(
         (r) => r.club_id === clubId && todayCourtIdsForClub.has(r.court_id)
       );
       for (const courtRes of clubCourts) {
+        const slotMin = courtRes.slot_minutes ?? DEFAULT_SLOT_MIN;
         const filteredTimes = filterSlotsStartingAfterNow(today, courtRes.free_slots.map(s => s.start), now);
         for (const time of filteredTimes) {
           const p = todayPrices.find(r => r.id === courtRes.court_id);
           const cm = metaByCourt.get(courtRes.court_id);
           slots.push({
             time,
-            duration: '90min',
+            duration: durationLabel(slotMin),
+            durationMinutes: slotMin,
             courtId: courtRes.court_id,
             courtName: courtRes.court_name,
             dateStr: today,
@@ -242,13 +255,15 @@ export async function fetchClubAvailabilityForCreate(
         (r) => r.club_id === clubId && tomorrowCourtIdsForClub.has(r.court_id)
       );
       for (const courtRes of clubCourts) {
+        const slotMin = courtRes.slot_minutes ?? DEFAULT_SLOT_MIN;
         const filteredTimes = filterSlotsStartingAfterNow(tomorrow, courtRes.free_slots.map(s => s.start), now);
         for (const time of filteredTimes) {
           const p = tomorrowPrices.find(r => r.id === courtRes.court_id);
           const cm = metaByCourt.get(courtRes.court_id);
           slots.push({
             time,
-            duration: '90min',
+            duration: durationLabel(slotMin),
+            durationMinutes: slotMin,
             courtId: courtRes.court_id,
             courtName: courtRes.court_name,
             dateStr: tomorrow,
