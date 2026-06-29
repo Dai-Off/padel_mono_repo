@@ -4,6 +4,7 @@ import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { calcEloPhase1, calcPhase2Result, calcFinalElo, eloToMu, getNextQuestionState, getPhase2Pool, type OnboardingAnswer } from '../services/onboardingService';
 import { calcEloRating } from '../services/levelingService';
+import { computeFreshAssessment } from '../services/coachAssessmentService';
 import { ligaFromEloWithBands } from '../services/matchmakingLeague';
 import { getActiveMatchmakingSeasonId } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
@@ -1578,12 +1579,14 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
     const wl = await fetchPlayerMatchmakingWl(supabase, id);
     const publicData = toPublicPlayer(player as Row);
 
-    // Radar / Coach Assessment
-    const { data: coach } = await supabase
-      .from('coach_assessments')
-      .select('level_number, level_name, skills, strengths, improvements, recommendation')
-      .eq('player_id', id)
-      .maybeSingle();
+    // Radar / Coach Assessment: se computa FRESCO (ELO + learning) en vez de leer
+    // la fila cruda, que puede estar obsoleta si el ELO cambió tras partidos.
+    let coach: Awaited<ReturnType<typeof computeFreshAssessment>> | null = null;
+    try {
+      coach = await computeFreshAssessment(id);
+    } catch (e) {
+      console.error('[public-profile] computeFreshAssessment:', e instanceof Error ? e.message : e);
+    }
 
     // Últimos partidos (resumen)
     const { data: recentMatches } = await supabase

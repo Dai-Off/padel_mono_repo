@@ -144,7 +144,12 @@ export const TrophyShowcaseSection: React.FC = () => {
           <>
             <View style={styles.list}>
               {displayed.map((a) => (
-                <AchievementCard key={a.id} achievement={a} editable onToggleVisibility={handleToggleVisibility} />
+                <AchievementCard
+                  key={a.id}
+                  achievement={a}
+                  editable={a.type !== 'course'}
+                  onToggleVisibility={handleToggleVisibility}
+                />
               ))}
             </View>
             {filtered.length > PREVIEW_COUNT ? (

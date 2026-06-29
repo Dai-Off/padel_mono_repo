@@ -107,12 +107,15 @@ export async function computeSignals(supabase: Supa, playerId: string): Promise<
     getCompletedCourses(supabase, playerId),
   ]);
 
-  const rows = (mp ?? []) as { result: string }[];
-  const matches = rows.length;
-  const wins = rows.filter((r) => r.result === 'win').length;
+  // Solo partidos con resultado decidido (no 'pending'/'invited').
+  const played = (mp ?? []).filter(
+    (r) => r.result === 'win' || r.result === 'loss' || r.result === 'draw',
+  ) as { result: string }[];
+  const matches = played.length;
+  const wins = played.filter((r) => r.result === 'win').length;
   let winStreakMax = 0;
   let cur = 0;
-  for (const r of rows) {
+  for (const r of played) {
     if (r.result === 'win') {
       cur += 1;
       if (cur > winStreakMax) winStreakMax = cur;
@@ -179,10 +182,13 @@ export async function evaluateAndGrant(supabase: Supa, playerId: string): Promis
   if (!toGrant.length) return [];
 
   const rows = toGrant.map((u) => ({ player_id: playerId, unlockable_id: u.id }));
-  const { error } = await supabase.from('player_unlockables').insert(rows);
+  // upsert ignorando duplicados: si otra petición concurrente ya insertó alguno,
+  // no falla el lote entero (insert sí lo haría ante un conflicto de PK).
+  const { error } = await supabase
+    .from('player_unlockables')
+    .upsert(rows, { onConflict: 'player_id,unlockable_id', ignoreDuplicates: true });
   if (error) {
-    // Si hay carrera (otro request insertó), no es fatal.
-    console.error('[unlockablesEngine] grant insert error:', error.message);
+    console.error('[unlockablesEngine] grant upsert error:', error.message);
   }
   return toGrant;
 }

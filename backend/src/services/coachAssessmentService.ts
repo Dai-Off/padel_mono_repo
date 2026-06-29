@@ -450,6 +450,25 @@ export async function recomputeAndGetAssessment(playerId: string) {
   return { ...data, stats };
 }
 
+/**
+ * Calcula el assessment FRESCO (skills + meta) sin escribir en BD ni stats.
+ * Para superficies de solo-lectura (p.ej. perfil público) que deben mostrar el
+ * radar al día aunque el ELO del jugador haya cambiado y la fila esté obsoleta.
+ */
+export async function computeFreshAssessment(playerId: string): Promise<{
+  level_number: number;
+  level_name: string;
+  skills: SkillSet;
+  strengths: string[];
+  improvements: string[];
+  recommendation: string;
+}> {
+  const supabase = getSupabaseServiceRoleClient();
+  const skills = await computeDynamicSkills(supabase, playerId);
+  const meta = resultMetaFromSkills(skills);
+  return { skills, ...meta };
+}
+
 export async function getPlayerAssessment(playerId: string) {
   const supabase = getSupabaseServiceRoleClient();
   
