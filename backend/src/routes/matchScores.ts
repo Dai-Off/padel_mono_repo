@@ -379,15 +379,28 @@ router.post('/:id/score/vote', async (req: Request, res: Response) => {
 
   if (rejects >= 2) {
     const now = new Date().toISOString();
+    // Limpiar votos anteriores para permitir nueva ronda
+    await supabase
+      .from('score_votes')
+      .delete()
+      .eq('match_id', matchId);
+
     const { data: upd, error: eUpd } = await supabase
       .from('matches')
-      .update({ score_status: 'no_result', updated_at: now })
+      .update({
+        score_status: 'pending',
+        score_proposer_id: null,
+        score_proposed_at: null,
+        sets: null,
+        match_end_reason: null,
+        updated_at: now,
+      })
       .eq('id', matchId)
       .eq('score_status', 'pending_votes')
       .select('id')
       .maybeSingle();
     if (eUpd) return res.status(500).json({ ok: false, error: eUpd.message });
-    return res.json({ ok: true, score_status: 'no_result', votes: { confirm: confirms, reject: rejects } });
+    return res.json({ ok: true, score_status: 'pending', votes: { confirm: 0, reject: 0 } });
   }
 
   return res.json({ ok: true, score_status: 'pending_votes', votes: { confirm: confirms, reject: rejects } });
