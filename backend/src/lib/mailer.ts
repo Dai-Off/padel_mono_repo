@@ -660,6 +660,137 @@ export async function sendBookingRelocatedEmail(
   return sendMailSmtp(to, subject, html);
 }
 
+function formatEurFromCents(cents: number): string {
+  return `${(cents / 100).toFixed(2).replace('.', ',')} €`;
+}
+
+export async function sendBookingCancellationNoticeEmail(params: {
+  to: string;
+  playerName: string;
+  clubName: string;
+  matchDateStr: string;
+  matchTimeStr: string;
+  courtName: string;
+  scenario: 'cancelled' | 'left' | 'removed';
+  cancelledBy: 'admin' | 'player';
+  refundSummary: {
+    paidTotalCents: number;
+    refundCents: number;
+    refundPercent: number;
+    cashAtCounter: boolean;
+    hadPayment: boolean;
+  };
+  policyMessage?: string;
+}): Promise<{ sent: boolean; error?: string }> {
+  const {
+    to,
+    playerName,
+    clubName,
+    matchDateStr,
+    matchTimeStr,
+    courtName,
+    scenario,
+    cancelledBy,
+    refundSummary,
+    policyMessage,
+  } = params;
+
+  const subjectByScenario: Record<typeof scenario, string> = {
+    cancelled: 'Tu partido ha sido cancelado — WeMatch',
+    left: 'Has salido del partido — WeMatch',
+    removed: 'Baja del partido — WeMatch',
+  };
+
+  const introByScenario: Record<typeof scenario, string> = {
+    cancelled:
+      cancelledBy === 'admin'
+        ? 'Te informamos que tu partido en <strong style="color: #FFFFFF;">{club}</strong> ha sido <strong>cancelado por el club</strong>.'
+        : 'Te confirmamos que has <strong>cancelado tu partido</strong> en <strong style="color: #FFFFFF;">{club}</strong>.',
+    left: 'Te confirmamos que has <strong>salido del partido</strong> en <strong style="color: #FFFFFF;">{club}</strong>. El partido sigue activo para el resto de jugadores.',
+    removed:
+      'Te informamos que has sido <strong>dado de baja del partido</strong> en <strong style="color: #FFFFFF;">{club}</strong> por el club.',
+  };
+
+  let refundHtml: string;
+  if (refundSummary.refundCents > 0) {
+    const amount = formatEurFromCents(refundSummary.refundCents);
+    const percentLine =
+      refundSummary.refundPercent < 100
+        ? `<p style="font-size: 14px; color: #AAAAAA; margin: 8px 0 0;">Reembolso aplicado: <strong style="color: #FFFFFF;">${refundSummary.refundPercent}%</strong> del importe pagado.</p>`
+        : '';
+    const cashLine = refundSummary.cashAtCounter
+      ? `<p style="font-size: 14px; color: #AAAAAA; margin: 8px 0 0;">La parte en efectivo se devuelve en <strong style="color: #FFFFFF;">mostrador del club</strong>.</p>`
+      : `<p style="font-size: 14px; color: #AAAAAA; margin: 8px 0 0;">El importe se acredita a tu método de pago o monedero del club.</p>`;
+    refundHtml = `
+      <div style="background-color: #111111; padding: 25px; border-radius: 12px; margin-bottom: 35px; border: 1px solid #222222;">
+        <h4 style="color: #F18F34; font-size: 18px; margin-top: 0; margin-bottom: 10px; text-transform: uppercase;">Reembolso</h4>
+        <p style="font-size: 15px; color: #FFFFFF; margin: 0;">Se ha procesado un reembolso de <strong style="color: #F18F34;">${escapeHtml(amount)}</strong>.</p>
+        ${percentLine}
+        ${cashLine}
+      </div>`;
+  } else if (refundSummary.hadPayment) {
+    const policyText =
+      policyMessage?.trim() ||
+      'Según la política de cancelación del club, no corresponde reembolso para esta baja.';
+    refundHtml = `
+      <div style="background-color: #111111; padding: 25px; border-radius: 12px; margin-bottom: 35px; border: 1px solid #222222;">
+        <h4 style="color: #F18F34; font-size: 18px; margin-top: 0; margin-bottom: 10px; text-transform: uppercase;">Sin reembolso</h4>
+        <p style="font-size: 15px; color: #FFFFFF; margin: 0;">${escapeHtml(policyText)}</p>
+      </div>`;
+  } else {
+    refundHtml = `
+      <div style="background-color: #111111; padding: 25px; border-radius: 12px; margin-bottom: 35px; border: 1px solid #222222;">
+        <p style="font-size: 15px; color: #FFFFFF; margin: 0;">No había pagos registrados a tu nombre en esta reserva.</p>
+      </div>`;
+  }
+
+  const intro = introByScenario[scenario].replace('{club}', escapeHtml(clubName));
+  const subject = subjectByScenario[scenario];
+
+  const html = `
+    <div style="background-color: #000000; color: #FFFFFF; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px 20px; max-width: 600px; margin: 0 auto; line-height: 1.6;">
+      <div style="text-align: center; margin-bottom: 40px;">
+        <img src="https://oxowmfhnorxnabhzkcmi.supabase.co/storage/v1/object/public/public-assets/imagen_2026-04-22_105702379.png" alt="WeMatch" width="120" style="display: block; margin: 0 auto;" />
+      </div>
+      <div style="padding: 0 10px;">
+        <p style="font-size: 16px; margin-bottom: 25px;">
+          Hola <span style="color: #F18F34; font-weight: bold;">${escapeHtml(playerName)}</span>,
+        </p>
+        <p style="font-size: 16px; margin-bottom: 25px;">
+          ${intro}
+        </p>
+        <div style="background-color: #111111; padding: 25px; border-radius: 12px; margin-bottom: 35px; border: 1px solid #222222;">
+          <table style="width: 100%; border-collapse: collapse; font-size: 15px;">
+            <tr>
+              <td style="padding: 6px 0; color: #AAAAAA; width: 35%;"><strong>Fecha:</strong></td>
+              <td style="padding: 6px 0; color: #FFFFFF;">${escapeHtml(matchDateStr)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #AAAAAA;"><strong>Hora:</strong></td>
+              <td style="padding: 6px 0; color: #FFFFFF;">${escapeHtml(matchTimeStr)}</td>
+            </tr>
+            <tr>
+              <td style="padding: 6px 0; color: #AAAAAA;"><strong>Pista:</strong></td>
+              <td style="padding: 6px 0; color: #FFFFFF;">${escapeHtml(courtName)}</td>
+            </tr>
+          </table>
+        </div>
+        ${refundHtml}
+        <p style="font-size: 16px; font-weight: bold; margin-bottom: 50px;">
+          El equipo de WeMatch
+        </p>
+        <hr style="border: 0; border-top: 1px solid #333333; margin-bottom: 30px;" />
+        <div style="text-align: center;">
+          <p style="font-size: 11px; color: #666666;">
+            © 2024 WeMatch Padel. Todos los derechos reservados.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+  return sendMailSmtp(to, subject, html);
+}
+
 export async function sendBookingCancelledByOverrideEmail(
   to: string,
   playerName: string,

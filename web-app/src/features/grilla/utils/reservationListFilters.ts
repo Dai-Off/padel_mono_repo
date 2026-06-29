@@ -54,7 +54,8 @@ export function isReservationPaid(res: Reservation): boolean {
     const total = totalPriceCents(res);
     const paid = res.totalPaidCents ?? 0;
     if (total <= 0) return paid > 0 || res.status === 'confirmed' || res.status === 'flat_rate';
-    return paid >= total;
+    if (paid >= total) return true;
+    return res.status === 'confirmed' || res.status === 'flat_rate';
 }
 
 export function isReservationPartiallyPaid(res: Reservation): boolean {
@@ -160,7 +161,13 @@ function rawBookingFullyPaid(
     return paid >= total;
 }
 
-/** Grid: públicos abiertos desde 3 jugadores; otros partidos 4 jugadores o pago completo. Lista muestra todos. */
+/** Partido con fila en `matches` y visibilidad privada. */
+export function isPrivateMatchBooking(b: { matches?: unknown }): boolean {
+    const match = resolveLinkedMatch(b);
+    return String(match?.visibility ?? '').toLowerCase() === 'private';
+}
+
+/** Grid: públicos abiertos desde 3 jugadores; partidos privados pagados al 100%; otros 4 jugadores o pago completo. Lista muestra todos. */
 export function shouldShowRawBookingInGrid(
     b: RawBookingPaymentInput & {
         court_contention_status?: string | null;
@@ -174,8 +181,18 @@ export function shouldShowRawBookingInGrid(
         matches?: unknown;
     },
 ): boolean {
-    if (b.court_contention_status === 'competing') return false;
     if (b.court_contention_status === 'lost') return false;
+
+    const type = rawBookingType(b);
+    const isMatchType = MATCH_GRID_FILL_TYPES.has(type);
+
+    // Mostrador: bloqueos, torneos, escuela, etc. Siempre visibles. Los partidos siguen las reglas de abajo.
+    if (b.source_channel === 'manual' && !isMatchType) return true;
+
+    if (b.court_contention_status === 'competing' && !isPrivateMatchBooking(b)) {
+        if (rawBookingFullyPaid(b) && (b.status === 'confirmed' || b.status === 'flat_rate')) return true;
+        return false;
+    }
 
     if (isPublicOpenMatchBooking(b)) {
         if (b.court_contention_status === 'won') return true;
@@ -184,10 +201,11 @@ export function shouldShowRawBookingInGrid(
         return false;
     }
 
-    if (b.source_channel === 'manual') return true;
+    if (isPrivateMatchBooking(b)) {
+        return rawBookingFullyPaid(b);
+    }
 
-    const type = rawBookingType(b);
-    if (!MATCH_GRID_FILL_TYPES.has(type)) return true;
+    if (!isMatchType) return true;
 
     if (rawPlayerCount(b) >= 4) return true;
     return rawBookingFullyPaid(b);
@@ -196,15 +214,18 @@ export function shouldShowRawBookingInGrid(
 /** Same rule on mapped reservations (e.g. optimistic grid updates). */
 export function shouldShowReservationInGrid(res: Reservation): boolean {
     const type = normalizeReservationTypeSlug(res.booking_type ?? res.reservation_type ?? 'standard');
+    const isMatchType = MATCH_GRID_FILL_TYPES.has(type);
+
+    if (res.source_channel === 'manual' && !isMatchType) return true;
+
     if (type === 'open_match') {
         if (playerCount(res) >= PUBLIC_OPEN_MATCH_MIN_PLAYERS) return true;
         if (isReservationPaid(res)) return true;
         return false;
     }
-    if (res.source_channel === 'manual') return true;
-    if (!MATCH_GRID_FILL_TYPES.has(type)) return true;
-    if (isReservationPlayersComplete(res)) return true;
-    return isReservationPaid(res);
+    if (!isMatchType) return true;
+    if (isReservationPaid(res)) return true;
+    return false;
 }
 
 export function willPublicOpenMatchStayOffGrid(playerCount: number, fullyPaid: boolean): boolean {

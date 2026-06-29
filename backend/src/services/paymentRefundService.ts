@@ -1,5 +1,6 @@
 import Stripe from 'stripe';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { scaleCentsByPercent } from '../lib/refundPercent';
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY?.trim();
 
@@ -33,9 +34,11 @@ export async function refundStripeBookingPaymentTransactions(
   supabase: ServiceSupabase,
   bookingId: string,
   _clubId: string,
+  refundPercent = 100,
 ): Promise<{ errors: string[]; stripeRefunded: number }> {
   return refundStripeTransactionsInternal(supabase, {
     bookingId,
+    refundPercent,
   });
 }
 
@@ -45,10 +48,12 @@ export async function refundStripeBookingPaymentForPlayer(
   bookingId: string,
   _clubId: string,
   payerPlayerId: string,
+  refundPercent = 100,
 ): Promise<{ errors: string[]; stripeRefunded: number }> {
   return refundStripeTransactionsInternal(supabase, {
     bookingId,
     payerPlayerId,
+    refundPercent,
   });
 }
 
@@ -77,17 +82,95 @@ export async function refundStripeTournamentPaymentForPlayer(
   });
 }
 
+async function markTxStatus(
+  supabase: ServiceSupabase,
+  txId: string,
+  status: 'refunded' | 'failed',
+  now: string,
+): Promise<string | null> {
+  const { error } = await supabase
+    .from('payment_transactions')
+    .update({ status, updated_at: now })
+    .eq('id', txId);
+  return error?.message ?? null;
+}
+
+function isAlreadyRefundedError(msg: string): boolean {
+  return /already been refunded|already refunded|has already been fully refunded/i.test(msg);
+}
+
+/** PI sin cargo real en Stripe (cancelado, abandonado, nunca cobrado). */
+function isNoChargeToRefundError(msg: string): boolean {
+  return /does not have a successful charge|does not have a charge|No such payment_intent|has been canceled|was canceled|payment_intent_unexpected_state/i.test(
+    msg,
+  );
+}
+
+async function resolveStripeRefundForTx(
+  stripe: Stripe,
+  supabase: ServiceSupabase,
+  tx: PaymentTxRow,
+  now: string,
+  refundPercent: number,
+): Promise<{ ok: true; stripeRefunded: number } | { ok: false; error: string }> {
+  const refundCents = scaleCentsByPercent(tx.amount_cents, refundPercent);
+  if (refundCents <= 0) {
+    return { ok: true, stripeRefunded: 0 };
+  }
+
+  try {
+    await stripe.refunds.create(
+      {
+        payment_intent: tx.stripe_payment_intent_id,
+        amount: refundCents,
+      },
+      { idempotencyKey: `refund_pi_${tx.id}_${refundPercent}`.slice(0, 255) },
+    );
+    const upErr = await markTxStatus(supabase, tx.id, 'refunded', now);
+    if (upErr) return { ok: false, error: `Actualizar tx ${tx.id} a refunded: ${upErr}` };
+    return { ok: true, stripeRefunded: 1 };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (isAlreadyRefundedError(msg)) {
+      const upErr = await markTxStatus(supabase, tx.id, 'refunded', now);
+      if (upErr) return { ok: false, error: `Actualizar tx ${tx.id} a refunded: ${upErr}` };
+      return { ok: true, stripeRefunded: 1 };
+    }
+    if (isNoChargeToRefundError(msg)) {
+      try {
+        const pi = await stripe.paymentIntents.retrieve(tx.stripe_payment_intent_id);
+        if ((pi.amount_received ?? 0) > 0) {
+          return { ok: false, error: `Stripe reembolso ${tx.stripe_payment_intent_id}: ${msg}` };
+        }
+        console.warn(
+          `[paymentRefund] PI ${pi.id} sin cargo (status=${pi.status}); tx ${tx.id} marcada como failed`,
+        );
+      } catch {
+        console.warn(
+          `[paymentRefund] PI ${tx.stripe_payment_intent_id} no recuperable; tx ${tx.id} marcada como failed`,
+        );
+      }
+      const upErr = await markTxStatus(supabase, tx.id, 'failed', now);
+      if (upErr) return { ok: false, error: `Actualizar tx ${tx.id} a failed: ${upErr}` };
+      return { ok: true, stripeRefunded: 0 };
+    }
+    return { ok: false, error: `Stripe reembolso ${tx.stripe_payment_intent_id}: ${msg}` };
+  }
+}
+
 async function refundStripeTransactionsInternal(
   supabase: ServiceSupabase,
   filter: {
     bookingId?: string;
     tournamentId?: string;
     payerPlayerId?: string;
+    refundPercent?: number;
   },
 ): Promise<{ errors: string[]; stripeRefunded: number }> {
   const errors: string[] = [];
   let stripeRefunded = 0;
   const now = new Date().toISOString();
+  const refundPercent = Math.max(0, Math.min(100, filter.refundPercent ?? 100));
 
   let q = supabase.from('payment_transactions').select('*').eq('status', 'succeeded');
   if (filter.bookingId) q = q.eq('booking_id', filter.bookingId);
@@ -108,10 +191,7 @@ async function refundStripeTransactionsInternal(
     }
 
     if (tx.amount_cents <= 0) {
-      await supabase
-        .from('payment_transactions')
-        .update({ status: 'refunded', updated_at: now })
-        .eq('id', tx.id);
+      await markTxStatus(supabase, tx.id, 'refunded', now);
       continue;
     }
 
@@ -121,28 +201,13 @@ async function refundStripeTransactionsInternal(
       );
       continue;
     }
-    try {
-      await stripe.refunds.create(
-        {
-          payment_intent: tx.stripe_payment_intent_id,
-        },
-        { idempotencyKey: `refund_pi_${tx.id}`.slice(0, 255) },
-      );
-      stripeRefunded += 1;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (/already been refunded|already refunded/i.test(msg)) {
-        stripeRefunded += 1;
-      } else {
-        errors.push(`Stripe reembolso ${tx.stripe_payment_intent_id}: ${msg}`);
-        continue;
-      }
+
+    const outcome = await resolveStripeRefundForTx(stripe, supabase, tx, now, refundPercent);
+    if (!outcome.ok) {
+      errors.push(outcome.error);
+      continue;
     }
-    const { error: upErr } = await supabase
-      .from('payment_transactions')
-      .update({ status: 'refunded', updated_at: now })
-      .eq('id', tx.id);
-    if (upErr) errors.push(`Actualizar tx ${tx.id} a refunded: ${upErr.message}`);
+    stripeRefunded += outcome.stripeRefunded;
   }
 
   return { errors, stripeRefunded };
