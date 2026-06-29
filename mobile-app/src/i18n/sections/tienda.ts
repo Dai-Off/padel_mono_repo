@@ -32,4 +32,29 @@ export interface TiendaTranslationKeys {
   emptyProducts: string;
   emptySearch: string;
   emptyFavorites: string;
+  cart: {
+    title: string;
+    empty: string;
+    emptyHint: string;
+    goToShop: string;
+    subtotal: string;
+    total: string;
+    items: string;
+    clear: string;
+    remove: string;
+    maxStock: string;
+    checkout: string;
+    checkoutError: string;
+    successTitle: string;
+    successBody: string;
+    continueShopping: string;
+    addedToast: string;
+    promoPlaceholder: string;
+    promoApply: string;
+    promoApplying: string;
+    promoApplied: string;
+    promoRemove: string;
+    promoInvalid: string;
+    discount: string;
+  };
 }

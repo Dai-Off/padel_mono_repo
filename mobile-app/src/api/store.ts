@@ -76,6 +76,8 @@ export type TiendaProduct = {
   image: string;
   badgePct?: string;
   stockDisplay?: TiendaStockDisplay;
+  /** Stock disponible (unidades). Se usa como tope al añadir al carrito. */
+  stock: number;
   inStock: boolean;
   category: StoreCategory;
   isFeatured: boolean;
@@ -122,6 +124,7 @@ export function mapStoreProductToTienda(product: StoreProduct): TiendaProduct | 
       product.stock_quantity,
       product.low_stock_threshold,
     ),
+    stock: product.stock_quantity,
     inStock: true,
     category: product.category,
     isFeatured: product.is_featured,
@@ -230,4 +233,98 @@ export async function fetchStoreCollections(): Promise<StoreCollectionsResponse>
     };
   }
   return data;
+}
+
+export interface StoreCheckoutItemInput {
+  product_id: string;
+  quantity: number;
+}
+
+export interface CreateStoreOrderIntentResponse {
+  ok: boolean;
+  clientSecret?: string;
+  paymentIntentId?: string;
+  amountCents?: number;
+  subtotalCents?: number;
+  discountCents?: number;
+  promoCode?: string | null;
+  orderId?: string;
+  code?: string;
+  error?: string;
+}
+
+/**
+ * Crea el PaymentIntent del pedido de tienda. El backend revalida stock y
+ * recalcula el total y el descuento (no se confía en los precios del cliente).
+ */
+export async function createStoreOrderIntent(
+  items: StoreCheckoutItemInput[],
+  token: string | null | undefined,
+  promoCode?: string | null,
+): Promise<CreateStoreOrderIntentResponse> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const body: { items: StoreCheckoutItemInput[]; promo_code?: string } = { items };
+    if (promoCode && promoCode.trim()) body.promo_code = promoCode.trim();
+    const res = await fetch(`${API_URL}/payments/create-intent-for-store-order`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const json = (await res.json()) as CreateStoreOrderIntentResponse;
+    if (!res.ok || !json.ok) {
+      return { ok: false, error: json.error ?? `Error ${res.status}`, code: json.code };
+    }
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
+}
+
+export interface StorePromoPreviewResponse {
+  ok: boolean;
+  code?: string;
+  discountType?: 'percent' | 'fixed';
+  discountValue?: number;
+  subtotalCents?: number;
+  discountCents?: number;
+  totalCents?: number;
+  errorCode?: string;
+  error?: string;
+}
+
+/**
+ * Previsualiza el descuento de un código promocional sobre el carrito actual.
+ * El backend revalida el carrito y recalcula el descuento.
+ */
+export async function previewStorePromo(
+  items: StoreCheckoutItemInput[],
+  code: string,
+  token: string | null | undefined,
+): Promise<StorePromoPreviewResponse> {
+  if (!token) return { ok: false, error: 'Token requerido' };
+  try {
+    const res = await fetch(`${API_URL}/payments/preview-store-promo`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ items, code }),
+    });
+    const json = (await res.json()) as StorePromoPreviewResponse & { code?: string };
+    if (!res.ok || !json.ok) {
+      return {
+        ok: false,
+        error: json.error ?? `Error ${res.status}`,
+        errorCode: (json as { code?: string }).code,
+      };
+    }
+    return json;
+  } catch {
+    return { ok: false, error: 'Error de conexión' };
+  }
 }

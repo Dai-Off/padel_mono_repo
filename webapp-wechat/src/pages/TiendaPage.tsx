@@ -19,6 +19,7 @@ import { ProductFormModal } from '../components/tienda/ProductFormModal';
 import { ProductRowActions } from '../components/tienda/ProductRowActions';
 import { StockAdjustModal } from '../components/tienda/StockAdjustModal';
 import { formatMoney, storeCategoryLabel } from '../lib/format';
+import { useAutoRefresh } from '../hooks/useAutoRefresh';
 import { parseTiendaStockParam } from '../lib/tiendaNav';
 import { DEFAULT_PAGE_SIZE, paginate, totalPages } from '../lib/pagination';
 import {
@@ -136,29 +137,41 @@ export function TiendaPage() {
         }
     }, [searchParams, setSearchParams]);
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const data = await listStoreProducts({
-                q: debouncedSearch || undefined,
-                category: category || undefined,
-                includeInactive: true,
-            });
-            setProducts(data);
-            setPage(1);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'No se pudo cargar el catálogo');
-            setProducts([]);
-        } finally {
-            setLoading(false);
-            setHasLoaded(true);
-        }
-    }, [debouncedSearch, category]);
+    const load = useCallback(
+        async (opts?: { silent?: boolean }) => {
+            const silent = opts?.silent ?? false;
+            if (!silent) setLoading(true);
+            try {
+                const data = await listStoreProducts({
+                    q: debouncedSearch || undefined,
+                    category: category || undefined,
+                    includeInactive: true,
+                });
+                setProducts(data);
+                setError(null);
+                // En refresco de fondo no reseteamos la paginación para no mover al usuario.
+                if (!silent) setPage(1);
+            } catch (err) {
+                // En refresco de fondo mantenemos el catálogo actual en pantalla.
+                if (!silent) {
+                    setError(err instanceof Error ? err.message : 'No se pudo cargar el catálogo');
+                    setProducts([]);
+                }
+            } finally {
+                if (!silent) setLoading(false);
+                setHasLoaded(true);
+            }
+        },
+        [debouncedSearch, category],
+    );
 
     useEffect(() => {
         void load();
     }, [load]);
+
+    const isModalOpen =
+        formOpen || Boolean(stockProduct) || Boolean(productToDelete) || flashModalOpen;
+    useAutoRefresh(() => load({ silent: true }), { enabled: !isModalOpen && !saving });
 
     const filteredProducts = useMemo(() => {
         if (!stockFilter) return products;

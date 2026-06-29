@@ -10,6 +10,7 @@ import * as ScreenOrientation from 'expo-screen-orientation';
 import { StripeProvider } from './src/stripe';
 import { AuthContext, AuthProvider } from './src/contexts/AuthContext';
 import { HomeDataProvider } from './src/contexts/HomeDataContext';
+import { CartProvider } from './src/contexts/CartContext';
 import { SplashScreen } from './src/components/SplashScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { MainApp } from './src/screens/MainApp';
@@ -153,7 +154,9 @@ export default function App() {
                 {/* Montado siempre (no dentro del branch authed) para que un
                     parpadeo de sesión no destruya el cache y dispare reload infinito. */}
                 <HomeDataProvider>
-                  <AppContent />
+                  <CartProvider>
+                    <AppContent />
+                  </CartProvider>
                 </HomeDataProvider>
               </AuthProvider>
             </I18nProvider>

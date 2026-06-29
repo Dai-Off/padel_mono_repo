@@ -24,6 +24,16 @@ import {
   tryRepairPaidGuestMissingFromMatch,
 } from '../services/matchPlayerSlotService';
 import { sendMatchJoinConfirmationEmail } from '../lib/mailer';
+import {
+  finalizeStoreOrder,
+  normalizeCartItems,
+  STRIPE_META_STORE_ORDER,
+  validateAndPriceCart,
+} from '../lib/storeCheckout';
+import { validatePromoCode } from '../lib/promoCodes';
+
+/** Importe mínimo cobrable por Stripe en EUR (50 céntimos). */
+const STRIPE_MIN_EUR_CENTS = 50;
 
 /** Reserva de pista privada = pago del total; partido público abierto = 1/4 salvo pay_full explícito. */
 function resolvePayFullForNewMatch(opts: {
@@ -703,6 +713,228 @@ export async function createIntentForSeasonPassEliteHandler(req: Request, res: R
     });
   } catch (err) {
     console.error('[payments/create-intent-for-season-pass-elite]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/create-intent-for-store-order
+ * Body: { items: [{ product_id, quantity }] }
+ * Headers: Authorization: Bearer <token>
+ *
+ * Revalida el carrito y calcula el total en el servidor, crea el pedido en
+ * estado `pending_payment` y el PaymentIntent de Stripe. El stock se descuenta
+ * solo al confirmar el pago (confirm-client / metadata purpose=store_order).
+ */
+export async function createIntentForStoreOrderHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const normalized = normalizeCartItems(req.body?.items);
+  if (!normalized.ok) {
+    res.status(400).json({ ok: false, error: normalized.error });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const { data: player } = await supabase
+      .from('players')
+      .select('id, email, stripe_customer_id')
+      .eq('email', user.email.trim().toLowerCase())
+      .maybeSingle();
+
+    if (!player) {
+      res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+      return;
+    }
+
+    const priced = await validateAndPriceCart(supabase, normalized.items);
+    if (!priced.ok) {
+      res.status(409).json({ ok: false, code: 'cart_invalid', error: priced.error });
+      return;
+    }
+
+    // Descuento por código promocional (opcional). El servidor recalcula el descuento.
+    let discountCents = 0;
+    let appliedPromoCode: string | null = null;
+    const rawPromo = req.body?.promo_code;
+    if (rawPromo != null && String(rawPromo).trim() !== '') {
+      const promo = await validatePromoCode(supabase, rawPromo, priced.subtotalCents);
+      if (!promo.ok) {
+        res.status(409).json({ ok: false, code: 'promo_invalid', error: promo.error });
+        return;
+      }
+      discountCents = promo.discountCents;
+      appliedPromoCode = promo.code;
+    }
+
+    const totalCents = priced.subtotalCents - discountCents;
+    if (totalCents < STRIPE_MIN_EUR_CENTS) {
+      res.status(409).json({
+        ok: false,
+        code: 'amount_too_low',
+        error: 'El total con descuento es inferior al mínimo cobrable',
+      });
+      return;
+    }
+
+    const { data: order, error: orderErr } = await supabase
+      .from('store_orders')
+      .insert({
+        player_id: player.id,
+        status: 'pending_payment',
+        subtotal_cents: priced.subtotalCents,
+        discount_cents: discountCents,
+        promo_code: appliedPromoCode,
+        currency: 'EUR',
+      })
+      .select('id')
+      .maybeSingle();
+
+    if (orderErr || !order) {
+      console.error('[payments/create-intent-for-store-order] order insert:', orderErr);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el pedido' });
+      return;
+    }
+
+    const itemsToInsert = priced.items.map((it) => ({
+      order_id: order.id,
+      product_id: it.product_id,
+      product_name: it.product_name,
+      product_brand: it.product_brand,
+      image_url: it.image_url,
+      unit_price_cents: it.unit_price_cents,
+      quantity: it.quantity,
+      line_total_cents: it.line_total_cents,
+    }));
+    const { error: itemsErr } = await supabase.from('store_order_items').insert(itemsToInsert);
+    if (itemsErr) {
+      console.error('[payments/create-intent-for-store-order] items insert:', itemsErr);
+      await supabase.from('store_orders').delete().eq('id', order.id);
+      res.status(500).json({ ok: false, error: 'No se pudo crear el pedido' });
+      return;
+    }
+
+    const stripe = getStripe();
+    const metadata: Record<string, string> = {
+      payer_player_id: player.id as string,
+      purpose: STRIPE_META_STORE_ORDER,
+      store_order_id: String(order.id),
+    };
+    if (appliedPromoCode) {
+      metadata.promo_code = appliedPromoCode;
+      metadata.discount_cents = String(discountCents);
+    }
+
+    const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
+      amount: totalCents,
+      currency: 'eur',
+      automatic_payment_methods: { enabled: true },
+      setup_future_usage: 'off_session',
+      metadata,
+    };
+
+    if (player.stripe_customer_id) {
+      paymentIntentParams.customer = player.stripe_customer_id as string;
+    } else {
+      const customer = await stripe.customers.create({
+        email: player.email as string,
+        metadata: { player_id: player.id as string },
+      });
+      paymentIntentParams.customer = customer.id;
+      await supabase
+        .from('players')
+        .update({ stripe_customer_id: customer.id, updated_at: new Date().toISOString() })
+        .eq('id', player.id);
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
+
+    await supabase
+      .from('store_orders')
+      .update({ stripe_payment_intent_id: paymentIntent.id, updated_at: new Date().toISOString() })
+      .eq('id', order.id);
+
+    res.json({
+      ok: true,
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      amountCents: totalCents,
+      subtotalCents: priced.subtotalCents,
+      discountCents,
+      promoCode: appliedPromoCode,
+      orderId: order.id,
+    });
+  } catch (err) {
+    console.error('[payments/create-intent-for-store-order]', err);
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+}
+
+/**
+ * POST /payments/preview-store-promo
+ * Body: { items: [{ product_id, quantity }], code }
+ * Headers: Authorization: Bearer <token>
+ *
+ * Previsualiza el descuento de un código promocional sobre el carrito actual,
+ * sin crear pedido ni PaymentIntent. El total real se recalcula al pagar.
+ */
+export async function previewStorePromoHandler(req: Request, res: Response): Promise<void> {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    res.status(401).json({ ok: false, error: 'Token requerido' });
+    return;
+  }
+
+  const normalized = normalizeCartItems(req.body?.items);
+  if (!normalized.ok) {
+    res.status(400).json({ ok: false, error: normalized.error });
+    return;
+  }
+
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user?.email) {
+      res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+      return;
+    }
+
+    const priced = await validateAndPriceCart(supabase, normalized.items);
+    if (!priced.ok) {
+      res.status(409).json({ ok: false, code: 'cart_invalid', error: priced.error });
+      return;
+    }
+
+    const promo = await validatePromoCode(supabase, req.body?.code, priced.subtotalCents);
+    if (!promo.ok) {
+      res.status(409).json({ ok: false, code: 'promo_invalid', error: promo.error });
+      return;
+    }
+
+    res.json({
+      ok: true,
+      code: promo.code,
+      discountType: promo.discountType,
+      discountValue: promo.discountValue,
+      subtotalCents: priced.subtotalCents,
+      discountCents: promo.discountCents,
+      totalCents: priced.subtotalCents - promo.discountCents,
+    });
+  } catch (err) {
+    console.error('[payments/preview-store-promo]', err);
     res.status(500).json({ ok: false, error: (err as Error).message });
   }
 }
@@ -3626,6 +3858,24 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
       res.json({ ok: true, season_pass: { has_elite: true } });
+      return;
+    }
+
+    // Pedido de tienda (mobile-app)
+    if (meta.purpose === STRIPE_META_STORE_ORDER && payer_player_id) {
+      if (player.id !== String(payer_player_id)) {
+        res.status(403).json({ ok: false, error: 'No eres el comprador de este pedido' });
+        return;
+      }
+      const r = await finalizeStoreOrder({
+        paymentIntentId: payment_intent_id,
+        playerId: String(payer_player_id),
+      });
+      if (!r.ok) {
+        res.status(400).json({ ok: false, error: r.error ?? 'No se pudo completar el pedido' });
+        return;
+      }
+      res.json({ ok: true, store_order: { id: r.orderId } });
       return;
     }
 
