@@ -11,13 +11,14 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { cancelMatchAsOrganizer, fetchMatchById } from '../api/matches';
+import { cancelMatchAsOrganizer, fetchMatchCancelPreview, fetchMatchById } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId } from '../api/players';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import { useAuth } from '../contexts/AuthContext';
 import { useTranslation } from '../i18n';
 import { theme } from '../theme';
+import { buildLeaveMatchAlertMessage } from '../utils/matchLeaveAlert';
 import type { PartidoItem } from './PartidosScreen';
 
 type PartidoPrivadoDetailScreenProps = {
@@ -85,33 +86,43 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
       Alert.alert(t('alerts.login.title'), t('alerts.privateCancel.title'));
       return;
     }
-    Alert.alert(
-      t('alerts.privateCancel.title'),
-      t('alerts.leaveMatch.bodySolo'),
-      [
+
+    void (async () => {
+      let preview = null;
+      try {
+        preview = await fetchMatchCancelPreview(partidoLocal.id, token);
+      } catch {
+        // Si falla el preview, seguimos con el mensaje estándar.
+      }
+      const message = buildLeaveMatchAlertMessage(t, true, preview);
+
+      Alert.alert(t('alerts.privateCancel.title'), message, [
         { text: t('common.no'), style: 'cancel' },
         {
-          text: t('alerts.leaveMatch.yesCancel'),
+          text: t('alerts.leaveMatch.cancel'),
           style: 'destructive',
           onPress: async () => {
             setCancelOverlay({ open: true, message: t('common.loading') });
             try {
               const r = await cancelMatchAsOrganizer(partidoLocal.id, token);
               if (r.ok) {
-                Alert.alert(t('alerts.ready.title'), t('alerts.privateCancel.done'));
+                const refundEligible =
+                  r.refundEligible ?? (preview?.ok === true && preview.refund_eligible !== false);
+                const doneMessage = refundEligible
+                  ? t('alerts.privateCancel.done')
+                  : t('alerts.privateCancel.doneNoRefund');
+                Alert.alert(t('alerts.ready.title'), doneMessage);
                 onBack();
                 return;
               }
-              const extra =
-                r.refund_errors?.length ? `\n\n${r.refund_errors.slice(0, 3).join('\n')}` : '';
-              Alert.alert(t('alerts.privateCancel.fail'), `${r.error}${extra}`);
+              Alert.alert(t('alerts.privateCancel.fail'), r.error);
             } finally {
               setCancelOverlay({ open: false, message: '' });
             }
           },
         },
-      ]
-    );
+      ]);
+    })();
   }, [session?.access_token, partidoLocal.id, onBack, t]);
 
   return (

@@ -4,6 +4,7 @@ import {
     Users,
     Building2,
     ShoppingBag,
+    Receipt,
     GraduationCap,
     Ticket,
 } from 'lucide-react';
@@ -43,6 +44,13 @@ export const NAV_ITEMS: NavItem[] = [
         path: '/tienda',
         icon: ShoppingBag,
         description: 'Productos y ofertas de la tienda',
+    },
+    {
+        id: 'ventas',
+        label: 'Ventas',
+        path: '/ventas',
+        icon: Receipt,
+        description: 'Pedidos e ingresos de la tienda en la app',
     },
     {
         id: 'cursos',

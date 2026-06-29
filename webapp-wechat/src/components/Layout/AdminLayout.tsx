@@ -76,14 +76,10 @@ export function AdminLayout() {
     }
 
     return (
-        <div
-            className={`flex bg-auth-bg text-auth-text ${
-                fixedListPage ? 'h-[100dvh] min-h-[100dvh] overflow-hidden' : 'min-h-screen-safe'
-            }`}
-        >
+        <div className="flex h-[100dvh] min-h-[100dvh] overflow-hidden bg-auth-bg text-auth-text">
             <Sidebar isOpen={sidebarOpen} onClose={closeSidebar} />
 
-            <div className={`flex min-w-0 flex-1 flex-col ${fixedListPage ? 'min-h-0 overflow-hidden' : ''}`}>
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 <AdminHeader
                     userEmail={userEmail}
                     onMenuOpen={openSidebar}
@@ -91,17 +87,17 @@ export function AdminLayout() {
                 />
 
                 <main
-                    className={`w-full flex-1 px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:px-6 lg:px-8 xl:px-10 2xl:px-12 pb-safe ${
-                        fixedListPage ? 'flex min-h-0 flex-col overflow-hidden pt-4 sm:pt-5' : pageMainY
+                    className={`flex min-h-0 w-full flex-1 flex-col px-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] sm:px-6 lg:px-8 xl:px-10 2xl:px-12 pb-safe ${
+                        fixedListPage
+                            ? 'overflow-hidden pt-2 sm:pt-3'
+                            : `overflow-y-auto overscroll-contain ${pageMainY}`
                     }`}
                 >
-                    {fixedListPage ? (
-                        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                            <Outlet context={{ userEmail }} />
-                        </div>
-                    ) : (
+                    <div
+                        className={`flex min-h-0 flex-1 flex-col ${fixedListPage ? 'overflow-hidden' : ''}`}
+                    >
                         <Outlet context={{ userEmail }} />
-                    )}
+                    </div>
                 </main>
             </div>
         </div>

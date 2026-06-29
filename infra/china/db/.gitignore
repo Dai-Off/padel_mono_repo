@@ -1,0 +1,6 @@
+# Nunca commitear dumps de la base (pueden contener datos personales / PII).
+dump/
+*.sql.gz
+*.dump
+schema.public.sql
+data.public.dump

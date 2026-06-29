@@ -15,7 +15,10 @@
     "test:i18n": "ts-node scripts/test-learning-i18n.ts",
     "admin:create": "ts-node -r dotenv/config scripts/create-admin.ts",
     "mobile-admin:create": "ts-node -r dotenv/config scripts/create-mobile-admin.ts",
-    "mobile-admin:migrate": "ts-node -r dotenv/config scripts/apply-mobile-admins-migration.ts"
+    "mobile-admin:migrate": "ts-node -r dotenv/config scripts/apply-mobile-admins-migration.ts",
+    "store:migrate": "ts-node -r dotenv/config scripts/apply-store-products-migration.ts",
+    "store:collections:migrate": "ts-node -r dotenv/config scripts/apply-store-collections-migration.ts",
+    "store:seed": "ts-node -r dotenv/config scripts/seed-store-products.ts"
   },
   "keywords": [
     "node",

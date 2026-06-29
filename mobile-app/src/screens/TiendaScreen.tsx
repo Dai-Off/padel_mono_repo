@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
-import type { StyleProp, TextStyle } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { NativeScrollEvent, NativeSyntheticEvent, StyleProp, TextStyle } from "react-native";
 import {
+  ActivityIndicator,
   Image,
   Platform,
   Pressable,
@@ -13,7 +14,30 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import type { ComponentProps } from "react";
 import { LinearGradient } from "expo-linear-gradient";
+import {
+  fetchStoreCollections,
+  fetchStoreFlash,
+  fetchStoreProducts,
+  mapStoreProductsToTienda,
+  type StoreCollectionPublic,
+  type StoreFlashCampaign,
+  type TiendaProduct,
+} from "../api/store";
+import { TiendaFiltersModal } from "../components/tienda/TiendaFiltersModal";
+import { ProductFavoriteButton } from "../components/tienda/ProductFavoriteButton";
+import { TiendaStockPill } from "../components/tienda/TiendaStockPill";
+import { PagerDots, VerticalScrollHint } from "../components/ui/PagerDots";
 import { SafeScrollView } from "../components/ui/SafeScrollView";
+import { useTiendaFavorites } from "../hooks/useTiendaFavorites";
+import {
+  countActiveFilters,
+  DEFAULT_TIENDA_FILTERS,
+  filterTiendaProducts,
+  sortTiendaProducts,
+  type TiendaCategoryId,
+  type TiendaFilterFlags,
+  type TiendaSortMode,
+} from "../lib/tiendaCatalog";
 import { lineHeightFor, theme } from "../theme";
 import { useTranslation } from "../i18n";
 
@@ -45,8 +69,65 @@ function featuredCardWidthForPlatform(): number {
   return 200;
 }
 
+function collectionBannerHeightForPlatform(): number {
+  return Math.round(theme.screenWidth * 0.52);
+}
+
+const COLLECTION_BANNER_W = theme.screenWidth;
+const COLLECTION_BANNER_H = collectionBannerHeightForPlatform();
 const FLASH_CARD_W = flashCardWidthForPlatform();
 const FEAT_CARD_W = featuredCardWidthForPlatform();
+const FLASH_TITLE_MAX_LEN = 24;
+
+function truncateFlashTitle(value: string, maxLen = FLASH_TITLE_MAX_LEN): string {
+  const trimmed = value.trim();
+  if (trimmed.length <= maxLen) return trimmed;
+  return `${trimmed.slice(0, maxLen - 1).trimEnd()}…`;
+}
+
+function computeFlashCountdown(endsAt: string | null | undefined) {
+  if (!endsAt?.trim()) {
+    return { h: "00", m: "00", s: "00", expired: true };
+  }
+  const endsMs = Date.parse(endsAt);
+  if (Number.isNaN(endsMs)) {
+    return { h: "00", m: "00", s: "00", expired: true };
+  }
+  const diff = endsMs - Date.now();
+  if (diff <= 0) {
+    return { h: "00", m: "00", s: "00", expired: true };
+  }
+  const totalSec = Math.floor(diff / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  return {
+    h: String(h).padStart(2, "0"),
+    m: String(m).padStart(2, "0"),
+    s: String(s).padStart(2, "0"),
+    expired: false,
+  };
+}
+
+function useFlashCountdown(endsAt: string | null | undefined) {
+  const [parts, setParts] = useState(() => computeFlashCountdown(endsAt));
+
+  useEffect(() => {
+    setParts(computeFlashCountdown(endsAt));
+    if (!endsAt?.trim()) return;
+
+    const endsMs = Date.parse(endsAt);
+    if (Number.isNaN(endsMs)) return;
+
+    const tick = () => {
+      setParts(computeFlashCountdown(endsAt));
+    };
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [endsAt]);
+
+  return parts;
+}
 
 const CHAR_EURO = "\u20AC";
 
@@ -97,17 +178,27 @@ const ACCENT_SOFT = "rgba(241, 143, 52, 0.35)";
 const BORDER = "rgba(255,255,255,0.08)";
 const CARD = "rgba(255,255,255,0.04)";
 
-type CategoryId =
-  | "all"
-  | "palas"
-  | "pelotas"
-  | "calzado"
-  | "ropa"
-  | "accesorios";
+type CategoryId = TiendaCategoryId;
 
-type IoniconName = ComponentProps<typeof Ionicons>["name"];
+type Product = TiendaProduct;
+
+const SORT_CYCLE: TiendaSortMode[] = [
+  "featured",
+  "price_low",
+  "price_high",
+  "name",
+];
+
+function sortModeLabel(mode: TiendaSortMode, t: (key: string) => string): string {
+  if (mode === "price_low") return t("tienda.sortPriceLow");
+  if (mode === "price_high") return t("tienda.sortPriceHigh");
+  if (mode === "name") return t("tienda.sortName");
+  return t("tienda.sortFeatured");
+}
 
 /** Icono + texto en fila: en Android, emoji + string en un mismo `Text` suele ocultar el texto. */
+type IoniconName = ComponentProps<typeof Ionicons>["name"];
+
 const CATEGORY_META: { id: CategoryId; icon: IoniconName }[] = [
   { id: "all", icon: "flame-outline" },
   { id: "palas", icon: "tennisball-outline" },
@@ -116,128 +207,6 @@ const CATEGORY_META: { id: CategoryId; icon: IoniconName }[] = [
   { id: "ropa", icon: "shirt-outline" },
   { id: "accesorios", icon: "bag-handle-outline" },
 ];
-
-type Product = {
-  id: string;
-  brand: string;
-  nameKey: `tienda.mockProduct${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}Name`;
-  price: string;
-  oldPrice?: string;
-  image: string;
-  rating: string;
-  reviews: string;
-  badgeHot?: boolean;
-  badgePct?: string;
-  stockCount?: number;
-  category: CategoryId;
-};
-
-const PRODUCTS: Product[] = [
-  {
-    id: "1",
-    brand: "Nox",
-    nameKey: "tienda.mockProduct1Name",
-    price: "349€",
-    oldPrice: "399€",
-    image:
-      "https://images.unsplash.com/photo-1626224583764-f87db24ac4ea?w=800&fit=crop",
-    rating: "4.9",
-    reviews: "156",
-    badgeHot: true,
-    badgePct: "-13%",
-    stockCount: 5,
-    category: "palas",
-  },
-  {
-    id: "2",
-    brand: "Bullpadel",
-    nameKey: "tienda.mockProduct2Name",
-    price: "289€",
-    oldPrice: "349€",
-    image:
-      "https://images.unsplash.com/photo-1767128890439-1af9ca2ff1ac?w=800&fit=crop",
-    rating: "4.8",
-    reviews: "124",
-    badgeHot: true,
-    badgePct: "-17%",
-    category: "palas",
-  },
-  {
-    id: "3",
-    brand: "Adidas",
-    nameKey: "tienda.mockProduct3Name",
-    price: "79€",
-    oldPrice: "99€",
-    image:
-      "https://images.unsplash.com/photo-1622560481979-f5b0174242a0?w=800&fit=crop",
-    rating: "4.7",
-    reviews: "67",
-    badgeHot: true,
-    badgePct: "-20%",
-    category: "accesorios",
-  },
-  {
-    id: "4",
-    brand: "Asics",
-    nameKey: "tienda.mockProduct4Name",
-    price: "129€",
-    oldPrice: "159€",
-    image:
-      "https://images.unsplash.com/photo-1610000750238-28d5e469692d?w=800&fit=crop",
-    rating: "4.6",
-    reviews: "89",
-    badgeHot: true,
-    badgePct: "-19%",
-    category: "calzado",
-  },
-  {
-    id: "5",
-    brand: "Hesacore",
-    nameKey: "tienda.mockProduct5Name",
-    price: "14.99€",
-    image:
-      "https://images.unsplash.com/photo-1569597773059-6d747e5f8ed5?w=800&fit=crop",
-    rating: "4.5",
-    reviews: "312",
-    category: "accesorios",
-  },
-  {
-    id: "6",
-    brand: "Head",
-    nameKey: "tienda.mockProduct6Name",
-    price: "5.99€",
-    image:
-      "https://images.unsplash.com/photo-1599409091912-88526846d833?w=800&fit=crop",
-    rating: "4.8",
-    reviews: "203",
-    category: "pelotas",
-  },
-  {
-    id: "7",
-    brand: "Adidas",
-    nameKey: "tienda.mockProduct7Name",
-    price: "44.99€",
-    image:
-      "https://images.unsplash.com/photo-1661474973381-130596c650c4?w=800&fit=crop",
-    rating: "4.6",
-    reviews: "78",
-    category: "ropa",
-  },
-  {
-    id: "8",
-    brand: "Wilson",
-    nameKey: "tienda.mockProduct8Name",
-    price: "34.99€",
-    image:
-      "https://images.unsplash.com/photo-1659081469066-c88ca2dec240?w=800&fit=crop",
-    rating: "4.2",
-    reviews: "45",
-    category: "ropa",
-  },
-];
-
-const FLASH = PRODUCTS.slice(0, 4);
-const FEATURED = PRODUCTS.slice(0, 4);
 
 /**
  * En Android, `elevation` en el mismo nodo que `overflow: 'hidden'` y texto multilínea suele recortar
@@ -274,8 +243,82 @@ function textBase(size: number, weight: "400" | "500" | "600" | "700" | "800") {
 
 export function TiendaScreen() {
   const { t } = useTranslation();
+  const { favoriteIds, toggleFavorite, isFavorite } = useTiendaFavorites();
   const [category, setCategory] = useState<CategoryId>("all");
   const [search, setSearch] = useState("");
+  const [sortMode, setSortMode] = useState<TiendaSortMode>("featured");
+  const [filters, setFilters] = useState<TiendaFilterFlags>(DEFAULT_TIENDA_FILTERS);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [draftFilters, setDraftFilters] = useState<TiendaFilterFlags>(DEFAULT_TIENDA_FILTERS);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [flashCampaign, setFlashCampaign] = useState<StoreFlashCampaign | null>(null);
+  const [flashApiProducts, setFlashApiProducts] = useState<Product[]>([]);
+  const [collections, setCollections] = useState<StoreCollectionPublic[]>([]);
+  const [activeCollection, setActiveCollection] = useState<{
+    id: string;
+    title: string;
+    productIds: string[];
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [collectionBannerIndex, setCollectionBannerIndex] = useState(0);
+
+  const loadProducts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [productsRes, flashRes, collectionsRes] = await Promise.all([
+        fetchStoreProducts(),
+        fetchStoreFlash(),
+        fetchStoreCollections(),
+      ]);
+      if (!productsRes.ok || !productsRes.products) {
+        setError(productsRes.error || t("tienda.loadError"));
+        setProducts([]);
+        setFlashCampaign(null);
+        setFlashApiProducts([]);
+      } else {
+        const mapped = mapStoreProductsToTienda(productsRes.products);
+        setProducts(mapped);
+
+        const catalogFlash = mapped.filter((p) => p.isFlashDeal);
+        const flashFromEndpoint =
+          flashRes.ok && flashRes.campaign ? flashRes.campaign : null;
+        const campaign =
+          (flashFromEndpoint?.ends_at ? flashFromEndpoint : null) ??
+          (productsRes.flash?.ends_at ? productsRes.flash : null) ??
+          flashFromEndpoint ??
+          productsRes.flash ??
+          null;
+
+        const endpointFlash =
+          flashRes.ok && flashRes.campaign?.enabled && flashRes.products
+            ? mapStoreProductsToTienda(flashRes.products)
+            : [];
+
+        setFlashCampaign(campaign ?? null);
+        setFlashApiProducts(endpointFlash.length > 0 ? endpointFlash : catalogFlash);
+      }
+
+      if (collectionsRes.ok && collectionsRes.collections) {
+        setCollections(collectionsRes.collections);
+      } else {
+        setCollections([]);
+      }
+    } catch {
+      setError(t("tienda.loadError"));
+      setProducts([]);
+      setFlashCampaign(null);
+      setFlashApiProducts([]);
+      setCollections([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    void loadProducts();
+  }, [loadProducts]);
 
   const categories = useMemo(
     () =>
@@ -286,13 +329,147 @@ export function TiendaScreen() {
     [t],
   );
 
-  const filtered = useMemo(() => {
-    if (category === "all") return PRODUCTS;
-    return PRODUCTS.filter((p) => p.category === category);
-  }, [category]);
+  const browseBase = useMemo(
+    () =>
+      filterTiendaProducts(products, {
+        category,
+        search,
+        filters: {
+          ...filters,
+          featuredOnly: false,
+          flashOnly: false,
+        },
+      }),
+    [products, category, search, filters],
+  );
+
+  const filtered = useMemo(
+    () =>
+      sortTiendaProducts(
+        filterTiendaProducts(products, {
+          category,
+          search,
+          filters,
+          productIds: activeCollection?.productIds ?? null,
+          favoriteIds,
+        }),
+        sortMode,
+      ),
+    [products, category, search, filters, sortMode, activeCollection, favoriteIds],
+  );
+
+  const flashProducts = useMemo(() => {
+    if (!flashCampaign?.enabled || flashApiProducts.length === 0) return [];
+    return filterTiendaProducts(flashApiProducts, {
+      category,
+      search,
+      filters: {
+        ...filters,
+        featuredOnly: false,
+        flashOnly: false,
+      },
+    });
+  }, [flashCampaign, flashApiProducts, category, search, filters]);
+
+  const flashEndsAt = flashCampaign?.ends_at ?? null;
+  const flashCountdown = useFlashCountdown(flashEndsAt);
+  const flashTitle = truncateFlashTitle(
+    flashCampaign?.title?.trim() || t("common.flashDeals"),
+  );
+  const showFlashSection =
+    Boolean(flashEndsAt) &&
+    !flashCountdown.expired &&
+    flashApiProducts.length > 0;
+  const flashCarouselProducts =
+    flashProducts.length > 0 ? flashProducts : flashApiProducts;
+
+  const featuredProducts = useMemo(
+    () => browseBase.filter((p) => p.isFeatured),
+    [browseBase],
+  );
+
+  const activeFilterCount = countActiveFilters(filters);
+  const hasBrowseConstraints =
+    category !== "all" ||
+    search.trim().length > 0 ||
+    activeFilterCount > 0 ||
+    activeCollection != null;
 
   const count = filtered.length;
+  const sortLabel = sortModeLabel(sortMode, t);
+
+  const openFilters = () => {
+    setDraftFilters(filters);
+    setFiltersOpen(true);
+  };
+
+  const cycleSortMode = () => {
+    setSortMode((current) => {
+      const idx = SORT_CYCLE.indexOf(current);
+      return SORT_CYCLE[(idx + 1) % SORT_CYCLE.length];
+    });
+  };
+
+  const renderSortControl = () => (
+    <Pressable
+      onPress={cycleSortMode}
+      style={({ pressed }) => [
+        Platform.OS === "android" ? styles.sortWrapAndroid : styles.sortWrap,
+        pressed && styles.pressed,
+      ]}
+    >
+      <View style={styles.sortLabelWrap}>
+        <Text style={[styles.sortLabel, textBase(12, "600")]} numberOfLines={1}>
+          {sortLabel}
+        </Text>
+      </View>
+      <Ionicons name="chevron-down" size={14} color="#6b7280" />
+    </Pressable>
+  );
+
+  const renderFilterButton = () => (
+    <Pressable
+      onPress={openFilters}
+      style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
+    >
+      <Ionicons name="options-outline" size={16} color="#9ca3af" />
+      <Text style={[styles.filterBtnText, textBase(12, "600")]}>{t("tienda.filters")}</Text>
+      {activeFilterCount > 0 ? (
+        <View style={styles.filterBadge}>
+          <Text style={[styles.filterBadgeText, textBase(10, "700")]}>{activeFilterCount}</Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
   const gridCardWidth = gridCardWidthForPlatform();
+
+  const onCollectionBannerScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const index = Math.round(event.nativeEvent.contentOffset.x / COLLECTION_BANNER_W);
+      setCollectionBannerIndex(Math.min(Math.max(index, 0), collections.length - 1));
+    },
+    [collections.length],
+  );
+
+  useEffect(() => {
+    setCollectionBannerIndex(0);
+  }, [collections.length]);
+
+  const showCollectionCarousel =
+    !loading &&
+    collections.length > 1 &&
+    !activeCollection &&
+    !filters.favoritesOnly;
+
+  if (loading) {
+    return (
+      <View style={styles.root}>
+        <View style={styles.fullScreenLoader}>
+          <ActivityIndicator size="large" color={ACCENT} />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -375,184 +552,261 @@ export function TiendaScreen() {
         {Platform.OS === "android" ? (
           <View style={styles.filterColumnAndroid}>
             <View style={styles.filterTopRowAndroid}>
-              <Pressable
-                style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
-              >
-                <Ionicons name="options-outline" size={16} color="#9ca3af" />
-                <Text style={[styles.filterBtnText, textBase(12, "600")]}>{t("tienda.filters")}</Text>
-              </Pressable>
+              {renderFilterButton()}
               <Text style={[styles.count, textBase(11, "500")]}>
                 {t("common.itemsCount", { count })}
               </Text>
             </View>
-            <View style={styles.sortWrapAndroid}>
-              <View style={styles.sortLabelWrap}>
-                <Text style={[styles.sortLabel, textBase(12, "600")]}>{t("tienda.sortFeatured")}</Text>
-              </View>
-              <Ionicons name="chevron-down" size={14} color="#6b7280" />
-            </View>
+            {renderSortControl()}
           </View>
         ) : (
           <View style={styles.filterRow}>
-            <Pressable
-              style={({ pressed }) => [styles.filterBtn, pressed && styles.pressed]}
-            >
-              <Ionicons name="options-outline" size={16} color="#9ca3af" />
-              <Text style={[styles.filterBtnText, textBase(12, "600")]}>{t("tienda.filters")}</Text>
-            </Pressable>
-            <View style={styles.sortWrap}>
-              <View style={styles.sortLabelWrap}>
-                <Text style={[styles.sortLabel, textBase(12, "600")]}>{t("tienda.sortFeatured")}</Text>
-              </View>
-              <Ionicons name="chevron-down" size={14} color="#6b7280" />
-            </View>
+            {renderFilterButton()}
+            {renderSortControl()}
             <Text style={[styles.count, textBase(11, "500")]}>
               {t("common.itemsCount", { count })}
             </Text>
           </View>
         )}
 
-        <View style={styles.bannerOuter}>
-          <Image
-            source={{
-              uri: "https://images.unsplash.com/photo-1717138751802-135ce738e36b?w=800&fit=crop",
-            }}
-            style={styles.bannerImg}
-            resizeMode="cover"
-          />
-          <LinearGradient
-            colors={["rgba(241,143,52,0.92)", "rgba(241,143,52,0.45)", "transparent"]}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            style={StyleSheet.absoluteFill}
-          />
-          <View style={styles.bannerTextBlock}>
-            <Text style={[styles.bannerTitle, textBase(26, "800")]}>
-              {t("tienda.bannerTitle")}
-            </Text>
-            <Text style={[styles.bannerSub, textBase(14, "500")]}>
-              {t("tienda.bannerSub")}
-            </Text>
+        {!loading && !showCollectionCarousel ? <VerticalScrollHint /> : null}
+
+        {error ? (
+          <View style={styles.errorBanner}>
+            <Text style={[styles.errorText, textBase(13, "500")]}>{error}</Text>
             <Pressable
-              style={({ pressed }) => [
-                styles.bannerCta,
-                pressed && { opacity: 0.9 },
-              ]}
+              onPress={() => void loadProducts()}
+              style={({ pressed }) => [styles.retryBtn, pressed && styles.pressed]}
             >
-              <Text style={[styles.bannerCtaText, textBase(12, "700")]}>
-                {t("tienda.bannerCta")}
-              </Text>
-              <Ionicons name="arrow-forward" size={16} color={BG} />
+              <Text style={[styles.retryText, textBase(12, "700")]}>{t("common.retry")}</Text>
             </Pressable>
           </View>
-        </View>
+        ) : null}
 
-        <Pressable
-          style={({ pressed }) => [styles.aiCard, pressed && styles.pressed]}
-        >
-          <LinearGradient
-            colors={[
-              "rgba(227,30,36,0.14)",
-              "rgba(147,22,26,0.55)",
-              "rgba(174,25,29,0.4)",
-            ]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFill}
-          />
-          <View style={styles.aiIcon}>
-            <LinearGradient
-              colors={[ACCENT, "#FFB347"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFill}
+        {!loading && collections.length > 0 && !activeCollection && !filters.favoritesOnly ? (
+          collections.length === 1 ? (
+            <CollectionBanner
+              collection={collections[0]}
+              onPressCta={() =>
+                setActiveCollection({
+                  id: collections[0].id,
+                  title: collections[0].title,
+                  productIds: collections[0].product_ids,
+                })
+              }
             />
-            <Ionicons
-              name="sparkles"
-              size={22}
-              color="#fff"
-              style={styles.aiIconGlyph}
-            />
-          </View>
-          <View style={styles.aiTextCol}>
-            <Text style={[styles.aiTitle, textBase(15, "700")]}>
-              {t("tienda.aiShoppingTitle")}
-            </Text>
-            <Text style={[styles.aiSub, textBase(12, "400")]}>
-              {t("tienda.aiShoppingSub")}
-            </Text>
-          </View>
-          <View style={styles.aiChevronWrap}>
-            <Ionicons name="chevron-forward" size={22} color={ACCENT} />
-          </View>
-        </Pressable>
+          ) : (
+            <View style={styles.collectionsCarouselWrap}>
+              <ScrollView
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                decelerationRate="fast"
+                snapToInterval={COLLECTION_BANNER_W}
+                snapToAlignment="start"
+                scrollEventThrottle={16}
+                onScroll={onCollectionBannerScroll}
+                contentContainerStyle={styles.collectionsRow}
+              >
+                {collections.map((collection) => (
+                  <CollectionBanner
+                    key={collection.id}
+                    collection={collection}
+                    onPressCta={() =>
+                      setActiveCollection({
+                        id: collection.id,
+                        title: collection.title,
+                        productIds: collection.product_ids,
+                      })
+                    }
+                  />
+                ))}
+              </ScrollView>
+              <PagerDots count={collections.length} activeIndex={collectionBannerIndex} />
+            </View>
+          )
+        ) : null}
 
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <View style={styles.sectionTitleRow}>
-              <Ionicons name="flash" size={20} color={ACCENT} />
-              <Text style={[styles.sectionTitle, textBase(16, "700")]}>
-                {t("common.flashDeals")}
+        {activeCollection ? (
+          <View style={styles.collectionChipRow}>
+            <View style={styles.collectionChip}>
+              <Text style={[styles.collectionChipText, textBase(11, "600")]} numberOfLines={1}>
+                {activeCollection.title}
               </Text>
-            </View>
-            <View style={styles.timerRow}>
-              <TimerBox value="05" />
-              <Text style={styles.timerSep}>:</Text>
-              <TimerBox value="41" />
-              <Text style={styles.timerSep}>:</Text>
-              <TimerBox value="55" dim />
+              <Pressable
+                onPress={() => setActiveCollection(null)}
+                hitSlop={8}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <Ionicons name="close-circle" size={18} color="#9ca3af" />
+              </Pressable>
             </View>
           </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.hScrollPad}
-          >
-            {FLASH.map((p) => (
-              <FlashCard key={p.id} product={p} cardWidth={FLASH_CARD_W} />
-            ))}
-          </ScrollView>
-        </View>
+        ) : null}
 
-        <View style={styles.section}>
-          <View style={styles.sectionHead}>
-            <View style={styles.sectionTitleRow}>
-              <Ionicons name="star" size={18} color="#eab308" />
-              <Text style={[styles.sectionTitle, textBase(16, "700")]}>
-                {t("common.featured")}
-              </Text>
-            </View>
-            <Pressable style={({ pressed }) => pressed && styles.pressed}>
-              <View style={styles.seeAllRow}>
-                <Text style={[styles.seeAll, textBase(11, "600")]}>{t("common.seeAll")}</Text>
-                <Ionicons name="chevron-forward" size={14} color={ACCENT} />
+        {!loading && !filters.flashOnly && !filters.favoritesOnly && showFlashSection ? (
+          <View style={styles.section}>
+            <View style={styles.flashSectionHead}>
+              <View style={styles.flashSectionTitleRow}>
+                <Ionicons name="flash" size={20} color={ACCENT} style={styles.flashSectionIcon} />
+                <Text
+                  style={[styles.flashSectionTitle, textBase(16, "700")]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {flashTitle}
+                </Text>
               </View>
-            </Pressable>
+              <View style={styles.timerRow}>
+                <TimerBox value={flashCountdown.h} />
+                <Text style={styles.timerSep}>:</Text>
+                <TimerBox value={flashCountdown.m} />
+                <Text style={styles.timerSep}>:</Text>
+                <TimerBox value={flashCountdown.s} dim />
+              </View>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.hScrollPad}
+            >
+              {flashCarouselProducts.map((p) => (
+                <FlashCard
+                  key={p.id}
+                  product={p}
+                  cardWidth={FLASH_CARD_W}
+                  t={t}
+                  isFavorite={isFavorite(p.id)}
+                  onToggleFavorite={toggleFavorite}
+                />
+              ))}
+            </ScrollView>
           </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.hScrollPad}
-          >
-            {FEATURED.map((p) => (
-              <FeaturedCard key={p.id} product={p} cardWidth={FEAT_CARD_W} />
-            ))}
-          </ScrollView>
-        </View>
+        ) : null}
 
-        <View style={styles.gridSection}>
-          <Text style={[styles.gridTitle, textBase(16, "700")]}>
-            {t("tienda.gridTitleAll")}
-            <Text style={styles.gridTitleMuted}> ({count})</Text>
-          </Text>
-          <View style={styles.grid}>
-            {filtered.map((p) => (
-              <GridProduct key={p.id} product={p} cardWidth={gridCardWidth} t={t} />
-            ))}
+        {!loading &&
+        !filters.featuredOnly &&
+        !filters.flashOnly &&
+        !filters.favoritesOnly &&
+        featuredProducts.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHead}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons name="star" size={18} color="#eab308" />
+                <Text style={[styles.sectionTitle, textBase(16, "700")]}>
+                  {t("common.featured")}
+                </Text>
+              </View>
+              <Pressable style={({ pressed }) => pressed && styles.pressed}>
+                <View style={styles.seeAllRow}>
+                  <Text style={[styles.seeAll, textBase(11, "600")]}>{t("common.seeAll")}</Text>
+                  <Ionicons name="chevron-forward" size={14} color={ACCENT} />
+                </View>
+              </Pressable>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.hScrollPad}
+            >
+              {featuredProducts.map((p) => (
+                <FeaturedCard
+                  key={p.id}
+                  product={p}
+                  cardWidth={FEAT_CARD_W}
+                  isFavorite={isFavorite(p.id)}
+                  onToggleFavorite={toggleFavorite}
+                  t={t}
+                />
+              ))}
+            </ScrollView>
           </View>
-        </View>
+        ) : null}
+
+        {!loading ? (
+          <View style={styles.gridSection}>
+            <Text style={[styles.gridTitle, textBase(16, "700")]}>
+              {t("tienda.gridTitleAll")}
+              <Text style={styles.gridTitleMuted}> ({count})</Text>
+            </Text>
+            {filtered.length === 0 ? (
+              <Text style={[styles.emptyText, textBase(14, "500")]}>
+                {filters.favoritesOnly
+                  ? t("tienda.emptyFavorites")
+                  : hasBrowseConstraints
+                    ? t("tienda.emptySearch")
+                    : t("tienda.emptyProducts")}
+              </Text>
+            ) : (
+              <View style={styles.grid}>
+                {filtered.map((p) => (
+                  <GridProduct
+                    key={p.id}
+                    product={p}
+                    cardWidth={gridCardWidth}
+                    t={t}
+                    isFavorite={isFavorite(p.id)}
+                    onToggleFavorite={toggleFavorite}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
+        ) : null}
       </SafeScrollView>
+
+      <TiendaFiltersModal
+        visible={filtersOpen}
+        value={draftFilters}
+        onChange={setDraftFilters}
+        onClose={() => {
+          setFilters(draftFilters);
+          setFiltersOpen(false);
+        }}
+      />
     </View>
+  );
+}
+
+function CollectionBanner({
+  collection,
+  onPressCta,
+}: {
+  collection: StoreCollectionPublic;
+  onPressCta: () => void;
+}) {
+  const imageUrl = collection.image_url?.trim();
+  if (!imageUrl) return null;
+
+  return (
+    <Pressable
+      onPress={onPressCta}
+      style={({ pressed }) => [styles.collectionBanner, pressed && styles.pressed]}
+    >
+      <Image source={{ uri: imageUrl }} style={styles.collectionBannerImg} resizeMode="cover" />
+      <LinearGradient
+        colors={["rgba(241,143,52,0.92)", "rgba(241,143,52,0.45)", "transparent"]}
+        start={{ x: 0, y: 0.5 }}
+        end={{ x: 1, y: 0.5 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={styles.collectionBannerTextBlock}>
+        <Text style={[styles.collectionBannerTitle, textBase(26, "800")]} numberOfLines={2}>
+          {collection.title}
+        </Text>
+        {collection.subtitle ? (
+          <Text style={[styles.collectionBannerSub, textBase(14, "500")]} numberOfLines={2}>
+            {collection.subtitle}
+          </Text>
+        ) : null}
+        <View style={styles.bannerCta}>
+          <Text style={[styles.bannerCtaText, textBase(12, "700")]}>
+            {collection.cta_text?.trim() || "Ver colección"}
+          </Text>
+          <Ionicons name="arrow-forward" size={16} color={BG} />
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -569,11 +823,16 @@ function TimerBox({ value, dim }: { value: string; dim?: boolean }) {
 function FlashCard({
   product,
   cardWidth,
+  t,
+  isFavorite,
+  onToggleFavorite,
 }: {
   product: Product;
   cardWidth: number;
+  t: (key: string, params?: Record<string, string | number>) => string;
+  isFavorite: boolean;
+  onToggleFavorite: (productId: string) => void;
 }) {
-  const { t } = useTranslation();
   return (
     <Pressable
       style={({ pressed }) => [
@@ -588,17 +847,35 @@ function FlashCard({
           colors={["transparent", "rgba(0,0,0,0.55)"]}
           style={StyleSheet.absoluteFill}
         />
-        {product.badgePct ? (
-          <View style={styles.pctBadge}>
-            <Text style={[styles.pctBadgeText, textBase(10, "800")]}>
-              {product.badgePct}
-            </Text>
-          </View>
-        ) : null}
+        <View style={styles.gridBadges}>
+          {product.isFlashDeal ? (
+            <View style={styles.flashBadge}>
+              <Ionicons name="flash" size={10} color="#fff" />
+              <Text style={[styles.flashBadgeText, textBase(9, "800")]}>
+                {t("common.flashBadge")}
+              </Text>
+            </View>
+          ) : null}
+          {product.badgePct ? (
+            <View style={styles.greenBadge}>
+              <Text style={[styles.greenBadgeText, textBase(9, "800")]}>
+                {product.badgePct}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+        <ProductFavoriteButton
+          productId={product.id}
+          isFavorite={isFavorite}
+          onToggle={onToggleFavorite}
+          size={14}
+          style={styles.gridHeart}
+        />
+        <TiendaStockPill display={product.stockDisplay} t={t} />
       </View>
       <View style={styles.flashBody}>
         <Text style={[styles.flashBrand, textBase(10, "600")]}>{product.brand}</Text>
-        <Text style={[styles.flashName, textBase(12, "700")]}>{t(product.nameKey)}</Text>
+        <Text style={[styles.flashName, textBase(12, "700")]}>{product.name}</Text>
         <View style={styles.flashPriceRow}>
           <PriceWithEuro
             raw={product.price}
@@ -619,11 +896,16 @@ function FlashCard({
 function FeaturedCard({
   product,
   cardWidth,
+  isFavorite,
+  onToggleFavorite,
+  t,
 }: {
   product: Product;
   cardWidth: number;
+  isFavorite: boolean;
+  onToggleFavorite: (productId: string) => void;
+  t: (key: string, params?: Record<string, string | number>) => string;
 }) {
-  const { t } = useTranslation();
   return (
     <Pressable
       style={({ pressed }) => [
@@ -641,19 +923,32 @@ function FeaturedCard({
             locations={[0, 0.4, 1]}
             style={StyleSheet.absoluteFill}
           />
-          <Pressable style={styles.heartBtn}>
-            <Ionicons name="heart-outline" size={18} color="rgba(255,255,255,0.85)" />
-          </Pressable>
-          <View style={styles.ratingPill}>
-            <Ionicons name="star" size={12} color="#eab308" />
-            <Text style={[styles.ratingPillText, textBase(10, "700")]}>
-              {product.rating}
-            </Text>
+          <ProductFavoriteButton
+            productId={product.id}
+            isFavorite={isFavorite}
+            onToggle={onToggleFavorite}
+            size={18}
+            style={styles.heartBtn}
+          />
+          <View style={styles.gridBadges}>
+            {product.isFeatured ? (
+              <View style={styles.featuredBadge}>
+                <Ionicons name="star" size={11} color="#fff" />
+              </View>
+            ) : null}
+            {product.badgePct ? (
+              <View style={styles.greenBadge}>
+                <Text style={[styles.greenBadgeText, textBase(9, "800")]}>
+                  {product.badgePct}
+                </Text>
+              </View>
+            ) : null}
           </View>
+          <TiendaStockPill display={product.stockDisplay} t={t} />
         </View>
         <View style={styles.featBody}>
           <Text style={[styles.featBrand, textBase(9, "700")]}>{product.brand}</Text>
-          <Text style={[styles.featName, textBase(14, "700")]}>{t(product.nameKey)}</Text>
+          <Text style={[styles.featName, textBase(14, "700")]}>{product.name}</Text>
           <View style={styles.featFooter}>
             <View style={styles.featPriceBlock}>
               <PriceWithEuro
@@ -681,12 +976,15 @@ function GridProduct({
   product,
   cardWidth,
   t,
+  isFavorite,
+  onToggleFavorite,
 }: {
   product: Product;
   cardWidth: number;
   t: (key: string, params?: Record<string, string | number>) => string;
+  isFavorite: boolean;
+  onToggleFavorite: (productId: string) => void;
 }) {
-  const fullStars = Math.min(5, Math.round(parseFloat(product.rating) || 0));
   return (
     <Pressable
       style={({ pressed }) => [
@@ -703,10 +1001,17 @@ function GridProduct({
           style={StyleSheet.absoluteFill}
         />
         <View style={styles.gridBadges}>
-          {product.badgeHot ? (
-            <View style={styles.hotBadge}>
-              <Ionicons name="flame" size={10} color="#fff" />
-              <Text style={[styles.hotBadgeText, textBase(9, "800")]}>{t("common.hotBadge")}</Text>
+          {product.isFlashDeal ? (
+            <View style={styles.flashBadge}>
+              <Ionicons name="flash" size={10} color="#fff" />
+              <Text style={[styles.flashBadgeText, textBase(9, "800")]}>
+                {t("common.flashBadge")}
+              </Text>
+            </View>
+          ) : null}
+          {product.isFeatured ? (
+            <View style={styles.featuredBadge}>
+              <Ionicons name="star" size={11} color="#fff" />
             </View>
           ) : null}
           {product.badgePct ? (
@@ -717,35 +1022,18 @@ function GridProduct({
             </View>
           ) : null}
         </View>
-        {product.stockCount != null ? (
-          <View style={styles.stockPill}>
-            <Ionicons name="time-outline" size={11} color="#fff" />
-            <Text style={[styles.stockPillText, textBase(9, "600")]}>
-              {t("common.stockRemaining", { count: product.stockCount })}
-            </Text>
-          </View>
-        ) : null}
-        <Pressable style={styles.gridHeart}>
-          <Ionicons name="heart-outline" size={14} color="rgba(255,255,255,0.65)" />
-        </Pressable>
+        <TiendaStockPill display={product.stockDisplay} t={t} />
+        <ProductFavoriteButton
+          productId={product.id}
+          isFavorite={isFavorite}
+          onToggle={onToggleFavorite}
+          size={14}
+          style={styles.gridHeart}
+        />
       </View>
       <View style={styles.gridBody}>
         <Text style={[styles.gridBrand, textBase(9, "700")]}>{product.brand}</Text>
-        <Text style={[styles.gridName, textBase(13, "600")]}>{t(product.nameKey)}</Text>
-        <View style={styles.starsRow}>
-          {[1, 2, 3, 4, 5].map((i) => (
-            <Ionicons
-              key={i}
-              name="star"
-              size={11}
-              color={i <= fullStars ? "#eab308" : "#374151"}
-            />
-          ))}
-          <Text style={[styles.reviews, textBase(10, "400")]}>
-            {" "}
-            ({product.reviews})
-          </Text>
-        </View>
+        <Text style={[styles.gridName, textBase(13, "600")]}>{product.name}</Text>
         <View style={styles.gridFooter}>
           <View style={styles.gridPriceCol}>
             <PriceWithEuro
@@ -784,6 +1072,44 @@ const styles = StyleSheet.create({
   heroTop: {
     paddingHorizontal: TIENDA_PAD_H,
     marginBottom: theme.spacing.sm,
+  },
+  errorBanner: {
+    marginHorizontal: TIENDA_PAD_H,
+    marginBottom: theme.spacing.sm,
+    padding: theme.spacing.md,
+    borderRadius: 12,
+    backgroundColor: "rgba(227,30,36,0.12)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(227,30,36,0.35)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  errorText: {
+    color: "#fca5a5",
+    flex: 1,
+  },
+  fullScreenLoader: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: BG,
+  },
+  retryBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  retryText: {
+    color: ACCENT,
+  },
+  emptyText: {
+    color: "#9ca3af",
+    textAlign: "center",
+    paddingVertical: theme.spacing.xl,
+    paddingHorizontal: TIENDA_PAD_H,
   },
   proShop: {
     color: ACCENT,
@@ -895,6 +1221,22 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.05)",
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: BORDER,
+    position: "relative",
+  },
+  filterBadge: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: ACCENT,
+  },
+  filterBadgeText: {
+    color: "#fff",
   },
   filterBtnText: {
     color: "#9ca3af",
@@ -936,6 +1278,66 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.lg,
     ...cardShadow(),
   },
+  collectionsCarouselWrap: {
+    marginBottom: theme.spacing.lg,
+  },
+  collectionsRow: {},
+  collectionBanner: {
+    width: COLLECTION_BANNER_W,
+    height: COLLECTION_BANNER_H,
+    overflow: "hidden",
+    backgroundColor: CARD,
+  },
+  collectionBannerImg: {
+    ...StyleSheet.absoluteFillObject,
+    width: "100%",
+    height: "100%",
+  },
+  collectionBannerTextBlock: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: "center",
+    paddingLeft: TIENDA_PAD_H,
+    paddingRight: 96,
+    maxWidth: "78%",
+  },
+  collectionBannerTitle: {
+    color: "#fff",
+    marginBottom: 6,
+    textShadowColor: "rgba(0,0,0,0.35)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  collectionBannerSub: {
+    color: "rgba(255,255,255,0.95)",
+    marginBottom: theme.spacing.md,
+    textShadowColor: "rgba(0,0,0,0.3)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  collectionChipRow: {
+    paddingHorizontal: TIENDA_PAD_H,
+    marginBottom: theme.spacing.sm,
+  },
+  collectionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  collectionChipText: {
+    color: "#e5e7eb",
+    flexShrink: 1,
+  },
   bannerImg: {
     ...StyleSheet.absoluteFillObject,
     width: "100%",
@@ -973,63 +1375,32 @@ const styles = StyleSheet.create({
   bannerCtaText: {
     color: BG,
   },
-  aiCard: {
-    position: "relative",
-    marginHorizontal: TIENDA_PAD_H,
-    borderRadius: 18,
-    overflow: Platform.OS === "ios" ? "hidden" : "visible",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "rgba(241,143,52,0.22)",
-    padding: theme.spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    marginBottom: theme.spacing.lg,
-  },
-  aiIcon: {
-    position: "relative",
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-    zIndex: 1,
-    ...Platform.select({
-      ios: {
-        shadowColor: ACCENT,
-        shadowOffset: { width: 0, height: 3 },
-        shadowOpacity: 0.35,
-        shadowRadius: 8,
-      },
-      android: {},
-    }),
-  },
-  aiIconGlyph: {
-    zIndex: 1,
-  },
-  aiTextCol: {
-    flex: 1,
-    minWidth: 0,
-    zIndex: 1,
-    ...Platform.select({
-      android: { alignItems: "stretch" as const },
-      default: {},
-    }),
-  },
-  aiChevronWrap: {
-    zIndex: 1,
-  },
-  aiTitle: {
-    color: "#fff",
-    marginBottom: 4,
-    flexShrink: 1,
-  },
-  aiSub: {
-    color: "#9ca3af",
-  },
   section: {
     marginBottom: theme.spacing.lg,
+  },
+  flashSectionHead: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "nowrap",
+    paddingHorizontal: TIENDA_PAD_H,
+    marginBottom: theme.spacing.sm,
+    gap: 10,
+  },
+  flashSectionTitleRow: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    minWidth: 0,
+  },
+  flashSectionIcon: {
+    flexShrink: 0,
+  },
+  flashSectionTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: "#fff",
   },
   sectionHead: {
     flexDirection: "row",
@@ -1056,6 +1427,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    flexShrink: 0,
   },
   timerBox: {
     backgroundColor: "rgba(255,255,255,0.1)",
@@ -1110,27 +1482,6 @@ const styles = StyleSheet.create({
   flashImg: {
     width: "100%",
     height: "100%",
-  },
-  pctBadge: {
-    position: "absolute",
-    top: 8,
-    left: 8,
-    backgroundColor: ACCENT,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    ...Platform.select({
-      ios: {
-        shadowColor: ACCENT,
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.35,
-        shadowRadius: 6,
-      },
-      android: {},
-    }),
-  },
-  pctBadgeText: {
-    color: "#fff",
   },
   flashBody: {
     paddingTop: 12,
@@ -1357,19 +1708,26 @@ const styles = StyleSheet.create({
     left: 8,
     gap: 6,
   },
-  hotBadge: {
+  flashBadge: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
     alignSelf: "flex-start",
-    backgroundColor: ACCENT,
+    backgroundColor: "#dc2626",
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 6,
   },
-  hotBadgeText: {
+  flashBadgeText: {
     color: "#fff",
-    letterSpacing: 0.6,
+    letterSpacing: 0.4,
+  },
+  featuredBadge: {
+    alignSelf: "flex-start",
+    backgroundColor: "rgba(234, 179, 8, 0.95)",
+    paddingHorizontal: 7,
+    paddingVertical: 5,
+    borderRadius: 6,
   },
   greenBadge: {
     alignSelf: "flex-start",
@@ -1379,21 +1737,6 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   greenBadgeText: {
-    color: "#fff",
-  },
-  stockPill: {
-    position: "absolute",
-    bottom: 8,
-    left: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "rgba(249,115,22,0.92)",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  stockPillText: {
     color: "#fff",
   },
   gridHeart: {

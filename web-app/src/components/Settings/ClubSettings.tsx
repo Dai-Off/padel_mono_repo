@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, useInView } from 'framer-motion';
-import { MapPin, Loader2, Save, Building2, ChevronRight, Clock } from 'lucide-react';
+import { MapPin, Loader2, Save, Building2, ChevronRight, Clock, Shield } from 'lucide-react';
 import {
     ClubWeeklyScheduleEditor,
     parseWeeklySchedule,
@@ -11,6 +11,12 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { authService } from '../../services/auth';
 import { clubService, type Club } from '../../services/club';
+import {
+    clubBookingPoliciesService,
+    BOOKING_WINDOW_DAY_OPTIONS,
+    CANCELLATION_POLICY_OPTIONS,
+    type ClubBookingPolicies,
+} from '../../services/clubBookingPolicies';
 import { PageSpinner } from '../Layout/PageSpinner';
 
 function AnimSection({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) {
@@ -109,6 +115,10 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
         notify_daily_email_summary: false,
     });
     const [weeklySchedule, setWeeklySchedule] = useState<WeeklyScheduleForm>(() => parseWeeklySchedule({}));
+    const [bookingPolicies, setBookingPolicies] = useState<ClubBookingPolicies>({
+        booking_window_days: 7,
+        cancellation_notice_hours: 24,
+    });
 
     const selectedClub = selectedClubId ? clubs.find((c) => c.id === selectedClubId) ?? null : null;
     const skipNextSwitchEffect = useRef(true);
@@ -130,11 +140,24 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
         setWeeklySchedule(parseWeeklySchedule(club.weekly_schedule));
     }, []);
 
+    const loadBookingPolicies = useCallback(async (clubId: string) => {
+        try {
+            const policies = await clubBookingPoliciesService.getByClub(clubId);
+            setBookingPolicies(policies);
+        } catch {
+            setBookingPolicies({
+                booking_window_days: 7,
+                cancellation_notice_hours: 24,
+            });
+        }
+    }, []);
+
     useEffect(() => {
         let cancelled = false;
         if (initialClub) {
             setSelectedClubId(initialClub.id);
             loadClubIntoForm(initialClub);
+            void loadBookingPolicies(initialClub.id);
             setClubs([initialClub]);
             setStatus('ready');
         } else {
@@ -166,6 +189,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                 if (first) {
                     setSelectedClubId(first.id);
                     loadClubIntoForm(first);
+                    void loadBookingPolicies(first.id);
                     setStatus('ready');
                 } else {
                     setStatus('no_club');
@@ -178,7 +202,7 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
             }
         })();
         return () => { cancelled = true; };
-    }, [initialClub, loadClubIntoForm, t]);
+    }, [initialClub, loadClubIntoForm, loadBookingPolicies, t]);
 
     useEffect(() => {
         if (!selectedClubId || !selectedClub) return;
@@ -187,7 +211,8 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
             return;
         }
         loadClubIntoForm(selectedClub);
-    }, [selectedClubId, selectedClub, loadClubIntoForm]);
+        void loadBookingPolicies(selectedClubId);
+    }, [selectedClubId, selectedClub, loadClubIntoForm, loadBookingPolicies]);
 
     const handleLanguageChange = (lng: string) => {
         void i18n.changeLanguage(lng);
@@ -214,6 +239,8 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                 weekly_schedule: weeklyScheduleToPayload(weeklySchedule),
             };
             const updated = await clubService.update(selectedClub.id, payload);
+            const savedPolicies = await clubBookingPoliciesService.update(selectedClub.id, bookingPolicies);
+            setBookingPolicies(savedPolicies);
             setClubs((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
             loadClubIntoForm(updated);
             toast.success(t('save_success'));
@@ -348,6 +375,66 @@ export function ClubSettingsTab({ initialClub }: ClubSettingsTabProps) {
                                 <h3 className="text-xs font-bold text-[#1A1A1A]">{t('club_schedule_title')}</h3>
                             </div>
                             <ClubWeeklyScheduleEditor value={weeklySchedule} onChange={setWeeklySchedule} />
+                        </div>
+                    </AnimSection>
+
+                    <AnimSection delay={0.09}>
+                        <div className="bg-white rounded-2xl border border-gray-100 p-5">
+                            <div className="flex items-center gap-2 mb-4">
+                                <div className="w-8 h-8 rounded-xl bg-[#7C3AED]/10 flex items-center justify-center">
+                                    <Shield className="w-4 h-4 text-[#7C3AED]" />
+                                </div>
+                                <h3 className="text-xs font-bold text-[#1A1A1A]">
+                                    {t('club_settings_booking_policies_title')}
+                                </h3>
+                            </div>
+                            <p className="text-xs text-gray-500 mb-4 leading-relaxed">
+                                {t('club_settings_booking_policies_desc_single')}
+                            </p>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                                        {t('club_settings_booking_window')}
+                                    </label>
+                                    <select
+                                        value={bookingPolicies.booking_window_days}
+                                        onChange={(e) =>
+                                            setBookingPolicies((p) => ({
+                                                ...p,
+                                                booking_window_days: Number(e.target.value),
+                                            }))
+                                        }
+                                        className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/30 text-sm text-[#1A1A1A]"
+                                    >
+                                        {BOOKING_WINDOW_DAY_OPTIONS.map((days) => (
+                                            <option key={days} value={days}>
+                                                {days} {t('club_settings_days')}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                                        {t('club_settings_cancellation')}
+                                    </label>
+                                    <select
+                                        value={bookingPolicies.cancellation_notice_hours}
+                                        onChange={(e) =>
+                                            setBookingPolicies((p) => ({
+                                                ...p,
+                                                cancellation_notice_hours: Number(e.target.value),
+                                            }))
+                                        }
+                                        className="w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-2xl focus:ring-2 focus:ring-[#E31E24]/30 text-sm text-[#1A1A1A]"
+                                    >
+                                        {CANCELLATION_POLICY_OPTIONS.map((opt) => (
+                                            <option key={opt.hours} value={opt.hours}>
+                                                {opt.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </div>
                         </div>
                     </AnimSection>
 

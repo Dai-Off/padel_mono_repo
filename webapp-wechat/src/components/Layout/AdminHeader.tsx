@@ -14,7 +14,7 @@ export function AdminHeader({ userEmail, onMenuOpen, onLogout }: AdminHeaderProp
     const current = getNavItemByPath(pathname);
 
     return (
-        <header className="sticky top-0 z-30 border-b border-auth-border bg-auth-bg/95 pt-safe backdrop-blur-md">
+        <header className="z-30 shrink-0 border-b border-auth-border bg-auth-bg/95 pt-safe backdrop-blur-md">
             <div className="flex min-h-14 items-center justify-between gap-3 px-[max(1rem,env(safe-area-inset-left))] py-3 pr-[max(1rem,env(safe-area-inset-right))] sm:min-h-16 sm:px-6 lg:px-8">
                 <div className="flex min-w-0 flex-1 items-center gap-3">
                     <button

@@ -16,6 +16,7 @@ import { browserIanaTimeZone } from '../../../lib/browserTimeZone';
 import { CreateMatchModal } from './CreateMatchModal';
 import { useVisualViewportFix } from '../hooks/useVisualViewportFix';
 import { PlayerSearch } from './ReservationModal';
+import { CashRefundModal, type CashRefundConfirmPayload } from './CashRefundModal';
 import {
     buildSyntheticMatchPlayer,
     nextFreeSlotIndex,
@@ -40,6 +41,11 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
     const [addingToSlot, setAddingToSlot] = useState<{ matchId: string, team: string, index: number, bookingId: string } | null>(null);
     const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
     const [removingFromMatch, setRemovingFromMatch] = useState<any | null>(null);
+    const [pendingPlayerRemove, setPendingPlayerRemove] = useState<{
+        matchId: string;
+        bookingId: string;
+        playerId: string;
+    } | null>(null);
 
     // Estado local de la fecha
     const [currentDate, setCurrentDate] = useState(() => new Date(dateStr + 'T12:00:00'));
@@ -50,6 +56,35 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
     }, [isOpen, dateStr]);
 
     const currentDateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(currentDate.getDate()).padStart(2, '0')}`;
+
+    const executeRemovePlayer = async ({ cashRefunds, applyRefund }: CashRefundConfirmPayload) => {
+        if (!pendingPlayerRemove) return;
+        setLoading(true);
+        try {
+            await apiFetchWithAuth(`/matches/${pendingPlayerRemove.matchId}/admin-remove-player`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    player_id: pendingPlayerRemove.playerId,
+                    booking_id: pendingPlayerRemove.bookingId,
+                    cash_refund_action: cashRefunds[pendingPlayerRemove.playerId],
+                    apply_refund: applyRefund,
+                }),
+            });
+            await fetchMatches();
+            setRemovingFromMatch(null);
+            setPendingPlayerRemove(null);
+        } catch (err) {
+            console.error('Error removing player:', err);
+            alert('Error al remover jugador');
+            throw err;
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const startRemovePlayer = (match: any, playerId: string, bookingId: string) => {
+        setPendingPlayerRemove({ matchId: match.id, bookingId, playerId });
+    };
 
     const fetchMatches = useCallback(async () => {
         if (!clubId) return;
@@ -492,25 +527,12 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                                             <button 
                                                 className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                                                 title="Remover"
-                                                onClick={async () => {
-                                                    setLoading(true);
-                                                    try {
-                                                        const matchBooking = Array.isArray(removingFromMatch.bookings) ? removingFromMatch.bookings[0] : removingFromMatch.bookings;
-                                                        await apiFetchWithAuth(`/matches/${removingFromMatch.id}/admin-remove-player`, {
-                                                            method: 'POST',
-                                                            body: JSON.stringify({
-                                                                player_id: player.id,
-                                                                booking_id: matchBooking?.id
-                                                            })
-                                                        });
-                                                        await fetchMatches();
-                                                        setRemovingFromMatch(null);
-                                                    } catch(err) {
-                                                        console.error(err);
-                                                        alert('Error al remover jugador');
-                                                    } finally {
-                                                        setLoading(false);
-                                                    }
+                                                onClick={() => {
+                                                    const matchBooking = Array.isArray(removingFromMatch.bookings)
+                                                        ? removingFromMatch.bookings[0]
+                                                        : removingFromMatch.bookings;
+                                                    if (!matchBooking?.id) return;
+                                                    startRemovePlayer(removingFromMatch, player.id, matchBooking.id);
                                                 }}
                                             >
                                                 <Trash2 size={16} />
@@ -523,11 +545,26 @@ export const MatchesManagementModal: React.FC<MatchesManagementModalProps> = ({ 
                     </div>
                 </div>
             )}
+
+            {pendingPlayerRemove && (
+                <CashRefundModal
+                    isOpen={!!pendingPlayerRemove}
+                    bookingId={pendingPlayerRemove.bookingId}
+                    playerId={pendingPlayerRemove.playerId}
+                    title="Devolución en efectivo"
+                    subtitle="Este jugador pagó en efectivo en mostrador."
+                    confirmLabel="Remover jugador"
+                    onClose={() => !loading && setPendingPlayerRemove(null)}
+                    onNoCashPlayers={(payload) => void executeRemovePlayer(payload)}
+                    onConfirm={executeRemovePlayer}
+                />
+            )}
             
             {isCreateMatchOpen && (
                 <CreateMatchModal
                     clubId={clubId}
                     isOpen={isCreateMatchOpen}
+                    initialDate={currentDateStr}
                     onClose={() => {
                         setIsCreateMatchOpen(false);
                         fetchMatches();

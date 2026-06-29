@@ -128,3 +128,44 @@ export async function apiFetchWithAuth<T>(path: string, options: RequestInit = {
     }
     return response.json();
 }
+
+export async function apiUploadWithAuth<T>(path: string, formData: FormData): Promise<T> {
+    let session = getStoredSession();
+    if (session && isTokenExpiringSoon(session.expires_at)) {
+        session = (await refreshSessionTokenIfPossible()) ?? session;
+    }
+    const token = session?.access_token ?? null;
+    const url = `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+    const headers = new Headers();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    let response = await fetch(url, { method: 'POST', headers, body: formData });
+
+    if (response.status === 401 && session?.refresh_token) {
+        const refreshed = await refreshSessionTokenIfPossible();
+        if (refreshed?.access_token) {
+            const retryHeaders = new Headers();
+            retryHeaders.set('Authorization', `Bearer ${refreshed.access_token}`);
+            response = await fetch(url, { method: 'POST', headers: retryHeaders, body: formData });
+        }
+    }
+
+    if (!response.ok) {
+        if (response.status === 401 && session?.access_token) {
+            try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch { /* ignore */ }
+            sessionStorage.setItem(SESSION_EXPIRED_KEY, '1');
+            window.location.assign('/login');
+        }
+        const errorData = await response.json().catch(() => ({ message: response.statusText }));
+        throw new HttpError(
+            (errorData as { error?: string; message?: string }).error ||
+                (errorData as { message?: string }).message ||
+                'API Request failed',
+            response.status,
+            typeof (errorData as { code?: unknown }).code === 'string'
+                ? (errorData as { code: string }).code
+                : undefined,
+            errorData as Record<string, unknown>
+        );
+    }
+    return response.json();
+}
