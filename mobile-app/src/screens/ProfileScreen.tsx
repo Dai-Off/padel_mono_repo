@@ -122,6 +122,7 @@ export function ProfileScreen({
   const [framesCatalog, setFramesCatalog] = useState<CatalogItem[]>([]);
   const [heroBadges, setHeroBadges] = useState<Achievement[]>([]);
   const [showCustomize, setShowCustomize] = useState(false);
+  const [customizationReady, setCustomizationReady] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [uploadingCover, setUploadingCover] = useState(false);
 
@@ -221,11 +222,11 @@ export function ProfileScreen({
     };
   }, [session?.access_token, profile?.id]);
 
-  // Personalización equipada + catálogos para resolver marco/insignias del hero
+  // Personalización equipada + catálogos para el hero. En paralelo con el perfil
+  // (endpoints /me, solo necesitan token) para que todo aparezca a la vez.
   useEffect(() => {
     const token = session?.access_token;
-    const playerId = profile?.id;
-    if (!token || !playerId) return;
+    if (!token) return;
     let cancelled = false;
     Promise.all([fetchCustomization(token), fetchUnlockables(token, ['frame']), fetchAchievements(token)])
       .then(([c, frames, achievements]) => {
@@ -234,11 +235,14 @@ export function ProfileScreen({
         setFramesCatalog(frames);
         setHeroBadges(achievements.filter((a) => a.type !== 'course'));
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setCustomizationReady(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [session?.access_token, profile?.id]);
+  }, [session?.access_token]);
 
   const equippedFrame = useMemo<FrameAttrs | null>(() => {
     const fid = customization?.frameId;
@@ -377,7 +381,7 @@ export function ProfileScreen({
     ]);
   };
 
-  if (profileLoading && !profile) {
+  if ((profileLoading && !profile) || (!customizationReady && !profileError)) {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#F18F34" />

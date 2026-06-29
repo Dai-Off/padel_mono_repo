@@ -158,11 +158,21 @@ function ruleMet(u: UnlockableRow, s: PlayerSignals): boolean {
   }
 }
 
+// Cooldown en memoria: evita reevaluar (queries pesadas) en cada lectura cuando
+// el perfil/modal disparan varias peticiones seguidas. El otorgado es idempotente
+// y on-read, así que basta evaluar una vez cada X segundos por jugador.
+const lastGrantAt = new Map<string, number>();
+const GRANT_COOLDOWN_MS = 15000;
+
 /**
  * Evalúa y otorga los desbloqueables que el jugador haya conseguido.
  * Devuelve los RECIÉN otorgados (con su info de catálogo) para el modal.
  */
 export async function evaluateAndGrant(supabase: Supa, playerId: string): Promise<UnlockableRow[]> {
+  const now = Date.now();
+  if (now - (lastGrantAt.get(playerId) ?? 0) < GRANT_COOLDOWN_MS) return [];
+  lastGrantAt.set(playerId, now);
+
   const [{ data: catalog }, { data: owned }] = await Promise.all([
     supabase
       .from('unlockables')

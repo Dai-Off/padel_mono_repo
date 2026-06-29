@@ -21,11 +21,11 @@ export interface FrameStyleDef {
 
 export const FRAME_STYLES: Record<FrameStyleKey, FrameStyleDef> = {
   none: { borderWidth: 0 },
-  solid: { borderWidth: 3 },
+  solid: { borderWidth: 2.5 },
   thin: { borderWidth: 1.5 },
-  double: { borderWidth: 2.5, double: true },
-  glow: { borderWidth: 3, glow: true },
-  bevel: { borderWidth: 3, bevel: true },
+  double: { borderWidth: 2, double: true },
+  glow: { borderWidth: 2.5, glow: true },
+  bevel: { borderWidth: 2.5, bevel: true },
 };
 
 export function getFrameStyle(style: string | null | undefined): FrameStyleDef {
