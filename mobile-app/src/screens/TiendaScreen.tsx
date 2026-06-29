@@ -29,6 +29,7 @@ import { TiendaStockPill } from "../components/tienda/TiendaStockPill";
 import { PagerDots, VerticalScrollHint } from "../components/ui/PagerDots";
 import { SafeScrollView } from "../components/ui/SafeScrollView";
 import { useTiendaFavorites } from "../hooks/useTiendaFavorites";
+import { useCart } from "../contexts/CartContext";
 import {
   countActiveFilters,
   DEFAULT_TIENDA_FILTERS,
@@ -244,6 +245,7 @@ function textBase(size: number, weight: "400" | "500" | "600" | "700" | "800") {
 export function TiendaScreen() {
   const { t } = useTranslation();
   const { favoriteIds, toggleFavorite, isFavorite } = useTiendaFavorites();
+  const { addItem } = useCart();
   const [category, setCategory] = useState<CategoryId>("all");
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<TiendaSortMode>("featured");
@@ -678,6 +680,7 @@ export function TiendaScreen() {
                   t={t}
                   isFavorite={isFavorite(p.id)}
                   onToggleFavorite={toggleFavorite}
+                  onAddToCart={addItem}
                 />
               ))}
             </ScrollView>
@@ -716,6 +719,7 @@ export function TiendaScreen() {
                   cardWidth={FEAT_CARD_W}
                   isFavorite={isFavorite(p.id)}
                   onToggleFavorite={toggleFavorite}
+                  onAddToCart={addItem}
                   t={t}
                 />
               ))}
@@ -747,6 +751,7 @@ export function TiendaScreen() {
                     t={t}
                     isFavorite={isFavorite(p.id)}
                     onToggleFavorite={toggleFavorite}
+                    onAddToCart={addItem}
                   />
                 ))}
               </View>
@@ -826,12 +831,14 @@ function FlashCard({
   t,
   isFavorite,
   onToggleFavorite,
+  onAddToCart,
 }: {
   product: Product;
   cardWidth: number;
   t: (key: string, params?: Record<string, string | number>) => string;
   isFavorite: boolean;
   onToggleFavorite: (productId: string) => void;
+  onAddToCart: (product: Product) => void;
 }) {
   return (
     <Pressable
@@ -876,17 +883,27 @@ function FlashCard({
       <View style={styles.flashBody}>
         <Text style={[styles.flashBrand, textBase(10, "600")]}>{product.brand}</Text>
         <Text style={[styles.flashName, textBase(12, "700")]}>{product.name}</Text>
-        <View style={styles.flashPriceRow}>
-          <PriceWithEuro
-            raw={product.price}
-            style={[styles.priceAccent, textBase(14, "800")]}
-          />
-          {product.oldPrice ? (
+        <View style={styles.flashFooter}>
+          <View style={styles.flashPriceCol}>
             <PriceWithEuro
-              raw={product.oldPrice}
-              style={[styles.priceOld, textBase(11, "500")]}
+              raw={product.price}
+              style={[styles.priceAccent, textBase(14, "800")]}
             />
-          ) : null}
+            {product.oldPrice ? (
+              <PriceWithEuro
+                raw={product.oldPrice}
+                style={[styles.priceOld, textBase(11, "500")]}
+              />
+            ) : null}
+          </View>
+          <Pressable
+            onPress={() => onAddToCart(product)}
+            hitSlop={6}
+            accessibilityLabel={t("nav.tiendaCart")}
+            style={({ pressed }) => [styles.gridCart, pressed && styles.pressed]}
+          >
+            <Ionicons name="add" size={18} color="#fff" />
+          </Pressable>
         </View>
       </View>
     </Pressable>
@@ -898,12 +915,14 @@ function FeaturedCard({
   cardWidth,
   isFavorite,
   onToggleFavorite,
+  onAddToCart,
   t,
 }: {
   product: Product;
   cardWidth: number;
   isFavorite: boolean;
   onToggleFavorite: (productId: string) => void;
+  onAddToCart: (product: Product) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
 }) {
   return (
@@ -962,7 +981,12 @@ function FeaturedCard({
                 />
               ) : null}
             </View>
-            <Pressable style={styles.cartRound}>
+            <Pressable
+              onPress={() => onAddToCart(product)}
+              hitSlop={6}
+              accessibilityLabel={t("nav.tiendaCart")}
+              style={({ pressed }) => [styles.cartRound, pressed && styles.pressed]}
+            >
               <Ionicons name="cart-outline" size={18} color="#fff" />
             </Pressable>
           </View>
@@ -978,12 +1002,14 @@ function GridProduct({
   t,
   isFavorite,
   onToggleFavorite,
+  onAddToCart,
 }: {
   product: Product;
   cardWidth: number;
   t: (key: string, params?: Record<string, string | number>) => string;
   isFavorite: boolean;
   onToggleFavorite: (productId: string) => void;
+  onAddToCart: (product: Product) => void;
 }) {
   return (
     <Pressable
@@ -1047,7 +1073,12 @@ function GridProduct({
               />
             ) : null}
           </View>
-          <Pressable style={styles.gridCart}>
+          <Pressable
+            onPress={() => onAddToCart(product)}
+            hitSlop={6}
+            accessibilityLabel={t("nav.tiendaCart")}
+            style={({ pressed }) => [styles.gridCart, pressed && styles.pressed]}
+          >
             <Ionicons name="cart-outline" size={16} color="#fff" />
           </Pressable>
         </View>
@@ -1534,6 +1565,22 @@ const styles = StyleSheet.create({
     marginTop: 2,
     paddingBottom: Platform.OS === "android" ? 2 : 0,
     paddingRight: 4,
+  },
+  flashFooter: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    gap: 8,
+    marginTop: 2,
+  },
+  flashPriceCol: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "baseline",
+    flexWrap: "wrap",
+    columnGap: 8,
+    rowGap: 4,
   },
   priceAccent: {
     color: ACCENT,
