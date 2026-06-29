@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,18 @@ import { useAuth } from '../contexts/AuthContext';
 import { fetchMyPlayerProfile, type MyPlayerProfile } from '../api/players';
 import { formatPlayerLabel } from '../lib/username';
 import { useHomeData } from '../contexts/HomeDataContext';
-import { PlayerAvatarCircle } from '../components/profile/PlayerAvatarCircle';
+import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWithFrame';
+import { AnimatedTitle } from '../components/profile/AnimatedTitle';
+import { ProfileCustomizationModal } from '../components/profile/ProfileCustomizationModal';
+import { RARITY_CONFIG } from '../design/rarity';
+import type { Achievement } from '../design/achievements';
+import {
+  fetchCustomization,
+  fetchUnlockables,
+  type ProfileCustomization,
+  type CatalogItem,
+} from '../api/profileCustomization';
+import { fetchAchievements } from '../api/unlockables';
 import { theme } from '../theme';
 import { AICoachSection } from '../components/profile/AICoachSection';
 import { TrophyShowcaseSection } from '../components/profile/TrophyShowcaseSection';
@@ -106,6 +117,11 @@ export function ProfileScreen({
   const [levelLoading, setLevelLoading] = useState(true);
   const [levelLimit, setLevelLimit] = useState<LevelHistoryLimit>('5');
   const [stats, setStats] = useState<PlayerStats | null>(null);
+  // Personalización (título/marco/insignias equipados) + catálogos para resolverlos
+  const [customization, setCustomization] = useState<ProfileCustomization | null>(null);
+  const [framesCatalog, setFramesCatalog] = useState<CatalogItem[]>([]);
+  const [heroBadges, setHeroBadges] = useState<Achievement[]>([]);
+  const [showCustomize, setShowCustomize] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [uploadingCover, setUploadingCover] = useState(false);
 
@@ -204,6 +220,39 @@ export function ProfileScreen({
       cancelled = true;
     };
   }, [session?.access_token, profile?.id]);
+
+  // Personalización equipada + catálogos para resolver marco/insignias del hero
+  useEffect(() => {
+    const token = session?.access_token;
+    const playerId = profile?.id;
+    if (!token || !playerId) return;
+    let cancelled = false;
+    Promise.all([fetchCustomization(token), fetchUnlockables(token, ['frame']), fetchAchievements(token)])
+      .then(([c, frames, achievements]) => {
+        if (cancelled) return;
+        setCustomization(c ?? { titleId: null, frameId: null, pinnedBadgeIds: [] });
+        setFramesCatalog(frames);
+        setHeroBadges(achievements.filter((a) => a.type !== 'course'));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.access_token, profile?.id]);
+
+  const equippedFrame = useMemo<FrameAttrs | null>(() => {
+    const fid = customization?.frameId;
+    if (!fid) return null;
+    const f = framesCatalog.find((x) => x.id === fid);
+    return f ? { rarity: f.rarity, style: f.style, animationType: f.animationType, colors: f.colors } : null;
+  }, [customization?.frameId, framesCatalog]);
+
+  const pinnedBadges = useMemo<Achievement[]>(() => {
+    const ids = customization?.pinnedBadgeIds ?? [];
+    return ids
+      .map((id) => heroBadges.find((b) => b.id === id))
+      .filter((b): b is Achievement => b != null);
+  }, [customization?.pinnedBadgeIds, heroBadges]);
 
   // Scroll a la Vitrina cuando el modal de desbloqueo pide "Ir a mi vitrina".
   // Arma el objetivo y reintenta; el onLayout de la Vitrina y el efecto de carga
@@ -433,14 +482,20 @@ export function ProfileScreen({
             </View>
             <View style={styles.profileHeader}>
               <View style={styles.avatarContainer}>
-                <PlayerAvatarCircle
+                <AvatarWithFrame
                   avatarUrl={profile?.avatarUrl}
                   initials={initials}
                   size={80}
+                  frame={equippedFrame}
                 />
               </View>
               <View style={styles.profileInfo}>
                 <Text style={styles.profileName}>{displayName}</Text>
+                {customization?.titleId ? (
+                  <View style={{ marginTop: 2 }}>
+                    <AnimatedTitle titleId={customization.titleId} />
+                  </View>
+                ) : null}
                 {usernameLine ? (
                   <Text style={styles.usernameText}>{usernameLine}</Text>
                 ) : null}
@@ -450,6 +505,21 @@ export function ProfileScreen({
                     <Text style={styles.emailText} numberOfLines={1}>
                       {profile?.email ?? session?.user?.email}
                     </Text>
+                  </View>
+                ) : null}
+                {pinnedBadges.length > 0 ? (
+                  <View style={styles.pinnedRow}>
+                    {pinnedBadges.map((b) => {
+                      const conf = RARITY_CONFIG[b.rarity];
+                      return (
+                        <View
+                          key={b.id}
+                          style={[styles.pinnedBadge, { backgroundColor: conf.bg, borderColor: conf.border }]}
+                        >
+                          <Ionicons name={b.icon as keyof typeof Ionicons.glyphMap} size={12} color={conf.color} />
+                        </View>
+                      );
+                    })}
                   </View>
                 ) : null}
               </View>
@@ -483,6 +553,12 @@ export function ProfileScreen({
                 <Text style={styles.personalizeBtnText}>Preferencias</Text>
               </Pressable>
             </View>
+
+            {/* Personalizar perfil (título / marco / insignias) */}
+            <Pressable style={styles.customizeBtn} onPress={() => setShowCustomize(true)}>
+              <Ionicons name="sparkles-outline" size={15} color="#fff" />
+              <Text style={styles.customizeBtnText}>Personalizar perfil</Text>
+            </Pressable>
           </View>
         </View>
 
@@ -624,7 +700,16 @@ export function ProfileScreen({
         }}
       />
 
-      {/* Navigation Dummy - matching Figma layout z-index */}
+      {customization ? (
+        <ProfileCustomizationModal
+          visible={showCustomize}
+          onClose={() => setShowCustomize(false)}
+          initials={initials}
+          avatarUrl={profile?.avatarUrl}
+          current={customization}
+          onSaved={(c) => setCustomization(c)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -852,6 +937,39 @@ const styles = StyleSheet.create({
     color: '#F18F34',
     fontSize: 14,
     fontWeight: '600',
+  },
+  customizeBtn: {
+    marginTop: 10,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: '#F18F34',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#F18F34',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  customizeBtnText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  pinnedRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 6,
+  },
+  pinnedBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   coachCardContainer: {
     paddingHorizontal: 16,
