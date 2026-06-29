@@ -1,7 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import mobileAdminStoreRouter from './mobileAdminStore';
 
 const router = Router();
+
+router.use('/store', mobileAdminStoreRouter);
 
 /**
  * Perfil para webapp-wechat únicamente.

@@ -1112,36 +1112,17 @@ export function MainApp() {
                 tone="dark"
                 onBack={() => setActiveTab('inicio')}
                 rightSlot={(
-                  <View style={styles.tiendaHeaderRight}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={t('nav.tiendaShoppingAssistant')}
-                      hitSlop={8}
-                      style={({ pressed }) => [
-                        styles.tiendaHeaderIconBase,
-                        pressed && { opacity: 0.85 },
-                      ]}
-                    >
-                      <LinearGradient
-                        colors={['#F18F34', '#FFB347']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={StyleSheet.absoluteFill}
-                      />
-                      <Ionicons name="sparkles" size={18} color="#fff" style={styles.tiendaHeaderIconFg} />
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={t('nav.tiendaCart')}
-                      hitSlop={8}
-                      style={({ pressed }) => [
-                        styles.tiendaHeaderCart,
-                        pressed && { opacity: 0.85 },
-                      ]}
-                    >
-                      <Ionicons name="cart-outline" size={18} color="#fff" />
-                    </Pressable>
-                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={t('nav.tiendaCart')}
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.tiendaHeaderCart,
+                      pressed && { opacity: 0.85 },
+                    ]}
+                  >
+                    <Ionicons name="cart-outline" size={18} color="#fff" />
+                  </Pressable>
                 )}
               />
             )
@@ -1305,22 +1286,6 @@ export function MainApp() {
 }
 
 const styles = StyleSheet.create({
-  tiendaHeaderRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  tiendaHeaderIconBase: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tiendaHeaderIconFg: {
-    zIndex: 1,
-  },
   tiendaHeaderCart: {
     width: 36,
     height: 36,

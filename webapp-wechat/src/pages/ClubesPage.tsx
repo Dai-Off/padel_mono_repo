@@ -74,7 +74,7 @@ export function ClubesPage() {
     return (
         <ListPageShell>
             <PageHeader
-                compact
+                dense
                 title="Clubes"
                 description="Clubes activos en la plataforma con pistas visibles."
                 count={loading ? undefined : clubs.length}

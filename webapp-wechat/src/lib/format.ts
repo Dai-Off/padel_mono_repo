@@ -29,3 +29,36 @@ const PLAYER_STATUS_LABELS: Record<string, string> = {
 export function playerStatusLabel(status: string): string {
     return PLAYER_STATUS_LABELS[status] ?? status;
 }
+
+const STORE_CATEGORY_LABELS: Record<string, string> = {
+    palas: 'Palas',
+    pelotas: 'Pelotas',
+    calzado: 'Calzado',
+    ropa: 'Ropa',
+    accesorios: 'Accesorios',
+};
+
+export function storeCategoryLabel(category: string): string {
+    return STORE_CATEGORY_LABELS[category] ?? category;
+}
+
+export function formatMoney(cents: number, currency = 'EUR'): string {
+    return new Intl.NumberFormat('es-ES', {
+        style: 'currency',
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(cents / 100);
+}
+
+export function eurosToCents(value: string): number | null {
+    const normalized = value.trim().replace(',', '.');
+    if (!normalized) return null;
+    const n = Number(normalized);
+    if (!Number.isFinite(n) || n < 0) return null;
+    return Math.round(n * 100);
+}
+
+export function centsToEurosInput(cents: number): string {
+    return (cents / 100).toFixed(2);
+}
