@@ -226,7 +226,7 @@ export function CrearPartidoLocationSheet({
     date: selectedSlot?.dateStr,
     slot: selectedSlot?.time,
     durationMinutes: DURATION_MIN,
-    reservationType: 'open_match',
+    reservationType: partidoPrivado ? 'standard' : 'open_match',
   });
 
   const getSlotDisplayPrice = () => {
@@ -329,6 +329,7 @@ export function CrearPartidoLocationSheet({
         start_at,
         end_at,
         total_price_cents: priceData.total_price_cents,
+        pay_full: partidoPrivado,
         visibility: partidoPrivado ? 'private' : 'public',
         competitive: false,
         gender,
@@ -433,6 +434,7 @@ export function CrearPartidoLocationSheet({
     priceData,
     priceLoading,
     t,
+    locale,
   ]);
 
   const handleSiguiente = () => {

@@ -25,6 +25,22 @@ import {
 } from '../services/matchPlayerSlotService';
 import { sendMatchJoinConfirmationEmail } from '../lib/mailer';
 
+/** Reserva de pista privada = pago del total; partido público abierto = 1/4 salvo pay_full explícito. */
+function resolvePayFullForNewMatch(opts: {
+  pay_full?: unknown;
+  visibility?: string | null;
+}): boolean {
+  if (
+    opts.pay_full === true ||
+    opts.pay_full === 'true' ||
+    opts.pay_full === 1 ||
+    opts.pay_full === '1'
+  ) {
+    return true;
+  }
+  return String(opts.visibility ?? '').toLowerCase() === 'private';
+}
+
 function parsePreferredSlotFromMeta(meta: Record<string, string | undefined>): number | null {
   const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
   return Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
@@ -326,7 +342,8 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
     }
 
     const totalCents = Number(total_price_cents);
-    const isPayFull = pay_full === true || pay_full === 'true' || pay_full === 1;
+    const vis = visibility === 'public' ? 'public' : 'private';
+    const isPayFull = resolvePayFullForNewMatch({ pay_full, visibility: vis });
     const reservation_type = isPayFull ? 'standard' : 'open_match';
 
     const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
@@ -370,7 +387,7 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       total_price_cents: String(totalCents),
       payer_player_id: player.id,
       timezone: timezone ?? 'Europe/Madrid',
-      visibility: visibility === 'public' ? 'public' : 'private',
+      visibility: vis,
       competitive: '0',
       gender: gender ?? 'any',
       source_channel: sch0,
@@ -3212,11 +3229,12 @@ async function processNewMatchPayment(
   const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
     ? meta.source_channel
     : 'mobile';
+  const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full, visibility });
   const reservation_type =
-    meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
-      ? meta.reservation_type
-      : meta.pay_full === '1'
-        ? 'standard'
+    isPayFull
+      ? 'standard'
+      : meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
+        ? meta.reservation_type
         : 'open_match';
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents <= 0) return;
@@ -3249,7 +3267,6 @@ async function processNewMatchPayment(
     }
   }
 
-  const isPayFull = meta.pay_full === '1';
   const shareCents = isPayFull ? total_price_cents : Math.ceil(total_price_cents / 4);
   const contentionStatus = contentionStatusForNewMatchBooking(reservation_type, isPayFull);
 
@@ -3428,12 +3445,12 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
 
-      const isPayFull = meta.pay_full === '1';
+      const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full, visibility });
       const reservation_type =
-        meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
-          ? meta.reservation_type
-          : isPayFull
-            ? 'standard'
+        isPayFull
+          ? 'standard'
+          : meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
+            ? meta.reservation_type
             : 'open_match';
 
       const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
@@ -4132,12 +4149,12 @@ export async function simulateBookingPaymentHandler(req: Request, res: Response)
       return;
     }
 
-    const isPayFull = meta.pay_full === '1';
+    const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full, visibility });
     const reservation_type =
-      meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
-        ? meta.reservation_type
-        : isPayFull
-          ? 'standard'
+      isPayFull
+        ? 'standard'
+        : meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
+          ? meta.reservation_type
           : 'open_match';
 
     const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(

@@ -825,6 +825,7 @@ export function ClubDetailScreen({
       restrictByLevel,
       eloMin,
       eloMax,
+      duration,
       initPaymentSheet,
       presentPaymentSheet,
       loadTimeSlotsForDate,

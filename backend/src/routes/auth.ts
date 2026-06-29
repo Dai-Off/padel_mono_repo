@@ -6,6 +6,7 @@ import { sendPasswordResetEmail, sendRegistrationConfirmationEmail, syncPlayerVe
 import { getFrontendUrl, getPasswordResetRedirectUrl } from '../lib/env';
 import { applyRedirectToActionLink } from '../lib/recoveryMobileBridge';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
+import { seedClubBookingPoliciesFromApplication } from '../lib/clubBookingPolicies';
 import { assignActiveMatchmakingSeasonIfNull } from '../services/matchmakingSeasonService';
 import { assertUsernameAvailable, normalizeUsername } from '../lib/playerUsername';
 
@@ -901,6 +902,11 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
         if (r.error) console.error('[register-club-owner] pricing rule seed failed:', r.error);
       }
     }
+
+    await seedClubBookingPoliciesFromApplication(supabase, clubId, {
+      booking_window: app.booking_window,
+      cancellation_policy: app.cancellation_policy,
+    });
 
     await supabase.from('club_application_invites').update({ used_at: new Date().toISOString() }).eq('id', invite.id);
     await supabase.from('club_applications').update({ club_owner_id: ownerId, club_id: clubId }).eq('id', application_id);

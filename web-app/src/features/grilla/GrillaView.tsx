@@ -347,9 +347,10 @@ const useClubData = (dateOrStr: Date | string) => {
     }, [authResolved, clubId, dateStr, fetchCourts, fetchBookingsForDate, prefetchWindow]);
 
     // Force-refresh: invalidate cache for current date and re-fetch
-    const refresh = useCallback(async () => {
-        delete bookingsCache[dateStr];
-        await fetchData();
+    const refresh = useCallback(async (opts?: { date?: string }) => {
+        const d = opts?.date ?? dateStr;
+        delete bookingsCache[d];
+        if (d === dateStr) await fetchData();
     }, [dateStr, fetchData]);
 
     useEffect(() => {
@@ -441,7 +442,8 @@ const useClubData = (dateOrStr: Date | string) => {
                         if (rawDate !== dateStr) return;
                         if (
                             raw.court_contention_status === 'won' ||
-                            (raw.reservation_type === 'open_match' && raw.status === 'confirmed')
+                            (raw.status === 'confirmed' &&
+                                (raw.reservation_type === 'open_match' || raw.reservation_type === 'standard'))
                         ) {
                             delete bookingsCache[dateStr];
                             fetchData();
@@ -679,9 +681,14 @@ function mapBookings(
                 const bpTotal = participants.reduce((sum: number, p: any) => sum + (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0), 0);
                 if (bpTotal > 0) return bpTotal;
                 // 3rd priority: for app payments, payment_status='paid' + share_amount_cents is the source of truth
-                return participants
+                const fromShare = participants
                     .filter((p: any) => p.payment_status === 'paid')
                     .reduce((sum: number, p: any) => sum + (p.share_amount_cents ?? 0), 0);
+                if (fromShare > 0) return fromShare;
+                // Reserva confirmada sin desglose (p. ej. pago manual recién persistido)
+                const totalCents = b.total_price_cents ?? 0;
+                if (totalCents > 0 && (b.status === 'confirmed' || b.status === 'flat_rate')) return totalCents;
+                return 0;
             })(),
             detailedPlayers: (() => {
                 if (bookingType === 'tournament') {
@@ -1124,17 +1131,34 @@ function GrillaViewInner() {
       }
   }, []);
 
-  const handleDeleteBooking = async (bookingId: string, _sendEmail: boolean) => {
-      removeBookingsFromCache([bookingId]);
-      setSelectedModalReservationId(null);
-      setEditingBookingData(null);
+  const handleDeleteBooking = async (
+      bookingId: string,
+      _sendEmail: boolean,
+      cashRefunds?: Record<string, 'cash_hand' | 'wallet'>,
+      applyRefund?: boolean,
+      refundPercent?: number,
+  ) => {
       try {
-          const res = await apiFetch<any>(`/bookings/${bookingId}`, { method: 'DELETE' });
+          const body: Record<string, unknown> = { cash_refunds: cashRefunds ?? {} };
+          if (typeof applyRefund === 'boolean') body.apply_refund = applyRefund;
+          if (typeof refundPercent === 'number') body.refund_percent = refundPercent;
+          const res = await apiFetch<any>(`/bookings/${bookingId}`, {
+              method: 'DELETE',
+              body: JSON.stringify(body),
+          });
           if (!res.ok) {
-              refresh();
               throw new Error(res.error || 'Unknown error');
           }
+          removeBookingsFromCache([bookingId]);
+          setSelectedModalReservationId(null);
+          setEditingBookingData(null);
+          if (res.policy_message && res.refund_applied === false) {
+              toast.warning(res.policy_message);
+          } else if (res.refund_applied === true && res.refund_eligible === false) {
+              toast.success('Reserva cancelada con reembolso manual aplicado.');
+          }
       } catch (err) {
+          refresh();
           console.error('Error deleting booking:', err);
           throw err;
       }
@@ -1145,14 +1169,18 @@ function GrillaViewInner() {
           (id) => !id.startsWith('school-slot-') && !id.startsWith('school-private-slot-'),
       );
       if (deletable.length === 0) return;
-      removeBookingsFromCache(deletable);
-      const results = await Promise.all(
-          deletable.map((id) => apiFetch<any>(`/bookings/${id}`, { method: 'DELETE' })),
-      );
-      const failed = results.filter((r) => !r.ok);
-      if (failed.length > 0) {
+      try {
+          const results = await Promise.all(
+              deletable.map((id) => apiFetch<any>(`/bookings/${id}`, { method: 'DELETE' })),
+          );
+          const failed = results.filter((r) => !r.ok);
+          if (failed.length > 0) {
+              throw new Error(`Failed to delete ${failed.length} booking(s)`);
+          }
+          removeBookingsFromCache(deletable);
+      } catch (err) {
           refresh();
-          throw new Error(`Failed to delete ${failed.length} booking(s)`);
+          throw err;
       }
   }, [removeBookingsFromCache, refresh]);
 
@@ -1370,6 +1398,34 @@ function GrillaViewInner() {
       setSearchParams(next, { replace: true });
   }, [searchParams, courts.length, openBookingById, setSearchParams]);
 
+function sumParticipantPaymentsCents(participants: unknown): number {
+    if (!Array.isArray(participants)) return 0;
+    return participants.reduce(
+        (sum, p) =>
+            sum + (Number((p as { paid_amount_cents?: number }).paid_amount_cents) || 0) +
+            (Number((p as { wallet_amount_cents?: number }).wallet_amount_cents) || 0),
+        0,
+    );
+}
+
+/** Resuelve el total a persistir: respeta el cobro manual aunque la tarifa difiera unos céntimos. */
+function resolveManualBookingTotalCents(
+    bookingData: {
+        total_price_cents?: number;
+        source_channel?: string;
+        participants?: unknown;
+    },
+    tariffCents: number | null,
+): number {
+    const modalTotal = Number(bookingData.total_price_cents ?? 0);
+    const collected = sumParticipantPaymentsCents(bookingData.participants);
+    if (bookingData.source_channel === 'manual' && collected > 0 && modalTotal > 0 && collected >= modalTotal) {
+        return collected;
+    }
+    if (tariffCents != null && Number.isFinite(tariffCents)) return tariffCents;
+    return modalTotal;
+}
+
   const handleCreateBooking = async (bookingData: any): Promise<CreateBookingBatchResult> => {
       try {
           const includeHolidays = bookingData.include_holidays !== false;
@@ -1416,18 +1472,20 @@ function GrillaViewInner() {
                   ).toISOString();
                   const endAt = new Date(new Date(startAt).getTime() + bookingData.duration_minutes * 60000).toISOString();
                   let totalPriceCents = bookingData.total_price_cents;
+                  let tariffCents: number | null = null;
                   if (clubId && courtId) {
                       try {
                           const slotPrice = await apiFetchWithAuth<any>(
                               `/tariffs/slot-price?club_id=${clubId}&court_id=${courtId}&date=${dateText}&slot=${bookingData.start_at}&duration_minutes=${bookingData.duration_minutes}&reservation_type=${bookingData.booking_type || 'standard'}`
                           );
                           if (typeof slotPrice.total_price_cents === 'number') {
-                              totalPriceCents = slotPrice.total_price_cents;
+                              tariffCents = slotPrice.total_price_cents;
                           }
                       } catch {
                           // Keep current total_price_cents as fallback
                       }
                   }
+                  totalPriceCents = resolveManualBookingTotalCents(bookingData, tariffCents);
 
                   const payload = {
                       ...bookingData,
@@ -1463,11 +1521,14 @@ function GrillaViewInner() {
           if (createdBookings.length > 0) {
               const mapped = mapBookings(createdBookings, courts);
               if (mapped.length > 0) {
-                  setReservations(prev => {
-                      const existing = new Set(prev.map(r => r.id));
-                      const additions = mapped.filter(r => !existing.has(r.id));
+                  const mergeNew = (prev: Reservation[]) => {
+                      const existing = new Set(prev.map((r) => r.id));
+                      const additions = mapped.filter((r) => !existing.has(r.id));
                       return additions.length > 0 ? [...prev, ...additions] : prev;
-                  });
+                  };
+                  setGridReservations(mergeNew);
+                  setListReservations(mergeNew);
+                  setReservations(mergeNew);
               }
           }
           if (createdBookings.length === 0 && skippedHolidayDates.length > 0) {
@@ -1988,10 +2049,8 @@ function GrillaViewInner() {
           pendingOverrideDrop.startTime,
           pendingOverrideDrop.status,
         );
-        if (res.displaced?.action === 'relocated') {
-          toast.success(`Partido incompleto movido a ${res.displaced.new_court_name}`);
-        } else if (res.displaced?.action === 'cancelled') {
-          toast.warning('Partido incompleto cancelado (sin pista disponible). Jugadores reembolsados.');
+        if (res.displaced?.action === 'cancelled') {
+          toast.warning('Partido incompleto cancelado. Jugadores reembolsados.');
         }
       } else {
         toast.error(res.error || 'Error al procesar el movimiento');

@@ -60,15 +60,25 @@ export interface AlertsTranslationKeys {
     titleLeave: string;
     bodySolo: string;
     bodyMulti: string;
+    bodySoloNoRefund: string;
+    bodyMultiNoRefund: string;
+    policyNoRefundDefault: string;
+    cancel: string;
+    leave: string;
     yesCancel: string;
     yesLeave: string;
     doneCancel: string;
     doneLeave: string;
+    doneCancelWithRefund: string;
+    doneCancelNoRefund: string;
+    doneLeaveWithRefund: string;
+    doneLeaveNoRefund: string;
     fail: string;
   };
   privateCancel: {
     title: string;
     done: string;
+    doneNoRefund: string;
     fail: string;
   };
   tournamentInvite: {
