@@ -55,6 +55,8 @@ interface Props {
   size?: number;
   frame?: FrameAttrs | null;
   animate?: boolean;
+  /** Nivel/ELO (0–7). Si se pasa, muestra una burbuja en el borde inferior. */
+  level?: number | null;
 }
 
 // Anillo expansivo (wmRippleRing): scale .92→1.5, opacity .8→0
@@ -88,7 +90,7 @@ function Spark({ cyc, index, color, dist, count }: { cyc: SharedValue<number>; i
   return <Animated.View pointerEvents="none" style={[styles.particle, { backgroundColor: color, shadowColor: color }, style]} />;
 }
 
-export const AvatarWithFrame: React.FC<Props> = ({ initials, avatarUrl, size = 80, frame, animate = true }) => {
+export const AvatarWithFrame: React.FC<Props> = ({ initials, avatarUrl, size = 80, frame, animate = true, level }) => {
   const noFrame = !frame || frame.style === 'none' || frame.style == null;
   const stl = getFrameStyle(frame?.style);
   const grad = frameGradient(frame?.colors, frame?.rarity ?? 'common');
@@ -199,7 +201,24 @@ export const AvatarWithFrame: React.FC<Props> = ({ initials, avatarUrl, size = 8
     </View>
   );
 
-  if (noFrame) return tile;
+  // Burbuja de nivel en el borde inferior (parte del "pack" avatar+marco+nivel)
+  const levelBubble =
+    level != null && Number.isFinite(level) ? (
+      <View style={[styles.levelRow, { bottom: (noFrame ? 0 : bw) - 12 }]} pointerEvents="none">
+        <View style={styles.levelPill}>
+          <Text style={styles.levelText}>{level.toFixed(2)}</Text>
+        </View>
+      </View>
+    ) : null;
+
+  if (noFrame) {
+    return (
+      <View style={{ width: size, height: size }}>
+        {tile}
+        {levelBubble}
+      </View>
+    );
+  }
 
   const gradSize = outer * 1.8;
   const hasGlow = !!cfg || stl.glow;
@@ -240,6 +259,8 @@ export const AvatarWithFrame: React.FC<Props> = ({ initials, avatarUrl, size = 8
 
       {/* Avatar QUIETO, encima del marco (en el hueco) */}
       <View style={styles.tileTop}>{tile}</View>
+
+      {levelBubble}
     </View>
   );
 };
@@ -255,6 +276,17 @@ const styles = StyleSheet.create({
   gradLayer: { position: 'absolute' },
   mask: { position: 'absolute' },
   tileTop: { zIndex: 2 },
+  levelRow: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 3 },
+  levelPill: {
+    minWidth: 42,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 9,
+    backgroundColor: '#F18F34',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  levelText: { color: '#fff', fontWeight: '800', fontSize: 14 },
   ring: { position: 'absolute', borderWidth: 2 },
   particle: { position: 'absolute', width: 5, height: 5, borderRadius: 3, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 4, elevation: 3 },
 });

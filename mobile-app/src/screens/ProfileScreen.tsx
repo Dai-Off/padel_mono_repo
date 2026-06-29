@@ -476,14 +476,6 @@ export function ProfileScreen({
         {/* Profile Details Card */}
         <View style={styles.profileCardWrap}>
           <View style={styles.profileCard}>
-            <View style={styles.eloBadge}>
-              <Text style={styles.eloLabel}>NIVEL</Text>
-              <Text style={styles.eloValue}>
-                {profile?.onboardingCompleted && profile?.eloRating != null && Number.isFinite(profile.eloRating)
-                  ? profile.eloRating.toFixed(2)
-                  : '--'}
-              </Text>
-            </View>
             <View style={styles.profileHeader}>
               <View style={styles.avatarContainer}>
                 <AvatarWithFrame
@@ -491,6 +483,11 @@ export function ProfileScreen({
                   initials={initials}
                   size={80}
                   frame={equippedFrame}
+                  level={
+                    profile?.onboardingCompleted && profile?.eloRating != null && Number.isFinite(profile.eloRating)
+                      ? profile.eloRating
+                      : null
+                  }
                 />
               </View>
               <View style={styles.profileInfo}>
@@ -810,34 +807,6 @@ const styles = StyleSheet.create({
   profileInfo: {
     flex: 1,
     paddingTop: 2,
-  },
-  eloBadge: {
-    position: 'absolute',
-    top: -24,
-    right: 14,
-    minWidth: 74,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#F18F34',
-    backgroundColor: '#F18F34',
-    zIndex: 2,
-  },
-  eloLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    color: '#fff',
-  },
-  eloValue: {
-    marginTop: 2,
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#fff',
-    lineHeight: 20,
   },
   profileName: {
     fontSize: 18,
