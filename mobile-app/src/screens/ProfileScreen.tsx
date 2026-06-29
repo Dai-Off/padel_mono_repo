@@ -490,22 +490,14 @@ export function ProfileScreen({
                 />
               </View>
               <View style={styles.profileInfo}>
-                <Text style={styles.profileName}>{displayName}</Text>
                 {customization?.titleId ? (
-                  <View style={{ marginTop: 2 }}>
+                  <View style={{ marginBottom: 2 }}>
                     <AnimatedTitle titleId={customization.titleId} />
                   </View>
                 ) : null}
+                <Text style={styles.profileName}>{displayName}</Text>
                 {usernameLine ? (
                   <Text style={styles.usernameText}>{usernameLine}</Text>
-                ) : null}
-                {(profile?.email ?? session?.user?.email) ? (
-                  <View style={styles.emailRow}>
-                    <Ionicons name="mail-outline" size={12} color="#9CA3AF" />
-                    <Text style={styles.emailText} numberOfLines={1}>
-                      {profile?.email ?? session?.user?.email}
-                    </Text>
-                  </View>
                 ) : null}
                 {pinnedBadges.length > 0 ? (
                   <View style={styles.pinnedRow}>
@@ -548,17 +540,11 @@ export function ProfileScreen({
               <Pressable style={styles.editBtn} onPress={() => onEditProfilePress?.()}>
                 <Text style={styles.editBtnText}>Editar perfil</Text>
               </Pressable>
-              <Pressable style={styles.personalizeBtn} onPress={() => onPreferencesPress?.()}>
-                <Ionicons name="options-outline" size={14} color="#F18F34" />
-                <Text style={styles.personalizeBtnText}>Preferencias</Text>
+              <Pressable style={styles.personalizeBtn} onPress={() => setShowCustomize(true)}>
+                <Ionicons name="sparkles-outline" size={14} color="#F18F34" />
+                <Text style={styles.personalizeBtnText}>Personalizar</Text>
               </Pressable>
             </View>
-
-            {/* Personalizar perfil (título / marco / insignias) */}
-            <Pressable style={styles.customizeBtn} onPress={() => setShowCustomize(true)}>
-              <Ionicons name="sparkles-outline" size={15} color="#fff" />
-              <Text style={styles.customizeBtnText}>Personalizar perfil</Text>
-            </Pressable>
           </View>
         </View>
 
@@ -937,26 +923,6 @@ const styles = StyleSheet.create({
     color: '#F18F34',
     fontSize: 14,
     fontWeight: '600',
-  },
-  customizeBtn: {
-    marginTop: 10,
-    height: 42,
-    borderRadius: 12,
-    backgroundColor: '#F18F34',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    shadowColor: '#F18F34',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  customizeBtnText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
   },
   pinnedRow: {
     flexDirection: 'row',

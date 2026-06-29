@@ -167,7 +167,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
             {([
               { key: 'title', label: 'Título', icon: 'ribbon-outline' },
               { key: 'frame', label: 'Marco', icon: 'sparkles-outline' },
-              { key: 'badges', label: 'Insignias', icon: 'medal-outline' },
+              { key: 'badges', label: 'Logros', icon: 'medal-outline' },
             ] as const).map((t) => (
               <Pressable key={t.key} onPress={() => setTab(t.key)} style={[styles.tab, tab === t.key && styles.tabActive]}>
                 <Ionicons name={t.icon} size={14} color={tab === t.key ? '#F18F34' : '#6B7280'} />
@@ -191,7 +191,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
                     selected={titleId == null}
                     onPress={() => setTitleId(null)}
                   />
-                  {byRarity(titles).map((g) => (
+                  {byRarity(titles.filter((t) => t.unlocked)).map((g) => (
                     <View key={g.rarity} style={styles.group}>
                       <Text style={[styles.groupLabel, { color: RARITY_CONFIG[g.rarity].color }]}>
                         {RARITY_CONFIG[g.rarity].label.toUpperCase()}
@@ -216,7 +216,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
               {/* MARCO */}
               {tab === 'frame' && (
                 <>
-                  {byRarity(frames).map((g) => (
+                  {byRarity(frames.filter((f) => f.unlocked)).map((g) => (
                     <View key={g.rarity} style={styles.group}>
                       <Text style={[styles.groupLabel, { color: RARITY_CONFIG[g.rarity].color }]}>
                         {RARITY_CONFIG[g.rarity].label.toUpperCase()}
@@ -231,7 +231,7 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
                               onPress={() => f.unlocked && setFrameId(f.id)}
                               style={[styles.frameCell, sel && styles.frameCellSel, !f.unlocked && styles.frameCellLocked]}
                             >
-                              <AvatarWithFrame initials={initials} avatarUrl={avatarUrl} size={40} frame={attrs} animate={sel} />
+                              <AvatarWithFrame initials={initials} avatarUrl={avatarUrl} size={40} frame={attrs} animate />
                               <Text style={styles.frameName} numberOfLines={1}>{f.title}</Text>
                               {f.animationType ? <Text style={styles.animatedTag}>ANIMADO</Text> : null}
                               {!f.unlocked ? (
@@ -251,11 +251,11 @@ export const ProfileCustomizationModal: React.FC<Props> = ({
               {tab === 'badges' && (
                 <>
                   <View style={styles.badgesHeader}>
-                    <Text style={styles.badgesHint}>Elige hasta <Text style={{ color: '#F18F34', fontWeight: '700' }}>4 insignias</Text></Text>
+                    <Text style={styles.badgesHint}>Elige hasta <Text style={{ color: '#F18F34', fontWeight: '700' }}>4 logros</Text></Text>
                     <Text style={styles.badgesCount}>{pinned.length}/{MAX_PINNED}</Text>
                   </View>
                   {badges.length === 0 ? (
-                    <Text style={styles.empty}>Aún no tienes insignias para fijar.</Text>
+                    <Text style={styles.empty}>Aún no tienes logros para fijar.</Text>
                   ) : (
                     badges.map((b) => {
                       const conf = RARITY_CONFIG[b.rarity];
