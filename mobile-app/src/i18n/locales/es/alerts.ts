@@ -60,17 +60,32 @@ export const alerts: AlertsTranslationKeys = {
   leaveMatch: {
     titleCancel: '¿Cancelar el partido?',
     titleLeave: '¿Salir del partido?',
-    bodySolo: 'Eres el único jugador: se anulará la reserva…',
-    bodyMulti: 'Dejarás tu plaza; los demás siguen en el partido…',
+    bodySolo: 'Eres el único jugador: se anulará la reserva y el partido desaparecerá. Si pagaste, se reembolsará.',
+    bodyMulti: 'Dejarás tu plaza; los demás siguen en el partido. Si pagaste tu parte, se reembolsará.',
+    bodySoloNoRefund: 'Eres el único jugador: se anulará la reserva y el partido desaparecerá. No habrá reembolso por la política del club.',
+    bodyMultiNoRefund: 'Dejarás tu plaza. No habrá reembolso por la política del club.',
+    policyNoRefundDefault: 'Fuera del plazo de reembolso del club: la baja se procesará sin devolución.',
+    cancel: 'Cancelar',
+    leave: 'Salir',
     yesCancel: 'Sí, cancelar todo',
     yesLeave: 'Sí, salir',
     doneCancel: 'El partido y la reserva quedaron cancelados.',
-    doneLeave: 'Saliste del partido. Si pagaste con tarjeta, el reembolso se procesará en breve.',
+    doneLeave: 'Saliste del partido.',
+    doneCancelWithRefund:
+      'El partido y la reserva quedaron cancelados. Si pagaste con tarjeta, el reembolso se procesará en breve.',
+    doneCancelNoRefund:
+      'El partido y la reserva quedaron cancelados. No habrá reembolso por la política de cancelación del club.',
+    doneLeaveWithRefund:
+      'Saliste del partido. Si pagaste con tarjeta, el reembolso se procesará en breve.',
+    doneLeaveNoRefund:
+      'Saliste del partido. No habrá reembolso por la política de cancelación del club.',
     fail: 'No se pudo completar',
   },
   privateCancel: {
     title: 'Cancelar reserva',
-    done: 'La reserva quedó cancelada.',
+    done: 'La reserva quedó cancelada. Si pagaste con tarjeta, el reembolso se procesará en breve.',
+    doneNoRefund:
+      'La reserva quedó cancelada. No habrá reembolso por la política de cancelación del club.',
     fail: 'No se pudo cancelar',
   },
   tournamentInvite: {

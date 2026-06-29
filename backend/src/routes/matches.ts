@@ -22,6 +22,18 @@ import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../l
 import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
 import { repairOpenMatchPlayersIfNeeded, syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
 import {
+  fetchBookingParticipantsForRefund,
+  listCashRefundCandidates,
+  collectStripePlayerIds,
+  refundBookingParticipant,
+  type CashRefundDisposition,
+} from '../lib/bookingParticipantRefund';
+import {
+  evaluateBookingRefundPolicy,
+  refundPolicyUserMessage,
+} from '../lib/bookingCancellationPolicy';
+import { notifyBookingCancellationEmails } from '../lib/bookingCancellationNotify';
+import {
   matchAffectsElo,
   normalizeMatchType,
   parseEloRange,
@@ -800,46 +812,118 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
 router.post('/:id/admin-add-player', async (req: Request, res: Response) => {
   const matchId = req.params.id;
   const { player_id, team, slot_index, booking_id } = req.body;
-  
+
   if (!player_id || !booking_id) {
     return res.status(400).json({ ok: false, error: 'Faltan player_id o booking_id' });
   }
-  
+
+  const slotIdx =
+    slot_index != null && Number.isFinite(Number(slot_index))
+      ? Math.trunc(Number(slot_index))
+      : 0;
+
   try {
     const supabase = getSupabaseServiceRoleClient();
-    
-    // 1. Si NO es un match mockeado, insertarlo en match_players
-    if (!matchId.startsWith('mock-match-')) {
-      const { error: errMP } = await supabase.from('match_players').insert([
-        { match_id: matchId, player_id, team: team || 'A', slot_index: slot_index || 0, invite_status: 'accepted' }
-      ]);
-      // Ignoramos error de unicidad por si el dev clickea dos veces
-      if (errMP && errMP.code !== '23505') {
-         console.error('Error insertando en match_players:', errMP);
+
+    const { data: booking, error: bookingErr } = await supabase
+      .from('bookings')
+      .select('id, status, deleted_at, total_price_cents, organizer_player_id')
+      .eq('id', booking_id)
+      .maybeSingle();
+    if (bookingErr) return res.status(500).json({ ok: false, error: bookingErr.message });
+    if (!booking || booking.deleted_at != null || booking.status === 'cancelled') {
+      return res.status(400).json({ ok: false, error: 'La reserva no está activa' });
+    }
+
+    let realMatchId = matchId;
+    if (matchId.startsWith('mock-match-')) {
+      const { data: matchByBooking } = await supabase
+        .from('matches')
+        .select('id, status')
+        .eq('booking_id', booking_id)
+        .maybeSingle();
+      if (matchByBooking?.id) {
+        realMatchId = matchByBooking.id;
+        if (matchByBooking.status === 'cancelled') {
+          return res.status(400).json({ ok: false, error: 'El partido está cancelado' });
+        }
+      }
+    } else {
+      const { data: matchRow } = await supabase
+        .from('matches')
+        .select('id, status')
+        .eq('id', matchId)
+        .maybeSingle();
+      if (matchRow?.status === 'cancelled') {
+        return res.status(400).json({ ok: false, error: 'El partido está cancelado' });
       }
     }
-    
-    // 2. Insertarlo en booking_participants
-    const { data: booking } = await supabase.from('bookings').select('total_price_cents').eq('id', booking_id).single();
-    const shareCents = booking ? Math.ceil((booking.total_price_cents || 0) / 4) : 0;
-    
-    const { error: errBP } = await supabase.from('booking_participants').insert([
-      { booking_id, player_id, role: 'guest', share_amount_cents: shareCents }
-    ]);
-    if (errBP && errBP.code !== '23505') {
-       console.error('Error insertando en booking_participants:', errBP);
+
+    if (!realMatchId.startsWith('mock-match-')) {
+      const capacity = await assertGuestCanJoinMatch(
+        supabase,
+        realMatchId,
+        booking_id,
+        player_id,
+        slotIdx,
+      );
+      if (!capacity.ok) {
+        return res.status(409).json({
+          ok: false,
+          code: capacity.code,
+          error: capacity.error ?? 'No hay plazas disponibles',
+        });
+      }
+      if (capacity.code === 'already_in_match') {
+        return res.status(409).json({ ok: false, code: 'already_in_match', error: 'El jugador ya está en este partido' });
+      }
     }
-    
+
+    const shareCents = Math.ceil((booking.total_price_cents || 0) / 4);
+
+    if (!realMatchId.startsWith('mock-match-')) {
+      const { error: errMP } = await supabase.from('match_players').insert([
+        {
+          match_id: realMatchId,
+          player_id,
+          team: team || 'A',
+          slot_index: slotIdx,
+          invite_status: 'accepted',
+        },
+      ]);
+      if (errMP) {
+        if (errMP.code === '23505') {
+          return res.status(409).json({ ok: false, error: 'La plaza ya está ocupada o el jugador ya está en el partido' });
+        }
+        return res.status(500).json({ ok: false, error: errMP.message });
+      }
+    }
+
+    const { error: errBP } = await supabase.from('booking_participants').insert([
+      { booking_id, player_id, role: 'guest', share_amount_cents: shareCents },
+    ]);
+    if (errBP) {
+      if (errBP.code === '23505') {
+        return res.status(409).json({ ok: false, error: 'El jugador ya es participante de esta reserva' });
+      }
+      return res.status(500).json({ ok: false, error: errBP.message });
+    }
+
     return res.status(200).json({ ok: true });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err.message });
+  } catch (err: unknown) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
 /** POST /matches/:id/admin-remove-player - Administrador remueve manualmente a un jugador */
 router.post('/:id/admin-remove-player', async (req: Request, res: Response) => {
   const matchId = req.params.id;
-  const { player_id, booking_id } = req.body;
+  const { player_id, booking_id, cash_refund_action, apply_refund } = req.body as {
+    player_id?: string;
+    booking_id?: string;
+    cash_refund_action?: CashRefundDisposition;
+    apply_refund?: boolean;
+  };
 
   if (!player_id || !booking_id) {
     return res.status(400).json({ ok: false, error: 'Faltan player_id o booking_id' });
@@ -849,49 +933,99 @@ router.post('/:id/admin-remove-player', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const now = new Date().toISOString();
 
-    // 1. Fetch participant payment before removal to compute refund
-    const { data: participant } = await supabase
-      .from('booking_participants')
-      .select('paid_amount_cents, wallet_amount_cents, payment_status')
-      .eq('booking_id', booking_id)
-      .eq('player_id', player_id)
-      .maybeSingle();
+    const clubId = await resolveClubIdForBooking(supabase, booking_id);
+    const refundPolicy = await evaluateBookingRefundPolicy(supabase, booking_id);
+    const shouldRefund =
+      typeof apply_refund === 'boolean' ? apply_refund : refundPolicy.eligible;
 
-    // 2. Remover de match_players
-    if (!matchId.startsWith('mock-match-')) {
-       await supabase.from('match_players').delete().eq('match_id', matchId).eq('player_id', player_id);
-    }
+    const participants = await fetchBookingParticipantsForRefund(supabase, booking_id);
+    const participant = participants.find((p) => p.player_id === player_id);
 
-    // 3. Remover de booking_participants
-    await supabase.from('booking_participants').delete().eq('booking_id', booking_id).eq('player_id', player_id);
+    if (participant && clubId) {
+      const stripeIds = await collectStripePlayerIds(supabase, booking_id);
+      const cashCandidates = shouldRefund
+        ? listCashRefundCandidates(participants, stripeIds, player_id)
+        : [];
+      if (cashCandidates.length > 0 && cash_refund_action !== 'cash_hand' && cash_refund_action !== 'wallet') {
+        return res.status(400).json({
+          ok: false,
+          code: 'cash_refund_required',
+          error: 'Este jugador pagó en efectivo. Indica si devuelves en mostrador o acreditas al monedero.',
+          cash_players: cashCandidates,
+        });
+      }
 
-    // 4. Acreditar en wallet si el jugador había pagado
-    if (participant && participant.payment_status === 'paid') {
-      const refundCents = (participant.paid_amount_cents ?? 0) + (participant.wallet_amount_cents ?? 0);
-      if (refundCents > 0) {
-        const { data: bookingRow } = await supabase
-          .from('bookings')
-          .select('courts(club_id)')
-          .eq('id', booking_id)
-          .maybeSingle();
-        const clubId = (bookingRow?.courts as { club_id?: string } | null)?.club_id;
-        if (clubId) {
-          await supabase.from('wallet_transactions').insert({
-            player_id,
-            club_id: clubId,
-            amount_cents: refundCents,
-            concept: 'Reembolso por baja de reserva',
-            type: 'refund',
-            booking_id,
-            created_at: now,
-          });
-        }
+      const refundResult = await refundBookingParticipant(supabase, booking_id, clubId, participant, {
+        concept: 'Reembolso por baja de reserva',
+        cashRefundAction: cash_refund_action,
+        now,
+        refundEligible: shouldRefund,
+      });
+      if (refundResult.errors.length > 0) {
+        return res.status(502).json({
+          ok: false,
+          error: 'No se pudo completar el reembolso',
+          refund_errors: refundResult.errors,
+        });
       }
     }
 
-    return res.status(200).json({ ok: true });
-  } catch (err: any) {
-    return res.status(500).json({ ok: false, error: err.message });
+    await notifyBookingCancellationEmails(supabase, {
+      bookingId: booking_id,
+      scenario: 'removed',
+      cancelledBy: 'admin',
+      refundPercent: shouldRefund ? 100 : 0,
+      refundEligible: shouldRefund,
+      policyMessage: shouldRefund ? undefined : refundPolicyUserMessage(refundPolicy),
+      cashRefundAction: cash_refund_action,
+      notifyPlayerIds: [player_id],
+    });
+
+    let realMatchId = matchId;
+    if (matchId.startsWith('mock-match-')) {
+      const { data: matchByBooking } = await supabase
+        .from('matches')
+        .select('id')
+        .eq('booking_id', booking_id)
+        .maybeSingle();
+      if (matchByBooking?.id) realMatchId = matchByBooking.id;
+    }
+
+    if (!realMatchId.startsWith('mock-match-')) {
+      await supabase.from('match_players').delete().eq('match_id', realMatchId).eq('player_id', player_id);
+    }
+
+    await supabase.from('booking_participants').delete().eq('booking_id', booking_id).eq('player_id', player_id);
+
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('organizer_player_id')
+      .eq('id', booking_id)
+      .maybeSingle();
+    if (booking?.organizer_player_id === player_id) {
+      const { data: mpRows } = await supabase
+        .from('match_players')
+        .select('player_id, slot_index')
+        .eq('match_id', realMatchId);
+      const sortedRemaining = [...(mpRows ?? [])].sort(
+        (a: { slot_index?: number | null }, b: { slot_index?: number | null }) =>
+          (a.slot_index ?? 999) - (b.slot_index ?? 999),
+      );
+      const newOrg = sortedRemaining[0]?.player_id ?? null;
+      await supabase
+        .from('bookings')
+        .update({ organizer_player_id: newOrg, updated_at: now })
+        .eq('id', booking_id);
+    }
+
+    return res.status(200).json({
+      ok: true,
+      refund_eligible: refundPolicy.eligible,
+      refund_applied: shouldRefund,
+      policy_message: refundPolicy.eligible ? undefined : refundPolicyUserMessage(refundPolicy),
+    });
+  } catch (err: unknown) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
   }
 });
 
@@ -1102,9 +1236,19 @@ router.post('/', async (req: Request, res: Response) => {
   try {
     const supabase = getSupabaseServiceRoleClient();
     const { data: existing } = await supabase.from('matches').select(SELECT_ONE).eq('booking_id', booking_id).maybeSingle();
+    const visibilityValue = visibility === 'public' ? 'public' : 'private';
     if (existing) {
+      await supabase
+        .from('matches')
+        .update({ visibility: visibilityValue, updated_at: new Date().toISOString() })
+        .eq('id', (existing as { id: string }).id);
       await syncMatchPlayersFromBooking(supabase, (existing as { id: string }).id, String(booking_id));
-      return res.status(200).json({ ok: true, match: existing });
+      const { data: refreshed } = await supabase
+        .from('matches')
+        .select(SELECT_ONE)
+        .eq('id', (existing as { id: string }).id)
+        .maybeSingle();
+      return res.status(200).json({ ok: true, match: refreshed ?? existing });
     }
 
     const type = normalizeMatchType(bodyType);
@@ -1163,6 +1307,76 @@ router.post('/', async (req: Request, res: Response) => {
  *       200: { description: OK }
  *       400: { description: Campos de marcador bloqueados }
  */
+/**
+ * GET /matches/:id/cancel-preview — política de reembolso antes de salir/cancelar (jugador).
+ */
+router.get('/:id/cancel-preview', async (req: Request, res: Response) => {
+  const matchId = req.params.id;
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'Token requerido' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !user?.email) {
+      return res.status(401).json({ ok: false, error: 'Sesión inválida o expirada' });
+    }
+    const { data: player, error: errPlayer } = await supabase
+      .from('players')
+      .select('id')
+      .eq('email', String(user.email).trim().toLowerCase())
+      .maybeSingle();
+    if (errPlayer) return res.status(500).json({ ok: false, error: errPlayer.message });
+    if (!player) return res.status(404).json({ ok: false, error: 'Jugador no encontrado' });
+
+    const { data: match, error: errMatch } = await supabase
+      .from('matches')
+      .select('id, booking_id, status, visibility')
+      .eq('id', matchId)
+      .maybeSingle();
+    if (errMatch) return res.status(500).json({ ok: false, error: errMatch.message });
+    if (!match) return res.status(404).json({ ok: false, error: 'Partido no encontrado' });
+    if (!match.booking_id) {
+      return res.status(400).json({ ok: false, error: 'El partido no tiene reserva asociada' });
+    }
+
+    const { data: mpRow } = await supabase
+      .from('match_players')
+      .select('player_id')
+      .eq('match_id', matchId)
+      .eq('player_id', player.id)
+      .maybeSingle();
+    const isPublic = String(match.visibility ?? '').toLowerCase() === 'public';
+    if (!isPublic) {
+      const { data: booking } = await supabase
+        .from('bookings')
+        .select('organizer_player_id')
+        .eq('id', match.booking_id)
+        .maybeSingle();
+      if (booking?.organizer_player_id !== player.id) {
+        return res.status(403).json({ ok: false, error: 'Solo el organizador puede cancelar un partido privado' });
+      }
+    } else if (!mpRow) {
+      return res.status(403).json({ ok: false, error: 'No estás en este partido' });
+    }
+
+    const refundPolicy = await evaluateBookingRefundPolicy(supabase, match.booking_id);
+    return res.json({
+      ok: true,
+      refund_eligible: refundPolicy.eligible,
+      notice_hours: refundPolicy.notice_hours,
+      incomplete_public_exempt: refundPolicy.incomplete_public_exempt,
+      match_player_count: refundPolicy.match_player_count,
+      hours_until_start: Math.round(refundPolicy.hours_until_start * 10) / 10,
+      policy_message: refundPolicyUserMessage(refundPolicy),
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 /**
  * POST /matches/:id/cancel
  * - Partido **público**: cualquier jugador en el partido. Si es el único → cancela reserva + partido y reembolsa todos los Stripe de la reserva. Si hay más → solo sale él, reembolso Stripe suyo, el partido sigue (reorganiza organizador si hace falta).
@@ -1240,6 +1454,7 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       return res.status(500).json({ ok: false, error: 'No se pudo resolver el club de la reserva' });
     }
 
+    const refundPolicy = await evaluateBookingRefundPolicy(supabase, booking.id);
     const now = new Date().toISOString();
 
     if (!isPublic) {
@@ -1249,13 +1464,15 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
           error: 'Solo el organizador puede cancelar un partido privado',
         });
       }
-      const stripeRef = await refundStripeBookingPaymentTransactions(supabase, booking.id, clubId);
-      if (stripeRef.errors.length > 0) {
-        return res.status(502).json({
-          ok: false,
-          error: 'No se pudieron completar los reembolsos con tarjeta (app). El partido no se canceló.',
-          refund_errors: stripeRef.errors,
-        });
+      if (refundPolicy.eligible) {
+        const stripeRef = await refundStripeBookingPaymentTransactions(supabase, booking.id, clubId);
+        if (stripeRef.errors.length > 0) {
+          return res.status(502).json({
+            ok: false,
+            error: 'No se pudieron completar los reembolsos con tarjeta (app). El partido no se canceló.',
+            refund_errors: stripeRef.errors,
+          });
+        }
       }
       const { error: errUpB } = await supabase
         .from('bookings')
@@ -1286,7 +1503,22 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         }
       }
 
-      return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
+      void notifyBookingCancellationEmails(supabase, {
+        bookingId: booking.id,
+        scenario: 'cancelled',
+        cancelledBy: 'player',
+        refundPercent: refundPolicy.eligible ? 100 : 0,
+        refundEligible: refundPolicy.eligible,
+        policyMessage: refundPolicyUserMessage(refundPolicy),
+      });
+
+      return res.json({
+        ok: true,
+        cancelled_entire_match: true,
+        match: matchRow,
+        refund_eligible: refundPolicy.eligible,
+        policy_message: refundPolicy.eligible ? undefined : refundPolicyUserMessage(refundPolicy),
+      });
     }
 
     const { data: mpRows, error: errMp } = await supabase
@@ -1302,13 +1534,15 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
 
     const n = (mpRows ?? []).length;
     if (n <= 1) {
-      const stripeRef = await refundStripeBookingPaymentTransactions(supabase, booking.id, clubId);
-      if (stripeRef.errors.length > 0) {
-        return res.status(502).json({
-          ok: false,
-          error: 'No se pudieron completar los reembolsos con tarjeta (app).',
-          refund_errors: stripeRef.errors,
-        });
+      if (refundPolicy.eligible) {
+        const stripeRef = await refundStripeBookingPaymentTransactions(supabase, booking.id, clubId);
+        if (stripeRef.errors.length > 0) {
+          return res.status(502).json({
+            ok: false,
+            error: 'No se pudieron completar los reembolsos con tarjeta (app).',
+            refund_errors: stripeRef.errors,
+          });
+        }
       }
       const { error: errUpB } = await supabase
         .from('bookings')
@@ -1339,17 +1573,44 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         }
       }
 
-      return res.json({ ok: true, cancelled_entire_match: true, match: matchRow });
-    }
+      void notifyBookingCancellationEmails(supabase, {
+        bookingId: booking.id,
+        scenario: 'cancelled',
+        cancelledBy: 'player',
+        refundPercent: refundPolicy.eligible ? 100 : 0,
+        refundEligible: refundPolicy.eligible,
+        policyMessage: refundPolicyUserMessage(refundPolicy),
+      });
 
-    const stripeSolo = await refundStripeBookingPaymentForPlayer(supabase, booking.id, clubId, playerId);
-    if (stripeSolo.errors.length > 0) {
-      return res.status(502).json({
-        ok: false,
-        error: 'No se pudo reembolsar tu pago con tarjeta. No se aplicó la baja.',
-        refund_errors: stripeSolo.errors,
+      return res.json({
+        ok: true,
+        cancelled_entire_match: true,
+        match: matchRow,
+        refund_eligible: refundPolicy.eligible,
+        policy_message: refundPolicy.eligible ? undefined : refundPolicyUserMessage(refundPolicy),
       });
     }
+
+    if (refundPolicy.eligible) {
+      const stripeSolo = await refundStripeBookingPaymentForPlayer(supabase, booking.id, clubId, playerId);
+      if (stripeSolo.errors.length > 0) {
+        return res.status(502).json({
+          ok: false,
+          error: 'No se pudo reembolsar tu pago con tarjeta. No se aplicó la baja.',
+          refund_errors: stripeSolo.errors,
+        });
+      }
+    }
+
+    void notifyBookingCancellationEmails(supabase, {
+      bookingId: booking.id,
+      scenario: 'left',
+      cancelledBy: 'player',
+      refundPercent: refundPolicy.eligible ? 100 : 0,
+      refundEligible: refundPolicy.eligible,
+      policyMessage: refundPolicyUserMessage(refundPolicy),
+      notifyPlayerIds: [playerId],
+    });
 
     const { error: delMp } = await supabase
       .from('match_players')
@@ -1392,6 +1653,8 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
     return res.json({
       ok: true,
       cancelled_entire_match: false,
+      refund_eligible: refundPolicy.eligible,
+      policy_message: refundPolicy.eligible ? undefined : refundPolicyUserMessage(refundPolicy),
       match: matchRow ?? { id: matchId, status: match.status },
     });
   } catch (err) {
@@ -1496,42 +1759,13 @@ router.delete('/:id', async (req: Request, res: Response) => {
       }
     }
 
-    // Refund wallet for all paid participants of the associated booking
-    if (matchRow.booking_id) {
-      const { data: bookingRow } = await supabase
-        .from('bookings')
-        .select('courts(club_id)')
-        .eq('id', matchRow.booking_id)
-        .maybeSingle();
-      const clubId = (bookingRow?.courts as { club_id?: string } | null)?.club_id;
-
-      if (clubId) {
-        const { data: paidParticipants } = await supabase
-          .from('booking_participants')
-          .select('player_id, paid_amount_cents, wallet_amount_cents')
-          .eq('booking_id', matchRow.booking_id)
-          .eq('payment_status', 'paid');
-
-        if (paidParticipants && paidParticipants.length > 0) {
-          const refundRows = paidParticipants
-            .filter((p) => (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0) > 0)
-            .map((p) => ({
-              player_id: p.player_id,
-              club_id: clubId,
-              amount_cents: (p.paid_amount_cents ?? 0) + (p.wallet_amount_cents ?? 0),
-              concept: 'Reembolso por cancelación de partido',
-              type: 'refund',
-              booking_id: matchRow.booking_id,
-              created_at: now,
-            }));
-          if (refundRows.length > 0) {
-            await supabase.from('wallet_transactions').insert(refundRows);
-          }
-        }
-      }
-    }
-
-    return res.json({ ok: true, match: data });
+    return res.json({
+      ok: true,
+      match: data,
+      warning: matchRow.booking_id
+        ? 'El partido quedó cancelado pero la reserva sigue activa. Usa DELETE /bookings/:id para cancelar la reserva completa.'
+        : undefined,
+    });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }

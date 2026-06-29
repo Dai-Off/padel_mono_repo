@@ -32,6 +32,7 @@ import type { Player } from '../../../types/api';
 import { useGrillaTranslation } from '../i18n/useGrillaTranslation';
 import { calendarLocale } from '../i18n/calendarLocale';
 import { TournamentGridBookingEditor } from './TournamentGridBookingEditor';
+import { CashRefundModal, type CashRefundConfirmPayload } from './CashRefundModal';
 import { WEEKDAY_CHIPS } from '../utils/recurrenceDates';
 import { resolveJoinedPlayer } from '../utils/bookingDisplay';
 import { formatPlayerLabel, formatPlayerSubline } from '../../../lib/playerLabel';
@@ -89,7 +90,13 @@ interface ReservationModalProps {
     onSave?: (bookingData: any) => Promise<CreateBookingBatchResult | void>;
     editingBookingData?: any | null;
     onUpdate?: (bookingId: string, data: any) => Promise<void>;
-    onDelete?: (bookingId: string, sendEmail: boolean) => Promise<void>;
+    onDelete?: (
+        bookingId: string,
+        sendEmail: boolean,
+        cashRefunds?: Record<string, 'cash_hand' | 'wallet'>,
+        applyRefund?: boolean,
+        refundPercent?: number,
+    ) => Promise<void>;
     onMarkPaid?: (bookingId: string) => Promise<void>;
     onMoveToHidden?: (bookingId: string) => Promise<void>;
     onMoveToVisible?: (bookingId: string) => Promise<void>;
@@ -531,6 +538,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [sendDeleteEmail, setSendDeleteEmail] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [cashRefundOpen, setCashRefundOpen] = useState(false);
     const [overlapError, setOverlapError] = useState<string | null>(null);
     const [hoursError, setHoursError] = useState<string | null>(null);
     const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -803,14 +811,16 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     }, [isOpen, clubId]);
 
     const totalPriceCents = useMemo(() => {
+        const storedCents = editingBookingData?.total_price_cents ?? 0;
+        if (isEditMode && storedCents > 0) {
+            return storedCents;
+        }
         const pricePerHour = pricesByType[resType]?.price_per_hour_cents;
-        // If club has a configured rate for this type, recalculate from current duration
         if (pricePerHour != null && pricePerHour > 0) {
             return Math.round((duration / 60) * pricePerHour);
         }
-        // Fallback: use the stored price (no price rule configured)
-        return editingBookingData?.total_price_cents ?? 0;
-    }, [pricesByType, resType, duration, editingBookingData?.total_price_cents]);
+        return storedCents;
+    }, [isEditMode, pricesByType, resType, duration, editingBookingData?.total_price_cents]);
 
     const formattedPrice = totalPriceCents != null && totalPriceCents >= 0
         ? (totalPriceCents / 100).toFixed(2).replace('.', ',') + ' €'
@@ -864,6 +874,28 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         totalCollectedCents >= (totalPriceCents ?? 0) && (totalPriceCents ?? 0) > 0
             ? 'confirmed'
             : 'pending_payment';
+
+    const executeDelete = useCallback(async ({ cashRefunds, applyRefund, refundPercent }: CashRefundConfirmPayload) => {
+        if (!onDelete || !editingBookingData) return;
+        setIsDeleting(true);
+        try {
+            await onDelete(
+                editingBookingData.id,
+                sendDeleteEmail,
+                cashRefunds,
+                applyRefund,
+                refundPercent,
+            );
+            setCashRefundOpen(false);
+            onClose();
+        } catch (err) {
+            console.error('Error deleting booking:', err);
+            toast.error(t('reservation.deleteError'));
+            throw err;
+        } finally {
+            setIsDeleting(false);
+        }
+    }, [onDelete, editingBookingData, sendDeleteEmail, onClose, t]);
     // ─────────────────────────────────────────────────────────────────────────
 
     if (!isOpen) return null;
@@ -1160,18 +1192,9 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
         }
     };
 
-    const handleDelete = async () => {
+    const handleDelete = () => {
         if (!onDelete || !editingBookingData) return;
-        setIsDeleting(true);
-        try {
-            await onDelete(editingBookingData.id, sendDeleteEmail);
-            onClose();
-        } catch (err) {
-            console.error('Error deleting booking:', err);
-            toast.error(t('reservation.deleteError'));
-        } finally {
-            setIsDeleting(false);
-        }
+        setCashRefundOpen(true);
     };
 
     const dateForLabel = bookingDate
@@ -1192,6 +1215,7 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
     const minutes = ['00', '15', '30', '45'];
 
     return portalModal(
+        <>
         <div style={vvStyle} className="fixed inset-0 z-100 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 transition-opacity duration-300">
             {/* Backdrop click to close */}
             <div className="absolute inset-0" onClick={onClose} />
@@ -2016,6 +2040,20 @@ export const ReservationModal: React.FC<ReservationModalProps> = ({
                 )}
 
             </div>
-        </div>,
+        </div>
+            {cashRefundOpen && editingBookingData?.id && (
+                <CashRefundModal
+                    isOpen={cashRefundOpen}
+                    bookingId={String(editingBookingData.id)}
+                    requireConfirmation
+                    title="Cancelar reserva"
+                    subtitle="Confirma la cancelación y, si hay efectivo, cómo devolverlo."
+                    confirmLabel="Cancelar reserva"
+                    onClose={() => !isDeleting && setCashRefundOpen(false)}
+                    onConfirm={executeDelete}
+                    externalSubmitting={isDeleting}
+                />
+            )}
+        </>,
     );
 };

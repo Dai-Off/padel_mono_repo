@@ -23,6 +23,7 @@ import { useStripe } from '../stripe';
 import { useAuth } from '../contexts/AuthContext';
 import {
   cancelMatchAsOrganizer,
+  fetchMatchCancelPreview,
   fetchMatchById,
   prepareJoin,
   submitMatchFeedback,
@@ -56,6 +57,7 @@ import {
 import { PartidoSlotAvatar } from '../components/partido/PartidoSlotAvatar';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { rejectMatchmakingProposal, leaveMatchmaking } from '../api/matchmaking';
+import { buildLeaveMatchAlertMessage, buildLeaveMatchDoneMessage } from '../utils/matchLeaveAlert';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import {
   MatchEvaluationFlow,
@@ -865,8 +867,14 @@ export function PartidoDetailScreen({
     !pendingMmPay &&
     canRecordScore &&
     partido.hasMyFeedback !== true;
+  const showLeaveBar =
+    playerContextResolved &&
+    isInMatch &&
+    !showFinishBar &&
+    !pendingMmPay &&
+    matchPhase !== 'past';
   const bottomBarNeedsStack = pendingMmPay || canDeclineMmProposal;
-  const bottomReserve = insets.bottom + (showFinishBar ? 100 : bottomBarNeedsStack ? 148 : 88);
+  const bottomReserve = insets.bottom + (showFinishBar || showLeaveBar ? 100 : bottomBarNeedsStack ? 148 : 88);
   const canPressCta =
     playerContextResolved &&
     !joinBusy &&
@@ -886,54 +894,70 @@ export function PartidoDetailScreen({
     }
     const soloEnPartido = playersFilledCount <= 1;
     const title = soloEnPartido ? t('alerts.leaveMatch.titleCancel') : t('alerts.leaveMatch.titleLeave');
-    const message = soloEnPartido
-      ? t('alerts.leaveMatch.bodySolo')
-      : t('alerts.leaveMatch.bodyMulti');
+    const confirmLabel = soloEnPartido ? t('alerts.leaveMatch.cancel') : t('alerts.leaveMatch.leave');
 
-    Alert.alert(title, message, [
-      { text: t('common.no'), style: 'cancel' },
-      {
-        text: soloEnPartido ? t('alerts.leaveMatch.yesCancel') : t('alerts.leaveMatch.yesLeave'),
-        style: 'destructive',
-        onPress: async () => {
-          setCancelOverlay({
-            open: true,
-            message: t('common.loading'),
-          });
-          try {
-            const r = await cancelMatchAsOrganizer(partido.id, token);
-            if (r.ok) {
-              if (r.cancelledEntireMatch) {
-                Alert.alert(t('alerts.ready.title'), t('alerts.leaveMatch.doneCancel'));
-                onBack();
-              } else {
-                setCancelOverlay((o) => ({ ...o, message: t('common.loading') }));
-                Alert.alert(t('alerts.ready.title'), t('alerts.leaveMatch.doneLeave'));
-                matchFetchGen.current += 1;
-                const updated = await reloadMatchPartido(partido.id, token, {
-                  viewerPlayerId: currentPlayerId ?? myProfile?.id ?? null,
+    void (async () => {
+      let preview = null;
+      try {
+        preview = await fetchMatchCancelPreview(partido.id, token);
+      } catch {
+        // Si falla el preview, seguimos con el mensaje estándar.
+      }
+      const message = buildLeaveMatchAlertMessage(t, soloEnPartido, preview);
+
+      Alert.alert(title, message, [
+        { text: t('common.no'), style: 'cancel' },
+        {
+          text: confirmLabel,
+          style: 'destructive',
+          onPress: async () => {
+            setCancelOverlay({
+              open: true,
+              message: t('common.loading'),
+            });
+            try {
+              const r = await cancelMatchAsOrganizer(partido.id, token);
+              if (r.ok) {
+                const refundEligible =
+                  r.refundEligible ?? (preview?.ok === true && preview.refund_eligible !== false);
+                const doneMessage = buildLeaveMatchDoneMessage(t, {
+                  entireMatch: r.cancelledEntireMatch,
+                  refundEligible,
                 });
-                if (updated) await syncPartidoAfterMutation(updated);
-                else void refreshMatches({ scope: 'mine' });
+                if (r.cancelledEntireMatch) {
+                  Alert.alert(t('alerts.ready.title'), doneMessage);
+                  onBack();
+                } else {
+                  setCancelOverlay((o) => ({ ...o, message: t('common.loading') }));
+                  Alert.alert(t('alerts.ready.title'), doneMessage);
+                  matchFetchGen.current += 1;
+                  const updated = await reloadMatchPartido(partido.id, token, {
+                    viewerPlayerId: currentPlayerId ?? myProfile?.id ?? null,
+                  });
+                  if (updated) await syncPartidoAfterMutation(updated);
+                  else void refreshMatches({ scope: 'mine' });
+                }
+                return;
               }
-              return;
+              const extra =
+                r.refund_errors?.length ? `\n\n${r.refund_errors.slice(0, 3).join('\n')}` : '';
+              Alert.alert(t('alerts.leaveMatch.fail'), `${r.error}${extra}`);
+            } finally {
+              setCancelOverlay({ open: false, message: '' });
             }
-            const extra =
-              r.refund_errors?.length ? `\n\n${r.refund_errors.slice(0, 3).join('\n')}` : '';
-            Alert.alert(t('alerts.leaveMatch.fail'), `${r.error}${extra}`);
-          } finally {
-            setCancelOverlay({ open: false, message: '' });
-          }
+          },
         },
-      },
-    ]);
+      ]);
+    })();
   }, [
     session?.access_token,
-    partido,
+    partido.id,
     onBack,
     playersFilledCount,
     syncPartidoAfterMutation,
     refreshMatches,
+    currentPlayerId,
+    myProfile?.id,
     t,
   ]);
 
@@ -1262,6 +1286,27 @@ export function PartidoDetailScreen({
             >
               <Text style={styles.finishBarCtaText}>{t('partidos.evalFinish')}</Text>
             </Pressable>
+          </View>
+        </View>
+      ) : showLeaveBar ? (
+        <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+          <View style={styles.finishBarRow}>
+            <Pressable
+              onPress={handleTrashMatch}
+              disabled={cancelOverlay.open}
+              style={({ pressed }) => [
+                styles.finishBarTrash,
+                pressed && !cancelOverlay.open && styles.pressed,
+                cancelOverlay.open && styles.finishBarBtnDisabled,
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={t('partidos.detailLeaveA11y')}
+            >
+              <Ionicons name="exit-outline" size={22} color="#f87171" />
+            </Pressable>
+            <View style={[styles.finishBarCta, styles.inMatchStatusCta]}>
+              <Text style={styles.finishBarCtaText}>{t('partidos.detailAlreadyInMatch')}</Text>
+            </View>
           </View>
         </View>
       ) : pendingMmPay ? (
@@ -1905,6 +1950,12 @@ const styles = StyleSheet.create({
     color: '#f87171',
     fontSize: 15,
     fontWeight: '600',
+  },
+  inMatchStatusCta: {
+    flex: 1,
+    width: undefined,
+    minHeight: 56,
+    justifyContent: 'center',
   },
   finishBarRow: {
     flexDirection: 'row',

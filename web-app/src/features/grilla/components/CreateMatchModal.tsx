@@ -158,9 +158,17 @@ interface CreateMatchModalProps {
     clubId?: string | null;
     isOpen: boolean;
     onClose: () => void;
+    initialDate?: string;
+    onCreated?: (bookingDate: string) => void;
 }
 
-export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOpen, onClose }) => {
+export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
+    clubId,
+    isOpen,
+    onClose,
+    initialDate,
+    onCreated,
+}) => {
     const vvStyle = useVisualViewportFix(isOpen);
     const { t } = useGrillaTranslation();
 
@@ -308,7 +316,11 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
         else updateSlotPayment(index, defaultSlot());
     };
 
-    const effectiveBookingType = matchVisibility === 'public' ? 'open_match' : 'standard';
+    const effectiveBookingType = 'open_match';
+
+    useEffect(() => {
+        if (isOpen && initialDate) setBookingDate(initialDate);
+    }, [isOpen, initialDate]);
 
     const totalPriceCents = useMemo(() => {
         const pricePerHour = pricesByType[effectiveBookingType]?.price_per_hour_cents || pricesByType['standard']?.price_per_hour_cents || 0;
@@ -410,6 +422,8 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
                 source_channel: 'manual',
                 participants: buildParticipants(),
                 send_email: false,
+                elo_min: eloMinFilter === '' ? null : Number(eloMinFilter),
+                elo_max: eloMaxFilter === '' ? null : Number(eloMaxFilter),
             };
 
             const bkRes = await apiFetchWithAuth<any>('/bookings', {
@@ -453,8 +467,16 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({ clubId, isOp
                     description: 'No aparecerá en la grilla hasta tener 3 jugadores. Podés verlo en Lista de reservas.',
                     duration: 8000,
                 });
+            } else if (matchVisibility === 'private' && computedStatus !== 'confirmed') {
+                toast.message('Partido privado guardado', {
+                    description: 'No aparecerá en la grilla hasta estar pagado al 100%. Podés verlo en Lista de reservas.',
+                    duration: 8000,
+                });
+            } else if (matchVisibility === 'private' && computedStatus === 'confirmed') {
+                toast.success('Partido privado creado y visible en la grilla.');
             }
 
+            onCreated?.(bookingDate);
             onClose();
         } catch (err: any) {
             console.error('Error creating match:', err);
