@@ -168,7 +168,8 @@ export async function evaluateAndGrant(supabase: Supa, playerId: string): Promis
       .from('unlockables')
       .select('id, kind, title, description, rarity, icon, animation_type, style, sport, unlock_type, unlock_value, sort_order')
       .eq('is_active', true)
-      .neq('unlock_type', 'manual'),
+      // 'manual' (recompensa/pendiente) y 'default' (implícito) no se auto-otorgan ni notifican.
+      .not('unlock_type', 'in', '("manual","default")'),
     supabase.from('player_unlockables').select('unlockable_id').eq('player_id', playerId),
   ]);
 
