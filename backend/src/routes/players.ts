@@ -1220,13 +1220,17 @@ router.get('/:id/stats', async (req: Request, res: Response) => {
  *     tags: [Players]
  *     summary: Historial de evolución del ELO del jugador autenticado (partidos de matchmaking)
  */
-router.get('/me/level-history', async (req: Request, res: Response) => {
-  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
-  if (authErr) return res.status(401).json({ ok: false, error: authErr });
-  const supabase = getSupabaseServiceRoleClient();
-
+// Construye el historial de nivel (ELO) de un jugador. Reutilizado por la ruta
+// propia (/me) y la pública (/:id).
+async function buildLevelHistory(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  playerId: string,
+  limitParam: string,
+): Promise<
+  | { ok: true; current_elo: number; matches: unknown[] }
+  | { ok: false; status: number; error: string }
+> {
   // Límite: 5 | 10 | all (por defecto 5)
-  const limitParam = String(req.query.limit ?? '5');
   let limit: number | null;
   if (limitParam === 'all') limit = null;
   else {
@@ -1240,8 +1244,8 @@ router.get('/me/level-history', async (req: Request, res: Response) => {
     .select('elo_rating')
     .eq('id', playerId)
     .maybeSingle();
-  if (ep) return res.status(500).json({ ok: false, error: ep.message });
-  if (!pl) return res.status(404).json({ ok: false, error: 'Player not found' });
+  if (ep) return { ok: false, status: 500, error: ep.message };
+  if (!pl) return { ok: false, status: 404, error: 'Player not found' };
   const currentElo = Number((pl as { elo_rating?: number }).elo_rating ?? 0);
 
   // Partidos del jugador (equipo, resultado y delta de ELO)
@@ -1249,7 +1253,7 @@ router.get('/me/level-history', async (req: Request, res: Response) => {
     .from('match_players')
     .select('match_id, team, result, rating_change')
     .eq('player_id', playerId);
-  if (e1) return res.status(500).json({ ok: false, error: e1.message });
+  if (e1) return { ok: false, status: 500, error: e1.message };
 
   const myByMatch = new Map<string, { team: 'A' | 'B'; result: string; rating_change: number }>();
   for (const r of myRows ?? []) {
@@ -1257,7 +1261,7 @@ router.get('/me/level-history', async (req: Request, res: Response) => {
     myByMatch.set(o.match_id, { team: o.team, result: o.result, rating_change: Number(o.rating_change ?? 0) });
   }
   const matchIds = [...myByMatch.keys()];
-  if (!matchIds.length) return res.json({ ok: true, current_elo: currentElo, matches: [] });
+  if (!matchIds.length) return { ok: true, current_elo: currentElo, matches: [] };
 
   // Solo partidos de matchmaking confirmados (los que mueven ELO), con sets, fecha y equipos
   const { data: matches, error: e2 } = await supabase
@@ -1270,7 +1274,7 @@ router.get('/me/level-history', async (req: Request, res: Response) => {
     .in('id', matchIds)
     .eq('type', 'matchmaking')
     .eq('score_status', 'confirmed');
-  if (e2) return res.status(500).json({ ok: false, error: e2.message });
+  if (e2) return { ok: false, status: 500, error: e2.message };
 
   type DbPlayerLite = { id?: string; first_name?: string | null; last_name?: string | null; avatar_url?: string | null };
   type DbMp = { team: 'A' | 'B'; slot_index?: number; player_id: string; players: DbPlayerLite | DbPlayerLite[] | null };
@@ -1335,7 +1339,30 @@ router.get('/me/level-history', async (req: Request, res: Response) => {
   // Aplicar límite: los N más recientes, manteniendo orden ascendente
   if (limit != null && result.length > limit) result = result.slice(result.length - limit);
 
-  return res.json({ ok: true, current_elo: currentElo, matches: result });
+  return { ok: true, current_elo: currentElo, matches: result };
+}
+
+router.get('/me/level-history', async (req: Request, res: Response) => {
+  const { playerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (authErr) return res.status(401).json({ ok: false, error: authErr });
+  const supabase = getSupabaseServiceRoleClient();
+  const out = await buildLevelHistory(supabase, playerId, String(req.query.limit ?? '5'));
+  if (!out.ok) return res.status(out.status).json({ ok: false, error: out.error });
+  return res.json({ ok: true, current_elo: out.current_elo, matches: out.matches });
+});
+
+/**
+ * @openapi
+ * /players/{id}/level-history:
+ *   get:
+ *     tags: [Players]
+ *     summary: Historial de nivel (ELO) de un jugador (público, mismo shape que /me)
+ */
+router.get('/:id/level-history', async (req: Request, res: Response) => {
+  const supabase = getSupabaseServiceRoleClient();
+  const out = await buildLevelHistory(supabase, req.params.id, String(req.query.limit ?? '5'));
+  if (!out.ok) return res.status(out.status).json({ ok: false, error: out.error });
+  return res.json({ ok: true, current_elo: out.current_elo, matches: out.matches });
 });
 
 /**

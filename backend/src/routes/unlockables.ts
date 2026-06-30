@@ -89,6 +89,67 @@ router.get('/me/achievements', async (req: Request, res: Response) => {
 
 /**
  * @openapi
+ * /players/{id}/public-achievements:
+ *   get:
+ *     tags: [Players]
+ *     summary: Logros VISIBLES (públicos) de un jugador + cursos completados (mismo shape que /me/achievements)
+ */
+router.get('/:id/public-achievements', async (req: Request, res: Response) => {
+  const supabase = getSupabaseServiceRoleClient();
+  const playerId = req.params.id;
+  try {
+    const { data: owned, error: e1 } = await supabase
+      .from('player_unlockables')
+      .select('unlocked_at, is_public, progress, unlockables!inner(id, kind, title, description, rarity, icon, sport)')
+      .eq('player_id', playerId)
+      .eq('is_public', true)
+      .in('unlockables.kind', ['trophy', 'badge'])
+      .order('unlocked_at', { ascending: false });
+    if (e1) return res.status(500).json({ ok: false, error: e1.message });
+
+    const achievements = (owned ?? [])
+      .map((row) => {
+        const r = row as { unlocked_at: string; is_public: boolean; progress: number | null; unlockables: unknown };
+        const u = pickEmbed(r.unlockables);
+        if (!u) return null;
+        return {
+          id: u.id,
+          type: u.kind,
+          title: u.title,
+          description: u.description ?? '',
+          icon: u.icon ?? 'trophy-outline',
+          rarity: u.rarity,
+          sport: u.sport ?? null,
+          date: r.unlocked_at,
+          isPublic: true,
+          progress: r.progress ?? undefined,
+        };
+      })
+      .filter(Boolean);
+
+    // Cursos completados (derivados de learning): públicos por defecto.
+    const courses = await getCompletedCourses(supabase, playerId);
+    const courseAchievements = courses.map((c) => ({
+      id: `course_${c.courseId}`,
+      type: 'course' as const,
+      title: c.title,
+      description: c.description ?? '',
+      icon: 'book-outline',
+      rarity: 'common' as const,
+      sport: null,
+      date: c.completedAt,
+      isPublic: true,
+      progress: undefined,
+    }));
+
+    return res.json({ ok: true, achievements: [...achievements, ...courseAchievements] });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
+/**
+ * @openapi
  * /players/me/achievements/{id}/visibility:
  *   patch:
  *     tags: [Players]
@@ -283,6 +344,65 @@ router.get('/me/profile-customization', async (req: Request, res: Response) => {
       frameId: row?.frame_id ?? null,
       pinnedBadgeIds: row?.pinned_badge_ids ?? [],
     },
+  });
+});
+
+/**
+ * @openapi
+ * /players/{id}/public-customization:
+ *   get:
+ *     tags: [Players]
+ *     summary: Personalización equipada de un jugador, RESUELTA (marco con atributos, título e insignias fijadas)
+ */
+router.get('/:id/public-customization', async (req: Request, res: Response) => {
+  const supabase = getSupabaseServiceRoleClient();
+  const playerId = req.params.id;
+
+  const { data, error } = await supabase
+    .from('player_profile_customization')
+    .select('title_id, frame_id, pinned_badge_ids')
+    .eq('player_id', playerId)
+    .maybeSingle();
+  if (error) return res.status(500).json({ ok: false, error: error.message });
+
+  const row = data as { title_id: string | null; frame_id: string | null; pinned_badge_ids: string[] } | null;
+  const frameId = row?.frame_id && row.frame_id !== 'none' ? row.frame_id : null;
+  const pinnedIds = row?.pinned_badge_ids ?? [];
+
+  // Resolver atributos del marco + insignias fijadas desde el catálogo.
+  type CatRow = {
+    id: string;
+    kind: string;
+    title: string;
+    rarity: string;
+    icon: string | null;
+    animation_type: string | null;
+    style: string | null;
+    colors: unknown;
+  };
+  const idsToResolve = [frameId, ...pinnedIds].filter((x): x is string => typeof x === 'string' && x.length > 0);
+  const byId = new Map<string, CatRow>();
+  if (idsToResolve.length) {
+    const { data: cat } = await supabase
+      .from('unlockables')
+      .select('id, kind, title, rarity, icon, animation_type, style, colors')
+      .in('id', idsToResolve);
+    for (const c of cat ?? []) byId.set((c as CatRow).id, c as CatRow);
+  }
+
+  const f = frameId ? byId.get(frameId) : undefined;
+  const frame = f
+    ? { rarity: f.rarity, style: f.style, animationType: f.animation_type, colors: Array.isArray(f.colors) ? (f.colors as string[]) : null }
+    : null;
+
+  const pinnedBadges = pinnedIds
+    .map((id) => byId.get(id))
+    .filter((u): u is CatRow => !!u && (u.kind === 'trophy' || u.kind === 'badge'))
+    .map((u) => ({ id: u.id, type: u.kind, title: u.title, icon: u.icon ?? 'trophy-outline', rarity: u.rarity }));
+
+  return res.json({
+    ok: true,
+    customization: { titleId: row?.title_id ?? null, frame, pinnedBadges },
   });
 });
 
