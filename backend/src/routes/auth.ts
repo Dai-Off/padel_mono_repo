@@ -12,6 +12,7 @@ import { countryToTimezone } from '../lib/clubTimezone';
 import { seedClubPricingFromApplication } from '../lib/clubPricing';
 import { assignActiveMatchmakingSeasonIfNull } from '../services/matchmakingSeasonService';
 import { assertUsernameAvailable, normalizeUsername } from '../lib/playerUsername';
+import { cancelPlayerDeletionIfPending } from '../lib/cancelPlayerDeletion';
 
 const router = Router();
 
@@ -199,7 +200,7 @@ async function resolveLoginEmail(
   }
   const { data: player, error } = await supabase
     .from('players')
-    .select('email')
+    .select('email, status')
     .eq('username', un.value)
     .neq('status', 'deleted')
     .maybeSingle();
@@ -258,6 +259,21 @@ router.post('/login', async (req: Request, res: Response) => {
     // Fallback: si el usuario no tiene fila en players (registro fuera del flujo normal), crearla.
     const authUser = data.user!;
     const emailStr2 = String(authUser.email ?? '').trim().toLowerCase();
+
+    const { data: linkedPlayer } = await supabase
+      .from('players')
+      .select('id, status')
+      .or(`auth_user_id.eq.${authUser.id}${emailStr2 ? `,email.eq.${emailStr2}` : ''}`)
+      .maybeSingle();
+
+    if (linkedPlayer && (linkedPlayer as { status: string }).status === 'deleted') {
+      return res.status(403).json({
+        ok: false,
+        error: 'Esta cuenta fue eliminada.',
+        error_code: 'ACCOUNT_DELETED',
+      });
+    }
+
     if (emailStr2) {
       const { data: existingPlayer } = await supabase
         .from('players')
@@ -290,8 +306,15 @@ router.post('/login', async (req: Request, res: Response) => {
       }
     }
 
+    const playerIdForCancel = (linkedPlayer as { id: string } | null)?.id ?? null;
+    let deletionCancelled = false;
+    if (playerIdForCancel) {
+      deletionCancelled = await cancelPlayerDeletionIfPending(playerIdForCancel, authUser.id);
+    }
+
     return res.json({
       ok: true,
+      deletion_cancelled: deletionCancelled,
       user: {
         id: authUser.id,
         email: authUser.email,

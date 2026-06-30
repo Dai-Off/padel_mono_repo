@@ -14,6 +14,13 @@ export interface SettingsTranslationKeys {
   deleteAccount: string;
   deleteAccountA11y: string;
   deleteAccountBody: string;
+  deleteAccountConfirmTitle: string;
+  deleteAccountConfirmBody: string;
+  deleteAccountConfirmButton: string;
+  deleteAccountCancelButton: string;
+  deleteAccountSuccess: string;
+  deleteAccountSuccessBody: string;
+  deleteAccountError: string;
   notifMessages: string;
   notifNewMatches: string;
   notifCompetitions: string;

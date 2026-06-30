@@ -51,6 +51,7 @@ import clubPlayerSegmentsRouter from "./clubPlayerSegments";
 import clubSportsRouter from "./clubSports";
 import mobileAdminRouter from "./mobileAdmin";
 import storeRouter from "./store";
+import accountRouter from "./account";
 
 
 const router = Router();
@@ -114,6 +115,7 @@ router.use("/club-player-segments", clubPlayerSegmentsRouter);
 router.use("/club-sports", clubSportsRouter);
 router.use("/mobile-admin", mobileAdminRouter);
 router.use("/store", storeRouter);
+router.use("/account", accountRouter);
 
 
 export default router;

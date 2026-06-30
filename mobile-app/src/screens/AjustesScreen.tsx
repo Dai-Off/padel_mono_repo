@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MenuScreenHeader } from '../components/menuScreen/MenuScreenHeader';
@@ -10,6 +10,7 @@ import { ChangePasswordScreen } from './ChangePasswordScreen';
 import { InfoContentScreen } from './InfoContentScreen';
 import { useAuth } from '../contexts/AuthContext';
 import { useHomeData } from '../contexts/HomeDataContext';
+import { requestAccountDeletion } from '../api/auth';
 import { updateMyPlayerPreferences, type PlayerPreferences } from '../api/players';
 import { registerOverlayNestedBack } from '../navigation/overlayBackRef';
 import { theme } from '../theme';
@@ -132,7 +133,7 @@ function AjustesPrivacidadView({
 
 export function AjustesScreen({ onBack }: AjustesScreenProps) {
   const insets = useSafeAreaInsets();
-  const { session } = useAuth();
+  const { session, logout } = useAuth();
   const { profile, refreshProfile } = useHomeData();
   const { locale: language, setLocale, t } = useTranslation();
   const token = session?.access_token;
@@ -140,6 +141,7 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
   const [view, setView] = useState<AjustesView>('main');
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const basePrefs = useMemo<PlayerPreferences | null>(() => profile?.preferences ?? null, [profile]);
   const [prefs, setPrefs] = useState<PlayerPreferences | null>(basePrefs);
@@ -155,6 +157,38 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
   const selectLanguage = (value: AppLocale) => {
     setLocale(value);
     setShowLanguagePicker(false);
+  };
+
+  const handleDeleteAccountPress = () => {
+    Alert.alert(t('settings.deleteAccountConfirmTitle'), t('settings.deleteAccountConfirmBody'), [
+      { text: t('settings.deleteAccountCancelButton'), style: 'cancel' },
+      {
+        text: t('settings.deleteAccountConfirmButton'),
+        style: 'destructive',
+        onPress: () => setShowDeleteConfirm(true),
+      },
+    ]);
+  };
+
+  const confirmDeleteAccount = async () => {
+    if (!token || deletingAccount) return;
+    setDeletingAccount(true);
+    try {
+      const res = await requestAccountDeletion(token);
+      setShowDeleteConfirm(false);
+      if (!res.ok) {
+        Alert.alert(t('settings.deleteAccount'), res.error ?? t('settings.deleteAccountError'));
+        return;
+      }
+      const days = res.grace_days ?? 14;
+      Alert.alert(
+        t('settings.deleteAccountSuccess'),
+        t('settings.deleteAccountSuccessBody', { days: String(days) }),
+        [{ text: t('common.understood'), onPress: () => void logout() }],
+      );
+    } finally {
+      setDeletingAccount(false);
+    }
   };
 
   const applyPrefs = async (next: PlayerPreferences) => {
@@ -280,12 +314,12 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
         <MenuScreenSection title={t('settings.dangerZone')} topSpacing>
           <Pressable
             style={({ pressed }) => [styles.dangerButton, pressed && { opacity: 0.92 }]}
-            onPress={() => setShowDeleteConfirm(true)}
+            onPress={handleDeleteAccountPress}
             accessibilityRole="button"
             accessibilityLabel={t('settings.deleteAccountA11y')}
           >
             <View style={styles.dangerIconBox}>
-              <Ionicons name="log-out-outline" size={20} color="#f87171" />
+              <Ionicons name="trash-outline" size={20} color="#f87171" />
             </View>
             <Text style={styles.dangerText}>{t('settings.deleteAccount')}</Text>
           </Pressable>
@@ -318,17 +352,33 @@ export function AjustesScreen({ onBack }: AjustesScreenProps) {
       <MenuScreenOverlay
         visible={showDeleteConfirm}
         title={t('settings.deleteAccount')}
-        onClose={() => setShowDeleteConfirm(false)}
+        onClose={() => !deletingAccount && setShowDeleteConfirm(false)}
       >
-        <Text style={styles.modalText}>
-          {t('settings.deleteAccountBody')}
-        </Text>
-        <Pressable
-          style={({ pressed }) => [styles.modalBtnGhost, pressed && { opacity: 0.9 }]}
-          onPress={() => setShowDeleteConfirm(false)}
-        >
-          <Text style={styles.modalBtnGhostText}>{t('common.understood')}</Text>
-        </Pressable>
+        <Text style={styles.modalText}>{t('settings.deleteAccountBody')}</Text>
+        <View style={styles.modalActions}>
+          <Pressable
+            style={({ pressed }) => [styles.modalBtnGhost, pressed && { opacity: 0.9 }]}
+            onPress={() => setShowDeleteConfirm(false)}
+            disabled={deletingAccount}
+          >
+            <Text style={styles.modalBtnGhostText}>{t('settings.deleteAccountCancelButton')}</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.modalBtnDanger,
+              pressed && { opacity: 0.9 },
+              deletingAccount && styles.modalBtnDisabled,
+            ]}
+            onPress={() => void confirmDeleteAccount()}
+            disabled={deletingAccount}
+          >
+            {deletingAccount ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.modalBtnDangerText}>{t('settings.deleteAccountConfirmButton')}</Text>
+            )}
+          </Pressable>
+        </View>
       </MenuScreenOverlay>
     </View>
   );
@@ -403,6 +453,7 @@ const styles = StyleSheet.create({
   languageOptionActive: { borderColor: 'rgba(241,143,52,0.35)' },
   languageOptionText: { color: '#fff', fontSize: 15 },
   modalText: { color: theme.auth.textSecondary, fontSize: 14, lineHeight: 20, marginBottom: 16 },
+  modalActions: { gap: 10 },
   modalBtnGhost: {
     paddingVertical: 12,
     borderRadius: 14,
@@ -412,6 +463,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.10)',
   },
   modalBtnGhostText: { color: '#fff', fontWeight: '700' },
+  modalBtnDanger: {
+    paddingVertical: 12,
+    borderRadius: 14,
+    alignItems: 'center',
+    backgroundColor: 'rgba(239,68,68,0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.45)',
+  },
+  modalBtnDangerText: { color: '#fca5a5', fontWeight: '700' },
+  modalBtnDisabled: { opacity: 0.6 },
   notifRow: {
     flexDirection: 'row',
     alignItems: 'center',

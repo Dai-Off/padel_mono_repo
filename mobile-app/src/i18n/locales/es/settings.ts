@@ -16,7 +16,16 @@ export const settings: SettingsTranslationKeys = {
   deleteAccount: 'Eliminar tu cuenta',
   deleteAccountA11y: 'Eliminar tu cuenta',
   deleteAccountBody:
-    'Esta acción es permanente. Si quieres eliminar tu cuenta, contacta con soporte desde la app o el club donde juegas habitualmente.',
+    'Tu cuenta se desactivará y, tras un período de gracia, se anonimizarán tus datos personales. Las transacciones y registros fiscales se conservarán sin datos identificables.',
+  deleteAccountConfirmTitle: '¿Eliminar tu cuenta?',
+  deleteAccountConfirmBody:
+    'Tu cuenta quedará pendiente de eliminación. Podrás cancelarlo iniciando sesión de nuevo antes de que venza el plazo.',
+  deleteAccountConfirmButton: 'Sí, eliminar cuenta',
+  deleteAccountCancelButton: 'Cancelar',
+  deleteAccountSuccess: 'Solicitud registrada',
+  deleteAccountSuccessBody:
+    'Tu cuenta se eliminará en {days} días. Inicia sesión antes de esa fecha si cambias de opinión.',
+  deleteAccountError: 'No se pudo procesar la solicitud. Inténtalo de nuevo.',
   notifMessages: 'Mensajes',
   notifNewMatches: 'Nuevos partidos',
   notifCompetitions: 'Competiciones',

@@ -16,7 +16,15 @@ export const settings: SettingsTranslationKeys = {
   deleteAccount: '刪除你的帳戶',
   deleteAccountA11y: '刪除你的帳戶',
   deleteAccountBody:
-    '此操作無法復原。如要刪除帳戶，請透過應用程式或你常打的球會聯絡客服。',
+    '你的帳戶將被停用；在寬限期後，個人資料會被匿名化。交易及稅務紀錄會保留，但不會包含可識別資料。',
+  deleteAccountConfirmTitle: '確定刪除帳戶？',
+  deleteAccountConfirmBody:
+    '你的帳戶將進入待刪除狀態。在期限前再次登入即可取消。',
+  deleteAccountConfirmButton: '是的，刪除帳戶',
+  deleteAccountCancelButton: '取消',
+  deleteAccountSuccess: '已提交申請',
+  deleteAccountSuccessBody: '你的帳戶將在 {days} 天後刪除。如改變主意，請在期限前再次登入。',
+  deleteAccountError: '無法處理申請，請稍後再試。',
   notifMessages: '訊息',
   notifNewMatches: '新球局',
   notifCompetitions: '競賽',
