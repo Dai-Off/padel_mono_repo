@@ -128,6 +128,9 @@ export function MainApp() {
   const [showCommunity, setShowCommunity] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
   const [messagesPeer, setMessagesPeer] = useState<MessagePeerNav | null>(null);
+  // Si el chat se abrió desde el perfil ajeno (botón Mensaje), al volver del chat
+  // se regresa al perfil ajeno en vez de a la lista de mensajes.
+  const [messagesReturnToProfile, setMessagesReturnToProfile] = useState(false);
   /** Incrementar para que HomeScreen reabra el modal de IA Afinidad (p. ej. volver del perfil) */
   const [affinityReopenSignal, setAffinityReopenSignal] = useState(0);
   const [showCompetitiveLeague, setShowCompetitiveLeague] = useState(false);
@@ -142,6 +145,9 @@ export function MainApp() {
   const [showSeasonPass, setShowSeasonPass] = useState(false);
   const [showPublicProfile, setShowPublicProfile] = useState(false);
   const [selectedPublicPlayerId, setSelectedPublicPlayerId] = useState<string | null>(null);
+  // Si un partido se abrió DESDE el perfil ajeno (su gráfico de evolución), el detalle
+  // de partido tiene prioridad sobre el perfil ajeno; al volver del partido, vuelve al perfil.
+  const [matchOpenedFromPublicProfile, setMatchOpenedFromPublicProfile] = useState(false);
   /** Perfil público abierto desde IA Afinidad — back reabre el modal */
   const [affinityPublicProfileId, setAffinityPublicProfileId] = useState<string | null>(null);
   /**
@@ -533,6 +539,10 @@ export function MainApp() {
       }
       // Hilo DM dentro de Mensajes
       if (showMessages && messagesPeer) {
+        if (messagesReturnToProfile) {
+          setShowMessages(false);
+          setMessagesReturnToProfile(false);
+        }
         setMessagesPeer(null);
         return true;
       }
@@ -540,6 +550,7 @@ export function MainApp() {
       if (showMessages) {
         setShowMessages(false);
         setMessagesPeer(null);
+        setMessagesReturnToProfile(false);
         return true;
       }
       // Perfil público (genérico o desde afinidad)
@@ -573,6 +584,7 @@ export function MainApp() {
       // Detalle de partido (prioridad sobre flujos padre, p. ej. Tu actividad)
       if (selectedPartido) {
         setSelectedPartido(null);
+        setMatchOpenedFromPublicProfile(false);
         return true;
       }
       // Tu actividad (subpantalla → menú → cerrar)
@@ -800,7 +812,15 @@ export function MainApp() {
         return (
           <DirectMessageThreadScreen
             peer={messagesPeer}
-            onBack={() => setMessagesPeer(null)}
+            onBack={() => {
+              // Si el chat se abrió desde el perfil ajeno, cerramos Mensajes para volver al perfil;
+              // si no, volvemos a la lista de mensajes.
+              if (messagesReturnToProfile) {
+                setShowMessages(false);
+                setMessagesReturnToProfile(false);
+              }
+              setMessagesPeer(null);
+            }}
           />
         );
       }
@@ -809,12 +829,16 @@ export function MainApp() {
           onBack={() => {
             setShowMessages(false);
             setMessagesPeer(null);
+            setMessagesReturnToProfile(false);
           }}
-          onSelectPeer={setMessagesPeer}
+          onSelectPeer={(peer) => {
+            setMessagesReturnToProfile(false);
+            setMessagesPeer(peer);
+          }}
         />
       );
     }
-    if (!showPartidoDetail && ((showPublicProfile && selectedPublicPlayerId) || affinityPublicProfileId)) {
+    if (!matchOpenedFromPublicProfile && ((showPublicProfile && selectedPublicPlayerId) || affinityPublicProfileId)) {
       const pid = affinityPublicProfileId || selectedPublicPlayerId || '';
       const isFromAffinity = !!affinityPublicProfileId;
 
@@ -832,13 +856,15 @@ export function MainApp() {
             }
           }}
           onChatPress={(chatPid, name) => {
-            setShowPublicProfile(false);
-            setAffinityPublicProfileId(null);
-            setSelectedPublicPlayerId(null);
+            // No cerramos el perfil ajeno: el chat se abre encima y al volver se regresa al perfil.
+            setMessagesReturnToProfile(true);
             setShowMessages(true);
             setMessagesPeer({ id: chatPid, displayName: name, avatarUrl: null });
           }}
-          onOpenMatch={openMatchById}
+          onOpenMatch={(matchId) => {
+            setMatchOpenedFromPublicProfile(true);
+            void openMatchById(matchId);
+          }}
         />
       );
     }
@@ -887,12 +913,19 @@ export function MainApp() {
           onBack={() => {
             void refreshMatches({ scope: 'mine' });
             setSelectedPartido(null);
+            // Si el partido se abrió desde el perfil ajeno, al volver se regresa a él.
+            setMatchOpenedFromPublicProfile(false);
           }}
           onGoHome={() => {
             void refreshMatches({ scope: 'mine' });
             setSelectedPartido(null);
             setShowTuActividad(false);
             setTuActividadSubView(null);
+            // "Ir a inicio" cierra también el perfil ajeno para no dejarlo debajo.
+            setMatchOpenedFromPublicProfile(false);
+            setShowPublicProfile(false);
+            setSelectedPublicPlayerId(null);
+            setAffinityPublicProfileId(null);
             setActiveTab('inicio');
           }}
           onOpenPublicProfile={(pid) => {
@@ -962,6 +995,7 @@ export function MainApp() {
             matchmakingBannerState={matchmakingHomeBannerState}
             onOpenSeasonPass={() => setShowSeasonPass(true)}
             onOpenMessageThread={(peer) => {
+              setMessagesReturnToProfile(false);
               setMessagesPeer(peer);
               setShowMessages(true);
             }}
