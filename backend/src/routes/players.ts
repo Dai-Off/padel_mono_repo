@@ -1596,7 +1596,7 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: player, error: pErr } = await supabase
       .from('players')
-      .select('id, first_name, last_name, username, avatar_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga')
+      .select('id, first_name, last_name, username, avatar_url, cover_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga')
       .eq('id', id)
       .maybeSingle();
 
@@ -1628,6 +1628,8 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
       player: {
         ...publicData,
         ...wl,
+        username: (player as { username?: string | null }).username ?? null,
+        cover_url: (player as { cover_url?: string | null }).cover_url ?? null,
         coach_assessment: coach || null,
         recent_matches: recentMatches || []
       }
