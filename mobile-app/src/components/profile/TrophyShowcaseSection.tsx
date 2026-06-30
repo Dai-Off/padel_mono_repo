@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../contexts/AuthContext';
@@ -7,9 +7,8 @@ import { AchievementCard } from './AchievementCard';
 import type { Achievement, AchievementType } from '../../design/achievements';
 import { fetchAchievements, toggleAchievementVisibility } from '../../api/unlockables';
 
-type TabKey = 'all' | 'trophy' | 'badge' | 'course';
+type TabKey = 'trophy' | 'badge' | 'course';
 const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { key: 'all', label: 'Todos', icon: 'star-outline' },
   { key: 'trophy', label: 'Trofeos', icon: 'trophy-outline' },
   { key: 'badge', label: 'Insignias', icon: 'medal-outline' },
   { key: 'course', label: 'Cursos', icon: 'school-outline' },
@@ -23,8 +22,10 @@ export const TrophyShowcaseSection: React.FC = () => {
 
   const [achievements, setAchievements] = useState<Achievement[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>('all');
+  const [activeTab, setActiveTab] = useState<TabKey>('trophy');
   const [expanded, setExpanded] = useState(false);
+  // Botón-ojo: si está activo, solo muestra los logros visibles (públicos).
+  const [onlyVisible, setOnlyVisible] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -50,12 +51,11 @@ export const TrophyShowcaseSection: React.FC = () => {
     return { trophy: by('trophy'), badge: by('badge'), course: by('course') };
   }, [achievements]);
 
-  const publicCount = useMemo(() => achievements.filter((a) => a.isPublic ?? true).length, [achievements]);
-
-  const filtered = useMemo(
-    () => (activeTab === 'all' ? achievements : achievements.filter((a) => a.type === activeTab)),
-    [achievements, activeTab],
-  );
+  const filtered = useMemo(() => {
+    let list = achievements.filter((a) => a.type === activeTab);
+    if (onlyVisible) list = list.filter((a) => a.isPublic ?? true);
+    return list;
+  }, [achievements, activeTab, onlyVisible]);
   const displayed = expanded ? filtered : filtered.slice(0, PREVIEW_COUNT);
 
   const handleToggleVisibility = async (id: string) => {
@@ -86,10 +86,17 @@ export const TrophyShowcaseSection: React.FC = () => {
             </View>
           </View>
           {achievements.length > 0 ? (
-            <View style={styles.publicBadge}>
-              <Ionicons name="eye-outline" size={12} color="#F18F34" />
-              <Text style={styles.publicBadgeText}>{publicCount} públicos</Text>
-            </View>
+            <Pressable
+              onPress={() => {
+                setOnlyVisible((v) => !v);
+                setExpanded(false);
+              }}
+              style={[styles.eyeBtn, onlyVisible && styles.eyeBtnActive]}
+              accessibilityLabel="Mostrar solo los logros visibles"
+              accessibilityState={{ selected: onlyVisible }}
+            >
+              <Ionicons name={onlyVisible ? 'eye' : 'eye-outline'} size={16} color={onlyVisible ? '#F18F34' : '#6B7280'} />
+            </Pressable>
           ) : null}
         </View>
 
@@ -108,26 +115,24 @@ export const TrophyShowcaseSection: React.FC = () => {
           ))}
         </View>
 
-        {/* Tabs de categoría */}
+        {/* Tabs de categoría (3, repartidas sin scroll) */}
         <View style={styles.tabsRow}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
-            {TABS.map((tab) => {
-              const active = activeTab === tab.key;
-              return (
-                <Pressable
-                  key={tab.key}
-                  onPress={() => {
-                    setActiveTab(tab.key);
-                    setExpanded(false);
-                  }}
-                  style={[styles.tabBtn, active && styles.tabBtnActive]}
-                >
-                  <Ionicons name={tab.icon} size={14} color={active ? '#F18F34' : '#6B7280'} />
-                  <Text style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>{tab.label}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          {TABS.map((tab) => {
+            const active = activeTab === tab.key;
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => {
+                  setActiveTab(tab.key);
+                  setExpanded(false);
+                }}
+                style={[styles.tabBtn, active && styles.tabBtnActive]}
+              >
+                <Ionicons name={tab.icon} size={14} color={active ? '#F18F34' : '#6B7280'} />
+                <Text style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>{tab.label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         {/* Lista / estados */}
@@ -196,18 +201,17 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 14, fontWeight: 'bold', color: '#fff' },
   count: { fontSize: 10, color: '#6B7280', marginTop: 1 },
-  publicBadge: {
-    flexDirection: 'row',
+  eyeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(241, 143, 52, 0.1)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 99,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(241, 143, 52, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  publicBadgeText: { fontSize: 9, fontWeight: 'bold', color: '#F18F34' },
+  eyeBtnActive: { backgroundColor: 'rgba(241, 143, 52, 0.15)', borderColor: 'rgba(241, 143, 52, 0.35)' },
   grid: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   gridItem: {
     flex: 1,
@@ -221,9 +225,8 @@ const styles = StyleSheet.create({
   gridEmoji: { fontSize: 18, marginBottom: 4 },
   gridVal: { fontSize: 15, fontWeight: 'bold', color: '#fff' },
   gridLab: { fontSize: 9, color: '#6B7280', fontWeight: '600' },
-  tabsRow: { backgroundColor: 'rgba(255, 255, 255, 0.03)', borderRadius: 12, marginBottom: 16, padding: 4 },
-  tabsScroll: { gap: 6 },
-  tabBtn: { paddingHorizontal: 12, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 8 },
+  tabsRow: { flexDirection: 'row', gap: 6, backgroundColor: 'rgba(255, 255, 255, 0.03)', borderRadius: 12, marginBottom: 16, padding: 4 },
+  tabBtn: { flex: 1, paddingHorizontal: 8, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 8 },
   tabBtnActive: { backgroundColor: 'rgba(241, 143, 52, 0.15)', borderWidth: 1, borderColor: 'rgba(241, 143, 52, 0.2)' },
   tabText: { fontSize: 10, fontWeight: 'bold' },
   tabTextActive: { color: '#F18F34' },
