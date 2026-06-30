@@ -202,11 +202,13 @@ export const AvatarWithFrame: React.FC<Props> = ({ initials, avatarUrl, size = 8
   );
 
   // Burbuja de nivel en el borde inferior (parte del "pack" avatar+marco+nivel)
+  // Se muestra siempre que se pase `level` (aunque sea null → "-"). Si no se pasa
+  // el prop (undefined), no hay burbuja (otros usos del pack sin nivel).
   const levelBubble =
-    level != null && Number.isFinite(level) ? (
+    level !== undefined ? (
       <View style={[styles.levelRow, { bottom: (noFrame ? 0 : bw) - 12 }]} pointerEvents="none">
         <View style={styles.levelPill}>
-          <Text style={styles.levelText}>{level.toFixed(2)}</Text>
+          <Text style={styles.levelText}>{level != null && Number.isFinite(level) ? level.toFixed(2) : '-'}</Text>
         </View>
       </View>
     ) : null;
