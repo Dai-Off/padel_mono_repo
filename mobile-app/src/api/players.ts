@@ -463,11 +463,14 @@ export type PublicPlayerProfile = {
   id: string;
   firstName: string | null;
   lastName: string | null;
+  username: string | null;
   avatarUrl: string | null;
+  coverUrl: string | null;
   gender: string | null;
   eloRating: number | null;
   sp: number;
   fiabilidad: number | null;
+  matchesPlayedTotal: number;
   mmWins: number;
   mmLosses: number;
   mmDraws: number;
@@ -497,11 +500,14 @@ export async function fetchPublicPlayerProfile(
       id: p.id,
       firstName: p.first_name ?? null,
       lastName: p.last_name ?? null,
+      username: p.username ?? null,
       avatarUrl: p.avatar_url ?? null,
+      coverUrl: p.cover_url ?? null,
       gender: p.gender ?? null,
       eloRating: p.elo_rating ?? null,
       sp: p.sp ?? 0,
       fiabilidad: p.fiabilidad ?? null,
+      matchesPlayedTotal: p.matches_played_total ?? 0,
       mmWins: p.mm_wins ?? 0,
       mmLosses: p.mm_losses ?? 0,
       mmDraws: p.mm_draws ?? 0,

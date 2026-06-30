@@ -22,7 +22,7 @@ import { AvatarWithFrame, type FrameAttrs } from '../components/profile/AvatarWi
 import { AnimatedTitle } from '../components/profile/AnimatedTitle';
 import { ProfileCustomizationModal } from '../components/profile/ProfileCustomizationModal';
 import { RARITY_CONFIG } from '../design/rarity';
-import { getLigaStyle } from '../design/ligas';
+import { LigaChip } from '../components/profile/LigaChip';
 import type { Achievement } from '../design/achievements';
 import {
   fetchCustomization,
@@ -490,18 +490,7 @@ export function ProfileScreen({
                       : null
                   }
                 />
-                {profile ? (() => {
-                  const liga = profile.onboardingCompleted ? getLigaStyle(profile.liga) : null;
-                  const color = liga?.color ?? '#6B7280';
-                  const icon: keyof typeof Ionicons.glyphMap = liga?.icon ?? 'shield-outline';
-                  const text = liga ? liga.label : 'Sin liga';
-                  return (
-                    <View style={[styles.ligaChip, { borderColor: color, backgroundColor: color + '26' }]}>
-                      <Ionicons name={icon} size={12} color={color} />
-                      <Text style={[styles.ligaText, { color }]}>{text}</Text>
-                    </View>
-                  );
-                })() : null}
+                {profile ? <LigaChip liga={profile.liga} style={{ marginTop: 16 }} /> : null}
               </View>
               <View style={styles.profileInfo}>
                 {customization?.titleId ? (
@@ -763,21 +752,6 @@ const styles = StyleSheet.create({
   avatarContainer: {
     marginTop: -40,
     alignItems: 'center',
-  },
-  ligaChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 16,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  ligaText: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.3,
   },
   avatar: {
     width: 64,

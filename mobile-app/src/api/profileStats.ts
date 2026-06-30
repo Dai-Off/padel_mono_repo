@@ -49,6 +49,24 @@ function mapResult(raw: string): 'win' | 'loss' | 'draw' {
   return raw === 'win' || raw === 'loss' ? raw : 'draw';
 }
 
+function mapLevelHistory(json: LevelHistoryResponse): LevelHistory {
+  return {
+    currentElo: Number(json.current_elo ?? 0),
+    matches: (json.matches ?? []).map((m) => ({
+      matchId: m.match_id,
+      playedAt: m.played_at,
+      result: mapResult(m.result),
+      ratingChange: Number(m.rating_change ?? 0),
+      eloAfter: Number(m.elo_after ?? 0),
+      myTeam: m.my_team,
+      scoreA: m.score_a ?? [],
+      scoreB: m.score_b ?? [],
+      teamA: m.team_a ?? [],
+      teamB: m.team_b ?? [],
+    })),
+  };
+}
+
 /** Historial de ELO del jugador autenticado (partidos de matchmaking). */
 export async function fetchLevelHistory(
   token: string | null | undefined,
@@ -61,21 +79,23 @@ export async function fetchLevelHistory(
     });
     const json = (await res.json()) as LevelHistoryResponse;
     if (!res.ok || !json.ok) return null;
-    return {
-      currentElo: Number(json.current_elo ?? 0),
-      matches: (json.matches ?? []).map((m) => ({
-        matchId: m.match_id,
-        playedAt: m.played_at,
-        result: mapResult(m.result),
-        ratingChange: Number(m.rating_change ?? 0),
-        eloAfter: Number(m.elo_after ?? 0),
-        myTeam: m.my_team,
-        scoreA: m.score_a ?? [],
-        scoreB: m.score_b ?? [],
-        teamA: m.team_a ?? [],
-        teamB: m.team_b ?? [],
-      })),
-    };
+    return mapLevelHistory(json);
+  } catch {
+    return null;
+  }
+}
+
+/** Historial de ELO de otro jugador (perfil ajeno). Público (sin token). */
+export async function fetchPlayerLevelHistory(
+  playerId: string,
+  limit: LevelHistoryLimit = '5',
+): Promise<LevelHistory | null> {
+  if (!playerId) return null;
+  try {
+    const res = await fetch(`${API_URL}/players/${playerId}/level-history?limit=${limit}`);
+    const json = (await res.json()) as LevelHistoryResponse;
+    if (!res.ok || !json.ok) return null;
+    return mapLevelHistory(json);
   } catch {
     return null;
   }

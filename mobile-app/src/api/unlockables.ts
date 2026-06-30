@@ -36,6 +36,21 @@ type AchievementsResponse = {
   error?: string;
 };
 
+function mapAchievements(json: AchievementsResponse): Achievement[] {
+  return (json.achievements ?? []).map((a) => ({
+    id: a.id,
+    type: asType(a.type),
+    title: a.title,
+    description: a.description ?? '',
+    icon: a.icon ?? 'trophy-outline',
+    rarity: asRarity(a.rarity),
+    sport: a.sport ?? null,
+    date: formatMonthYear(a.date),
+    isPublic: a.isPublic ?? true,
+    progress: a.progress,
+  }));
+}
+
 /** Vitrina de logros del jugador (trofeos/insignias conseguidos + cursos completados). */
 export async function fetchAchievements(token: string | null | undefined): Promise<Achievement[]> {
   if (!token) return [];
@@ -45,18 +60,20 @@ export async function fetchAchievements(token: string | null | undefined): Promi
     });
     const json = (await res.json()) as AchievementsResponse;
     if (!res.ok || !json.ok) return [];
-    return (json.achievements ?? []).map((a) => ({
-      id: a.id,
-      type: asType(a.type),
-      title: a.title,
-      description: a.description ?? '',
-      icon: a.icon ?? 'trophy-outline',
-      rarity: asRarity(a.rarity),
-      sport: a.sport ?? null,
-      date: formatMonthYear(a.date),
-      isPublic: a.isPublic ?? true,
-      progress: a.progress,
-    }));
+    return mapAchievements(json);
+  } catch {
+    return [];
+  }
+}
+
+/** Logros VISIBLES (públicos) de otro jugador, para el perfil ajeno. Público (sin token). */
+export async function fetchPlayerPublicAchievements(playerId: string): Promise<Achievement[]> {
+  if (!playerId) return [];
+  try {
+    const res = await fetch(`${API_URL}/players/${playerId}/public-achievements`);
+    const json = (await res.json()) as AchievementsResponse;
+    if (!res.ok || !json.ok) return [];
+    return mapAchievements(json);
   } catch {
     return [];
   }

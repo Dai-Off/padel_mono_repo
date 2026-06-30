@@ -814,7 +814,7 @@ export function MainApp() {
         />
       );
     }
-    if ((showPublicProfile && selectedPublicPlayerId) || affinityPublicProfileId) {
+    if (!showPartidoDetail && ((showPublicProfile && selectedPublicPlayerId) || affinityPublicProfileId)) {
       const pid = affinityPublicProfileId || selectedPublicPlayerId || '';
       const isFromAffinity = !!affinityPublicProfileId;
 
@@ -838,6 +838,7 @@ export function MainApp() {
             setShowMessages(true);
             setMessagesPeer({ id: chatPid, displayName: name, avatarUrl: null });
           }}
+          onOpenMatch={openMatchById}
         />
       );
     }

@@ -1,5 +1,6 @@
 import { API_URL } from '../config';
 import type { AchievementRarity } from '../design/rarity';
+import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
 export type UnlockableKind = 'trophy' | 'badge' | 'course' | 'title' | 'frame';
 
@@ -82,6 +83,57 @@ export async function fetchCustomization(
       titleId: json.customization.titleId ?? null,
       frameId: json.customization.frameId ?? null,
       pinnedBadgeIds: json.customization.pinnedBadgeIds ?? [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Insignia fijada de un jugador (resuelta), para el hero del perfil ajeno. */
+export interface PublicPinnedBadge {
+  id: string;
+  type: 'trophy' | 'badge';
+  title: string;
+  icon: string;
+  rarity: AchievementRarity;
+}
+
+/** Personalización equipada de otro jugador, ya resuelta (marco + título + fijadas). */
+export interface PublicProfileCustomization {
+  titleId: string | null;
+  frame: FrameAttrs | null;
+  pinnedBadges: PublicPinnedBadge[];
+}
+
+/** Personalización pública de otro jugador (perfil ajeno). Público (sin token). */
+export async function fetchPlayerPublicCustomization(
+  playerId: string,
+): Promise<PublicProfileCustomization | null> {
+  if (!playerId) return null;
+  try {
+    const res = await fetch(`${API_URL}/players/${playerId}/public-customization`);
+    const json = (await res.json()) as {
+      ok?: boolean;
+      customization?: {
+        titleId: string | null;
+        frame: { rarity: string; style: string | null; animationType: string | null; colors: string[] | null } | null;
+        pinnedBadges: { id: string; type: string; title: string; icon: string; rarity: string }[];
+      };
+    };
+    if (!res.ok || !json.ok || !json.customization) return null;
+    const c = json.customization;
+    return {
+      titleId: c.titleId ?? null,
+      frame: c.frame
+        ? { rarity: asRarity(c.frame.rarity), style: c.frame.style, animationType: c.frame.animationType, colors: c.frame.colors ?? null }
+        : null,
+      pinnedBadges: (c.pinnedBadges ?? []).map((b) => ({
+        id: b.id,
+        type: b.type === 'trophy' ? 'trophy' : 'badge',
+        title: b.title,
+        icon: b.icon,
+        rarity: asRarity(b.rarity),
+      })),
     };
   } catch {
     return null;

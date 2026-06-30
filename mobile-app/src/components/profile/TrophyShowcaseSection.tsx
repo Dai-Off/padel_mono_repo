@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../../contexts/AuthContext';
 import { AchievementCard } from './AchievementCard';
 import type { Achievement, AchievementType } from '../../design/achievements';
-import { fetchAchievements, toggleAchievementVisibility } from '../../api/unlockables';
+import { fetchAchievements, fetchPlayerPublicAchievements, toggleAchievementVisibility } from '../../api/unlockables';
 
 type TabKey = 'trophy' | 'badge' | 'course';
 const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
@@ -16,25 +16,32 @@ const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }
 
 const PREVIEW_COUNT = 4;
 
-export const TrophyShowcaseSection: React.FC = () => {
+interface TrophyShowcaseSectionProps {
+  /** Si se pasa, es el perfil AJENO: carga los logros visibles de ese jugador (público), sin ojo ni edición. */
+  playerId?: string;
+}
+
+export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ playerId }) => {
   const { session } = useAuth();
   const token = session?.access_token ?? null;
+  const own = !playerId; // perfil propio si no hay playerId
 
   const [achievements, setAchievements] = useState<Achievement[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>('trophy');
   const [expanded, setExpanded] = useState(false);
-  // Botón-ojo: si está activo, solo muestra los logros visibles (públicos).
+  // Botón-ojo (solo perfil propio): si está activo, solo muestra los visibles.
   const [onlyVisible, setOnlyVisible] = useState(false);
 
   useEffect(() => {
-    if (!token) {
-      setLoading(false);
-      return;
-    }
     let cancelled = false;
     setLoading(true);
-    fetchAchievements(token)
+    const load = playerId
+      ? fetchPlayerPublicAchievements(playerId)
+      : token
+        ? fetchAchievements(token)
+        : Promise.resolve([] as Achievement[]);
+    load
       .then((list) => {
         if (!cancelled) setAchievements(list);
       })
@@ -44,7 +51,7 @@ export const TrophyShowcaseSection: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, playerId]);
 
   const counts = useMemo(() => {
     const by = (t: AchievementType) => achievements.filter((a) => a.type === t).length;
@@ -82,10 +89,10 @@ export const TrophyShowcaseSection: React.FC = () => {
             </LinearGradient>
             <View>
               <Text style={styles.title}>Vitrina de Logros</Text>
-              <Text style={styles.count}>{achievements.length} logros conseguidos</Text>
+              <Text style={styles.count}>{achievements.length} {own ? 'logros conseguidos' : 'logros visibles'}</Text>
             </View>
           </View>
-          {achievements.length > 0 ? (
+          {own && achievements.length > 0 ? (
             <Pressable
               onPress={() => {
                 setOnlyVisible((v) => !v);
@@ -143,7 +150,9 @@ export const TrophyShowcaseSection: React.FC = () => {
         ) : achievements.length === 0 ? (
           <View style={styles.centered}>
             <Ionicons name="trophy-outline" size={24} color="#6B7280" />
-            <Text style={styles.emptyText}>Aún no has conseguido logros. ¡Juega partidos y completa lecciones!</Text>
+            <Text style={styles.emptyText}>
+              {own ? 'Aún no has conseguido logros. ¡Juega partidos y completa lecciones!' : 'Este jugador no tiene logros visibles.'}
+            </Text>
           </View>
         ) : (
           <>
@@ -152,7 +161,7 @@ export const TrophyShowcaseSection: React.FC = () => {
                 <AchievementCard
                   key={a.id}
                   achievement={a}
-                  editable={a.type !== 'course'}
+                  editable={own && a.type !== 'course'}
                   onToggleVisibility={handleToggleVisibility}
                 />
               ))}
@@ -166,12 +175,14 @@ export const TrophyShowcaseSection: React.FC = () => {
           </>
         )}
 
-        <View style={styles.disclaimer}>
-          <Ionicons name="lock-closed" size={12} color="#4B5563" />
-          <Text style={styles.disclaimerText}>
-            Los logros marcados como <Text style={styles.disclaimerBold}>públicos</Text> serán visibles para otros jugadores.
-          </Text>
-        </View>
+        {own ? (
+          <View style={styles.disclaimer}>
+            <Ionicons name="lock-closed" size={12} color="#4B5563" />
+            <Text style={styles.disclaimerText}>
+              Los logros marcados como <Text style={styles.disclaimerBold}>públicos</Text> serán visibles para otros jugadores.
+            </Text>
+          </View>
+        ) : null}
       </View>
     </View>
   );
