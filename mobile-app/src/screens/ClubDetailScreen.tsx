@@ -21,12 +21,13 @@ import { Ionicons } from "@expo/vector-icons";
 import type { SearchCourtResult } from "../api/search";
 import { fetchSearchCourts } from "../api/search";
 import { fetchAvailableSlots } from "../api/availability";
-import { fetchClubById } from "../api/clubs";
+import { fetchClubById, fetchClubPublicInfo } from "../api/clubs";
 import { fetchPublicClubReviews } from "../api/clubReviews";
 import { fetchCourtsByClubId, type Court } from "../api/courts";
 import { fetchMatches, type MatchEnriched } from "../api/matches";
 import { mapMatchToPartido } from "../api/mapMatchToPartido";
-import { clubLocalDateTimeToUtcIso } from "../lib/clubTimeZone";
+import { resolveSlotStartEndUtc } from "../lib/bookingSlotTime";
+import { clubIanaTimeZone } from "../lib/clubTimeZone";
 import {
   createIntentForNewMatch,
   confirmPaymentFromClient,
@@ -401,8 +402,9 @@ export function ClubDetailScreen({
   const loadClubData = useCallback(async () => {
     setClubCourtsLoading(true);
     const token = session?.access_token;
-    const [club, courts, reviewsRes] = await Promise.all([
+    const [club, clubPublic, courts, reviewsRes] = await Promise.all([
       fetchClubById(court.clubId, token),
+      fetchClubPublicInfo(court.clubId),
       fetchCourtsByClubId(court.clubId),
       fetchPublicClubReviews(court.clubId),
     ]);
@@ -411,6 +413,11 @@ export function ClubDetailScreen({
     // disponibilidad y la reserva respeten el horario (inicio + duración ≤ cierre).
     const clubDur = Number(club?.slot_duration_min);
     if (Number.isFinite(clubDur) && clubDur > 0) setDuration(clubDur);
+    const tz =
+      clubPublic?.timezone?.trim() ||
+      club?.timezone?.trim() ||
+      undefined;
+    if (tz) setClubTimezone(tz);
     setScheduleText(
       club?.weekly_schedule
         ? formatWeeklySchedule(
@@ -458,6 +465,10 @@ export function ClubDetailScreen({
   const [rawSlotsByCourt, setRawSlotsByCourt] = useState<Record<string, string[]>>(
     {},
   );
+  const [slotUtcByTime, setSlotUtcByTime] = useState<
+    Record<string, { start_at: string; end_at: string }>
+  >({});
+  const [clubTimezone, setClubTimezone] = useState<string | undefined>(undefined);
   const [timeSlotsLoading, setTimeSlotsLoading] = useState(false);
   const [slotNow, setSlotNow] = useState(() => new Date());
   const [courtPrices, setCourtPrices] = useState<
@@ -491,18 +502,33 @@ export function ClubDetailScreen({
     [selectedDate],
   );
 
+  const startAtUtcByTime = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [time, utc] of Object.entries(slotUtcByTime)) {
+      out[time] = utc.start_at;
+    }
+    return out;
+  }, [slotUtcByTime]);
+
   const timeSlotsForDate = useMemo(
-    () => filterSlotsStartingAfterNow(dateStrForSlots, rawTimeSlotsUnion, slotNow),
-    [dateStrForSlots, rawTimeSlotsUnion, slotNow],
+    () =>
+      filterSlotsStartingAfterNow(dateStrForSlots, rawTimeSlotsUnion, slotNow, {
+        clubTimezone,
+        startAtUtcByTime,
+      }),
+    [dateStrForSlots, rawTimeSlotsUnion, slotNow, clubTimezone, startAtUtcByTime],
   );
 
   const slotsByCourt = useMemo(() => {
     const o: Record<string, string[]> = {};
     for (const [id, slots] of Object.entries(rawSlotsByCourt)) {
-      o[id] = filterSlotsStartingAfterNow(dateStrForSlots, slots, slotNow);
+      o[id] = filterSlotsStartingAfterNow(dateStrForSlots, slots, slotNow, {
+        clubTimezone,
+        startAtUtcByTime,
+      });
     }
     return o;
-  }, [dateStrForSlots, rawSlotsByCourt, slotNow]);
+  }, [dateStrForSlots, rawSlotsByCourt, slotNow, clubTimezone, startAtUtcByTime]);
 
   useEffect(() => {
     if (activeTab !== "book") return;
@@ -566,16 +592,26 @@ export function ClubDetailScreen({
         });
 
         const allSlots: string[] = [];
+        const utcByTime: Record<string, { start_at: string; end_at: string }> = {};
+        let resolvedClubTz: string | undefined;
         if (availability.ok) {
           for (const res of availability.results) {
-            const courtSlots = res.free_slots.map(s => s.start);
+            if (res.club_timezone?.trim()) resolvedClubTz = res.club_timezone.trim();
+            const courtSlots = res.free_slots.map((s) => s.start);
             allSlots.push(...courtSlots);
             slotsPerCourt[res.court_id] = courtSlots;
+            for (const s of res.free_slots) {
+              if (s.start_at && s.end_at) {
+                utcByTime[s.start] = { start_at: s.start_at, end_at: s.end_at };
+              }
+            }
           }
         }
 
         setRawTimeSlotsUnion([...new Set(allSlots)].sort());
         setRawSlotsByCourt(slotsPerCourt);
+        setSlotUtcByTime(utcByTime);
+        if (resolvedClubTz) setClubTimezone(resolvedClubTz);
         setSlotNow(new Date());
       } catch (err) {
         __DEV__ && console.warn("[ClubDetail] Error loading availability:", err);
@@ -627,8 +663,17 @@ export function ClubDetailScreen({
       }
       const slotDateStr = localCalendarYmd(selectedDate);
       if (
-        filterSlotsStartingAfterNow(slotDateStr, [selectedTimeSlot], new Date())
-          .length === 0
+        filterSlotsStartingAfterNow(
+          slotDateStr,
+          [selectedTimeSlot],
+          new Date(),
+          {
+            clubTimezone,
+            startAtUtcByTime: slotUtcByTime[selectedTimeSlot]
+              ? { [selectedTimeSlot]: slotUtcByTime[selectedTimeSlot].start_at }
+              : undefined,
+          },
+        ).length === 0
       ) {
         Alert.alert(
           t("alerts.scheduleConflict.title"),
@@ -676,8 +721,15 @@ export function ClubDetailScreen({
         });
 
       const dateStr = localCalendarYmd(selectedDate);
-      const start_at = clubLocalDateTimeToUtcIso(dateStr, selectedTimeSlot);
-      const end_at = new Date(new Date(start_at).getTime() + duration * 60 * 1000).toISOString();
+      const utcSlot = slotUtcByTime[selectedTimeSlot];
+      const { start_at, end_at } = resolveSlotStartEndUtc({
+        dateStr,
+        time: selectedTimeSlot,
+        durationMinutes: duration,
+        startAtUtc: utcSlot?.start_at,
+        endAtUtc: utcSlot?.end_at,
+        clubTimezone: clubTimezone ?? clubIanaTimeZone(),
+      });
       const totalPriceCents = Math.max(finalPriceCents, 100);
       const payChoice = await askPayLaterChoice();
       if (payChoice === "cancel") return;
@@ -814,6 +866,9 @@ export function ClubDetailScreen({
     [
       selectedTimeSlot,
       selectedDate,
+      slotUtcByTime,
+      clubTimezone,
+      startAtUtcByTime,
       organizerPlayerId,
       profile?.id,
       session?.access_token,

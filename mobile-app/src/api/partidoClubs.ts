@@ -1,5 +1,6 @@
 import { filterSlotsStartingAfterNow } from '../domain/localSlotAvailability';
 import { toDateStringLocal } from '../utils/dateLocal';
+import { fetchClubTimezones } from './clubs';
 import { fetchSearchCourts } from './search';
 import { fetchAvailableSlots } from './availability';
 import type { SearchCourtResult } from './search';
@@ -25,6 +26,12 @@ export type SlotForCreate = {
   minPriceFormatted: string;
   courtSport?: string;
   courtIndoor?: boolean;
+  /** UTC del inicio del turno (desde /availability/slots). */
+  startAtUtc?: string;
+  /** UTC del fin del turno (desde /availability/slots). */
+  endAtUtc?: string;
+  /** Zona IANA del club para conversiones de respaldo. */
+  clubTimezone?: string;
 };
 
 export type ClubAvailabilityFilters = {
@@ -136,6 +143,22 @@ function mergeByClub(todayResults: SearchCourtResult[], tomorrowResults: SearchC
   return Array.from(byClub.values()).sort((a, b) => a.clubName.localeCompare(b.clubName));
 }
 
+function pickPreferredSlot(a: SlotForCreate, b: SlotForCreate): SlotForCreate {
+  if (a.startAtUtc && !b.startAtUtc) return a;
+  if (b.startAtUtc && !a.startAtUtc) return b;
+  return a.minPriceCents < b.minPriceCents ? a : b;
+}
+
+function buildStartAtUtcByTime(
+  freeSlots: { start: string; start_at?: string }[],
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const s of freeSlots) {
+    if (s.start_at) out[s.start] = s.start_at;
+  }
+  return out;
+}
+
 function courtMetaFromPrices(prices: SearchCourtResult[]): Map<string, { sport: string; indoor: boolean }> {
   const m = new Map<string, { sport: string; indoor: boolean }>();
   for (const p of prices) {
@@ -190,9 +213,10 @@ export async function fetchClubAvailabilityForCreate(
 
   // Obtenemos disponibilidad real (requiere token) en BATCH para mejorar performance.
   // Sin forzar duración: el backend usa la duración de turno configurada por cada club.
-  const [day1Res, day2Res] = await Promise.all([
+  const [day1Res, day2Res, clubTzMap] = await Promise.all([
     fetchAvailableSlots({ clubIds, date: today, token }),
-    fetchAvailableSlots({ clubIds, date: tomorrow, token })
+    fetchAvailableSlots({ clubIds, date: tomorrow, token }),
+    fetchClubTimezones(clubIds),
   ]);
 
   const finalResults: ClubDisplay[] = [];
@@ -214,10 +238,23 @@ export async function fetchClubAvailabilityForCreate(
       );
       for (const courtRes of clubCourts) {
         const slotMin = courtRes.slot_minutes ?? DEFAULT_SLOT_MIN;
-        const filteredTimes = filterSlotsStartingAfterNow(today, courtRes.free_slots.map(s => s.start), now);
+        const clubTimezone = courtRes.club_timezone ?? clubTzMap.get(clubId);
+        const startAtUtcByTime = buildStartAtUtcByTime(courtRes.free_slots);
+        const slotUtcByTime = new Map(
+          courtRes.free_slots
+            .filter((s) => s.start_at)
+            .map((s) => [s.start, { startAtUtc: s.start_at!, endAtUtc: s.end_at }]),
+        );
+        const filteredTimes = filterSlotsStartingAfterNow(
+          today,
+          courtRes.free_slots.map((s) => s.start),
+          now,
+          { clubTimezone, startAtUtcByTime },
+        );
         for (const time of filteredTimes) {
           const p = todayPrices.find(r => r.id === courtRes.court_id);
           const cm = metaByCourt.get(courtRes.court_id);
+          const utc = slotUtcByTime.get(time);
           slots.push({
             time,
             duration: durationLabel(slotMin),
@@ -230,14 +267,17 @@ export async function fetchClubAvailabilityForCreate(
             minPriceFormatted: p?.minPriceFormatted ?? '-',
             courtSport: cm?.sport ?? 'padel',
             courtIndoor: cm?.indoor ?? false,
+            startAtUtc: utc?.startAtUtc,
+            endAtUtc: utc?.endAtUtc,
+            clubTimezone,
           });
         }
       }
       if (slots.length > 0) {
         const byTime = new Map<string, SlotForCreate>();
-        slots.forEach(s => {
+        slots.forEach((s) => {
           const prev = byTime.get(s.time);
-          if (!prev || s.minPriceCents < prev.minPriceCents) byTime.set(s.time, s);
+          byTime.set(s.time, prev ? pickPreferredSlot(s, prev) : s);
         });
         dates.push({
           dateStr: today,
@@ -256,10 +296,23 @@ export async function fetchClubAvailabilityForCreate(
       );
       for (const courtRes of clubCourts) {
         const slotMin = courtRes.slot_minutes ?? DEFAULT_SLOT_MIN;
-        const filteredTimes = filterSlotsStartingAfterNow(tomorrow, courtRes.free_slots.map(s => s.start), now);
+        const clubTimezone = courtRes.club_timezone ?? clubTzMap.get(clubId);
+        const startAtUtcByTime = buildStartAtUtcByTime(courtRes.free_slots);
+        const slotUtcByTime = new Map(
+          courtRes.free_slots
+            .filter((s) => s.start_at)
+            .map((s) => [s.start, { startAtUtc: s.start_at!, endAtUtc: s.end_at }]),
+        );
+        const filteredTimes = filterSlotsStartingAfterNow(
+          tomorrow,
+          courtRes.free_slots.map((s) => s.start),
+          now,
+          { clubTimezone, startAtUtcByTime },
+        );
         for (const time of filteredTimes) {
           const p = tomorrowPrices.find(r => r.id === courtRes.court_id);
           const cm = metaByCourt.get(courtRes.court_id);
+          const utc = slotUtcByTime.get(time);
           slots.push({
             time,
             duration: durationLabel(slotMin),
@@ -272,14 +325,17 @@ export async function fetchClubAvailabilityForCreate(
             minPriceFormatted: p?.minPriceFormatted ?? '-',
             courtSport: cm?.sport ?? 'padel',
             courtIndoor: cm?.indoor ?? false,
+            startAtUtc: utc?.startAtUtc,
+            endAtUtc: utc?.endAtUtc,
+            clubTimezone,
           });
         }
       }
       if (slots.length > 0) {
         const byTime = new Map<string, SlotForCreate>();
-        slots.forEach(s => {
+        slots.forEach((s) => {
           const prev = byTime.get(s.time);
-          if (!prev || s.minPriceCents < prev.minPriceCents) byTime.set(s.time, s);
+          byTime.set(s.time, prev ? pickPreferredSlot(s, prev) : s);
         });
         dates.push({
           dateStr: tomorrow,
