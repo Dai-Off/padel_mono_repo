@@ -27,7 +27,13 @@ import { fetchCourtsByClubId, type Court } from "../api/courts";
 import { fetchMatches, type MatchEnriched } from "../api/matches";
 import { mapMatchToPartido } from "../api/mapMatchToPartido";
 import { resolveSlotStartEndUtc } from "../lib/bookingSlotTime";
-import { clubIanaTimeZone } from "../lib/clubTimeZone";
+import {
+  addDaysToClubKey,
+  clubIanaTimeZone,
+  clubLocalDateTimeToUtcIso,
+  dayKeyInClubTz,
+  setClubTimeZone,
+} from "../lib/clubTimeZone";
 import {
   createIntentForNewMatch,
   confirmPaymentFromClient,
@@ -49,7 +55,6 @@ import { zhHK } from "../i18n/zh-HK";
 import { theme } from "../theme";
 import { filterSlotsStartingAfterNow } from "../domain/localSlotAvailability";
 import { getMatchBooking } from "../domain/matchLifecycle";
-import { toDateStringLocal as localCalendarYmd } from "../utils/dateLocal";
 import { useSlotPrice } from "../hooks/useSlotPrice";
 
 const DURATION_MIN = 60;
@@ -144,49 +149,72 @@ function formatWeeklySchedule(
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
-function getNextDays(
+function getNextClubDays(
   count: number,
   days: readonly string[],
   months: readonly string[],
+  timeZone: string,
 ) {
-  const out: { day: number; dayName: string; month: string; date: Date }[] = [];
-  const today = new Date();
+  const out: { day: number; dayName: string; month: string; dateStr: string }[] = [];
+  const todayKey = dayKeyInClubTz(new Date());
+  const weekdayToIndex: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
   for (let i = 0; i < count; i++) {
-    const d = new Date(today);
-    d.setDate(today.getDate() + i);
+    const dateStr = addDaysToClubKey(todayKey, i);
+    const ref = new Date(clubLocalDateTimeToUtcIso(dateStr, "12:00", timeZone));
+    const weekdayShort = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      weekday: "short",
+    }).format(ref);
+    const dow = weekdayToIndex[weekdayShort] ?? 0;
     out.push({
-      day: d.getDate(),
-      dayName: days[d.getDay() === 0 ? 6 : d.getDay() - 1] ?? "",
-      month: months[d.getMonth()] ?? "",
-      date: d,
+      day: parseInt(dateStr.slice(8, 10), 10),
+      dayName: days[dow === 0 ? 6 : dow - 1] ?? "",
+      month: months[parseInt(dateStr.slice(5, 7), 10) - 1] ?? "",
+      dateStr,
     });
   }
   return out;
 }
 
-function matchBelongsToClub(match: MatchEnriched, clubId: string): boolean {
-  const clubIdFromMatch = getMatchBooking(match)?.courts?.club_id;
-  return clubIdFromMatch != null && clubIdFromMatch === clubId;
-}
-
 function formatDateTimeForConfirmation(
-  date: Date,
+  dateStr: string,
   time: string,
   days: readonly string[],
   months: readonly string[],
+  timeZone: string,
 ): string {
-  const d = new Date(date);
-  d.setHours(
-    parseInt(time.slice(0, 2), 10),
-    parseInt(time.slice(3, 5) || "0", 10),
-    0,
-    0,
-  );
-  const dayName =
-    (d.getDay() === 0 ? days[6] : days[d.getDay() - 1]) ?? "";
-  const dayNum = d.getDate();
-  const month = months[d.getMonth()] ?? "";
+  const ref = new Date(clubLocalDateTimeToUtcIso(dateStr, "12:00", timeZone));
+  const weekdayShort = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+  }).format(ref);
+  const weekdayToIndex: Record<string, number> = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+  const dow = weekdayToIndex[weekdayShort] ?? 0;
+  const dayName = days[dow === 0 ? 6 : dow - 1] ?? "";
+  const dayNum = parseInt(dateStr.slice(8, 10), 10);
+  const month = months[parseInt(dateStr.slice(5, 7), 10) - 1] ?? "";
   return `${dayName}, ${dayNum} ${month} · ${time}`;
+}
+
+function matchBelongsToClub(match: MatchEnriched, clubId: string): boolean {
+  const clubIdFromMatch = getMatchBooking(match)?.courts?.club_id;
+  return clubIdFromMatch != null && clubIdFromMatch === clubId;
 }
 
 async function createPayLaterBooking(params: {
@@ -417,7 +445,10 @@ export function ClubDetailScreen({
       clubPublic?.timezone?.trim() ||
       club?.timezone?.trim() ||
       undefined;
-    if (tz) setClubTimezone(tz);
+    if (tz) {
+      setClubTimezone(tz);
+      setClubTimeZone(tz);
+    }
     setScheduleText(
       club?.weekly_schedule
         ? formatWeeklySchedule(
@@ -481,25 +512,21 @@ export function ClubDetailScreen({
   const [restrictByLevel, setRestrictByLevel] = useState(false);
   const [eloMin, setEloMin] = useState(() => defaultFriendlyRange(3.5).eloMin);
   const [eloMax, setEloMax] = useState(() => defaultFriendlyRange(3.5).eloMax);
+  const activeTz = clubTimezone ?? clubIanaTimeZone();
   const dateOptions = useMemo(
     () =>
-      getNextDays(
+      getNextClubDays(
         7,
         localeBundle.search.clubDetailDays,
         localeBundle.common.monthsShort,
+        activeTz,
       ),
-    [localeBundle],
+    [localeBundle, activeTz],
   );
 
-  const selectedDate = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + selectedDateIndex);
-    return d;
-  }, [selectedDateIndex]);
-
   const dateStrForSlots = useMemo(
-    () => localCalendarYmd(selectedDate),
-    [selectedDate],
+    () => addDaysToClubKey(dayKeyInClubTz(new Date()), selectedDateIndex),
+    [selectedDateIndex],
   );
 
   const startAtUtcByTime = useMemo(() => {
@@ -556,10 +583,9 @@ export function ClubDetailScreen({
   }, [timeSlotsForDate, selectedTimeSlot]);
 
   const loadTimeSlotsForDate = useCallback(
-    async (date: Date) => {
+    async (dateStr: string) => {
       setTimeSlotsLoading(true);
       try {
-        const dateStr = localCalendarYmd(date);
         const slotsPerCourt: Record<string, string[]> = {};
         
         // Mantener fetchSearchCourts solo para precios
@@ -601,8 +627,13 @@ export function ClubDetailScreen({
             allSlots.push(...courtSlots);
             slotsPerCourt[res.court_id] = courtSlots;
             for (const s of res.free_slots) {
-              if (s.start_at && s.end_at) {
-                utcByTime[s.start] = { start_at: s.start_at, end_at: s.end_at };
+              if (s.start_at) {
+                const end_at =
+                  s.end_at ??
+                  new Date(
+                    new Date(s.start_at).getTime() + duration * 60 * 1000,
+                  ).toISOString();
+                utcByTime[s.start] = { start_at: s.start_at, end_at };
               }
             }
           }
@@ -611,7 +642,10 @@ export function ClubDetailScreen({
         setRawTimeSlotsUnion([...new Set(allSlots)].sort());
         setRawSlotsByCourt(slotsPerCourt);
         setSlotUtcByTime(utcByTime);
-        if (resolvedClubTz) setClubTimezone(resolvedClubTz);
+        if (resolvedClubTz) {
+          setClubTimezone(resolvedClubTz);
+          setClubTimeZone(resolvedClubTz);
+        }
         setSlotNow(new Date());
       } catch (err) {
         __DEV__ && console.warn("[ClubDetail] Error loading availability:", err);
@@ -633,9 +667,9 @@ export function ClubDetailScreen({
 
   useEffect(() => {
     if (activeTab === "book") {
-      loadTimeSlotsForDate(selectedDate);
+      loadTimeSlotsForDate(dateStrForSlots);
     }
-  }, [activeTab, selectedDate, loadTimeSlotsForDate, duration]);
+  }, [activeTab, dateStrForSlots, loadTimeSlotsForDate, duration]);
 
   useEffect(() => {
     if (profile?.id) {
@@ -661,14 +695,14 @@ export function ClubDetailScreen({
         );
         return;
       }
-      const slotDateStr = localCalendarYmd(selectedDate);
+      const slotDateStr = dateStrForSlots;
       if (
         filterSlotsStartingAfterNow(
           slotDateStr,
           [selectedTimeSlot],
           new Date(),
           {
-            clubTimezone,
+            clubTimezone: activeTz,
             startAtUtcByTime: slotUtcByTime[selectedTimeSlot]
               ? { [selectedTimeSlot]: slotUtcByTime[selectedTimeSlot].start_at }
               : undefined,
@@ -720,7 +754,7 @@ export function ClubDetailScreen({
           );
         });
 
-      const dateStr = localCalendarYmd(selectedDate);
+      const dateStr = dateStrForSlots;
       const utcSlot = slotUtcByTime[selectedTimeSlot];
       const { start_at, end_at } = resolveSlotStartEndUtc({
         dateStr,
@@ -728,7 +762,7 @@ export function ClubDetailScreen({
         durationMinutes: duration,
         startAtUtc: utcSlot?.start_at,
         endAtUtc: utcSlot?.end_at,
-        clubTimezone: clubTimezone ?? clubIanaTimeZone(),
+        clubTimezone: activeTz,
       });
       const totalPriceCents = Math.max(finalPriceCents, 100);
       const payChoice = await askPayLaterChoice();
@@ -750,23 +784,24 @@ export function ClubDetailScreen({
           Alert.alert(t("common.error"), created.error ?? t("search.clubBookNoPayError"));
           return;
         }
-        await loadTimeSlotsForDate(selectedDate);
+        await loadTimeSlotsForDate(dateStrForSlots);
         setExpandedCourtId(null);
         setConfirmationModalData({
           courtName: c.name,
           clubName: court.clubName,
           dateTimeFormatted: formatDateTimeForConfirmation(
-            selectedDate,
+            dateStrForSlots,
             selectedTimeSlot,
             localeBundle.search.clubDetailDays,
             localeBundle.common.monthsShort,
+            activeTz,
           ),
           duration: t("common.durationMin", { minutes: duration }),
           priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
           matchVisibility: partidoPrivado ? "private" : "public",
           clubId: court.clubId,
           courtId: c.id,
-          date: localCalendarYmd(selectedDate),
+          date: dateStrForSlots,
           slot: selectedTimeSlot,
           durationMinutes: duration,
         });
@@ -841,31 +876,33 @@ export function ClubDetailScreen({
       }
 
       // Refrescar disponibilidad para que la pista desaparezca automáticamente
-      await loadTimeSlotsForDate(selectedDate);
+      await loadTimeSlotsForDate(dateStrForSlots);
       setExpandedCourtId(null);
 
       setConfirmationModalData({
         courtName: c.name,
         clubName: court.clubName,
         dateTimeFormatted: formatDateTimeForConfirmation(
-          selectedDate,
+          dateStrForSlots,
           selectedTimeSlot,
           localeBundle.search.clubDetailDays,
           localeBundle.common.monthsShort,
+          activeTz,
         ),
         duration: t("common.durationMin", { minutes: duration }),
         priceFormatted: `${(finalPriceCents / 100).toFixed(2)}€`,
         matchVisibility: partidoPrivado ? "private" : "public",
         clubId: court.clubId,
         courtId: c.id,
-        date: localCalendarYmd(selectedDate),
+        date: dateStrForSlots,
         slot: selectedTimeSlot,
         durationMinutes: duration,
       });
     },
     [
       selectedTimeSlot,
-      selectedDate,
+      dateStrForSlots,
+      activeTz,
       slotUtcByTime,
       clubTimezone,
       startAtUtcByTime,

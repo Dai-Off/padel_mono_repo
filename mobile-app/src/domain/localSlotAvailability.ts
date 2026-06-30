@@ -1,5 +1,9 @@
-import { clubLocalDateTimeToUtcIso } from '../lib/clubTimeZone';
-import { toDateStringLocal } from '../utils/dateLocal';
+import {
+  clubLocalDateTimeToUtcIso,
+  dayKeyInClubTz,
+  dayKeyInTimeZone,
+  DEFAULT_CLUB_TIMEZONE,
+} from '../lib/clubTimeZone';
 
 function normalizeSlotTime(slot: string): string {
   if (slot.includes('T')) {
@@ -23,12 +27,8 @@ export function localSlotStartUtcMs(
     return new Date(options.startAtUtc).getTime();
   }
   const time = normalizeSlotTime(slot);
-  const tz = options?.clubTimezone;
-  return new Date(
-    tz
-      ? clubLocalDateTimeToUtcIso(calendarDateStr, time, tz)
-      : clubLocalDateTimeToUtcIso(calendarDateStr, time),
-  ).getTime();
+  const tz = options?.clubTimezone?.trim() || DEFAULT_CLUB_TIMEZONE;
+  return new Date(clubLocalDateTimeToUtcIso(calendarDateStr, time, tz)).getTime();
 }
 
 /**
@@ -47,8 +47,10 @@ export function filterSlotsStartingAfterNow(
   const sorted = [...slots].sort((a, b) =>
     normalizeSlotTime(a).localeCompare(normalizeSlotTime(b)),
   );
-  const todayOnDevice = toDateStringLocal(now);
-  if (calendarDateStr !== todayOnDevice) {
+  const todayKey = options?.clubTimezone?.trim()
+    ? dayKeyInTimeZone(now, options.clubTimezone)
+    : dayKeyInClubTz(now);
+  if (calendarDateStr !== todayKey) {
     return sorted;
   }
   const t = now.getTime();

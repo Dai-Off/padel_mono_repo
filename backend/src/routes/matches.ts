@@ -66,11 +66,11 @@ function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type, score_status, sets, match_end_reason, retired_team, score_proposer_id,
           ${bookingRel} (
-            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type, deleted_at,
+            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, reservation_type, timezone, deleted_at,
             payment_transactions (amount_cents, status),
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city, lat, lng, logo_url, photo_urls)
+              clubs (id, name, address, city, lat, lng, logo_url, photo_urls, timezone)
             )
           ),
           match_players (
@@ -83,10 +83,10 @@ function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
 function expandSelectDiscovery(): string {
   return `id, created_at, updated_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status, type,
           bookings!inner (
-            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id,
+            id, organizer_player_id, start_at, end_at, status, total_price_cents, currency, court_id, timezone,
             courts (
               id, club_id, name, indoor, glass_type, sport,
-              clubs (id, name, address, city, lat, lng, logo_url, photo_urls)
+              clubs (id, name, address, city, lat, lng, logo_url, photo_urls, timezone)
             )
           ),
           match_players (
