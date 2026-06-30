@@ -28,6 +28,7 @@ import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
 import { resolveSlotStartEndUtc } from '../../lib/bookingSlotTime';
+import { clubLocalDateTimeToUtcIso, setClubTimeZone } from '../../lib/clubTimeZone';
 import { useSlotPrice } from '../../hooks/useSlotPrice';
 import { fetchMyPlayerId } from '../../api/players';
 import { formatLocale, useTranslation, type AppLocale } from '../../i18n';
@@ -86,15 +87,24 @@ function buildStartEnd(slot: SlotForCreate): { start_at: string; end_at: string 
   });
 }
 
-function formatDateTimeForBookingConfirm(dateStr: string, time: string, locale: AppLocale): string {
-  const d = new Date(`${dateStr}T${time}:00`);
-  const dayName = d
-    .toLocaleDateString(formatLocale(locale), { weekday: 'short' })
+function formatDateTimeForBookingConfirm(
+  dateStr: string,
+  time: string,
+  locale: AppLocale,
+  timeZone?: string,
+): string {
+  const tz = timeZone?.trim() || 'Europe/Madrid';
+  const ref = new Date(clubLocalDateTimeToUtcIso(dateStr, '12:00', tz));
+  const dayName = ref
+    .toLocaleDateString(formatLocale(locale), { timeZone: tz, weekday: 'short' })
     .replace('.', '')
     .toUpperCase();
-  const dayNum = d.getDate();
-  const month = d
-    .toLocaleDateString(formatLocale(locale), { month: 'short' })
+  const dayNum = parseInt(
+    new Intl.DateTimeFormat('en-CA', { timeZone: tz, day: '2-digit' }).format(ref),
+    10,
+  );
+  const month = ref
+    .toLocaleDateString(formatLocale(locale), { timeZone: tz, month: 'short' })
     .replace('.', '');
   return `${dayName}, ${dayNum} ${month} · ${time}`;
 }
@@ -290,6 +300,9 @@ export function CrearPartidoLocationSheet({
       }
 
       setCreateError(null);
+      if (slot.clubTimezone?.trim()) {
+        setClubTimeZone(slot.clubTimezone.trim());
+      }
       setSelectedSlot(slot);
       setSelectedClub(club);
       const range = defaultFriendlyRange(cachedProfile?.eloRating ?? null);
@@ -411,7 +424,12 @@ export function CrearPartidoLocationSheet({
     const confirmation: BookingConfirmationData = {
       courtName: selectedSlot.courtName,
       clubName: selectedClub.clubName,
-      dateTimeFormatted: formatDateTimeForBookingConfirm(selectedSlot.dateStr, selectedSlot.time, locale),
+      dateTimeFormatted: formatDateTimeForBookingConfirm(
+        selectedSlot.dateStr,
+        selectedSlot.time,
+        locale,
+        selectedSlot.clubTimezone,
+      ),
       duration: t('common.durationMin', { minutes: slotDurationMin(selectedSlot) }),
       priceFormatted: currentPriceFormatted,
       matchVisibility: partidoPrivado ? 'private' : 'public',

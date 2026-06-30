@@ -12,8 +12,8 @@ function unwrapMatchPlayer(raw: unknown): MatchPlayerRef | null {
   return raw as MatchPlayerRef;
 }
 
-function formatDateTime(startAt: string, _endAt: string): string {
-  return formatPartidoDateTimeLabel(startAt);
+function formatDateTime(startAt: string, timeZone?: string | null): string {
+  return formatPartidoDateTimeLabel(startAt, timeZone);
 }
 
 function formatPrice(cents: number, currency: string): string {
@@ -122,6 +122,7 @@ export function mapMatchToPartido(
 
   const court = b.courts;
   const club = court?.clubs;
+  const bookingTimeZone = b.timezone ?? club?.timezone ?? null;
   const venue = club?.name ?? 'Club';
   const city = club?.city ?? '';
   const address = club?.address ?? '';
@@ -220,7 +221,7 @@ export function mapMatchToPartido(
     organizerPlayerId: b.organizer_player_id ?? null,
     visibility: m.visibility === 'private' ? 'private' : 'public',
     matchPhase,
-    dateTime: formatDateTime(b.start_at, b.end_at),
+    dateTime: formatDateTime(b.start_at, bookingTimeZone),
     mode,
     typeLabel,
     levelRange,

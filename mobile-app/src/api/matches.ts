@@ -48,6 +48,7 @@ export type MatchBookingExpanded = {
   total_price_cents: number;
   currency: string;
   status?: string;
+  timezone?: string | null;
   reservation_type?: string | null;
   court_id: string;
   courts?: {
@@ -67,6 +68,7 @@ export type MatchBookingExpanded = {
       logo_url?: string | null;
       photo_urls?: unknown;
       display_image_url?: string | null;
+      timezone?: string | null;
     } | null;
   } | null;
 };

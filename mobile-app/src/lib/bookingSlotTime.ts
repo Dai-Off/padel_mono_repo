@@ -1,7 +1,4 @@
-import { clubLocalDateTimeToUtcIso } from './clubTimeZone';
-
-/** Misma zona por defecto que el backend (`clubTimezoneOrDefault`). */
-const DEFAULT_CLUB_TIMEZONE = 'Europe/Madrid';
+import { clubLocalDateTimeToUtcIso, DEFAULT_CLUB_TIMEZONE } from './clubTimeZone';
 
 export type SlotBookingTimeInput = {
   dateStr: string;
