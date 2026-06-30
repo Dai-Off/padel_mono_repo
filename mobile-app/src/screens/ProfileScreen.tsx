@@ -650,43 +650,6 @@ export function ProfileScreen({
           </View>
         ) : null}
 
-        {/* Bottom Menu Actions */}
-        <View style={styles.menuContainer}>
-          <View style={styles.menuCard}>
-            {[
-              { title: 'Preferencias', icon: 'locate-outline' },
-              { title: 'Configuración', icon: 'settings-outline' },
-              { title: 'Ayuda y soporte', icon: 'people-outline' },
-              { title: 'Términos y condiciones', icon: 'document-text-outline' },
-            ].map((item, idx, arr) => (
-              <Pressable
-                key={item.title}
-                style={[styles.menuItem, idx === arr.length - 1 && styles.menuItemLast]}
-                onPress={() => {
-                  if (item.title === 'Preferencias') {
-                    onPreferencesPress?.();
-                    return;
-                  }
-                  if (item.title === 'Ayuda y soporte') {
-                    onNavigateToInfo?.('help');
-                    return;
-                  }
-                  if (item.title === 'Términos y condiciones') {
-                    onNavigateToInfo?.('terms');
-                    return;
-                  }
-                  Alert.alert(item.title, `Navegando a ${item.title}`);
-                }}
-              >
-                <View style={styles.menuIconBox}>
-                  <Ionicons name={item.icon as any} size={16} color="#9CA3AF" />
-                </View>
-                <Text style={styles.menuText}>{item.title}</Text>
-                <Ionicons name="chevron-forward" size={16} color="#4B5563" />
-              </Pressable>
-            ))}
-          </View>
-        </View>
       </ScrollView>
 
       <OnboardingLevelModal
