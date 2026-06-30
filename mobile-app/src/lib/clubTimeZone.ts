@@ -38,16 +38,33 @@ function formatInTimeZone(date: Date, timeZone: string): string {
   return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}:${get('second')}`;
 }
 
-/** Convierte fecha+hora civil del club (zona del dispositivo) a ISO UTC. */
-export function clubLocalDateTimeToUtcIso(dateStr: string, timeHHmm: string): string {
+/** Convierte fecha+hora civil en una zona IANA concreta a ISO UTC. */
+export function zonedLocalDateTimeToUtcIso(
+  dateStr: string,
+  timeHHmm: string,
+  timeZone: string,
+): string {
+  const tz = timeZone?.trim() || CLUB_IANA_TIMEZONE;
   const local = `${dateStr}T${timeHHmm.length === 5 ? `${timeHHmm}:00` : timeHHmm}`;
   const parseAsUtc = (s: string) => new Date(`${s}Z`);
   const targetMs = parseAsUtc(local).getTime();
   let guess = new Date(targetMs);
-  let drift = parseAsUtc(formatInTimeZone(guess, CLUB_IANA_TIMEZONE)).getTime() - targetMs;
+  let drift = parseAsUtc(formatInTimeZone(guess, tz)).getTime() - targetMs;
   guess = new Date(targetMs - drift);
-  drift = parseAsUtc(formatInTimeZone(guess, CLUB_IANA_TIMEZONE)).getTime() - targetMs;
+  drift = parseAsUtc(formatInTimeZone(guess, tz)).getTime() - targetMs;
   return new Date(guess.getTime() - drift).toISOString();
+}
+
+/**
+ * Convierte fecha+hora civil a ISO UTC. Por defecto usa la zona del dispositivo;
+ * para reservas pasá la zona del club (`clubs.timezone`) para que coincida con el backend.
+ */
+export function clubLocalDateTimeToUtcIso(
+  dateStr: string,
+  timeHHmm: string,
+  timeZone: string = CLUB_IANA_TIMEZONE,
+): string {
+  return zonedLocalDateTimeToUtcIso(dateStr, timeHHmm, timeZone);
 }
 
 export function dayKeyInClubTz(date: Date = new Date()): string {

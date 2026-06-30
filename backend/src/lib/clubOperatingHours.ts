@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { dayKeyInTz, formatInTimeZone } from '../routes/learningTimezone';
+import { dayKeyInTz, formatInTimeZone, zonedTimeToUtc } from '../routes/learningTimezone';
 import { clubTimezoneOrDefault } from './clubTimezone';
 
 export type DayOperatingHours = {
@@ -66,7 +66,7 @@ export function buildUniformWeeklySchedule(
   return out;
 }
 
-function weekdayCodeInTz(isoUtc: string, timeZone: string): WeekdayCode {
+export function weekdayCodeInTz(isoUtc: string, timeZone: string): WeekdayCode {
   const d = new Date(isoUtc);
   const short = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(d);
   const map: Record<string, WeekdayCode> = {
@@ -79,6 +79,13 @@ function weekdayCodeInTz(isoUtc: string, timeZone: string): WeekdayCode {
     Sun: 'sun',
   };
   return map[short] ?? 'mon';
+}
+
+/** Día de la semana (`mon`..`sun`) para una fecha civil YYYY-MM-DD en la zona del club. */
+export function weekdayCodeForCalendarDate(dateStr: string, timeZone: string): WeekdayCode {
+  const tz = clubTimezoneOrDefault(timeZone);
+  const noonUtc = zonedTimeToUtc(`${dateStr}T12:00:00`, tz);
+  return weekdayCodeInTz(noonUtc.toISOString(), tz);
 }
 
 function readDayEntry(weeklySchedule: unknown, weekday: WeekdayCode): unknown {

@@ -1,12 +1,5 @@
-import { clubLocalDateTimeToUtcIso, dayKeyInClubTz } from '../lib/clubTimeZone';
-
-/**
- * Instante local de inicio de franja `HH:00` o `HH:mm` en un día calendario `YYYY-MM-DD` (local).
- */
-export function localSlotStart(calendarDateStr: string, slot: string): Date {
-  const time = normalizeSlotTime(slot);
-  return new Date(clubLocalDateTimeToUtcIso(calendarDateStr, time));
-}
+import { clubLocalDateTimeToUtcIso } from '../lib/clubTimeZone';
+import { toDateStringLocal } from '../utils/dateLocal';
 
 function normalizeSlotTime(slot: string): string {
   if (slot.includes('T')) {
@@ -18,19 +11,53 @@ function normalizeSlotTime(slot: string): string {
 }
 
 /**
- * Si `calendarDateStr` es hoy en el dispositivo, elimina franjas cuyo inicio ya pasó respecto a `now`.
- * Otros días: devuelve slots ordenados sin recortar.
+ * Instante UTC de inicio de una franja en el día calendario del club.
+ * `clubTimezone` debe ser la zona del club; si no se pasa, se usa la del dispositivo.
+ */
+export function localSlotStartUtcMs(
+  calendarDateStr: string,
+  slot: string,
+  options?: { clubTimezone?: string; startAtUtc?: string },
+): number {
+  if (options?.startAtUtc) {
+    return new Date(options.startAtUtc).getTime();
+  }
+  const time = normalizeSlotTime(slot);
+  const tz = options?.clubTimezone;
+  return new Date(
+    tz
+      ? clubLocalDateTimeToUtcIso(calendarDateStr, time, tz)
+      : clubLocalDateTimeToUtcIso(calendarDateStr, time),
+  ).getTime();
+}
+
+/**
+ * Si `calendarDateStr` es hoy en el dispositivo, elimina franjas cuyo inicio ya pasó
+ * respecto al reloj actual (`now`). Usa `startAtUtc` de la API cuando está disponible.
  */
 export function filterSlotsStartingAfterNow(
   calendarDateStr: string,
   slots: string[],
   now: Date = new Date(),
+  options?: {
+    clubTimezone?: string;
+    startAtUtcByTime?: Record<string, string>;
+  },
 ): string[] {
-  const sorted = [...slots].sort((a, b) => normalizeSlotTime(a).localeCompare(normalizeSlotTime(b)));
-  const todayInClub = dayKeyInClubTz(now);
-  if (calendarDateStr !== todayInClub) {
+  const sorted = [...slots].sort((a, b) =>
+    normalizeSlotTime(a).localeCompare(normalizeSlotTime(b)),
+  );
+  const todayOnDevice = toDateStringLocal(now);
+  if (calendarDateStr !== todayOnDevice) {
     return sorted;
   }
   const t = now.getTime();
-  return sorted.filter((s) => localSlotStart(calendarDateStr, s).getTime() > t);
+  return sorted.filter((s) => {
+    const time = normalizeSlotTime(s);
+    const startMs = localSlotStartUtcMs(calendarDateStr, time, {
+      clubTimezone: options?.clubTimezone,
+      startAtUtc: options?.startAtUtcByTime?.[time],
+    });
+    return startMs > t;
+  });
 }

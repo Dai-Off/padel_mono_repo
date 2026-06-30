@@ -1,17 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { bookingBlocksCourtForAvailability } from '../lib/courtContentionService';
 import { clubTimezoneOrDefault } from '../lib/clubTimezone';
-import { resolveDayOperatingHours } from '../lib/clubOperatingHours';
+import { resolveDayOperatingHours, weekdayCodeForCalendarDate } from '../lib/clubOperatingHours';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { zonedTimeToUtc } from '../routes/learningTimezone';
 
 const router = Router();
-
-function dateToWeekday(d: Date): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
-  const idx = d.getUTCDay();
-  if (idx === 0) return 'sun';
-  return (['mon', 'tue', 'wed', 'thu', 'fri', 'sat'][idx - 1] as 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat');
-}
 
 function overlaps(s1: number, e1: number, s2: number, e2: number): boolean {
   return s1 < e2 && e1 > s2;
@@ -88,16 +82,16 @@ router.get('/slots', async (req: Request, res: Response) => {
       (clubsTzRes.data ?? []).map((c) => [c.id, clubTimezoneOrDefault(c.timezone as string | null)])
     );
 
-    // 3. Prepare lookups
-    const weekday = dateToWeekday(new Date(`${date}T00:00:00Z`));
-
-    // Horario operativo del club para ese día (mismo `weekly_schedule` que usa la
-    // grilla del panel y la validación de reservas). Acota los slots a apertura/cierre.
+    // 3. Prepare lookups — horario operativo por club y día civil en su zona horaria.
     const clubHoursMap = new Map(
-      (clubsTzRes.data ?? []).map((c) => [
-        c.id,
-        resolveDayOperatingHours((c as { weekly_schedule?: unknown }).weekly_schedule, weekday),
-      ])
+      (clubsTzRes.data ?? []).map((c) => {
+        const tz = clubTimezoneOrDefault((c as { timezone?: string | null }).timezone);
+        const weekday = weekdayCodeForCalendarDate(date, tz);
+        return [
+          c.id,
+          resolveDayOperatingHours((c as { weekly_schedule?: unknown }).weekly_schedule, weekday),
+        ];
+      }),
     );
 
     // Duración de turno por club: la forzada por el cliente o la configurada en el club (def. 90).
@@ -114,13 +108,18 @@ router.get('/slots', async (req: Request, res: Response) => {
       .filter(c => (!c.starts_on || date >= c.starts_on) && (!c.ends_on || date <= c.ends_on))
       .map(c => c.id);
     
+    // School courses: día de la semana según zona de referencia del lote.
+    const referenceTz =
+      clubTzMap.get(clubIds[0]) ?? clubTimezoneOrDefault(null);
+    const weekdayForSchool = weekdayCodeForCalendarDate(date, referenceTz);
+
     let schoolBlocks: { court_id: string; startMin: number; endMin: number }[] = [];
     if (activeCourseIds.length > 0) {
       const { data: schoolDays } = await supabase
         .from('club_school_course_days')
         .select('course_id, start_time, end_time')
         .in('course_id', activeCourseIds)
-        .eq('weekday', weekday);
+        .eq('weekday', weekdayForSchool);
       
       const courseToCourt = new Map(coursesRes.data?.map(c => [c.id, c.court_id]));
       schoolBlocks = (schoolDays ?? []).map(d => {
@@ -200,11 +199,20 @@ router.get('/slots', async (req: Request, res: Response) => {
         const endM = eMin % 60;
         freeSlots.push({
           start: slotTime.slice(0, 5),
-          end: `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`
+          end: `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`,
+          start_at: new Date(sMs).toISOString(),
+          end_at: new Date(eMs).toISOString(),
         });
       }
       freeSlots.sort((a, b) => a.start.localeCompare(b.start));
-      results.push({ court_id: court.id, court_name: court.name, club_id: court.club_id, slot_minutes: slotMinutes, free_slots: freeSlots });
+      results.push({
+        court_id: court.id,
+        court_name: court.name,
+        club_id: court.club_id,
+        club_timezone: courtTz,
+        slot_minutes: slotMinutes,
+        free_slots: freeSlots,
+      });
     }
 
     return res.json({ ok: true, date, results });

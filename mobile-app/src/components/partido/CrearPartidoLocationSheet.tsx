@@ -27,7 +27,7 @@ import { fetchClubAvailabilityForCreate } from '../../api/partidoClubs';
 import type { ClubDisplay, SlotForCreate } from '../../api/partidoClubs';
 import { theme } from '../../theme';
 import type { BookingConfirmationData } from '../../screens/BookingConfirmationScreen';
-import { clubLocalDateTimeToUtcIso } from '../../lib/clubTimeZone';
+import { resolveSlotStartEndUtc } from '../../lib/bookingSlotTime';
 import { useSlotPrice } from '../../hooks/useSlotPrice';
 import { fetchMyPlayerId } from '../../api/players';
 import { formatLocale, useTranslation, type AppLocale } from '../../i18n';
@@ -75,10 +75,15 @@ function slotPriceForDuration(slot: SlotForCreate): string {
   return totalCents >= 100 ? `${(totalCents / 100).toFixed(2)}€` : slot.minPriceFormatted;
 }
 
-function buildStartEnd(dateStr: string, time: string, durationMin: number): { start_at: string; end_at: string } {
-  const start_at = clubLocalDateTimeToUtcIso(dateStr, time);
-  const end_at = new Date(new Date(start_at).getTime() + durationMin * 60 * 1000).toISOString();
-  return { start_at, end_at };
+function buildStartEnd(slot: SlotForCreate): { start_at: string; end_at: string } {
+  return resolveSlotStartEndUtc({
+    dateStr: slot.dateStr,
+    time: slot.time,
+    durationMinutes: slotDurationMin(slot),
+    startAtUtc: slot.startAtUtc,
+    endAtUtc: slot.endAtUtc,
+    clubTimezone: slot.clubTimezone,
+  });
 }
 
 function formatDateTimeForBookingConfirm(dateStr: string, time: string, locale: AppLocale): string {
@@ -326,7 +331,7 @@ export function CrearPartidoLocationSheet({
 
     setCreating(true);
     setCreateError(null);
-    const { start_at, end_at } = buildStartEnd(selectedSlot.dateStr, selectedSlot.time, slotDurationMin(selectedSlot));
+    const { start_at, end_at } = buildStartEnd(selectedSlot);
 
     const intentRes = await createIntentForNewMatch(
       {
