@@ -17,9 +17,9 @@ const router = Router();
 router.use(attachAuthContext);
 
 const SELECT_LIST =
-  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
+  'id, created_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, slot_duration_min, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 const SELECT_ONE =
-  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, weekly_schedule, schedule_exceptions, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
+  'id, created_at, updated_at, owner_id, fiscal_tax_id, fiscal_legal_name, name, description, address, city, postal_code, lat, lng, base_currency, timezone, slot_duration_min, weekly_schedule, schedule_exceptions, logo_url, photo_urls, contact_phone, contact_email, notify_new_bookings, notify_cancellations, notify_maintenance_reminders, notify_daily_email_summary';
 
 router.get('/', requireClubOwnerOrAdminOrPortalStaff, async (req: Request, res: Response) => {
   const owner_id = req.query.owner_id as string | undefined;
@@ -323,7 +323,7 @@ router.get('/miniapp/:id/public', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data, error } = await supabase
       .from('clubs')
-      .select('id, name, address, city, postal_code, lat, lng, weekly_schedule, logo_url, photo_urls')
+      .select('id, name, address, city, postal_code, lat, lng, timezone, slot_duration_min, weekly_schedule, logo_url, photo_urls')
       .eq('id', id)
       .maybeSingle();
     if (error) return res.status(500).json({ ok: false, error: error.message });
@@ -374,6 +374,8 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
     lat,
     lng,
     base_currency,
+    timezone,
+    slot_duration_min,
     weekly_schedule,
     schedule_exceptions,
     logo_url,
@@ -410,6 +412,10 @@ router.post('/', requireClubOwnerOrAdmin, async (req: Request, res: Response) =>
           lat: lat != null ? Number(lat) : null,
           lng: lng != null ? Number(lng) : null,
           base_currency: base_currency ?? 'EUR',
+          ...(typeof timezone === 'string' && timezone.trim() ? { timezone: timezone.trim() } : {}),
+          ...(Number.isFinite(Number(slot_duration_min)) && Number(slot_duration_min) > 0
+            ? { slot_duration_min: Number(slot_duration_min) }
+            : {}),
           weekly_schedule: weekly_schedule ?? {},
           schedule_exceptions: schedule_exceptions ?? [],
           logo_url: logo_url ?? null,
@@ -561,6 +567,8 @@ router.put('/:id', requireAuthUser, async (req: Request, res: Response) => {
     'lat',
     'lng',
     'base_currency',
+    'timezone',
+    'slot_duration_min',
     'weekly_schedule',
     'schedule_exceptions',
     'logo_url',

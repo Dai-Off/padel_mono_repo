@@ -6,9 +6,7 @@ import { overlappingBookingBlocksNewReservation } from './courtContentionService
 export const MATCH_DRAFT_LOCK_MARKER = '__MATCH_DRAFT_LOCK__';
 
 /** IANA zone for escuela/Reservas when `clubs` no trae columna; alineado con `matchmaking` y `bookings`. */
-import { CLUB_IANA_TIMEZONE } from './clubTimezone';
-
-const DEFAULT_CLUB_TIMEZONE = CLUB_IANA_TIMEZONE;
+import { clubTimezoneOrDefault } from './clubTimezone';
 
 function shortWeekdayCodeInTimeZone(d: Date, timeZone: string): 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun' {
   const s = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' }).format(d);
@@ -95,7 +93,12 @@ export async function hasCourtConflict(
   // Escuela: `start_time`/`end_time` son hora reloj del club; el slot es UTC. Antes se mezclaban
   // minutos UTC (slice del ISO) con minutos "locales" y el día de la semana en UTC, generando
   // falsos positivos (p. ej. pista libre en el panel y bloqueada en matchmaking).
-  const clubTz = DEFAULT_CLUB_TIMEZONE;
+  const { data: clubRow } = await supabase
+    .from('clubs')
+    .select('timezone')
+    .eq('id', clubId)
+    .maybeSingle();
+  const clubTz = clubTimezoneOrDefault((clubRow as { timezone?: string | null } | null)?.timezone);
   const dayKey = dayKeyInTz(new Date(startAt), clubTz);
   const slotWeekday = shortWeekdayCodeInTimeZone(new Date(startAt), clubTz);
 

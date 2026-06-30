@@ -11,6 +11,8 @@ import {
   STRIPE_META_TOURNAMENT_PURPOSE,
 } from '../services/tournamentsService';
 import { refreshBookingStatusAfterParticipantPayment } from '../lib/bookingPaymentSync';
+import { clubTimezoneOrDefault } from '../lib/clubTimezone';
+import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
 import {
   finalizeSeasonPassElitePurchase,
   getOrCreateSeasonPassRow,
@@ -366,9 +368,30 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       res.status(400).json({ ok: false, error: slotConflict });
       return;
     }
+    // La reserva (inicio + duración) debe caber dentro del horario del club:
+    // p.ej. cerrando 21:00, no se puede empezar 20:00 un turno de 120 min.
+    const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
+      courtId: court_id,
+      startAt: start_at,
+      endAt: end_at,
+      reservationType: reservation_type,
+    });
+    if (!hoursCheck.ok) {
+      res.status(400).json({ ok: false, error: hoursCheck.error });
+      return;
+    }
     const sch0 = ['mobile', 'web', 'manual', 'system'].includes(source_channel) ? source_channel : 'mobile';
-    const { data: courtForClub } = await supabase.from('courts').select('club_id').eq('id', court_id).maybeSingle();
+    const { data: courtForClub } = await supabase
+      .from('courts')
+      .select('club_id, club:clubs(timezone)')
+      .eq('id', court_id)
+      .maybeSingle();
     const clubIdRule = (courtForClub as { club_id?: string } | null)?.club_id;
+    // El timezone de la reserva lo define el club de la pista, no el dispositivo.
+    const bookingTimezone = clubTimezoneOrDefault(
+      (courtForClub as { club?: { timezone?: string | null } } | null)?.club?.timezone
+        ?? (typeof timezone === 'string' ? timezone : null),
+    );
     if (clubIdRule) {
       const allowMap = await fetchAllowOnlineByType(supabase, clubIdRule);
       const gate = assertReservationTypeAllowedOnline(allowMap, reservation_type, sch0);
@@ -396,7 +419,7 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       end_at,
       total_price_cents: String(totalCents),
       payer_player_id: player.id,
-      timezone: timezone ?? 'Europe/Madrid',
+      timezone: bookingTimezone,
       visibility: vis,
       competitive: '0',
       gender: gender ?? 'any',

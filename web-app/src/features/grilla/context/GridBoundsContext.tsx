@@ -17,26 +17,47 @@ const DEFAULT_BOUNDS: GridBoundsValue = {
     closed: false,
 };
 
+/** Duración por defecto del turno (min) si el club no la define. */
+export const DEFAULT_SLOT_DURATION_MIN = 90;
+
 const GridBoundsContext = createContext<GridBoundsValue>(DEFAULT_BOUNDS);
+// Duración del turno del club: define cuánto ocupa una reserva, necesario para
+// saber si un turno entra completo antes del cierre (no alcanza el bloque de 30').
+const ClubSlotDurationContext = createContext<number>(DEFAULT_SLOT_DURATION_MIN);
 
 export function GridBoundsProvider({
     weeklySchedule,
     dateStr,
+    slotDurationMin,
     children,
 }: {
     weeklySchedule: unknown;
     dateStr: string;
+    slotDurationMin?: number;
     children: React.ReactNode;
 }) {
     const value = useMemo(
         () => gridBoundsForClubDay(weeklySchedule, dateStr),
         [weeklySchedule, dateStr],
     );
-    return <GridBoundsContext.Provider value={value}>{children}</GridBoundsContext.Provider>;
+    const duration = Number.isFinite(slotDurationMin) && (slotDurationMin as number) > 0
+        ? (slotDurationMin as number)
+        : DEFAULT_SLOT_DURATION_MIN;
+    return (
+        <GridBoundsContext.Provider value={value}>
+            <ClubSlotDurationContext.Provider value={duration}>
+                {children}
+            </ClubSlotDurationContext.Provider>
+        </GridBoundsContext.Provider>
+    );
 }
 
 export function useGridBounds(): GridBoundsValue {
     return useContext(GridBoundsContext);
+}
+
+export function useClubSlotDurationMin(): number {
+    return useContext(ClubSlotDurationContext);
 }
 
 export function getGridIntervalsForBounds(bounds: GridBoundsValue): string[] {

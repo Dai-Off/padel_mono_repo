@@ -10,6 +10,8 @@ export type CourtAvailability = {
   court_name: string;
   /** Present on multi-club responses; single-club queries include it per court row. */
   club_id: string;
+  /** Duración de turno (min) del club, usada para generar/validar el slot. */
+  slot_minutes?: number;
   free_slots: AvailabilitySlot[];
 };
 

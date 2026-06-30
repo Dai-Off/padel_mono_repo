@@ -7,6 +7,9 @@ import { getFrontendUrl, getPasswordResetRedirectUrl } from '../lib/env';
 import { applyRedirectToActionLink } from '../lib/recoveryMobileBridge';
 import { ensureDefaultPricingRuleForCourt } from '../lib/pricingRulesDefaults';
 import { seedClubBookingPoliciesFromApplication } from '../lib/clubBookingPolicies';
+import { buildUniformWeeklySchedule } from '../lib/clubOperatingHours';
+import { countryToTimezone } from '../lib/clubTimezone';
+import { seedClubPricingFromApplication } from '../lib/clubPricing';
 import { assignActiveMatchmakingSeasonIfNull } from '../services/matchmakingSeasonService';
 import { assertUsernameAvailable, normalizeUsername } from '../lib/playerUsername';
 
@@ -842,13 +845,28 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
       })
       .select('id')
       .single();
-    if (ownerErr) return res.status(500).json({ ok: false, error: ownerErr.message });
+    if (ownerErr) {
+      const msg = ownerErr.message.toLowerCase();
+      if (msg.includes('club_owners_email_key') || (msg.includes('duplicate') && msg.includes('email'))) {
+        return res.status(409).json({
+          ok: false,
+          error: 'Este email ya está asociado a un club. Inicia sesión con tu email y contraseña en lugar de completar el registro.',
+        });
+      }
+      return res.status(500).json({ ok: false, error: ownerErr.message });
+    }
     const ownerId = newOwner.id;
 
     const fiscalName = app.official_name?.trim() || app.club_name?.trim() || ownerName;
     const fiscalTaxId = app.tax_id?.trim() || 'PENDING';
     const address = app.full_address?.trim() || `${app.city}, ${app.country}`;
     const postalCode = (app.full_address && /\d{5}/.test(app.full_address)) ? app.full_address.match(/\d{5}/)?.[0] : '00000';
+    // Trasladar el horario cargado en el alta (franja única open/close) a un
+    // weekly_schedule uniforme. Si la solicitud no trae horario válido, se omite
+    // y la columna queda con su default (la grilla/validación usarán el fallback).
+    const weeklySchedule = buildUniformWeeklySchedule(app.open_time, app.close_time);
+    // Zona horaria derivada automáticamente del país declarado en el alta.
+    const clubTimezone = countryToTimezone(app.country);
     const { data: newClub, error: clubErr } = await supabase
       .from('clubs')
       .insert({
@@ -861,6 +879,11 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
         city: app.city?.trim(),
         postal_code: postalCode,
         logo_url: app.logo_url?.trim() || null,
+        ...(weeklySchedule ? { weekly_schedule: weeklySchedule } : {}),
+        ...(clubTimezone ? { timezone: clubTimezone } : {}),
+        ...(Number.isFinite(Number(app.slot_duration_min)) && Number(app.slot_duration_min) > 0
+          ? { slot_duration_min: Number(app.slot_duration_min) }
+          : {}),
       })
       .select('id')
       .single();
@@ -907,6 +930,11 @@ router.post('/register-club-owner', async (req: Request, res: Response) => {
       booking_window: app.booking_window,
       cancellation_policy: app.cancellation_policy,
     });
+
+    // Tarifas del club a partir del pricing del alta: deja el club operativo
+    // (reservas con precio calculable) ni bien se crea.
+    const pricingSeed = await seedClubPricingFromApplication(supabase, clubId, app.pricing);
+    if (!pricingSeed.ok) console.error('[register-club-owner] pricing seed failed:', pricingSeed.error);
 
     await supabase.from('club_application_invites').update({ used_at: new Date().toISOString() }).eq('id', invite.id);
     await supabase.from('club_applications').update({ club_owner_id: ownerId, club_id: clubId }).eq('id', application_id);

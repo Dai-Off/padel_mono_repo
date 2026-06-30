@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { authService } from '../../services/auth';
@@ -113,6 +113,13 @@ export function Login() {
                                 {isLoading ? 'Ingresando…' : 'Iniciar sesión'}
                             </AuthButton>
                         </form>
+
+                        <p className="mt-2 text-center text-sm text-auth-muted">
+                            ¿Tenés un club?{' '}
+                            <Link to="/registrar-club" className="font-semibold text-auth-accent hover:opacity-90">
+                                Registralo aquí
+                            </Link>
+                        </p>
                     </div>
                 </div>
 

@@ -1188,6 +1188,8 @@ export function MainApp() {
             ? '#0F0F0F'
           : showPartidoDetail
             ? '#0F0F0F'
+            : showClubDetail
+            ? '#0F0F0F'
             : crearPartidoFlow.open
               ? '#0F0F0F'
               : activeTab === 'perfil'

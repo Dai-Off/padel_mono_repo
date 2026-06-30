@@ -1,4 +1,22 @@
-export const CLUB_IANA_TIMEZONE = 'Europe/Madrid';
+/** Respaldo si el dispositivo no expone su zona horaria. */
+const FALLBACK_TIMEZONE = 'Europe/Madrid';
+
+function detectDeviceTimeZone(): string {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return tz && tz.trim() ? tz.trim() : FALLBACK_TIMEZONE;
+  } catch {
+    return FALLBACK_TIMEZONE;
+  }
+}
+
+/**
+ * Zona horaria usada para las operaciones del club. Se detecta automáticamente
+ * desde el dispositivo (no se fuerza una zona fija); el jugador está en la
+ * ciudad del club, así que coincide con la zona horaria del club. Si el runtime
+ * no la expone, cae a un respaldo válido.
+ */
+export const CLUB_IANA_TIMEZONE = detectDeviceTimeZone();
 
 export function clubIanaTimeZone(): string {
   return CLUB_IANA_TIMEZONE;
@@ -20,7 +38,7 @@ function formatInTimeZone(date: Date, timeZone: string): string {
   return `${get('year')}-${get('month')}-${get('day')}T${hour}:${get('minute')}:${get('second')}`;
 }
 
-/** Convierte fecha+hora civil del club (Europe/Madrid) a ISO UTC. */
+/** Convierte fecha+hora civil del club (zona del dispositivo) a ISO UTC. */
 export function clubLocalDateTimeToUtcIso(dateStr: string, timeHHmm: string): string {
   const local = `${dateStr}T${timeHHmm.length === 5 ? `${timeHHmm}:00` : timeHHmm}`;
   const parseAsUtc = (s: string) => new Date(`${s}Z`);
@@ -41,7 +59,7 @@ export function dayKeyInClubTz(date: Date = new Date()): string {
   }).format(date);
 }
 
-/** Límites UTC de un día calendario del club (offset 0 = hoy en Madrid). */
+/** Límites UTC de un día calendario del club (offset 0 = hoy en la zona del club). */
 export function clubCalendarDayBounds(dayOffsetFromToday: number): {
   dayKey: string;
   dateFrom: string;
@@ -65,7 +83,7 @@ export function addDaysToClubKey(baseKey: string, days: number): string {
 }
 
 /** Hora civil del club (HH:mm) como minutos desde medianoche. */
-/** Etiqueta de fecha/hora para tarjetas de partido (siempre hora del club, no del dispositivo). */
+/** Etiqueta de fecha/hora para tarjetas de partido (hora local del club/dispositivo). */
 export function formatPartidoDateTimeLabel(startAtIso: string): string {
   const start = new Date(startAtIso);
   if (Number.isNaN(start.getTime())) return '—';

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { Login } from './components/Auth/Login';
+import { ClubRegistration } from './components/Registration/ClubRegistration';
 import { AdminLayout } from './components/Layout/AdminLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { UsuariosPage } from './pages/UsuariosPage';
@@ -24,6 +25,7 @@ export default function App() {
             <Toaster position="top-right" richColors />
             <Routes>
                 <Route path="/login" element={<Login />} />
+                <Route path="/registrar-club" element={<ClubRegistration />} />
                 <Route
                     path="/"
                     element={
