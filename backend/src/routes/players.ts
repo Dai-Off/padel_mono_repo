@@ -11,6 +11,7 @@ import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueCon
 import { parsePeerFeedbackLocale } from '../lib/peerFeedbackLanguage';
 import { getLastPeerFeedbackInsightForPlayer } from '../services/postMatchPeerFeedbackInsightService';
 import { syncPlayerVector } from '../lib/mailer';
+import { pickClubImageSource, resolveClubLogoUrlForClient } from '../lib/clubLogoUrl';
 import {
   assertUsernameAvailable,
   normalizeUsername,
@@ -172,7 +173,7 @@ const SELECT_PUBLIC_INTERNAL = `
   matches_played_competitive, matches_played_friendly, matches_played_matchmaking,
   elo_last_updated_at, stripe_customer_id, consents,
   preferred_side, preferred_schedule_slots, preferred_days, preferred_play_style,
-  preferred_match_duration_min, preferred_partner_level, favorite_clubs,
+  preferred_match_duration_min, preferred_partner_level, favorite_clubs, dominant_hand,
   notif_new_matches, notif_tournament_reminders, notif_class_updates, notif_chat_messages,
   affinity_visible,
   play_location, birth_date, profile_description,
@@ -222,6 +223,7 @@ const PREF_DAYS = new Set(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
 const PREF_STYLE = new Set(['competitive', 'social', 'learning', 'balanced']);
 const PREF_PARTNER_LEVEL = new Set(['similar', 'higher', 'lower', 'any']);
 const PREF_DURATION = new Set([60, 90, 120]);
+const PREF_HAND = new Set(['left', 'right']);
 
 function parseStringArray(value: unknown, field: string, maxItems: number): { ok: true; value: string[] } | { ok: false; error: string } {
   if (!Array.isArray(value)) return { ok: false, error: `${field} debe ser un arreglo` };
@@ -296,6 +298,19 @@ function normalizePreferencesPatch(body: Record<string, unknown>): PreferencesPa
     const parsed = parseStringArray(body.favorite_clubs, 'favorite_clubs', 20);
     if (!parsed.ok) return parsed;
     patch.favorite_clubs = parsed.value.slice(0, 20);
+  }
+
+  // Mano preferida: 'left' | 'right' | null (para limpiar). null = sin definir.
+  if (Object.prototype.hasOwnProperty.call(body, 'dominant_hand')) {
+    hasAny = true;
+    const raw = body.dominant_hand;
+    if (raw === null) {
+      patch.dominant_hand = null;
+    } else if (typeof raw === 'string' && PREF_HAND.has(raw.trim().toLowerCase())) {
+      patch.dominant_hand = raw.trim().toLowerCase();
+    } else {
+      return { ok: false, error: 'dominant_hand inválido' };
+    }
   }
 
   const boolFields = [
@@ -1596,7 +1611,7 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
     const supabase = getSupabaseServiceRoleClient();
     const { data: player, error: pErr } = await supabase
       .from('players')
-      .select('id, first_name, last_name, username, avatar_url, cover_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga')
+      .select('id, first_name, last_name, username, avatar_url, cover_url, gender, elo_rating, sp, sigma, matches_played_competitive, matches_played_friendly, matches_played_matchmaking, liga, lps, mm_peak_liga, preferred_side, preferred_play_style, dominant_hand')
       .eq('id', id)
       .maybeSingle();
 
@@ -1636,6 +1651,112 @@ router.get('/:id/public-profile', async (req: Request, res: Response) => {
     });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
+/**
+ * @openapi
+ * /players/{id}/frequent-clubs:
+ *   get:
+ *     tags: [Players]
+ *     summary: Clubs donde el jugador suele jugar (por frecuencia de partidos). Público.
+ */
+router.get('/:id/frequent-clubs', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '8'), 10) || 8, 1), 20);
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: mp } = await supabase.from('match_players').select('match_id').eq('player_id', id);
+    const matchIds = [...new Set((mp ?? []).map((r) => (r as { match_id: string }).match_id))];
+    if (!matchIds.length) return res.json({ ok: true, clubs: [] });
+
+    const { data: matches } = await supabase
+      .from('matches')
+      .select('id, bookings ( courts ( clubs ( id, name, logo_url, photo_urls ) ) )')
+      .in('id', matchIds);
+
+    type ClubRow = { id: string; name?: string | null; logo_url?: string | null; photo_urls?: unknown };
+    const countByClub = new Map<string, number>();
+    const clubMeta = new Map<string, ClubRow>();
+    for (const m of matches ?? []) {
+      const b = (m as { bookings?: unknown }).bookings;
+      const booking = Array.isArray(b) ? b[0] : b;
+      const courts = (booking as { courts?: unknown } | null)?.courts;
+      const court = Array.isArray(courts) ? courts[0] : courts;
+      const clubs = (court as { clubs?: unknown } | null)?.clubs;
+      const club = (Array.isArray(clubs) ? clubs[0] : clubs) as ClubRow | null;
+      if (!club?.id) continue;
+      countByClub.set(club.id, (countByClub.get(club.id) ?? 0) + 1);
+      if (!clubMeta.has(club.id)) clubMeta.set(club.id, club);
+    }
+
+    const ranked = [...countByClub.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+    const clubs = await Promise.all(
+      ranked.map(async ([clubId, count]) => {
+        const meta = clubMeta.get(clubId)!;
+        let image: string | null = null;
+        const raw = pickClubImageSource(meta);
+        if (raw) {
+          try {
+            image = await resolveClubLogoUrlForClient(supabase, raw);
+          } catch {
+            image = null;
+          }
+        }
+        return { id: clubId, name: meta.name ?? 'Club', image, count };
+      }),
+    );
+    return res.json({ ok: true, clubs });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
+  }
+});
+
+/**
+ * @openapi
+ * /players/{id}/frequent-partners:
+ *   get:
+ *     tags: [Players]
+ *     summary: Personas con las que el jugador suele jugar (co-jugadores por frecuencia). Público.
+ */
+router.get('/:id/frequent-partners', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? '8'), 10) || 8, 1), 20);
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data: mine } = await supabase.from('match_players').select('match_id').eq('player_id', id);
+    const matchIds = [...new Set((mine ?? []).map((r) => (r as { match_id: string }).match_id))];
+    if (!matchIds.length) return res.json({ ok: true, partners: [] });
+
+    const { data: others } = await supabase
+      .from('match_players')
+      .select('player_id')
+      .in('match_id', matchIds)
+      .neq('player_id', id);
+
+    const countByPlayer = new Map<string, number>();
+    for (const r of others ?? []) {
+      const pid = (r as { player_id: string }).player_id;
+      if (pid) countByPlayer.set(pid, (countByPlayer.get(pid) ?? 0) + 1);
+    }
+    const ranked = [...countByPlayer.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+    if (!ranked.length) return res.json({ ok: true, partners: [] });
+
+    const { data: players } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, username, avatar_url')
+      .in('id', ranked.map(([pid]) => pid));
+    type PRow = { id: string; first_name?: string | null; last_name?: string | null; username?: string | null; avatar_url?: string | null };
+    const meta = new Map((players ?? []).map((p) => [(p as PRow).id, p as PRow]));
+
+    const partners = ranked.map(([pid, count]) => {
+      const p = meta.get(pid);
+      const name = p ? `${p.first_name ?? ''} ${p.last_name ?? ''}`.trim() || (p.username ?? 'Jugador') : 'Jugador';
+      return { id: pid, name, avatarUrl: p?.avatar_url ?? null, count };
+    });
+    return res.json({ ok: true, partners });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err instanceof Error ? err.message : 'Unknown error' });
   }
 });
 
