@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { publishDirectMessage, publishThreadRead } from '../lib/messagesRealtime';
+import { getEquippedFrames } from '../services/equippedFramesService';
 
 const router = Router();
 
@@ -63,6 +64,7 @@ router.get('/conversations', async (req: Request, res: Response) => {
     peersMeta = (players ?? []) as typeof peersMeta;
   }
   const metaById = new Map(peersMeta.map((p) => [p.id, p]));
+  const frames = await getEquippedFrames(supabase, peerOrder);
 
   const { data: unreadRows, error: uErr } = await supabase
     .from('player_direct_messages')
@@ -87,6 +89,7 @@ router.get('/conversations', async (req: Request, res: Response) => {
       peer_last_name: meta?.last_name ?? '',
       peer_username: meta?.username ?? null,
       peer_avatar_url: meta?.avatar_url ?? null,
+      peer_frame: frames.get(peer) ?? null,
       last_message_at: last.created_at,
       last_message_preview: last.body.length > 120 ? `${last.body.slice(0, 117)}…` : last.body,
       unread_count: unreadByPeer.get(peer) ?? 0,

@@ -17,6 +17,7 @@ import { fetchMyPlayerId, searchPlayers, type PlayerSearchHit } from '../api/pla
 import { subscribeMessagesSocket } from '../realtime/messagesSocket';
 import { theme } from '../theme';
 import { formatPlayerLabel } from '../lib/username';
+import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 
 const ACCENT = '#F18F34';
 const BG = '#0A0A0A';
@@ -35,11 +36,9 @@ type MessagesScreenProps = {
 };
 
 function peerDisplayName(c: DirectConversation): string {
-  return formatPlayerLabel({
-    username: c.peer_username,
-    first_name: c.peer_first_name,
-    last_name: c.peer_last_name,
-  });
+  const name = `${c.peer_first_name ?? ''} ${c.peer_last_name ?? ''}`.trim();
+  if (name) return name;
+  return c.peer_username?.trim() || 'Jugador';
 }
 
 function initials(name: string): string {
@@ -155,9 +154,13 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
         }
         style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
       >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{initials(name)}</Text>
-        </View>
+        <AvatarWithFrame
+          avatarUrl={item.peer_avatar_url}
+          initials={initials(name)}
+          size={44}
+          frame={item.peer_frame ?? null}
+          animate={false}
+        />
         <View style={styles.rowBody}>
           <View style={styles.rowTop}>
             <Text style={styles.peerName} numberOfLines={1}>
@@ -285,7 +288,7 @@ export function MessagesScreen({ onBack, onSelectPeer }: MessagesScreenProps) {
                       onPress={() =>
                         openThread({
                           id: item.id,
-                          displayName: dn,
+                          displayName: fullName || dn,
                           avatarUrl: null,
                         })
                       }
