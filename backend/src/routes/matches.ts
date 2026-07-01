@@ -14,6 +14,7 @@ import {
 } from '../services/paymentRefundService';
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
 import { enrichMatchRowsWithClubImages } from '../lib/clubLogoUrl';
+import { getEquippedFrames } from '../services/equippedFramesService';
 import { tryRepairPaidGuestMissingFromMatch } from '../services/matchPlayerSlotService';
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
@@ -44,6 +45,36 @@ function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?
       })
     : rawMps;
   return { ...row, bookings, match_players };
+}
+
+type MatchRowWithPlayers = {
+  match_players?: Array<{ players?: { id?: string; frame?: unknown } | null } | null> | null;
+};
+
+/**
+ * Adjunta el marco equipado (`frame`) a cada jugador de los partidos dados.
+ * Muta los objetos `players` en sitio. Batchea todos los ids en una sola
+ * llamada a getEquippedFrames. Reutilizable por detalle y listas.
+ */
+async function attachEquippedFramesToMatches(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  rows: MatchRowWithPlayers[],
+): Promise<void> {
+  const ids: string[] = [];
+  for (const r of rows) {
+    for (const mp of r.match_players ?? []) {
+      const pid = mp?.players?.id;
+      if (pid) ids.push(pid);
+    }
+  }
+  if (ids.length === 0) return;
+  const frames = await getEquippedFrames(supabase, ids);
+  for (const r of rows) {
+    for (const mp of r.match_players ?? []) {
+      const p = mp?.players;
+      if (p?.id) p.frame = frames.get(p.id) ?? null;
+    }
+  }
 }
 
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
@@ -515,6 +546,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         out as { bookings?: unknown; match_players?: unknown },
       );
       await enrichMatchRowsWithClubImages(supabase, [flattened]);
+      await attachEquippedFramesToMatches(supabase, [flattened as MatchRowWithPlayers]);
       return res.json({
         ok: true,
         match: {

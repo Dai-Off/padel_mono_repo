@@ -52,7 +52,7 @@ import {
   resolvePlayerDisplayLevel,
   type ProfileForPartidoEnrich,
 } from '../lib/partidoPlayerUtils';
-import { PartidoSlotAvatar } from '../components/partido/PartidoSlotAvatar';
+import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
 import { rejectMatchmakingProposal, leaveMatchmaking } from '../api/matchmaking';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
@@ -1387,6 +1387,12 @@ function PlayerSlotDetail({
     normalizePlayerAvatarUrl(player.avatar);
   const displayInitials = resolvePlayerDisplayInitials(player, currentProfile, displayOpts);
   const displayLevel = resolvePlayerDisplayLevel(player, currentProfile, displayOpts);
+  // ELO numérico para la burbuja combinada del avatar (undefined => sin burbuja).
+  const levelNum = (() => {
+    if (!displayLevel || displayLevel === '—') return undefined;
+    const n = Number(displayLevel.replace(',', '.'));
+    return Number.isFinite(n) ? n : undefined;
+  })();
 
   if (player.isFree) {
     return (
@@ -1428,11 +1434,12 @@ function PlayerSlotDetail({
         onPress={() => player.id && onOpenPublicProfile?.(player.id)}
         style={({ pressed }) => [styles.plFill, pressed && styles.pressed]}
       >
-        <PartidoSlotAvatar
+        <AvatarWithFrame
           avatarUrl={avatarUrl}
           initials={displayInitials}
           size={56}
-          borderRadius={12}
+          frame={player.frame ?? null}
+          level={levelNum}
         />
       </Pressable>
       <Pressable onPress={() => player.id && onOpenPublicProfile?.(player.id)}>
@@ -1440,11 +1447,6 @@ function PlayerSlotDetail({
           {player.name || 'Jugador'}
         </Text>
       </Pressable>
-      {displayLevel ? (
-        <View style={styles.plLevel}>
-          <Text style={styles.plLevelText}>{displayLevel}</Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -1730,14 +1732,12 @@ const styles = StyleSheet.create({
   },
   plSlot: { alignItems: 'center', maxWidth: 88 },
   plFill: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
+    // Sin tamaño fijo ni overflow:hidden: AvatarWithFrame dibuja su propio
+    // tile y el marco sobresale del avatar; recortarlo lo ocultaría.
+    // Margen inferior amplio: la burbuja de ELO cuelga bajo el avatar.
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
-    overflow: 'hidden',
-    backgroundColor: '#F18F34',
+    marginBottom: 14,
   },
   plAvatar: { width: 56, height: 56, borderRadius: 12 },
   plInitials: {
@@ -1751,17 +1751,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: 4,
     textAlign: 'center',
-  },
-  plLevel: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: '#facc15',
-  },
-  plLevelText: {
-    fontSize: 8,
-    fontWeight: '800',
-    color: '#1A1A1A',
   },
   plFree: {
     width: 56,

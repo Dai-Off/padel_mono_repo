@@ -226,11 +226,20 @@ export const AvatarWithFrame: React.FC<Props> = ({ initials, avatarUrl, size = 8
   // Burbuja de nivel en el borde inferior (parte del "pack" avatar+marco+nivel)
   // Se muestra siempre que se pase `level` (aunque sea null → "-"). Si no se pasa
   // el prop (undefined), no hay burbuja (otros usos del pack sin nivel).
+  // Dimensiones proporcionales a `size` (referencia 80 = perfil) para que se vea
+  // igual en cualquier tamaño sin ajustes por pantalla.
+  const lvlK = size / 80;
+  const lvlFont = Math.max(9, Math.round(14 * lvlK));
+  const lvlPadH = Math.max(6, Math.round(9 * lvlK));
+  const lvlPadV = Math.max(2, Math.round(3 * lvlK));
+  const lvlMinW = Math.max(28, Math.round(42 * lvlK));
+  const lvlRadius = Math.max(6, Math.round(9 * lvlK));
+  const lvlOffset = Math.round(12 * lvlK);
   const levelBubble =
     level !== undefined ? (
-      <View style={[styles.levelRow, { bottom: (noFrame ? 0 : bw) - 12 }]} pointerEvents="none">
-        <View style={styles.levelPill}>
-          <Text style={styles.levelText}>{level != null && Number.isFinite(level) ? level.toFixed(2) : '-'}</Text>
+      <View style={[styles.levelRow, { bottom: (noFrame ? 0 : bw) - lvlOffset }]} pointerEvents="none">
+        <View style={[styles.levelPill, { minWidth: lvlMinW, paddingHorizontal: lvlPadH, paddingVertical: lvlPadV, borderRadius: lvlRadius }]}>
+          <Text style={[styles.levelText, { fontSize: lvlFont }]}>{level != null && Number.isFinite(level) ? level.toFixed(2).replace('.', ',') : '-'}</Text>
         </View>
       </View>
     ) : null;
@@ -301,16 +310,13 @@ const styles = StyleSheet.create({
   mask: { position: 'absolute' },
   tileTop: { zIndex: 2 },
   levelRow: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 3 },
+  // minWidth/padding/borderRadius/fontSize se calculan según `size` (ver arriba).
   levelPill: {
-    minWidth: 42,
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    borderRadius: 9,
     backgroundColor: '#F18F34',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  levelText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  levelText: { color: '#fff', fontWeight: '800' },
   ring: { position: 'absolute', borderWidth: 2 },
   particle: { position: 'absolute', width: 5, height: 5, borderRadius: 3, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 4, elevation: 3 },
 });
