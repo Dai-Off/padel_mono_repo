@@ -889,6 +889,10 @@ export function MainApp() {
             setShowCompetitiveLeague(false);
             setSelectedPartido(p);
           }}
+          onOpenPlayer={(pid) => {
+            setSelectedPublicPlayerId(pid);
+            setShowPublicProfile(true);
+          }}
         />
       );
     }

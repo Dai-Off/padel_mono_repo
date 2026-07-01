@@ -1,4 +1,5 @@
 import { API_URL } from '../config';
+import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
 export type MatchmakingLeagueConfigRow = {
   code: string;
@@ -67,8 +68,8 @@ export type MatchmakingLeaderboardRow = {
   username: string | null;
   elo_rating: number | null;
   lps: number;
-  mm_wins: number;
-  mm_losses: number;
+  avatar_url: string | null;
+  frame?: FrameAttrs | null;
 };
 
 export type MatchmakingLeaderboardResponse = {

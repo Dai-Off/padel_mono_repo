@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { getEquippedFrames } from '../services/equippedFramesService';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import {
   applyExpansionAccept,
@@ -14,30 +15,6 @@ import {
 import { closeActiveMatchmakingSeason } from '../services/matchmakingSeasonService';
 import { getMatchmakingLeagueConfigRows } from '../services/matchmakingLeagueConfigService';
 import { clearMatchmakingPoolIfPlayerPaid } from '../services/matchmakingPoolCleanup';
-
-type MmWl = { mm_wins: number; mm_losses: number; mm_draws: number };
-const ZERO_MM_WL: MmWl = { mm_wins: 0, mm_losses: 0, mm_draws: 0 };
-
-async function fetchPlayerMatchmakingWl(
-  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
-  playerId: string,
-): Promise<MmWl> {
-  try {
-    const { data, error } = await supabase.rpc('player_matchmaking_record', { p_player_id: playerId });
-    if (error) return ZERO_MM_WL;
-    const rows = data as unknown;
-    const row = Array.isArray(rows) ? rows[0] : rows;
-    if (!row || typeof row !== 'object') return ZERO_MM_WL;
-    const r = row as Record<string, unknown>;
-    return {
-      mm_wins: Number(r.wins ?? 0),
-      mm_losses: Number(r.losses ?? 0),
-      mm_draws: Number(r.draws ?? 0),
-    };
-  } catch {
-    return ZERO_MM_WL;
-  }
-}
 
 async function countActiveSearching(
   supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
@@ -244,7 +221,7 @@ router.get('/leaderboard', async (req: Request, res: Response) => {
 
   const { data: players, error: qErr } = await supabase
     .from('players')
-    .select('id, first_name, last_name, username, elo_rating, lps')
+    .select('id, first_name, last_name, username, elo_rating, lps, avatar_url')
     .eq('liga', ligaCode)
     .eq('onboarding_completed', true)
     .order('lps', { ascending: false })
@@ -252,30 +229,29 @@ router.get('/leaderboard', async (req: Request, res: Response) => {
     .range(offset, offset + limit - 1);
   if (qErr) return res.status(500).json({ ok: false, error: qErr.message });
 
-  const rows = await Promise.all(
-    (players ?? []).map(async (p, index) => {
-      const row = p as {
-        id: string;
-        first_name?: string | null;
-        last_name?: string | null;
-        username?: string | null;
-        elo_rating?: number | null;
-        lps?: number | null;
-      };
-      const wl = await fetchPlayerMatchmakingWl(supabase, row.id);
-      return {
-        rank: offset + index + 1,
-        player_id: row.id,
-        first_name: row.first_name ?? null,
-        last_name: row.last_name ?? null,
-        username: row.username ?? null,
-        elo_rating: row.elo_rating != null ? Number(row.elo_rating) : null,
-        lps: Math.max(0, Math.round(Number(row.lps ?? 0))),
-        mm_wins: wl.mm_wins,
-        mm_losses: wl.mm_losses,
-      };
-    }),
-  );
+  const frames = await getEquippedFrames(supabase, (players ?? []).map((p) => (p as { id: string }).id));
+  const rows = (players ?? []).map((p, index) => {
+    const row = p as {
+      id: string;
+      first_name?: string | null;
+      last_name?: string | null;
+      username?: string | null;
+      elo_rating?: number | null;
+      lps?: number | null;
+      avatar_url?: string | null;
+    };
+    return {
+      rank: offset + index + 1,
+      player_id: row.id,
+      first_name: row.first_name ?? null,
+      last_name: row.last_name ?? null,
+      username: row.username ?? null,
+      elo_rating: row.elo_rating != null ? Number(row.elo_rating) : null,
+      lps: Math.max(0, Math.round(Number(row.lps ?? 0))),
+      avatar_url: row.avatar_url ?? null,
+      frame: frames.get(row.id) ?? null,
+    };
+  });
 
   const hasMore = offset + rows.length < total;
   return res.json({ ok: true, liga: ligaCode, total, offset, limit, has_more: hasMore, rows });
