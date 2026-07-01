@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useMemo } from 'react';
 import {
   Platform,
   Pressable,
@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { PartidoItem } from '../../../screens/PartidosScreen';
+import { isPartidoCancelled } from '../../../domain/matchLifecycle';
 import { PartidoOpenCard } from '../../partido/PartidoOpenCard';
 import { INICIO_PAD_H } from './constants';
 import { androidReadableText } from './textStyles';
@@ -51,6 +52,13 @@ function CarouselItem({ width, children }: { width: number; children: ReactNode 
   return <View style={[styles.carouselItem, { width }]}>{children}</View>;
 }
 
+function isUpcomingPartido(item: PartidoItem): boolean {
+  if (isPartidoCancelled(item)) return false;
+  const phase = item.matchPhase ?? 'upcoming';
+  if (phase === 'past') return false;
+  return true;
+}
+
 function ProximoCard({
   item,
   onPress,
@@ -64,7 +72,7 @@ function ProximoCard({
 }) {
   return (
     <View style={[styles.cardShell, fullWidth && styles.cardShellFull]}>
-      <PartidoOpenCard item={item} onPress={onPress} fullWidth={fullWidth} />
+      <PartidoOpenCard item={item} onPress={onPress} fullWidth={fullWidth} showVisibilityBadge />
       <LinearGradient
         pointerEvents="none"
         colors={[`rgba(${theme.orb1Color}, 0.1)`, 'transparent']}
@@ -86,6 +94,7 @@ export function ProximosPartidosSection({
   const theme = useAmbientTheme(OPENWEATHER_API_KEY);
   const insets = useSafeAreaInsets();
   const { width: windowW } = useWindowDimensions();
+  const upcomingItems = useMemo(() => items.filter(isUpcomingPartido), [items]);
   const usableW = windowW - INICIO_PAD_H * 2;
   /** Una reserva: card a todo el ancho útil del Inicio. Dos o más: ancho tipo carrusel (como antes). */
   const carouselCardW = Math.min(
@@ -94,11 +103,10 @@ export function ProximosPartidosSection({
   );
   const singleCardW = Math.max(200, usableW);
   const cardWidth =
-    !loading && items.length === 1 ? singleCardW : carouselCardW;
+    !loading && upcomingItems.length === 1 ? singleCardW : carouselCardW;
 
-  // Si ya cargó y no hay partidos próximos ni por confirmar, ocultar toda la
-  // sección. El skeleton sigue mostrándose mientras carga.
-  if (!loading && items.length === 0) {
+  // Si ya cargó y no hay partidos próximos, ocultar toda la sección.
+  if (!loading && upcomingItems.length === 0) {
     return null;
   }
 
@@ -108,18 +116,18 @@ export function ProximosPartidosSection({
         <View style={styles.headerTextCol}>
           <Text style={styles.title}>{t('home.proximosPartidos.title')}</Text>
           <Text style={styles.subtitle}>
-            {loading && items.length === 0
+            {loading && upcomingItems.length === 0
               ? t('home.proximosPartidos.loading')
-              : items.length === 0
+              : upcomingItems.length === 0
                 ? t('home.proximosPartidos.empty')
-                : items.length === 1
+                : upcomingItems.length === 1
                   ? t('home.proximosPartidos.oneConfirmed')
-                  : t('home.proximosPartidos.manyConfirmed', { count: items.length })}
+                  : t('home.proximosPartidos.manyConfirmed', { count: upcomingItems.length })}
           </Text>
         </View>
       </View>
 
-      {loading && items.length === 0 ? (
+      {loading && upcomingItems.length === 0 ? (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -152,21 +160,21 @@ export function ProximosPartidosSection({
           showsHorizontalScrollIndicator={false}
           nestedScrollEnabled
           removeClippedSubviews={false}
-          scrollEnabled={items.length > 1}
+          scrollEnabled={upcomingItems.length > 1}
           style={styles.carouselScroll}
           contentContainerStyle={[
             styles.carouselContent,
             {
               paddingRight:
-                items.length === 1 ? insets.right : 12 + insets.right,
+                upcomingItems.length === 1 ? insets.right : 12 + insets.right,
             },
           ]}
         >
-            {items.map((item) => (
+            {upcomingItems.map((item) => (
               <CarouselItem key={item.id} width={cardWidth}>
                 <ProximoCard
                   item={item}
-                  fullWidth={items.length === 1}
+                  fullWidth={upcomingItems.length === 1}
                   onPress={() => onPartidoPress?.(item)}
                   theme={theme}
                 />

@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,11 +10,12 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { cancelMatchAsOrganizer, fetchMatchCancelPreview, fetchMatchById } from '../api/matches';
+import { cancelMatchAsOrganizer, fetchMatchById } from '../api/matches';
 import { mapMatchToPartido } from '../api/mapMatchToPartido';
 import { fetchMyPlayerId } from '../api/players';
 import { ClubInfoSheet } from '../components/partido/ClubInfoSheet';
 import { useAuth } from '../contexts/AuthContext';
+import { useHomeData } from '../contexts/HomeDataContext';
 import { useTranslation } from '../i18n';
 import { theme } from '../theme';
 import { buildLeaveMatchAlertMessage } from '../utils/matchLeaveAlert';
@@ -36,10 +36,11 @@ function StatusDot({ color }: { color: string }) {
 export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDetailScreenProps) {
   const { t } = useTranslation();
   const { session } = useAuth();
+  const { removeMisPartido, refreshMatches } = useHomeData();
   const [clubInfoVisible, setClubInfoVisible] = useState(false);
   const [partidoLocal, setPartidoLocal] = useState(partido);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
-  const [cancelOverlay, setCancelOverlay] = useState({ open: false, message: '' });
+  const [cancelPrivateBusy, setCancelPrivateBusy] = useState(false);
 
   const venueAddress = partidoLocal.venueAddress ?? partidoLocal.location;
   const venueImage = partidoLocal.venueImage;
@@ -81,49 +82,48 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
     Boolean(session?.access_token) && userIsOrganizer && matchPhase !== 'past';
 
   const handleCancelReserva = useCallback(() => {
+    if (cancelPrivateBusy) return;
     const token = session?.access_token;
     if (!token) {
       Alert.alert(t('alerts.login.title'), t('alerts.privateCancel.title'));
       return;
     }
 
-    void (async () => {
-      let preview = null;
-      try {
-        preview = await fetchMatchCancelPreview(partidoLocal.id, token);
-      } catch {
-        // Si falla el preview, seguimos con el mensaje estándar.
-      }
-      const message = buildLeaveMatchAlertMessage(t, true, preview);
+    const message = buildLeaveMatchAlertMessage(
+      t,
+      { isOrganizer: true, soloInMatch: true },
+      null,
+    );
 
-      Alert.alert(t('alerts.privateCancel.title'), message, [
-        { text: t('common.no'), style: 'cancel' },
-        {
-          text: t('alerts.leaveMatch.cancel'),
-          style: 'destructive',
-          onPress: async () => {
-            setCancelOverlay({ open: true, message: t('common.loading') });
+    Alert.alert(t('alerts.privateCancel.title'), message, [
+      { text: t('common.no'), style: 'cancel' },
+      {
+        text: t('alerts.leaveMatch.cancel'),
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            setCancelPrivateBusy(true);
             try {
               const r = await cancelMatchAsOrganizer(partidoLocal.id, token);
               if (r.ok) {
-                const refundEligible =
-                  r.refundEligible ?? (preview?.ok === true && preview.refund_eligible !== false);
-                const doneMessage = refundEligible
+                removeMisPartido(partidoLocal.id);
+                void refreshMatches({ force: true, scope: 'mine' });
+                const doneMessage = r.refundEligible
                   ? t('alerts.privateCancel.done')
                   : t('alerts.privateCancel.doneNoRefund');
-                Alert.alert(t('alerts.ready.title'), doneMessage);
                 onBack();
+                Alert.alert(t('alerts.ready.title'), doneMessage);
                 return;
               }
               Alert.alert(t('alerts.privateCancel.fail'), r.error);
             } finally {
-              setCancelOverlay({ open: false, message: '' });
+              setCancelPrivateBusy(false);
             }
-          },
+          })();
         },
-      ]);
-    })();
-  }, [session?.access_token, partidoLocal.id, onBack, t]);
+      },
+    ]);
+  }, [cancelPrivateBusy, session?.access_token, partidoLocal.id, onBack, removeMisPartido, refreshMatches, t]);
 
   return (
     <View style={styles.container}>
@@ -235,14 +235,24 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
 
         {canCancelPrivate ? (
           <Pressable
-            style={({ pressed }) => [styles.cancelReservaBtn, pressed && styles.pressed]}
+            style={({ pressed }) => [
+              styles.cancelReservaBtn,
+              pressed && !cancelPrivateBusy && styles.pressed,
+              cancelPrivateBusy && styles.cancelReservaBtnBusy,
+            ]}
             onPress={handleCancelReserva}
-            disabled={cancelOverlay.open}
+            disabled={cancelPrivateBusy}
             accessibilityRole="button"
             accessibilityLabel={t('alerts.privateCancel.title')}
           >
-            <Ionicons name="close-circle-outline" size={20} color="#f87171" />
-            <Text style={styles.cancelReservaBtnText}>{t('alerts.privateCancel.title')}</Text>
+            {cancelPrivateBusy ? (
+              <ActivityIndicator color="#f87171" size="small" />
+            ) : (
+              <Ionicons name="close-circle-outline" size={20} color="#f87171" />
+            )}
+            <Text style={[styles.cancelReservaBtnText, cancelPrivateBusy && styles.cancelReservaBtnTextHidden]}>
+              {t('alerts.privateCancel.title')}
+            </Text>
           </Pressable>
         ) : session?.access_token && !userIsOrganizer ? (
           <Text style={styles.cancelHint}>{t('alerts.leaveMatch.bodyMulti')}</Text>
@@ -254,16 +264,6 @@ export function PartidoPrivadoDetailScreen({ partido, onBack }: PartidoPrivadoDe
           partido={partidoLocal}
         />
       </ScrollView>
-
-      <Modal visible={cancelOverlay.open} transparent animationType="fade">
-        <View style={styles.cancelModalRoot}>
-          <View style={styles.cancelModalCard}>
-            <ActivityIndicator size="large" color={theme.auth.accent} />
-            <Text style={styles.cancelModalText}>{cancelOverlay.message}</Text>
-            <Text style={styles.cancelModalHint}>{t('alerts.matchEval.retryLater')}</Text>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -458,40 +458,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#f87171',
   },
+  cancelReservaBtnBusy: {
+    opacity: 0.88,
+  },
+  cancelReservaBtnTextHidden: {
+    opacity: 0,
+  },
   cancelHint: {
     fontSize: 12,
     color: theme.auth.textMuted,
     textAlign: 'center',
     marginTop: theme.spacing.sm,
     paddingHorizontal: 8,
-  },
-  cancelModalRoot: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-  },
-  cancelModalCard: {
-    backgroundColor: 'rgba(28,28,30,0.98)',
-    borderRadius: 16,
-    paddingVertical: 24,
-    paddingHorizontal: 22,
-    alignItems: 'center',
-    gap: 12,
-    maxWidth: 300,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  cancelModalText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  cancelModalHint: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.5)',
-    textAlign: 'center',
   },
 });

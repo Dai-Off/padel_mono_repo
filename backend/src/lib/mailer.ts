@@ -187,6 +187,21 @@ export async function sendInviteEmail(to: string, inviteUrl: string, clubName: s
   return invokeEdgeFunction('send-invitation-email', { to, inviteUrl, clubName });
 }
 
+export async function sendPrivateMatchInviteEmail(
+  to: string,
+  inviteUrl: string,
+  params: { clubName: string; matchWhen: string; inviterName?: string },
+): Promise<{ sent: boolean; error?: string }> {
+  return invokeEdgeFunction('send-invitation-email', {
+    to,
+    inviteUrl,
+    clubName: params.clubName,
+    inviteKind: 'private_match',
+    matchWhen: params.matchWhen,
+    inviterName: params.inviterName ?? 'Un jugador',
+  });
+}
+
 export async function sendClubCrmEmail(
   to: string,
   subject: string,

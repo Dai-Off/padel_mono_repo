@@ -9,6 +9,7 @@ import courtsRouter from "./courts";
 import bookingsRouter from "./bookings";
 import bookingParticipantsRouter from "./bookingParticipants";
 import matchesRouter from "./matches";
+import matchInvitesRouter from "./matchInvites";
 import matchScoresRouter from "./matchScores";
 import matchFeedbackRouter from "./matchFeedback";
 import matchmakingRouter from "./matchmaking";
@@ -58,6 +59,7 @@ import accountRouter from "./account";
 const router = Router();
 
 const matchesStack = Router();
+matchesStack.use(matchInvitesRouter);
 matchesStack.use(matchScoresRouter);
 matchesStack.use(matchFeedbackRouter);
 matchesStack.use(matchesRouter);

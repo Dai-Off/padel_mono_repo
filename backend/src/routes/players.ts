@@ -1521,6 +1521,39 @@ router.get('/username/check', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /players/check-email?email= — verifica si el email pertenece a un jugador registrado */
+router.get('/check-email', async (req: Request, res: Response) => {
+  const { playerId: authPlayerId, error: authErr } = await getPlayerIdFromBearer(req);
+  if (!authPlayerId) return res.status(401).json({ ok: false, error: authErr ?? 'Token requerido' });
+  const email = String(req.query.email ?? '').trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ ok: false, error: 'Email inválido' });
+  }
+  try {
+    const supabase = getSupabaseServiceRoleClient();
+    const { data, error } = await supabase
+      .from('players')
+      .select('id, first_name, last_name, email')
+      .eq('email', email)
+      .neq('status', 'deleted')
+      .maybeSingle();
+    if (error) return res.status(500).json({ ok: false, error: error.message });
+    if (!data) return res.json({ ok: true, exists: false });
+    return res.json({
+      ok: true,
+      exists: true,
+      player: {
+        id: data.id,
+        first_name: (data as { first_name?: string }).first_name,
+        last_name: (data as { last_name?: string }).last_name,
+        email: (data as { email?: string }).email,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+});
+
 /**
  * @openapi
  * /players:

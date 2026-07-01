@@ -346,7 +346,7 @@ export async function cancelMatchAsOrganizer(
     if (json.ok) {
       return {
         ok: true,
-        cancelledEntireMatch: json.cancelled_entire_match !== false,
+        cancelledEntireMatch: json.cancelled_entire_match === true,
         refundEligible: json.refund_eligible !== false,
       };
     }

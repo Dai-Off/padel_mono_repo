@@ -19,6 +19,7 @@ import { fetchStreak, type StreakInfo } from '../api/dailyLessons';
 import {
   getMatchBooking,
   getMatchListPhase,
+  isPartidoCancelled,
   shouldIncludeInHomeMisPartidos,
   shouldIncludePartidoInHomeCarousel,
 } from '../domain/matchLifecycle';
@@ -30,10 +31,12 @@ import {
   enrichPartidosWithProfileAvatar,
   isPartidoOpenForDiscovery,
   mergeMisPartidosFromServer,
+  removeMisPartidoFromList,
   upsertMisPartidosList,
   type ProfileForPartidoEnrich,
 } from '../lib/partidoPlayerUtils';
 import { reloadMatchPartido } from '../lib/reloadMatchPartido';
+import { findMisPartidoIdsToRemove } from '../lib/pruneMisPartidos';
 import { useAuth } from './AuthContext';
 import type { PartidoItem } from '../screens/PartidosScreen';
 
@@ -67,10 +70,16 @@ type HomeDataValue = {
   refreshMatches: (opts?: { force?: boolean; scope?: 'full' | 'mine' }) => Promise<void>;
   /** Actualiza el carrusel "Mis partidos" al instante (p. ej. tras unirse a un partido). */
   upsertMisPartido: (item: PartidoItem) => void;
+  /** Quita un partido del carrusel (p. ej. tras cancelar o salir). */
+  removeMisPartido: (matchId: string) => void;
   /** Tras crear/unirse: carga el partido, lo inserta en Home y revalida con el servidor. */
   syncMisPartidoFromMatchId: (
     matchId: string,
-    opts?: { organizerPlayerId?: string | null; forceSlotIndex?: number },
+    opts?: {
+      organizerPlayerId?: string | null;
+      forceSlotIndex?: number;
+      matchVisibility?: 'public' | 'private';
+    },
   ) => Promise<void>;
 
   // Tournaments (solo el count, que es lo que usa el home).
@@ -128,10 +137,18 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
 
   const [partidos, setPartidos] = useState<PartidoItem[]>([]);
   const [misPartidos, setMisPartidos] = useState<PartidoItem[]>([]);
+  useEffect(() => {
+    misPartidosRef.current = misPartidos;
+  }, [misPartidos]);
   const [matchesLoading, setMatchesLoading] = useState(false);
   const matchesLoadedAt = useRef(0);
   const refreshMatchesMineAt = useRef(0);
   const profileForEnrichRef = useRef<ProfileForPartidoEnrich | null>(null);
+  /** IDs que /matches/mine devolvió alguna vez — si desaparecen, no reinsertar en merge. */
+  const everSyncedMisPartidoIdsRef = useRef(new Set<string>());
+  /** Upserts locales recientes (crear/unirse) antes de que /mine los confirme. */
+  const pendingLocalMisPartidoIdsRef = useRef(new Map<string, number>());
+  const misPartidosRef = useRef<PartidoItem[]>([]);
 
   const [publicTournamentsCount, setPublicTournamentsCount] = useState<number | null>(null);
   const [tournamentsLoading, setTournamentsLoading] = useState(false);
@@ -231,7 +248,18 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   );
 
   const upsertMisPartido = useCallback((item: PartidoItem) => {
+    if (isPartidoCancelled(item)) {
+      pendingLocalMisPartidoIdsRef.current.delete(item.id);
+      setMisPartidos((prev) => removeMisPartidoFromList(prev, item.id));
+      return;
+    }
+    pendingLocalMisPartidoIdsRef.current.set(item.id, Date.now());
     setMisPartidos((prev) => upsertMisPartidosList(prev, item));
+  }, []);
+
+  const removeMisPartido = useCallback((matchId: string) => {
+    pendingLocalMisPartidoIdsRef.current.delete(matchId);
+    setMisPartidos((prev) => removeMisPartidoFromList(prev, matchId));
   }, []);
 
   const profileForEnrich = useMemo((): ProfileForPartidoEnrich | null => {
@@ -281,11 +309,13 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         setMisPartidos([]);
         setPartidos([]);
         matchesLoadedAt.current = 0;
+        everSyncedMisPartidoIdsRef.current.clear();
+        pendingLocalMisPartidoIdsRef.current.clear();
         return;
       }
       const mineOnly = scope === 'mine';
       if (!force && !mineOnly && matchesLoadedAt.current > 0) return;
-      if (mineOnly && matchesLoadedAt.current > 0) {
+      if (mineOnly && !force && matchesLoadedAt.current > 0) {
         const lastMineRefresh = refreshMatchesMineAt.current;
         if (Date.now() - lastMineRefresh < 3000) return;
       }
@@ -303,9 +333,31 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
           if (gen !== refreshMatchesGen.current) return;
 
           const mineNormalized = (myMatches as MatchEnriched[]).map(normalizeMatchEnriched);
+          for (const m of mineNormalized) {
+            if (m.id) everSyncedMisPartidoIdsRef.current.add(m.id);
+          }
           const misFromServer = buildMisPartidosFromMatches(mineNormalized, enrichProfile);
+          const serverIds = new Set(misFromServer.map((p) => p.id));
+          for (const id of serverIds) {
+            pendingLocalMisPartidoIdsRef.current.delete(id);
+          }
 
-          setMisPartidos((prev) => mergeMisPartidosFromServer(prev, misFromServer));
+          const prevMis = misPartidosRef.current;
+          const staleIds = await findMisPartidoIdsToRemove(prevMis, serverIds, token);
+          for (const id of staleIds) {
+            pendingLocalMisPartidoIdsRef.current.delete(id);
+          }
+          const prunedPrev = prevMis.filter((p) => !staleIds.has(p.id));
+
+          setMisPartidos(
+            mergeMisPartidosFromServer(
+              prunedPrev,
+              misFromServer,
+              enrichProfile,
+              everSyncedMisPartidoIdsRef.current,
+              pendingLocalMisPartidoIdsRef.current,
+            ),
+          );
 
           if (!mineOnly) {
             const { dateFrom, dateTo } = defaultPartidosDiscoveryDateRange();
@@ -355,14 +407,18 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
   const syncMisPartidoFromMatchId = useCallback(
     async (
       matchId: string,
-      opts?: { organizerPlayerId?: string | null; forceSlotIndex?: number },
+      opts?: {
+        organizerPlayerId?: string | null;
+        forceSlotIndex?: number;
+        matchVisibility?: 'public' | 'private';
+      },
     ) => {
       if (!token || !matchId.trim()) return;
 
       const freshProfile = await fetchMyPlayerProfile(token);
       const playerId = freshProfile?.id ?? opts?.organizerPlayerId?.trim() ?? profile?.id ?? null;
       if (!playerId) {
-        await refreshMatches({ scope: 'mine' });
+        await refreshMatches({ force: true, scope: 'mine' });
         return;
       }
 
@@ -377,17 +433,28 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         retryIfMissingPlayerId: playerId,
       });
       if (loaded) {
-        let enriched = enrichPartidoWithProfileAvatar(loaded, profileEnrich, {
-          forceSlotIndex: opts?.forceSlotIndex,
-        });
-        enriched = {
-          ...enriched,
-          organizerPlayerId: enriched.organizerPlayerId ?? opts?.organizerPlayerId ?? playerId,
-        };
-        upsertMisPartido(enriched);
+        if (isPartidoCancelled(loaded)) {
+          removeMisPartido(matchId);
+        } else {
+          let enriched = enrichPartidoWithProfileAvatar(loaded, profileEnrich, {
+            forceSlotIndex: opts?.forceSlotIndex,
+          });
+          enriched = {
+            ...enriched,
+            organizerPlayerId: enriched.organizerPlayerId ?? opts?.organizerPlayerId ?? playerId,
+            visibility:
+              enriched.visibility ??
+              (opts?.matchVisibility === 'private'
+                ? 'private'
+                : opts?.matchVisibility === 'public'
+                  ? 'public'
+                  : undefined),
+          };
+          upsertMisPartido(enriched);
+        }
       }
 
-      await refreshMatches({ scope: 'mine' });
+      await refreshMatches({ force: true, scope: 'mine' });
 
       if (freshProfile) {
         setProfile((prev) => {
@@ -404,7 +471,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
         profileLoadedAt.current = Date.now();
       }
     },
-    [token, profile?.id, profile?.firstName, profile?.lastName, profile?.avatarUrl, upsertMisPartido, refreshMatches],
+    [token, profile?.id, profile?.firstName, profile?.lastName, profile?.avatarUrl, upsertMisPartido, removeMisPartido, refreshMatches],
   );
 
   const refreshTournaments = useCallback(
@@ -649,6 +716,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       matchesLoading,
       refreshMatches,
       upsertMisPartido,
+      removeMisPartido,
       syncMisPartidoFromMatchId,
       publicTournamentsCount,
       tournamentsLoading,
@@ -674,6 +742,7 @@ export function HomeDataProvider({ children }: { children: ReactNode }) {
       matchesLoading,
       refreshMatches,
       upsertMisPartido,
+      removeMisPartido,
       syncMisPartidoFromMatchId,
       publicTournamentsCount,
       tournamentsLoading,

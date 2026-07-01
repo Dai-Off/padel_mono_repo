@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { bookingStartIsTooFarInPast, BOOKING_START_PAST_ERROR } from '../lib/bookingStartNotInPast';
 import { finalizePastMatches, finalizePastMatchesThrottled } from '../lib/finalizePastMatches';
+import { validateGuestMatchJoinEligibility } from '../lib/guestJoinEligibility';
 import { getMatchListPhase } from '../lib/matchLifecycle';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { hasCourtConflict } from '../lib/courtConflict';
@@ -22,6 +23,8 @@ import {
 import { assertReservationTypeAllowedOnline, fetchAllowOnlineByType } from '../lib/reservationAllowOnline';
 import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
 import { clubTimezoneOrDefault } from '../lib/clubTimezone';
+import { resolveOpenMatchEndAt } from '../lib/openMatchDuration';
+import { getPrivateMatchInviteAccess } from '../lib/matchInviteAccess';
 import { repairOpenMatchPlayersIfNeeded, syncMatchPlayersFromBooking } from '../lib/matchFromBookingSync';
 import {
   fetchBookingParticipantsForRefund,
@@ -35,6 +38,7 @@ import {
   refundPolicyUserMessage,
 } from '../lib/bookingCancellationPolicy';
 import { notifyBookingCancellationEmails } from '../lib/bookingCancellationNotify';
+import { cancelActiveInvitesForMatch } from '../lib/matchInviteLifecycle';
 import {
   matchAffectsElo,
   normalizeMatchType,
@@ -502,6 +506,8 @@ router.get('/mine', async (req: Request, res: Response) => {
       const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
       if (!b?.start_at || !b?.end_at) return false;
       if (b.deleted_at != null) return false;
+      if (String(row.status ?? '').toLowerCase() === 'cancelled') return false;
+      if (String(b.status ?? '').toLowerCase() === 'cancelled') return false;
       const listPhase = getMatchListPhase(nowMs, row.status, b.start_at, b.end_at);
       if (phase === 'past') return listPhase === 'past';
       if (phase === 'upcoming') return listPhase !== 'past';
@@ -753,11 +759,12 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
   if (bookingStartIsTooFarInPast(String(start_at))) {
     return res.status(400).json({ ok: false, error: BOOKING_START_PAST_ERROR });
   }
+  const effectiveEndAt = resolveOpenMatchEndAt(String(start_at));
   try {
     if (await playerHasDebt(String(organizer_player_id))) {
       return res.status(403).json({ ok: false, error: 'player_blocked_by_debt' });
     }
-    const conflictReason = await hasCourtConflict(String(court_id), String(start_at), String(end_at));
+    const conflictReason = await hasCourtConflict(String(court_id), String(start_at), effectiveEndAt);
     if (conflictReason) {
       return res.status(409).json({ ok: false, error: conflictReason });
     }
@@ -766,7 +773,7 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
     const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
       courtId: String(court_id),
       startAt: String(start_at),
-      endAt: String(end_at),
+      endAt: effectiveEndAt,
       reservationType: 'open_match',
     });
     if (!hoursCheck.ok) {
@@ -804,7 +811,7 @@ router.post('/create-with-booking', async (req: Request, res: Response) => {
           court_id,
           organizer_player_id,
           start_at,
-          end_at,
+          end_at: effectiveEndAt,
           timezone: bookingTimezone,
           total_price_cents: Number(total_price_cents),
           currency: 'EUR',
@@ -1101,7 +1108,7 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
     return res.status(400).json({ ok: false, error: 'slot_index (0-3) es obligatorio' });
   }
   try {
-    await finalizePastMatches();
+    await finalizePastMatchesThrottled();
     const supabase = getSupabaseServiceRoleClient();
     const { data: { user }, error } = await supabase.auth.getUser(token);
     if (error || !user?.email) {
@@ -1119,16 +1126,20 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
 
     const { data: match, error: errMatch } = await supabase
       .from('matches')
-      .select('id, booking_id, status, competitive, type, elo_min, elo_max')
+      .select('id, booking_id, status, competitive, type, elo_min, elo_max, visibility')
       .eq('id', matchId)
       .maybeSingle();
     if (errMatch) return res.status(500).json({ ok: false, error: errMatch.message });
     if (!match) return res.status(404).json({ ok: false, error: 'Partido no encontrado' });
-    if (match.status === 'cancelled') {
-      return res.status(400).json({ ok: false, error: 'El partido está cancelado' });
-    }
-    if (match.status === 'finished') {
-      return res.status(400).json({ ok: false, error: 'El partido ya finalizó.' });
+    if (String((match as { visibility?: string }).visibility ?? '').toLowerCase() === 'private') {
+      const inviteAccess = await getPrivateMatchInviteAccess(supabase, matchId, playerId);
+      if (!inviteAccess.ok) {
+        return res.status(403).json({
+          ok: false,
+          code: 'private_match',
+          error: 'Este partido es privado. Solo puedes unirte con invitación.',
+        });
+      }
     }
     if (!match.booking_id) {
       return res.status(400).json({ ok: false, error: 'El partido no tiene reserva asociada' });
@@ -1136,44 +1147,23 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
 
     const { data: contentionBooking, error: errContBk } = await supabase
       .from('bookings')
-      .select('status, court_contention_status')
+      .select('status, court_contention_status, start_at, end_at, total_price_cents')
       .eq('id', match.booking_id)
       .maybeSingle();
     if (errContBk) return res.status(500).json({ ok: false, error: errContBk.message });
-    if (contentionBooking?.status === 'cancelled') {
-      return res.status(400).json({
-        ok: false,
-        code: 'contention_lost',
-        error: 'Este partido ya no tiene la pista: otro grupo completó el partido antes.',
-      });
-    }
-    if (contentionBooking?.court_contention_status === 'lost') {
-      return res.status(400).json({
-        ok: false,
-        code: 'contention_lost',
-        error: 'Este partido ya no tiene la pista: otro grupo completó el partido antes.',
-      });
-    }
 
-    const { data: joinPlayer, error: errJP } = await supabase
-      .from('players')
-      .select('elo_rating, onboarding_completed')
-      .eq('id', playerId)
-      .maybeSingle();
-    if (errJP) return res.status(500).json({ ok: false, error: errJP.message });
-
-    const mCompetitive = !!(match as { competitive?: boolean }).competitive;
-    const mType = String((match as { type?: string }).type ?? 'open');
-    if (matchAffectsElo(mCompetitive, mType) && !(joinPlayer as { onboarding_completed?: boolean })?.onboarding_completed) {
-      return res.status(403).json({ ok: false, error: 'Complete el cuestionario de nivelación primero' });
-    }
-    const eloJoin = Number((joinPlayer as { elo_rating?: number }).elo_rating ?? 0);
-    const eloMin = (match as { elo_min?: number | null }).elo_min;
-    const eloMax = (match as { elo_max?: number | null }).elo_max;
-    if (eloMin != null && eloMax != null) {
-      if (eloJoin < eloMin || eloJoin > eloMax) {
-        return res.status(403).json({ ok: false, error: 'Tu nivel no está en el rango permitido para este partido' });
-      }
+    const eligibility = await validateGuestMatchJoinEligibility(supabase, {
+      matchId,
+      playerId,
+      match,
+      booking: contentionBooking,
+    });
+    if (!eligibility.ok) {
+      return res.status(eligibility.httpStatus ?? 400).json({
+        ok: false,
+        code: eligibility.code,
+        error: eligibility.error,
+      });
     }
 
     const capacity = await assertGuestCanJoinMatch(
@@ -1194,60 +1184,7 @@ router.post('/:id/prepare-join', async (req: Request, res: Response) => {
       return res.status(409).json({ ok: false, code: 'already_in_match', error: 'Ya estás en este partido' });
     }
 
-    const { data: targetBooking } = await supabase
-      .from('bookings')
-      .select('start_at, end_at')
-      .eq('id', match.booking_id)
-      .maybeSingle();
-    const joinPhase = getMatchListPhase(
-      Date.now(),
-      match.status,
-      targetBooking?.start_at,
-      targetBooking?.end_at
-    );
-    if (joinPhase === 'past') {
-      return res.status(400).json({
-        ok: false,
-        error: 'El partido ya finalizó o no está disponible.',
-      });
-    }
-    const targetStart = targetBooking?.start_at ? new Date(targetBooking.start_at).getTime() : 0;
-    const targetEnd = targetBooking?.end_at ? new Date(targetBooking.end_at).getTime() : 0;
-    if (targetStart && targetEnd) {
-      const { data: myMatches } = await supabase
-        .from('match_players')
-        .select('match_id')
-        .eq('player_id', playerId);
-      const myMatchIds = (myMatches ?? []).map((m: { match_id: string }) => m.match_id);
-      if (myMatchIds.length > 0) {
-        const { data: matchesWithBookings } = await supabase
-          .from('matches')
-          .select('id, status, bookings(start_at, end_at)')
-          .in('id', myMatchIds)
-          .neq('status', 'cancelled');
-        const overlaps = (matchesWithBookings ?? []).some((m: { status: string; bookings?: { start_at: string; end_at: string } | { start_at: string; end_at: string }[] }) => {
-          const b = Array.isArray(m.bookings) ? m.bookings[0] : m.bookings;
-          if (!b?.start_at || !b?.end_at) return false;
-          const exStart = new Date(b.start_at).getTime();
-          const exEnd = new Date(b.end_at).getTime();
-          return targetStart < exEnd && targetEnd > exStart;
-        });
-        if (overlaps) {
-          return res.status(400).json({
-            ok: false,
-            code: 'schedule_conflict',
-            error: 'Ya tienes un partido a esa hora. Elige otro horario.',
-          });
-        }
-      }
-    }
-
-    const { data: booking } = await supabase
-      .from('bookings')
-      .select('total_price_cents')
-      .eq('id', match.booking_id)
-      .maybeSingle();
-    const totalCents = booking?.total_price_cents ?? 0;
+    const totalCents = contentionBooking?.total_price_cents ?? 0;
     const shareCents = Math.ceil(totalCents / 4);
 
     return res.status(200).json({
@@ -1406,17 +1343,16 @@ router.get('/:id/cancel-preview', async (req: Request, res: Response) => {
       .eq('match_id', matchId)
       .eq('player_id', player.id)
       .maybeSingle();
-    const isPublic = String(match.visibility ?? '').toLowerCase() === 'public';
-    if (!isPublic) {
-      const { data: booking } = await supabase
-        .from('bookings')
-        .select('organizer_player_id')
-        .eq('id', match.booking_id)
-        .maybeSingle();
-      if (booking?.organizer_player_id !== player.id) {
-        return res.status(403).json({ ok: false, error: 'Solo el organizador puede cancelar un partido privado' });
-      }
-    } else if (!mpRow) {
+
+    const { data: booking } = await supabase
+      .from('bookings')
+      .select('organizer_player_id')
+      .eq('id', match.booking_id)
+      .maybeSingle();
+    const isOrganizer = booking?.organizer_player_id === player.id;
+    const inMatch = Boolean(mpRow);
+
+    if (!inMatch) {
       return res.status(403).json({ ok: false, error: 'No estás en este partido' });
     }
 
@@ -1424,6 +1360,7 @@ router.get('/:id/cancel-preview', async (req: Request, res: Response) => {
     return res.json({
       ok: true,
       refund_eligible: refundPolicy.eligible,
+      is_organizer: isOrganizer,
       notice_hours: refundPolicy.notice_hours,
       incomplete_public_exempt: refundPolicy.incomplete_public_exempt,
       match_player_count: refundPolicy.match_player_count,
@@ -1437,8 +1374,8 @@ router.get('/:id/cancel-preview', async (req: Request, res: Response) => {
 
 /**
  * POST /matches/:id/cancel
- * - Partido **público**: cualquier jugador en el partido. Si es el único → cancela reserva + partido y reembolsa todos los Stripe de la reserva. Si hay más → solo sale él, reembolso Stripe suyo, el partido sigue (reorganiza organizador si hace falta).
- * - Partido **privado**: solo el organizador; siempre cancelación total (igual que antes).
+ * - **Organizador** (público o privado): cancela reserva + partido y reembolsa a todos los que pagaron.
+ * - **Invitado** (se unió al partido): sale de su plaza y reembolso solo su pago; el partido sigue.
  */
 router.post('/:id/cancel', async (req: Request, res: Response) => {
   const matchId = req.params.id;
@@ -1505,8 +1442,6 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       return res.status(400).json({ ok: false, error: 'El partido ya finalizó' });
     }
 
-    const isPublic = String((match as { visibility?: string }).visibility ?? '') === 'public';
-
     const clubId = await resolveClubIdForBooking(supabase, booking.id);
     if (!clubId) {
       return res.status(500).json({ ok: false, error: 'No se pudo resolver el club de la reserva' });
@@ -1514,70 +1449,7 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
 
     const refundPolicy = await evaluateBookingRefundPolicy(supabase, booking.id);
     const now = new Date().toISOString();
-
-    if (!isPublic) {
-      if (booking.organizer_player_id !== playerId) {
-        return res.status(403).json({
-          ok: false,
-          error: 'Solo el organizador puede cancelar un partido privado',
-        });
-      }
-      if (refundPolicy.eligible) {
-        const stripeRef = await refundStripeBookingPaymentTransactions(supabase, booking.id, clubId);
-        if (stripeRef.errors.length > 0) {
-          return res.status(502).json({
-            ok: false,
-            error: 'No se pudieron completar los reembolsos con tarjeta (app). El partido no se canceló.',
-            refund_errors: stripeRef.errors,
-          });
-        }
-      }
-      const { error: errUpB } = await supabase
-        .from('bookings')
-        .update({
-          status: 'cancelled',
-          updated_at: now,
-          cancelled_at: now,
-          cancelled_by: 'player',
-          deleted_at: now,
-        })
-        .eq('id', booking.id)
-        .is('deleted_at', null);
-      if (errUpB) return res.status(500).json({ ok: false, error: errUpB.message });
-
-      const { data: matchRow, error: errUpM } = await supabase
-        .from('matches')
-        .update({ status: 'cancelled', updated_at: now })
-        .eq('id', matchId)
-        .select('id, status')
-        .maybeSingle();
-      if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
-
-      if ((match as { type?: string }).type === 'matchmaking') {
-        try {
-          await releaseMatchmakingProposal(matchId, { cancelBooking: false });
-        } catch (e) {
-          console.error('[matches/cancel] releaseMatchmakingProposal (privado):', e);
-        }
-      }
-
-      void notifyBookingCancellationEmails(supabase, {
-        bookingId: booking.id,
-        scenario: 'cancelled',
-        cancelledBy: 'player',
-        refundPercent: refundPolicy.eligible ? 100 : 0,
-        refundEligible: refundPolicy.eligible,
-        policyMessage: refundPolicyUserMessage(refundPolicy),
-      });
-
-      return res.json({
-        ok: true,
-        cancelled_entire_match: true,
-        match: matchRow,
-        refund_eligible: refundPolicy.eligible,
-        policy_message: refundPolicy.eligible ? undefined : refundPolicyUserMessage(refundPolicy),
-      });
-    }
+    const isOrganizer = booking.organizer_player_id === playerId;
 
     const { data: mpRows, error: errMp } = await supabase
       .from('match_players')
@@ -1590,18 +1462,55 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       return res.status(403).json({ ok: false, error: 'No estás en este partido' });
     }
 
-    const n = (mpRows ?? []).length;
-    if (n <= 1) {
-      if (refundPolicy.eligible) {
-        const stripeRef = await refundStripeBookingPaymentTransactions(supabase, booking.id, clubId);
-        if (stripeRef.errors.length > 0) {
-          return res.status(502).json({
-            ok: false,
-            error: 'No se pudieron completar los reembolsos con tarjeta (app).',
-            refund_errors: stripeRef.errors,
-          });
-        }
+    const refundAllPaidParticipants = async (): Promise<string[]> => {
+      if (!refundPolicy.eligible) return [];
+      const participants = await fetchBookingParticipantsForRefund(supabase, booking.id);
+      const errors: string[] = [];
+      for (const row of participants) {
+        if (String(row.payment_status ?? '') !== 'paid') continue;
+        const result = await refundBookingParticipant(supabase, booking.id, clubId, row, {
+          concept: 'Reembolso por cancelación de reserva',
+          refundEligible: true,
+          refundPercent: 100,
+          now,
+        });
+        errors.push(...result.errors);
       }
+      return errors;
+    };
+
+    const refundLeavingPlayer = async (): Promise<string[]> => {
+      if (!refundPolicy.eligible) return [];
+      const participants = await fetchBookingParticipantsForRefund(supabase, booking.id);
+      const row = participants.find((p) => p.player_id === playerId);
+      if (!row) {
+        const stripeSolo = await refundStripeBookingPaymentForPlayer(
+          supabase,
+          booking.id,
+          clubId,
+          playerId,
+        );
+        return stripeSolo.errors;
+      }
+      const result = await refundBookingParticipant(supabase, booking.id, clubId, row, {
+        concept: 'Reembolso por baja de reserva',
+        refundEligible: true,
+        refundPercent: 100,
+        now,
+      });
+      return result.errors;
+    };
+
+    if (isOrganizer) {
+      const refundErrors = await refundAllPaidParticipants();
+      if (refundErrors.length > 0) {
+        return res.status(502).json({
+          ok: false,
+          error: 'No se pudieron completar los reembolsos. El partido no se canceló.',
+          refund_errors: refundErrors,
+        });
+      }
+
       const { error: errUpB } = await supabase
         .from('bookings')
         .update({
@@ -1623,11 +1532,18 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
         .maybeSingle();
       if (errUpM) return res.status(500).json({ ok: false, error: errUpM.message });
 
+      const inviteCancel = await cancelActiveInvitesForMatch(supabase, matchId);
+      if (inviteCancel.error) {
+        console.error('[matches/cancel] cancelActiveInvitesForMatch:', inviteCancel.error);
+      }
+
+      await supabase.from('match_players').delete().eq('match_id', matchId);
+
       if ((match as { type?: string }).type === 'matchmaking') {
         try {
           await releaseMatchmakingProposal(matchId, { cancelBooking: false });
         } catch (e) {
-          console.error('[matches/cancel] releaseMatchmakingProposal (público vacío):', e);
+          console.error('[matches/cancel] releaseMatchmakingProposal (organizador):', e);
         }
       }
 
@@ -1649,15 +1565,13 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       });
     }
 
-    if (refundPolicy.eligible) {
-      const stripeSolo = await refundStripeBookingPaymentForPlayer(supabase, booking.id, clubId, playerId);
-      if (stripeSolo.errors.length > 0) {
-        return res.status(502).json({
-          ok: false,
-          error: 'No se pudo reembolsar tu pago con tarjeta. No se aplicó la baja.',
-          refund_errors: stripeSolo.errors,
-        });
-      }
+    const refundErrors = await refundLeavingPlayer();
+    if (refundErrors.length > 0) {
+      return res.status(502).json({
+        ok: false,
+        error: 'No se pudo completar tu reembolso. No se aplicó la baja.',
+        refund_errors: refundErrors,
+      });
     }
 
     void notifyBookingCancellationEmails(supabase, {
@@ -1683,22 +1597,6 @@ router.post('/:id/cancel', async (req: Request, res: Response) => {
       .eq('booking_id', booking.id)
       .eq('player_id', playerId);
     if (delBp) return res.status(500).json({ ok: false, error: delBp.message });
-
-    if (booking.organizer_player_id === playerId) {
-      const sortedRemaining = [...(mpRows ?? [])]
-        .filter((r: { player_id: string }) => r.player_id !== playerId)
-        .sort(
-          (a: { slot_index?: number | null }, b: { slot_index?: number | null }) =>
-            (a.slot_index ?? 999) - (b.slot_index ?? 999),
-        );
-      const newOrg = sortedRemaining[0]?.player_id;
-      if (newOrg) {
-        await supabase
-          .from('bookings')
-          .update({ organizer_player_id: newOrg, updated_at: now })
-          .eq('id', booking.id);
-      }
-    }
 
     await supabase.from('matches').update({ updated_at: now }).eq('id', matchId);
 

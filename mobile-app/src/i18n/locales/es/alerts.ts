@@ -62,6 +62,10 @@ export const alerts: AlertsTranslationKeys = {
     titleLeave: '¿Salir del partido?',
     bodySolo: 'Eres el único jugador: se anulará la reserva y el partido desaparecerá. Si pagaste, se reembolsará.',
     bodyMulti: 'Dejarás tu plaza; los demás siguen en el partido. Si pagaste tu parte, se reembolsará.',
+    bodyOrganizerCancel:
+      'Se cancelará el partido para todos los jugadores. Si alguien pagó, se reembolsará.',
+    bodyOrganizerCancelNoRefund:
+      'Se cancelará el partido para todos los jugadores. No habrá reembolso por la política del club.',
     bodySoloNoRefund: 'Eres el único jugador: se anulará la reserva y el partido desaparecerá. No habrá reembolso por la política del club.',
     bodyMultiNoRefund: 'Dejarás tu plaza. No habrá reembolso por la política del club.',
     policyNoRefundDefault: 'Fuera del plazo de reembolso del club: la baja se procesará sin devolución.',
@@ -92,6 +96,11 @@ export const alerts: AlertsTranslationKeys = {
     accepted: 'Invitación aceptada',
     acceptedBody: 'Ya estás inscrito en el torneo.',
     title: 'Invitación al torneo',
+  },
+  matchInvite: {
+    accepted: 'Invitación aceptada',
+    acceptedBody: 'Ya puedes unirte al partido privado y pagar tu plaza.',
+    title: 'Invitación al partido',
   },
   tournament: {
     sportAlert: 'Por ahora todos los torneos son de pádel.',

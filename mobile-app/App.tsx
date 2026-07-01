@@ -151,8 +151,6 @@ export default function App() {
           <SafeAreaProvider>
             <I18nProvider>
               <AuthProvider>
-                {/* Montado siempre (no dentro del branch authed) para que un
-                    parpadeo de sesión no destruya el cache y dispare reload infinito. */}
                 <HomeDataProvider>
                   <CartProvider>
                     <AppContent />

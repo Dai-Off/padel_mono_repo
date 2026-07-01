@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
-import { PartidoCard } from '../components/partido/PartidoCard';
 import { PartidoOpenCard } from '../components/partido/PartidoOpenCard';
 import { PartidoOpenCardSkeleton } from '../components/partido/PartidoOpenCardSkeleton';
 import { CrearPartidoLocationSheet } from '../components/partido/CrearPartidoLocationSheet';
@@ -82,13 +81,18 @@ export type PartidoItem = {
   startAt?: string;
   endAt?: string;
   matchGender?: 'male' | 'female' | 'mixed' | 'all';
+  /** Reserva asociada (evita round-trip prepare-join antes del pago). */
+  bookingId?: string;
 };
 
 type SheetKind = 'sport' | 'where' | 'when' | 'more' | null;
 
 type PartidosScreenProps = {
   onPartidoPress?: (partido: PartidoItem) => void;
-  onOpenWeMatchClubsFlow?: (organizerPlayerId: string | null) => void;
+  onOpenWeMatchClubsFlow?: (
+    organizerPlayerId: string | null,
+    matchVisibility: 'public' | 'private',
+  ) => void;
   onNavigateToCompleteOnboarding?: () => void;
   partidosRefreshNonce?: number;
 };
@@ -109,9 +113,7 @@ export function PartidosScreen({
     applyFilters,
     patchFilters,
     openPartidos,
-    myPartidos,
     loading,
-    misPartidosLoading,
     organizerPlayerId,
     clubs,
     clubsLoading,
@@ -170,32 +172,6 @@ export function PartidosScreen({
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>{t('partidos.noOpenMatches')}</Text>
               <Text style={styles.emptyHint}>{t('partidos.noOpenMatchesHint')}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={[styles.section, { marginTop: theme.spacing.xl }]}>
-          <Text style={styles.sectionTitle}>{t('partidos.myMatches')}</Text>
-          <Text style={styles.sectionSubtitle}>{t('partidos.myMatchesSub')}</Text>
-        </View>
-        <View style={styles.list}>
-          {misPartidosLoading && myPartidos.length === 0 ? (
-            <>
-              <PartidoOpenCardSkeleton />
-              <PartidoOpenCardSkeleton />
-            </>
-          ) : myPartidos.length > 0 ? (
-            myPartidos.map((item) => (
-              <PartidoCard
-                key={item.id}
-                item={item}
-                surface="dark"
-                onPress={() => onPartidoPress?.(item)}
-              />
-            ))
-          ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>{t('partidos.noUpcomingMatches')}</Text>
             </View>
           )}
         </View>
@@ -266,9 +242,9 @@ export function PartidosScreen({
         modalOnlyWeMatch
         initialStep="location"
         organizerPlayerId={organizerPlayerId}
-        onContinueWeMatch={() => {
+        onContinueWeMatch={(visibility) => {
           setLocationModalVisible(false);
-          onOpenWeMatchClubsFlow?.(organizerPlayerId ?? null);
+          onOpenWeMatchClubsFlow?.(organizerPlayerId ?? null, visibility);
         }}
         onClose={() => setLocationModalVisible(false)}
         onSiguiente={() => {}}
