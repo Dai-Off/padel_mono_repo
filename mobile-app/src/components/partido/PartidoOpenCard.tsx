@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
-import { PlayerAvatarCircle } from "../profile/PlayerAvatarCircle";
+import { AvatarWithFrame } from "../profile/AvatarWithFrame";
 import { useHomeData } from "../../contexts/HomeDataContext";
 import {
   resolvePlayerDisplayAvatar,
@@ -103,11 +103,12 @@ function PlayerFace({
   }
   return (
     <View style={styles.slotFill}>
-      <PlayerAvatarCircle
+      <AvatarWithFrame
         avatarUrl={resolvePlayerDisplayAvatar(player, currentProfile, displayOpts)}
         initials={resolvePlayerDisplayInitials(player, currentProfile, displayOpts)}
-        size={40}
-        borderRadius={8}
+        size={SLOT}
+        frame={player.frame ?? null}
+        animate={false}
       />
     </View>
   );
@@ -408,12 +409,12 @@ const styles = StyleSheet.create({
     paddingRight: 8,
   },
   slotFill: {
-    width: SLOT,
-    height: SLOT,
-    borderRadius: 6,
+    // Sin tamaño fijo ni overflow:hidden: el marco de AvatarWithFrame sobresale
+    // del avatar; recortarlo lo ocultaría. minWidth reserva el hueco del slot.
+    minWidth: SLOT,
+    minHeight: SLOT,
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden",
   },
   slotAvatar: {
     width: SLOT,
