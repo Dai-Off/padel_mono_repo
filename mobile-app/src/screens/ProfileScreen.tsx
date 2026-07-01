@@ -133,7 +133,9 @@ export function ProfileScreen({
   // Personalización (título/marco/insignias equipados) + catálogos para resolverlos
   const [customization, setCustomization] = useState<ProfileCustomization | null>(null);
   const [framesCatalog, setFramesCatalog] = useState<CatalogItem[]>([]);
-  const [heroBadges, setHeroBadges] = useState<Achievement[]>([]);
+  // Lista completa de logros: alimenta a la vez las insignias del hero y la
+  // Vitrina (dedupe: un solo fetch compartido en vez de dos).
+  const [allAchievements, setAllAchievements] = useState<Achievement[]>([]);
   const [showCustomize, setShowCustomize] = useState(false);
   const [customizationReady, setCustomizationReady] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
@@ -279,7 +281,7 @@ export function ProfileScreen({
         if (cancelled) return;
         setCustomization(c ?? { titleId: null, frameId: null, pinnedBadgeIds: [] });
         setFramesCatalog(frames);
-        setHeroBadges(achievements.filter((a) => a.type !== 'course'));
+        setAllAchievements(achievements);
       })
       .catch(() => {})
       .finally(() => {
@@ -296,6 +298,12 @@ export function ProfileScreen({
     const f = framesCatalog.find((x) => x.id === fid);
     return f ? { rarity: f.rarity, style: f.style, animationType: f.animationType, colors: f.colors } : null;
   }, [customization?.frameId, framesCatalog]);
+
+  // Insignias del hero (no-cursos) derivadas de la lista completa compartida.
+  const heroBadges = useMemo<Achievement[]>(
+    () => allAchievements.filter((a) => a.type !== 'course'),
+    [allAchievements],
+  );
 
   const pinnedBadges = useMemo<Achievement[]>(() => {
     const ids = customization?.pinnedBadgeIds ?? [];
@@ -430,7 +438,10 @@ export function ProfileScreen({
     ]);
   };
 
-  if ((profileLoading && !profile) || (!customizationReady && !profileError)) {
+  // Gate mínimo (C7): el hero solo espera al perfil. La personalización (marco,
+  // título, insignias) es opcional en el render y entra en cuanto llega, sin
+  // bloquear el pintado de la pantalla.
+  if (profileLoading && !profile) {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#F18F34" />
@@ -679,7 +690,7 @@ export function ProfileScreen({
               scrollToVitrina();
             }}
           >
-            <TrophyShowcaseSection />
+            <TrophyShowcaseSection achievements={allAchievements} loading={!customizationReady} />
           </View>
         ) : null}
 
