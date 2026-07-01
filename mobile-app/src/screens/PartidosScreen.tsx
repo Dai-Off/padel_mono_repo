@@ -21,6 +21,7 @@ import type { MatchListPhase } from '../domain/matchLifecycle';
 import { usePartidosList } from '../hooks/usePartidosList';
 import { useTranslation } from '../i18n';
 import { lineHeightFor, theme } from '../theme';
+import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
 export type PartidoMode = 'competitivo' | 'amistoso';
 export type PartidoPlayer = {
@@ -30,6 +31,8 @@ export type PartidoPlayer = {
   initial?: string;
   level: string;
   isFree: boolean;
+  /** Marco equipado del jugador (para pintar el "pack" con AvatarWithFrame). */
+  frame?: FrameAttrs | null;
 };
 export type PartidoItem = {
   id: string;

@@ -8,6 +8,21 @@ const knownPlayerAvatars = new Map<string, string>();
 /** ELO formateado por jugador — evita badge amarillo vacío tras unirse. */
 const knownPlayerLevels = new Map<string, string>();
 
+/** Marco equipado por jugador — evita que parpadee/desaparezca en refetches. */
+type PlayerFrame = NonNullable<PartidoItem['players'][number]['frame']>;
+const knownPlayerFrames = new Map<string, PlayerFrame>();
+
+export function cachePlayerFrame(playerId: string | null | undefined, frame: PlayerFrame | null | undefined): void {
+  const id = playerId?.trim();
+  if (id && frame) knownPlayerFrames.set(id, frame);
+}
+
+export function getCachedPlayerFrame(playerId: string | null | undefined): PlayerFrame | null {
+  const id = playerId?.trim();
+  if (!id) return null;
+  return knownPlayerFrames.get(id) ?? null;
+}
+
 export function cachePlayerAvatar(playerId: string | null | undefined, url: string | null | undefined): void {
   const id = playerId?.trim();
   const uri = normalizePlayerAvatarUrl(url);
@@ -62,6 +77,43 @@ function rememberPartidoAvatars(partido: PartidoItem): void {
   for (const [pid, uri] of collectAvatarsByPlayerId(partido)) {
     knownPlayerAvatars.set(pid, uri);
   }
+}
+
+function collectFramesByPlayerId(partido: PartidoItem): Map<string, PlayerFrame> {
+  const map = new Map<string, PlayerFrame>();
+  partido.players.forEach((p, index) => {
+    const pid = playerIdAtSlot(partido, index, p);
+    if (pid && p.frame) map.set(pid, p.frame);
+  });
+  return map;
+}
+
+function rememberPartidoFrames(partido: PartidoItem): void {
+  for (const [pid, frame] of collectFramesByPlayerId(partido)) {
+    knownPlayerFrames.set(pid, frame);
+  }
+}
+
+/**
+ * Tras un refetch, no descartar el marco que ya teníamos si el nuevo llega sin
+ * él (misma plaza, mismo jugador). Evita el parpadeo "marco → sin marco → marco".
+ */
+export function preservePartidoPlayerFrames(
+  previous: PartidoItem,
+  incoming: PartidoItem,
+): PartidoItem {
+  const prevById = collectFramesByPlayerId(previous);
+  const players = incoming.players.map((p, index) => {
+    if (p.frame) return p;
+    const pid = playerIdAtSlot(incoming, index, p) ?? playerIdAtSlot(previous, index, p);
+    const prevFrame = (pid ? prevById.get(pid) : null) ?? (pid ? getCachedPlayerFrame(pid) : null);
+    if (prevFrame) return { ...p, frame: prevFrame };
+    return p;
+  });
+  const changed = players.some((p, i) => p.frame !== incoming.players[i]?.frame);
+  const result = changed ? { ...incoming, players } : incoming;
+  rememberPartidoFrames(result);
+  return result;
 }
 
 export type ProfileForPartidoEnrich = {
@@ -369,6 +421,7 @@ export function enrichPartidoWithProfileAvatar(
   if (uri) cachePlayerAvatar(pid, uri);
   rememberPartidoAvatars(result);
   rememberPartidoLevels(result);
+  rememberPartidoFrames(result);
   return result;
 }
 
@@ -475,7 +528,13 @@ export function preservePartidoPlayerLevels(
   return changed ? { ...incoming, players } : incoming;
 }
 
-/** True si la UI de jugadores (avatar, nombre, ELO) no cambiaría visiblemente. */
+/** Clave estable del marco equipado, para comparar sin re-render innecesario. */
+function frameKey(frame: PartidoItem['players'][number]['frame']): string {
+  if (!frame) return '';
+  return [frame.style ?? '', frame.animationType ?? '', frame.rarity ?? '', (frame.colors ?? []).join(',')].join('|');
+}
+
+/** True si la UI de jugadores (avatar, nombre, ELO, marco) no cambiaría visiblemente. */
 export function partidoPlayersDisplayEqual(a: PartidoItem, b: PartidoItem): boolean {
   if (a.players.length !== b.players.length) return false;
   return a.players.every((pa, i) => {
@@ -486,6 +545,7 @@ export function partidoPlayersDisplayEqual(a: PartidoItem, b: PartidoItem): bool
     if ((pa.name ?? '') !== (pb.name ?? '')) return false;
     if (normalizeLevelDisplay(pa.level) !== normalizeLevelDisplay(pb.level)) return false;
     if ((pa.initial ?? '') !== (pb.initial ?? '')) return false;
+    if (frameKey(pa.frame) !== frameKey(pb.frame)) return false;
     const avA = normalizePlayerAvatarUrl(pa.avatar);
     const avB = normalizePlayerAvatarUrl(pb.avatar);
     return avA === avB;
@@ -525,6 +585,7 @@ export function mergePartidoWithServer(
   let next = enrichPartidoWithProfileAvatar(base, profile, opts);
   next = preservePartidoPlayerAvatars(previous, next);
   next = preservePartidoPlayerLevels(previous, next);
+  next = preservePartidoPlayerFrames(previous, next);
   return {
     ...next,
     organizerPlayerId: next.organizerPlayerId ?? previous.organizerPlayerId,
@@ -583,6 +644,7 @@ export function upsertMisPartidosList(items: PartidoItem[], next: PartidoItem): 
   const idx = items.findIndex((p) => p.id === next.id);
   const mergedItem = idx >= 0 ? preservePartidoPlayerAvatars(items[idx], next) : next;
   rememberPartidoAvatars(mergedItem);
+  rememberPartidoFrames(mergedItem);
   const merged =
     idx >= 0 ? items.map((p, i) => (i === idx ? mergedItem : p)) : [mergedItem, ...items];
   const upcoming = merged.filter((p) => p.matchPhase !== 'past');
@@ -669,5 +731,6 @@ export function mergeMisPartidosFromServer(
     merged = upsertMisPartidosList(merged, p);
   }
   merged.forEach(rememberPartidoAvatars);
+  merged.forEach(rememberPartidoFrames);
   return merged.filter((p) => !isPartidoCancelled(p));
 }

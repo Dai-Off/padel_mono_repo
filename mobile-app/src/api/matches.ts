@@ -1,5 +1,6 @@
 import { API_URL } from '../config';
 import { normalizeMatchList } from './normalizeMatch';
+import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
 export type Match = {
   id: string;
@@ -29,6 +30,8 @@ type PlayerRef = {
   elo_rating: number;
   liga?: string | null;
   avatar_url?: string | null;
+  /** Marco equipado resuelto por el backend (getEquippedFrames). */
+  frame?: FrameAttrs | null;
 };
 
 type MatchPlayerRef = {

@@ -37,6 +37,8 @@ import type {
 } from '../api/tournaments';
 import { useHomeData } from '../contexts/HomeDataContext';
 import { OnboardingSoftBlockBanner } from '../components/onboarding/OnboardingSoftBlockBanner';
+import { AvatarWithFrame } from '../components/profile/AvatarWithFrame';
+import { PlayerProfileOverlay } from '../components/profile/PlayerProfileOverlay';
 import {
   fetchTournamentCompetitionPlayerView,
   fetchTournamentChatMessages,
@@ -392,6 +394,8 @@ export function TournamentDetailScreen({
   const [tab, setTab] = useState<DetailTab>('info');
   const [competition, setCompetition] = useState<TournamentCompetitionPlayerView | null>(null);
   const [participants, setParticipants] = useState<TournamentParticipantRow[]>([]);
+  // Perfil público de un participante, abierto ENCIMA del detalle (modal anidado).
+  const [profilePlayerId, setProfilePlayerId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<TournamentChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [chatDraft, setChatDraft] = useState('');
@@ -1355,25 +1359,23 @@ export function TournamentDetailScreen({
                         .map((part) => part[0]?.toUpperCase() ?? '')
                         .join('');
                       return (
-                        <View key={p.id} style={styles.teamRow}>
-                          {p.avatar_url ? (
-                            <Image source={{ uri: p.avatar_url }} style={styles.participantAvatarImage} />
-                          ) : (
-                            <View style={styles.teamAvatar}>
-                              <Text style={styles.teamAvatarText} numberOfLines={1}>
-                                {initials || 'J'}
-                              </Text>
-                            </View>
-                          )}
+                        <Pressable
+                          key={p.id}
+                          style={({ pressed }) => [styles.teamRow, pressed && styles.teamRowPressed]}
+                          onPress={() => p.id && setProfilePlayerId(p.id)}
+                        >
+                          <AvatarWithFrame
+                            avatarUrl={p.avatar_url}
+                            initials={initials || 'J'}
+                            size={40}
+                            frame={p.frame ?? null}
+                            level={p.elo_rating ?? undefined}
+                            animate={false}
+                          />
                           <View style={styles.teamRowText}>
                             <Text style={styles.teamName}>{fullName}</Text>
-                            <Text style={styles.teamSub}>
-                              {t('torneos.detailPlayerLevel', {
-                                level: p.elo_rating != null ? Math.round(Number(p.elo_rating)) : '—',
-                              })}
-                            </Text>
                           </View>
-                        </View>
+                        </Pressable>
                       );
                     })}
                 {competitionTeams.length === 0 && slotsFree > 0 ? <TeamSlotAvailableRow /> : null}
@@ -1669,6 +1671,15 @@ export function TournamentDetailScreen({
         onPress={() => onOpenProfileForOnboarding?.()}
         message={t('torneos.detailOnboardingBanner')}
         bottomOffset={90}
+      />
+
+      {/* Perfil público de un participante, encima del detalle. Overlay (no
+          Modal anidado, que RN no presenta bien dentro de otro Modal). Al volver
+          se cierra y se regresa al torneo, sin perder el contexto. */}
+      <PlayerProfileOverlay
+        playerId={profilePlayerId}
+        onClose={() => setProfilePlayerId(null)}
+        onOpenPlayer={(pid) => setProfilePlayerId(pid)}
       />
     </View>
   );
@@ -2037,6 +2048,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
+  teamRowPressed: { opacity: 0.7 },
   teamRowText: { flex: 1, minWidth: 0 },
   teamAvatar: {
     width: 40,
@@ -2045,14 +2057,6 @@ const styles = StyleSheet.create({
     backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  participantAvatarImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   teamAvatarText: {
     fontSize: 10,

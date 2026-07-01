@@ -3,12 +3,11 @@ import {
   View, 
   Text, 
   StyleSheet, 
-  Modal, 
+  Modal,
   FlatList, 
   TextInput, 
-  TouchableOpacity, 
+  TouchableOpacity,
   Platform,
-  Image,
   ActivityIndicator
 } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
@@ -17,14 +16,24 @@ import { CommunityPost, CommunityComment, fetchComments, addComment } from '../.
 import { formatTimeAgo } from '../../utils/timeAgo';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTranslation } from '../../i18n';
+import { AvatarWithFrame } from '../profile/AvatarWithFrame';
+
+/** Iniciales (máx 2) del comentarista. */
+function commentInitials(p: { first_name?: string | null; last_name?: string | null; username?: string | null }): string {
+  const a = p.first_name?.trim()?.[0] ?? '';
+  const b = p.last_name?.trim()?.[0] ?? '';
+  const ini = (a + b).toUpperCase();
+  return ini || (p.username?.trim()?.slice(0, 2) ?? '?').toUpperCase();
+}
 
 interface CommentSheetProps {
   isVisible: boolean;
   onClose: () => void;
   post: CommunityPost | null;
+  onPressAuthor?: (playerId: string) => void;
 }
 
-export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, post }) => {
+export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, post, onPressAuthor }) => {
   const { session } = useAuth();
   const { t } = useTranslation();
   const token = session?.access_token;
@@ -91,12 +100,24 @@ export const CommentSheet: React.FC<CommentSheetProps> = ({ isVisible, onClose, 
               contentContainerStyle={styles.list}
               renderItem={({ item }) => (
                 <View style={styles.commentItem}>
-                  <Image 
-                    source={{ uri: item.player.avatar_url || 'https://via.placeholder.com/150' }} 
-                    style={styles.commentAvatar} 
-                  />
+                  <TouchableOpacity
+                    style={styles.commentAvatar}
+                    activeOpacity={0.7}
+                    onPress={() => item.player.id && onPressAuthor?.(item.player.id)}
+                  >
+                    <AvatarWithFrame
+                      avatarUrl={item.player.avatar_url}
+                      initials={commentInitials(item.player)}
+                      size={36}
+                      frame={item.player.frame ?? null}
+                      animate={false}
+                    />
+                  </TouchableOpacity>
                   <View style={styles.commentTextContainer}>
-                    <Text style={styles.commentAuthor}>
+                    <Text
+                      style={styles.commentAuthor}
+                      onPress={() => item.player.id && onPressAuthor?.(item.player.id)}
+                    >
                       {item.player.first_name} {item.player.last_name}
                       <Text style={styles.commentTime}>  {formatTimeAgo(item.created_at, t)}</Text>
                     </Text>
@@ -184,9 +205,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   commentAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
     marginRight: 12,
   },
   commentTextContainer: {

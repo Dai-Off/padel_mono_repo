@@ -1,8 +1,8 @@
-import { Image, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "../../i18n";
 import { theme } from "../../theme";
-import { PlayerAvatarCircle } from "../profile/PlayerAvatarCircle";
+import { AvatarWithFrame } from "../profile/AvatarWithFrame";
 import { useHomeData } from "../../contexts/HomeDataContext";
 import {
   resolvePlayerDisplayAvatar,
@@ -61,23 +61,29 @@ function PlayerSlot({
       </View>
     );
   }
+  // ELO numérico para la burbuja combinada del pack (undefined => sin burbuja).
+  const levelNum = (() => {
+    const s = player.level?.trim();
+    if (!s || s === "—") return undefined;
+    const n = Number(s.replace(",", "."));
+    return Number.isFinite(n) ? n : undefined;
+  })();
   return (
     <View style={styles.playerSlot}>
-      <PlayerAvatarCircle
+      <AvatarWithFrame
         avatarUrl={resolvePlayerDisplayAvatar(player, currentProfile, displayOpts)}
         initials={resolvePlayerDisplayInitials(player, currentProfile, displayOpts)}
         size={48}
-        borderRadius={10}
+        frame={player.frame ?? null}
+        level={levelNum}
+        animate={false}
       />
       <Text
-        style={[styles.playerName, d && styles.playerNameDark]}
+        style={[styles.playerName, styles.playerNameWithBubble, d && styles.playerNameDark]}
         numberOfLines={1}
       >
         {player.name}
       </Text>
-      <View style={styles.levelBadge}>
-        <Text style={styles.levelBadgeText}>{player.level}</Text>
-      </View>
     </View>
   );
 }
@@ -166,26 +172,24 @@ export function PartidoCard({
             d && styles.privateReservadoRowDark,
           ]}
         >
-          <View style={styles.privateReservadoAvatar}>
-            {(() => {
-              const org = item.players.find((p) => !p.isFree);
-              if (!org)
-                return <Text style={styles.privateReservadoIcon}>✓</Text>;
-              return org.avatar ? (
-                <Image
-                  source={{ uri: org.avatar }}
-                  style={styles.privateReservadoImg}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View style={styles.privateReservadoInitialWrap}>
-                  <Text style={styles.privateReservadoInitial}>
-                    {org.initial ?? org.name[0] ?? "?"}
-                  </Text>
+          {(() => {
+            const org = item.players.find((p) => !p.isFree);
+            if (!org)
+              return (
+                <View style={styles.privateReservadoAvatar}>
+                  <Text style={styles.privateReservadoIcon}>✓</Text>
                 </View>
               );
-            })()}
-          </View>
+            return (
+              <AvatarWithFrame
+                avatarUrl={org.avatar}
+                initials={org.initial ?? org.name[0] ?? "?"}
+                size={36}
+                frame={org.frame ?? null}
+                animate={false}
+              />
+            );
+          })()}
           <Text
             style={[
               styles.privateReservadoLabel,
@@ -301,16 +305,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  privateReservadoImg: { width: 36, height: 36, borderRadius: 10 },
-  privateReservadoInitialWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#1A1A1A",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  privateReservadoInitial: { fontSize: 12, fontWeight: "700", color: "#fff" },
   privateReservadoIcon: { fontSize: 16, fontWeight: "700", color: "#E31E24" },
   privateReservadoLabel: { fontSize: 12, fontWeight: "600", color: "#6b7280" },
   playersRow: {
@@ -359,14 +353,8 @@ const styles = StyleSheet.create({
     maxWidth: 50,
     textAlign: "center",
   },
-  levelBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: "#fef08a",
-    marginTop: 2,
-  },
-  levelBadgeText: { fontSize: 9, fontWeight: "700", color: "#1A1A1A" },
+  /** Hueco para la burbuja de ELO que cuelga bajo el avatar del pack. */
+  playerNameWithBubble: { marginTop: 10 },
   venueRow: {
     flexDirection: "row",
     alignItems: "center",

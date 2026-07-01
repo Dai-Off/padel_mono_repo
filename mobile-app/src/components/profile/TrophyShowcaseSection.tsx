@@ -1,205 +1,195 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { formatLocale, useTranslation } from '../../i18n';
+import { useAuth } from '../../contexts/AuthContext';
+import { AchievementCard } from './AchievementCard';
+import type { Achievement, AchievementType } from '../../design/achievements';
+import { fetchAchievements, fetchPlayerPublicAchievements, toggleAchievementVisibility } from '../../api/unlockables';
 
-type AchievementTier = 'legendary' | 'epic' | 'normal';
+type TabKey = 'trophy' | 'badge' | 'course';
+const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { key: 'trophy', label: 'Trofeos', icon: 'trophy-outline' },
+  { key: 'badge', label: 'Insignias', icon: 'medal-outline' },
+  { key: 'course', label: 'Cursos', icon: 'school-outline' },
+];
 
-interface Achievement {
-  id: string;
-  title: string;
-  description: string;
-  tier: AchievementTier;
-  icon: keyof typeof Ionicons.glyphMap;
-  date: string;
-  sport?: 'padel';
-  color: string;
-  isPublic: boolean;
+const PREVIEW_COUNT = 4;
+
+interface TrophyShowcaseSectionProps {
+  /** Si se pasa, es el perfil AJENO: carga los logros visibles de ese jugador (público), sin ojo ni edición. */
+  playerId?: string;
 }
 
-export const TrophyShowcaseSection: React.FC = () => {
-  const { t, locale } = useTranslation();
-  const numberLocale = formatLocale(locale);
-  const tabAll = t('profile.logrosTabAll');
-  const tabTrophies = t('profile.achievementsTitle');
-  const tabBadges = t('profile.coachStrengths');
-  const tabCourses = t('profile.coachProgCoursesCompleted');
-  const [activeTab, setActiveTab] = useState(tabAll);
+export const TrophyShowcaseSection: React.FC<TrophyShowcaseSectionProps> = ({ playerId }) => {
+  const { session } = useAuth();
+  const token = session?.access_token ?? null;
+  const own = !playerId; // perfil propio si no hay playerId
 
-  const achievements = useMemo<Achievement[]>(
-    () => [
-      {
-        id: '1',
-        title: t('profile.achievementsTitle'),
-        description: t('profile.achievementsEmptySub'),
-        tier: 'legendary',
-        icon: 'trophy-outline',
-        date: new Date(2025, 7, 1).toLocaleDateString(numberLocale, { month: 'short', year: 'numeric' }),
-        sport: 'padel',
-        color: '#F18F34',
-        isPublic: true,
-      },
-      {
-        id: '2',
-        title: t('profile.coachProgDailyLesson'),
-        description: t('onboarding.profileLevelCoachDesc'),
-        tier: 'epic',
-        icon: 'flame-outline',
-        date: new Date(2025, 6, 1).toLocaleDateString(numberLocale, { month: 'short', year: 'numeric' }),
-        sport: 'padel',
-        color: '#A855F7',
-        isPublic: true,
-      },
-      {
-        id: '3',
-        title: t('profile.coachProgCoursesCompleted'),
-        description: t('profile.achievementsEmptySub'),
-        tier: 'normal',
-        icon: 'ribbon-outline',
-        date: new Date(2025, 5, 1).toLocaleDateString(numberLocale, { month: 'short', year: 'numeric' }),
-        color: '#6B7280',
-        isPublic: true,
-      },
-    ],
-    [t, numberLocale],
-  );
+  const [achievements, setAchievements] = useState<Achievement[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabKey>('trophy');
+  const [expanded, setExpanded] = useState(false);
+  // Botón-ojo (solo perfil propio): si está activo, solo muestra los visibles.
+  const [onlyVisible, setOnlyVisible] = useState(false);
 
-  const renderAchievement = (item: Achievement) => {
-    const isLegendary = item.tier === 'legendary';
-    const isEpic = item.tier === 'epic';
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const load = playerId
+      ? fetchPlayerPublicAchievements(playerId)
+      : token
+        ? fetchAchievements(token)
+        : Promise.resolve([] as Achievement[]);
+    load
+      .then((list) => {
+        if (!cancelled) setAchievements(list);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, playerId]);
 
-    return (
-      <View
-        key={item.id}
-        style={[
-          styles.achItem,
-          isLegendary && styles.achItemLegendary,
-          isEpic && styles.achItemEpic,
-        ]}
-      >
-        <View style={[styles.achIconBox, { backgroundColor: `${item.color}15`, borderColor: `${item.color}30` }]}>
-          <Ionicons name={item.icon} size={20} color={item.color} />
-        </View>
-        <View style={styles.achContent}>
-          <View style={styles.achTitleRow}>
-            <Text style={styles.achTitle} numberOfLines={1}>{item.title}</Text>
-            {isLegendary && (
-              <View style={styles.tierBadgeLegendary}>
-                <Text style={styles.tierBadgeTextLegendary}>{t('profile.coachDistHigh').toUpperCase()}</Text>
-              </View>
-            )}
-            {isEpic && (
-              <View style={styles.tierBadgeEpic}>
-                <Text style={styles.tierBadgeTextEpic}>{t('profile.coachDistNormal').toUpperCase()}</Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.achDesc} numberOfLines={1}>{item.description}</Text>
-          <View style={styles.achFooter}>
-            <Text style={styles.achDate}>{item.date}</Text>
-            {item.sport && (
-              <View style={styles.sportBadge}>
-                <Text style={styles.sportBadgeText}>{t('common.sportPadel')}</Text>
-              </View>
-            )}
-          </View>
-        </View>
-        <Pressable style={styles.eyeBtn}>
-          <Ionicons name="eye-outline" size={14} color="#F18F34" />
-        </Pressable>
-      </View>
-    );
+  const counts = useMemo(() => {
+    const by = (t: AchievementType) => achievements.filter((a) => a.type === t).length;
+    return { trophy: by('trophy'), badge: by('badge'), course: by('course') };
+  }, [achievements]);
+
+  const filtered = useMemo(() => {
+    let list = achievements.filter((a) => a.type === activeTab);
+    if (onlyVisible) list = list.filter((a) => a.isPublic ?? true);
+    return list;
+  }, [achievements, activeTab, onlyVisible]);
+  const displayed = expanded ? filtered : filtered.slice(0, PREVIEW_COUNT);
+
+  const handleToggleVisibility = async (id: string) => {
+    // Cursos derivados no tienen estado de visibilidad (siempre públicos).
+    if (id.startsWith('course_')) return;
+    const current = achievements.find((a) => a.id === id);
+    if (!current) return;
+    const optimistic = !(current.isPublic ?? true);
+    setAchievements((prev) => prev.map((a) => (a.id === id ? { ...a, isPublic: optimistic } : a)));
+    const result = await toggleAchievementVisibility(token, id);
+    if (result != null && result !== optimistic) {
+      setAchievements((prev) => prev.map((a) => (a.id === id ? { ...a, isPublic: result } : a)));
+    }
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.card}>
+        {/* Header */}
         <View style={styles.header}>
           <View style={styles.titleGroup}>
             <LinearGradient colors={['#F18F34', '#E95F32']} style={styles.trophyIconBox}>
               <Ionicons name="trophy-outline" size={16} color="#fff" />
             </LinearGradient>
             <View>
-              <Text style={styles.title}>{t('profile.achievementsTitle')}</Text>
-              <Text style={styles.count}>{t('profile.achievementsEmptySub')}</Text>
+              <Text style={styles.title}>Vitrina de Logros</Text>
+              <Text style={styles.count}>{achievements.length} {own ? 'logros conseguidos' : 'logros visibles'}</Text>
             </View>
           </View>
-          <View style={styles.publicBadge}>
-            <Ionicons name="eye-outline" size={12} color="#F18F34" />
-            <Text style={styles.publicBadgeText}>{t('common.itemsCount', { count: 8 })}</Text>
-          </View>
+          {own && achievements.length > 0 ? (
+            <Pressable
+              onPress={() => {
+                setOnlyVisible((v) => !v);
+                setExpanded(false);
+              }}
+              style={[styles.eyeBtn, onlyVisible && styles.eyeBtnActive]}
+              accessibilityLabel="Mostrar solo los logros visibles"
+              accessibilityState={{ selected: onlyVisible }}
+            >
+              <Ionicons name={onlyVisible ? 'eye' : 'eye-outline'} size={16} color={onlyVisible ? '#F18F34' : '#6B7280'} />
+            </Pressable>
+          ) : null}
         </View>
 
+        {/* Resumen por categoría */}
         <View style={styles.grid}>
-          <View style={styles.gridItem}>
-            <Text style={styles.gridEmoji}>🏆</Text>
-            <Text style={styles.gridVal}>5</Text>
-            <Text style={styles.gridLab}>{tabTrophies}</Text>
-          </View>
-          <View style={styles.gridItem}>
-            <Text style={styles.gridEmoji}>🎖️</Text>
-            <Text style={styles.gridVal}>2</Text>
-            <Text style={styles.gridLab}>{tabBadges}</Text>
-          </View>
-          <View style={styles.gridItem}>
-            <Text style={styles.gridEmoji}>📚</Text>
-            <Text style={styles.gridVal}>3</Text>
-            <Text style={styles.gridLab}>{tabCourses}</Text>
-          </View>
+          {[
+            { emoji: '🏆', val: counts.trophy, lab: 'Trofeos' },
+            { emoji: '🎖️', val: counts.badge, lab: 'Insignias' },
+            { emoji: '📚', val: counts.course, lab: 'Cursos' },
+          ].map((g) => (
+            <View key={g.lab} style={styles.gridItem}>
+              <Text style={styles.gridEmoji}>{g.emoji}</Text>
+              <Text style={styles.gridVal}>{g.val}</Text>
+              <Text style={styles.gridLab}>{g.lab}</Text>
+            </View>
+          ))}
         </View>
 
+        {/* Tabs de categoría (3, repartidas sin scroll) */}
         <View style={styles.tabsRow}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsScroll}>
-            {[
-              { id: tabAll, icon: 'star-outline' as const },
-              { id: tabTrophies, icon: 'trophy-outline' as const },
-              { id: tabBadges, icon: 'medal-outline' as const },
-              { id: tabCourses, icon: 'school-outline' as const },
-            ].map((tab) => (
+          {TABS.map((tab) => {
+            const active = activeTab === tab.key;
+            return (
               <Pressable
-                key={tab.id}
-                onPress={() => setActiveTab(tab.id)}
-                style={[styles.tabBtn, activeTab === tab.id && styles.tabBtnActive]}
+                key={tab.key}
+                onPress={() => {
+                  setActiveTab(tab.key);
+                  setExpanded(false);
+                }}
+                style={[styles.tabBtn, active && styles.tabBtnActive]}
               >
-                <Ionicons
-                  name={tab.icon}
-                  size={14}
-                  color={activeTab === tab.id ? '#F18F34' : '#6B7280'}
-                />
-                <Text style={[styles.tabText, activeTab === tab.id ? styles.tabTextActive : styles.tabTextInactive]}>
-                  {tab.id}
-                </Text>
+                <Ionicons name={tab.icon} size={14} color={active ? '#F18F34' : '#6B7280'} />
+                <Text style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>{tab.label}</Text>
               </Pressable>
-            ))}
-          </ScrollView>
+            );
+          })}
         </View>
 
-        <View style={styles.list}>
-          {achievements.map(renderAchievement)}
-        </View>
+        {/* Lista / estados */}
+        {loading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color="#F18F34" />
+          </View>
+        ) : achievements.length === 0 ? (
+          <View style={styles.centered}>
+            <Ionicons name="trophy-outline" size={24} color="#6B7280" />
+            <Text style={styles.emptyText}>
+              {own ? 'Aún no has conseguido logros. ¡Juega partidos y completa lecciones!' : 'Este jugador no tiene logros visibles.'}
+            </Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.list}>
+              {displayed.map((a) => (
+                <AchievementCard
+                  key={a.id}
+                  achievement={a}
+                  editable={own && a.type !== 'course'}
+                  onToggleVisibility={handleToggleVisibility}
+                />
+              ))}
+            </View>
+            {filtered.length > PREVIEW_COUNT ? (
+              <Pressable style={styles.viewAllBtn} onPress={() => setExpanded((v) => !v)}>
+                <Text style={styles.viewAllText}>{expanded ? 'Ver menos' : `Ver todos (${filtered.length})`}</Text>
+                <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={14} color="#9CA3AF" />
+              </Pressable>
+            ) : null}
+          </>
+        )}
 
-        <Pressable style={styles.viewAllBtn}>
-          <Text style={styles.viewAllText}>{t('common.seeAll')}</Text>
-          <Ionicons name="chevron-down" size={14} color="#9CA3AF" />
-        </Pressable>
-
-        <View style={styles.disclaimer}>
-          <Ionicons name="lock-closed" size={12} color="#4B5563" />
-          <Text style={styles.disclaimerText}>
-            {t('profile.achievementsEmpty')}
-          </Text>
-        </View>
+        {own ? (
+          <View style={styles.disclaimer}>
+            <Ionicons name="lock-closed" size={12} color="#4B5563" />
+            <Text style={styles.disclaimerText}>
+              Los logros marcados como <Text style={styles.disclaimerBold}>públicos</Text> serán visibles para otros jugadores.
+            </Text>
+          </View>
+        ) : null}
       </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    paddingHorizontal: 16,
-    marginTop: 16,
-  },
+  container: { paddingHorizontal: 16, marginTop: 16 },
   card: {
     backgroundColor: 'rgba(255, 255, 255, 0.06)',
     borderRadius: 24,
@@ -207,17 +197,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.08)',
     padding: 16,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  titleGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  titleGroup: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   trophyIconBox: {
     width: 34,
     height: 34,
@@ -229,37 +210,20 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
   },
-  title: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  count: {
-    fontSize: 10,
-    color: '#6B7280',
-    marginTop: 1,
-  },
-  publicBadge: {
-    flexDirection: 'row',
+  title: { fontSize: 14, fontWeight: 'bold', color: '#fff' },
+  count: { fontSize: 10, color: '#6B7280', marginTop: 1 },
+  eyeBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(241, 143, 52, 0.1)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 99,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(241, 143, 52, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  publicBadgeText: {
-    fontSize: 9,
-    fontWeight: 'bold',
-    color: '#F18F34',
-  },
-  grid: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
+  eyeBtnActive: { backgroundColor: 'rgba(241, 143, 52, 0.15)', borderColor: 'rgba(241, 143, 52, 0.35)' },
+  grid: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   gridItem: {
     flex: 1,
     backgroundColor: 'rgba(255, 255, 255, 0.04)',
@@ -269,168 +233,20 @@ const styles = StyleSheet.create({
     padding: 10,
     alignItems: 'center',
   },
-  gridEmoji: {
-    fontSize: 18,
-    marginBottom: 4,
-  },
-  gridVal: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#fff',
-  },
-  gridLab: {
-    fontSize: 9,
-    color: '#6B7280',
-    fontWeight: '600',
-  },
-  tabsRow: {
-    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    borderRadius: 12,
-    marginBottom: 16,
-    padding: 4,
-  },
-  tabsScroll: {
-    gap: 6,
-  },
-  tabBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 8,
-  },
-  tabBtnActive: {
-    backgroundColor: 'rgba(241, 143, 52, 0.15)',
-    borderWidth: 1,
-    borderColor: 'rgba(241, 143, 52, 0.2)',
-  },
-  tabText: {
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  tabTextActive: {
-    color: '#F18F34',
-  },
-  tabTextInactive: {
-    color: '#6B7280',
-  },
-  list: {
-    gap: 10,
-  },
-  achItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.04)',
-  },
-  achItemLegendary: {
-    backgroundColor: 'rgba(241, 143, 52, 0.08)',
-    borderColor: 'rgba(241, 143, 52, 0.2)',
-  },
-  achItemEpic: {
-    backgroundColor: 'rgba(168, 85, 247, 0.08)',
-    borderColor: 'rgba(168, 85, 247, 0.2)',
-  },
-  achIconBox: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  achContent: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  achTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  achTitle: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#fff',
-    maxWidth: '60%',
-  },
-  tierBadgeLegendary: {
-    backgroundColor: 'rgba(241, 143, 52, 0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(241, 143, 52, 0.3)',
-  },
-  tierBadgeTextLegendary: {
-    fontSize: 8,
-    fontWeight: '900',
-    color: '#F18F34',
-  },
-  tierBadgeEpic: {
-    backgroundColor: 'rgba(168, 85, 247, 0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(168, 85, 247, 0.3)',
-  },
-  tierBadgeTextEpic: {
-    fontSize: 8,
-    fontWeight: '900',
-    color: '#A855F7',
-  },
-  achDesc: {
-    fontSize: 10,
-    color: '#9CA3AF',
-  },
-  achFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 6,
-  },
-  achDate: {
-    fontSize: 9,
-    color: '#4B5563',
-  },
-  sportBadge: {
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  sportBadgeText: {
-    fontSize: 8,
-    color: '#9CA3AF',
-    fontWeight: '600',
-  },
-  eyeBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: 'rgba(241, 143, 52, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  viewAllBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 12,
-    paddingVertical: 8,
-  },
-  viewAllText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#9CA3AF',
-  },
+  gridEmoji: { fontSize: 18, marginBottom: 4 },
+  gridVal: { fontSize: 15, fontWeight: 'bold', color: '#fff' },
+  gridLab: { fontSize: 9, color: '#6B7280', fontWeight: '600' },
+  tabsRow: { flexDirection: 'row', gap: 6, backgroundColor: 'rgba(255, 255, 255, 0.03)', borderRadius: 12, marginBottom: 16, padding: 4 },
+  tabBtn: { flex: 1, paddingHorizontal: 8, paddingVertical: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderRadius: 8 },
+  tabBtnActive: { backgroundColor: 'rgba(241, 143, 52, 0.15)', borderWidth: 1, borderColor: 'rgba(241, 143, 52, 0.2)' },
+  tabText: { fontSize: 10, fontWeight: 'bold' },
+  tabTextActive: { color: '#F18F34' },
+  tabTextInactive: { color: '#6B7280' },
+  list: { gap: 10 },
+  centered: { minHeight: 96, alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16 },
+  emptyText: { fontSize: 12, color: '#9CA3AF', textAlign: 'center' },
+  viewAllBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12, paddingVertical: 8 },
+  viewAllText: { fontSize: 11, fontWeight: '600', color: '#9CA3AF' },
   disclaimer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -440,13 +256,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.02)',
     borderRadius: 12,
   },
-  disclaimerText: {
-    fontSize: 9,
-    color: '#4B5563',
-    flex: 1,
-  },
-  disclaimerBold: {
-    color: '#F18F34',
-    fontWeight: 'bold',
-  },
+  disclaimerText: { fontSize: 9, color: '#4B5563', flex: 1 },
+  disclaimerBold: { color: '#F18F34', fontWeight: 'bold' },
 });

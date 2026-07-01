@@ -1,4 +1,5 @@
 import { API_URL } from "../config";
+import type { FrameAttrs } from "../components/profile/AvatarWithFrame";
 import { withLangQuery } from "./backendLang";
 import type { AppLocale } from "../i18n/constants";
 
@@ -36,6 +37,7 @@ type MeResponse = {
     preferred_play_style?: string | null;
     preferred_match_duration_min?: number | null;
     preferred_partner_level?: string | null;
+    dominant_hand?: string | null;
     favorite_clubs?: string[] | null;
     notif_new_matches?: boolean | null;
     notif_tournament_reminders?: boolean | null;
@@ -52,6 +54,8 @@ type MeResponse = {
     birth_date?: string | null;
     profile_description?: string | null;
     play_location?: string | null;
+    /** Marco equipado resuelto (getEquippedFrames). */
+    frame?: FrameAttrs | null;
   };
   error?: string;
 };
@@ -63,6 +67,8 @@ export type PlayerPreferences = {
   preferredPlayStyle: "competitive" | "social" | "learning" | "balanced";
   preferredMatchDurationMin: 60 | 90 | 120;
   preferredPartnerLevel: "similar" | "higher" | "lower" | "any";
+  /** Mano preferida/hábil. null = sin definir. */
+  dominantHand: "left" | "right" | null;
   favoriteClubs: string[];
   notifNewMatches: boolean;
   notifTournamentReminders: boolean;
@@ -107,6 +113,8 @@ export type MyPlayerProfile = {
   birthDate: string | null;
   profileDescription: string | null;
   playLocation: string | null;
+  /** Marco equipado del propio usuario (para pintar el pack, p. ej. en el sidebar). */
+  frame: FrameAttrs | null;
 };
 
 export type PlayerGender = MyPlayerProfile['gender'];
@@ -179,6 +187,9 @@ export async function fetchMyPlayerProfile(
       .toLowerCase();
     const prefSide: PlayerPreferences["preferredSide"] =
       prefSideRaw === "right" || prefSideRaw === "left" ? prefSideRaw : "both";
+    const handRaw = String(json.player.dominant_hand ?? "").trim().toLowerCase();
+    const dominantHand: PlayerPreferences["dominantHand"] =
+      handRaw === "left" || handRaw === "right" ? handRaw : null;
     const prefStyleRaw = String(json.player.preferred_play_style ?? "balanced")
       .trim()
       .toLowerCase();
@@ -250,6 +261,7 @@ export async function fetchMyPlayerProfile(
         preferredPlayStyle: prefStyle,
         preferredMatchDurationMin: prefDuration,
         preferredPartnerLevel: prefLevel,
+        dominantHand,
         favoriteClubs: parseArray(json.player.favorite_clubs).slice(0, 20),
         notifNewMatches: json.player.notif_new_matches !== false,
         notifTournamentReminders:
@@ -273,6 +285,7 @@ export async function fetchMyPlayerProfile(
         json.player.play_location != null && String(json.player.play_location).trim() !== ''
           ? String(json.player.play_location)
           : null,
+      frame: json.player.frame ?? null,
     };
   } catch (err) {
     console.error("[fetchMyPlayerProfile]", err);
@@ -365,6 +378,7 @@ export async function updateMyPlayerPreferences(
         preferred_play_style: preferences.preferredPlayStyle,
         preferred_match_duration_min: preferences.preferredMatchDurationMin,
         preferred_partner_level: preferences.preferredPartnerLevel,
+        dominant_hand: preferences.dominantHand,
         favorite_clubs: preferences.favoriteClubs,
         notif_new_matches: preferences.notifNewMatches,
         notif_tournament_reminders: preferences.notifTournamentReminders,
@@ -471,16 +485,22 @@ export type PublicPlayerProfile = {
   id: string;
   firstName: string | null;
   lastName: string | null;
+  username: string | null;
   avatarUrl: string | null;
+  coverUrl: string | null;
   gender: string | null;
   eloRating: number | null;
   sp: number;
   fiabilidad: number | null;
+  matchesPlayedTotal: number;
   mmWins: number;
   mmLosses: number;
   mmDraws: number;
   liga: string | null;
   mmPeakLiga: string | null;
+  preferredSide: "right" | "left" | "both";
+  preferredPlayStyle: "competitive" | "social" | "learning" | "balanced";
+  dominantHand: "left" | "right" | null;
   coachAssessment: any | null; // Reuse types if needed, but any for simplicity here
   recentMatches: any[];
 };
@@ -506,16 +526,25 @@ export async function fetchPublicPlayerProfile(
       id: p.id,
       firstName: p.first_name ?? null,
       lastName: p.last_name ?? null,
+      username: p.username ?? null,
       avatarUrl: p.avatar_url ?? null,
+      coverUrl: p.cover_url ?? null,
       gender: p.gender ?? null,
       eloRating: p.elo_rating ?? null,
       sp: p.sp ?? 0,
       fiabilidad: p.fiabilidad ?? null,
+      matchesPlayedTotal: p.matches_played_total ?? 0,
       mmWins: p.mm_wins ?? 0,
       mmLosses: p.mm_losses ?? 0,
       mmDraws: p.mm_draws ?? 0,
       liga: p.liga ?? null,
       mmPeakLiga: p.mm_peak_liga ?? null,
+      preferredSide: p.preferred_side === "right" || p.preferred_side === "left" ? p.preferred_side : "both",
+      preferredPlayStyle:
+        p.preferred_play_style === "competitive" || p.preferred_play_style === "social" || p.preferred_play_style === "learning"
+          ? p.preferred_play_style
+          : "balanced",
+      dominantHand: p.dominant_hand === "left" || p.dominant_hand === "right" ? p.dominant_hand : null,
       coachAssessment: p.coach_assessment ?? null,
       recentMatches: p.recent_matches ?? [],
     };

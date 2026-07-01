@@ -15,6 +15,7 @@ import {
 } from '../services/paymentRefundService';
 import { releaseMatchmakingProposal } from '../services/matchmakingService';
 import { enrichMatchRowsWithClubImages } from '../lib/clubLogoUrl';
+import { getEquippedFrames } from '../services/equippedFramesService';
 import {
   assertGuestCanJoinMatch,
   tryRepairPaidGuestMissingFromMatch,
@@ -65,6 +66,53 @@ function flattenMatchRowForClient<T extends { bookings?: unknown; match_players?
       })
     : rawMps;
   return { ...row, bookings, match_players };
+}
+
+type MatchRowWithPlayers = {
+  match_players?: Array<{ players?: unknown } | null> | null;
+};
+
+/** Supabase expande la relación 1:1 `players` a veces como array de 1 elemento. */
+function playerObjOf(mp: { players?: unknown } | null): { id?: string; frame?: unknown } | null {
+  const raw = mp?.players;
+  const p = Array.isArray(raw) ? raw[0] ?? null : raw ?? null;
+  return p as { id?: string; frame?: unknown } | null;
+}
+
+/**
+ * Adjunta el marco equipado (`frame`) a cada jugador de los partidos dados.
+ * Muta los objetos `players` en sitio (soporta players como objeto o array).
+ * Batchea todos los ids en una sola llamada a getEquippedFrames. Reutilizable
+ * por detalle y listas.
+ */
+async function attachEquippedFramesToMatches(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  rows: MatchRowWithPlayers[],
+): Promise<void> {
+  const ids: string[] = [];
+  for (const r of rows) {
+    for (const mp of r.match_players ?? []) {
+      const pid = playerObjOf(mp)?.id;
+      if (pid) ids.push(pid);
+    }
+  }
+  if (ids.length === 0) return;
+  const frames = await getEquippedFrames(supabase, ids);
+  for (const r of rows) {
+    for (const mp of r.match_players ?? []) {
+      const p = playerObjOf(mp);
+      if (p?.id) p.frame = frames.get(p.id) ?? null;
+    }
+  }
+}
+
+/** Enriquecido estándar de filas de partido para el cliente: imágenes de club + marco. */
+async function enrichMatchRowsForClient(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  rows: unknown[],
+): Promise<void> {
+  await enrichMatchRowsWithClubImages(supabase, rows as Parameters<typeof enrichMatchRowsWithClubImages>[1]);
+  await attachEquippedFramesToMatches(supabase, rows as MatchRowWithPlayers[]);
 }
 
 function expandSelect(bookingRel: 'bookings' | 'bookings!inner'): string {
@@ -260,10 +308,10 @@ router.get('/', async (req: Request, res: Response) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
           return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
         });
-        await enrichMatchRowsWithClubImages(supabase, filtered);
+        await enrichMatchRowsForClient(supabase, filtered);
         return res.json({ ok: true, matches: filtered });
       }
-      await enrichMatchRowsWithClubImages(supabase, rows);
+      await enrichMatchRowsForClient(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -308,7 +356,7 @@ router.get('/', async (req: Request, res: Response) => {
         if (joinable_only && !isJoinableDiscoveryRow(row)) return false;
         return true;
       });
-      await enrichMatchRowsWithClubImages(supabase, rows);
+      await enrichMatchRowsForClient(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -346,10 +394,10 @@ router.get('/', async (req: Request, res: Response) => {
           const b = Array.isArray(row.bookings) ? row.bookings[0] : row.bookings;
           return getMatchListPhase(Date.now(), row.status, b?.start_at, b?.end_at) !== 'past';
         });
-        await enrichMatchRowsWithClubImages(supabase, filtered);
+        await enrichMatchRowsForClient(supabase, filtered);
         return res.json({ ok: true, matches: filtered });
       }
-      await enrichMatchRowsWithClubImages(supabase, rows);
+      await enrichMatchRowsForClient(supabase, rows);
       return res.json({ ok: true, matches: rows });
     }
 
@@ -493,6 +541,7 @@ router.get('/mine', async (req: Request, res: Response) => {
       }),
     );
 
+    await attachEquippedFramesToMatches(supabase, withFeedbackFlag as MatchRowWithPlayers[]);
     return res.json({ ok: true, matches: withFeedbackFlag });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -587,7 +636,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       const flattened = flattenMatchRowForClient(
         out as { bookings?: unknown; match_players?: unknown },
       );
-      await enrichMatchRowsWithClubImages(supabase, [flattened]);
+      await enrichMatchRowsForClient(supabase, [flattened]);
       return res.json({
         ok: true,
         match: {

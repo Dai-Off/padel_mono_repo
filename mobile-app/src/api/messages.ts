@@ -1,4 +1,5 @@
 import { API_URL } from '../config';
+import type { FrameAttrs } from '../components/profile/AvatarWithFrame';
 
 function headers(token: string | null | undefined) {
   return {
@@ -13,6 +14,7 @@ export type DirectConversation = {
   peer_last_name: string;
   peer_username?: string | null;
   peer_avatar_url: string | null;
+  peer_frame?: FrameAttrs | null;
   last_message_at: string;
   last_message_preview: string;
   unread_count: number;

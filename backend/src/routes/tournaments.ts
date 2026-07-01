@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { attachAuthContext } from '../middleware/attachAuthContext';
 import { requireClubOwnerOrAdminOrPortalStaff } from '../middleware/requireClubOwnerOrAdminOrPortalStaff';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
+import { getEquippedFrames } from '../services/equippedFramesService';
 import { findTournamentConflict } from '../lib/tournamentConflicts';
 import { sendClubCrmEmail, sendInviteEmail } from '../lib/mailer';
 import {
@@ -3433,6 +3434,8 @@ router.get('/:id/player-detail', async (req: Request, res: Response) => {
         }));
       })
       .filter((p: any, idx: number, arr: any[]) => arr.findIndex((x) => x.id === p.id) === idx);
+    const participantFrames = await getEquippedFrames(supabase, participants.map((p: any) => p.id));
+    for (const p of participants) (p as any).frame = participantFrames.get(p.id) ?? null;
     return res.json({
       ok: true,
       tournament: ctx.tournament,
