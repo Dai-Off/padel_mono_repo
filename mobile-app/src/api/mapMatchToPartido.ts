@@ -216,6 +216,7 @@ export function mapMatchToPartido(
 
   return {
     id: m.id,
+    bookingId: m.booking_id ?? b.id,
     playerIds,
     playerIdsBySlot,
     organizerPlayerId: b.organizer_player_id ?? null,

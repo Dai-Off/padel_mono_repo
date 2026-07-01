@@ -34,4 +34,14 @@ server.listen(port, () => {
   }
 });
 
+function shutdown(signal: string) {
+  console.log(`[shutdown] ${signal} — liberando puerto ${port}`);
+  messagesWss.close();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 5000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 export default app;

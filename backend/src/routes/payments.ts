@@ -12,6 +12,9 @@ import {
 } from '../services/tournamentsService';
 import { refreshBookingStatusAfterParticipantPayment } from '../lib/bookingPaymentSync';
 import { clubTimezoneOrDefault } from '../lib/clubTimezone';
+import { resolveOpenMatchTimeRange } from '../lib/openMatchDuration';
+import { getPrivateMatchInviteAccess } from '../lib/matchInviteAccess';
+import { validateGuestMatchJoinEligibility } from '../lib/guestJoinEligibility';
 import { assertBookingWithinClubOperatingHours } from '../lib/clubOperatingHours';
 import {
   finalizeSeasonPassElitePurchase,
@@ -22,6 +25,7 @@ import { getActiveSeasonRow } from '../services/seasonPassSeasonConfig';
 import {
   assertGuestCanJoinMatch,
   guestJoinMatchAfterPayment,
+  parsePreferredSlotFromMeta,
   registerGuestJoinPaymentIntent,
   tryRepairPaidGuestMissingFromMatch,
 } from '../services/matchPlayerSlotService';
@@ -37,26 +41,20 @@ import { validatePromoCode } from '../lib/promoCodes';
 /** Importe mínimo cobrable por Stripe en EUR (50 céntimos). */
 const STRIPE_MIN_EUR_CENTS = 50;
 
-/** Reserva de pista privada = pago del total; partido público abierto = 1/4 salvo pay_full explícito. */
-function resolvePayFullForNewMatch(opts: {
-  pay_full?: unknown;
-  visibility?: string | null;
-}): boolean {
-  if (
+/** Reserva de pista privada (standard) = pago del total. Partidos open_match = 1/4 salvo pay_full explícito. */
+function resolvePayFullForNewMatch(opts: { pay_full?: unknown }): boolean {
+  return (
     opts.pay_full === true ||
     opts.pay_full === 'true' ||
     opts.pay_full === 1 ||
     opts.pay_full === '1'
-  ) {
-    return true;
-  }
-  return String(opts.visibility ?? '').toLowerCase() === 'private';
+  );
 }
 
-function parsePreferredSlotFromMeta(meta: Record<string, string | undefined>): number | null {
-  const raw = meta.slot_index != null ? parseInt(String(meta.slot_index), 10) : NaN;
-  return Number.isFinite(raw) && raw >= 0 && raw <= 3 ? raw : null;
+function isOpenMatchReservation(reservation_type: string): boolean {
+  return reservation_type === 'open_match';
 }
+
 import { zonedTimeToUtc } from './learningTimezone';
 import { buildStoreSalesForCashClosing, listClubStorePaymentEntries, paymentMethodFromStripeRef, type ClubPaymentLedgerEntry } from '../lib/inventorySale';
 import { canAccessClub, isClubOwnerForCashLedger } from '../lib/clubAccess';
@@ -192,6 +190,7 @@ async function resolveReusablePaymentIntent(
   bookingId: string,
   payerPlayerId: string,
   amountCents: number,
+  requestedSlot?: number | null,
 ): Promise<
   | { kind: 'reuse'; clientSecret: string; paymentIntentId: string }
   | { kind: 'already_paid'; paymentIntentId: string }
@@ -220,6 +219,14 @@ async function resolveReusablePaymentIntent(
         pi.client_secret &&
         Number(pi.amount) === amountCents
       ) {
+        if (requestedSlot != null) {
+          const metaSlot = parsePreferredSlotFromMeta(
+            pi.metadata as Record<string, string | undefined>,
+          );
+          if (metaSlot != null && metaSlot !== requestedSlot) {
+            continue;
+          }
+        }
         return {
           kind: 'reuse',
           clientSecret: pi.client_secret,
@@ -291,8 +298,18 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       return;
     }
 
+    const totalCents = Number(total_price_cents);
+    const vis = visibility === 'public' ? 'public' : 'private';
+    const isPayFull = resolvePayFullForNewMatch({ pay_full });
+    const reservation_type = isPayFull ? 'standard' : 'open_match';
+    const { end_at: effectiveEndAt } = resolveOpenMatchTimeRange(
+      String(start_at),
+      String(end_at),
+      reservation_type,
+    );
+
     const newStart = new Date(start_at).getTime();
-    const newEnd = new Date(end_at).getTime();
+    const newEnd = new Date(effectiveEndAt).getTime();
     if (!Number.isFinite(newStart) || !Number.isFinite(newEnd) || newEnd <= newStart) {
       res.status(400).json({ ok: false, error: 'Rango horario inválido' });
       return;
@@ -353,16 +370,11 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       }
     }
 
-    const totalCents = Number(total_price_cents);
-    const vis = visibility === 'public' ? 'public' : 'private';
-    const isPayFull = resolvePayFullForNewMatch({ pay_full, visibility: vis });
-    const reservation_type = isPayFull ? 'standard' : 'open_match';
-
     const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
       supabase,
       court_id,
       start_at,
-      end_at,
+      effectiveEndAt,
     );
     if (slotConflict) {
       res.status(400).json({ ok: false, error: slotConflict });
@@ -373,7 +385,7 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
     const hoursCheck = await assertBookingWithinClubOperatingHours(supabase, {
       courtId: court_id,
       startAt: start_at,
-      endAt: end_at,
+      endAt: effectiveEndAt,
       reservationType: reservation_type,
     });
     if (!hoursCheck.ok) {
@@ -416,7 +428,7 @@ export async function createIntentForNewMatchHandler(req: Request, res: Response
       court_id,
       organizer_player_id,
       start_at,
-      end_at,
+      end_at: effectiveEndAt,
       total_price_cents: String(totalCents),
       payer_player_id: player.id,
       timezone: bookingTimezone,
@@ -1008,7 +1020,7 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
 
     const { data: booking } = await supabase
       .from('bookings')
-      .select('id, status, total_price_cents, currency')
+      .select('id, status, total_price_cents, currency, start_at, end_at, court_contention_status')
       .eq('id', booking_id)
       .maybeSingle();
 
@@ -1064,14 +1076,40 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       }
       const { data: match } = await supabase
         .from('matches')
-        .select('id, status')
+        .select('id, status, visibility, competitive, type, elo_min, elo_max')
         .eq('booking_id', booking_id)
         .maybeSingle();
-      if (!match || match.status === 'cancelled' || match.status === 'finished') {
+      if (!match) {
         res.status(400).json({ ok: false, error: 'El partido no permite nuevas plazas' });
         return;
       }
+      if (String((match as { visibility?: string }).visibility ?? '').toLowerCase() === 'private') {
+        const inviteAccess = await getPrivateMatchInviteAccess(supabase, match.id, player.id);
+        if (!inviteAccess.ok) {
+          res.status(403).json({
+            ok: false,
+            code: 'private_match',
+            error: 'Este partido es privado. Solo puedes unirte con invitación.',
+          });
+          return;
+        }
+      }
       guestJoinMatchId = match.id;
+
+      const eligibility = await validateGuestMatchJoinEligibility(supabase, {
+        matchId: match.id,
+        playerId: player.id,
+        match,
+        booking,
+      });
+      if (!eligibility.ok) {
+        res.status(eligibility.httpStatus ?? 400).json({
+          ok: false,
+          code: eligibility.code,
+          error: eligibility.error,
+        });
+        return;
+      }
 
       const capacity = await assertGuestCanJoinMatch(
         supabase,
@@ -1096,7 +1134,13 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
         .eq('player_id', player.id)
         .maybeSingle();
       if (existingBookingParticipant?.payment_status === 'paid') {
-        await tryRepairPaidGuestMissingFromMatch(supabase, match.id, booking_id, player.id);
+        await tryRepairPaidGuestMissingFromMatch(
+          supabase,
+          match.id,
+          booking_id,
+          player.id,
+          typeof slot_index === 'number' ? slot_index : null,
+        );
         const { data: paidTx } = await supabase
           .from('payment_transactions')
           .select('stripe_payment_intent_id')
@@ -1132,6 +1176,7 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       booking_id,
       player.id,
       amountCents,
+      typeof slot_index === 'number' ? slot_index : null,
     );
     if (resolved.kind === 'already_paid') {
       if (!participant_id && typeof slot_index === 'number') {
@@ -1146,6 +1191,7 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
             matchForRepair.id,
             booking_id,
             player.id,
+            slot_index,
           );
         }
       }
@@ -1158,6 +1204,41 @@ export async function createIntentHandler(req: Request, res: Response): Promise<
       return;
     }
     if (resolved.kind === 'reuse') {
+      if (guestJoinMatchId && typeof slot_index === 'number') {
+        try {
+          const pi = await stripe.paymentIntents.retrieve(resolved.paymentIntentId);
+          const metaSlot = parsePreferredSlotFromMeta(
+            pi.metadata as Record<string, string | undefined>,
+          );
+          if (metaSlot !== slot_index) {
+            await stripe.paymentIntents.update(resolved.paymentIntentId, {
+              metadata: {
+                ...(pi.metadata ?? {}),
+                booking_id,
+                payer_player_id: player.id,
+                slot_index: String(slot_index),
+              },
+            });
+          }
+        } catch (metaErr) {
+          console.warn('[payments/create-intent] reuse slot metadata update:', metaErr);
+        }
+        const capacityBeforeReuse = await assertGuestCanJoinMatch(
+          supabase,
+          guestJoinMatchId,
+          booking_id,
+          player.id,
+          slot_index,
+        );
+        if (!capacityBeforeReuse.ok) {
+          res.status(409).json({
+            ok: false,
+            code: capacityBeforeReuse.code,
+            error: capacityBeforeReuse.error,
+          });
+          return;
+        }
+      }
       res.json({
         ok: true,
         clientSecret: resolved.clientSecret,
@@ -3484,13 +3565,18 @@ async function processNewMatchPayment(
   const source_channel = ['mobile', 'web', 'manual', 'system'].includes(meta.source_channel)
     ? meta.source_channel
     : 'mobile';
-  const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full, visibility });
+  const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full });
   const reservation_type =
     isPayFull
       ? 'standard'
       : meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
         ? meta.reservation_type
         : 'open_match';
+  const { end_at: effectiveEndAt } = resolveOpenMatchTimeRange(
+    String(start_at),
+    String(end_at),
+    reservation_type,
+  );
 
   if (!court_id || !organizer_player_id || !start_at || !end_at || total_price_cents <= 0) return;
 
@@ -3498,13 +3584,13 @@ async function processNewMatchPayment(
     supabase,
     court_id,
     start_at,
-    end_at,
+    effectiveEndAt,
   );
   if (slotConflict) {
     console.error('[payments/webhook] Slot blocked for contention match, skipping booking creation.', {
       court_id,
       start_at,
-      end_at,
+      end_at: effectiveEndAt,
       paymentIntentId: pi.id,
       error: slotConflict,
     });
@@ -3529,7 +3615,7 @@ async function processNewMatchPayment(
     court_id,
     organizer_player_id,
     start_at,
-    end_at,
+    end_at: effectiveEndAt,
     timezone,
     total_price_cents,
     currency: 'EUR',
@@ -3550,39 +3636,12 @@ async function processNewMatchPayment(
     return;
   }
 
-  const { data: match, error: errMatch } = await supabase
-    .from('matches')
-    .insert([{
-      booking_id: booking.id,
-      visibility,
-      elo_min,
-      elo_max,
-      gender,
-      competitive,
-      type: 'open',
-    }])
-    .select('id')
-    .maybeSingle();
-
-  if (errMatch || !match) {
-    console.error('[payments/webhook] Error creando match:', errMatch);
-    return;
-  }
-
   await supabase.from('booking_participants').insert([{
     booking_id: booking.id,
     player_id: organizer_player_id,
     role: 'organizer',
     share_amount_cents: shareCents,
     payment_status: 'paid',
-  }]);
-
-  await supabase.from('match_players').insert([{
-    match_id: match.id,
-    player_id: organizer_player_id,
-    team: 'A',
-    invite_status: 'accepted',
-    slot_index: 0,
   }]);
 
   await supabase.from('payment_transactions').insert({
@@ -3593,6 +3652,35 @@ async function processNewMatchPayment(
     stripe_payment_intent_id: pi.id,
     status: 'succeeded',
   });
+
+  if (isOpenMatchReservation(reservation_type)) {
+    const { data: match, error: errMatch } = await supabase
+      .from('matches')
+      .insert([{
+        booking_id: booking.id,
+        visibility,
+        elo_min,
+        elo_max,
+        gender,
+        competitive,
+        type: 'open',
+      }])
+      .select('id')
+      .maybeSingle();
+
+    if (errMatch || !match) {
+      console.error('[payments/webhook] Error creando match:', errMatch);
+      return;
+    }
+
+    await supabase.from('match_players').insert([{
+      match_id: match.id,
+      player_id: organizer_player_id,
+      team: 'A',
+      invite_status: 'accepted',
+      slot_index: 0,
+    }]);
+  }
 
   if (isPayFull) {
     try {
@@ -3700,19 +3788,24 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
 
-      const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full, visibility });
+      const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full });
       const reservation_type =
         isPayFull
           ? 'standard'
           : meta.reservation_type === 'standard' || meta.reservation_type === 'open_match'
             ? meta.reservation_type
             : 'open_match';
+      const { end_at: effectiveEndAt } = resolveOpenMatchTimeRange(
+        String(start_at),
+        String(end_at),
+        reservation_type,
+      );
 
       const slotConflict = await assertCourtSlotAvailableForNewContentionMatch(
         supabase,
         court_id,
         start_at,
-        end_at,
+        effectiveEndAt,
       );
       if (slotConflict) {
         res.status(400).json({
@@ -3740,7 +3833,7 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         court_id,
         organizer_player_id,
         start_at,
-        end_at,
+        end_at: effectiveEndAt,
         timezone,
         total_price_cents,
         currency: 'EUR',
@@ -3762,26 +3855,6 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         return;
       }
 
-      const { data: match, error: errMatch } = await supabase
-        .from('matches')
-        .insert([{
-          booking_id: booking.id,
-          visibility,
-          elo_min,
-          elo_max,
-          gender,
-          competitive,
-          type: 'open',
-        }])
-        .select('id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status')
-        .maybeSingle();
-
-      if (errMatch || !match) {
-        console.error('[payments/confirm-client] Error creando match:', errMatch);
-        res.status(500).json({ ok: false, error: 'No se pudo crear el partido' });
-        return;
-      }
-
       const { data: organizerParticipant, error: errBP } = await supabase
         .from('booking_participants')
         .insert([{
@@ -3798,15 +3871,6 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         console.error('[payments/confirm-client] Error creando participant:', errBP);
       }
 
-      const { error: errMP } = await supabase.from('match_players').insert([{
-        match_id: match.id,
-        player_id: organizer_player_id,
-        team: 'A',
-        invite_status: 'accepted',
-        slot_index: 0,
-      }]);
-      if (errMP) console.error('[payments/confirm-client] Error creando match_player:', errMP);
-
       await supabase.from('payment_transactions').insert({
         booking_id: booking.id,
         payer_player_id: player.id,
@@ -3815,6 +3879,39 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
         stripe_payment_intent_id: pi.id,
         status: 'succeeded',
       });
+
+      let match: Record<string, unknown> | null = null;
+      if (isOpenMatchReservation(reservation_type)) {
+        const { data: createdMatch, error: errMatch } = await supabase
+          .from('matches')
+          .insert([{
+            booking_id: booking.id,
+            visibility,
+            elo_min,
+            elo_max,
+            gender,
+            competitive,
+            type: 'open',
+          }])
+          .select('id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status')
+          .maybeSingle();
+
+        if (errMatch || !createdMatch) {
+          console.error('[payments/confirm-client] Error creando match:', errMatch);
+          res.status(500).json({ ok: false, error: 'No se pudo crear el partido' });
+          return;
+        }
+        match = createdMatch as Record<string, unknown>;
+
+        const { error: errMP } = await supabase.from('match_players').insert([{
+          match_id: (createdMatch as { id: string }).id,
+          player_id: organizer_player_id,
+          team: 'A',
+          invite_status: 'accepted',
+          slot_index: 0,
+        }]);
+        if (errMP) console.error('[payments/confirm-client] Error creando match_player:', errMP);
+      }
 
       if (isPayFull) {
         try {
@@ -4005,11 +4102,9 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
       }
 
       await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
-      try {
-        await resolveCourtContention(supabase, booking_id);
-      } catch (contentionErr) {
+      void resolveCourtContention(supabase, booking_id).catch((contentionErr) => {
         console.error('[payments/confirm-client] resolveCourtContention:', contentionErr);
-      }
+      });
 
       res.json({
         ok: true,
@@ -4019,11 +4114,9 @@ export async function confirmClientHandler(req: Request, res: Response): Promise
     }
 
     await refreshBookingStatusAfterParticipantPayment(supabase, booking_id);
-    try {
-      await resolveCourtContention(supabase, booking_id);
-    } catch (contentionErr) {
+    void resolveCourtContention(supabase, booking_id).catch((contentionErr) => {
       console.error('[payments/confirm-client] resolveCourtContention:', contentionErr);
-    }
+    });
 
     res.json({ ok: true });
   } catch (err) {
@@ -4422,7 +4515,7 @@ export async function simulateBookingPaymentHandler(req: Request, res: Response)
       return;
     }
 
-    const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full, visibility });
+    const isPayFull = resolvePayFullForNewMatch({ pay_full: meta.pay_full });
     const reservation_type =
       isPayFull
         ? 'standard'
@@ -4484,40 +4577,12 @@ export async function simulateBookingPaymentHandler(req: Request, res: Response)
       return;
     }
 
-    const { data: match, error: errMatch } = await supabase
-      .from('matches')
-      .insert([{
-        booking_id: booking.id,
-        visibility,
-        elo_min,
-        elo_max,
-        gender,
-        competitive,
-        type: 'open',
-      }])
-      .select('id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status')
-      .maybeSingle();
-
-    if (errMatch || !match) {
-      console.error('[payments/simulate-booking-payment] Error creando match:', errMatch);
-      res.status(500).json({ ok: false, error: 'No se pudo crear el partido' });
-      return;
-    }
-
     await supabase.from('booking_participants').insert([{
       booking_id: booking.id,
       player_id: organizer_player_id,
       role: 'organizer',
       share_amount_cents: shareCents,
       payment_status: 'paid',
-    }]);
-
-    await supabase.from('match_players').insert([{
-      match_id: match.id,
-      player_id: organizer_player_id,
-      team: 'A',
-      invite_status: 'accepted',
-      slot_index: 0,
     }]);
 
     await supabase.from('payment_transactions').insert({
@@ -4528,6 +4593,38 @@ export async function simulateBookingPaymentHandler(req: Request, res: Response)
       stripe_payment_intent_id: pi.id,
       status: 'succeeded',
     });
+
+    let match: Record<string, unknown> | null = null;
+    if (isOpenMatchReservation(reservation_type)) {
+      const { data: createdMatch, error: errMatch } = await supabase
+        .from('matches')
+        .insert([{
+          booking_id: booking.id,
+          visibility,
+          elo_min,
+          elo_max,
+          gender,
+          competitive,
+          type: 'open',
+        }])
+        .select('id, created_at, booking_id, visibility, elo_min, elo_max, gender, competitive, status')
+        .maybeSingle();
+
+      if (errMatch || !createdMatch) {
+        console.error('[payments/simulate-booking-payment] Error creando match:', errMatch);
+        res.status(500).json({ ok: false, error: 'No se pudo crear el partido' });
+        return;
+      }
+      match = createdMatch as Record<string, unknown>;
+
+      await supabase.from('match_players').insert([{
+        match_id: (createdMatch as { id: string }).id,
+        player_id: organizer_player_id,
+        team: 'A',
+        invite_status: 'accepted',
+        slot_index: 0,
+      }]);
+    }
 
     if (isPayFull) {
       try {

@@ -26,7 +26,7 @@ import { CompeticionesScreen } from './CompeticionesScreen';
 import { HomeScreen, markAffinityModalPendingReopen } from './HomeScreen';
 import type { PartidoItem } from './PartidosScreen';
 import { PartidoDetailScreen } from './PartidoDetailScreen';
-import { PartidoPrivadoDetailScreen } from './PartidoPrivadoDetailScreen';
+import { NotificationsScreen } from './NotificationsScreen';
 import { PartidosScreen } from './PartidosScreen';
 import { MatchSearchScreen } from './MatchSearchScreen';
 import { MonederoScreen } from './MonederoScreen';
@@ -57,7 +57,10 @@ import {
 import { SeasonTransitionModal } from '../components/matchmaking/SeasonTransitionModal';
 import { UsernameSetupModal } from '../components/profile/UsernameSetupModal';
 import { acceptTournamentInvite } from '../api/tournamentInvites';
+import { fetchReceivedMatchInvites, type ReceivedMatchInvite } from '../api/matchInvites';
 import { parseTournamentInviteUrl } from '../lib/parseTournamentInviteUrl';
+import { reloadMatchPartido } from '../lib/reloadMatchPartido';
+import { isPlayerInPartido } from '../lib/partidoPlayerUtils';
 import { CommunityScreen } from './CommunityScreen';
 import { MessagesScreen, type MessagePeerNav } from './MessagesScreen';
 import { DirectMessageThreadScreen } from './DirectMessageThreadScreen';
@@ -107,7 +110,7 @@ export function MainApp() {
   const sidebar = useSidebar(false);
   const { session } = useAuth();
   const { totalCount: cartCount } = useCart();
-  const { profile, refreshMatches, syncMisPartidoFromMatchId } = useHomeData();
+  const { profile, refreshMatches, syncMisPartidoFromMatchId, upsertMisPartido } = useHomeData();
   const [activeTab, setActiveTab] = useState<MainTabId>('inicio');
   const [showCart, setShowCart] = useState(false);
   const [clubDetailCourt, setClubDetailCourt] = useState<SearchCourtResult | null>(null);
@@ -129,9 +132,13 @@ export function MainApp() {
   const [crearPartidoFlow, setCrearPartidoFlow] = useState<{
     open: boolean;
     organizerId: string | null;
-  }>({ open: false, organizerId: null });
+    matchVisibility: 'public' | 'private';
+  }>({ open: false, organizerId: null, matchVisibility: 'public' });
   const [partidosRefreshNonce, setPartidosRefreshNonce] = useState(0);
   const [bookingSuccessData, setBookingSuccessData] = useState<BookingConfirmationData | null>(null);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [matchReceivedInvites, setMatchReceivedInvites] = useState<ReceivedMatchInvite[]>([]);
+  const [matchInviteNonce, setMatchInviteNonce] = useState(0);
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [profileRefreshKey, setProfileRefreshKey] = useState(0);
@@ -347,13 +354,34 @@ export function MainApp() {
     [session?.access_token, t],
   );
 
+  const openMatchFromInvite = useCallback(
+    async (invite: ReceivedMatchInvite) => {
+      const accessToken = session?.access_token;
+      if (!accessToken) return;
+      const viewerId = profile?.id ?? null;
+      const loaded = await reloadMatchPartido(invite.match_id, accessToken, {
+        viewerPlayerId: viewerId,
+      });
+      if (loaded) {
+        setSelectedPartido(loaded);
+        if (viewerId && isPlayerInPartido(loaded, viewerId)) {
+          upsertMisPartido(loaded);
+        }
+      } else {
+        Alert.alert(t('alerts.error.title'), t('partidos.matchInviteOpenFail'));
+      }
+    },
+    [session?.access_token, profile?.id, upsertMisPartido, t],
+  );
+
   const consumeInviteUrl = useCallback(
     async (url: string | null) => {
       if (!url) return;
-      const parsed = parseTournamentInviteUrl(url);
-      if (!parsed) return;
-      await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
-      await processTournamentInvite(parsed.token, parsed.tournamentId);
+      const tournamentParsed = parseTournamentInviteUrl(url);
+      if (tournamentParsed) {
+        await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
+        await processTournamentInvite(tournamentParsed.token, tournamentParsed.tournamentId);
+      }
     },
     [processTournamentInvite],
   );
@@ -361,10 +389,10 @@ export function MainApp() {
   useEffect(() => {
     if (!session?.access_token) return;
     void (async () => {
-      const raw = await AsyncStorage.getItem(PENDING_TOURNAMENT_INVITE_KEY);
-      if (raw) {
+      const rawTournament = await AsyncStorage.getItem(PENDING_TOURNAMENT_INVITE_KEY);
+      if (rawTournament) {
         try {
-          const parsed = JSON.parse(raw) as { token: string; tournamentId: string };
+          const parsed = JSON.parse(rawTournament) as { token: string; tournamentId: string };
           if (parsed.token && parsed.tournamentId) {
             await AsyncStorage.removeItem(PENDING_TOURNAMENT_INVITE_KEY);
             await processTournamentInvite(parsed.token, parsed.tournamentId);
@@ -382,6 +410,33 @@ export function MainApp() {
     });
     return () => sub.remove();
   }, [session?.access_token, consumeInviteUrl, processTournamentInvite]);
+
+  useEffect(() => {
+    const token = session?.access_token ?? null;
+    if (!token) {
+      setMatchReceivedInvites([]);
+      return;
+    }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = async () => {
+      const res = await fetchReceivedMatchInvites(token);
+      if (!cancelled && res.ok) setMatchReceivedInvites(res.invites);
+      if (!cancelled) {
+        timer = setTimeout(() => void poll(), 8000);
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [session?.access_token, matchInviteNonce]);
+
+  useEffect(() => {
+    if (partidosRefreshNonce < 1) return;
+    void refreshMatches({ force: true, scope: 'mine' });
+  }, [partidosRefreshNonce, refreshMatches]);
 
   const openOnboardingFromSection = (returnTo: PostOnboardingReturn) => {
     setPendingOnboardingReturn(returnTo);
@@ -454,6 +509,7 @@ export function MainApp() {
     selectedEducationalCourse != null ||
     selectedPublicCourse != null ||
     showMessages ||
+    showNotifications ||
     showCommunity ||
     showPublicProfile ||
     affinityPublicProfileId !== null;
@@ -537,7 +593,7 @@ export function MainApp() {
       }
       // Flujo crear partido (cierra y refresca lista)
       if (crearPartidoFlow.open) {
-        setCrearPartidoFlow({ open: false, organizerId: null });
+        setCrearPartidoFlow({ open: false, organizerId: null, matchVisibility: 'public' });
         setPartidosRefreshNonce((n) => n + 1);
         return true;
       }
@@ -582,6 +638,11 @@ export function MainApp() {
       if (activeTab === 'perfil' && !showEditProfile && !showPreferences && !infoScreen) {
         setActiveTab('inicio');
         setProfileAutoOpenOnboarding(false);
+        return true;
+      }
+      // Notificaciones
+      if (showNotifications) {
+        setShowNotifications(false);
         return true;
       }
       // Community
@@ -780,30 +841,66 @@ export function MainApp() {
     if (crearPartidoFlow.open) {
       const bumpPartidos = () => setPartidosRefreshNonce((n) => n + 1);
       const closeFlow = () => {
-        setCrearPartidoFlow({ open: false, organizerId: null });
+        setCrearPartidoFlow({ open: false, organizerId: null, matchVisibility: 'public' });
         bumpPartidos();
       };
       return (
         <CrearPartidoLocationSheet
           presentation="fullscreen"
           initialStep="clubs"
+          initialMatchVisibility={crearPartidoFlow.matchVisibility}
           organizerPlayerId={crearPartidoFlow.organizerId}
           onClose={closeFlow}
           onSiguiente={closeFlow}
           onNavigateToCompleteOnboarding={() => {
-            setCrearPartidoFlow({ open: false, organizerId: null });
+            setCrearPartidoFlow({ open: false, organizerId: null, matchVisibility: 'public' });
             bumpPartidos();
             setActiveTab('perfil');
           }}
           onPartidoCreado={(data) => {
             const organizerId = crearPartidoFlow.organizerId ?? profile?.id ?? null;
-            setCrearPartidoFlow({ open: false, organizerId: null });
+            setCrearPartidoFlow({ open: false, organizerId: null, matchVisibility: 'public' });
             bumpPartidos();
             setBookingSuccessData(data);
             if (data.matchId) {
-              void syncMisPartidoFromMatchId(data.matchId, { organizerPlayerId: organizerId });
+              upsertMisPartido({
+                id: data.matchId,
+                dateTime: data.dateTimeFormatted,
+                visibility: data.matchVisibility,
+                organizerPlayerId: organizerId,
+                matchPhase: 'upcoming',
+                mode: 'amistoso',
+                typeLabel: 'Todos los jugadores',
+                levelRange: 'Libre',
+                players: [
+                  {
+                    name: profile?.firstName ?? 'Tú',
+                    level: '—',
+                    isFree: false,
+                    initial: profile?.firstName?.[0]?.toUpperCase() ?? 'T',
+                    avatar: profile?.avatarUrl ?? undefined,
+                  },
+                  { name: '', level: '', isFree: true },
+                  { name: '', level: '', isFree: true },
+                  { name: '', level: '', isFree: true },
+                ],
+                playerIds: organizerId ? [organizerId] : [],
+                playerIdsBySlot: [organizerId ?? null, null, null, null],
+                venue: data.clubName,
+                location: '—',
+                price: data.priceFormatted,
+                pricePerPlayer: data.priceFormatted,
+                duration: data.duration,
+                courtName: data.courtName,
+                clubId: data.clubId,
+                startAt: data.date,
+              });
+              void syncMisPartidoFromMatchId(data.matchId, {
+                organizerPlayerId: organizerId,
+                matchVisibility: data.matchVisibility,
+              });
             } else {
-              void refreshMatches({ scope: 'mine' });
+              void refreshMatches({ force: true, scope: 'mine' });
             }
           }}
         />
@@ -857,6 +954,17 @@ export function MainApp() {
             } else {
               setActiveTab('perfil');
             }
+          }}
+        />
+      );
+    }
+    if (showNotifications) {
+      return (
+        <NotificationsScreen
+          onBack={() => setShowNotifications(false)}
+          onOpenMatch={async (invite) => {
+            setShowNotifications(false);
+            await openMatchFromInvite(invite);
           }}
         />
       );
@@ -960,18 +1068,13 @@ export function MainApp() {
       );
     }
     if (showPartidoDetail && selectedPartido) {
-      if (selectedPartido.visibility === 'private') {
-        return (
-          <PartidoPrivadoDetailScreen
-            partido={selectedPartido}
-            onBack={() => setSelectedPartido(null)}
-          />
-        );
-      }
       return (
         <PartidoDetailScreen
           partido={selectedPartido}
-          onMatchDataChanged={() => setPartidosRefreshNonce((n) => n + 1)}
+          onMatchDataChanged={() => {
+            setMatchInviteNonce((n) => n + 1);
+            setPartidosRefreshNonce((n) => n + 1);
+          }}
           onBack={() => {
             void refreshMatches({ scope: 'mine' });
             setSelectedPartido(null);
@@ -1033,6 +1136,9 @@ export function MainApp() {
             pairInvites={pairInvites}
             onPairInvitesChanged={() => setPairInviteNonce((n) => n + 1)}
             onAcceptInviteAndSearch={openCompetitiveWithPartner}
+            matchReceivedInvites={matchReceivedInvites}
+            onMatchInvitesChanged={() => setMatchInviteNonce((n) => n + 1)}
+            onViewMatchInvite={(invite) => openMatchFromInvite(invite)}
             onOpenSeasonPass={() => setShowSeasonPass(true)}
             onOpenMessageThread={(peer) => {
               setMessagesPeer(peer);
@@ -1073,10 +1179,11 @@ export function MainApp() {
         return (
           <PartidosScreen
             onPartidoPress={(p) => setSelectedPartido(p)}
-            onOpenWeMatchClubsFlow={(organizerId) =>
+            onOpenWeMatchClubsFlow={(organizerId, matchVisibility) =>
               setCrearPartidoFlow({
                 open: true,
                 organizerId: organizerId ?? profile?.id ?? null,
+                matchVisibility,
               })
             }
             onNavigateToCompleteOnboarding={() => setActiveTab('perfil')}
@@ -1168,6 +1275,7 @@ export function MainApp() {
                     <HomeHeader
                       onMenuPress={sidebar.toggle}
                       onMessagesPress={() => setShowMessages(true)}
+                      onNotificationsPress={() => setShowNotifications(true)}
                       onGroupsPress={() => setShowCommunity(true)}
                     />
                   )
@@ -1291,14 +1399,15 @@ export function MainApp() {
         onClose={handleSeasonTransitionClose}
       />
 
-      {bookingSuccessData != null && bookingSuccessData.matchVisibility === 'private' ? (
+      {bookingSuccessData != null &&
+      (bookingSuccessData.confirmationKind === 'reservation' ||
+        bookingSuccessData.matchVisibility === 'private') ? (
         <PrivateReservationModal
           visible
           data={bookingSuccessData}
           onClose={() => setBookingSuccessData(null)}
         />
-      ) : null}
-      {bookingSuccessData != null && bookingSuccessData.matchVisibility === 'public' ? (
+      ) : bookingSuccessData != null ? (
         <View style={styles.bookingSuccessOverlay} accessibilityViewIsModal>
           <BookingConfirmationScreen
             data={bookingSuccessData}

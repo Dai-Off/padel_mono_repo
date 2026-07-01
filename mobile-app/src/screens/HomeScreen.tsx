@@ -34,6 +34,8 @@ import {
   type PairInvite,
 } from '../api/matchmaking';
 import { PairInviteBanner } from '../components/matchmaking/PairInviteBanner';
+import { MatchInviteBanner } from '../components/partido/MatchInviteBanner';
+import type { ReceivedMatchInvite } from '../api/matchInvites';
 import { updateMyPlayerPreferences, updateAffinityVisible, type PlayerPreferences } from '../api/players';
 import { type SeasonPassMissionDto } from '../api/seasonPass';
 import {
@@ -96,6 +98,9 @@ type HomeScreenProps = {
   pairInvites?: PairInvite[];
   onPairInvitesChanged?: () => void;
   onAcceptInviteAndSearch?: (invite: PairInvite) => void;
+  matchReceivedInvites?: ReceivedMatchInvite[];
+  onMatchInvitesChanged?: () => void;
+  onViewMatchInvite?: (invite: ReceivedMatchInvite) => void | Promise<void>;
 };
 
 /** Caché a nivel de módulo para que affinityResponse y los IDs enviados sobrevivan al desmonte/remonte de HomeScreen */
@@ -165,6 +170,9 @@ export function HomeScreen({
   pairInvites,
   onPairInvitesChanged,
   onAcceptInviteAndSearch,
+  matchReceivedInvites,
+  onMatchInvitesChanged,
+  onViewMatchInvite,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { locale, t } = useTranslation();
@@ -497,6 +505,15 @@ export function HomeScreen({
               invites={pairInvites}
               onChanged={() => onPairInvitesChanged?.()}
               onAcceptAndSearch={(inv) => onAcceptInviteAndSearch?.(inv)}
+            />
+          </InicioEnterBlock>
+        )}
+        {matchReceivedInvites && matchReceivedInvites.length > 0 && (
+          <InicioEnterBlock enterIndex={0}>
+            <MatchInviteBanner
+              invites={matchReceivedInvites}
+              onChanged={() => onMatchInvitesChanged?.()}
+              onViewMatch={(invite) => onViewMatchInvite?.(invite) ?? Promise.resolve()}
             />
           </InicioEnterBlock>
         )}

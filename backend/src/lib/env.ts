@@ -48,3 +48,14 @@ export function buildTournamentInviteUrl(tournamentId: string, token: string): s
   const base = getTournamentInviteBaseUrl();
   return `${base}/tournaments/invites/${encodeURIComponent(token)}/accept?tournament_id=${encodeURIComponent(tournamentId)}`;
 }
+
+export function getMatchInviteBaseUrl(): string {
+  const explicit = process.env.MATCH_INVITE_BASE_URL?.trim();
+  if (explicit) return explicit.replace(/\/$/, '');
+  return getTournamentInviteBaseUrl();
+}
+
+export function buildMatchInviteUrl(matchId: string, token: string): string {
+  const base = getMatchInviteBaseUrl();
+  return `${base}/matches/invites/${encodeURIComponent(token)}/accept?match_id=${encodeURIComponent(matchId)}`;
+}

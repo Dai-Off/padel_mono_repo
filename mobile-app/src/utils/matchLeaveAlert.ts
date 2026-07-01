@@ -4,21 +4,35 @@ export type MatchCancelPreviewResult = {
   policy_message?: string;
 };
 
+export type LeaveMatchAlertMode = {
+  /** Creador del partido → cancela reserva para todos. */
+  isOrganizer: boolean;
+  /** Solo queda una plaza ocupada (mensaje más corto al cancelar). */
+  soloInMatch: boolean;
+};
+
 export function buildLeaveMatchAlertMessage(
   t: (key: string) => string,
-  soloEnPartido: boolean,
+  mode: LeaveMatchAlertMode,
   preview: MatchCancelPreviewResult | null,
 ): string {
   const noRefund = preview?.ok === true && preview.refund_eligible === false;
   const policyText =
     preview?.policy_message?.trim() || t('alerts.leaveMatch.policyNoRefundDefault');
-  const base = soloEnPartido
-    ? noRefund
-      ? t('alerts.leaveMatch.bodySoloNoRefund')
-      : t('alerts.leaveMatch.bodySolo')
-    : noRefund
-      ? t('alerts.leaveMatch.bodyMultiNoRefund')
-      : t('alerts.leaveMatch.bodyMulti');
+
+  let base: string;
+  if (mode.isOrganizer) {
+    base = mode.soloInMatch
+      ? noRefund
+        ? t('alerts.leaveMatch.bodySoloNoRefund')
+        : t('alerts.leaveMatch.bodySolo')
+      : noRefund
+        ? t('alerts.leaveMatch.bodyOrganizerCancelNoRefund')
+        : t('alerts.leaveMatch.bodyOrganizerCancel');
+  } else {
+    base = noRefund ? t('alerts.leaveMatch.bodyMultiNoRefund') : t('alerts.leaveMatch.bodyMulti');
+  }
+
   return noRefund ? `${base}\n\n${policyText}` : base;
 }
 

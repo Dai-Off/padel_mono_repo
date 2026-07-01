@@ -68,6 +68,7 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
   const titleLine = `${data.courtName} - ${data.clubName}`;
   const sheetMaxH = Math.round(screenH * 0.9);
   const kind = data.confirmationKind ?? 'match';
+  const isPrivateMatch = kind === 'match' && data.matchVisibility === 'private';
 
   const { priceData, loading } = useSlotPrice({
     clubId: data.clubId,
@@ -139,7 +140,13 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
                 <View style={styles.badge}>
                   <Text style={styles.badgeEmoji}>{kind === 'tournament' ? '🏆' : '🎾'}</Text>
                   <Text style={[styles.badgeText, androidLabel({})]}>
-                    {kind === 'tournament' ? t('common.comingSoon') : t('partidos.detailOpenMatch')}
+                    {kind === 'tournament'
+                      ? t('common.comingSoon')
+                      : kind === 'reservation'
+                        ? t('partidos.yourReservation')
+                        : isPrivateMatch
+                          ? t('partidos.detailPrivateMatch')
+                          : t('partidos.detailOpenMatch')}
                   </Text>
                 </View>
               </View>
@@ -156,11 +163,19 @@ export function PrivateReservationModal({ visible, data, onClose }: Props) {
                 <PrivateInfoRow icon="cash-outline" label={t('common.sortByPrice')} value={getPriceValue()} />
               </View>
 
-              <View style={styles.emailBox}>
-                <Text style={[styles.emailText, androidLabel({})]}>
-                  📧 {t('search.clubBookingConfirmError')}
-                </Text>
-              </View>
+              {isPrivateMatch ? (
+                <View style={styles.emailBox}>
+                  <Text style={[styles.emailText, androidLabel({})]}>
+                    {t('partidos.privateInviteManageInDetail')}
+                  </Text>
+                </View>
+              ) : (
+                <View style={styles.emailBox}>
+                  <Text style={[styles.emailText, androidLabel({})]}>
+                    📧 {t('search.clubBookingConfirmError')}
+                  </Text>
+                </View>
+              )}
             </View>
           </ScrollView>
 
