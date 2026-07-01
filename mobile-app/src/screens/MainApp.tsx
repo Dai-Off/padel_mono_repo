@@ -799,11 +799,19 @@ export function MainApp() {
         />
       );
     }
-    if (showCommunity) {
+    // Community cede el paso al perfil público SOLO cuando se abre un perfil desde
+    // aquí (guard). Así no cambia la precedencia del resto de pantallas.
+    if (showCommunity && !(showPublicProfile && selectedPublicPlayerId)) {
       return (
         <CommunityScreen
           onBack={() => setShowCommunity(false)}
           onMessagesPress={() => { setShowCommunity(false); setShowMessages(true); }}
+          onOpenPlayer={(pid) => {
+            setAffinityPublicProfileId(null);
+            setMatchOpenedFromPublicProfile(false);
+            setSelectedPublicPlayerId(pid);
+            setShowPublicProfile(true);
+          }}
         />
       );
     }
@@ -890,6 +898,8 @@ export function MainApp() {
             setSelectedPartido(p);
           }}
           onOpenPlayer={(pid) => {
+            setAffinityPublicProfileId(null);
+            setMatchOpenedFromPublicProfile(false);
             setSelectedPublicPlayerId(pid);
             setShowPublicProfile(true);
           }}

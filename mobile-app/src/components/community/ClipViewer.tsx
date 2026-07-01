@@ -19,6 +19,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CommunityPost, fetchReelsFeed, toggleLike, toggleBookmark } from '../../api/community';
 import { formatPlayerLabel } from '../../lib/username';
 import { CommentSheet } from './CommentSheet';
+import { AvatarWithFrame } from '../profile/AvatarWithFrame';
+
+/** Iniciales (máx 2) del autor del clip. */
+function clipAuthorInitials(p: { first_name?: string | null; last_name?: string | null; username?: string | null }): string {
+  const a = p.first_name?.trim()?.[0] ?? '';
+  const b = p.last_name?.trim()?.[0] ?? '';
+  const ini = (a + b).toUpperCase();
+  return ini || (p.username?.trim()?.slice(0, 2) ?? '?').toUpperCase();
+}
 
 const { width, height } = Dimensions.get('window');
 
@@ -27,6 +36,7 @@ interface ClipViewerProps {
   seedClip: CommunityPost | null;
   token?: string | null;
   onClose: () => void;
+  onPressAuthor?: (playerId: string) => void;
 }
 
 /**
@@ -34,7 +44,7 @@ interface ClipViewerProps {
  * con reproducción del clip activo, doble-tap like, mute y acciones.
  * Los botones "Seguir" y "Compartir" son solo visuales por ahora.
  */
-export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, token, onClose }) => {
+export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, token, onClose, onPressAuthor }) => {
   const insets = useSafeAreaInsets();
   const [clips, setClips] = useState<CommunityPost[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -96,6 +106,7 @@ export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, tok
               token={token}
               cellHeight={viewportH}
               onOpenComments={() => setCommentsClip(item)}
+              onPressAuthor={onPressAuthor}
             />
           )}
           pagingEnabled
@@ -126,6 +137,7 @@ export const ClipViewer: React.FC<ClipViewerProps> = ({ isVisible, seedClip, tok
           isVisible={!!commentsClip}
           onClose={() => setCommentsClip(null)}
           post={commentsClip}
+          onPressAuthor={onPressAuthor}
         />
       </View>
     </Modal>
@@ -141,9 +153,10 @@ interface ClipCellProps {
   token?: string | null;
   cellHeight: number;
   onOpenComments: () => void;
+  onPressAuthor?: (playerId: string) => void;
 }
 
-const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellHeight, onOpenComments }) => {
+const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellHeight, onOpenComments, onPressAuthor }) => {
   const insets = useSafeAreaInsets();
   const url = clip.images?.[0]?.media_url ?? null;
 
@@ -247,19 +260,23 @@ const ClipCell: React.FC<ClipCellProps> = ({ clip, isActive, muted, token, cellH
 
       {/* Sidebar de acciones */}
       <View style={[styles.sidebar, { bottom: insets.bottom + 90 }]}>
-        <View style={styles.authorAvatarWrap}>
-          {clip.player.avatar_url ? (
-            <Animated.Image source={{ uri: clip.player.avatar_url }} style={styles.authorAvatar} />
-          ) : (
-            <View style={[styles.authorAvatar, styles.authorAvatarFallback]}>
-              <Ionicons name="person" size={18} color="#FFF" />
-            </View>
-          )}
+        <TouchableOpacity
+          style={styles.authorAvatarWrap}
+          activeOpacity={0.7}
+          onPress={() => clip.player.id && onPressAuthor?.(clip.player.id)}
+        >
+          <AvatarWithFrame
+            avatarUrl={clip.player.avatar_url}
+            initials={clipAuthorInitials(clip.player)}
+            size={46}
+            frame={clip.player.frame ?? null}
+            animate={false}
+          />
           {/* "Seguir" — solo visual */}
           <View style={styles.followBadge}>
             <Ionicons name="add" size={12} color="#FFF" />
           </View>
-        </View>
+        </TouchableOpacity>
 
         <TouchableOpacity style={styles.action} onPress={handleLike}>
           <Ionicons name={liked ? 'heart' : 'heart-outline'} size={32} color={liked ? '#FF3B30' : '#FFF'} />
@@ -352,18 +369,6 @@ const styles = StyleSheet.create({
   },
   authorAvatarWrap: {
     marginBottom: 4,
-  },
-  authorAvatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    borderWidth: 2,
-    borderColor: '#FFF',
-  },
-  authorAvatarFallback: {
-    backgroundColor: '#F18F34',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   followBadge: {
     position: 'absolute',

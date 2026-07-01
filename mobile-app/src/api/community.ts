@@ -1,5 +1,6 @@
 import { API_URL } from "../config";
 import { StoryOverlays } from "../lib/storyOverlays";
+import type { FrameAttrs } from "../components/profile/AvatarWithFrame";
 
 export interface CommunityPlayer {
   id: string;
@@ -7,6 +8,8 @@ export interface CommunityPlayer {
   last_name: string;
   username?: string | null;
   avatar_url: string | null;
+  /** Marco equipado del autor (para pintar el pack). */
+  frame?: FrameAttrs | null;
 }
 
 export interface CommunityPostImage {

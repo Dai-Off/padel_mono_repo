@@ -1,18 +1,29 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { CommunityPost, toggleLike, toggleBookmark } from '../../api/community';
 import { PostImageCarousel } from './PostImageCarousel';
 import { formatTimeAgo } from '../../utils/timeAgo';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatPlayerLabel } from '../../lib/username';
+import { AvatarWithFrame } from '../profile/AvatarWithFrame';
+
+/** Iniciales (máx 2) del autor para el avatar. */
+function authorInitials(p: { first_name?: string | null; last_name?: string | null; username?: string | null }): string {
+  const a = p.first_name?.trim()?.[0] ?? '';
+  const b = p.last_name?.trim()?.[0] ?? '';
+  const ini = (a + b).toUpperCase();
+  if (ini) return ini;
+  return (p.username?.trim()?.slice(0, 2) ?? '?').toUpperCase();
+}
 
 interface PostCardProps {
   post: CommunityPost;
   onPressComments: (post: CommunityPost) => void;
+  onPressAuthor?: (playerId: string) => void;
 }
 
-export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments }) => {
+export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments, onPressAuthor }) => {
   const { session } = useAuth();
   const token = session?.access_token;
   
@@ -51,11 +62,20 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments }) => 
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.userInfo}>
-          <Image 
-            source={{ uri: post.player.avatar_url || 'https://via.placeholder.com/150' }} 
-            style={styles.avatar} 
-          />
+        <TouchableOpacity
+          style={styles.userInfo}
+          activeOpacity={0.7}
+          onPress={() => post.player.id && onPressAuthor?.(post.player.id)}
+        >
+          <View style={styles.avatar}>
+            <AvatarWithFrame
+              avatarUrl={post.player.avatar_url}
+              initials={authorInitials(post.player)}
+              size={32}
+              frame={post.player.frame ?? null}
+              animate={false}
+            />
+          </View>
           <View style={styles.textInfo}>
             <Text style={styles.username}>
               {formatPlayerLabel(post.player)}
@@ -64,7 +84,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onPressComments }) => 
               <Text style={styles.location}>{post.location}</Text>
             )}
           </View>
-        </View>
+        </TouchableOpacity>
         <TouchableOpacity>
           <Ionicons name="ellipsis-horizontal" size={20} color="#FFF" />
         </TouchableOpacity>
@@ -146,9 +166,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
     marginRight: 10,
   },
   textInfo: {

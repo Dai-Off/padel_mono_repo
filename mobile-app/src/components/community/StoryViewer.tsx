@@ -17,6 +17,15 @@ import { StoryGroup } from '../../api/community';
 import { formatTimeAgo } from '../../utils/timeAgo';
 import { formatPlayerLabel } from '../../lib/username';
 import { filterById } from '../../lib/storyOverlays';
+import { AvatarWithFrame } from '../profile/AvatarWithFrame';
+
+/** Iniciales (máx 2) del autor de la historia. */
+function storyInitials(p: { first_name?: string | null; last_name?: string | null; username?: string | null }): string {
+  const a = p.first_name?.trim()?.[0] ?? '';
+  const b = p.last_name?.trim()?.[0] ?? '';
+  const ini = (a + b).toUpperCase();
+  return ini || (p.username?.trim()?.slice(0, 2) ?? '?').toUpperCase();
+}
 
 const { width, height } = Dimensions.get('window');
 const STORY_DURATION = 5000; // 5 seconds
@@ -25,9 +34,10 @@ interface StoryViewerProps {
   isVisible: boolean;
   onClose: () => void;
   group: StoryGroup | null;
+  onPressAuthor?: (playerId: string) => void;
 }
 
-export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, group }) => {
+export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, group, onPressAuthor }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const progress = useRef(new Animated.Value(0)).current;
   const isPaused = useRef(false);
@@ -251,11 +261,20 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
 
           {/* Header Info */}
           <View style={styles.header}>
-            <View style={styles.userInfo}>
-              <Image 
-                source={{ uri: group.player.avatar_url || 'https://via.placeholder.com/150' }} 
-                style={styles.avatar} 
-              />
+            <TouchableOpacity
+              style={styles.userInfo}
+              activeOpacity={0.7}
+              onPress={() => group.player.id && onPressAuthor?.(group.player.id)}
+            >
+              <View style={styles.avatar}>
+                <AvatarWithFrame
+                  avatarUrl={group.player.avatar_url}
+                  initials={storyInitials(group.player)}
+                  size={36}
+                  frame={group.player.frame ?? null}
+                  animate={false}
+                />
+              </View>
               <View>
                 <Text style={styles.username}>
                   {formatPlayerLabel(group.player)}
@@ -264,7 +283,7 @@ export const StoryViewer: React.FC<StoryViewerProps> = ({ isVisible, onClose, gr
                   {formatTimeAgo(currentStory.created_at)}
                 </Text>
               </View>
-            </View>
+            </TouchableOpacity>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
               <Ionicons name="close" size={28} color="#FFF" />
             </TouchableOpacity>
@@ -331,12 +350,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
     marginRight: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
   },
   username: {
     color: '#FFF',

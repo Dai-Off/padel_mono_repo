@@ -3,8 +3,27 @@ import multer from 'multer';
 import { getSupabaseServiceRoleClient } from '../lib/supabase';
 import { getPlayerIdFromBearer } from '../lib/authPlayer';
 import { moderateImage } from '../services/communityModerationService';
+import { getEquippedFrames } from '../services/equippedFramesService';
 
 const router = Router();
+
+/**
+ * Adjunta el marco equipado (`frame`) a cada objeto `player` de comunidad
+ * (autores de posts/clips/stories/comentarios). Muta los objetos en sitio,
+ * batcheando todos los ids en una sola llamada a getEquippedFrames.
+ */
+async function attachFramesToCommunityPlayers(
+  supabase: ReturnType<typeof getSupabaseServiceRoleClient>,
+  players: Array<{ id?: string | null; frame?: unknown } | null | undefined>,
+): Promise<void> {
+  const list = players.filter((p): p is { id?: string | null; frame?: unknown } => !!p);
+  const ids = list.map((p) => p.id).filter((x): x is string => typeof x === 'string' && x.length > 0);
+  if (!ids.length) return;
+  const frames = await getEquippedFrames(supabase, ids);
+  for (const p of list) {
+    if (p.id) p.frame = frames.get(p.id) ?? null;
+  }
+}
 
 // Configuración de Multer: en memoria. Acepta imágenes y vídeos (Clips).
 // Límite alto para permitir vídeos de hasta ~60s.
@@ -83,6 +102,7 @@ router.get('/feed', async (req: Request, res: Response) => {
       has_liked: myLikes.includes(p.id),
       has_bookmarked: myBookmarks.includes(p.id),
     }));
+    await attachFramesToCommunityPlayers(supabase, enriched.map(p => p.player));
 
     return res.json({ ok: true, posts: enriched, next_cursor: nextCursor });
   } catch (err) {
@@ -135,6 +155,7 @@ router.get('/reels', async (req: Request, res: Response) => {
     }
 
     const enriched = items.map(p => ({ ...p, has_liked: myLikes.includes(p.id) }));
+    await attachFramesToCommunityPlayers(supabase, enriched.map(p => p.player));
     return res.json({ ok: true, reels: enriched, next_cursor: nextCursor });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -231,6 +252,7 @@ router.get('/reels/feed', async (req: Request, res: Response) => {
       myLikes = (likes ?? []).map(l => l.post_id);
     }
     const enriched = result.map(p => ({ ...p, has_liked: myLikes.includes(p.id) }));
+    await attachFramesToCommunityPlayers(supabase, enriched.map(p => p.player));
 
     return res.json({ ok: true, reels: enriched, next_cursor: nextCursor });
   } catch (err) {
@@ -275,7 +297,9 @@ router.get('/stories', async (req: Request, res: Response) => {
       groupsMap.get(pid).stories.push(s);
     }
 
-    return res.json({ ok: true, groups: Array.from(groupsMap.values()) });
+    const groups = Array.from(groupsMap.values());
+    await attachFramesToCommunityPlayers(supabase, groups.map((g) => g.player));
+    return res.json({ ok: true, groups });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
   }
@@ -545,6 +569,7 @@ router.get('/posts/:id/comments', async (req: Request, res: Response) => {
     const items = hasMore ? comments.slice(0, limit) : comments;
     const nextCursor = hasMore ? items[items.length - 1].created_at : null;
 
+    await attachFramesToCommunityPlayers(supabase, items.map((c: { player?: unknown }) => c.player as { id?: string | null } | null));
     return res.json({ ok: true, comments: items, next_cursor: nextCursor });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
@@ -579,6 +604,7 @@ router.post('/posts/:id/comments', async (req: Request, res: Response) => {
       .single();
 
     if (error) return res.status(500).json({ ok: false, error: error.message });
+    await attachFramesToCommunityPlayers(supabase, [ (comment as { player?: unknown }).player as { id?: string | null } | null ]);
     return res.status(201).json({ ok: true, comment });
   } catch (err) {
     return res.status(500).json({ ok: false, error: (err as Error).message });
