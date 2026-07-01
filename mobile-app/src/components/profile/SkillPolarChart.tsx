@@ -25,10 +25,13 @@ interface SkillPolarChartProps {
     mental: number;
     tactical: number;
   };
+  /** Valor máximo de la escala (Coach IA = 70; por defecto 100). */
+  max?: number;
 }
 
-export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({ 
-  skills = { technical: 25, physical: 25, mental: 25, tactical: 25 } 
+export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({
+  skills = { technical: 25, physical: 25, mental: 25, tactical: 25 },
+  max = 100,
 }) => {
   const animatedValue = useRef(new Animated.Value(0)).current;
 
@@ -46,10 +49,10 @@ export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({
 
   // Convert points for the polygon based on animation
   const getPoints = (val: number) => {
-    const tech = (skills.technical / 100) * maxRadius * val;
-    const phys = (skills.physical / 100) * maxRadius * val;
-    const ment = (skills.mental / 100) * maxRadius * val;
-    const tact = (skills.tactical / 100) * maxRadius * val;
+    const tech = (skills.technical / max) * maxRadius * val;
+    const phys = (skills.physical / max) * maxRadius * val;
+    const ment = (skills.mental / max) * maxRadius * val;
+    const tact = (skills.tactical / max) * maxRadius * val;
 
     // North, East, South, West
     const p1 = `${center},${center - tech}`;
@@ -70,7 +73,7 @@ export const SkillPolarChart: React.FC<SkillPolarChartProps> = ({
       <View style={[styles.skillDot, { backgroundColor: color }]} />
       <Text style={[styles.skillLabel, { color }]}>{label}</Text>
       <View style={styles.barTrack}>
-        <View style={[styles.barFill, { width: `${value}%`, backgroundColor: color }]} />
+        <View style={[styles.barFill, { width: `${Math.max(0, Math.min(100, (value / max) * 100))}%`, backgroundColor: color }]} />
       </View>
       <Text style={[styles.skillValueText, { color }]}>{value}</Text>
     </View>

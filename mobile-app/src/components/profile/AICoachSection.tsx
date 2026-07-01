@@ -143,7 +143,8 @@ export const AICoachSection: React.FC<AICoachSectionProps> = ({ assessment, peer
               <Text style={styles.analysisTitle}>Análisis de tu Nivel Actual</Text>
             </View>
             
-            <SkillPolarChart 
+            <SkillPolarChart
+              max={70}
               skills={{
                 technical: assessment.skills.technical,
                 physical: assessment.skills.physical,
