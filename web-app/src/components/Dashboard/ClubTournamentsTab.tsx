@@ -4,6 +4,8 @@ import {
   ArrowDownUp,
   Award,
   Calendar,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Copy,
   DollarSign,
@@ -665,6 +667,8 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
   const [filterHasPlayers, setFilterHasPlayers] = useState(false);
   const [filterEntryRequests, setFilterEntryRequests] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
+  const [listPage, setListPage] = useState(1);
+  const [listPageSize, setListPageSize] = useState(25);
   const [entryRequests, setEntryRequests] = useState<TournamentEntryRequest[]>([]);
   const [entryRequestsLoading, setEntryRequestsLoading] = useState(false);
   const [entryApproveDivisionId, setEntryApproveDivisionId] = useState('');
@@ -1317,6 +1321,24 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
     return result;
   }, [items, filterStatus, filterSort, filterUnread, filterHasPlayers, filterEntryRequests, filterSearch, chatUnread]);
 
+  const listTotalPages = Math.max(1, Math.ceil(filteredItems.length / listPageSize));
+
+  useEffect(() => {
+    setListPage(1);
+  }, [filterStatus, filterSort, filterUnread, filterHasPlayers, filterEntryRequests, filterSearch, listPageSize]);
+
+  useEffect(() => {
+    if (listPage > listTotalPages) setListPage(listTotalPages);
+  }, [listPage, listTotalPages]);
+
+  const paginatedItems = useMemo(() => {
+    const start = (listPage - 1) * listPageSize;
+    return filteredItems.slice(start, start + listPageSize);
+  }, [filteredItems, listPage, listPageSize]);
+
+  const listShowingFrom = filteredItems.length === 0 ? 0 : (listPage - 1) * listPageSize + 1;
+  const listShowingTo = Math.min(listPage * listPageSize, filteredItems.length);
+
   const manualTeamOptions = useMemo<ManualTeamOption[]>(() => {
     if (competition && Array.isArray(competition.teams) && competition.teams.length > 0) {
       return competition.teams.map((t) => ({ id: t.id, label: t.name }));
@@ -1644,7 +1666,7 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
       {!isDetailRoute && (
         <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
           <div className="divide-y divide-gray-100">
-            {filteredItems.map((row) => {
+            {paginatedItems.map((row) => {
               const confirmed = row.confirmed_count ?? 0;
               const pending = row.pending_count ?? 0;
               const hasPendingEntryRequests = (row.pending_entry_requests_count ?? 0) > 0;
@@ -1857,6 +1879,45 @@ export function ClubTournamentsTab({ clubId, clubResolved }: Props) {
               <div className="py-10 text-center text-xs text-gray-400">No hay torneos creados todavía.</div>
             )}
           </div>
+          {filteredItems.length > 0 && (
+            <div className="flex flex-wrap items-center justify-end gap-4 px-4 py-3 border-t border-gray-100 bg-gray-50/50">
+              <div className="flex items-center gap-2 text-[11px] text-gray-600">
+                <span className="font-medium">Filas por página</span>
+                <select
+                  value={listPageSize}
+                  onChange={(e) => setListPageSize(Number(e.target.value))}
+                  className="rounded-lg border border-gray-200 px-2 py-1 text-[11px] font-semibold bg-white"
+                >
+                  {[10, 25, 50, 100].map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <span className="text-[11px] text-gray-500">
+                Resultados {listShowingFrom} – {listShowingTo} de {filteredItems.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                  disabled={listPage === 1}
+                  className="p-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40 hover:bg-gray-50"
+                  aria-label="Página anterior"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setListPage((p) => Math.min(listTotalPages, p + 1))}
+                  disabled={listPage === listTotalPages}
+                  className="p-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40 hover:bg-gray-50"
+                  aria-label="Página siguiente"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

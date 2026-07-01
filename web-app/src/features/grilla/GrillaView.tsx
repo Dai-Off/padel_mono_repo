@@ -2348,14 +2348,24 @@ function resolveManualBookingTotalCents(
               <button onClick={() => setIsMenuOpen(true)} className="md:hidden w-9 h-9 bg-white/20 border border-white/30 rounded-lg flex items-center justify-center text-white shadow-[0_1px_2px_rgba(0,0,0,0.1)] hover:bg-white/30 shrink-0 transition-colors">
                 <Menu className="w-5 h-5 text-white" />
               </button>
-              <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">
-                <div className="w-full h-full rounded-full border border-gray-900 bg-white flex items-center justify-center">
-                  <span className="font-extrabold text-[10px] sm:text-xs text-black italic tracking-tighter">X7</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveView('grid');
+                  navigate('/grilla?menu=reservas');
+                }}
+                className="flex items-center gap-3 md:gap-4 rounded-lg hover:bg-white/10 transition-colors -ml-1 pl-1 pr-2 py-0.5"
+                title={portalClubName || t('header.clubName')}
+              >
+                <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-white border border-white/30 flex items-center justify-center shrink-0 overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.1)] relative p-[2px]">
+                  <div className="w-full h-full rounded-full border border-gray-900 bg-white flex items-center justify-center">
+                    <span className="font-extrabold text-[10px] sm:text-xs text-black italic tracking-tighter">X7</span>
+                  </div>
                 </div>
-              </div>
-              <div className="flex flex-col">
-                <h1 className="text-[13px] md:text-sm font-bold text-white leading-tight">{portalClubName || t('header.clubName')}</h1>
-              </div>
+                <div className="flex flex-col text-left">
+                  <h1 className="text-[13px] md:text-sm font-bold text-white leading-tight">{portalClubName || t('header.clubName')}</h1>
+                </div>
+              </button>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative">
@@ -2889,7 +2899,6 @@ function resolveManualBookingTotalCents(
                     style={{
                       height: `${nativeGridHeight}px`,
                       zoom: scale,
-                      width: '100%',
                       // Fallback para navs muy antiguos (transform rompe position: sticky)
                       ...(typeof CSS !== 'undefined' && CSS.supports && !CSS.supports('zoom', '1') ? {
                         transform: `scale(${scale})`,
@@ -2898,7 +2907,7 @@ function resolveManualBookingTotalCents(
                       } : {})
                     }}
                     className={clsx(
-                      "flex relative w-full min-w-0 pl-4 md:pl-8",
+                      "flex relative pl-4 md:pl-8 overflow-hidden",
                       focusedCourtId && !activeId && "touch-pan-y"
                     )}
                     onTouchStart={focusedCourtId && !activeId ? onTouchStart : undefined}
@@ -2907,7 +2916,7 @@ function resolveManualBookingTotalCents(
                   >
                     <TimeAxis position="left" isCompact={false} />
 
-                    <div className="flex flex-1 w-full min-w-0 relative z-10 mb-0">
+                    <div className="flex relative z-10 mb-0 overflow-hidden">
                       <GridBackground />
                       {visibleCourts.map(court => (
                         <CourtColumn

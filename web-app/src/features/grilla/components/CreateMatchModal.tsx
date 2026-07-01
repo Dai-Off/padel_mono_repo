@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
     X,
     AlertTriangle,
@@ -493,7 +494,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
     const minutes = ['00', '15', '30', '45'];
     const levelOptions = Array.from({ length: 15 }, (_, i) => (i * 0.5).toFixed(1));
 
-    return (
+    const modal = (
         <div style={vvStyle} className="fixed inset-0 z-250 flex items-end justify-center bg-black/50 backdrop-blur-[2px] sm:items-center sm:p-4 hover:opacity-100 transition-opacity duration-300">
             <div className="absolute inset-0" onClick={onClose} />
             <div className="relative flex flex-col w-full h-[90vh] bg-gray-50 rounded-t-3xl shadow-2xl sm:h-auto sm:max-h-[90vh] sm:w-[800px] sm:rounded-2xl animate-slide-up sm:animate-fade-scale-in overflow-hidden">
@@ -749,4 +750,7 @@ export const CreateMatchModal: React.FC<CreateMatchModalProps> = ({
             </div>
         </div>
     );
+
+    if (typeof document === 'undefined') return null;
+    return createPortal(modal, document.body);
 };
