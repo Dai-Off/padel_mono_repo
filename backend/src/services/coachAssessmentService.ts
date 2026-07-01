@@ -146,24 +146,25 @@ type SkillSet = CoachAssessmentResult['skills'];
 
 /**
  * Deriva nivel + fortalezas + áreas de mejora + recomendación a partir de las
- * 4 skills (0-100). Reutilizado por el cálculo del cuestionario y por el radar
- * dinámico (ELO + learning).
+ * 4 skills (0-70, escala del nivel × 10). Reutilizado por el cálculo del
+ * cuestionario y por el radar dinámico (ELO + learning).
  */
 function resultMetaFromSkills(skills: SkillSet): Omit<CoachAssessmentResult, 'skills' | 'stats'> {
   const avg = (skills.technical + skills.physical + skills.mental + skills.tactical) / 4;
 
+  // Umbrales sobre 70 (= 20/40/60/80 originales × 0.7).
   let level_number = 1;
   let level_name = 'Principiante';
-  if (avg > 80) {
+  if (avg > 56) {
     level_number = 5;
     level_name = 'Élite';
-  } else if (avg > 60) {
+  } else if (avg > 42) {
     level_number = 4;
     level_name = 'Profesional';
-  } else if (avg > 40) {
+  } else if (avg > 28) {
     level_number = 3;
     level_name = 'Avanzado';
-  } else if (avg > 20) {
+  } else if (avg > 14) {
     level_number = 2;
     level_name = 'Intermedio';
   }
@@ -236,12 +237,12 @@ export function calculateAssessment(answers: CoachAnswer[]): CoachAssessmentResu
     });
   });
 
-  // Final skills (0-100)
+  // Final skills (0-70, escala del nivel × 10)
   const skills = {
-    technical: Math.round((scores.technical / totalWeights.technical) * 100) || 25,
-    physical: Math.round((scores.physical / totalWeights.physical) * 100) || 25,
-    mental: Math.round((scores.mental / totalWeights.mental) * 100) || 25,
-    tactical: Math.round((scores.tactical / totalWeights.tactical) * 100) || 25,
+    technical: Math.round((scores.technical / totalWeights.technical) * 70) || 18,
+    physical: Math.round((scores.physical / totalWeights.physical) * 70) || 18,
+    mental: Math.round((scores.mental / totalWeights.mental) * 70) || 18,
+    tactical: Math.round((scores.tactical / totalWeights.tactical) * 70) || 18,
   };
 
   return { skills, ...resultMetaFromSkills(skills) };
@@ -334,10 +335,10 @@ export async function saveAssessment(playerId: string, answers: CoachAnswer[], r
 }
 
 // ─── Radar dinámico (ELO base + learning por área) ───
-const DYNAMIC_SPREAD = 40; // S: separación máx por learning (±SPREAD/2 por área)
+const DYNAMIC_SPREAD = 28; // S: separación máx por learning (±SPREAD/2 por área). Escala /70.
 const DYNAMIC_MIN_SAMPLES = 8; // N_MIN: preguntas por área para fiarnos del dato
-// Pequeño "shape" base para que un radar sin datos de learning no sea un cuadrado plano
-const BASE_OFFSETS: SkillSet = { technical: 4, physical: -2, mental: 1, tactical: -3 };
+// Pequeño "shape" base para que un radar sin datos de learning no sea un cuadrado plano (escala /70)
+const BASE_OFFSETS: SkillSet = { technical: 3, physical: -1, mental: 1, tactical: -2 };
 // Área de learning (BD) -> skill del radar; 'rules' se ignora (no es una dimensión)
 const LEARNING_AREA_TO_SKILL: Record<string, keyof SkillSet> = {
   technique: 'technical',
@@ -368,7 +369,7 @@ async function computeDynamicSkills(
     .eq('id', playerId)
     .maybeSingle();
   const elo = Number((pl as { elo_rating?: number } | null)?.elo_rating ?? 0);
-  const base = clamp((elo / 7) * 100, 0, 100);
+  const base = clamp((elo / 7) * 70, 0, 70); // escala /70 (= nivel × 10)
 
   const { data: logRows } = await supabase
     .from('learning_question_log')
@@ -402,7 +403,7 @@ async function computeDynamicSkills(
       const confidence = Math.min(1, total / DYNAMIC_MIN_SAMPLES);
       value += (acc - 0.5) * DYNAMIC_SPREAD * confidence;
     }
-    skills[skill] = Math.round(clamp(value, 10, 100));
+    skills[skill] = Math.round(clamp(value, 7, 70));
   });
 
   return skills;

@@ -84,26 +84,26 @@ function deriveCoachAssessmentFromLevel(level0to7: number): {
   improvements: string[];
   recommendation: string;
 } {
-  const base = clamp((level0to7 / 7) * 100, 0, 100);
+  const base = clamp((level0to7 / 7) * 70, 0, 70); // escala /70 (= nivel × 10)
   const skills: CoachSkills = {
-    technical: Math.round(clamp(base + 4, 10, 100)),
-    physical: Math.round(clamp(base - 2, 10, 100)),
-    mental: Math.round(clamp(base + 1, 10, 100)),
-    tactical: Math.round(clamp(base - 3, 10, 100)),
+    technical: Math.round(clamp(base + 3, 7, 70)),
+    physical: Math.round(clamp(base - 1, 7, 70)),
+    mental: Math.round(clamp(base + 1, 7, 70)),
+    tactical: Math.round(clamp(base - 2, 7, 70)),
   };
   const avg = (skills.technical + skills.physical + skills.mental + skills.tactical) / 4;
   let level_number = 1;
   let level_name = 'Principiante';
-  if (avg > 80) {
+  if (avg > 56) {
     level_number = 5;
     level_name = 'Elite';
-  } else if (avg > 60) {
+  } else if (avg > 42) {
     level_number = 4;
     level_name = 'Profesional';
-  } else if (avg > 40) {
+  } else if (avg > 28) {
     level_number = 3;
     level_name = 'Avanzado';
-  } else if (avg > 20) {
+  } else if (avg > 14) {
     level_number = 2;
     level_name = 'Intermedio';
   }
